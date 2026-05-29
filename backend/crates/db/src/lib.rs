@@ -4,11 +4,11 @@ use notegate_core::{Config, Error, Result};
 use sqlx::postgres::PgPoolOptions;
 
 pub mod user_repo;
-pub mod vault_repo;
+pub mod vault;
 
 pub use sqlx::PgPool;
 pub use user_repo::UserRepo;
-pub use vault_repo::{
+pub use vault::{
     Children, Document, DocumentBundle, FindRequest, GrepMatch, GrepRequest, Node, NodeKind,
     VaultRepo, VaultRepoError,
 };

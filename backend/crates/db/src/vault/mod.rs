@@ -1,6 +1,23 @@
-use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
+
+mod error;
+mod model;
+mod rows;
+#[cfg(test)]
+mod tests;
+mod validation;
+
+pub use error::{VaultRepoError, VaultResult};
+pub use model::{
+    Children, Document, DocumentBundle, FindRequest, GrepMatch, GrepRequest, Node, NodeKind,
+};
+
+use error::map_sqlx_error;
+use rows::{DocumentBundleRow, DocumentRow, GrepCandidateRow, NodeRow};
+use validation::{
+    child_path, clamp_limit, normalize_path, validate_document_name, validate_folder_name,
+};
 
 #[derive(Debug, Clone)]
 pub struct VaultRepo {
@@ -648,226 +665,6 @@ impl VaultRepo {
     }
 }
 
-const NODE_SELECT_BY_ID: &str = r#"
-    SELECT
-        n.id,
-        n.parent_id,
-        n.name,
-        n.kind,
-        n.path_cache,
-        n.sort_order,
-        EXISTS (
-            SELECT 1
-            FROM nodes c
-            WHERE c.workspace_id = n.workspace_id
-              AND c.parent_id = n.id
-              AND c.deleted_at IS NULL
-        ) AS has_children,
-        n.created_at,
-        n.updated_at
-    FROM nodes n
-    WHERE n.workspace_id = $1
-      AND n.id = $2
-      AND n.deleted_at IS NULL
-"#;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodeKind {
-    Folder,
-    Document,
-}
-
-impl NodeKind {
-    fn from_db(value: String) -> Self {
-        match value.as_str() {
-            "document" => Self::Document,
-            _ => Self::Folder,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Folder => "folder",
-            Self::Document => "document",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Node {
-    pub id: Uuid,
-    pub parent_id: Option<Uuid>,
-    pub name: String,
-    pub kind: NodeKind,
-    pub path: String,
-    pub sort_order: i32,
-    pub has_children: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Children {
-    pub parent: Node,
-    pub children: Vec<Node>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Document {
-    pub node_id: Uuid,
-    pub workspace_id: Uuid,
-    pub content_md: String,
-    pub search_text: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DocumentBundle {
-    pub node: Node,
-    pub document: Document,
-}
-
-#[derive(Debug, Clone)]
-pub struct FindRequest {
-    pub q: String,
-    pub path: Option<String>,
-    pub kind: Option<String>,
-    pub limit: Option<i64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct GrepRequest {
-    pub q: String,
-    pub path: Option<String>,
-    pub context: Option<i64>,
-    pub limit: Option<i64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct GrepMatch {
-    pub node_id: Uuid,
-    pub path: String,
-    pub line_no: i64,
-    pub line: String,
-    pub before: Vec<String>,
-    pub after: Vec<String>,
-}
-
-#[derive(Debug)]
-pub enum VaultRepoError {
-    NotFound(String),
-    InvalidInput(String),
-    Conflict(String),
-    Internal(String),
-}
-
-pub type VaultResult<T> = Result<T, VaultRepoError>;
-
-#[derive(sqlx::FromRow)]
-struct NodeRow {
-    id: Uuid,
-    parent_id: Option<Uuid>,
-    name: String,
-    kind: String,
-    path_cache: String,
-    sort_order: i32,
-    has_children: bool,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-impl NodeRow {
-    fn into_node(self) -> Node {
-        Node {
-            id: self.id,
-            parent_id: self.parent_id,
-            name: self.name,
-            kind: NodeKind::from_db(self.kind),
-            path: self.path_cache,
-            sort_order: self.sort_order,
-            has_children: self.has_children,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct DocumentRow {
-    node_id: Uuid,
-    workspace_id: Uuid,
-    content_md: String,
-    search_text: String,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-impl DocumentRow {
-    fn into_document(self) -> Document {
-        Document {
-            node_id: self.node_id,
-            workspace_id: self.workspace_id,
-            content_md: self.content_md,
-            search_text: self.search_text,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct DocumentBundleRow {
-    id: Uuid,
-    parent_id: Option<Uuid>,
-    name: String,
-    kind: String,
-    path_cache: String,
-    sort_order: i32,
-    has_children: bool,
-    node_created_at: DateTime<Utc>,
-    node_updated_at: DateTime<Utc>,
-    node_id: Uuid,
-    workspace_id: Uuid,
-    content_md: String,
-    search_text: String,
-    document_created_at: DateTime<Utc>,
-    document_updated_at: DateTime<Utc>,
-}
-
-impl DocumentBundleRow {
-    fn into_bundle(self) -> DocumentBundle {
-        DocumentBundle {
-            node: Node {
-                id: self.id,
-                parent_id: self.parent_id,
-                name: self.name,
-                kind: NodeKind::from_db(self.kind),
-                path: self.path_cache,
-                sort_order: self.sort_order,
-                has_children: self.has_children,
-                created_at: self.node_created_at,
-                updated_at: self.node_updated_at,
-            },
-            document: Document {
-                node_id: self.node_id,
-                workspace_id: self.workspace_id,
-                content_md: self.content_md,
-                search_text: self.search_text,
-                created_at: self.document_created_at,
-                updated_at: self.document_updated_at,
-            },
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct GrepCandidateRow {
-    node_id: Uuid,
-    path_cache: String,
-    content_md: String,
-}
-
 async fn update_subtree_paths(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
@@ -899,262 +696,25 @@ async fn update_subtree_paths(
     Ok(())
 }
 
-fn validate_folder_name(name: &str) -> VaultResult<()> {
-    validate_base_name(name)?;
-    if name.ends_with(".md") {
-        return Err(VaultRepoError::InvalidInput(
-            "folder name cannot end with .md".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_document_name(name: &str) -> VaultResult<()> {
-    validate_base_name(name)?;
-    if !name.ends_with(".md") {
-        return Err(VaultRepoError::InvalidInput(
-            "document name must end with .md".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_base_name(name: &str) -> VaultResult<()> {
-    if name.is_empty() {
-        return Err(VaultRepoError::InvalidInput("name cannot be empty".into()));
-    }
-    if name == "." || name == ".." {
-        return Err(VaultRepoError::InvalidInput("invalid name".into()));
-    }
-    if name.contains('/') {
-        return Err(VaultRepoError::InvalidInput("name cannot contain /".into()));
-    }
-    Ok(())
-}
-
-fn normalize_path(path: &str) -> VaultResult<String> {
-    if !path.starts_with('/') {
-        return Err(VaultRepoError::InvalidInput(
-            "path must start with /".into(),
-        ));
-    }
-
-    let mut segments = Vec::new();
-    for segment in path.split('/') {
-        if segment.is_empty() {
-            continue;
-        }
-        if segment == "." || segment == ".." {
-            return Err(VaultRepoError::InvalidInput(
-                "path cannot contain . or ..".into(),
-            ));
-        }
-        segments.push(segment);
-    }
-
-    if segments.is_empty() {
-        Ok("/".into())
-    } else {
-        Ok(format!("/{}", segments.join("/")))
-    }
-}
-
-fn child_path(parent_path: &str, name: &str) -> String {
-    if parent_path == "/" {
-        format!("/{name}")
-    } else {
-        format!("{parent_path}/{name}")
-    }
-}
-
-fn clamp_limit(limit: Option<i64>) -> i64 {
-    limit.unwrap_or(50).clamp(1, 100)
-}
-
-fn map_sqlx_error(error: sqlx::Error) -> VaultRepoError {
-    if let sqlx::Error::Database(db_error) = &error {
-        if db_error.code().as_deref() == Some("23505") {
-            return VaultRepoError::Conflict("name or path already exists".into());
-        }
-        if db_error.code().as_deref() == Some("23514") {
-            return VaultRepoError::InvalidInput("invalid vault data".into());
-        }
-    }
-
-    VaultRepoError::Internal(format!("vault repository query failed: {error}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sqlx::postgres::PgPoolOptions;
-
-    #[tokio::test]
-    async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(), String> {
-        let Some(pool) = test_pool().await? else {
-            return Ok(());
-        };
-        crate::MIGRATOR
-            .run(&pool)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        let user_id = create_test_user(&pool).await?;
-        let repo = VaultRepo::new(pool.clone());
-
-        let root = repo.root(user_id).await.map_err(debug_error)?;
-        assert_eq!(root.path, "/");
-        assert_eq!(root.kind, NodeKind::Folder);
-
-        let projects = repo
-            .create_folder(user_id, root.id, "projects")
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(projects.path, "/projects");
-
-        let document = repo
-            .create_document(user_id, projects.id, "notegate.md")
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(document.node.path, "/projects/notegate.md");
-        assert_eq!(document.document.content_md, "");
-
-        let saved = repo
-            .save_document(
-                user_id,
-                document.node.id,
-                "# notegate\nfile tree markdown memo\n",
-            )
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(
-            saved.document.content_md,
-            "# notegate\nfile tree markdown memo\n"
-        );
-
-        let grep_before = repo
-            .grep(
-                user_id,
-                GrepRequest {
-                    q: "file tree".into(),
-                    path: Some("/projects".into()),
-                    context: Some(1),
-                    limit: Some(50),
-                },
-            )
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(grep_before.len(), 1);
-        assert_eq!(grep_before[0].path, "/projects/notegate.md");
-        assert_eq!(grep_before[0].line_no, 2);
-
-        let archive = repo
-            .create_folder(user_id, root.id, "archive")
-            .await
-            .map_err(debug_error)?;
-        let duplicate_name = repo
-            .create_document(user_id, archive.id, "notegate.md")
-            .await;
-        assert!(matches!(duplicate_name, Err(VaultRepoError::Conflict(_))));
-
-        let moved = repo
-            .move_node(user_id, document.node.id, archive.id, Some("notegate.md"))
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(moved.path, "/archive/notegate.md");
-
-        let old_path = repo.resolve(user_id, "/projects/notegate.md").await;
-        assert!(matches!(old_path, Err(VaultRepoError::NotFound(_))));
-
-        let opened = repo
-            .document(user_id, document.node.id)
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(opened.node.path, "/archive/notegate.md");
-        assert_eq!(opened.document.content_md, saved.document.content_md);
-
-        let grep_after = repo
-            .grep(
-                user_id,
-                GrepRequest {
-                    q: "file tree".into(),
-                    path: Some("/archive".into()),
-                    context: Some(0),
-                    limit: Some(50),
-                },
-            )
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(grep_after.len(), 1);
-        assert_eq!(grep_after[0].path, "/archive/notegate.md");
-
-        let find_results = repo
-            .find(
-                user_id,
-                FindRequest {
-                    q: "notegate".into(),
-                    path: None,
-                    kind: Some("document".into()),
-                    limit: Some(50),
-                },
-            )
-            .await
-            .map_err(debug_error)?;
-        assert_eq!(find_results.len(), 1);
-        assert_eq!(find_results[0].path, "/archive/notegate.md");
-
-        repo.delete_node(user_id, archive.id)
-            .await
-            .map_err(debug_error)?;
-        let deleted_doc = repo.document(user_id, document.node.id).await;
-        assert!(matches!(deleted_doc, Err(VaultRepoError::NotFound(_))));
-
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user_id)
-            .execute(&pool)
-            .await
-            .map_err(|error| error.to_string())?;
-
-        Ok(())
-    }
-
-    async fn test_pool() -> Result<Option<PgPool>, String> {
-        let url = std::env::var("NOTEGATE_TEST_DATABASE_URL")
-            .or_else(|_| std::env::var("DATABASE_URL"))
-            .ok();
-        let Some(url) = url else {
-            eprintln!("skipping vault db test: NOTEGATE_TEST_DATABASE_URL is not set");
-            return Ok(None);
-        };
-
-        PgPoolOptions::new()
-            .max_connections(1)
-            .connect(&url)
-            .await
-            .map(Some)
-            .map_err(|error| error.to_string())
-    }
-
-    async fn create_test_user(pool: &PgPool) -> Result<Uuid, String> {
-        let id = Uuid::new_v4();
-        let sub = format!("vault-test-{id}");
-        let email = format!("vault-test-{id}@example.test");
-        sqlx::query_scalar::<_, Uuid>(
-            r#"
-            INSERT INTO users (id, sub, email, display_name)
-            VALUES ($1, $2, $3, 'Vault Test')
-            RETURNING id
-            "#,
-        )
-        .bind(id)
-        .bind(sub)
-        .bind(email)
-        .fetch_one(pool)
-        .await
-        .map_err(|error| error.to_string())
-    }
-
-    fn debug_error(error: VaultRepoError) -> String {
-        format!("{error:?}")
-    }
-}
+const NODE_SELECT_BY_ID: &str = r#"
+    SELECT
+        n.id,
+        n.parent_id,
+        n.name,
+        n.kind,
+        n.path_cache,
+        n.sort_order,
+        EXISTS (
+            SELECT 1
+            FROM nodes c
+            WHERE c.workspace_id = n.workspace_id
+              AND c.parent_id = n.id
+              AND c.deleted_at IS NULL
+        ) AS has_children,
+        n.created_at,
+        n.updated_at
+    FROM nodes n
+    WHERE n.workspace_id = $1
+      AND n.id = $2
+      AND n.deleted_at IS NULL
+"#;
