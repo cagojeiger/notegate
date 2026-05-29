@@ -1,5 +1,6 @@
 use super::*;
 use sqlx::postgres::PgPoolOptions;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(), String> {
