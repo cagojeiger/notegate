@@ -11,9 +11,10 @@ config/local.toml
 # Local repository research clones
 .repos/
 
-# OMC tooling
+# Local agent tooling
 .omc/
 .omx/
+.codex/
 
 # OS
 .DS_Store
