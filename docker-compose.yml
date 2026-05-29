@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: notegate
+      POSTGRES_PASSWORD: notegate
+      POSTGRES_DB: notegate
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notegate"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
+      NOTEGATE_DB_MAX_CONNECTIONS: 10
+      LOG_FORMAT: json
+      NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
+      NOTEGATE_PUBLIC_URL: http://localhost:9191
+      NOTEGATE_OAUTH_CLIENT_ID: notegate-web
+      NOTEGATE_OAUTH_REDIRECT_URL: http://localhost:9191/callback
+      NOTEGATE_RESOURCE_URL: http://localhost:9191/mcp
+      NOTEGATE_JWKS_CACHE_TTL_SECS: 300
+    ports:
+      - "9191:9191"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Frontend (Next.js) — uncomment once frontend/ exists.
+  # Separate Dockerfile + context: backend and web have different base images,
+  # build caches, and deploy cadences, so they never share one build.
+  # web:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     # Server-side calls to the API use the compose network hostname.
+  #     API_URL: http://api:9191
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - api
+  #   restart: unless-stopped
+
+volumes:
+  pgdata:
