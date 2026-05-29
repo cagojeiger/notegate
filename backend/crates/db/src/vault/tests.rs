@@ -15,6 +15,32 @@ async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     let user_id = create_test_user(&pool).await?;
     let repo = VaultRepo::new(pool.clone());
 
+    let read_before_root = repo
+        .find(
+            user_id,
+            FindRequest {
+                q: "notegate".into(),
+                path: None,
+                kind: None,
+                limit: Some(50),
+            },
+        )
+        .await;
+    assert!(matches!(read_before_root, Err(VaultRepoError::NotFound(_))));
+
+    let workspace_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM workspaces
+        WHERE owner_user_id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    assert_eq!(workspace_count, 0);
+
     let root = repo.root(user_id).await.map_err(debug_error)?;
     assert_eq!(root.path, "/");
     assert_eq!(root.kind, NodeKind::Folder);

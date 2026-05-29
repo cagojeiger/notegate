@@ -13,7 +13,7 @@ impl VaultRepo {
         name: &str,
     ) -> VaultResult<DocumentBundle> {
         validate_document_name(name)?;
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let parent = self.node_by_id(workspace_id, parent_node_id).await?;
         if parent.kind != NodeKind::Folder {
             return Err(VaultRepoError::InvalidInput(
@@ -69,7 +69,7 @@ impl VaultRepo {
     }
 
     pub async fn document(&self, user_id: Uuid, node_id: Uuid) -> VaultResult<DocumentBundle> {
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let row = sqlx::query_as::<_, DocumentBundleRow>(
             r#"
             SELECT
@@ -114,7 +114,7 @@ impl VaultRepo {
         node_id: Uuid,
         content_md: &str,
     ) -> VaultResult<DocumentBundle> {
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
 
         let exists = sqlx::query_scalar::<_, bool>(

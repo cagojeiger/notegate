@@ -17,7 +17,7 @@ impl VaultRepo {
             }
         }
 
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let limit = clamp_limit(request.limit);
         let path = request.path.as_deref().map(normalize_path).transpose()?;
         let like_q = format!("%{q}%");
@@ -76,7 +76,7 @@ impl VaultRepo {
             return Err(VaultRepoError::InvalidInput("query cannot be empty".into()));
         }
 
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let limit = clamp_limit(request.limit) as usize;
         let context = request.context.unwrap_or(0).clamp(0, 5) as usize;
         let path = request.path.as_deref().map(normalize_path).transpose()?;

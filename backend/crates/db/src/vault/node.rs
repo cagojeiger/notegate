@@ -8,7 +8,7 @@ use super::{Children, Node, NodeKind, VaultRepo, VaultRepoError, VaultResult};
 
 impl VaultRepo {
     pub async fn children(&self, user_id: Uuid, node_id: Uuid) -> VaultResult<Children> {
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let parent = self.node_by_id(workspace_id, node_id).await?;
         if parent.kind != NodeKind::Folder {
             return Err(VaultRepoError::InvalidInput("node is not a folder".into()));
@@ -58,7 +58,7 @@ impl VaultRepo {
         name: &str,
     ) -> VaultResult<Node> {
         validate_folder_name(name)?;
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let parent = self.node_by_id(workspace_id, parent_node_id).await?;
         if parent.kind != NodeKind::Folder {
             return Err(VaultRepoError::InvalidInput(
@@ -101,7 +101,7 @@ impl VaultRepo {
         new_parent_node_id: Uuid,
         new_name: Option<&str>,
     ) -> VaultResult<Node> {
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let node = self.node_by_id(workspace_id, node_id).await?;
         if node.parent_id.is_none() {
             return Err(VaultRepoError::Conflict("root cannot be moved".into()));
@@ -160,7 +160,7 @@ impl VaultRepo {
     }
 
     pub async fn delete_node(&self, user_id: Uuid, node_id: Uuid) -> VaultResult<()> {
-        let workspace_id = self.ensure_default_workspace(user_id).await?;
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let node = self.node_by_id(workspace_id, node_id).await?;
         if node.parent_id.is_none() {
             return Err(VaultRepoError::Conflict("root cannot be deleted".into()));
