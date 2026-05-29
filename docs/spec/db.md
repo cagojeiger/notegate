@@ -157,16 +157,17 @@ CREATE UNIQUE INDEX nodes_one_root_per_workspace
 전제를 더 엄격하게 지키기 위해서다. root가 실수로 soft delete되어도 같은
 workspace에 새 root를 만들 수 없어야 한다.
 
-### 같은 폴더 안 이름 중복 방지
+### Workspace 안 이름 중복 방지
 
-soft delete를 쓰기 때문에 일반 `UNIQUE (workspace_id, parent_id, name)`은
-맞지 않다. 삭제된 파일 이름은 나중에 다시 쓸 수 있어야 한다.
+soft delete를 쓰기 때문에 일반 `UNIQUE (workspace_id, name)`은 맞지 않다.
+삭제된 파일 이름은 나중에 다시 쓸 수 있어야 한다.
 
-살아있는 node끼리만 같은 parent 아래에서 이름 중복을 막는다.
+root를 제외한 살아있는 node끼리는 같은 workspace 안에서 같은 이름을 가질 수
+없다. 폴더가 달라도 같은 이름은 허용하지 않는다.
 
 ```sql
-CREATE UNIQUE INDEX nodes_live_sibling_name_key
-    ON nodes(workspace_id, parent_id, name)
+CREATE UNIQUE INDEX nodes_live_workspace_name_key
+    ON nodes(workspace_id, name)
     WHERE deleted_at IS NULL AND parent_id IS NOT NULL;
 ```
 
@@ -323,7 +324,7 @@ INSERT nodes(kind = 'folder')
 규칙:
 
 - parent는 같은 workspace의 folder node여야 한다.
-- 같은 parent 아래에 같은 이름의 살아있는 node가 있으면 실패한다.
+- 같은 workspace 안에 같은 이름의 살아있는 node가 있으면 실패한다.
 
 ### touch
 
@@ -408,7 +409,7 @@ folder면 descendant path_cache도 갱신
 - 자기 자신이나 자신의 descendant 아래로 이동할 수 없다.
 - document node의 새 이름은 소문자 `.md`로 끝나야 한다.
 - folder node의 새 이름은 `.md`로 끝날 수 없다.
-- 같은 target parent 아래에 같은 이름의 살아있는 node가 있으면 실패한다.
+- 같은 workspace 안에 같은 이름의 살아있는 node가 있으면 실패한다.
 
 folder를 이동하거나 이름 변경하면 descendant path도 갱신한다. 기본 구현은
 기존 path prefix를 새 path prefix로 바꾸는 방식으로 충분하다.

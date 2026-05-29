@@ -271,7 +271,7 @@ POST /api/v1/vault/folders
 규칙:
 
 - `parent_node_id`는 folder node여야 한다.
-- 같은 parent 아래에 같은 이름의 살아있는 node가 있으면 실패한다.
+- 같은 workspace 안에 같은 이름의 살아있는 node가 있으면 실패한다.
 - 생성된 folder node를 반환한다.
 
 ### touch
@@ -295,7 +295,7 @@ POST /api/v1/vault/documents
 
 - `parent_node_id`는 folder node여야 한다.
 - `name`은 `.md`로 끝나야 한다.
-- 같은 parent 아래에 같은 이름의 살아있는 node가 있으면 실패한다.
+- 같은 workspace 안에 같은 이름의 살아있는 node가 있으면 실패한다.
 - `nodes` row와 `documents` row를 하나의 transaction에서 만든다.
 - 초기 `content_md`는 빈 문자열이다.
 
@@ -384,7 +384,7 @@ PATCH /api/v1/vault/nodes/{node_id}/move
 - document의 `new_name`은 소문자 `.md`로 끝나야 한다.
 - folder의 `new_name`은 `.md`로 끝날 수 없다.
 - 자기 자신이나 자신의 하위 폴더로 이동할 수 없다.
-- 같은 target parent 아래에 같은 이름의 살아있는 node가 있으면 실패한다.
+- 같은 workspace 안에 같은 이름의 살아있는 node가 있으면 실패한다.
 - 이동/이름 변경 후 `path_cache`를 갱신한다.
 - folder를 이동/이름 변경하면 모든 descendant의 `path_cache`도 갱신한다.
 
@@ -551,6 +551,7 @@ root를 제외한 node name은 다음 규칙을 따른다.
 - `.` 또는 `..`일 수 없다.
 - document node는 소문자 `.md`로 끝나야 한다.
 - folder node는 `.md`로 끝날 수 없다.
+- root를 제외한 살아있는 node 이름은 같은 workspace 안에서 unique해야 한다.
 
 DB CHECK는 최소 방어선이다. 실제 검증과 에러 메시지는 application layer에서
 처리한다.

@@ -1052,6 +1052,11 @@ mod tests {
             .create_folder(user_id, root.id, "archive")
             .await
             .map_err(debug_error)?;
+        let duplicate_name = repo
+            .create_document(user_id, archive.id, "notegate.md")
+            .await;
+        assert!(matches!(duplicate_name, Err(VaultRepoError::Conflict(_))));
+
         let moved = repo
             .move_node(user_id, document.node.id, archive.id, Some("notegate.md"))
             .await
