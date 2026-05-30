@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use notegate_db::{Children, Document, DocumentBundle, GrepMatch, Node};
+use notegate_domain::files::{Children, Document, DocumentBundle, GrepMatch, Node};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

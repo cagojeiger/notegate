@@ -1,27 +1,20 @@
 use uuid::Uuid;
 
+use super::FilesRepo;
 use super::error::map_sqlx_error;
 use super::rows::{GrepCandidateRow, NodeRow};
-use super::validation::{clamp_limit, normalize_path};
-use super::{FilesRepo, FilesRepoError, FilesResult, FindRequest, GrepMatch, GrepRequest, Node};
+use notegate_domain::files::{FilesResult, FindQuery, GrepCandidate, GrepCandidateQuery, Node};
 
 impl FilesRepo {
-    pub async fn find(&self, user_id: Uuid, request: FindRequest) -> FilesResult<Vec<Node>> {
-        let q = request.q.trim();
-        if q.is_empty() {
-            return Err(FilesRepoError::InvalidInput("query cannot be empty".into()));
-        }
-        if let Some(kind) = request.kind.as_deref() {
-            if kind != "folder" && kind != "document" {
-                return Err(FilesRepoError::InvalidInput("invalid node kind".into()));
-            }
-        }
-
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let limit = clamp_limit(request.limit);
-        let path = request.path.as_deref().map(normalize_path).transpose()?;
-        let like_q = format!("%{q}%");
-        let subtree_like = path
+    pub(super) async fn find_nodes(
+        &self,
+        workspace_id: Uuid,
+        query: FindQuery,
+    ) -> FilesResult<Vec<Node>> {
+        let like_q = format!("%{}%", query.q);
+        let kind = query.kind.map(|kind| kind.as_str());
+        let subtree_like = query
+            .path
             .as_ref()
             .map(|p| format!("{}/%", p.trim_end_matches('/')));
 
@@ -59,10 +52,10 @@ impl FilesRepo {
         )
         .bind(workspace_id)
         .bind(like_q)
-        .bind(request.kind)
-        .bind(path)
+        .bind(kind)
+        .bind(query.path)
         .bind(subtree_like)
-        .bind(limit)
+        .bind(query.limit)
         .fetch_all(self.pool())
         .await
         .map_err(map_sqlx_error)?;
@@ -70,20 +63,16 @@ impl FilesRepo {
         Ok(rows.into_iter().map(NodeRow::into_node).collect())
     }
 
-    pub async fn grep(&self, user_id: Uuid, request: GrepRequest) -> FilesResult<Vec<GrepMatch>> {
-        let q = request.q.trim();
-        if q.is_empty() {
-            return Err(FilesRepoError::InvalidInput("query cannot be empty".into()));
-        }
-
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let limit = clamp_limit(request.limit) as usize;
-        let context = request.context.unwrap_or(0).clamp(0, 5) as usize;
-        let path = request.path.as_deref().map(normalize_path).transpose()?;
-        let subtree_like = path
+    pub(super) async fn grep_candidates(
+        &self,
+        workspace_id: Uuid,
+        query: GrepCandidateQuery,
+    ) -> FilesResult<Vec<GrepCandidate>> {
+        let subtree_like = query
+            .path
             .as_ref()
             .map(|p| format!("{}/%", p.trim_end_matches('/')));
-        let like_q = format!("%{q}%");
+        let like_q = format!("%{}%", query.q);
 
         let candidates = sqlx::query_as::<_, GrepCandidateRow>(
             r#"
@@ -106,48 +95,16 @@ impl FilesRepo {
         )
         .bind(workspace_id)
         .bind(like_q)
-        .bind(path)
+        .bind(query.path)
         .bind(subtree_like)
-        .bind(limit as i64)
+        .bind(query.limit)
         .fetch_all(self.pool())
         .await
         .map_err(map_sqlx_error)?;
 
-        let needle = q.to_lowercase();
-        let mut matches = Vec::new();
-        for candidate in candidates {
-            let lines: Vec<&str> = candidate.content_md.split('\n').collect();
-            for (idx, line) in lines.iter().enumerate() {
-                if !line.to_lowercase().contains(&needle) {
-                    continue;
-                }
-
-                let before_start = idx.saturating_sub(context);
-                let before = lines[before_start..idx]
-                    .iter()
-                    .map(|line| (*line).to_owned())
-                    .collect();
-                let after_end = (idx + 1 + context).min(lines.len());
-                let after = lines[idx + 1..after_end]
-                    .iter()
-                    .map(|line| (*line).to_owned())
-                    .collect();
-
-                matches.push(GrepMatch {
-                    node_id: candidate.node_id,
-                    path: candidate.path_cache.clone(),
-                    line_no: idx as i64 + 1,
-                    line: (*line).to_owned(),
-                    before,
-                    after,
-                });
-
-                if matches.len() >= limit {
-                    return Ok(matches);
-                }
-            }
-        }
-
-        Ok(matches)
+        Ok(candidates
+            .into_iter()
+            .map(GrepCandidateRow::into_candidate)
+            .collect())
     }
 }

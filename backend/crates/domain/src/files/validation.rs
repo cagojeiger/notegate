@@ -1,9 +1,9 @@
-use super::error::{FilesRepoError, FilesResult};
+use super::{FilesError, FilesResult};
 
 pub(super) fn validate_folder_name(name: &str) -> FilesResult<()> {
     validate_base_name(name)?;
     if name.ends_with(".md") {
-        return Err(FilesRepoError::InvalidInput(
+        return Err(FilesError::InvalidInput(
             "folder name cannot end with .md".into(),
         ));
     }
@@ -13,7 +13,7 @@ pub(super) fn validate_folder_name(name: &str) -> FilesResult<()> {
 pub(super) fn validate_document_name(name: &str) -> FilesResult<()> {
     validate_base_name(name)?;
     if !name.ends_with(".md") {
-        return Err(FilesRepoError::InvalidInput(
+        return Err(FilesError::InvalidInput(
             "document name must end with .md".into(),
         ));
     }
@@ -22,22 +22,20 @@ pub(super) fn validate_document_name(name: &str) -> FilesResult<()> {
 
 fn validate_base_name(name: &str) -> FilesResult<()> {
     if name.is_empty() {
-        return Err(FilesRepoError::InvalidInput("name cannot be empty".into()));
+        return Err(FilesError::InvalidInput("name cannot be empty".into()));
     }
     if name == "." || name == ".." {
-        return Err(FilesRepoError::InvalidInput("invalid name".into()));
+        return Err(FilesError::InvalidInput("invalid name".into()));
     }
     if name.contains('/') {
-        return Err(FilesRepoError::InvalidInput("name cannot contain /".into()));
+        return Err(FilesError::InvalidInput("name cannot contain /".into()));
     }
     Ok(())
 }
 
 pub(super) fn normalize_path(path: &str) -> FilesResult<String> {
     if !path.starts_with('/') {
-        return Err(FilesRepoError::InvalidInput(
-            "path must start with /".into(),
-        ));
+        return Err(FilesError::InvalidInput("path must start with /".into()));
     }
 
     let mut segments = Vec::new();
@@ -46,7 +44,7 @@ pub(super) fn normalize_path(path: &str) -> FilesResult<String> {
             continue;
         }
         if segment == "." || segment == ".." {
-            return Err(FilesRepoError::InvalidInput(
+            return Err(FilesError::InvalidInput(
                 "path cannot contain . or ..".into(),
             ));
         }

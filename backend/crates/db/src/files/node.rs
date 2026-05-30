@@ -1,20 +1,18 @@
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+use super::FilesRepo;
 use super::error::map_sqlx_error;
 use super::rows::NodeRow;
-use super::validation::{child_path, validate_document_name, validate_folder_name};
-use super::{Children, FilesRepo, FilesRepoError, FilesResult, Node, NodeKind};
+use notegate_domain::files::{FilesError, FilesResult, Node};
 
 impl FilesRepo {
-    pub async fn children(&self, user_id: Uuid, node_id: Uuid) -> FilesResult<Children> {
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let parent = self.node_by_id(workspace_id, node_id).await?;
-        if parent.kind != NodeKind::Folder {
-            return Err(FilesRepoError::InvalidInput("node is not a folder".into()));
-        }
-
-        let children = sqlx::query_as::<_, NodeRow>(
+    pub(super) async fn child_nodes(
+        &self,
+        workspace_id: Uuid,
+        parent_node_id: Uuid,
+    ) -> FilesResult<Vec<Node>> {
+        let rows = sqlx::query_as::<_, NodeRow>(
             r#"
             SELECT
                 n.id,
@@ -40,7 +38,7 @@ impl FilesRepo {
             "#,
         )
         .bind(workspace_id)
-        .bind(node_id)
+        .bind(parent_node_id)
         .fetch_all(self.pool())
         .await
         .map_err(map_sqlx_error)?
@@ -48,25 +46,16 @@ impl FilesRepo {
         .map(NodeRow::into_node)
         .collect();
 
-        Ok(Children { parent, children })
+        Ok(rows)
     }
 
-    pub async fn create_folder(
+    pub(super) async fn create_folder_node(
         &self,
-        user_id: Uuid,
+        workspace_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
+        path: &str,
     ) -> FilesResult<Node> {
-        validate_folder_name(name)?;
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let parent = self.node_by_id(workspace_id, parent_node_id).await?;
-        if parent.kind != NodeKind::Folder {
-            return Err(FilesRepoError::InvalidInput(
-                "parent is not a folder".into(),
-            ));
-        }
-
-        let path = child_path(&parent.path, name);
         let row = sqlx::query_as::<_, NodeRow>(
             r#"
             INSERT INTO nodes (workspace_id, parent_id, name, kind, path_cache)
@@ -94,45 +83,15 @@ impl FilesRepo {
         Ok(row.into_node())
     }
 
-    pub async fn move_node(
+    pub(super) async fn move_node_record(
         &self,
-        user_id: Uuid,
+        workspace_id: Uuid,
         node_id: Uuid,
         new_parent_node_id: Uuid,
-        new_name: Option<&str>,
-    ) -> FilesResult<Node> {
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let node = self.node_by_id(workspace_id, node_id).await?;
-        if node.parent_id.is_none() {
-            return Err(FilesRepoError::Conflict("root cannot be moved".into()));
-        }
-
-        let new_parent = self.node_by_id(workspace_id, new_parent_node_id).await?;
-        if new_parent.kind != NodeKind::Folder {
-            return Err(FilesRepoError::InvalidInput(
-                "new parent is not a folder".into(),
-            ));
-        }
-
-        let final_name = new_name.unwrap_or(&node.name);
-        match node.kind {
-            NodeKind::Folder => validate_folder_name(final_name)?,
-            NodeKind::Document => validate_document_name(final_name)?,
-        }
-
-        if node.id == new_parent.id
-            || new_parent.path == node.path
-            || new_parent
-                .path
-                .starts_with(&format!("{}/", node.path.trim_end_matches('/')))
-        {
-            return Err(FilesRepoError::Conflict(
-                "node cannot move into itself or its descendant".into(),
-            ));
-        }
-
-        let old_path = node.path.clone();
-        let new_path = child_path(&new_parent.path, final_name);
+        new_name: &str,
+        old_path: &str,
+        new_path: &str,
+    ) -> FilesResult<()> {
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
 
         sqlx::query(
@@ -148,24 +107,22 @@ impl FilesRepo {
         .bind(workspace_id)
         .bind(node_id)
         .bind(new_parent_node_id)
-        .bind(final_name)
+        .bind(new_name)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
 
-        update_subtree_paths(&mut tx, workspace_id, node_id, &old_path, &new_path).await?;
+        update_subtree_paths(&mut tx, workspace_id, node_id, old_path, new_path).await?;
         tx.commit().await.map_err(map_sqlx_error)?;
 
-        self.node_by_id(workspace_id, node_id).await
+        Ok(())
     }
 
-    pub async fn delete_node(&self, user_id: Uuid, node_id: Uuid) -> FilesResult<()> {
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let node = self.node_by_id(workspace_id, node_id).await?;
-        if node.parent_id.is_none() {
-            return Err(FilesRepoError::Conflict("root cannot be deleted".into()));
-        }
-
+    pub(super) async fn soft_delete_subtree(
+        &self,
+        workspace_id: Uuid,
+        node_id: Uuid,
+    ) -> FilesResult<()> {
         sqlx::query(
             r#"
             WITH RECURSIVE descendants AS (
@@ -208,7 +165,7 @@ impl FilesRepo {
             .map_err(map_sqlx_error)?;
 
         row.map(NodeRow::into_node)
-            .ok_or_else(|| FilesRepoError::NotFound("node not found".into()))
+            .ok_or_else(|| FilesError::NotFound("node not found".into()))
     }
 
     pub(super) async fn node_by_path(&self, workspace_id: Uuid, path: &str) -> FilesResult<Node> {
@@ -243,7 +200,7 @@ impl FilesRepo {
         .map_err(map_sqlx_error)?;
 
         row.map(NodeRow::into_node)
-            .ok_or_else(|| FilesRepoError::NotFound("node not found".into()))
+            .ok_or_else(|| FilesError::NotFound("node not found".into()))
     }
 }
 

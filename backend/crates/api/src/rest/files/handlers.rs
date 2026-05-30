@@ -1,8 +1,12 @@
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
-use notegate_db::{FilesRepo, FindRequest as RepoFindRequest, GrepRequest as RepoGrepRequest};
+use notegate_db::FilesRepo;
 use notegate_domain::Caller;
+use notegate_domain::files::{
+    CreateDocument, CreateFolder, FilesService, FindRequest as DomainFindRequest,
+    GrepRequest as DomainGrepRequest, MoveNode, SaveDocument,
+};
 use uuid::Uuid;
 
 use super::dto::{
@@ -17,8 +21,11 @@ pub(super) async fn root(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let node = repo.root(caller.user.id).await.map_err(map_files_error)?;
+    let service = files_service(&state);
+    let node = service
+        .root(caller.user.id)
+        .await
+        .map_err(map_files_error)?;
     Ok(Json(NodeResponseBody {
         node: NodeOutput::from(node),
     }))
@@ -29,8 +36,8 @@ pub(super) async fn resolve(
     Extension(caller): Extension<Caller>,
     Query(query): Query<ResolveQuery>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let node = repo
+    let service = files_service(&state);
+    let node = service
         .resolve(caller.user.id, &query.path)
         .await
         .map_err(map_files_error)?;
@@ -44,8 +51,8 @@ pub(super) async fn children(
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
 ) -> Result<Json<ChildrenResponse>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let result = repo
+    let service = files_service(&state);
+    let result = service
         .children(caller.user.id, node_id)
         .await
         .map_err(map_files_error)?;
@@ -57,9 +64,15 @@ pub(super) async fn create_folder(
     Extension(caller): Extension<Caller>,
     Json(request): Json<CreateNodeRequest>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let node = repo
-        .create_folder(caller.user.id, request.parent_node_id, &request.name)
+    let service = files_service(&state);
+    let node = service
+        .create_folder(
+            caller.user.id,
+            CreateFolder {
+                parent_node_id: request.parent_node_id,
+                name: request.name,
+            },
+        )
         .await
         .map_err(map_files_error)?;
     Ok(Json(NodeResponseBody {
@@ -72,9 +85,15 @@ pub(super) async fn create_document(
     Extension(caller): Extension<Caller>,
     Json(request): Json<CreateNodeRequest>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let bundle = repo
-        .create_document(caller.user.id, request.parent_node_id, &request.name)
+    let service = files_service(&state);
+    let bundle = service
+        .create_document(
+            caller.user.id,
+            CreateDocument {
+                parent_node_id: request.parent_node_id,
+                name: request.name,
+            },
+        )
         .await
         .map_err(map_files_error)?;
     Ok(Json(DocumentResponse::from(bundle)))
@@ -85,8 +104,8 @@ pub(super) async fn open_document(
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let bundle = repo
+    let service = files_service(&state);
+    let bundle = service
         .document(caller.user.id, node_id)
         .await
         .map_err(map_files_error)?;
@@ -99,9 +118,15 @@ pub(super) async fn save_document(
     Path(node_id): Path<Uuid>,
     Json(request): Json<SaveDocumentRequest>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let bundle = repo
-        .save_document(caller.user.id, node_id, &request.content_md)
+    let service = files_service(&state);
+    let bundle = service
+        .save_document(
+            caller.user.id,
+            SaveDocument {
+                node_id,
+                content_md: request.content_md,
+            },
+        )
         .await
         .map_err(map_files_error)?;
     Ok(Json(DocumentResponse::from(bundle)))
@@ -113,13 +138,15 @@ pub(super) async fn move_node(
     Path(node_id): Path<Uuid>,
     Json(request): Json<MoveNodeRequest>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let node = repo
+    let service = files_service(&state);
+    let node = service
         .move_node(
             caller.user.id,
-            node_id,
-            request.new_parent_node_id,
-            request.new_name.as_deref(),
+            MoveNode {
+                node_id,
+                new_parent_node_id: request.new_parent_node_id,
+                new_name: request.new_name,
+            },
         )
         .await
         .map_err(map_files_error)?;
@@ -133,8 +160,9 @@ pub(super) async fn delete_node(
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    repo.delete_node(caller.user.id, node_id)
+    let service = files_service(&state);
+    service
+        .delete_node(caller.user.id, node_id)
         .await
         .map_err(map_files_error)?;
     Ok(StatusCode::NO_CONTENT)
@@ -145,11 +173,11 @@ pub(super) async fn find(
     Extension(caller): Extension<Caller>,
     Json(request): Json<FindRequest>,
 ) -> Result<Json<FindResponse>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let results = repo
+    let service = files_service(&state);
+    let results = service
         .find(
             caller.user.id,
-            RepoFindRequest {
+            DomainFindRequest {
                 q: request.q,
                 path: request.path,
                 kind: request.kind,
@@ -169,11 +197,11 @@ pub(super) async fn grep(
     Extension(caller): Extension<Caller>,
     Json(request): Json<GrepRequest>,
 ) -> Result<Json<GrepResponse>, ApiError> {
-    let repo = FilesRepo::new(state.db.clone());
-    let results = repo
+    let service = files_service(&state);
+    let results = service
         .grep(
             caller.user.id,
-            RepoGrepRequest {
+            DomainGrepRequest {
                 q: request.q,
                 path: request.path,
                 context: request.context,
@@ -186,4 +214,8 @@ pub(super) async fn grep(
         .map(Into::into)
         .collect();
     Ok(Json(GrepResponse { results }))
+}
+
+fn files_service(state: &AppState) -> FilesService<FilesRepo> {
+    FilesService::new(FilesRepo::new(state.db.clone()))
 }

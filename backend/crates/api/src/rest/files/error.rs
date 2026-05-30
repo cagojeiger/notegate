@@ -1,13 +1,13 @@
-use notegate_db::FilesRepoError;
+use notegate_domain::files::FilesError;
 
 use crate::error::ApiError;
 
-pub(super) fn map_files_error(error: FilesRepoError) -> ApiError {
+pub(super) fn map_files_error(error: FilesError) -> ApiError {
     match error {
-        FilesRepoError::NotFound(message) => ApiError::not_found(message),
-        FilesRepoError::InvalidInput(message) => ApiError::invalid_field(message),
-        FilesRepoError::Conflict(message) => ApiError::conflict(message),
-        FilesRepoError::Internal(message) => {
+        FilesError::NotFound(message) => ApiError::not_found(message),
+        FilesError::InvalidInput(message) => ApiError::invalid_field(message),
+        FilesError::Conflict(message) => ApiError::conflict(message),
+        FilesError::Internal(message) => {
             tracing::error!(event = "files.error", detail = %message);
             ApiError::internal("internal server error")
         }

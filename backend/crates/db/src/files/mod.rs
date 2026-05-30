@@ -2,18 +2,17 @@ use sqlx::PgPool;
 
 mod document;
 mod error;
-mod model;
 mod node;
 mod rows;
 mod search;
+mod store;
 #[cfg(test)]
 mod tests;
-mod validation;
 mod workspace;
 
-pub use error::{FilesRepoError, FilesResult};
-pub use model::{
-    Children, Document, DocumentBundle, FindRequest, GrepMatch, GrepRequest, Node, NodeKind,
+pub use notegate_domain::files::{
+    Children, CreateDocument, CreateFolder, Document, DocumentBundle, FilesError, FilesResult,
+    FilesService, FindRequest, GrepMatch, GrepRequest, MoveNode, Node, NodeKind, SaveDocument,
 };
 
 #[derive(Debug, Clone)]

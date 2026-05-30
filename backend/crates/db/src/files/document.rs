@@ -1,28 +1,19 @@
 use uuid::Uuid;
 
+use super::FilesRepo;
 use super::error::map_sqlx_error;
 use super::rows::{DocumentBundleRow, DocumentRow, NodeRow};
-use super::validation::{child_path, validate_document_name};
-use super::{DocumentBundle, FilesRepo, FilesRepoError, FilesResult, NodeKind};
+use notegate_domain::files::{DocumentBundle, FilesError, FilesResult};
 
 impl FilesRepo {
-    pub async fn create_document(
+    pub(super) async fn create_document_node(
         &self,
-        user_id: Uuid,
+        workspace_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
+        path: &str,
     ) -> FilesResult<DocumentBundle> {
-        validate_document_name(name)?;
-        let workspace_id = self.default_workspace_id(user_id).await?;
-        let parent = self.node_by_id(workspace_id, parent_node_id).await?;
-        if parent.kind != NodeKind::Folder {
-            return Err(FilesRepoError::InvalidInput(
-                "parent is not a folder".into(),
-            ));
-        }
-
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
-        let path = child_path(&parent.path, name);
         let node_row = sqlx::query_as::<_, NodeRow>(
             r#"
             INSERT INTO nodes (workspace_id, parent_id, name, kind, path_cache)
@@ -68,8 +59,11 @@ impl FilesRepo {
         })
     }
 
-    pub async fn document(&self, user_id: Uuid, node_id: Uuid) -> FilesResult<DocumentBundle> {
-        let workspace_id = self.default_workspace_id(user_id).await?;
+    pub(super) async fn document_by_node_id(
+        &self,
+        workspace_id: Uuid,
+        node_id: Uuid,
+    ) -> FilesResult<DocumentBundle> {
         let row = sqlx::query_as::<_, DocumentBundleRow>(
             r#"
             SELECT
@@ -105,39 +99,16 @@ impl FilesRepo {
         .map_err(map_sqlx_error)?;
 
         row.map(DocumentBundleRow::into_bundle)
-            .ok_or_else(|| FilesRepoError::NotFound("document not found".into()))
+            .ok_or_else(|| FilesError::NotFound("document not found".into()))
     }
 
-    pub async fn save_document(
+    pub(super) async fn save_document_content(
         &self,
-        user_id: Uuid,
+        workspace_id: Uuid,
         node_id: Uuid,
         content_md: &str,
-    ) -> FilesResult<DocumentBundle> {
-        let workspace_id = self.default_workspace_id(user_id).await?;
+    ) -> FilesResult<()> {
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
-
-        let exists = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM nodes
-                WHERE workspace_id = $1
-                  AND id = $2
-                  AND kind = 'document'
-                  AND deleted_at IS NULL
-            )
-            "#,
-        )
-        .bind(workspace_id)
-        .bind(node_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        if !exists {
-            return Err(FilesRepoError::NotFound("document not found".into()));
-        }
 
         sqlx::query(
             r#"
@@ -171,7 +142,6 @@ impl FilesRepo {
         .map_err(map_sqlx_error)?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
-
-        self.document(user_id, node_id).await
+        Ok(())
     }
 }

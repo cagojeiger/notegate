@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::model::{Document, DocumentBundle, Node, NodeKind};
+use notegate_domain::files::{Document, DocumentBundle, GrepCandidate, Node, NodeKind};
 
 #[derive(sqlx::FromRow)]
 pub(super) struct NodeRow {
@@ -22,7 +22,7 @@ impl NodeRow {
             id: self.id,
             parent_id: self.parent_id,
             name: self.name,
-            kind: NodeKind::from_db(self.kind),
+            kind: NodeKind::from_storage(&self.kind),
             path: self.path_cache,
             sort_order: self.sort_order,
             has_children: self.has_children,
@@ -81,7 +81,7 @@ impl DocumentBundleRow {
                 id: self.id,
                 parent_id: self.parent_id,
                 name: self.name,
-                kind: NodeKind::from_db(self.kind),
+                kind: NodeKind::from_storage(&self.kind),
                 path: self.path_cache,
                 sort_order: self.sort_order,
                 has_children: self.has_children,
@@ -105,4 +105,14 @@ pub(super) struct GrepCandidateRow {
     pub(super) node_id: Uuid,
     pub(super) path_cache: String,
     pub(super) content_md: String,
+}
+
+impl GrepCandidateRow {
+    pub(super) fn into_candidate(self) -> GrepCandidate {
+        GrepCandidate {
+            node_id: self.node_id,
+            path: self.path_cache,
+            content_md: self.content_md,
+        }
+    }
 }

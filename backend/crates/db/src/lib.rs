@@ -6,9 +6,10 @@ use sqlx::postgres::PgPoolOptions;
 pub mod files;
 pub mod user_repo;
 
-pub use files::{
-    Children, Document, DocumentBundle, FilesRepo, FilesRepoError, FindRequest, GrepMatch,
-    GrepRequest, Node, NodeKind,
+pub use files::FilesRepo;
+pub use notegate_domain::files::{
+    Children, CreateDocument, CreateFolder, Document, DocumentBundle, FilesError, FilesResult,
+    FilesService, FindRequest, GrepMatch, GrepRequest, MoveNode, Node, NodeKind, SaveDocument,
 };
 pub use sqlx::PgPool;
 pub use user_repo::UserRepo;

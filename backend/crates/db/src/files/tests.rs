@@ -1,4 +1,8 @@
 use super::*;
+use notegate_domain::files::{
+    CreateDocument, CreateFolder, FilesError, FilesService, FindRequest, GrepRequest, MoveNode,
+    SaveDocument,
+};
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
@@ -14,8 +18,9 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
 
     let user_id = create_test_user(&pool).await?;
     let repo = FilesRepo::new(pool.clone());
+    let service = FilesService::new(repo);
 
-    let read_before_root = repo
+    let read_before_root = service
         .find(
             user_id,
             FindRequest {
@@ -26,7 +31,7 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
             },
         )
         .await;
-    assert!(matches!(read_before_root, Err(FilesRepoError::NotFound(_))));
+    assert!(matches!(read_before_root, Err(FilesError::NotFound(_))));
 
     let workspace_count = sqlx::query_scalar::<_, i64>(
         r#"
@@ -41,28 +46,42 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     .map_err(|error| error.to_string())?;
     assert_eq!(workspace_count, 0);
 
-    let root = repo.root(user_id).await.map_err(debug_error)?;
+    let root = service.root(user_id).await.map_err(debug_error)?;
     assert_eq!(root.path, "/");
     assert_eq!(root.kind, NodeKind::Folder);
 
-    let projects = repo
-        .create_folder(user_id, root.id, "projects")
+    let projects = service
+        .create_folder(
+            user_id,
+            CreateFolder {
+                parent_node_id: root.id,
+                name: "projects".into(),
+            },
+        )
         .await
         .map_err(debug_error)?;
     assert_eq!(projects.path, "/projects");
 
-    let document = repo
-        .create_document(user_id, projects.id, "notegate.md")
+    let document = service
+        .create_document(
+            user_id,
+            CreateDocument {
+                parent_node_id: projects.id,
+                name: "notegate.md".into(),
+            },
+        )
         .await
         .map_err(debug_error)?;
     assert_eq!(document.node.path, "/projects/notegate.md");
     assert_eq!(document.document.content_md, "");
 
-    let saved = repo
+    let saved = service
         .save_document(
             user_id,
-            document.node.id,
-            "# notegate\nfile tree markdown memo\n",
+            SaveDocument {
+                node_id: document.node.id,
+                content_md: "# notegate\nfile tree markdown memo\n".into(),
+            },
         )
         .await
         .map_err(debug_error)?;
@@ -71,7 +90,7 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         "# notegate\nfile tree markdown memo\n"
     );
 
-    let grep_before = repo
+    let grep_before = service
         .grep(
             user_id,
             GrepRequest {
@@ -87,32 +106,51 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     assert_eq!(grep_before[0].path, "/projects/notegate.md");
     assert_eq!(grep_before[0].line_no, 2);
 
-    let archive = repo
-        .create_folder(user_id, root.id, "archive")
+    let archive = service
+        .create_folder(
+            user_id,
+            CreateFolder {
+                parent_node_id: root.id,
+                name: "archive".into(),
+            },
+        )
         .await
         .map_err(debug_error)?;
-    let duplicate_name = repo
-        .create_document(user_id, archive.id, "notegate.md")
+    let duplicate_name = service
+        .create_document(
+            user_id,
+            CreateDocument {
+                parent_node_id: archive.id,
+                name: "notegate.md".into(),
+            },
+        )
         .await;
-    assert!(matches!(duplicate_name, Err(FilesRepoError::Conflict(_))));
+    assert!(matches!(duplicate_name, Err(FilesError::Conflict(_))));
 
-    let moved = repo
-        .move_node(user_id, document.node.id, archive.id, Some("notegate.md"))
+    let moved = service
+        .move_node(
+            user_id,
+            MoveNode {
+                node_id: document.node.id,
+                new_parent_node_id: archive.id,
+                new_name: Some("notegate.md".into()),
+            },
+        )
         .await
         .map_err(debug_error)?;
     assert_eq!(moved.path, "/archive/notegate.md");
 
-    let old_path = repo.resolve(user_id, "/projects/notegate.md").await;
-    assert!(matches!(old_path, Err(FilesRepoError::NotFound(_))));
+    let old_path = service.resolve(user_id, "/projects/notegate.md").await;
+    assert!(matches!(old_path, Err(FilesError::NotFound(_))));
 
-    let opened = repo
+    let opened = service
         .document(user_id, document.node.id)
         .await
         .map_err(debug_error)?;
     assert_eq!(opened.node.path, "/archive/notegate.md");
     assert_eq!(opened.document.content_md, saved.document.content_md);
 
-    let grep_after = repo
+    let grep_after = service
         .grep(
             user_id,
             GrepRequest {
@@ -127,7 +165,7 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     assert_eq!(grep_after.len(), 1);
     assert_eq!(grep_after[0].path, "/archive/notegate.md");
 
-    let find_results = repo
+    let find_results = service
         .find(
             user_id,
             FindRequest {
@@ -142,11 +180,12 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     assert_eq!(find_results.len(), 1);
     assert_eq!(find_results[0].path, "/archive/notegate.md");
 
-    repo.delete_node(user_id, archive.id)
+    service
+        .delete_node(user_id, archive.id)
         .await
         .map_err(debug_error)?;
-    let deleted_doc = repo.document(user_id, document.node.id).await;
-    assert!(matches!(deleted_doc, Err(FilesRepoError::NotFound(_))));
+    let deleted_doc = service.document(user_id, document.node.id).await;
+    assert!(matches!(deleted_doc, Err(FilesError::NotFound(_))));
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
@@ -193,6 +232,6 @@ async fn create_test_user(pool: &PgPool) -> Result<Uuid, String> {
     .map_err(|error| error.to_string())
 }
 
-fn debug_error(error: FilesRepoError) -> String {
+fn debug_error(error: FilesError) -> String {
     format!("{error:?}")
 }

@@ -8,10 +8,18 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
-    pub(super) fn from_db(value: String) -> Self {
-        match value.as_str() {
+    pub fn from_storage(value: &str) -> Self {
+        match value {
             "document" => Self::Document,
             _ => Self::Folder,
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "folder" => Some(Self::Folder),
+            "document" => Some(Self::Document),
+            _ => None,
         }
     }
 
@@ -59,19 +67,25 @@ pub struct DocumentBundle {
 }
 
 #[derive(Debug, Clone)]
-pub struct FindRequest {
+pub struct FindQuery {
     pub q: String,
     pub path: Option<String>,
-    pub kind: Option<String>,
-    pub limit: Option<i64>,
+    pub kind: Option<NodeKind>,
+    pub limit: i64,
 }
 
 #[derive(Debug, Clone)]
-pub struct GrepRequest {
+pub struct GrepCandidateQuery {
     pub q: String,
     pub path: Option<String>,
-    pub context: Option<i64>,
-    pub limit: Option<i64>,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct GrepCandidate {
+    pub node_id: Uuid,
+    pub path: String,
+    pub content_md: String,
 }
 
 #[derive(Debug, Clone)]
