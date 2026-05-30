@@ -1,29 +1,12 @@
 use uuid::Uuid;
 
-use super::FilesRepo;
-use super::error::map_sqlx_error;
-use super::rows::NodeRow;
+use super::super::FilesRepo;
+use super::super::error::map_sqlx_error;
+use super::super::rows::NodeRow;
 use notegate_domain::files::{FilesError, FilesResult, Node};
 
 impl FilesRepo {
-    pub(super) async fn default_workspace_id(&self, user_id: Uuid) -> FilesResult<Uuid> {
-        let workspace_id = sqlx::query_scalar::<_, Uuid>(
-            r#"
-            SELECT id
-            FROM workspaces
-            WHERE owner_user_id = $1
-              AND name = 'default'
-            "#,
-        )
-        .bind(user_id)
-        .fetch_optional(self.pool())
-        .await
-        .map_err(map_sqlx_error)?;
-
-        workspace_id.ok_or_else(|| FilesError::NotFound("default workspace not found".into()))
-    }
-
-    pub(super) async fn initialize_default_workspace(&self, user_id: Uuid) -> FilesResult<Uuid> {
+    pub(in crate::files) async fn initialize_root_node(&self, user_id: Uuid) -> FilesResult<Node> {
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
         let inserted_workspace_id = sqlx::query_scalar::<_, Uuid>(
             r#"
@@ -66,11 +49,6 @@ impl FilesRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(workspace_id)
-    }
-
-    pub(super) async fn root_for_workspace(&self, workspace_id: Uuid) -> FilesResult<Node> {
         let row = sqlx::query_as::<_, NodeRow>(
             r#"
             SELECT
@@ -96,9 +74,11 @@ impl FilesRepo {
             "#,
         )
         .bind(workspace_id)
-        .fetch_optional(self.pool())
+        .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
 
         row.map(NodeRow::into_node)
             .ok_or_else(|| FilesError::NotFound("root node not found".into()))

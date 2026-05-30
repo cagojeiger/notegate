@@ -1,14 +1,12 @@
 use sqlx::PgPool;
 
-mod document;
+mod commands;
 mod error;
-mod node;
+mod queries;
 mod rows;
-mod search;
 mod store;
 #[cfg(test)]
 mod tests;
-mod workspace;
 
 pub use notegate_domain::files::{
     Children, CreateDocument, CreateFolder, Document, DocumentBundle, FilesError, FilesResult,

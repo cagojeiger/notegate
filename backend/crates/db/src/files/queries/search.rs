@@ -1,16 +1,17 @@
 use uuid::Uuid;
 
-use super::FilesRepo;
-use super::error::map_sqlx_error;
-use super::rows::{GrepCandidateRow, NodeRow};
+use super::super::FilesRepo;
+use super::super::error::map_sqlx_error;
+use super::super::rows::{GrepCandidateRow, NodeRow};
 use notegate_domain::files::{FilesResult, FindQuery, GrepCandidate, GrepCandidateQuery, Node};
 
 impl FilesRepo {
-    pub(super) async fn find_nodes(
+    pub(in crate::files) async fn find_nodes(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         query: FindQuery,
     ) -> FilesResult<Vec<Node>> {
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let like_q = format!("%{}%", query.q);
         let kind = query.kind.map(|kind| kind.as_str());
         let subtree_like = query
@@ -63,11 +64,12 @@ impl FilesRepo {
         Ok(rows.into_iter().map(NodeRow::into_node).collect())
     }
 
-    pub(super) async fn grep_candidates(
+    pub(in crate::files) async fn grep_candidates(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         query: GrepCandidateQuery,
     ) -> FilesResult<Vec<GrepCandidate>> {
+        let workspace_id = self.default_workspace_id(user_id).await?;
         let subtree_like = query
             .path
             .as_ref()

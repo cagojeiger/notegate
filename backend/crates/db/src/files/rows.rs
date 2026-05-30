@@ -33,29 +33,6 @@ impl NodeRow {
 }
 
 #[derive(sqlx::FromRow)]
-pub(super) struct DocumentRow {
-    node_id: Uuid,
-    workspace_id: Uuid,
-    content_md: String,
-    search_text: String,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-impl DocumentRow {
-    pub(super) fn into_document(self) -> Document {
-        Document {
-            node_id: self.node_id,
-            workspace_id: self.workspace_id,
-            content_md: self.content_md,
-            search_text: self.search_text,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
 pub(super) struct DocumentBundleRow {
     id: Uuid,
     parent_id: Option<Uuid>,

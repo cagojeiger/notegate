@@ -2,94 +2,72 @@ use std::future::Future;
 
 use uuid::Uuid;
 
-use super::{DocumentBundle, FilesResult, FindQuery, GrepCandidate, GrepCandidateQuery, Node};
+use super::{
+    Children, CreateDocument, CreateFolder, DocumentBundle, FilesResult, FindQuery, GrepCandidate,
+    GrepCandidateQuery, MoveNode, Node, SaveDocument,
+};
 
 pub trait FilesStore: Clone + Send + Sync + 'static {
-    fn initialize_default_workspace(
+    fn initialize_root_node(&self, user_id: Uuid)
+    -> impl Future<Output = FilesResult<Node>> + Send;
+
+    fn resolve_node(
         &self,
         user_id: Uuid,
-    ) -> impl Future<Output = FilesResult<Uuid>> + Send;
-
-    fn default_workspace_id(&self, user_id: Uuid)
-    -> impl Future<Output = FilesResult<Uuid>> + Send;
-
-    fn root_for_workspace(
-        &self,
-        workspace_id: Uuid,
-    ) -> impl Future<Output = FilesResult<Node>> + Send;
-
-    fn node_by_id(
-        &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-    ) -> impl Future<Output = FilesResult<Node>> + Send;
-
-    fn node_by_path(
-        &self,
-        workspace_id: Uuid,
-        path: &str,
+        path: String,
     ) -> impl Future<Output = FilesResult<Node>> + Send;
 
     fn child_nodes(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         parent_node_id: Uuid,
-    ) -> impl Future<Output = FilesResult<Vec<Node>>> + Send;
+    ) -> impl Future<Output = FilesResult<Children>> + Send;
 
-    fn create_folder_node(
+    fn create_folder(
         &self,
-        workspace_id: Uuid,
-        parent_node_id: Uuid,
-        name: &str,
-        path: &str,
+        user_id: Uuid,
+        command: CreateFolder,
     ) -> impl Future<Output = FilesResult<Node>> + Send;
 
-    fn create_document_node(
+    fn create_document(
         &self,
-        workspace_id: Uuid,
-        parent_node_id: Uuid,
-        name: &str,
-        path: &str,
+        user_id: Uuid,
+        command: CreateDocument,
     ) -> impl Future<Output = FilesResult<DocumentBundle>> + Send;
 
-    fn document_by_node_id(
+    fn document(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         node_id: Uuid,
     ) -> impl Future<Output = FilesResult<DocumentBundle>> + Send;
 
-    fn save_document_content(
+    fn save_document(
         &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-        content_md: &str,
-    ) -> impl Future<Output = FilesResult<()>> + Send;
+        user_id: Uuid,
+        command: SaveDocument,
+    ) -> impl Future<Output = FilesResult<DocumentBundle>> + Send;
 
-    fn move_node_record(
+    fn move_node(
         &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-        new_parent_node_id: Uuid,
-        new_name: &str,
-        old_path: &str,
-        new_path: &str,
-    ) -> impl Future<Output = FilesResult<()>> + Send;
+        user_id: Uuid,
+        command: MoveNode,
+    ) -> impl Future<Output = FilesResult<Node>> + Send;
 
-    fn soft_delete_subtree(
+    fn delete_node(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         node_id: Uuid,
     ) -> impl Future<Output = FilesResult<()>> + Send;
 
     fn find_nodes(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         query: FindQuery,
     ) -> impl Future<Output = FilesResult<Vec<Node>>> + Send;
 
     fn grep_candidates(
         &self,
-        workspace_id: Uuid,
+        user_id: Uuid,
         query: GrepCandidateQuery,
     ) -> impl Future<Output = FilesResult<Vec<GrepCandidate>>> + Send;
 }

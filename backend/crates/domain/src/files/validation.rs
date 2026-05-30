@@ -20,6 +20,10 @@ pub(super) fn validate_document_name(name: &str) -> FilesResult<()> {
     Ok(())
 }
 
+pub(super) fn validate_node_name(name: &str) -> FilesResult<()> {
+    validate_base_name(name)
+}
+
 fn validate_base_name(name: &str) -> FilesResult<()> {
     if name.is_empty() {
         return Err(FilesError::InvalidInput("name cannot be empty".into()));
@@ -55,14 +59,6 @@ pub(super) fn normalize_path(path: &str) -> FilesResult<String> {
         Ok("/".into())
     } else {
         Ok(format!("/{}", segments.join("/")))
-    }
-}
-
-pub(super) fn child_path(parent_path: &str, name: &str) -> String {
-    if parent_path == "/" {
-        format!("/{name}")
-    } else {
-        format!("{parent_path}/{name}")
     }
 }
 

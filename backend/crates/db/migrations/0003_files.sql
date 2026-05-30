@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE TABLE IF NOT EXISTS workspaces (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_user_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -39,8 +41,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS nodes_one_root_per_workspace
     ON nodes(workspace_id)
     WHERE parent_id IS NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS nodes_live_sibling_name_key
-    ON nodes(workspace_id, parent_id, name)
+CREATE UNIQUE INDEX IF NOT EXISTS nodes_live_workspace_name_key
+    ON nodes(workspace_id, name)
     WHERE deleted_at IS NULL AND parent_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS nodes_live_path_key
@@ -53,6 +55,10 @@ CREATE INDEX IF NOT EXISTS nodes_children_idx
 
 CREATE INDEX IF NOT EXISTS nodes_kind_idx
     ON nodes(workspace_id, kind)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS nodes_path_trgm_idx
+    ON nodes USING gin (path_cache gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -70,3 +76,6 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX IF NOT EXISTS documents_workspace_updated_idx
     ON documents(workspace_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS documents_search_text_trgm_idx
+    ON documents USING gin (search_text gin_trgm_ops);
