@@ -1,12 +1,12 @@
-# 파일시스템 Vault DB 스키마
+# 파일트리 DB 스키마
 
-개인용 Markdown vault를 구현하기 위한 DB 스키마 설계다.
+개인용 Markdown 파일트리를 구현하기 위한 DB 스키마 설계다.
 
 목표는 특정 root 아래에서 폴더와 `.md` 파일만 다루는 작은 파일시스템이다.
 API는 `ls`, `mkdir`, `touch`, `open`, `save`, `mv`, `rm`, `find`, `grep`을
 제공한다.
 
-이 스키마는 파일트리 vault core만 책임진다. AI 검색, AI 문서 수정,
+이 스키마는 파일트리 core만 책임진다. AI 검색, AI 문서 수정,
 daily/context/review, raw data 생명주기 관리는 나중에 이 구조 위에 얹는다.
 
 ## 기존 전제
@@ -25,7 +25,7 @@ created_at
 updated_at
 ```
 
-vault 스키마는 새 `users`를 만들지 않고 기존 `users.id`를 참조한다.
+파일트리 스키마는 새 `users`를 만들지 않고 기존 `users.id`를 참조한다.
 
 ## 테이블
 
@@ -50,7 +50,7 @@ users
 
 ## workspaces
 
-workspace는 사용자의 개인 vault 경계다.
+workspace는 사용자의 개인 파일트리 경계다.
 
 처음에는 사용자당 `default` workspace 하나만 만들어도 된다. 그래도
 workspace를 두는 이유는 개인 데이터의 경계를 명확히 하기 위해서다.
@@ -69,7 +69,7 @@ CREATE TABLE workspaces (
 
 규칙:
 
-- `owner_user_id`는 vault 소유자다.
+- `owner_user_id`는 파일트리 소유자다.
 - 클라이언트는 `workspace_id`를 보내지 않는다.
 - API는 인증된 사용자로부터 workspace를 결정한다.
 

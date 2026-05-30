@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
-use notegate_db::{FindRequest as RepoFindRequest, GrepRequest as RepoGrepRequest, VaultRepo};
+use notegate_db::{FilesRepo, FindRequest as RepoFindRequest, GrepRequest as RepoGrepRequest};
 use notegate_domain::Caller;
 use uuid::Uuid;
 
@@ -9,7 +9,7 @@ use super::dto::{
     ChildrenResponse, CreateNodeRequest, DocumentResponse, FindRequest, FindResponse, GrepRequest,
     GrepResponse, MoveNodeRequest, NodeOutput, NodeResponseBody, ResolveQuery, SaveDocumentRequest,
 };
-use super::error::map_vault_error;
+use super::error::map_files_error;
 use crate::error::ApiError;
 use crate::state::AppState;
 
@@ -17,8 +17,8 @@ pub(super) async fn root(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
-    let node = repo.root(caller.user.id).await.map_err(map_vault_error)?;
+    let repo = FilesRepo::new(state.db.clone());
+    let node = repo.root(caller.user.id).await.map_err(map_files_error)?;
     Ok(Json(NodeResponseBody {
         node: NodeOutput::from(node),
     }))
@@ -29,11 +29,11 @@ pub(super) async fn resolve(
     Extension(caller): Extension<Caller>,
     Query(query): Query<ResolveQuery>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let node = repo
         .resolve(caller.user.id, &query.path)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(NodeResponseBody {
         node: NodeOutput::from(node),
     }))
@@ -44,11 +44,11 @@ pub(super) async fn children(
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
 ) -> Result<Json<ChildrenResponse>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let result = repo
         .children(caller.user.id, node_id)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(ChildrenResponse::from(result)))
 }
 
@@ -57,11 +57,11 @@ pub(super) async fn create_folder(
     Extension(caller): Extension<Caller>,
     Json(request): Json<CreateNodeRequest>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let node = repo
         .create_folder(caller.user.id, request.parent_node_id, &request.name)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(NodeResponseBody {
         node: NodeOutput::from(node),
     }))
@@ -72,11 +72,11 @@ pub(super) async fn create_document(
     Extension(caller): Extension<Caller>,
     Json(request): Json<CreateNodeRequest>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let bundle = repo
         .create_document(caller.user.id, request.parent_node_id, &request.name)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(DocumentResponse::from(bundle)))
 }
 
@@ -85,11 +85,11 @@ pub(super) async fn open_document(
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let bundle = repo
         .document(caller.user.id, node_id)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(DocumentResponse::from(bundle)))
 }
 
@@ -99,11 +99,11 @@ pub(super) async fn save_document(
     Path(node_id): Path<Uuid>,
     Json(request): Json<SaveDocumentRequest>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let bundle = repo
         .save_document(caller.user.id, node_id, &request.content_md)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(DocumentResponse::from(bundle)))
 }
 
@@ -113,7 +113,7 @@ pub(super) async fn move_node(
     Path(node_id): Path<Uuid>,
     Json(request): Json<MoveNodeRequest>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let node = repo
         .move_node(
             caller.user.id,
@@ -122,7 +122,7 @@ pub(super) async fn move_node(
             request.new_name.as_deref(),
         )
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(Json(NodeResponseBody {
         node: NodeOutput::from(node),
     }))
@@ -133,10 +133,10 @@ pub(super) async fn delete_node(
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     repo.delete_node(caller.user.id, node_id)
         .await
-        .map_err(map_vault_error)?;
+        .map_err(map_files_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -145,7 +145,7 @@ pub(super) async fn find(
     Extension(caller): Extension<Caller>,
     Json(request): Json<FindRequest>,
 ) -> Result<Json<FindResponse>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let results = repo
         .find(
             caller.user.id,
@@ -157,7 +157,7 @@ pub(super) async fn find(
             },
         )
         .await
-        .map_err(map_vault_error)?
+        .map_err(map_files_error)?
         .into_iter()
         .map(NodeOutput::from)
         .collect();
@@ -169,7 +169,7 @@ pub(super) async fn grep(
     Extension(caller): Extension<Caller>,
     Json(request): Json<GrepRequest>,
 ) -> Result<Json<GrepResponse>, ApiError> {
-    let repo = VaultRepo::new(state.db.clone());
+    let repo = FilesRepo::new(state.db.clone());
     let results = repo
         .grep(
             caller.user.id,
@@ -181,7 +181,7 @@ pub(super) async fn grep(
             },
         )
         .await
-        .map_err(map_vault_error)?
+        .map_err(map_files_error)?
         .into_iter()
         .map(Into::into)
         .collect();

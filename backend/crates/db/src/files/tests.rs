@@ -3,7 +3,7 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(), String> {
+async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(), String> {
     let Some(pool) = test_pool().await? else {
         return Ok(());
     };
@@ -13,7 +13,7 @@ async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .map_err(|error| error.to_string())?;
 
     let user_id = create_test_user(&pool).await?;
-    let repo = VaultRepo::new(pool.clone());
+    let repo = FilesRepo::new(pool.clone());
 
     let read_before_root = repo
         .find(
@@ -26,7 +26,7 @@ async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
             },
         )
         .await;
-    assert!(matches!(read_before_root, Err(VaultRepoError::NotFound(_))));
+    assert!(matches!(read_before_root, Err(FilesRepoError::NotFound(_))));
 
     let workspace_count = sqlx::query_scalar::<_, i64>(
         r#"
@@ -94,7 +94,7 @@ async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     let duplicate_name = repo
         .create_document(user_id, archive.id, "notegate.md")
         .await;
-    assert!(matches!(duplicate_name, Err(VaultRepoError::Conflict(_))));
+    assert!(matches!(duplicate_name, Err(FilesRepoError::Conflict(_))));
 
     let moved = repo
         .move_node(user_id, document.node.id, archive.id, Some("notegate.md"))
@@ -103,7 +103,7 @@ async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
     assert_eq!(moved.path, "/archive/notegate.md");
 
     let old_path = repo.resolve(user_id, "/projects/notegate.md").await;
-    assert!(matches!(old_path, Err(VaultRepoError::NotFound(_))));
+    assert!(matches!(old_path, Err(FilesRepoError::NotFound(_))));
 
     let opened = repo
         .document(user_id, document.node.id)
@@ -146,7 +146,7 @@ async fn vault_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .await
         .map_err(debug_error)?;
     let deleted_doc = repo.document(user_id, document.node.id).await;
-    assert!(matches!(deleted_doc, Err(VaultRepoError::NotFound(_))));
+    assert!(matches!(deleted_doc, Err(FilesRepoError::NotFound(_))));
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
@@ -162,7 +162,7 @@ async fn test_pool() -> Result<Option<PgPool>, String> {
         .or_else(|_| std::env::var("DATABASE_URL"))
         .ok();
     let Some(url) = url else {
-        eprintln!("skipping vault db test: NOTEGATE_TEST_DATABASE_URL is not set");
+        eprintln!("skipping files db test: NOTEGATE_TEST_DATABASE_URL is not set");
         return Ok(None);
     };
 
@@ -176,12 +176,12 @@ async fn test_pool() -> Result<Option<PgPool>, String> {
 
 async fn create_test_user(pool: &PgPool) -> Result<Uuid, String> {
     let id = Uuid::new_v4();
-    let sub = format!("vault-test-{id}");
-    let email = format!("vault-test-{id}@example.test");
+    let sub = format!("files-test-{id}");
+    let email = format!("files-test-{id}@example.test");
     sqlx::query_scalar::<_, Uuid>(
         r#"
             INSERT INTO users (id, sub, email, display_name)
-            VALUES ($1, $2, $3, 'Vault Test')
+            VALUES ($1, $2, $3, 'Files Test')
             RETURNING id
             "#,
     )
@@ -193,6 +193,6 @@ async fn create_test_user(pool: &PgPool) -> Result<Uuid, String> {
     .map_err(|error| error.to_string())
 }
 
-fn debug_error(error: VaultRepoError) -> String {
+fn debug_error(error: FilesRepoError) -> String {
     format!("{error:?}")
 }

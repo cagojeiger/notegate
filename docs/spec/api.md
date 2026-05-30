@@ -1,6 +1,6 @@
-# 파일시스템 Vault API
+# 파일트리 Files API
 
-개인용 Markdown vault의 1차 API 설계다.
+개인용 Markdown 파일트리의 1차 API 설계다.
 
 목표는 브라우저에서 특정 root 아래를 파일시스템처럼 다루는 것이다. 이
 root 안에서는 폴더와 `.md` 파일만 만들 수 있다.
@@ -76,7 +76,7 @@ command input이 강해질 때 추가한다.
 
 ### Workspace
 
-workspace는 사용자의 개인 vault 경계다.
+workspace는 사용자의 개인 파일트리 경계다.
 
 클라이언트는 `workspace_id`를 보내지 않는다. API는 인증된 사용자로부터
 workspace를 결정한다. 모든 조회와 변경은 이 workspace 안에서만 실행한다.
@@ -157,7 +157,7 @@ path:    /projects/memgrep.md
 현재 workspace의 root folder node를 가져온다.
 
 ```http
-GET /api/v1/vault/root
+GET /api/v1/files/root
 ```
 
 응답:
@@ -180,7 +180,7 @@ GET /api/v1/vault/root
 command input이나 URL 기반 동작에서 path를 node로 해석한다.
 
 ```http
-GET /api/v1/vault/resolve?path=/projects/memgrep.md
+GET /api/v1/files/resolve?path=/projects/memgrep.md
 ```
 
 응답:
@@ -221,7 +221,7 @@ path는 서버에서 canonical form으로 정규화한 뒤 해석한다.
 폴더의 직접 자식만 가져온다.
 
 ```http
-GET /api/v1/vault/nodes/{node_id}/children
+GET /api/v1/files/nodes/{node_id}/children
 ```
 
 규칙:
@@ -256,7 +256,7 @@ GET /api/v1/vault/nodes/{node_id}/children
 폴더를 만든다.
 
 ```http
-POST /api/v1/vault/folders
+POST /api/v1/files/folders
 ```
 
 요청:
@@ -279,7 +279,7 @@ POST /api/v1/vault/folders
 빈 `.md` 문서를 만든다.
 
 ```http
-POST /api/v1/vault/documents
+POST /api/v1/files/documents
 ```
 
 요청:
@@ -310,7 +310,7 @@ POST /api/v1/vault/documents
 문서 본문을 읽는다.
 
 ```http
-GET /api/v1/vault/documents/{node_id}
+GET /api/v1/files/documents/{node_id}
 ```
 
 규칙:
@@ -340,7 +340,7 @@ GET /api/v1/vault/documents/{node_id}
 문서 본문을 저장한다.
 
 ```http
-PATCH /api/v1/vault/documents/{node_id}
+PATCH /api/v1/files/documents/{node_id}
 ```
 
 요청:
@@ -363,7 +363,7 @@ PATCH /api/v1/vault/documents/{node_id}
 node를 이동하거나 이름을 바꾼다.
 
 ```http
-PATCH /api/v1/vault/nodes/{node_id}/move
+PATCH /api/v1/files/nodes/{node_id}/move
 ```
 
 요청:
@@ -406,7 +406,7 @@ mv /projects/a.md /archive/b.md
 node를 삭제한다.
 
 ```http
-DELETE /api/v1/vault/nodes/{node_id}
+DELETE /api/v1/files/nodes/{node_id}
 ```
 
 규칙:
@@ -424,7 +424,7 @@ DELETE /api/v1/vault/nodes/{node_id}
 파일/폴더 이름과 경로를 검색한다. Markdown 본문은 보지 않는다.
 
 ```http
-POST /api/v1/vault/search/find
+POST /api/v1/files/search/find
 ```
 
 요청:
@@ -453,7 +453,7 @@ POST /api/v1/vault/search/find
 Markdown 본문을 검색한다.
 
 ```http
-POST /api/v1/vault/search/grep
+POST /api/v1/files/search/grep
 ```
 
 요청:
@@ -490,7 +490,7 @@ guard:
       "node_id": "doc-node-id",
       "path": "/projects/memgrep.md",
       "line_no": 12,
-      "line": "memgrep stores Markdown notes in a small vault.",
+      "line": "memgrep stores Markdown notes in a small file tree.",
       "before": [],
       "after": []
     }
@@ -507,39 +507,39 @@ command input은 core API를 대체하지 않는다. 버튼 UI, command input,
 
 ```text
 ls /projects
-  -> GET /api/v1/vault/resolve?path=/projects
-  -> GET /api/v1/vault/nodes/{node_id}/children
+  -> GET /api/v1/files/resolve?path=/projects
+  -> GET /api/v1/files/nodes/{node_id}/children
 
 mkdir /projects
-  -> GET /api/v1/vault/resolve?path=/
-  -> POST /api/v1/vault/folders
+  -> GET /api/v1/files/resolve?path=/
+  -> POST /api/v1/files/folders
 
 touch /projects/memgrep.md
-  -> GET /api/v1/vault/resolve?path=/projects
-  -> POST /api/v1/vault/documents
+  -> GET /api/v1/files/resolve?path=/projects
+  -> POST /api/v1/files/documents
 
 open /projects/memgrep.md
-  -> GET /api/v1/vault/resolve?path=/projects/memgrep.md
-  -> GET /api/v1/vault/documents/{node_id}
+  -> GET /api/v1/files/resolve?path=/projects/memgrep.md
+  -> GET /api/v1/files/documents/{node_id}
 
 save /projects/memgrep.md
-  -> GET /api/v1/vault/resolve?path=/projects/memgrep.md
-  -> PATCH /api/v1/vault/documents/{node_id}
+  -> GET /api/v1/files/resolve?path=/projects/memgrep.md
+  -> PATCH /api/v1/files/documents/{node_id}
 
 mv /projects/a.md /archive/b.md
-  -> GET /api/v1/vault/resolve?path=/projects/a.md
-  -> GET /api/v1/vault/resolve?path=/archive
-  -> PATCH /api/v1/vault/nodes/{node_id}/move
+  -> GET /api/v1/files/resolve?path=/projects/a.md
+  -> GET /api/v1/files/resolve?path=/archive
+  -> PATCH /api/v1/files/nodes/{node_id}/move
 
 rm /projects/memgrep.md
-  -> GET /api/v1/vault/resolve?path=/projects/memgrep.md
-  -> DELETE /api/v1/vault/nodes/{node_id}
+  -> GET /api/v1/files/resolve?path=/projects/memgrep.md
+  -> DELETE /api/v1/files/nodes/{node_id}
 
 find memgrep
-  -> POST /api/v1/vault/search/find
+  -> POST /api/v1/files/search/find
 
 grep memgrep /projects
-  -> POST /api/v1/vault/search/grep
+  -> POST /api/v1/files/search/grep
 ```
 
 ## 이름 규칙

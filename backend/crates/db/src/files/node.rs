@@ -4,14 +4,14 @@ use uuid::Uuid;
 use super::error::map_sqlx_error;
 use super::rows::NodeRow;
 use super::validation::{child_path, validate_document_name, validate_folder_name};
-use super::{Children, Node, NodeKind, VaultRepo, VaultRepoError, VaultResult};
+use super::{Children, FilesRepo, FilesRepoError, FilesResult, Node, NodeKind};
 
-impl VaultRepo {
-    pub async fn children(&self, user_id: Uuid, node_id: Uuid) -> VaultResult<Children> {
+impl FilesRepo {
+    pub async fn children(&self, user_id: Uuid, node_id: Uuid) -> FilesResult<Children> {
         let workspace_id = self.default_workspace_id(user_id).await?;
         let parent = self.node_by_id(workspace_id, node_id).await?;
         if parent.kind != NodeKind::Folder {
-            return Err(VaultRepoError::InvalidInput("node is not a folder".into()));
+            return Err(FilesRepoError::InvalidInput("node is not a folder".into()));
         }
 
         let children = sqlx::query_as::<_, NodeRow>(
@@ -56,12 +56,12 @@ impl VaultRepo {
         user_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
-    ) -> VaultResult<Node> {
+    ) -> FilesResult<Node> {
         validate_folder_name(name)?;
         let workspace_id = self.default_workspace_id(user_id).await?;
         let parent = self.node_by_id(workspace_id, parent_node_id).await?;
         if parent.kind != NodeKind::Folder {
-            return Err(VaultRepoError::InvalidInput(
+            return Err(FilesRepoError::InvalidInput(
                 "parent is not a folder".into(),
             ));
         }
@@ -100,16 +100,16 @@ impl VaultRepo {
         node_id: Uuid,
         new_parent_node_id: Uuid,
         new_name: Option<&str>,
-    ) -> VaultResult<Node> {
+    ) -> FilesResult<Node> {
         let workspace_id = self.default_workspace_id(user_id).await?;
         let node = self.node_by_id(workspace_id, node_id).await?;
         if node.parent_id.is_none() {
-            return Err(VaultRepoError::Conflict("root cannot be moved".into()));
+            return Err(FilesRepoError::Conflict("root cannot be moved".into()));
         }
 
         let new_parent = self.node_by_id(workspace_id, new_parent_node_id).await?;
         if new_parent.kind != NodeKind::Folder {
-            return Err(VaultRepoError::InvalidInput(
+            return Err(FilesRepoError::InvalidInput(
                 "new parent is not a folder".into(),
             ));
         }
@@ -126,7 +126,7 @@ impl VaultRepo {
                 .path
                 .starts_with(&format!("{}/", node.path.trim_end_matches('/')))
         {
-            return Err(VaultRepoError::Conflict(
+            return Err(FilesRepoError::Conflict(
                 "node cannot move into itself or its descendant".into(),
             ));
         }
@@ -159,11 +159,11 @@ impl VaultRepo {
         self.node_by_id(workspace_id, node_id).await
     }
 
-    pub async fn delete_node(&self, user_id: Uuid, node_id: Uuid) -> VaultResult<()> {
+    pub async fn delete_node(&self, user_id: Uuid, node_id: Uuid) -> FilesResult<()> {
         let workspace_id = self.default_workspace_id(user_id).await?;
         let node = self.node_by_id(workspace_id, node_id).await?;
         if node.parent_id.is_none() {
-            return Err(VaultRepoError::Conflict("root cannot be deleted".into()));
+            return Err(FilesRepoError::Conflict("root cannot be deleted".into()));
         }
 
         sqlx::query(
@@ -199,7 +199,7 @@ impl VaultRepo {
         Ok(())
     }
 
-    pub(super) async fn node_by_id(&self, workspace_id: Uuid, node_id: Uuid) -> VaultResult<Node> {
+    pub(super) async fn node_by_id(&self, workspace_id: Uuid, node_id: Uuid) -> FilesResult<Node> {
         let row = sqlx::query_as::<_, NodeRow>(NODE_SELECT_BY_ID)
             .bind(workspace_id)
             .bind(node_id)
@@ -208,10 +208,10 @@ impl VaultRepo {
             .map_err(map_sqlx_error)?;
 
         row.map(NodeRow::into_node)
-            .ok_or_else(|| VaultRepoError::NotFound("node not found".into()))
+            .ok_or_else(|| FilesRepoError::NotFound("node not found".into()))
     }
 
-    pub(super) async fn node_by_path(&self, workspace_id: Uuid, path: &str) -> VaultResult<Node> {
+    pub(super) async fn node_by_path(&self, workspace_id: Uuid, path: &str) -> FilesResult<Node> {
         let row = sqlx::query_as::<_, NodeRow>(
             r#"
             SELECT
@@ -243,7 +243,7 @@ impl VaultRepo {
         .map_err(map_sqlx_error)?;
 
         row.map(NodeRow::into_node)
-            .ok_or_else(|| VaultRepoError::NotFound("node not found".into()))
+            .ok_or_else(|| FilesRepoError::NotFound("node not found".into()))
     }
 }
 
@@ -253,7 +253,7 @@ async fn update_subtree_paths(
     moving_node_id: Uuid,
     old_prefix: &str,
     new_prefix: &str,
-) -> VaultResult<()> {
+) -> FilesResult<()> {
     sqlx::query(
         r#"
         UPDATE nodes

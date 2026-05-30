@@ -11,17 +11,17 @@ mod tests;
 mod validation;
 mod workspace;
 
-pub use error::{VaultRepoError, VaultResult};
+pub use error::{FilesRepoError, FilesResult};
 pub use model::{
     Children, Document, DocumentBundle, FindRequest, GrepMatch, GrepRequest, Node, NodeKind,
 };
 
 #[derive(Debug, Clone)]
-pub struct VaultRepo {
+pub struct FilesRepo {
     pool: PgPool,
 }
 
-impl VaultRepo {
+impl FilesRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }

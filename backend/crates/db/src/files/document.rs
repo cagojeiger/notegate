@@ -3,20 +3,20 @@ use uuid::Uuid;
 use super::error::map_sqlx_error;
 use super::rows::{DocumentBundleRow, DocumentRow, NodeRow};
 use super::validation::{child_path, validate_document_name};
-use super::{DocumentBundle, NodeKind, VaultRepo, VaultRepoError, VaultResult};
+use super::{DocumentBundle, FilesRepo, FilesRepoError, FilesResult, NodeKind};
 
-impl VaultRepo {
+impl FilesRepo {
     pub async fn create_document(
         &self,
         user_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
-    ) -> VaultResult<DocumentBundle> {
+    ) -> FilesResult<DocumentBundle> {
         validate_document_name(name)?;
         let workspace_id = self.default_workspace_id(user_id).await?;
         let parent = self.node_by_id(workspace_id, parent_node_id).await?;
         if parent.kind != NodeKind::Folder {
-            return Err(VaultRepoError::InvalidInput(
+            return Err(FilesRepoError::InvalidInput(
                 "parent is not a folder".into(),
             ));
         }
@@ -68,7 +68,7 @@ impl VaultRepo {
         })
     }
 
-    pub async fn document(&self, user_id: Uuid, node_id: Uuid) -> VaultResult<DocumentBundle> {
+    pub async fn document(&self, user_id: Uuid, node_id: Uuid) -> FilesResult<DocumentBundle> {
         let workspace_id = self.default_workspace_id(user_id).await?;
         let row = sqlx::query_as::<_, DocumentBundleRow>(
             r#"
@@ -105,7 +105,7 @@ impl VaultRepo {
         .map_err(map_sqlx_error)?;
 
         row.map(DocumentBundleRow::into_bundle)
-            .ok_or_else(|| VaultRepoError::NotFound("document not found".into()))
+            .ok_or_else(|| FilesRepoError::NotFound("document not found".into()))
     }
 
     pub async fn save_document(
@@ -113,7 +113,7 @@ impl VaultRepo {
         user_id: Uuid,
         node_id: Uuid,
         content_md: &str,
-    ) -> VaultResult<DocumentBundle> {
+    ) -> FilesResult<DocumentBundle> {
         let workspace_id = self.default_workspace_id(user_id).await?;
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
 
@@ -136,7 +136,7 @@ impl VaultRepo {
         .map_err(map_sqlx_error)?;
 
         if !exists {
-            return Err(VaultRepoError::NotFound("document not found".into()));
+            return Err(FilesRepoError::NotFound("document not found".into()));
         }
 
         sqlx::query(

@@ -3,17 +3,17 @@ use uuid::Uuid;
 use super::error::map_sqlx_error;
 use super::rows::{GrepCandidateRow, NodeRow};
 use super::validation::{clamp_limit, normalize_path};
-use super::{FindRequest, GrepMatch, GrepRequest, Node, VaultRepo, VaultRepoError, VaultResult};
+use super::{FilesRepo, FilesRepoError, FilesResult, FindRequest, GrepMatch, GrepRequest, Node};
 
-impl VaultRepo {
-    pub async fn find(&self, user_id: Uuid, request: FindRequest) -> VaultResult<Vec<Node>> {
+impl FilesRepo {
+    pub async fn find(&self, user_id: Uuid, request: FindRequest) -> FilesResult<Vec<Node>> {
         let q = request.q.trim();
         if q.is_empty() {
-            return Err(VaultRepoError::InvalidInput("query cannot be empty".into()));
+            return Err(FilesRepoError::InvalidInput("query cannot be empty".into()));
         }
         if let Some(kind) = request.kind.as_deref() {
             if kind != "folder" && kind != "document" {
-                return Err(VaultRepoError::InvalidInput("invalid node kind".into()));
+                return Err(FilesRepoError::InvalidInput("invalid node kind".into()));
             }
         }
 
@@ -70,10 +70,10 @@ impl VaultRepo {
         Ok(rows.into_iter().map(NodeRow::into_node).collect())
     }
 
-    pub async fn grep(&self, user_id: Uuid, request: GrepRequest) -> VaultResult<Vec<GrepMatch>> {
+    pub async fn grep(&self, user_id: Uuid, request: GrepRequest) -> FilesResult<Vec<GrepMatch>> {
         let q = request.q.trim();
         if q.is_empty() {
-            return Err(VaultRepoError::InvalidInput("query cannot be empty".into()));
+            return Err(FilesRepoError::InvalidInput("query cannot be empty".into()));
         }
 
         let workspace_id = self.default_workspace_id(user_id).await?;

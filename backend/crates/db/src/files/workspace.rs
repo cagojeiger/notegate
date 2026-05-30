@@ -3,21 +3,21 @@ use uuid::Uuid;
 use super::error::map_sqlx_error;
 use super::rows::NodeRow;
 use super::validation::normalize_path;
-use super::{Node, VaultRepo, VaultRepoError, VaultResult};
+use super::{FilesRepo, FilesRepoError, FilesResult, Node};
 
-impl VaultRepo {
-    pub async fn root(&self, user_id: Uuid) -> VaultResult<Node> {
+impl FilesRepo {
+    pub async fn root(&self, user_id: Uuid) -> FilesResult<Node> {
         let workspace_id = self.initialize_default_workspace(user_id).await?;
         self.root_for_workspace(workspace_id).await
     }
 
-    pub async fn resolve(&self, user_id: Uuid, path: &str) -> VaultResult<Node> {
+    pub async fn resolve(&self, user_id: Uuid, path: &str) -> FilesResult<Node> {
         let workspace_id = self.default_workspace_id(user_id).await?;
         let path = normalize_path(path)?;
         self.node_by_path(workspace_id, &path).await
     }
 
-    pub(super) async fn default_workspace_id(&self, user_id: Uuid) -> VaultResult<Uuid> {
+    pub(super) async fn default_workspace_id(&self, user_id: Uuid) -> FilesResult<Uuid> {
         let workspace_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT id
@@ -31,10 +31,10 @@ impl VaultRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        workspace_id.ok_or_else(|| VaultRepoError::NotFound("default workspace not found".into()))
+        workspace_id.ok_or_else(|| FilesRepoError::NotFound("default workspace not found".into()))
     }
 
-    pub(super) async fn initialize_default_workspace(&self, user_id: Uuid) -> VaultResult<Uuid> {
+    pub(super) async fn initialize_default_workspace(&self, user_id: Uuid) -> FilesResult<Uuid> {
         let mut tx = self.pool().begin().await.map_err(map_sqlx_error)?;
         let inserted_workspace_id = sqlx::query_scalar::<_, Uuid>(
             r#"
@@ -81,7 +81,7 @@ impl VaultRepo {
         Ok(workspace_id)
     }
 
-    async fn root_for_workspace(&self, workspace_id: Uuid) -> VaultResult<Node> {
+    async fn root_for_workspace(&self, workspace_id: Uuid) -> FilesResult<Node> {
         let row = sqlx::query_as::<_, NodeRow>(
             r#"
             SELECT
@@ -112,6 +112,6 @@ impl VaultRepo {
         .map_err(map_sqlx_error)?;
 
         row.map(NodeRow::into_node)
-            .ok_or_else(|| VaultRepoError::NotFound("root node not found".into()))
+            .ok_or_else(|| FilesRepoError::NotFound("root node not found".into()))
     }
 }

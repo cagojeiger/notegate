@@ -3,15 +3,15 @@
 use notegate_core::{Config, Error, Result};
 use sqlx::postgres::PgPoolOptions;
 
+pub mod files;
 pub mod user_repo;
-pub mod vault;
 
+pub use files::{
+    Children, Document, DocumentBundle, FilesRepo, FilesRepoError, FindRequest, GrepMatch,
+    GrepRequest, Node, NodeKind,
+};
 pub use sqlx::PgPool;
 pub use user_repo::UserRepo;
-pub use vault::{
-    Children, Document, DocumentBundle, FindRequest, GrepMatch, GrepRequest, Node, NodeKind,
-    VaultRepo, VaultRepoError,
-};
 
 /// Embedded migrations from `migrations/`, run at startup via [`run_migrations`].
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

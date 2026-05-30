@@ -1,41 +1,41 @@
-use super::error::{VaultRepoError, VaultResult};
+use super::error::{FilesRepoError, FilesResult};
 
-pub(super) fn validate_folder_name(name: &str) -> VaultResult<()> {
+pub(super) fn validate_folder_name(name: &str) -> FilesResult<()> {
     validate_base_name(name)?;
     if name.ends_with(".md") {
-        return Err(VaultRepoError::InvalidInput(
+        return Err(FilesRepoError::InvalidInput(
             "folder name cannot end with .md".into(),
         ));
     }
     Ok(())
 }
 
-pub(super) fn validate_document_name(name: &str) -> VaultResult<()> {
+pub(super) fn validate_document_name(name: &str) -> FilesResult<()> {
     validate_base_name(name)?;
     if !name.ends_with(".md") {
-        return Err(VaultRepoError::InvalidInput(
+        return Err(FilesRepoError::InvalidInput(
             "document name must end with .md".into(),
         ));
     }
     Ok(())
 }
 
-fn validate_base_name(name: &str) -> VaultResult<()> {
+fn validate_base_name(name: &str) -> FilesResult<()> {
     if name.is_empty() {
-        return Err(VaultRepoError::InvalidInput("name cannot be empty".into()));
+        return Err(FilesRepoError::InvalidInput("name cannot be empty".into()));
     }
     if name == "." || name == ".." {
-        return Err(VaultRepoError::InvalidInput("invalid name".into()));
+        return Err(FilesRepoError::InvalidInput("invalid name".into()));
     }
     if name.contains('/') {
-        return Err(VaultRepoError::InvalidInput("name cannot contain /".into()));
+        return Err(FilesRepoError::InvalidInput("name cannot contain /".into()));
     }
     Ok(())
 }
 
-pub(super) fn normalize_path(path: &str) -> VaultResult<String> {
+pub(super) fn normalize_path(path: &str) -> FilesResult<String> {
     if !path.starts_with('/') {
-        return Err(VaultRepoError::InvalidInput(
+        return Err(FilesRepoError::InvalidInput(
             "path must start with /".into(),
         ));
     }
@@ -46,7 +46,7 @@ pub(super) fn normalize_path(path: &str) -> VaultResult<String> {
             continue;
         }
         if segment == "." || segment == ".." {
-            return Err(VaultRepoError::InvalidInput(
+            return Err(FilesRepoError::InvalidInput(
                 "path cannot contain . or ..".into(),
             ));
         }
