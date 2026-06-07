@@ -106,38 +106,3 @@ CREATE INDEX IF NOT EXISTS documents_content_trgm_idx
 
 CREATE INDEX IF NOT EXISTS documents_workspace_updated_idx
     ON documents(workspace_id, updated_at DESC, node_id);
-
-CREATE TABLE IF NOT EXISTS document_lines (
-    workspace_id UUID NOT NULL,
-    node_id      UUID NOT NULL,
-    line_no      INTEGER NOT NULL,
-    line_text    TEXT NOT NULL,
-    line_hash    TEXT NOT NULL DEFAULT '',
-
-    PRIMARY KEY (node_id, line_no),
-    FOREIGN KEY (node_id, workspace_id)
-        REFERENCES documents(node_id, workspace_id)
-        ON DELETE CASCADE,
-    CHECK (line_no >= 1)
-);
-
-CREATE INDEX IF NOT EXISTS document_lines_workspace_text_trgm_idx
-    ON document_lines USING gin (line_text gin_trgm_ops);
-
-CREATE INDEX IF NOT EXISTS document_lines_workspace_node_line_idx
-    ON document_lines(workspace_id, node_id, line_no);
-
-CREATE TABLE IF NOT EXISTS document_index_status (
-    node_id         UUID PRIMARY KEY,
-    workspace_id    UUID NOT NULL,
-    content_sha256  TEXT NOT NULL,
-    index_version   INTEGER NOT NULL DEFAULT 1,
-    status          TEXT NOT NULL CHECK (status IN ('ready', 'stale', 'failed')),
-    error           TEXT,
-    indexed_at      TIMESTAMPTZ,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    FOREIGN KEY (node_id, workspace_id)
-        REFERENCES documents(node_id, workspace_id)
-        ON DELETE CASCADE
-);

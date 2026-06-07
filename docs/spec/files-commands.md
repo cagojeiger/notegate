@@ -86,7 +86,7 @@ path = /projects/note.md
 1. parent path를 resolve한다.
 2. basename이 `.md`로 끝나는지 검증한다.
 3. `nodes(kind='document')`와 `documents` row를 하나의 transaction에서 만든다.
-4. 빈 문서도 `document_lines`/`document_index_status`를 일관되게 초기화한다.
+4. 빈 문서 원본 row를 만들고 `content_sha256`, `byte_len`, `line_count` 기본값을 유지한다.
 
 ### `cat` / `open`
 
@@ -195,7 +195,7 @@ Markdown 본문을 line 단위로 검색한다.
 검색 대상:
 
 ```text
-document_lines.line_text
+documents.content_md 후보 검색 후 application code에서 line-split
 ```
 
 규칙:

@@ -44,67 +44,6 @@ impl FilesRepo {
             return Err(FilesError::NotFound("document not found".into()));
         }
 
-        sqlx::query(
-            r#"
-            DELETE FROM document_lines
-            WHERE workspace_id = $1
-              AND node_id = $2
-            "#,
-        )
-        .bind(workspace_id)
-        .bind(command.node_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO document_lines (workspace_id, node_id, line_no, line_text, line_hash)
-            SELECT
-                $1,
-                $2,
-                lines.line_no::INTEGER,
-                lines.line_text,
-                encode(digest(lines.line_text, 'sha256'), 'hex')
-            FROM unnest(string_to_array($3, E'\n')) WITH ORDINALITY AS lines(line_text, line_no)
-            WHERE $3 <> ''
-            "#,
-        )
-        .bind(workspace_id)
-        .bind(command.node_id)
-        .bind(&command.content_md)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO document_index_status (
-                node_id,
-                workspace_id,
-                content_sha256,
-                status,
-                indexed_at,
-                updated_at
-            )
-            SELECT node_id, workspace_id, content_sha256, 'ready', now(), now()
-            FROM documents
-            WHERE workspace_id = $1
-              AND node_id = $2
-            ON CONFLICT (node_id) DO UPDATE
-                SET content_sha256 = EXCLUDED.content_sha256,
-                    status = 'ready',
-                    error = NULL,
-                    indexed_at = EXCLUDED.indexed_at,
-                    updated_at = now()
-            "#,
-        )
-        .bind(workspace_id)
-        .bind(command.node_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
         let node_result = sqlx::query(
             r#"
             UPDATE nodes

@@ -99,27 +99,6 @@ impl FilesRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
-            r#"
-            INSERT INTO document_index_status (
-                node_id,
-                workspace_id,
-                content_sha256,
-                status,
-                indexed_at
-            )
-            SELECT node_id, workspace_id, content_sha256, 'ready', now()
-            FROM documents
-            WHERE workspace_id = $1
-              AND node_id = $2
-            "#,
-        )
-        .bind(workspace_id)
-        .bind(node_row.id)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
         let row = sqlx::query_as::<_, DocumentBundleRow>(
             r#"
             SELECT

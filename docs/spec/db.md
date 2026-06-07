@@ -14,15 +14,8 @@ nodes        folder/document 공통 tree node
 documents    markdown document 본문
 ```
 
-Search/index tables:
-
-```text
-document_lines         grep용 line-level derived index
-document_index_status  검색 인덱스 상태/버전/재색인 추적
-```
-
-`document_lines`와 `document_index_status`는 원본이 아니라 derived data다. 깨지면
-`documents.content_md`에서 재생성할 수 있어야 한다.
+현재 단계는 원본 저장만 고려한다. 검색용 line-level index나 async reindex 상태 테이블은
+문서 수정 빈도와 write amplification이 커진 뒤 별도 설계로 추가한다.
 
 ## users
 
@@ -201,65 +194,25 @@ CREATE TABLE documents (
 - 저장 시 `documents.updated_at`과 연결된 `nodes.updated_at`을 함께 갱신한다.
 - `byte_len`과 `line_count`는 read limit, pagination, write guard에 사용한다.
 
-## document_lines
+## Deferred search indexes
 
-`document_lines`는 grep용 line-level derived index다. 원본은 `documents.content_md`다.
+현재 migration에는 line-level derived index를 만들지 않는다. Markdown 원본은
+`documents.content_md` 하나가 source of truth이며, `byte_len`, `line_count`,
+`content_sha256`만 저장 시 함께 갱신한다.
 
-```sql
-CREATE TABLE document_lines (
-    workspace_id UUID NOT NULL,
-    node_id      UUID NOT NULL,
-    line_no      INTEGER NOT NULL,
-    line_text    TEXT NOT NULL,
-    line_hash    TEXT NOT NULL DEFAULT '',
+나중에 grep 성능이 필요해지면 다음을 별도 migration/job으로 추가한다.
 
-    PRIMARY KEY (node_id, line_no),
-    FOREIGN KEY (node_id, workspace_id)
-        REFERENCES documents(node_id, workspace_id)
-        ON DELETE CASCADE,
-    CHECK (line_no >= 1)
-);
+```text
+document_lines         grep용 line-level derived index
+document_index_status  검색 인덱스 상태/버전/재색인 추적
 ```
 
-Indexes:
-
-```sql
-CREATE INDEX document_lines_workspace_text_trgm_idx
-    ON document_lines USING gin (line_text gin_trgm_ops);
-
-CREATE INDEX document_lines_workspace_node_line_idx
-    ON document_lines(workspace_id, node_id, line_no);
-```
-
-검색 시에는 `nodes`와 join하여 `deleted_at IS NULL`과 최신 `path_cache`를 확인한다.
-`document_lines`에는 path를 저장하지 않는다. path는 `nodes`가 source of truth다.
-
-## document_index_status
-
-검색 인덱스 상태를 추적한다. 초기 구현이 동기 인덱싱이어도 이 테이블을 두면
-나중에 async reindex/backfill로 전환하기 쉽다.
-
-```sql
-CREATE TABLE document_index_status (
-    node_id         UUID PRIMARY KEY,
-    workspace_id    UUID NOT NULL,
-    content_sha256  TEXT NOT NULL,
-    index_version   INTEGER NOT NULL DEFAULT 1,
-    status          TEXT NOT NULL CHECK (status IN ('ready', 'stale', 'failed')),
-    error           TEXT,
-    indexed_at      TIMESTAMPTZ,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    FOREIGN KEY (node_id, workspace_id)
-        REFERENCES documents(node_id, workspace_id)
-        ON DELETE CASCADE
-);
-```
+그때도 이 테이블들은 원본이 아니라 derived data여야 하며, 깨지면
+`documents.content_md`에서 재생성할 수 있어야 한다.
 
 ## Soft delete
 
-삭제는 `nodes.deleted_at`을 설정한다. `documents`와 `document_lines`는 FK 때문에 물리
-삭제하지 않아도 되지만, query는 반드시 `nodes.deleted_at IS NULL`을 확인한다.
+삭제는 `nodes.deleted_at`을 설정한다. query는 반드시 `nodes.deleted_at IS NULL`을 확인한다.
 
 장기적으로는 retention 정책에 따라 soft-deleted document를 purge하는 job을 둘 수 있다.
 

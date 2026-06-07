@@ -16,7 +16,6 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .await
         .map_err(|error| error.to_string())?;
     assert_index_exists(&pool, "nodes_path_trgm_idx").await?;
-    assert_index_exists(&pool, "document_lines_workspace_text_trgm_idx").await?;
 
     let user_id = create_test_user(&pool).await?;
     let repo = FilesRepo::new(pool.clone());

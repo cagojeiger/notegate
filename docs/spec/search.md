@@ -4,7 +4,7 @@ notegate has two search modes:
 
 ```text
 find = metadata/path search over nodes
-grep = Markdown body line search over document_lines
+grep = Markdown body search over documents.content_md, then line-split in application code
 ```
 
 ## Source of truth vs index
@@ -16,14 +16,8 @@ nodes.path_cache, nodes.name, nodes.kind
 documents.content_md
 ```
 
-Derived search data:
-
-```text
-document_lines
-document_index_status
-```
-
-Derived index tables must be rebuildable from canonical data.
+현재 단계에는 derived search table을 두지 않는다. `documents.content_md`가 grep의 원본이자
+현재 검색 대상이다.
 
 ## Find
 
@@ -62,47 +56,44 @@ n.path_cache = $scope_path OR n.path_cache LIKE $scope_prefix
 
 ## Grep
 
-`grep` searches `document_lines.line_text` and joins `nodes` for current path and deletion state.
+현재 grep은 `documents.content_md`에서 후보 문서를 찾고, application code가 원문을
+line-split하여 line number와 context를 만든다. 이 방식은 저장 시 line index를 삭제/삽입하지
+않으므로 빈번한 autosave에서 write amplification을 피한다.
 
 Conceptual query:
 
 ```sql
-SELECT n.id, n.path_cache, l.line_no, l.line_text
-FROM document_lines l
+SELECT n.id, n.path_cache, d.content_md
+FROM documents d
 JOIN nodes n
-  ON n.id = l.node_id
- AND n.workspace_id = l.workspace_id
-WHERE l.workspace_id = $workspace_id
+  ON n.id = d.node_id
+ AND n.workspace_id = d.workspace_id
+WHERE d.workspace_id = $workspace_id
   AND n.deleted_at IS NULL
-  AND l.line_text ILIKE $query
+  AND d.content_md ILIKE $query
   AND (n.path_cache = $scope OR n.path_cache LIKE $scope_prefix)
-ORDER BY n.path_cache, l.line_no
+ORDER BY d.updated_at DESC
 LIMIT $limit;
 ```
 
-Context lines are fetched by `(workspace_id, node_id, line_no)` around each hit.
+나중에 grep QPS나 문서 크기가 커지면 `document_lines`와 async indexer를 별도 설계로
+추가한다. 그때도 line index는 source of truth가 아니라 `documents.content_md`에서 재생성 가능한
+derived data여야 한다.
 
 ## Index freshness
 
-Initial implementation may update `document_lines` synchronously inside document save. The schema still
-tracks `document_index_status` so the system can later move to async indexing.
-
-Possible statuses:
-
-```text
-ready   index matches current content hash
-stale   document changed but index is not updated yet
-failed  indexing failed; error contains safe diagnostic
-```
+현재 단계에는 별도 index freshness 상태가 없다. 저장 성공은 원본 `documents.content_md`와
+metadata(`content_sha256`, `byte_len`, `line_count`)가 갱신되었음을 의미한다.
 
 ## Pagination
 
 `find` supports keyset pagination by `(path_cache, id)`.
 
-`grep` supports keyset pagination by `(path_cache, node_id, line_no)`. Cursor is opaque to clients.
+현재 grep cursor는 구현하지 않는다. line-level index를 도입할 때 `(path_cache, node_id, line_no)`
+keyset pagination을 함께 설계한다. Cursor is opaque to clients.
 
 ## External search engines
 
 Postgres remains the source of truth. If future scale requires typo tolerance, advanced ranking,
-semantic search, high QPS, or independent search scaling, `document_lines` can be treated as the
-local implementation of a broader search-index interface and replaced/augmented by an external engine.
+semantic search, high QPS, or independent search scaling, introduce a separate search-index interface
+that can be backed by `document_lines` or an external engine.
