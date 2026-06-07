@@ -21,6 +21,7 @@ use crate::identity::CallerResolver;
 use crate::state::AppState;
 
 use crate::auth::bearer::{AuthError, verify_bearer};
+use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
 
 const KEY: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCx8TUdJX0WeXTQ
@@ -149,6 +150,8 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
         oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
         resource_url: "https://api.example.test".to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
+        browser_session_secret: "test-browser-session-secret-32-bytes".to_owned(),
+        browser_session_ttl: Duration::from_secs(3600),
         secure_cookies: false,
     });
     let jwks = Arc::new(JwksCache::with_keys(
@@ -330,6 +333,43 @@ async fn api_routes_accept_valid_bearer() -> Result<(), Box<dyn std::error::Erro
         .await?;
 
     assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+    let app = crate::routes::app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+    let app = crate::routes::app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 

@@ -16,7 +16,7 @@ use tracing::{Span, info, info_span};
 
 use crate::auth::bearer::require_bearer;
 use crate::auth::metadata::{protected_resource_metadata, protected_resource_metadata_url};
-use crate::auth::oauth::{callback, login};
+use crate::auth::oauth::{callback, login, logout};
 use crate::error::ApiError;
 use crate::mcp::server::mcp_handler;
 use crate::state::AppState;
@@ -56,6 +56,7 @@ fn auth_routes() -> Router<AppState> {
     Router::new()
         .route("/login", get(login))
         .route("/callback", get(callback))
+        .route("/logout", get(logout))
 }
 
 fn metadata_routes(state: &AppState) -> Router<AppState> {

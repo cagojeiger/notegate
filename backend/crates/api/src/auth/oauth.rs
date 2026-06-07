@@ -2,9 +2,11 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
+use axum_extra::extract::cookie::{Cookie, SameSite};
 use notegate_domain::{IdentityError, ResolveAttrs};
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
+use time::Duration as CookieDuration;
 
 use crate::auth::oauth_exchange::exchange_code_for_userinfo;
 use crate::auth::oauth_flow::{
@@ -12,6 +14,7 @@ use crate::auth::oauth_flow::{
     new_login_flow,
 };
 use crate::auth::page::html_page;
+use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -150,11 +153,26 @@ pub async fn callback(
     };
     match state.resolver.resolve_browser(attrs.clone()).await {
         Ok(_caller) => {
-            let body = format!(
-                "You're registered, sub={}. Reconnect your MCP client to {}.",
-                attrs.sub, state.config.resource_url
-            );
-            (jar, html_page(StatusCode::OK, "Login complete", &body)).into_response()
+            let session = match create_browser_session(&state, &attrs.sub) {
+                Ok(session) => session,
+                Err(error) => {
+                    tracing::error!(event = "oauth.session_failed", %error);
+                    return (
+                        jar,
+                        html_page(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Login error",
+                            "internal error",
+                        ),
+                    )
+                        .into_response();
+                }
+            };
+            (
+                jar.add(browser_session_cookie(&state, session)),
+                Redirect::to("/"),
+            )
+                .into_response()
         }
         Err(IdentityError::Inactive) => (
             jar,
@@ -174,4 +192,34 @@ pub async fn callback(
                 .into_response()
         }
     }
+}
+
+pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {
+    (
+        jar.add(expired_browser_session_cookie(state.config.secure_cookies)),
+        Redirect::to("/"),
+    )
+        .into_response()
+}
+
+fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
+    Cookie::build((BROWSER_SESSION_COOKIE, value))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(state.config.secure_cookies)
+        .max_age(CookieDuration::seconds(
+            state.config.browser_session_ttl.as_secs() as i64,
+        ))
+        .build()
+}
+
+fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
+    Cookie::build((BROWSER_SESSION_COOKIE, ""))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(secure)
+        .max_age(CookieDuration::seconds(0))
+        .build()
 }

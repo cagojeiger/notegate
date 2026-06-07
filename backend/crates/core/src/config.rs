@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
+const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 
 /// Server + database configuration.
 #[derive(Debug, Clone, Deserialize, Validate)]
@@ -53,6 +54,16 @@ pub struct Config {
     )]
     #[validate(custom(function = "validate_jwks_cache_ttl"))]
     pub jwks_cache_ttl: Duration,
+    /// Secret used to sign browser session cookies.
+    #[validate(length(min = 32))]
+    pub browser_session_secret: String,
+    /// Browser session cookie TTL.
+    #[serde(
+        rename = "browser_session_ttl_secs",
+        deserialize_with = "duration_from_secs"
+    )]
+    #[validate(custom(function = "validate_browser_session_ttl"))]
+    pub browser_session_ttl: Duration,
     /// Whether login flow cookies must carry the Secure flag.
     #[serde(skip)]
     pub secure_cookies: bool,
@@ -85,6 +96,8 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .set_default("db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
         .map_err(map_config_error)?
         .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
+        .map_err(map_config_error)?
+        .set_default("browser_session_ttl_secs", DEFAULT_BROWSER_SESSION_TTL_SECS)
         .map_err(map_config_error)?;
 
     if include_files {
@@ -139,6 +152,15 @@ fn validate_jwks_cache_ttl(value: &Duration) -> std::result::Result<(), Validati
     }
 }
 
+fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), ValidationError> {
+    let seconds = value.as_secs();
+    if (60..=86_400).contains(&seconds) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("range"))
+    }
+}
+
 fn secure_cookies_for_redirect(oauth_redirect_url: &str) -> bool {
     oauth_redirect_url.starts_with("https://")
 }
@@ -187,6 +209,8 @@ mod tests {
             oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
+            browser_session_secret: "test-browser-session-secret-32-bytes".to_owned(),
+            browser_session_ttl: Duration::from_secs(3600),
             secure_cookies: false,
         }
     }
@@ -213,6 +237,10 @@ mod tests {
                     "http://localhost:9191/callback",
                 ),
                 ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                (
+                    "NOTEGATE_BROWSER_SESSION_SECRET",
+                    "env-browser-session-secret-32-bytes",
+                ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
                 ("PATH", "/bin"),
                 ("DATABASE_URL", "postgres://ignored"),
@@ -226,6 +254,10 @@ mod tests {
             config.jwks_cache_ttl.as_secs(),
             super::DEFAULT_JWKS_CACHE_TTL_SECS
         );
+        assert_eq!(
+            config.browser_session_ttl.as_secs(),
+            super::DEFAULT_BROWSER_SESSION_TTL_SECS
+        );
         Ok(())
     }
 
@@ -237,6 +269,7 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:9191");
         assert_eq!(config.db_max_connections, 10);
         assert_eq!(config.jwks_cache_ttl.as_secs(), 300);
+        assert_eq!(config.browser_session_ttl.as_secs(), 3600);
         assert!(!config.secure_cookies);
         Ok(())
     }
@@ -249,6 +282,14 @@ mod tests {
 
         let mut config = valid_config();
         config.jwks_cache_ttl = Duration::from_secs(1);
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.browser_session_secret = "too-short".to_owned();
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.browser_session_ttl = Duration::from_secs(1);
         assert!(config.validate().is_err());
     }
 
