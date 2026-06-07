@@ -178,7 +178,7 @@ CREATE TABLE workspace_access (
 ```text
 viewer = list/stat/read/find/grep
 editor = viewer + write/patch/mkdir/touch/move/delete
-owner  = editor + workspace access and agent key management
+owner  = editor + workspace access management
 ```
 
 성능 규칙:
@@ -282,14 +282,14 @@ workspace_max_nodes = 10000
 workspace_max_documents = 5000
 workspace_max_document_bytes = 268435456 bytes
 max_path_depth = 5
-max_path_len = 768 bytes
+max_path_len = 645 bytes
 folder_max_children = 200
 ```
 
 규칙:
 
 - depth는 저장하지 않고 parent chain에서 계산한다. root는 `0`, root의 직접 자식은 `1`이다.
-- create/touch/write(create=true)는 resulting depth가 `5` 또는 resulting path 길이 `768` bytes를 넘으면 거부한다.
+- create/touch/write(create=true)는 resulting depth가 `5` 또는 resulting path 길이 `645` bytes를 넘으면 거부한다.
 - move는 이동되는 subtree 전체의 resulting max depth가 `5` 이하인지 transaction 안에서 검증한다.
 - move/rename은 moved node의 `parent_id`/`name`만 바꾸며 descendant path rewrite를 하지 않는다.
 - 같은 parent folder의 live direct children은 최대 `200`개다.
@@ -297,6 +297,7 @@ folder_max_children = 200
 - workspace 안 live documents는 최대 `5000`개다. document create transaction에서 검사한다.
 - workspace 안 live document 원문 총량은 최대 `268435456` bytes다. write/patch transaction에서 검사한다.
 - child 수와 workspace node 수 제한은 partial unique/check constraint로 표현하기 어렵기 때문에 create/move/restore transaction에서 count 후 검증한다.
+- `max_path_len=645`는 ASCII node name 최대 `128` chars와 depth `5`에서 도출되는 최대 absolute path 길이다.
 
 ### Name constraints
 

@@ -22,12 +22,14 @@ workspace_name_max_len = 63 chars
 folder_name_max_len = 128 chars
 document_file_name_max_len = 128 chars, including .md
 document_title_stem_max_len = 125 chars, excluding .md
-max_path_len = 768 bytes
+max_path_len = 645 bytes
 max_path_depth = 5 segments
 workspace_max_nodes = 10000 live nodes
 workspace_max_documents = 5000 live documents
 workspace_max_document_bytes = 268435456 bytes  # 256 MiB
 ```
+
+`max_path_len=645` is derived from ASCII node names (`128` chars max) and `max_path_depth=5`: leading slash + five max-length segments + four separators.
 
 Depth counts segments below workspace root:
 

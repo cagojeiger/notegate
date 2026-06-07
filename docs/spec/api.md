@@ -119,7 +119,7 @@ REST는 화면을 위한 API다. UI는 파일트리 node를 펼치고 선택 상
 서버가 매 요청마다 `workspace_access`로 권한을 검증한다.
 
 ```text
-me -> workspaces -> children(workspace_id, root_node_id) -> document(workspace_id, node_id)
+me -> workspaces -> children(workspace_id, derived root_node_id) -> document(workspace_id, node_id)
 ```
 
 `/api/v1/files/root` 같은 전역 root endpoint는 두지 않는다. root node id는 workspace

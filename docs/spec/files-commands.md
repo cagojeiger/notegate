@@ -232,10 +232,12 @@ node metadata를 검색한다.
 
 ```text
 name
-path
 kind
 scope path
 ```
+
+`find` query는 node name에 매칭한다. path는 결과 display와 scope 제한에 사용하며, path substring
+검색은 현재 기본 `find` 계약에 포함하지 않는다.
 
 규칙:
 

@@ -83,7 +83,7 @@ API key / agent key               -> agent account
 ```text
 viewer = list/stat/read/find/grep
 editor = viewer + write/patch/mkdir/touch/move/delete
-owner  = editor + workspace access and agent key management
+owner  = editor + workspace access management
 ```
 
 권한 없는 workspace나 cross-workspace node 접근은 `404`로 숨긴다.
@@ -127,6 +127,8 @@ owner  = editor + workspace access and agent key management
   "updated_at": "2026-01-01T00:00:00Z"
 }
 ```
+
+`root_node_id` is derived from the workspace root node lookup; it is not stored on the workspace row.
 
 ### Node output
 
@@ -251,7 +253,7 @@ Creates a workspace, grants the creator `owner`, and creates the canonical root 
 GET /api/v1/workspaces/{workspace_id}
 ```
 
-Returns workspace metadata, caller role, and `root_node_id`.
+Returns workspace metadata, caller role, and derived `root_node_id`.
 
 ### Rename workspace
 
@@ -553,7 +555,7 @@ POST /api/v1/workspaces/{workspace_id}/search/find
 }
 ```
 
-Returns node matches by name/path.
+Returns node matches by name and optional kind. The `path` request field is a scope path, not a path substring query.
 
 ### Grep content
 
@@ -575,7 +577,7 @@ Returns line matches with `node_id`, current path, line number, and context line
 
 ## Agents
 
-Agent APIs manage agent accounts and API keys. Workspace-specific permissions for agents are still granted through the Access category. API keys authenticate as `agent` accounts.
+Agent APIs manage agent accounts and API keys. Workspace-specific permissions for agents are still granted through the Access category. API keys authenticate as `agent` accounts. Agent key lifecycle is governed by agent ownership/creator rules, not by workspace role; workspace owners only grant or revoke workspace access for agent accounts.
 
 ### List agents
 

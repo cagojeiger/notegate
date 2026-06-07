@@ -196,6 +196,8 @@ Output:
   ],
   "page": {"limit": 50, "returned": 1, "has_more": false}
 }
+
+`root_node_id` is derived from the workspace root node lookup; it is not stored on the workspace row.
 ```
 
 ## `workspaces_get`
@@ -466,7 +468,7 @@ Rules:
 
 ## `files_find`
 
-Find nodes by name/path metadata.
+Find nodes by name metadata under an optional scope path.
 
 Input:
 
