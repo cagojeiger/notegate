@@ -2,8 +2,9 @@ use uuid::Uuid;
 
 use super::FilesRepo;
 use notegate_domain::files::{
-    Children, CreateDocument, CreateFolder, DocumentBundle, FilesResult, FilesStore, FindQuery,
-    GrepCandidate, GrepCandidateQuery, MoveNode, Node, SaveDocument,
+    Children, ChildrenPage, ChildrenRequest, CreateDocument, CreateFolder, DocumentBundle,
+    FilesResult, FilesStore, FindQuery, GrepCandidate, GrepCandidateQuery, MoveNode, Node,
+    SaveDocument,
 };
 
 impl FilesStore for FilesRepo {
@@ -17,6 +18,15 @@ impl FilesStore for FilesRepo {
 
     async fn child_nodes(&self, user_id: Uuid, parent_node_id: Uuid) -> FilesResult<Children> {
         FilesRepo::child_nodes(self, user_id, parent_node_id).await
+    }
+
+    async fn paged_child_nodes(
+        &self,
+        user_id: Uuid,
+        parent_node_id: Uuid,
+        request: ChildrenRequest,
+    ) -> FilesResult<ChildrenPage> {
+        FilesRepo::paged_child_nodes(self, user_id, parent_node_id, request).await
     }
 
     async fn create_folder(&self, user_id: Uuid, command: CreateFolder) -> FilesResult<Node> {

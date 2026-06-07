@@ -1,12 +1,14 @@
 use uuid::Uuid;
 
+const DOCUMENT_MAX_BYTES: usize = 2 * 1024 * 1024;
+
 use super::validation::{
     clamp_limit, normalize_path, validate_document_name, validate_folder_name, validate_node_name,
 };
 use super::{
-    Children, CreateDocument, CreateFolder, DocumentBundle, FilesError, FilesResult, FilesStore,
-    FindQuery, FindRequest, GrepCandidateQuery, GrepMatch, GrepRequest, MoveNode, Node, NodeKind,
-    SaveDocument,
+    Children, ChildrenPage, ChildrenRequest, CreateDocument, CreateFolder, DocumentBundle,
+    FilesError, FilesResult, FilesStore, FindQuery, FindRequest, GrepCandidateQuery, GrepMatch,
+    GrepRequest, MoveNode, Node, NodeKind, SaveDocument,
 };
 
 #[derive(Debug, Clone)]
@@ -35,6 +37,17 @@ where
         self.store.child_nodes(user_id, node_id).await
     }
 
+    pub async fn children_page(
+        &self,
+        user_id: Uuid,
+        node_id: Uuid,
+        request: ChildrenRequest,
+    ) -> FilesResult<ChildrenPage> {
+        self.store
+            .paged_child_nodes(user_id, node_id, request)
+            .await
+    }
+
     pub async fn create_folder(&self, user_id: Uuid, command: CreateFolder) -> FilesResult<Node> {
         validate_folder_name(&command.name)?;
         self.store.create_folder(user_id, command).await
@@ -58,6 +71,9 @@ where
         user_id: Uuid,
         command: SaveDocument,
     ) -> FilesResult<DocumentBundle> {
+        if command.content_md.len() > DOCUMENT_MAX_BYTES {
+            return Err(FilesError::InvalidInput("document is too large".into()));
+        }
         self.store.save_document(user_id, command).await
     }
 
@@ -121,12 +137,16 @@ where
                 }
 
                 let before_start = idx.saturating_sub(context);
-                let before = lines[before_start..idx]
+                let before = lines
+                    .get(before_start..idx)
+                    .unwrap_or(&[])
                     .iter()
                     .map(|line| (*line).to_owned())
                     .collect();
                 let after_end = (idx + 1 + context).min(lines.len());
-                let after = lines[idx + 1..after_end]
+                let after = lines
+                    .get(idx + 1..after_end)
+                    .unwrap_or(&[])
                     .iter()
                     .map(|line| (*line).to_owned())
                     .collect();

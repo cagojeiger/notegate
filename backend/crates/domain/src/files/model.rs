@@ -51,6 +51,20 @@ pub struct Children {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChildrenPage {
+    pub parent: Node,
+    pub page: Page<Node>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<super::ChildrenCursor>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Document {
     pub node_id: Uuid,
     pub workspace_id: Uuid,

@@ -1,6 +1,19 @@
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
+pub struct ChildrenRequest {
+    pub limit: Option<i64>,
+    pub cursor: Option<ChildrenCursor>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChildrenCursor {
+    pub sort_order: i32,
+    pub name: String,
+    pub id: Uuid,
+}
+
+#[derive(Debug, Clone)]
 pub struct CreateFolder {
     pub parent_node_id: Uuid,
     pub name: String,

@@ -4,18 +4,26 @@ use axum::http::StatusCode;
 use notegate_db::FilesRepo;
 use notegate_domain::Caller;
 use notegate_domain::files::{
-    CreateDocument, CreateFolder, FilesService, FindRequest as DomainFindRequest,
-    GrepRequest as DomainGrepRequest, MoveNode, SaveDocument,
+    ChildrenRequest as DomainChildrenRequest, CreateDocument, CreateFolder, FilesError,
+    FilesService, FindRequest as DomainFindRequest, GrepRequest as DomainGrepRequest, MoveNode,
+    SaveDocument,
 };
 use uuid::Uuid;
 
 use super::dto::{
-    ChildrenResponse, CreateNodeRequest, DocumentResponse, FindRequest, FindResponse, GrepRequest,
-    GrepResponse, MoveNodeRequest, NodeOutput, NodeResponseBody, ResolveQuery, SaveDocumentRequest,
+    ChildrenQuery, ChildrenResponse, CreateNodeRequest, DeleteNodeQuery, DocumentResponse,
+    FindRequest, FindResponse, GrepRequest, GrepResponse, MoveNodeRequest, NodeOutput,
+    NodeResponseBody, OpenDocumentQuery, PageOutput, ResolveQuery, SaveDocumentRequest,
+    decode_cursor,
 };
 use super::error::map_files_error;
 use crate::error::ApiError;
 use crate::state::AppState;
+
+const FIND_DEFAULT_LIMIT: i64 = 50;
+const FIND_MAX_LIMIT: i64 = 100;
+const GREP_DEFAULT_LIMIT: i64 = 20;
+const GREP_MAX_LIMIT: i64 = 100;
 
 pub(super) async fn root(
     State(state): State<AppState>,
@@ -50,13 +58,21 @@ pub(super) async fn children(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
+    Query(query): Query<ChildrenQuery>,
 ) -> Result<Json<ChildrenResponse>, ApiError> {
     let service = files_service(&state);
     let result = service
-        .children(caller.user.id, node_id)
+        .children_page(
+            caller.user.id,
+            node_id,
+            DomainChildrenRequest {
+                limit: query.limit,
+                cursor: decode_cursor(query.cursor)?,
+            },
+        )
         .await
         .map_err(map_files_error)?;
-    Ok(Json(ChildrenResponse::from(result)))
+    Ok(Json(ChildrenResponse::try_from_page(result)?))
 }
 
 pub(super) async fn create_folder(
@@ -96,20 +112,21 @@ pub(super) async fn create_document(
         )
         .await
         .map_err(map_files_error)?;
-    Ok(Json(DocumentResponse::from(bundle)))
+    Ok(Json(DocumentResponse::from_bundle(bundle)))
 }
 
 pub(super) async fn open_document(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
+    Query(query): Query<OpenDocumentQuery>,
 ) -> Result<Json<DocumentResponse>, ApiError> {
     let service = files_service(&state);
     let bundle = service
         .document(caller.user.id, node_id)
         .await
         .map_err(map_files_error)?;
-    Ok(Json(DocumentResponse::from(bundle)))
+    Ok(Json(DocumentResponse::from_bundle_range(bundle, query)))
 }
 
 pub(super) async fn save_document(
@@ -129,7 +146,7 @@ pub(super) async fn save_document(
         )
         .await
         .map_err(map_files_error)?;
-    Ok(Json(DocumentResponse::from(bundle)))
+    Ok(Json(DocumentResponse::from_bundle(bundle)))
 }
 
 pub(super) async fn move_node(
@@ -159,8 +176,32 @@ pub(super) async fn delete_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
+    Query(query): Query<DeleteNodeQuery>,
 ) -> Result<StatusCode, ApiError> {
     let service = files_service(&state);
+    if !query.recursive.unwrap_or(false) {
+        match service.document(caller.user.id, node_id).await {
+            Ok(_document) => {}
+            Err(FilesError::NotFound(_)) => match service
+                .children_page(
+                    caller.user.id,
+                    node_id,
+                    DomainChildrenRequest {
+                        limit: Some(1),
+                        cursor: None,
+                    },
+                )
+                .await
+            {
+                Ok(_folder) => {
+                    return Err(ApiError::conflict("folder delete requires recursive=true"));
+                }
+                Err(error) => return Err(map_files_error(error)),
+            },
+            Err(error) => return Err(map_files_error(error)),
+        }
+    }
+
     service
         .delete_node(caller.user.id, node_id)
         .await
@@ -173,6 +214,13 @@ pub(super) async fn find(
     Extension(caller): Extension<Caller>,
     Json(request): Json<FindRequest>,
 ) -> Result<Json<FindResponse>, ApiError> {
+    if request.cursor.is_some() {
+        return Err(ApiError::invalid_field("find cursor is not supported yet"));
+    }
+    let limit = request
+        .limit
+        .unwrap_or(FIND_DEFAULT_LIMIT)
+        .clamp(1, FIND_MAX_LIMIT);
     let service = files_service(&state);
     let results = service
         .find(
@@ -181,15 +229,19 @@ pub(super) async fn find(
                 q: request.q,
                 path: request.path,
                 kind: request.kind,
-                limit: request.limit,
+                limit: Some(limit),
             },
         )
         .await
         .map_err(map_files_error)?
         .into_iter()
         .map(NodeOutput::from)
-        .collect();
-    Ok(Json(FindResponse { results }))
+        .collect::<Vec<_>>();
+    let returned = results.len();
+    Ok(Json(FindResponse {
+        results,
+        page: PageOutput::terminal(limit, returned),
+    }))
 }
 
 pub(super) async fn grep(
@@ -197,6 +249,13 @@ pub(super) async fn grep(
     Extension(caller): Extension<Caller>,
     Json(request): Json<GrepRequest>,
 ) -> Result<Json<GrepResponse>, ApiError> {
+    if request.cursor.is_some() {
+        return Err(ApiError::invalid_field("grep cursor is not supported yet"));
+    }
+    let limit = request
+        .limit
+        .unwrap_or(GREP_DEFAULT_LIMIT)
+        .clamp(1, GREP_MAX_LIMIT);
     let service = files_service(&state);
     let results = service
         .grep(
@@ -205,15 +264,19 @@ pub(super) async fn grep(
                 q: request.q,
                 path: request.path,
                 context: request.context,
-                limit: request.limit,
+                limit: Some(limit),
             },
         )
         .await
         .map_err(map_files_error)?
         .into_iter()
         .map(Into::into)
-        .collect();
-    Ok(Json(GrepResponse { results }))
+        .collect::<Vec<_>>();
+    let returned = results.len();
+    Ok(Json(GrepResponse {
+        results,
+        page: PageOutput::terminal(limit, returned),
+    }))
 }
 
 fn files_service(state: &AppState) -> FilesService<FilesRepo> {

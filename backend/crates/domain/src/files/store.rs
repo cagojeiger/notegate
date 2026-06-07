@@ -3,8 +3,8 @@ use std::future::Future;
 use uuid::Uuid;
 
 use super::{
-    Children, CreateDocument, CreateFolder, DocumentBundle, FilesResult, FindQuery, GrepCandidate,
-    GrepCandidateQuery, MoveNode, Node, SaveDocument,
+    Children, ChildrenPage, ChildrenRequest, CreateDocument, CreateFolder, DocumentBundle,
+    FilesResult, FindQuery, GrepCandidate, GrepCandidateQuery, MoveNode, Node, SaveDocument,
 };
 
 pub trait FilesStore: Clone + Send + Sync + 'static {
@@ -22,6 +22,13 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
         user_id: Uuid,
         parent_node_id: Uuid,
     ) -> impl Future<Output = FilesResult<Children>> + Send;
+
+    fn paged_child_nodes(
+        &self,
+        user_id: Uuid,
+        parent_node_id: Uuid,
+        request: ChildrenRequest,
+    ) -> impl Future<Output = FilesResult<ChildrenPage>> + Send;
 
     fn create_folder(
         &self,
