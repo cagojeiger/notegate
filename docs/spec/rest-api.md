@@ -52,7 +52,7 @@ Base path:
 GET /api/v1/files/root
 ```
 
-Returns or initializes the default workspace root node.
+Initializes the default workspace if needed and returns its canonical root node. Workspace creation creates the root node automatically.
 
 ### Resolve path
 
@@ -169,8 +169,7 @@ POST /api/v1/files/search/find
   "q": "note",
   "path": "/projects",
   "kind": "document",
-  "limit": 50,
-  "cursor": null
+  "limit": 50
 }
 ```
 
@@ -185,8 +184,7 @@ POST /api/v1/files/search/grep
   "q": "auth",
   "path": "/projects",
   "context": 2,
-  "limit": 20,
-  "cursor": null
+  "limit": 20
 }
 ```
 

@@ -14,8 +14,8 @@ nodes        folder/document 공통 tree node
 documents    markdown document 본문
 ```
 
-현재 단계는 원본 저장만 고려한다. 검색용 line-level index나 async reindex 상태 테이블은
-문서 수정 빈도와 write amplification이 커진 뒤 별도 설계로 추가한다.
+현재 단계는 원본 Markdown 저장만 고려한다. grep은 `documents.content_md`를 `ILIKE`로
+후보 검색하고 application code에서 line-split한다.
 
 ## users
 
@@ -55,6 +55,7 @@ CREATE TABLE workspaces (
 
 - 클라이언트는 `workspace_id`를 보내지 않는다.
 - 서버는 인증된 `users.id`로 default workspace를 찾거나 초기화한다.
+- workspace가 생성되면 DB trigger가 canonical root node `/`를 같은 workspace에 만든다.
 - workspace 삭제는 해당 사용자의 파일트리 전체 삭제를 의미한다.
 
 ## nodes
@@ -81,7 +82,7 @@ CREATE TABLE nodes (
         ON DELETE CASCADE,
 
     CHECK (
-        (parent_id IS NULL AND name = '/' AND kind = 'folder' AND path_cache = '/')
+        (parent_id IS NULL AND name = '/' AND kind = 'folder' AND path_cache = '/' AND deleted_at IS NULL)
         OR
         (parent_id IS NOT NULL AND name <> '' AND name NOT LIKE '%/%')
     ),
@@ -101,7 +102,18 @@ CREATE UNIQUE INDEX nodes_one_root_per_workspace
     WHERE parent_id IS NULL;
 ```
 
-root는 soft delete 대상이 아니다. root 이동/삭제는 conflict다.
+`parent_id IS NULL`은 root에만 허용한다. root는 soft delete 대상이 아니며,
+root 이동/삭제/rename은 conflict다. `workspaces.root_node_id`는 두지 않고
+`nodes(parent_id IS NULL)`로 root를 찾는다.
+
+Workspace 생성 시 root 자동 생성:
+
+```sql
+CREATE TRIGGER workspaces_create_root_node
+AFTER INSERT ON workspaces
+FOR EACH ROW
+EXECUTE FUNCTION create_workspace_root_node();
+```
 
 ### Sibling name uniqueness
 
@@ -193,22 +205,6 @@ CREATE TABLE documents (
 - folder node는 document row를 가지지 않는다.
 - 저장 시 `documents.updated_at`과 연결된 `nodes.updated_at`을 함께 갱신한다.
 - `byte_len`과 `line_count`는 read limit, pagination, write guard에 사용한다.
-
-## Deferred search indexes
-
-현재 migration에는 line-level derived index를 만들지 않는다. Markdown 원본은
-`documents.content_md` 하나가 source of truth이며, `byte_len`, `line_count`,
-`content_sha256`만 저장 시 함께 갱신한다.
-
-나중에 grep 성능이 필요해지면 다음을 별도 migration/job으로 추가한다.
-
-```text
-document_lines         grep용 line-level derived index
-document_index_status  검색 인덱스 상태/버전/재색인 추적
-```
-
-그때도 이 테이블들은 원본이 아니라 derived data여야 하며, 깨지면
-`documents.content_md`에서 재생성할 수 있어야 한다.
 
 ## Soft delete
 

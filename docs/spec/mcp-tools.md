@@ -49,8 +49,7 @@ Input:
 ```json
 {
   "path": "/projects",
-  "limit": 100,
-  "cursor": null
+  "limit": 100
 }
 ```
 
@@ -203,8 +202,7 @@ Input:
   "q": "note",
   "path": "/projects",
   "kind": "document",
-  "limit": 50,
-  "cursor": null
+  "limit": 50
 }
 ```
 
@@ -219,8 +217,7 @@ Input:
   "q": "auth",
   "path": "/projects",
   "context": 2,
-  "limit": 20,
-  "cursor": null
+  "limit": 20
 }
 ```
 

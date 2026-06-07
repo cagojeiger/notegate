@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS nodes (
         ON DELETE CASCADE,
 
     CHECK (
-        (parent_id IS NULL AND name = '/' AND kind = 'folder' AND path_cache = '/')
+        (parent_id IS NULL AND name = '/' AND kind = 'folder' AND path_cache = '/' AND deleted_at IS NULL)
         OR
         (parent_id IS NOT NULL AND name <> '' AND name NOT LIKE '%/%')
     ),
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 
 CREATE UNIQUE INDEX IF NOT EXISTS nodes_one_root_per_workspace
     ON nodes(workspace_id)
-    WHERE parent_id IS NULL AND deleted_at IS NULL;
+    WHERE parent_id IS NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS nodes_live_sibling_name_key
     ON nodes(workspace_id, parent_id, name)
@@ -82,6 +82,23 @@ CREATE INDEX IF NOT EXISTS nodes_name_trgm_idx
 CREATE INDEX IF NOT EXISTS nodes_path_trgm_idx
     ON nodes USING gin (path_cache gin_trgm_ops)
     WHERE deleted_at IS NULL;
+
+CREATE OR REPLACE FUNCTION create_workspace_root_node()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO nodes (workspace_id, parent_id, name, kind, path_cache)
+    VALUES (NEW.id, NULL, '/', 'folder', '/');
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS workspaces_create_root_node ON workspaces;
+CREATE TRIGGER workspaces_create_root_node
+AFTER INSERT ON workspaces
+FOR EACH ROW
+EXECUTE FUNCTION create_workspace_root_node();
 
 CREATE TABLE IF NOT EXISTS documents (
     node_id        UUID PRIMARY KEY,

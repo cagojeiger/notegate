@@ -7,7 +7,7 @@ semantics를 따른다.
 ## Path rules
 
 - 모든 path는 `/`로 시작한다.
-- root는 `/`다.
+- root는 `/`이고 workspace마다 실제 `nodes` row로 존재한다.
 - root 외 trailing slash는 canonical path에 저장하지 않는다.
 - 빈 segment, `.`, `..` segment는 허용하지 않는다.
 - path는 server에서 canonical form으로 normalize한다.
@@ -15,7 +15,7 @@ semantics를 따른다.
 
 ## Name rules
 
-- root 외 node name은 빈 문자열일 수 없다.
+- root name은 `/`로 고정한다. root 외 node name은 빈 문자열일 수 없다.
 - `/`, NUL, CR/LF를 포함할 수 없다.
 - `.` 또는 `..`일 수 없다.
 - document name은 `.md`로 끝나야 한다.
@@ -190,7 +190,7 @@ scope path
 
 ### `grep`
 
-Markdown 본문을 line 단위로 검색한다.
+Markdown 본문을 검색한다. 후보 문서는 `documents.content_md ILIKE`로 찾고, line number/context는 application code에서 만든다.
 
 검색 대상:
 

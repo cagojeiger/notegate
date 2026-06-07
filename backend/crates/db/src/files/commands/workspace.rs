@@ -37,6 +37,8 @@ impl FilesRepo {
             .map_err(map_sqlx_error)?,
         };
 
+        // Schema trigger creates the root for newly inserted workspaces.
+        // Keep this idempotent insert as a repair path for pre-trigger/dev data.
         sqlx::query(
             r#"
             INSERT INTO nodes (workspace_id, parent_id, name, kind, path_cache)
