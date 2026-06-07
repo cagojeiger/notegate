@@ -55,6 +55,9 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 
 # Auth / OAuth / MCP
+aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }
+aliri_oauth2 = { version = "0.10.2", default-features = false, features = ["rsa", "reqwest", "tokio", "rustls-tls"] }
+aliri_clock = "0.1.0"
 jsonwebtoken = "9"
 openidconnect = { version = "4.0.1", default-features = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -63,6 +66,7 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2"
 axum-extra = { version = "0.10", features = ["cookie"] }
+secrecy = { version = "0.10", features = ["serde"] }
 subtle = "2"
 rmcp = { version = "1.7.0", features = ["transport-streamable-http-server"] }
 schemars = { version = "1", features = ["derive"] }

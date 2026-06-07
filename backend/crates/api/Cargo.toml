@@ -29,6 +29,9 @@ tracing-subscriber.workspace = true
 dotenvy.workspace = true
 anyhow.workspace = true
 
+aliri.workspace = true
+aliri_oauth2.workspace = true
+aliri_clock.workspace = true
 jsonwebtoken.workspace = true
 openidconnect.workspace = true
 reqwest.workspace = true
@@ -37,6 +40,7 @@ sha2.workspace = true
 base64.workspace = true
 url.workspace = true
 axum-extra.workspace = true
+secrecy.workspace = true
 subtle.workspace = true
 rmcp.workspace = true
 chrono.workspace = true

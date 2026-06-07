@@ -7,14 +7,14 @@ use notegate_db::PgPool;
 
 use crate::identity::CallerResolver;
 
-use crate::auth::jwks::JwksCache;
+use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
     pub config: Arc<Config>,
-    pub jwks: Arc<JwksCache>,
+    pub jwt: Arc<JwtAuthority>,
     pub oidc: Arc<OidcProvider>,
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
@@ -24,7 +24,7 @@ impl AppState {
     pub fn new(
         db: PgPool,
         config: Arc<Config>,
-        jwks: Arc<JwksCache>,
+        jwt: Arc<JwtAuthority>,
         oidc: Arc<OidcProvider>,
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
@@ -32,7 +32,7 @@ impl AppState {
         Self {
             db,
             config,
-            jwks,
+            jwt,
             oidc,
             resolver,
             http,

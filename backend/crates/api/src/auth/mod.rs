@@ -1,7 +1,7 @@
 pub mod bearer;
 #[cfg(test)]
 mod bearer_tests;
-pub mod jwks;
+pub mod jwt;
 pub mod metadata;
 pub mod oauth;
 mod oauth_exchange;

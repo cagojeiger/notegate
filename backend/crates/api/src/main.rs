@@ -52,18 +52,12 @@ async fn main() -> anyhow::Result<()> {
     let user_repo = notegate_db::UserRepo::new(pool.clone());
     let resolver = notegate_domain::Resolver::new(user_repo);
     let config = std::sync::Arc::new(config);
-    let jwks = std::sync::Arc::new(auth::jwks::JwksCache::new(
-        jwks_url,
-        config.authgate_url.clone(),
-        config.resource_url.clone(),
-        config.jwks_cache_ttl,
-        http.clone(),
-    ));
+    let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));
     let state = AppState::new(
         pool.clone(),
         config.clone(),
-        jwks,
+        jwt,
         oidc,
         std::sync::Arc::new(resolver),
         http,

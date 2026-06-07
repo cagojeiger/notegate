@@ -8,9 +8,10 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use config::{Config as LayeredConfig, Environment, File, FileFormat};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer};
 use url::Url;
-use validator::{Validate, ValidationError};
+use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::error::{Error, Result};
 
@@ -21,55 +22,88 @@ const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 
 /// Server + database configuration.
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
     /// Postgres connection string.
-    #[validate(length(min = 1))]
     pub database_url: String,
     /// Max connections in the sqlx pool.
-    #[validate(range(min = 1, max = 256))]
     pub db_max_connections: u32,
     /// Base URL for authgate, with trailing slash trimmed.
-    #[validate(custom(function = "validate_http_url_value"))]
     pub authgate_url: String,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
     #[serde(rename = "public_url")]
-    #[validate(custom(function = "validate_http_url_value"))]
     pub notegate_public_url: String,
     /// Public OAuth client id registered in authgate.
-    #[validate(length(min = 1))]
     pub oauth_client_id: String,
     /// Exact redirect URL registered in authgate.
-    #[validate(custom(function = "validate_http_url_value"))]
     pub oauth_redirect_url: String,
     /// Resource/audience URL for REST and MCP, with trailing slash trimmed.
-    #[validate(custom(function = "validate_http_url_value"))]
     pub resource_url: String,
     /// Shared JWKS cache TTL.
     #[serde(
         rename = "jwks_cache_ttl_secs",
         deserialize_with = "duration_from_secs"
     )]
-    #[validate(custom(function = "validate_jwks_cache_ttl"))]
     pub jwks_cache_ttl: Duration,
     /// Secret used to sign browser session cookies.
-    #[validate(length(min = 32))]
-    pub browser_session_secret: String,
+    pub browser_session_secret: SecretString,
     /// Browser session cookie TTL.
     #[serde(
         rename = "browser_session_ttl_secs",
         deserialize_with = "duration_from_secs"
     )]
-    #[validate(custom(function = "validate_browser_session_ttl"))]
     pub browser_session_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
     /// Whether login flow cookies must carry the Secure flag.
     #[serde(skip)]
     pub secure_cookies: bool,
+}
+
+impl Validate for Config {
+    fn validate(&self) -> std::result::Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if self.database_url.is_empty() {
+            errors.add("database_url", ValidationError::new("length"));
+        }
+        if !(1..=256).contains(&self.db_max_connections) {
+            errors.add("db_max_connections", ValidationError::new("range"));
+        }
+        if validate_http_url_value(&self.authgate_url).is_err() {
+            errors.add("authgate_url", ValidationError::new("http_url"));
+        }
+        if validate_http_url_value(&self.notegate_public_url).is_err() {
+            errors.add("notegate_public_url", ValidationError::new("http_url"));
+        }
+        if self.oauth_client_id.is_empty() {
+            errors.add("oauth_client_id", ValidationError::new("length"));
+        }
+        if validate_http_url_value(&self.oauth_redirect_url).is_err() {
+            errors.add("oauth_redirect_url", ValidationError::new("http_url"));
+        }
+        if validate_http_url_value(&self.resource_url).is_err() {
+            errors.add("resource_url", ValidationError::new("http_url"));
+        }
+        if validate_jwks_cache_ttl(&self.jwks_cache_ttl).is_err() {
+            errors.add("jwks_cache_ttl", ValidationError::new("range"));
+        }
+        if validate_secret_min_32(&self.browser_session_secret).is_err() {
+            errors.add("browser_session_secret", ValidationError::new("length"));
+        }
+        if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
+            errors.add("browser_session_ttl", ValidationError::new("range"));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 impl Config {
@@ -166,6 +200,14 @@ fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), Val
     }
 }
 
+fn validate_secret_min_32(value: &SecretString) -> std::result::Result<(), ValidationError> {
+    if value.expose_secret().len() >= 32 {
+        Ok(())
+    } else {
+        Err(ValidationError::new("length"))
+    }
+}
+
 fn secure_cookies_for_redirect(oauth_redirect_url: &str) -> bool {
     oauth_redirect_url.starts_with("https://")
 }
@@ -199,6 +241,7 @@ mod tests {
     use std::time::Duration;
 
     use config::Environment;
+    use secrecy::SecretString;
     use validator::Validate;
 
     use super::{Config, load_from_sources};
@@ -214,7 +257,9 @@ mod tests {
             oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
-            browser_session_secret: "test-browser-session-secret-32-bytes".to_owned(),
+            browser_session_secret: SecretString::from(
+                "test-browser-session-secret-32-bytes".to_owned(),
+            ),
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
             secure_cookies: false,
@@ -292,7 +337,7 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.browser_session_secret = "too-short".to_owned();
+        config.browser_session_secret = SecretString::from("too-short".to_owned());
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

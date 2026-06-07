@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
@@ -8,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, encode};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use notegate_domain::{Caller, Channel, IdentityError, ResolveAttrs, User};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -16,7 +15,7 @@ use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-use crate::auth::jwks::JwksCache;
+use crate::auth::jwt::JwtAuthority;
 use crate::identity::CallerResolver;
 use crate::state::AppState;
 
@@ -51,16 +50,6 @@ WNYy7n/b2QYI1CcDUtrxjmDVGSbdQ1MG04Az3PhLBDh4UE/yOXb3slpLECmfjcK/
 lq0mdqBAHuT8W8E2jRw9CejdITWxllSS0L8xhhSv5JMJ+3CUmpbsWP1X6ByQmF/E
 EmW0T9kajxWyy7ochOgNdA==
 -----END PRIVATE KEY-----"#;
-
-const PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsfE1HSV9Fnl00COG8SPE
-tPGOMa95P4XMhpsnSV4lbfoUFyuAjPUc/uFtkmH2s3VoNKdYdHsi/PNycvS5sX0L
-OOE9Zon7OwmZZvIocZmY97p7BUAAO4XfXxh8MDW1UKzBswG+7TVekRKAbPNNKUjJ
-egbWtFYErU/7WlF8CrCX5ebDfyjkuGUH+bYRRnRd10pX/PTIQ6159FdJ6R9wgNIk
-0gRNRHsWEdlV+AxhPAmYXPWFNvYpDtiNlCi3anCp8kTlWzLKKeJdWBHzr3xuByUG
-XLcfCIoVsBd+SXtpS62E2pkt8D8OitcxcE9/8DZcXB7Z+TIj544uAY3XaPTmeKPc
-dwIDAQAB
------END PUBLIC KEY-----"#;
 
 #[derive(Debug, Serialize)]
 struct TestClaims {
@@ -133,11 +122,6 @@ fn test_user(attrs: ResolveAttrs) -> User {
 }
 
 fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
-    let mut keys = HashMap::new();
-    keys.insert(
-        "kid-1".to_owned(),
-        DecodingKey::from_rsa_pem(PUB_KEY.as_bytes())?,
-    );
     let pool =
         PgPoolOptions::new().connect_lazy("postgres://notegate:notegate@localhost/notegate")?;
     let config = Arc::new(notegate_core::Config {
@@ -150,16 +134,14 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
         oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
         resource_url: "https://api.example.test".to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
-        browser_session_secret: "test-browser-session-secret-32-bytes".to_owned(),
+        browser_session_secret: secrecy::SecretString::from(
+            "test-browser-session-secret-32-bytes".to_owned(),
+        ),
         browser_session_ttl: Duration::from_secs(3600),
         openapi_enabled: false,
         secure_cookies: false,
     });
-    let jwks = Arc::new(JwksCache::with_keys(
-        config.authgate_url.clone(),
-        config.resource_url.clone(),
-        keys,
-    ));
+    let jwt = Arc::new(JwtAuthority::from_jwks(&config, aliri_jwks()?));
     let oidc = Arc::new(crate::auth::oidc::OidcProvider::new(
         &config,
         reqwest::Client::new(),
@@ -167,7 +149,7 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
     Ok(AppState::new(
         pool,
         config,
-        jwks,
+        jwt,
         oidc,
         Arc::new(TestResolver { mode }),
         reqwest::Client::new(),
@@ -398,6 +380,22 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
 
     assert_eq!(response.status(), StatusCode::OK);
     Ok(())
+}
+
+fn aliri_jwks() -> Result<aliri::Jwks, Box<dyn std::error::Error>> {
+    use base64::Engine as _;
+
+    let n = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(
+        "sfE1HSV9Fnl00COG8SPEtPGOMa95P4XMhpsnSV4lbfoUFyuAjPUc_uFtkmH2s3VoNKdYdHsi_PNycvS5sX0LOOE9Zon7OwmZZvIocZmY97p7BUAAO4XfXxh8MDW1UKzBswG-7TVekRKAbPNNKUjJegbWtFYErU_7WlF8CrCX5ebDfyjkuGUH-bYRRnRd10pX_PTIQ6159FdJ6R9wgNIk0gRNRHsWEdlV-AxhPAmYXPWFNvYpDtiNlCi3anCp8kTlWzLKKeJdWBHzr3xuByUGXLcfCIoVsBd-SXtpS62E2pkt8D8OitcxcE9_8DZcXB7Z-TIj544uAY3XaPTmeKPcdw",
+    )?;
+    let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode("AQAB")?;
+    let rsa = aliri::jwa::Rsa::from_public_components(n, e)?;
+    let key = aliri::Jwk::from(rsa)
+        .with_algorithm(aliri::jwa::Algorithm::RS256)
+        .with_key_id(aliri::jwk::KeyId::from_static("kid-1"));
+    let mut jwks = aliri::Jwks::default();
+    jwks.add_key(key);
+    Ok(jwks)
 }
 
 fn alg_none_token() -> String {
