@@ -152,6 +152,7 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
         jwks_cache_ttl: Duration::from_secs(300),
         browser_session_secret: "test-browser-session-secret-32-bytes".to_owned(),
         browser_session_ttl: Duration::from_secs(3600),
+        openapi_enabled: false,
         secure_cookies: false,
     });
     let jwks = Arc::new(JwksCache::with_keys(

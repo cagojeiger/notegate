@@ -18,6 +18,7 @@ const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
 const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
+const DEFAULT_OPENAPI_ENABLED: bool = false;
 
 /// Server + database configuration.
 #[derive(Debug, Clone, Deserialize, Validate)]
@@ -64,6 +65,8 @@ pub struct Config {
     )]
     #[validate(custom(function = "validate_browser_session_ttl"))]
     pub browser_session_ttl: Duration,
+    /// Whether OpenAPI JSON and Swagger UI routes are exposed.
+    pub openapi_enabled: bool,
     /// Whether login flow cookies must carry the Secure flag.
     #[serde(skip)]
     pub secure_cookies: bool,
@@ -98,6 +101,8 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
         .map_err(map_config_error)?
         .set_default("browser_session_ttl_secs", DEFAULT_BROWSER_SESSION_TTL_SECS)
+        .map_err(map_config_error)?
+        .set_default("openapi_enabled", DEFAULT_OPENAPI_ENABLED)
         .map_err(map_config_error)?;
 
     if include_files {
@@ -211,6 +216,7 @@ mod tests {
             jwks_cache_ttl: Duration::from_secs(300),
             browser_session_secret: "test-browser-session-secret-32-bytes".to_owned(),
             browser_session_ttl: Duration::from_secs(3600),
+            openapi_enabled: false,
             secure_cookies: false,
         }
     }
@@ -270,6 +276,7 @@ mod tests {
         assert_eq!(config.db_max_connections, 10);
         assert_eq!(config.jwks_cache_ttl.as_secs(), 300);
         assert_eq!(config.browser_session_ttl.as_secs(), 3600);
+        assert!(!config.openapi_enabled);
         assert!(!config.secure_cookies);
         Ok(())
     }

@@ -5,6 +5,7 @@ use notegate_domain::files::{
     ChildrenCursor, ChildrenPage, Document, DocumentBundle, GrepMatch, Node,
 };
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -14,48 +15,48 @@ const OPEN_MAX_LINES: i64 = 1000;
 const OPEN_DEFAULT_MAX_BYTES: usize = 65_536;
 const OPEN_MAX_BYTES: usize = 262_144;
 
-#[derive(Debug, Deserialize)]
-pub(super) struct ResolveQuery {
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub(crate) struct ResolveQuery {
     pub(super) path: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct ChildrenQuery {
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub(crate) struct ChildrenQuery {
     pub(super) limit: Option<i64>,
     pub(super) cursor: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct OpenDocumentQuery {
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub(crate) struct OpenDocumentQuery {
     pub(super) start_line: Option<i64>,
     pub(super) max_lines: Option<i64>,
     pub(super) max_bytes: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct DeleteNodeQuery {
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+pub(crate) struct DeleteNodeQuery {
     pub(super) recursive: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct CreateNodeRequest {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct CreateNodeRequest {
     pub(super) parent_node_id: Uuid,
     pub(super) name: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct SaveDocumentRequest {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct SaveDocumentRequest {
     pub(super) content_md: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct MoveNodeRequest {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct MoveNodeRequest {
     pub(super) new_parent_node_id: Uuid,
     pub(super) new_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct FindRequest {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct FindRequest {
     pub(super) q: String,
     pub(super) path: Option<String>,
     pub(super) kind: Option<String>,
@@ -63,8 +64,8 @@ pub(super) struct FindRequest {
     pub(super) cursor: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct GrepRequest {
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct GrepRequest {
     pub(super) q: String,
     pub(super) path: Option<String>,
     pub(super) context: Option<i64>,
@@ -72,13 +73,13 @@ pub(super) struct GrepRequest {
     pub(super) cursor: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct NodeResponseBody {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct NodeResponseBody {
     pub(super) node: NodeOutput,
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct ChildrenResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ChildrenResponse {
     parent: ParentOutput,
     children: Vec<NodeOutput>,
     page: PageOutput,
@@ -114,8 +115,8 @@ impl ChildrenResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct DocumentResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct DocumentResponse {
     node: NodeOutput,
     document: DocumentOutput,
 }
@@ -136,20 +137,20 @@ impl DocumentResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct FindResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct FindResponse {
     pub(super) results: Vec<NodeOutput>,
     pub(super) page: PageOutput,
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct GrepResponse {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct GrepResponse {
     pub(super) results: Vec<GrepMatchOutput>,
     pub(super) page: PageOutput,
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct PageOutput {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct PageOutput {
     limit: i64,
     returned: usize,
     has_more: bool,
@@ -168,14 +169,14 @@ impl PageOutput {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct ParentOutput {
     id: Uuid,
     path: String,
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct NodeOutput {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct NodeOutput {
     id: Uuid,
     parent_id: Option<Uuid>,
     name: String,
@@ -203,7 +204,7 @@ impl From<Node> for NodeOutput {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct DocumentOutput {
     node_id: Uuid,
     content_md: String,
@@ -255,8 +256,8 @@ impl DocumentOutput {
     }
 }
 
-#[derive(Debug, Serialize)]
-pub(super) struct GrepMatchOutput {
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct GrepMatchOutput {
     node_id: Uuid,
     path: String,
     line_no: i64,

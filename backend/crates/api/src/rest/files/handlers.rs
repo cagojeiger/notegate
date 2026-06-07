@@ -25,7 +25,13 @@ const FIND_MAX_LIMIT: i64 = 100;
 const GREP_DEFAULT_LIMIT: i64 = 20;
 const GREP_MAX_LIMIT: i64 = 100;
 
-pub(super) async fn root(
+#[utoipa::path(
+    get,
+    path = "/api/v1/files/root",
+    responses((status = 200, description = "Default workspace root", body = NodeResponseBody)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn root(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
 ) -> Result<Json<NodeResponseBody>, ApiError> {
@@ -39,7 +45,14 @@ pub(super) async fn root(
     }))
 }
 
-pub(super) async fn resolve(
+#[utoipa::path(
+    get,
+    path = "/api/v1/files/resolve",
+    params(ResolveQuery),
+    responses((status = 200, description = "Resolved node", body = NodeResponseBody)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn resolve(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ResolveQuery>,
@@ -54,7 +67,14 @@ pub(super) async fn resolve(
     }))
 }
 
-pub(super) async fn children(
+#[utoipa::path(
+    get,
+    path = "/api/v1/files/nodes/{node_id}/children",
+    params(("node_id" = Uuid, Path, description = "Folder node id"), ChildrenQuery),
+    responses((status = 200, description = "Direct child nodes", body = ChildrenResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn children(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
@@ -75,7 +95,14 @@ pub(super) async fn children(
     Ok(Json(ChildrenResponse::try_from_page(result)?))
 }
 
-pub(super) async fn create_folder(
+#[utoipa::path(
+    post,
+    path = "/api/v1/files/folders",
+    request_body = CreateNodeRequest,
+    responses((status = 200, description = "Created folder", body = NodeResponseBody)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn create_folder(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Json(request): Json<CreateNodeRequest>,
@@ -96,7 +123,14 @@ pub(super) async fn create_folder(
     }))
 }
 
-pub(super) async fn create_document(
+#[utoipa::path(
+    post,
+    path = "/api/v1/files/documents",
+    request_body = CreateNodeRequest,
+    responses((status = 200, description = "Created document", body = DocumentResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn create_document(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Json(request): Json<CreateNodeRequest>,
@@ -115,7 +149,14 @@ pub(super) async fn create_document(
     Ok(Json(DocumentResponse::from_bundle(bundle)))
 }
 
-pub(super) async fn open_document(
+#[utoipa::path(
+    get,
+    path = "/api/v1/files/documents/{node_id}",
+    params(("node_id" = Uuid, Path, description = "Document node id"), OpenDocumentQuery),
+    responses((status = 200, description = "Document content", body = DocumentResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn open_document(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
@@ -129,7 +170,15 @@ pub(super) async fn open_document(
     Ok(Json(DocumentResponse::from_bundle_range(bundle, query)))
 }
 
-pub(super) async fn save_document(
+#[utoipa::path(
+    patch,
+    path = "/api/v1/files/documents/{node_id}",
+    params(("node_id" = Uuid, Path, description = "Document node id")),
+    request_body = SaveDocumentRequest,
+    responses((status = 200, description = "Saved document", body = DocumentResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn save_document(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
@@ -149,7 +198,15 @@ pub(super) async fn save_document(
     Ok(Json(DocumentResponse::from_bundle(bundle)))
 }
 
-pub(super) async fn move_node(
+#[utoipa::path(
+    patch,
+    path = "/api/v1/files/nodes/{node_id}/move",
+    params(("node_id" = Uuid, Path, description = "Node id")),
+    request_body = MoveNodeRequest,
+    responses((status = 200, description = "Moved node", body = NodeResponseBody)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn move_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
@@ -172,7 +229,14 @@ pub(super) async fn move_node(
     }))
 }
 
-pub(super) async fn delete_node(
+#[utoipa::path(
+    delete,
+    path = "/api/v1/files/nodes/{node_id}",
+    params(("node_id" = Uuid, Path, description = "Node id"), DeleteNodeQuery),
+    responses((status = 204, description = "Deleted node")),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn delete_node(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(node_id): Path<Uuid>,
@@ -209,7 +273,14 @@ pub(super) async fn delete_node(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub(super) async fn find(
+#[utoipa::path(
+    post,
+    path = "/api/v1/files/search/find",
+    request_body = FindRequest,
+    responses((status = 200, description = "Find results", body = FindResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn find(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Json(request): Json<FindRequest>,
@@ -244,7 +315,14 @@ pub(super) async fn find(
     }))
 }
 
-pub(super) async fn grep(
+#[utoipa::path(
+    post,
+    path = "/api/v1/files/search/grep",
+    request_body = GrepRequest,
+    responses((status = 200, description = "Grep results", body = GrepResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn grep(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Json(request): Json<GrepRequest>,

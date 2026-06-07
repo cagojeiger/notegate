@@ -5,7 +5,7 @@ use crate::state::AppState;
 
 mod dto;
 mod error;
-mod handlers;
+pub(crate) mod handlers;
 
 pub fn routes() -> Router<AppState> {
     Router::new()

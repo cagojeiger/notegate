@@ -28,6 +28,7 @@ pub fn app(state: AppState) -> Router {
         .merge(system_routes())
         .merge(auth_routes())
         .merge(metadata_routes(&state))
+        .merge(crate::openapi::routes(&state.config))
         .nest("/api", rest_api_routes(state.clone()))
         .route("/mcp", any(mcp_handler))
         .with_state(state)
