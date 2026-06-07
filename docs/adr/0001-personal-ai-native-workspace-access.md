@@ -9,6 +9,11 @@
 notegate는 개인용 Markdown 노트 서비스다. 사용자는 익숙한 파일/문서 도구처럼
 workspace, folder, document, search, editor 중심의 역할을 사용해야 한다.
 
+제품의 기본 UX는 흔한 파일 트리 모델을 따른다. 많은 사용자가 폴더, 문서, 이동, 이름 변경,
+검색 같은 개념에 이미 익숙하고, 최신 LLM도 터미널/파일 관리 workflow를 잘 학습하고 있다.
+따라서 notegate는 새로운 정보 구조를 만들기보다 익숙한 파일 관리 UX를 차용해 사용자와
+agent 모두의 학습 비용을 낮추는 방향을 택한다.
+
 동시에 AI agent는 제품의 부가 기능이 아니라 1급 사용 방식이다. 사용자는 agent를
 workspace에 연결해 읽기 전용 또는 편집 workflow를 맡길 수 있어야 하고, 현재 문서/노드 상태는
 마지막으로 사람 사용자가 바꾼 것인지 agent가 바꾼 것인지 구분할 수 있어야 한다.
@@ -51,6 +56,10 @@ workspace 생성자는 자동으로 `owner`가 된다. Agent는 workspace에 별
 
 workspace 단위 권한은 개인용 노트 서비스라는 제품 철학과 잘 맞는다. 사용자는 agent를
 개별 파일마다 연결하기보다 자신의 note workspace에 연결한다고 이해하는 편이 자연스럽다.
+
+파일 트리 UX는 사용자가 이미 알고 있는 mental model을 재사용한다. 또한 LLM에게도
+`ls`, `read`, `write`, `patch`, `mv`, `grep` 같은 파일 관리 방식은 친숙한 작업 단위다.
+이는 제품 고유 개념을 학습시키는 비용을 줄이고, 사람과 agent가 같은 구조를 공유하게 한다.
 
 검색 성능 면에서도 workspace 단위 권한이 단순하다. 요청 시작 시 한 번 권한을 확인하면,
 `find`나 `grep` 쿼리는 `workspace_id` 기준으로 실행할 수 있다. 파일별 ACL을 넣으면 검색마다
