@@ -55,7 +55,9 @@ pub struct Document {
     pub node_id: Uuid,
     pub workspace_id: Uuid,
     pub content_md: String,
-    pub search_text: String,
+    pub content_sha256: String,
+    pub byte_len: i32,
+    pub line_count: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

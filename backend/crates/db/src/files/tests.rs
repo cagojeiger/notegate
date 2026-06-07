@@ -16,7 +16,7 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .await
         .map_err(|error| error.to_string())?;
     assert_index_exists(&pool, "nodes_path_trgm_idx").await?;
-    assert_index_exists(&pool, "documents_search_text_trgm_idx").await?;
+    assert_index_exists(&pool, "document_lines_workspace_text_trgm_idx").await?;
 
     let user_id = create_test_user(&pool).await?;
     let repo = FilesRepo::new(pool.clone());
@@ -141,8 +141,9 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .await
         .map_err(debug_error)?;
     assert_eq!(grep_before.len(), 1);
-    assert_eq!(grep_before[0].path, "/projects/notegate.md");
-    assert_eq!(grep_before[0].line_no, 2);
+    let first_grep_before = grep_before.first().ok_or("missing grep_before result")?;
+    assert_eq!(first_grep_before.path, "/projects/notegate.md");
+    assert_eq!(first_grep_before.line_no, 2);
 
     let archive = service
         .create_folder(
@@ -220,7 +221,8 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .await
         .map_err(debug_error)?;
     assert_eq!(grep_after.len(), 1);
-    assert_eq!(grep_after[0].path, "/archive/projects/notegate.md");
+    let first_grep_after = grep_after.first().ok_or("missing grep_after result")?;
+    assert_eq!(first_grep_after.path, "/archive/projects/notegate.md");
 
     let find_results = service
         .find(
@@ -235,7 +237,8 @@ async fn files_flow_uses_nodes_for_paths_and_documents_for_content() -> Result<(
         .await
         .map_err(debug_error)?;
     assert_eq!(find_results.len(), 1);
-    assert_eq!(find_results[0].path, "/archive/projects/notegate.md");
+    let first_find = find_results.first().ok_or("missing find result")?;
+    assert_eq!(first_find.path, "/archive/projects/notegate.md");
 
     service
         .delete_node(user_id, archive.id)

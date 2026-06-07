@@ -85,7 +85,7 @@ impl FilesRepo {
              AND n.workspace_id = d.workspace_id
             WHERE d.workspace_id = $1
               AND n.deleted_at IS NULL
-              AND d.search_text ILIKE $2
+              AND d.content_md ILIKE $2
               AND (
                   $3::TEXT IS NULL
                   OR n.path_cache = $3

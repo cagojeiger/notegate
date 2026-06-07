@@ -27,7 +27,9 @@ impl FilesRepo {
                 d.node_id,
                 d.workspace_id,
                 d.content_md,
-                d.search_text,
+                d.content_sha256,
+                d.byte_len,
+                d.line_count,
                 d.created_at AS document_created_at,
                 d.updated_at AS document_updated_at
             FROM nodes n
