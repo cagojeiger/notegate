@@ -399,6 +399,64 @@ async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
+async fn api_cookie_mutation_requires_same_origin_header() -> Result<(), Box<dyn std::error::Error>>
+{
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+    let app = crate::routes::app(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/missing")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/missing")
+                .header("origin", "http://localhost:9191")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
+async fn bearer_mutation_does_not_require_browser_origin() -> Result<(), Box<dyn std::error::Error>>
+{
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let valid = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("https://api.example.test"),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/missing")
+                .header("authorization", format!("Bearer {valid}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
 async fn browser_session_resolves_browser_channel() -> Result<(), Box<dyn std::error::Error>> {
     let state = state(ResolverMode::Registered(true))?;
     let session = create_browser_session(&state, "sub-cookie")?;

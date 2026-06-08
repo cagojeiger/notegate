@@ -48,7 +48,7 @@ Swagger 샘플 호출 방법:
 
 1. 브라우저 session 인증이 필요하면 별도 탭에서 `/auth/login`을 먼저 연다.
 2. `/swagger-ui`를 연다.
-3. 같은 origin browser session cookie로 `/api/v1/*`를 호출하거나, Swagger `Authorize`에 bearer token을 넣어 호출한다.
+3. 같은 origin browser session cookie로 `/api/v1/*`를 호출하거나, Swagger `Authorize`에 bearer token을 넣어 호출한다. Cookie 기반 mutation 요청은 same-origin `Origin`/`Referer`가 필요하다.
 4. Auth redirect/session/discovery endpoint는 OpenAPI 범위 밖이며 [auth.md](auth.md)에만 정의한다.
 
 ## Category map
