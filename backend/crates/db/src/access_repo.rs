@@ -4,8 +4,8 @@
 //! lifecycle operations so RBAC changes remain isolated from workspace creation,
 //! rename, and delete queries.
 
-use chrono::{DateTime, Utc};
 use crate::map_sqlx_error;
+use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::account::AccountKind;
 use notegate_model::{Role, WorkspaceAccess};

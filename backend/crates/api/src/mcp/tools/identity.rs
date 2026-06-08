@@ -1,7 +1,6 @@
 use axum::http::request::Parts;
 use notegate_model::Caller;
-use rmcp::ErrorData;
-use rmcp::Json;
+use rmcp::{ErrorData, Json};
 
 use super::resolve::invalid_input_error;
 use crate::identity::me::{MeOutput, build_me};

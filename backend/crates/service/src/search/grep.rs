@@ -10,7 +10,10 @@ use crate::files::policy::FileCommand;
 use crate::files::validation;
 use crate::pagination::clamp_limit;
 
-use super::{GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest, SearchService, SearchStore, validate_query};
+use super::{
+    GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest, SearchService, SearchStore,
+    validate_query,
+};
 
 impl<S> SearchService<S>
 where

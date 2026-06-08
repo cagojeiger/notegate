@@ -70,7 +70,7 @@ impl McpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<Json<MeOutput>, ErrorData> {
-        tools::me::call(&parts)
+        tools::identity::call(&parts)
     }
 
     #[tool(
@@ -81,9 +81,9 @@ impl McpServer {
     pub async fn workspaces_list_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::workspaces_list::Input>,
+        params: Parameters<tools::workspaces::ListInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::workspaces_list::call(&self.state, &parts, params).await
+        tools::workspaces::list(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -94,9 +94,9 @@ impl McpServer {
     pub async fn workspaces_create_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::workspaces_create::Input>,
+        params: Parameters<tools::workspaces::CreateInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::workspaces_create::call(&self.state, &parts, params).await
+        tools::workspaces::create(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -107,9 +107,9 @@ impl McpServer {
     pub async fn workspaces_get_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::workspaces_get::Input>,
+        params: Parameters<tools::workspaces::GetInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::workspaces_get::call(&self.state, &parts, params).await
+        tools::workspaces::get(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -120,9 +120,9 @@ impl McpServer {
     pub async fn files_ls_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_ls::Input>,
+        params: Parameters<tools::files::LsInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_ls::call(&self.state, &parts, params).await
+        tools::files::ls(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -133,9 +133,9 @@ impl McpServer {
     pub async fn files_stat_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_stat::Input>,
+        params: Parameters<tools::files::StatInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_stat::call(&self.state, &parts, params).await
+        tools::files::stat(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -146,9 +146,9 @@ impl McpServer {
     pub async fn files_mkdir_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_mkdir::Input>,
+        params: Parameters<tools::files::MkdirInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_mkdir::call(&self.state, &parts, params).await
+        tools::files::mkdir(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -159,9 +159,9 @@ impl McpServer {
     pub async fn files_touch_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_touch::Input>,
+        params: Parameters<tools::files::TouchInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_touch::call(&self.state, &parts, params).await
+        tools::files::touch(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -172,9 +172,9 @@ impl McpServer {
     pub async fn files_read_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_read::Input>,
+        params: Parameters<tools::files::ReadInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_read::call(&self.state, &parts, params).await
+        tools::files::read(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -185,9 +185,9 @@ impl McpServer {
     pub async fn files_write_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_write::Input>,
+        params: Parameters<tools::files::WriteInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_write::call(&self.state, &parts, params).await
+        tools::files::write(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -198,9 +198,9 @@ impl McpServer {
     pub async fn files_patch_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_patch::Input>,
+        params: Parameters<tools::files::PatchInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_patch::call(&self.state, &parts, params).await
+        tools::files::patch(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -211,9 +211,9 @@ impl McpServer {
     pub async fn files_mv_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_mv::Input>,
+        params: Parameters<tools::files::MvInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_mv::call(&self.state, &parts, params).await
+        tools::files::mv(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -224,9 +224,9 @@ impl McpServer {
     pub async fn files_rm_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_rm::Input>,
+        params: Parameters<tools::files::RmInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_rm::call(&self.state, &parts, params).await
+        tools::files::rm(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -237,9 +237,9 @@ impl McpServer {
     pub async fn files_find_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_find::Input>,
+        params: Parameters<tools::search::FindInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_find::call(&self.state, &parts, params).await
+        tools::search::find(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -250,9 +250,9 @@ impl McpServer {
     pub async fn files_grep_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_grep::Input>,
+        params: Parameters<tools::search::GrepInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files_grep::call(&self.state, &parts, params).await
+        tools::search::grep(&self.state, &parts, params).await
     }
 }
 

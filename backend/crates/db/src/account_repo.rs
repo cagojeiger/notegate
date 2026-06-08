@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use crate::map_sqlx_error;
+use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;

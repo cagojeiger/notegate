@@ -4,8 +4,8 @@
 //! the canonical root node with attribution = the creator) and grants the creator
 //! `owner` in the same transaction, after enforcing the owner quota in-tx.
 
-use chrono::{DateTime, Utc};
 use crate::map_sqlx_error;
+use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{Role, Workspace};
 use notegate_service::workspaces::{
