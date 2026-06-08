@@ -38,7 +38,7 @@ use notegate_db::{AccessRepo, FilesRepo, WorkspaceRepo};
 use notegate_model::Role;
 use notegate_service::access::{AccessService, GrantAccess};
 use notegate_service::error::ServiceError;
-use notegate_service::files::input::Edit;
+use notegate_service::files::Edit;
 use notegate_service::files::{
     CreateDocument, CreateFolder, DeleteNode, FilesService, MoveNode, PatchDocument, ReadDocument,
     WriteDocument, WriteTarget,

@@ -12,7 +12,7 @@ use similar::TextDiff;
 
 use crate::error::ServiceError;
 
-use super::input::Edit;
+use super::types::Edit;
 
 /// Why a patch failed. Mapped to `400`/`409` by [`PatchError::into_service_error`].
 #[derive(Debug, Clone, PartialEq, Eq)]

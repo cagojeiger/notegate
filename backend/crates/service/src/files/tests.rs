@@ -12,7 +12,7 @@ use notegate_core::Result as CoreResult;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::files::input::Edit;
+use crate::files::types::Edit;
 
 /// An in-memory file tree for exercising the service end-to-end without a DB.
 #[derive(Clone)]

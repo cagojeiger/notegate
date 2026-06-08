@@ -9,8 +9,8 @@ use notegate_core::Result as CoreResult;
 use notegate_model::{Document, Node, Role};
 use uuid::Uuid;
 
-use super::input::{CreateFolder, MoveNode};
-use super::output::{ChildrenCursor, DocumentStats};
+use super::types::{ChildrenCursor, DocumentStats};
+use super::types::{CreateFolder, MoveNode};
 
 /// Persistence and authorization for the file tree. The `db` crate implements
 /// this; the service stays free of sqlx/axum.

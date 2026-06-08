@@ -20,7 +20,7 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, WorkspaceRepo};
-use notegate_service::files::input::Edit;
+use notegate_service::files::Edit;
 use notegate_service::files::{
     ChildrenCursor, CreateDocument, CreateFolder, DeleteNode, FilesService, FilesStore, MoveNode,
     PatchDocument, ReadDocument, WriteDocument, WriteTarget,

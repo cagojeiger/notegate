@@ -8,32 +8,30 @@
 //! never stored.
 
 pub mod content;
-pub mod input;
-pub mod output;
 pub mod patch;
 pub mod policy;
 pub mod store;
 pub mod target;
+pub mod types;
 pub mod validation;
 
 mod mutate;
-mod range;
 mod read;
 mod view;
 
 pub use content::{Metrics, compute as content_metrics};
-pub use input::{
-    ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, Edit, MoveNode, PatchDocument,
-    ReadDocument, WriteDocument, WriteTarget,
-};
-pub use output::{
-    ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
-    ReadContent, ReadResult,
-};
 pub use patch::{PatchError, apply_edits};
 pub use policy::{FileCommand, require as require_role};
 pub use store::{FilesStore, StoredContent};
 pub use target::{Target, parse_target};
+pub use types::{
+    ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
+    ReadContent, ReadResult,
+};
+pub use types::{
+    ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, Edit, MoveNode, PatchDocument,
+    ReadDocument, WriteDocument, WriteTarget,
+};
 pub use validation::FilesValidationError;
 
 #[cfg(test)]
