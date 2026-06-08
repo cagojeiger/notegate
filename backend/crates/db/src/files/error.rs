@@ -11,7 +11,7 @@ use notegate_core::Error;
 pub fn map_constraint_error(error: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db_error) = &error {
         if db_error.is_unique_violation() {
-            return Error::validation("a node with this name already exists in this folder");
+            return Error::conflict("a node with this name already exists in this folder");
         }
         if db_error.is_check_violation() {
             return Error::validation("the node violates a content or name constraint");

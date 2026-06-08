@@ -37,7 +37,7 @@ pub async fn move_node(
         .await?
         .ok_or_else(|| Error::not_found("node not found"))?;
     if moved.parent_id.is_none() {
-        return Err(Error::validation("cannot move the root node"));
+        return Err(Error::conflict("cannot move the root node"));
     }
     let current_name: String =
         sqlx::query_scalar("SELECT name FROM nodes WHERE workspace_id = $1 AND id = $2")
@@ -69,7 +69,7 @@ pub async fn move_node(
     .await
     .map_err(map_sqlx_error)?;
     if into_subtree {
-        return Err(Error::validation(
+        return Err(Error::conflict(
             "cannot move a node into itself or its descendant",
         ));
     }
@@ -88,7 +88,7 @@ pub async fn move_node(
     let dest_depth = checks::node_depth(&mut tx, workspace_id, new_parent_id).await?;
     let subtree_depth = checks::subtree_relative_depth(&mut tx, workspace_id, node_id).await?;
     if dest_depth + 1 + subtree_depth > limits::MAX_PATH_DEPTH {
-        return Err(Error::validation(format!(
+        return Err(Error::conflict(format!(
             "move would exceed the maximum path depth of {}",
             limits::MAX_PATH_DEPTH
         )));

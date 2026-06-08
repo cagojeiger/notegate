@@ -46,7 +46,7 @@ pub async fn soft_delete_node(
         return Err(Error::not_found("node not found"));
     }
     if subtree > limits::SUBTREE_DELETE_MAX_NODES {
-        return Err(Error::validation(format!(
+        return Err(Error::conflict(format!(
             "subtree of {subtree} nodes exceeds the synchronous delete limit of {}",
             limits::SUBTREE_DELETE_MAX_NODES
         )));

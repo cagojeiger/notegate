@@ -128,7 +128,7 @@ pub async fn require_fanout(
     .await
     .map_err(map_sqlx_error)?;
     if to_usize(children, "child")? >= caps.folder_max_children {
-        return Err(Error::validation(format!(
+        return Err(Error::conflict(format!(
             "folder already has the maximum of {} children",
             caps.folder_max_children
         )));
@@ -150,7 +150,7 @@ pub async fn require_node_budget(
     .await
     .map_err(map_sqlx_error)?;
     if to_usize(nodes, "node")? >= caps.workspace_max_nodes {
-        return Err(Error::validation(format!(
+        return Err(Error::conflict(format!(
             "workspace already has the maximum of {} nodes",
             caps.workspace_max_nodes
         )));
@@ -174,7 +174,7 @@ pub async fn require_document_budget(
     .await
     .map_err(map_sqlx_error)?;
     if to_usize(docs, "document")? >= caps.workspace_max_documents {
-        return Err(Error::validation(format!(
+        return Err(Error::conflict(format!(
             "workspace already has the maximum of {} documents",
             caps.workspace_max_documents
         )));
@@ -203,7 +203,7 @@ pub async fn require_byte_budget(
     .map_err(map_sqlx_error)?;
     let projected = total - previous_bytes + new_bytes;
     if projected > caps.workspace_max_document_bytes as i64 {
-        return Err(Error::validation(format!(
+        return Err(Error::conflict(format!(
             "write would exceed the workspace document byte budget of {}",
             caps.workspace_max_document_bytes
         )));
@@ -231,7 +231,7 @@ pub async fn require_sibling_unique(
     .await
     .map_err(map_sqlx_error)?;
     match existing {
-        Some(id) if Some(id) != ignore_id => Err(Error::validation(format!(
+        Some(id) if Some(id) != ignore_id => Err(Error::conflict(format!(
             "a node named '{name}' already exists in this folder"
         ))),
         _ => Ok(()),

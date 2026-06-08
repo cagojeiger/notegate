@@ -34,7 +34,7 @@ pub async fn update_node_metadata(
     if let Some(name) = new_name {
         // The root node (no parent) cannot be renamed.
         let Some(parent_id) = node.parent_id else {
-            return Err(Error::validation("cannot rename the root node"));
+            return Err(Error::conflict("cannot rename the root node"));
         };
         checks::require_sibling_unique(&mut tx, workspace_id, parent_id, name, Some(node_id))
             .await?;
