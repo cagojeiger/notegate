@@ -89,6 +89,8 @@ pub const GREP_MAX_LIMIT: i64 = 100;
 pub const GREP_DEFAULT_CONTEXT: i64 = 2;
 /// Maximum `grep` context lines.
 pub const GREP_MAX_CONTEXT: i64 = 5;
+/// Maximum search query length in Unicode scalar values.
+pub const SEARCH_QUERY_MAX_CHARS: usize = 256;
 
 // --- Read limits ---
 

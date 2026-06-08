@@ -363,13 +363,25 @@ where
     }
 }
 
-/// Reject empty search strings before they can become broad `ILIKE '%%'` scans.
+/// Reject empty, multi-line, or very long search strings before they can become
+/// broad or expensive `ILIKE` scans.
 fn validate_query(q: &str) -> ServiceResult<&str> {
     let trimmed = q.trim();
     if trimmed.is_empty() {
         return Err(ServiceError::InvalidInput(
             "search query cannot be empty".to_owned(),
         ));
+    }
+    if trimmed.contains(['\n', '\r']) {
+        return Err(ServiceError::InvalidInput(
+            "search query must be a single line".to_owned(),
+        ));
+    }
+    if trimmed.chars().count() > limits::SEARCH_QUERY_MAX_CHARS {
+        return Err(ServiceError::InvalidInput(format!(
+            "search query must be at most {} characters",
+            limits::SEARCH_QUERY_MAX_CHARS
+        )));
     }
     Ok(trimmed)
 }
@@ -490,9 +502,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_is_rejected() {
+    fn invalid_queries_are_rejected() {
         assert!(matches!(
             validate_query("   "),
+            Err(ServiceError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            validate_query("alpha\nbeta"),
+            Err(ServiceError::InvalidInput(_))
+        ));
+        let too_long = "x".repeat(limits::SEARCH_QUERY_MAX_CHARS + 1);
+        assert!(matches!(
+            validate_query(&too_long),
             Err(ServiceError::InvalidInput(_))
         ));
         assert_eq!(validate_query("  note  ").unwrap(), "note");

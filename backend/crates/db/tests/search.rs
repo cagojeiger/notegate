@@ -267,6 +267,64 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+/// Search scope paths are node scopes: a folder scopes to its subtree, a document
+/// scopes to that single document, and an unresolved scope is an actionable not-found.
+#[tokio::test]
+async fn search_scope_accepts_document_and_rejects_missing_path()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_workspace(&ws_repo, owner, "personal").await;
+
+    let note = write_doc(&files, owner, ws, root, "note.md", "alpha\nneedle\n").await;
+    let _other = write_doc(&files, owner, ws, root, "other.md", "needle\n").await;
+
+    let single_doc = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: Some("/note.md".to_owned()),
+                context: Some(0),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(
+        single_doc.items.len(),
+        1,
+        "document scope returns that document only"
+    );
+    assert_eq!(single_doc.items[0].node_id, note);
+
+    let missing = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "note".to_owned(),
+                path: Some("/missing".to_owned()),
+                kind: None,
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(missing, notegate_service::error::ServiceError::NotFound(_)),
+        "missing scope is not_found, got {missing:?}"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// grep returns the correct 1-based line number and before/after context, and the
 /// context count is clamped to GREP_MAX_CONTEXT.
 #[tokio::test]

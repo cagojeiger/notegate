@@ -253,9 +253,8 @@ impl SearchStore for FilesRepo {
         cursor: Option<&FindCursor>,
     ) -> Result<Vec<(Node, String, bool)>> {
         let scope_node = self.resolve_scope(workspace_id, scope).await?;
-        // A scope path that does not resolve yields no results (empty subtree).
         if scope.is_some() && scope_node.is_none() {
-            return Ok(Vec::new());
+            return Err(notegate_core::Error::not_found("scope path not found"));
         }
         queries::search::find_nodes(&self.pool, workspace_id, q, scope_node, kind, limit, cursor)
             .await
@@ -271,7 +270,7 @@ impl SearchStore for FilesRepo {
     ) -> Result<Vec<GrepCandidate>> {
         let scope_node = self.resolve_scope(workspace_id, scope).await?;
         if scope.is_some() && scope_node.is_none() {
-            return Ok(Vec::new());
+            return Err(notegate_core::Error::not_found("scope path not found"));
         }
         queries::search::grep_candidates(&self.pool, workspace_id, q, scope_node, limit, cursor)
             .await
