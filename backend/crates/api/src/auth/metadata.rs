@@ -150,7 +150,7 @@ mod tests {
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
             mcp_oauth_client_id: "notegate-mcp".to_owned(),
-            oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
+            oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
             browser_session_secret: SecretString::from(

@@ -167,7 +167,7 @@ fn state_with_resource(
         notegate_public_url: "http://localhost:9191".to_owned(),
         oauth_client_id: "notegate-web".to_owned(),
         mcp_oauth_client_id: "notegate-mcp".to_owned(),
-        oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
+        oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
         resource_url: resource_url.to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
         browser_session_secret: secrecy::SecretString::from(
@@ -436,7 +436,7 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
 
-    for path in ["/auth/success", "/success"] {
+    for path in ["/auth/success"] {
         let response = app
             .clone()
             .oneshot(Request::builder().uri(path).body(Body::empty())?)
@@ -444,7 +444,7 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    for path in ["/auth/logout", "/logout"] {
+    for path in ["/auth/logout"] {
         let response = app
             .clone()
             .oneshot(Request::builder().uri(path).body(Body::empty())?)

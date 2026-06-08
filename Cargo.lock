@@ -1569,7 +1569,6 @@ dependencies = [
  "jsonwebtoken",
  "notegate-core",
  "notegate-db",
- "notegate-infra",
  "notegate-model",
  "notegate-service",
  "openidconnect",
@@ -1621,17 +1620,6 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
- "uuid",
-]
-
-[[package]]
-name = "notegate-infra"
-version = "0.1.0"
-dependencies = [
- "notegate-core",
- "notegate-model",
- "reqwest",
- "sqlx",
  "uuid",
 ]
 

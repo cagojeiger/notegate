@@ -1,7 +1,4 @@
 //! Postgres connection-pool construction.
-//!
-//! Moved out of the `db` crate so the `api` layer wires the pool and hands it to
-//! both `db` repositories and `infra` consumers.
 
 use notegate_core::{Config, Error, Result};
 use sqlx::PgPool;

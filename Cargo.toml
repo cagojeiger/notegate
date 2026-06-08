@@ -13,7 +13,6 @@ repository = "https://github.com/cagojeiger/notegate"
 # Internal crates
 notegate-core = { path = "backend/crates/core" }
 notegate-db = { path = "backend/crates/db" }
-notegate-infra = { path = "backend/crates/infra" }
 notegate-model = { path = "backend/crates/model" }
 notegate-service = { path = "backend/crates/service" }
 

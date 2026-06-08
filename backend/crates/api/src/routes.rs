@@ -64,13 +64,6 @@ fn auth_routes() -> Router<AppState> {
         .route("/auth/callback", get(callback))
         .route("/auth/success", get(success))
         .route("/auth/logout", get(logout))
-        // Compatibility aliases: the current authgate `notegate-web` client is
-        // registered with `http://localhost:9191/callback`. Keep these until the
-        // external client registration moves to `/auth/callback`.
-        .route("/login", get(login))
-        .route("/callback", get(callback))
-        .route("/success", get(success))
-        .route("/logout", get(logout))
 }
 
 fn metadata_routes(state: &AppState) -> Router<AppState> {

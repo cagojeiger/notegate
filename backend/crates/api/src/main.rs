@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     // aborts startup instead of leaving us without graceful shutdown.
     let signals = ShutdownSignals::install()?;
 
-    let pool = notegate_infra::connect(&config).await?;
+    let pool = notegate_db::connect(&config).await?;
     notegate_db::run_migrations(&pool).await?;
     info!(
         event = "db.ready",
