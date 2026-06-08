@@ -22,8 +22,12 @@ const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 
 /// Server + database configuration.
+///
+/// Unknown fields are ignored (not denied): the loader ingests the shared
+/// `NOTEGATE_*` env namespace, which also carries vars read elsewhere — e.g. the
+/// count-cap overrides in [`crate::limits`] (`NOTEGATE_FOLDER_MAX_CHILDREN`, …).
+/// Denying unknowns here would crash startup whenever such a var is set.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
