@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::http::header::{CONTENT_TYPE, WWW_AUTHENTICATE};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
@@ -453,6 +453,7 @@ async fn bearer_mutation_does_not_require_browser_origin() -> Result<(), Box<dyn
         )
         .await?;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_json_error(response, "not_found", "api route not found").await?;
     Ok(())
 }
 
@@ -513,6 +514,26 @@ async fn unknown_api_routes_still_require_bearer() -> Result<(), Box<dyn std::er
         .await?;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+async fn assert_json_error(
+    response: axum::response::Response,
+    kind: &str,
+    message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json; charset=utf-8")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["error"], kind);
+    assert_eq!(value["kind"], kind);
+    assert_eq!(value["message"], message);
     Ok(())
 }
 

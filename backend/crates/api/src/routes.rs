@@ -119,8 +119,8 @@ async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, Ap
     Ok(Json(HealthResponse { status: "ready" }))
 }
 
-async fn api_not_found() -> axum::http::StatusCode {
-    axum::http::StatusCode::NOT_FOUND
+async fn api_not_found() -> ApiError {
+    ApiError::not_found("api route not found")
 }
 
 async fn add_json_charset(request: Request<Body>, next: Next) -> Response {

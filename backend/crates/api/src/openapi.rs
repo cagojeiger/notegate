@@ -334,4 +334,82 @@ mod tests {
             assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
         }
     }
+
+    #[test]
+    fn openapi_lists_exact_resource_methods() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+        let paths = value["paths"].as_object().expect("paths object");
+
+        let mut actual = Vec::new();
+        for (path, item) in paths {
+            let item = item.as_object().expect("path item object");
+            for method in item.keys() {
+                if matches!(method.as_str(), "get" | "post" | "put" | "patch" | "delete") {
+                    actual.push(format!("{} {path}", method.to_uppercase()));
+                }
+            }
+        }
+        actual.sort();
+
+        let mut expected = vec![
+            "DELETE /api/v1/agents/{agent_id}",
+            "DELETE /api/v1/agents/{agent_id}/keys/{key_id}",
+            "DELETE /api/v1/workspaces/{workspace_id}",
+            "DELETE /api/v1/workspaces/{workspace_id}/access/{account_id}",
+            "DELETE /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "GET /api/v1/agents",
+            "GET /api/v1/me",
+            "GET /api/v1/workspaces",
+            "GET /api/v1/workspaces/{workspace_id}",
+            "GET /api/v1/workspaces/{workspace_id}/access",
+            "GET /api/v1/workspaces/{workspace_id}/documents/{node_id}",
+            "GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
+            "GET /api/v1/workspaces/{workspace_id}/paths/resolve",
+            "PATCH /api/v1/workspaces/{workspace_id}",
+            "PATCH /api/v1/workspaces/{workspace_id}/documents/{node_id}",
+            "PATCH /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "POST /api/v1/agents",
+            "POST /api/v1/agents/{agent_id}/keys",
+            "POST /api/v1/workspaces",
+            "POST /api/v1/workspaces/{workspace_id}/nodes",
+            "POST /api/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
+            "POST /api/v1/workspaces/{workspace_id}/search/find",
+            "POST /api/v1/workspaces/{workspace_id}/search/grep",
+            "PUT /api/v1/workspaces/{workspace_id}/access/{account_id}",
+            "PUT /api/v1/workspaces/{workspace_id}/documents/{node_id}",
+        ];
+        expected.sort();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn openapi_marks_every_operation_as_bearer_secured() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+        let paths = value["paths"].as_object().expect("paths object");
+
+        for (path, item) in paths {
+            let item = item.as_object().expect("path item object");
+            for (method, operation) in item {
+                if !matches!(
+                    method.as_str(),
+                    "get" | "put" | "post" | "delete" | "patch" | "options" | "head" | "trace"
+                ) {
+                    continue;
+                }
+                let security = operation["security"]
+                    .as_array()
+                    .expect("security requirement array");
+                assert!(
+                    security
+                        .iter()
+                        .any(|requirement| requirement.get("bearer_auth").is_some()),
+                    "missing bearer_auth for {method} {path}"
+                );
+            }
+        }
+    }
 }
