@@ -10,6 +10,47 @@ Base paths:
 /.well-known OAuth discovery metadata
 ```
 
+## OpenAPI / Swagger 범위
+
+`/openapi.json`과 `/swagger-ui`는 `/api/v1` JSON resource API만 문서화하고 샘플 호출 대상으로 삼는다.
+
+OpenAPI에 포함한다:
+
+```text
+/api/v1/me
+/api/v1/workspaces
+/api/v1/workspaces/{workspace_id}/nodes
+/api/v1/workspaces/{workspace_id}/documents
+/api/v1/workspaces/{workspace_id}/search
+/api/v1/workspaces/{workspace_id}/access
+/api/v1/agents
+```
+
+OpenAPI에서 제외한다:
+
+```text
+/auth/*
+/.well-known/*
+/mcp
+/health
+/ready
+```
+
+판단 근거:
+
+- `/api/v1/*`는 브라우저/UI resource API이며 JSON request/response 계약을 가진다.
+- `/auth/*`는 redirect와 session cookie 발급 흐름이며 resource API가 아니다.
+- `/.well-known/*`는 OAuth discovery metadata다.
+- `/mcp`는 OpenAPI가 아니라 MCP tool schema로 정의한다.
+- `/health`, `/ready`는 운영용 system endpoint다.
+
+Swagger 샘플 호출 방법:
+
+1. 브라우저 session 인증이 필요하면 별도 탭에서 `/auth/login`을 먼저 연다.
+2. `/swagger-ui`를 연다.
+3. 같은 origin browser session cookie로 `/api/v1/*`를 호출하거나, Swagger `Authorize`에 bearer token을 넣어 호출한다.
+4. Auth redirect/session/discovery endpoint는 OpenAPI 범위 밖이며 [auth.md](auth.md)에만 정의한다.
+
 ## Category map
 
 | Category | Scope | Base path | Contract file |

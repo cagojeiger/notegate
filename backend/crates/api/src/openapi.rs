@@ -11,10 +11,14 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::rest;
 use crate::state::AppState;
 
-/// The OpenAPI document is generated from `#[utoipa::path]` annotations on the
-/// actual REST handlers, so route/method drift is caught close to the code that
-/// serves the endpoint. `docs/spec/rest/` remains the REST contract;
-/// `/openapi.json` is the machine-readable contract.
+/// The OpenAPI document is the machine-readable contract for the `/api/v1`
+/// JSON resource API only. Auth redirect/session endpoints, OAuth discovery
+/// metadata, MCP, and system health/readiness endpoints are intentionally kept
+/// outside this document; see `docs/spec/rest/README.md` for the scope decision.
+///
+/// The document is generated from `#[utoipa::path]` annotations on the actual
+/// REST resource handlers, so route/method drift is caught close to the code
+/// that serves each endpoint.
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -282,7 +286,30 @@ mod tests {
     }
 
     #[test]
-    fn openapi_lists_every_rest_category() {
+    fn openapi_excludes_non_resource_api_surfaces() {
+        let doc = ApiDoc::openapi();
+        let paths = &doc.paths.paths;
+
+        for path in [
+            "/auth/login",
+            "/auth/callback",
+            "/auth/success",
+            "/auth/logout",
+            "/.well-known/oauth-authorization-server",
+            "/.well-known/oauth-protected-resource",
+            "/mcp",
+            "/health",
+            "/ready",
+        ] {
+            assert!(
+                !paths.contains_key(path),
+                "non-resource endpoint should stay outside OpenAPI: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn openapi_lists_every_resource_api_category() {
         let doc = ApiDoc::openapi();
         let paths = &doc.paths.paths;
         for path in [
