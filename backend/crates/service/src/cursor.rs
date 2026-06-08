@@ -4,6 +4,8 @@
 //! module so the query and the cursor can never drift. Cursors are base64url
 //! (no padding) over a versioned HMAC-SHA256 envelope and are opaque to clients.
 
+use std::sync::OnceLock;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Serialize;
@@ -13,17 +15,29 @@ use sha2::{Digest, Sha256};
 const CURSOR_VERSION: u8 = 1;
 const HMAC_SHA256_LEN: usize = 32;
 const HMAC_BLOCK_LEN: usize = 64;
-const CURSOR_SIGNING_KEY: &[u8] = b"notegate-cursor-signing-key-v1-2026-06-08";
+const MIN_SIGNING_KEY_LEN: usize = 32;
+const DEFAULT_TEST_SIGNING_KEY: &[u8] = b"notegate-test-cursor-signing-key-32-bytes";
+
+static SIGNING_KEY: OnceLock<Vec<u8>> = OnceLock::new();
 
 /// A cursor failed to decode (corrupt or tampered).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid cursor")]
 pub struct CursorError;
 
+/// Configure the cursor signing key for this process.
+pub fn configure_signing_key(key: &[u8]) -> Result<(), CursorError> {
+    if key.len() < MIN_SIGNING_KEY_LEN {
+        return Err(CursorError);
+    }
+    let _already_configured = SIGNING_KEY.set(key.to_vec());
+    Ok(())
+}
+
 /// Encode a keyset tuple into an opaque cursor string.
 pub fn encode<T: Serialize>(value: &T) -> Result<String, CursorError> {
     let payload = serde_json::to_vec(value).map_err(|_error| CursorError)?;
-    let signature = hmac_sha256(CURSOR_SIGNING_KEY, &payload);
+    let signature = hmac_sha256(signing_key(), &payload);
 
     let mut envelope = Vec::with_capacity(1 + HMAC_SHA256_LEN + payload.len());
     envelope.push(CURSOR_VERSION);
@@ -43,11 +57,18 @@ pub fn decode<T: DeserializeOwned>(cursor: &str) -> Result<T, CursorError> {
         return Err(CursorError);
     }
     let (signature, payload) = rest.split_at(HMAC_SHA256_LEN);
-    let expected = hmac_sha256(CURSOR_SIGNING_KEY, payload);
+    let expected = hmac_sha256(signing_key(), payload);
     if !constant_time_eq(signature, &expected) {
         return Err(CursorError);
     }
     serde_json::from_slice(payload).map_err(|_error| CursorError)
+}
+
+fn signing_key() -> &'static [u8] {
+    SIGNING_KEY
+        .get()
+        .map(Vec::as_slice)
+        .unwrap_or(DEFAULT_TEST_SIGNING_KEY)
 }
 
 fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; HMAC_SHA256_LEN] {
@@ -109,6 +130,11 @@ mod tests {
     )]
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn config_rejects_short_key() {
+        assert_eq!(configure_signing_key(b"short"), Err(CursorError));
+    }
 
     #[test]
     fn round_trips_a_tuple() {

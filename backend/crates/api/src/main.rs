@@ -1,6 +1,7 @@
 use std::io;
 
 use notegate_core::Config;
+use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
@@ -42,6 +43,10 @@ async fn main() -> anyhow::Result<()> {
         event = "db.ready",
         max_connections = config.db_max_connections
     );
+
+    notegate_service::cursor::configure_signing_key(
+        config.browser_session_secret.expose_secret().as_bytes(),
+    )?;
 
     let bind_addr = config.bind_addr;
     let http = reqwest::Client::builder()
