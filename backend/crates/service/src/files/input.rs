@@ -46,9 +46,11 @@ pub struct ReadDocument {
 /// The path-centric (MCP) caller resolves the path before calling: a resolved
 /// document node becomes [`WriteTarget::Existing`]; a missing path with
 /// `create=true` becomes [`WriteTarget::Create`] (dirname → `parent_node_id`,
-/// basename → `name`). A missing path with `create=false` is a `404` the caller
-/// returns without invoking the service. The id-centric (REST) caller always
-/// uses [`WriteTarget::Existing`].
+/// basename → `name`). A missing path with `create=false` is a surface-level
+/// error returned without invoking the write service. The id-centric REST
+/// document replace endpoint uses [`WriteTarget::Existing`]; the REST node-create
+/// endpoint may use [`WriteTarget::Create`] when a new document includes initial
+/// content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteTarget {
     /// Replace the content of an existing document node.

@@ -83,6 +83,9 @@ same visible name matches more than one -> invalid params with ambiguity data
 workspace_id inaccessible              -> invalid params
 ```
 
+`target`은 workspace와 path/scope가 하나씩 있는 tool에서 쓰는 축약형이다. 두 경로가 필요한
+`files_mv`는 `target` 대신 workspace selector와 `source_path`/`destination_path`를 사용한다.
+
 Path scope:
 
 ```text

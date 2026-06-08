@@ -10,6 +10,14 @@ MCP tools            = LLM/터미널 사용성을 위한 path 중심 command API
 REST와 MCP는 서로 다른 입력 방식을 쓰지만, 같은 workspace/account/access 규칙과 같은 DB를
 사용한다.
 
+Surface별 입력 변환은 API layer가 맡고, command invariant는 service layer가 맡는다.
+
+```text
+REST node/document/search handler -> workspace_id/node_id/body를 service command로 변환
+MCP path tool                     -> workspace selector/path/target을 resolve한 뒤 service command로 변환
+service command                   -> 권한, limit, cursor, 파일 불변식, lifecycle semantics 검증
+```
+
 
 ## Document boundary
 
