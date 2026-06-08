@@ -1,4 +1,4 @@
-//! `files_mkdir`: create a folder at a path (mcp-tools.md). Requires `editor`.
+//! `files_mkdir`: create a folder at a path (`docs/spec/mcp/files.md`). Requires `editor`.
 //!
 //! The path's dirname is resolved to the parent folder; the basename becomes the
 //! new folder name. Name/depth/fanout validation lives in the files service.

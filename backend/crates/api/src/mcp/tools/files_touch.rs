@@ -1,4 +1,4 @@
-//! `files_touch`: create an empty Markdown document (mcp-tools.md). Requires
+//! `files_touch`: create an empty Markdown document (`docs/spec/mcp/files.md`). Requires
 //! `editor`.
 //!
 //! The path's dirname resolves to the parent folder; the basename (which must

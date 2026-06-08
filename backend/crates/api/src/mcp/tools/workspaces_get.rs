@@ -1,4 +1,4 @@
-//! `workspaces_get`: return one workspace by name (mcp-tools.md).
+//! `workspaces_get`: return one workspace by name (`docs/spec/mcp/workspaces.md`).
 //!
 //! Resolves the canonical `workspace` name (or the `workspace_id` fallback)
 //! against the caller's accessible workspaces. An ambiguous name yields the

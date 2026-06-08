@@ -9,7 +9,7 @@ use crate::state::AppState;
 
 /// The OpenAPI document is generated from `#[utoipa::path]` annotations on the
 /// actual REST handlers, so route/method drift is caught close to the code that
-/// serves the endpoint. `docs/spec/rest-api.md` remains the design narrative;
+/// serves the endpoint. `docs/spec/rest/` remains the REST contract;
 /// `/openapi.json` is the machine-readable contract.
 #[derive(OpenApi)]
 #[openapi(

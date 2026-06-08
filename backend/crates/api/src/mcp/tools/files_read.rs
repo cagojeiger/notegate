@@ -1,4 +1,4 @@
-//! `files_read`: read a Markdown document with range limits (mcp-tools.md).
+//! `files_read`: read a Markdown document with range limits (`docs/spec/mcp/files.md`).
 //!
 //! Resolves the path to a document node, then reads a bounded line/byte slice.
 //! When `if_none_match_sha256` matches the current content hash, the tool returns

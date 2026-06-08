@@ -1,4 +1,4 @@
-//! `files_mv`: move or rename a path within a workspace (mcp-tools.md). Requires
+//! `files_mv`: move or rename a path within a workspace (`docs/spec/mcp/files.md`). Requires
 //! `editor`.
 //!
 //! Both paths live in the same workspace (cross-workspace moves are unsupported).

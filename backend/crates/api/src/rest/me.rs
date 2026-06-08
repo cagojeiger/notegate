@@ -2,7 +2,7 @@
 //!
 //! Returns the authenticated account, optional user/agent detail, and global
 //! non-workspace capabilities via the shared [`build_me`] builder, kept aligned
-//! with the MCP `me` tool (mcp-tools.md mandate). Workspace-specific roles live
+//! with the MCP `me` tool (`docs/spec/mcp/identity.md`). Workspace-specific roles live
 //! in the Workspaces category, not in `/me`.
 
 use axum::extract::Extension;

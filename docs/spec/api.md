@@ -1,6 +1,6 @@
 # notegate API architecture
 
-이 문서는 notegate API의 상위 architecture와 surface 경계를 정의한다. 개별 endpoint의 request/response 계약은 `rest-api.md`와 `mcp-tools.md`에서 정의한다.
+이 문서는 notegate API의 상위 architecture와 surface 경계를 정의한다. 개별 endpoint/tool의 request/response 계약은 `rest/`와 `mcp/` 디렉토리에서 정의한다.
 
 ```text
 Browser/UI REST API  = 화면과 tree state를 위한 node_id 중심 API
@@ -13,18 +13,18 @@ REST와 MCP는 서로 다른 입력 방식을 쓰지만, 같은 workspace/accoun
 
 ## Document boundary
 
-`api.md`와 `rest-api.md`는 역할이 다르다.
+`api.md`, `rest/`, `mcp/`는 역할이 다르다.
 
 ```text
 api.md       = API architecture / category / layer / cross-surface invariant
-rest-api.md  = HTTP REST endpoint contract / URL / request / response / status code
-mcp-tools.md = MCP tool contract / path-oriented command API
+rest/        = HTTP REST endpoint contract / URL / request / response / status code
+mcp/         = MCP tool contract / path-oriented command API
 ```
 
 `api.md`에는 개별 endpoint body를 자세히 쓰지 않는다. 대신 REST, MCP, Auth, System이
 어떤 책임을 갖고 어떤 category/layer로 나뉘는지 정의한다.
 
-`rest-api.md`에는 실제 HTTP 계약을 쓴다. frontend/BFF/API handler 구현자는 이 문서를
+`rest/`에는 실제 HTTP 계약을 쓴다. frontend/BFF/API handler 구현자는 이 문서들을
 기준으로 route, DTO, status code, pagination을 맞춘다.
 
 ## 설계 원칙
@@ -32,7 +32,7 @@ mcp-tools.md = MCP tool contract / path-oriented command API
 1. DB는 workspace/account/file tree의 source of truth다.
 2. REST는 브라우저 UI가 쓰기 쉬운 resource API를 제공한다.
 3. MCP는 LLM이 터미널 명령처럼 쓰기 쉬운 path command API를 제공한다.
-4. REST와 MCP는 DB를 직접 다루지 않고 공통 domain/service 계층을 호출한다.
+4. REST와 MCP는 DB를 직접 다루지 않고 공통 service 계층을 호출한다.
 5. 목록, 검색, 읽기, subtree 변경은 모두 limit/pagination/truncation 정책을 가진다.
 6. 현재 검색은 Postgres `LIKE`/`ILIKE` 기반으로 단순하게 유지한다.
 7. API는 기능 단위 category를 명확히 나눈다. `files` 하나에 identity/access/agent를 섞지 않는다.
@@ -40,11 +40,11 @@ mcp-tools.md = MCP tool contract / path-oriented command API
 
 ## API categories
 
-REST API는 다음 category로 나눈다. category는 URL, handler module, domain service의
+REST API는 다음 category로 나눈다. category는 URL, handler module, service의
 경계를 정하는 기준이다.
 
 ```text
-Auth       /auth/*, /.well-known/oauth-protected-resource*
+Auth       /auth/*, /.well-known/oauth-authorization-server, /.well-known/oauth-protected-resource*
 Identity   /api/v1/me
 Workspace  /api/v1/workspaces
 Nodes      /api/v1/workspaces/{workspace_id}/nodes
@@ -59,7 +59,8 @@ MCP        /mcp
 분류 기준:
 
 - auth/session resource: login, callback, logout, OAuth protected-resource metadata.
-- workspace 밖 global resource: `me`, `workspaces`, `agents`, system endpoints.
+- identity resource: `/me`는 caller identity와 workspace 밖 전역 capability만 반환한다.
+- workspace 밖 global resource: `workspaces`, `agents`, system endpoints.
 - workspace 안 resource: `nodes`, `documents`, `search`, `access`.
 - LLM/CLI command surface: REST category에 억지로 맞추지 않고 `/mcp` tool로 분리한다.
 - `files`는 product concept이지 top-level REST category가 아니다. REST에서는
@@ -80,33 +81,42 @@ api/rest/access
 api/rest/agents
 api/mcp
 
-domain/identity
-domain/workspaces
-domain/files
-domain/search
-domain/access
-domain/agents
+model/account
+model/user
+model/agent
+model/workspace
+model/node
+model/document
+
+service/identity
+service/workspaces
+service/files
+service/search
+service/access
+service/agents
 
 db/account_repo
-db/workspace_repo
+db/workspaces
+db/access
 db/files_repo
 db/agent_repo
+db/postgres_pool
 ```
 
 레이어 규칙:
 
 - Auth layer는 OAuth redirect/callback/session 발급과 bearer challenge metadata를 담당한다.
 - API layer는 HTTP/MCP DTO, auth extraction, error mapping만 담당한다.
-- Domain layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
+- Model layer는 persistence/API에 독립적인 데이터 타입을 담당한다.
+- Service layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
 - DB layer는 query/transaction/pagination cursor 구현만 담당한다.
-- Search가 커지면 `domain/search`와 `db/search_repo`를 별도 indexing backend로 교체할 수 있어야 한다.
 
 ## 문서 구성
 
 - [`db.md`](db.md): 현재 사용하는 canonical 테이블 설계.
 - [`files-commands.md`](files-commands.md): `ls`, `read`, `mv` 같은 공통 파일 명령의 의미.
-- [`rest-api.md`](rest-api.md): HTTP REST endpoint 계약.
-- [`mcp-tools.md`](mcp-tools.md): LLM/CLI 친화 MCP tool 계약.
+- [`rest/`](rest/README.md): HTTP REST endpoint 계약.
+- [`mcp/`](mcp/README.md): LLM/CLI 친화 MCP tool 계약.
 - [`search.md`](search.md): `find`, `grep`의 현재 단순 검색 방식.
 - [`performance-limits.md`](performance-limits.md): pagination, max size, subtree 제한 정책.
 
@@ -119,8 +129,10 @@ REST는 화면을 위한 API다. UI는 파일트리 node를 펼치고 선택 상
 서버가 매 요청마다 `workspace_access`로 권한을 검증한다.
 
 ```text
-me -> workspaces -> children(workspace_id, derived root_node_id) -> document(workspace_id, node_id)
+me(identity/capabilities) -> workspaces(role/root_node_id) -> children(workspace_id, root_node_id) -> document(workspace_id, node_id)
 ```
+
+`me`는 workspace 목록을 싣지 않는다. 초기 workspace 선택은 `workspaces` category가 담당한다.
 
 `/api/v1/files/root` 같은 전역 root endpoint는 두지 않는다. root node id는 workspace
 응답에 포함한다.

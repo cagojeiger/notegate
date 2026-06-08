@@ -44,7 +44,7 @@ impl ApiError {
     }
 }
 
-/// Map a service-layer error to an HTTP response per `rest-api.md` Error policy.
+/// Map a service-layer error to an HTTP response per `docs/spec/rest/errors.md`.
 /// Internal failures are logged but their detail is never returned to the client.
 impl From<ServiceError> for ApiError {
     fn from(error: ServiceError) -> Self {

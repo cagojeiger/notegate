@@ -1,4 +1,4 @@
-//! `files_rm`: soft-delete a path (mcp-tools.md). Requires `editor`.
+//! `files_rm`: soft-delete a path (`docs/spec/mcp/files.md`). Requires `editor`.
 //!
 //! Resolves the path to a node, then soft-deletes it. Folder deletion requires
 //! `recursive=true`; root deletion is forbidden; an over-large subtree is

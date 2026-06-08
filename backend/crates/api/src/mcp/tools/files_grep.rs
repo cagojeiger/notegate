@@ -1,5 +1,5 @@
 //! `files_grep`: search Markdown body lines under an optional scope path
-//! (mcp-tools.md).
+//! (`docs/spec/mcp/search.md`).
 //!
 //! Workspace-scoped. The cursor is opaque and passed straight through. This tool
 //! wires the MCP surface to the search service and maps match items.

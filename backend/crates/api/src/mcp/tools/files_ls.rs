@@ -1,4 +1,4 @@
-//! `files_ls`: list the direct children of a folder (mcp-tools.md).
+//! `files_ls`: list the direct children of a folder (`docs/spec/mcp/files.md`).
 //!
 //! Resolves the folder path to a node, then keyset-paginates its live children
 //! through the files service (default limit `100`, max `200`).

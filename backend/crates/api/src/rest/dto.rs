@@ -1,6 +1,6 @@
 //! Shared REST data-transfer objects and the mappers from service/model types.
 //!
-//! These mirror the exact JSON shapes in `docs/spec/rest-api.md` (Page,
+//! These mirror the exact JSON shapes in `docs/spec/rest/README.md` (Page,
 //! AccountRef, Workspace output, Node output, Document output). The api layer
 //! owns these so the `model`/`service` types stay transport-free; mapping here is
 //! thin (no domain logic).

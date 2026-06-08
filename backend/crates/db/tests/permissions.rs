@@ -1,8 +1,8 @@
 //! Permission matrix over a real Postgres schema.
 //!
 //! Drives `FilesService`, `AccessService`, and `WorkspaceService` over the real
-//! db repos and asserts the spec's role gate (`rest-api.md` "Auth and
-//! authorization", `db.md` role table) at the service-error level, which the API
+//! db repos and asserts the spec's role gate (`docs/spec/rest/README.md`
+//! "Workspace authorization" and `db.md` role table) at the service-error level, which the API
 //! layer maps 1:1 to HTTP status codes:
 //!
 //! - `ServiceError::Forbidden`  -> 403 (lesser role for the command)

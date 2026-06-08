@@ -5,7 +5,7 @@
 //! canonical selector), or with a compact `target` string (`<ws>:/<path>`), or
 //! — as an explicit fallback — by `workspace_id`. Resolution is stateless: every
 //! tool call resolves the selector against the caller's accessible workspaces
-//! (`docs/spec/mcp-tools.md`). Paths are resolved inside the selected workspace
+//! (`docs/spec/mcp/README.md`). Paths are resolved inside the selected workspace
 //! only.
 
 use std::borrow::Cow;

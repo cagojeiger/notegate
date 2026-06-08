@@ -1,5 +1,5 @@
 //! The shared `me` identity builder used by both REST `GET /api/v1/me` and the
-//! MCP `me` tool, so the two surfaces stay aligned (mcp-tools.md mandate).
+//! MCP `me` tool, so the two surfaces stay aligned (`docs/spec/mcp/identity.md`).
 //!
 //! The shape is `{ account, user?, agent?, capabilities }`. Workspace-specific
 //! roles are intentionally excluded; callers enumerate them through the
@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-/// A lightweight account reference, mirroring `rest-api.md`'s Account ref.
+/// A lightweight account reference, mirroring `docs/spec/rest/README.md`'s Account ref.
 #[derive(Debug, Clone, Serialize, JsonSchema, ToSchema, PartialEq, Eq)]
 pub struct AccountRefOutput {
     pub id: String,

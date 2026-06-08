@@ -1,5 +1,5 @@
 //! `files_patch`: apply exact targeted replacements to one Markdown document
-//! (mcp-tools.md). Requires `editor`.
+//! (`docs/spec/mcp/files.md`). Requires `editor`.
 //!
 //! Path-first: the path is resolved to the document node, then the edits are
 //! applied by the files service, which enforces exact (non-fuzzy) matching,

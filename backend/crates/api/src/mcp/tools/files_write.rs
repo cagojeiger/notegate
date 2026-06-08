@@ -1,5 +1,5 @@
 //! `files_write`: replace (or optionally create) a Markdown document
-//! (mcp-tools.md). Requires `editor`.
+//! (`docs/spec/mcp/files.md`). Requires `editor`.
 //!
 //! Path-first: the path is resolved to decide the write target. A resolved
 //! document is replaced (`WriteTarget::Existing`). A missing path with

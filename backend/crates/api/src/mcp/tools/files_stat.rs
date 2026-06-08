@@ -1,4 +1,4 @@
-//! `files_stat`: return metadata for a path (mcp-tools.md).
+//! `files_stat`: return metadata for a path (`docs/spec/mcp/files.md`).
 
 use axum::http::request::Parts;
 use rmcp::handler::server::wrapper::Parameters;

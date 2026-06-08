@@ -1,7 +1,7 @@
 //! MCP/CLI compact target parsing: `<workspace>:/<absolute-path>`.
 //!
 //! `target` is syntactic sugar for the structured `workspace` + `path` fields
-//! (`docs/spec/mcp-tools.md`). Workspace names cannot contain `:` (they match the
+//! (`docs/spec/mcp/README.md`). Workspace names cannot contain `:` (they match the
 //! restricted name grammar), so the target splits on the first `:`; the remainder
 //! must be an absolute path inside the workspace.
 

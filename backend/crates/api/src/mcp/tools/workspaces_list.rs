@@ -1,4 +1,4 @@
-//! `workspaces_list`: list workspaces accessible to the caller (mcp-tools.md).
+//! `workspaces_list`: list workspaces accessible to the caller (`docs/spec/mcp/workspaces.md`).
 //!
 //! Use before file tools when the caller has more than one workspace. Default
 //! limit `50`, max `100`. Pagination is delegated to the workspace service so

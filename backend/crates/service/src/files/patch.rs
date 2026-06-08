@@ -1,6 +1,7 @@
 //! Exact-match patch engine for `files_patch`.
 //!
-//! The contract (`docs/spec/{files-commands,mcp-tools,rest-api}.md`) is exact,
+//! The contract (`docs/spec/files-commands.md`, `docs/spec/mcp/files.md`, and
+//! `docs/spec/rest/documents.md`) is exact,
 //! not fuzzy: each `old_text` must match the ORIGINAL document exactly once, edits
 //! must not be no-ops, ranges must not overlap or nest, and all edits apply
 //! atomically against the original (not incrementally). Line endings are preserved
