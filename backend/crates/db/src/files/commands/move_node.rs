@@ -25,6 +25,7 @@ pub async fn move_node(
     node_id: Uuid,
     new_parent_id: Uuid,
     new_name: Option<&str>,
+    expected_parent_id: Option<Uuid>,
     updated_by: Uuid,
     caps: Limits,
 ) -> Result<Node> {
@@ -38,6 +39,13 @@ pub async fn move_node(
         .ok_or_else(|| Error::not_found("node not found"))?;
     if moved.parent_id.is_none() {
         return Err(Error::conflict("cannot move the root node"));
+    }
+    if let Some(expected_parent_id) = expected_parent_id
+        && moved.parent_id != Some(expected_parent_id)
+    {
+        return Err(Error::conflict(
+            "expected_parent_id does not match the node's current parent; refresh and retry",
+        ));
     }
     let current_name: String =
         sqlx::query_scalar("SELECT name FROM nodes WHERE workspace_id = $1 AND id = $2")

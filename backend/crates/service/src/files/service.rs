@@ -453,6 +453,14 @@ where
                 "cannot move the root node".to_owned(),
             ));
         }
+        if let Some(expected_parent_id) = command.expected_parent_id
+            && node.parent_id != Some(expected_parent_id)
+        {
+            return Err(ServiceError::Conflict(
+                "expected_parent_id does not match the node's current parent; refresh and retry"
+                    .to_owned(),
+            ));
+        }
 
         let dest_parent = self
             .load_node(workspace_id, command.new_parent_node_id)

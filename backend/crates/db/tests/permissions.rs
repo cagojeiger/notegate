@@ -328,6 +328,7 @@ async fn viewer_can_read_but_not_mutate() -> Result<(), Box<dyn std::error::Erro
                     node_id: f.doc_id,
                     new_parent_node_id: f.root_id,
                     new_name: None,
+                    expected_parent_id: None,
                 },
             )
             .await,
@@ -430,6 +431,7 @@ async fn editor_can_mutate_but_not_manage_access() -> Result<(), Box<dyn std::er
                 node_id: f.doc_id,
                 new_parent_node_id: made.node.id,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await?;
@@ -527,6 +529,7 @@ async fn cross_workspace_node_is_not_found() -> Result<(), Box<dyn std::error::E
                     node_id: f.other_folder_id,
                     new_parent_node_id: f.root_id,
                     new_name: None,
+                    expected_parent_id: None,
                 },
             )
             .await,

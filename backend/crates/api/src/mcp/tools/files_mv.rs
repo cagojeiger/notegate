@@ -67,6 +67,7 @@ pub async fn call(
                 node_id: source.node.id,
                 new_parent_node_id: dest_parent.node.id,
                 new_name: Some(new_name),
+                expected_parent_id: None,
             },
         )
         .await

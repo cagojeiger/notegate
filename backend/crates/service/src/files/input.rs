@@ -91,6 +91,8 @@ pub struct MoveNode {
     pub new_parent_node_id: Uuid,
     /// Rename as part of the move; `None` keeps the current name.
     pub new_name: Option<String>,
+    /// Optimistic guard; conflict if the node's current parent differs.
+    pub expected_parent_id: Option<Uuid>,
 }
 
 /// Soft-delete command (`rm`).

@@ -342,16 +342,6 @@ pub(crate) async fn move_node(
 ) -> Result<Json<NodeOut>, ApiError> {
     let account_id = caller.account_id();
 
-    // Optimistic parent guard: compare the node's current parent before moving.
-    if let Some(expected) = body.expected_parent_id {
-        let current = state.files.stat(account_id, workspace_id, node_id).await?;
-        if current.node.parent_id != Some(expected) {
-            return Err(ApiError::conflict(
-                "expected_parent_id does not match the node's current parent; refresh and retry",
-            ));
-        }
-    }
-
     let view = state
         .files
         .move_node(
@@ -361,6 +351,7 @@ pub(crate) async fn move_node(
                 node_id,
                 new_parent_node_id: body.new_parent_id,
                 new_name: body.new_name,
+                expected_parent_id: body.expected_parent_id,
             },
         )
         .await?;

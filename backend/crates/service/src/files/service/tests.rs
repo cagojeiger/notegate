@@ -457,6 +457,13 @@ impl FilesStore for MemStore {
     async fn move_node(&self, _ws: Uuid, command: &MoveNode, updated_by: Uuid) -> CoreResult<Node> {
         let mut state = self.lock();
         let node = state.nodes.get_mut(&command.node_id).expect("node");
+        if let Some(expected_parent_id) = command.expected_parent_id
+            && node.parent_id != Some(expected_parent_id)
+        {
+            return Err(notegate_core::Error::conflict(
+                "expected_parent_id does not match the node's current parent; refresh and retry",
+            ));
+        }
         node.parent_id = Some(command.new_parent_node_id);
         if let Some(ref name) = command.new_name {
             node.name = name.clone();
@@ -975,6 +982,7 @@ async fn mv_root_is_forbidden() {
                 node_id: store.root_id,
                 new_parent_node_id: dest,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await
@@ -994,6 +1002,7 @@ async fn mv_into_self_is_conflict() {
                 node_id: folder,
                 new_parent_node_id: folder,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await
@@ -1014,6 +1023,7 @@ async fn mv_into_descendant_is_conflict() {
                 node_id: parent,
                 new_parent_node_id: child,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await
@@ -1036,10 +1046,36 @@ async fn mv_destination_name_conflict_is_conflict() {
                 node_id: moving,
                 new_parent_node_id: dest,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await
         .unwrap_err();
+    assert!(matches!(err, ServiceError::Conflict(_)));
+}
+
+#[tokio::test]
+async fn mv_expected_parent_mismatch_is_conflict() {
+    let (svc, store) = service(Some(Role::Editor));
+    let old_parent = store.add_folder(store.root_id, "old");
+    let actual_parent = store.add_folder(store.root_id, "actual");
+    let dest = store.add_folder(store.root_id, "dest");
+    let doc = store.add_document(actual_parent, "doc.md", "x\n");
+
+    let err = svc
+        .move_node(
+            actor(),
+            store.workspace_id,
+            MoveNode {
+                node_id: doc,
+                new_parent_node_id: dest,
+                new_name: None,
+                expected_parent_id: Some(old_parent),
+            },
+        )
+        .await
+        .unwrap_err();
+
     assert!(matches!(err, ServiceError::Conflict(_)));
 }
 
@@ -1056,6 +1092,7 @@ async fn mv_same_path_is_noop_success() {
                 node_id: doc,
                 new_parent_node_id: folder,
                 new_name: Some("note.md".to_owned()),
+                expected_parent_id: None,
             },
         )
         .await
@@ -1085,6 +1122,7 @@ async fn mv_into_full_destination_is_conflict() {
                 node_id: moving,
                 new_parent_node_id: dest,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await
@@ -1106,6 +1144,7 @@ async fn mv_succeeds_and_derives_new_path() {
                 node_id: doc,
                 new_parent_node_id: dest,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await

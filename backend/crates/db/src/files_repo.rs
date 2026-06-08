@@ -203,6 +203,7 @@ impl FilesStore for FilesRepo {
             command.node_id,
             command.new_parent_node_id,
             command.new_name.as_deref(),
+            command.expected_parent_id,
             updated_by,
             self.limits,
         )

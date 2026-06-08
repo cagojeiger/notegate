@@ -203,6 +203,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 node_id: note_id,
                 new_parent_node_id: archive_id,
                 new_name: None,
+                expected_parent_id: None,
             },
         )
         .await?;
