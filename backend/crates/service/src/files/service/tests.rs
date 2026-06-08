@@ -830,7 +830,7 @@ async fn write_expected_sha_mismatch_is_conflict() {
 }
 
 #[tokio::test]
-async fn write_rejects_too_many_lines() {
+async fn write_rejects_too_many_lines_as_invalid_input() {
     let (svc, store) = service(Some(Role::Editor));
     let id = store.add_document(store.root_id, "n.md", "x");
     let big = "a\n".repeat(limits::DOCUMENT_MAX_LINES + 1);
@@ -846,7 +846,7 @@ async fn write_rejects_too_many_lines() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, ServiceError::Conflict(_)));
+    assert!(matches!(err, ServiceError::InvalidInput(_)));
 }
 
 // --- patch (integration through the service) ---

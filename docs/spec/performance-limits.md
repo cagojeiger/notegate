@@ -186,8 +186,9 @@ document_max_lines = 2000    # per document
 Branching:
 
 ```text
-document bytes > document_max_bytes -> 409 conflict
-document lines > document_max_lines -> 409 conflict
+document bytes > document_max_bytes -> 400 invalid input
+document lines > document_max_lines -> 400 invalid input
+workspace live document bytes > max  -> 409 conflict
 hash mismatch on guarded write/patch -> 409 conflict
 ```
 

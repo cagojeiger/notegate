@@ -79,10 +79,10 @@ impl FilesValidationError {
             Self::WorkspaceDocumentsExceeded { max } => ServiceError::Conflict(format!(
                 "workspace already has the maximum of {max} live documents"
             )),
-            Self::DocumentBytesExceeded { max } => ServiceError::Conflict(format!(
+            Self::DocumentBytesExceeded { max } => ServiceError::InvalidInput(format!(
                 "document exceeds the maximum of {max} bytes; split the document into smaller notes"
             )),
-            Self::DocumentLinesExceeded { max } => ServiceError::Conflict(format!(
+            Self::DocumentLinesExceeded { max } => ServiceError::InvalidInput(format!(
                 "document exceeds the maximum of {max} lines; split the document into smaller notes"
             )),
             Self::WorkspaceDocumentBytesExceeded { max } => ServiceError::Conflict(format!(
@@ -362,8 +362,20 @@ mod tests {
             ServiceError::Conflict(_)
         ));
         assert!(matches!(
-            FilesValidationError::DocumentBytesExceeded { max: 1 }.into_service_error(),
+            FilesValidationError::WorkspaceDocumentBytesExceeded { max: 1 }.into_service_error(),
             ServiceError::Conflict(_)
+        ));
+    }
+
+    #[test]
+    fn per_document_size_errors_map_to_invalid_input() {
+        assert!(matches!(
+            FilesValidationError::DocumentBytesExceeded { max: 1 }.into_service_error(),
+            ServiceError::InvalidInput(_)
+        ));
+        assert!(matches!(
+            FilesValidationError::DocumentLinesExceeded { max: 1 }.into_service_error(),
+            ServiceError::InvalidInput(_)
         ));
     }
 }
