@@ -7,6 +7,7 @@
 //! inactive credentials.
 
 use chrono::{DateTime, Utc};
+use crate::map_sqlx_error;
 use notegate_core::{Error, Result, limits};
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::{Agent, AgentKey};
@@ -432,8 +433,4 @@ impl AgentAuthStore for AgentRepo {
 
         Ok(Some((account_row.into_account()?, Agent::from(agent_row))))
     }
-}
-
-fn map_sqlx_error(error: sqlx::Error) -> Error {
-    Error::internal(format!("agent repository query failed: {error}"))
 }

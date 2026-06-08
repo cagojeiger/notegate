@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
 use super::super::rows::{DOCUMENT_COLUMNS, DocumentRow, NODE_COLUMNS, NodeRow};
+use crate::to_usize;
 
 /// Load live document metrics without the Markdown body.
 pub async fn document_stats(
@@ -99,9 +100,4 @@ pub async fn sum_live_document_bytes(pool: &PgPool, workspace_id: Uuid) -> Resul
     .await
     .map_err(map_sqlx_error)?;
     to_usize(total, "document byte")
-}
-
-fn to_usize(value: i64, label: &str) -> Result<usize> {
-    usize::try_from(value)
-        .map_err(|_error| notegate_core::Error::internal(format!("negative {label} sum")))
 }

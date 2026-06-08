@@ -8,21 +8,33 @@
 
 use notegate_core::{Error, Result};
 
-pub mod access;
+pub mod access_repo;
 pub mod account_repo;
 pub mod agent_repo;
 pub mod files;
 pub mod files_repo;
 pub mod postgres_pool;
-pub mod workspaces;
+pub mod workspaces_repo;
 
-pub use access::AccessRepo;
+pub use access_repo::AccessRepo;
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
 pub use files_repo::FilesRepo;
 pub use postgres_pool::connect;
 pub use sqlx::PgPool;
-pub use workspaces::WorkspaceRepo;
+pub use workspaces_repo::WorkspaceRepo;
+
+/// Generic internal mapping for any repository query failure. Shared by every
+/// repo so the mapping never drifts; detail is logged, not surfaced.
+pub(crate) fn map_sqlx_error(error: sqlx::Error) -> Error {
+    Error::internal(format!("database query failed: {error}"))
+}
+
+/// Convert a non-negative SQL count into `usize`. A negative value can only come
+/// from a corrupt aggregate, so it is an internal error.
+pub(crate) fn to_usize(value: i64, label: &str) -> Result<usize> {
+    usize::try_from(value).map_err(|_error| Error::internal(format!("negative {label} count")))
+}
 
 /// Embedded migrations from `migrations/`, run at startup via [`run_migrations`].
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");

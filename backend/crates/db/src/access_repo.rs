@@ -5,6 +5,7 @@
 //! rename, and delete queries.
 
 use chrono::{DateTime, Utc};
+use crate::map_sqlx_error;
 use notegate_core::{Error, Result, limits};
 use notegate_model::account::AccountKind;
 use notegate_model::{Role, WorkspaceAccess};
@@ -254,8 +255,4 @@ async fn guard_last_owner(
     }
 
     Ok(())
-}
-
-fn map_sqlx_error(error: sqlx::Error) -> Error {
-    Error::internal(format!("access repository query failed: {error}"))
 }

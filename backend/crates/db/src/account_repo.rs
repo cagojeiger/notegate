@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use crate::map_sqlx_error;
 use notegate_core::{Error, Result};
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
@@ -294,8 +295,4 @@ impl UserStore for AccountRepo {
 
         Ok(Some((account_row.into_account()?, User::from(user_row))))
     }
-}
-
-fn map_sqlx_error(error: sqlx::Error) -> Error {
-    Error::internal(format!("account repository query failed: {error}"))
 }

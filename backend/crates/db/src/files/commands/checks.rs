@@ -10,6 +10,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
+use crate::to_usize;
 
 /// Serialize file-tree mutations in a workspace. This closes races where two
 /// transactions both observe state below a cap, or one mutation updates a node
@@ -237,8 +238,4 @@ pub async fn require_sibling_unique(
         ))),
         _ => Ok(()),
     }
-}
-
-fn to_usize(value: i64, label: &str) -> Result<usize> {
-    usize::try_from(value).map_err(|_error| Error::internal(format!("negative {label} count")))
 }

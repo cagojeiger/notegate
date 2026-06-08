@@ -6,6 +6,8 @@
 
 use notegate_core::Error;
 
+pub(crate) use crate::map_sqlx_error;
+
 /// Map a sibling-name unique violation or a CHECK violation to a clean
 /// validation error; fall back to the generic internal mapping otherwise.
 pub fn map_constraint_error(error: sqlx::Error) -> Error {
@@ -18,9 +20,4 @@ pub fn map_constraint_error(error: sqlx::Error) -> Error {
         }
     }
     map_sqlx_error(error)
-}
-
-/// Generic internal mapping for a files-repo query failure.
-pub fn map_sqlx_error(error: sqlx::Error) -> Error {
-    Error::internal(format!("files repository query failed: {error}"))
 }

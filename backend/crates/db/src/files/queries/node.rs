@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
 use super::super::rows::{NODE_COLUMNS, NodeRow};
+use crate::to_usize;
 
 /// The caller's live workspace role, or `None` if no non-revoked grant from an
 /// active account exists.
@@ -311,9 +312,4 @@ pub async fn is_self_or_descendant(
     .await
     .map_err(map_sqlx_error)?;
     Ok(found)
-}
-
-fn to_usize(value: i64, label: &str) -> Result<usize> {
-    usize::try_from(value)
-        .map_err(|_error| notegate_core::Error::internal(format!("negative {label} count")))
 }

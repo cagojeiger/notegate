@@ -5,6 +5,7 @@
 //! `owner` in the same transaction, after enforcing the owner quota in-tx.
 
 use chrono::{DateTime, Utc};
+use crate::map_sqlx_error;
 use notegate_core::{Error, Result, limits};
 use notegate_model::{Role, Workspace};
 use notegate_service::workspaces::{
@@ -325,8 +326,4 @@ fn map_constraint_error(error: sqlx::Error) -> Error {
         }
     }
     map_sqlx_error(error)
-}
-
-fn map_sqlx_error(error: sqlx::Error) -> Error {
-    Error::internal(format!("workspace repository query failed: {error}"))
 }
