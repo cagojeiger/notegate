@@ -28,6 +28,8 @@ pub async fn move_node(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
+    checks::lock_workspace(&mut tx, workspace_id).await?;
+
     // The moved node must exist and be live; the root cannot be moved.
     let moved = checks::live_node(&mut tx, workspace_id, node_id)
         .await?

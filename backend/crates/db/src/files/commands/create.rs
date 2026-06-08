@@ -26,6 +26,7 @@ pub async fn insert_folder(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
+    checks::lock_workspace(&mut tx, workspace_id).await?;
     prepare_create(&mut tx, workspace_id, parent_id, name).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
@@ -56,6 +57,7 @@ pub async fn insert_document(
 ) -> Result<(Node, Document)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
+    checks::lock_workspace(&mut tx, workspace_id).await?;
     prepare_create(&mut tx, workspace_id, parent_id, name).await?;
     checks::require_document_budget(&mut tx, workspace_id).await?;
     checks::require_byte_budget(&mut tx, workspace_id, 0, i64::from(content.byte_len)).await?;

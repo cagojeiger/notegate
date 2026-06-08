@@ -160,6 +160,16 @@ impl WorkspaceStore for WorkspaceRepo {
     ) -> Result<Workspace> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
+        let owner_exists: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1 FOR UPDATE")
+                .bind(command.owner_account_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        if owner_exists.is_none() {
+            return Err(Error::not_found("owner account not found"));
+        }
+
         // Enforce the owner quota inside the transaction so a concurrent create
         // cannot slip past the cap.
         let owned: i64 =
@@ -355,6 +365,8 @@ impl AccessStore for WorkspaceRepo {
     ) -> Result<WorkspaceAccess> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
+        lock_workspace(&mut tx, command.workspace_id).await?;
+
         guard_last_owner(
             &mut tx,
             command.workspace_id,
@@ -413,6 +425,7 @@ impl AccessStore for WorkspaceRepo {
         revoked_by: Uuid,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        lock_workspace(&mut tx, workspace_id).await?;
         guard_last_owner(&mut tx, workspace_id, account_id, None).await?;
 
         sqlx::query(
@@ -428,6 +441,19 @@ impl AccessStore for WorkspaceRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
+}
+
+async fn lock_workspace(tx: &mut sqlx::PgConnection, workspace_id: Uuid) -> Result<()> {
+    let found: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 FOR UPDATE")
+            .bind(workspace_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+    if found.is_none() {
+        return Err(Error::not_found("workspace not found"));
+    }
+    Ok(())
 }
 
 /// Lock the live owner rows and reject a change that would leave the workspace

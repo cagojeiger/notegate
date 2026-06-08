@@ -10,6 +10,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
+use super::checks;
 
 /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
 pub async fn soft_delete_node(
@@ -19,6 +20,8 @@ pub async fn soft_delete_node(
     deleted_by: Uuid,
 ) -> Result<()> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    checks::lock_workspace(&mut tx, workspace_id).await?;
 
     // Bound the synchronous delete by the live subtree size.
     let subtree: i64 = sqlx::query_scalar(

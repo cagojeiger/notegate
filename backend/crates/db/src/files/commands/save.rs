@@ -26,6 +26,8 @@ pub async fn save_document_content(
 ) -> Result<(Node, Document)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
+    checks::lock_workspace(&mut tx, workspace_id).await?;
+
     // Current byte length/hash (for budget delta + optimistic guard); the
     // document row is locked so `expected_sha256` is compared atomically with
     // the following update.

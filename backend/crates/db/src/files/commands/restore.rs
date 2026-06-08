@@ -27,6 +27,8 @@ pub async fn restore_node(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
+    checks::lock_workspace(&mut tx, workspace_id).await?;
+
     // The target must exist and be soft-deleted; the root is never deleted.
     let row: Option<(Option<Uuid>, String)> = sqlx::query_as(
         "SELECT parent_id, name FROM nodes \
