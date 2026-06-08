@@ -10,9 +10,12 @@ Input:
 {
   "workspace": "personal",
   "path": "/projects",
-  "limit": 100
+  "limit": 100,
+  "cursor": "opaque-cursor"
 }
 ```
+
+첫 page에서는 `cursor`를 생략하고, 이후 page는 이전 응답의 `page.next_cursor`를 그대로 다시 전달한다.
 
 Output:
 

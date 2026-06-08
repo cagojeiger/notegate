@@ -113,11 +113,13 @@ malformed cursor -> 400 invalid input
 Cursor tuples:
 
 ```text
-children   -> sort_order, name, id
-workspaces -> created_at, id
-access     -> id
-agents     -> id
+children   -> sort_order ASC, name ASC, id ASC
+workspaces -> created_at ASC, id ASC
+access     -> account id over the service-materialized, stable access list
+agents     -> agent id over the service-materialized, stable agent list
 ```
+
+Cursor format은 opaque이며 service-owned다. REST/MCP surface는 cursor 문자열을 해석하지 않고 그대로 전달한다.
 
 ## Search limits
 
@@ -151,9 +153,11 @@ missing scope path -> 404 not found / MCP invalid params kind=not_found
 Cursor tuples:
 
 ```text
-find -> name, id
-grep -> updated_at, node_id, match_offset
+find -> name ASC, id ASC
+grep -> updated_at DESC, node_id ASC, match_offset
 ```
+
+`match_offset`은 한 document 안의 match 수가 page limit보다 많을 때 같은 document 내부에서 이어 읽기 위한 값이다.
 
 ## Read limits
 

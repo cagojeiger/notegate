@@ -130,10 +130,10 @@ List/search page shape:
 Branching:
 
 ```text
-missing limit    -> tool default
-limit < 1        -> 1
-limit > max      -> max
-malformed cursor -> invalid params
+missing limit             -> tool default
+limit < 1                 -> 1
+limit > max               -> max
+malformed/tampered cursor -> invalid params
 ```
 
 Read branching:

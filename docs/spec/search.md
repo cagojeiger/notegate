@@ -178,7 +178,7 @@ Cursors are signed; malformed or tampered cursors are rejected.
 - `find_default_limit = 50`, `find_max_limit = 100`
 - `grep_default_limit = 20`, `grep_max_limit = 100`
 
-`find` cursor is based on the stable ordering used for node metadata results, currently `(name, id)`.
-`grep` cursor is based on the stable ordering used for content candidates, currently `(updated_at, node_id)`
-plus an intra-document match offset when needed. Invalid or tampered cursors return `400 invalid cursor`;
+`find` cursor is based on the stable ordering used for node metadata results, currently `(name ASC, id ASC)`.
+`grep` cursor is based on the stable ordering used for content candidates, currently `(updated_at DESC, node_id ASC)`
+plus an intra-document `match_offset` when needed. Invalid or tampered cursors return `400 invalid cursor`;
 stale cursors are not a stable client contract.
