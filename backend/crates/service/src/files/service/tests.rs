@@ -100,13 +100,6 @@ impl MemStore {
         id
     }
 
-    fn mark_deleted(&self, id: Uuid) {
-        if let Some(node) = self.lock().nodes.get_mut(&id) {
-            node.deleted_at = Some(Utc::now());
-            node.deleted_by = Some(actor());
-        }
-    }
-
     fn derive_path(state: &State, id: Uuid) -> Option<String> {
         let node = state.nodes.get(&id)?;
         match node.parent_id {
@@ -171,6 +164,7 @@ fn raw_node(
         created_by: actor(),
         updated_by: actor(),
         deleted_by: None,
+        purge_after: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
         deleted_at: None,
@@ -192,15 +186,6 @@ impl FilesStore for MemStore {
             .nodes
             .get(&id)
             .filter(|n| n.deleted_at.is_none())
-            .cloned())
-    }
-
-    async fn find_deleted_node(&self, _ws: Uuid, id: Uuid) -> CoreResult<Option<Node>> {
-        Ok(self
-            .lock()
-            .nodes
-            .get(&id)
-            .filter(|n| n.deleted_at.is_some())
             .cloned())
     }
 
@@ -341,21 +326,6 @@ impl FilesStore for MemStore {
         Ok(Self::is_descendant(&self.lock(), node_id, candidate))
     }
 
-    async fn has_deleted_ancestor(&self, _ws: Uuid, id: Uuid) -> CoreResult<bool> {
-        let state = self.lock();
-        let mut current = state.nodes.get(&id).and_then(|n| n.parent_id);
-        while let Some(parent) = current {
-            let Some(node) = state.nodes.get(&parent) else {
-                break;
-            };
-            if node.deleted_at.is_some() {
-                return Ok(true);
-            }
-            current = node.parent_id;
-        }
-        Ok(false)
-    }
-
     async fn insert_folder(
         &self,
         _ws: Uuid,
@@ -481,7 +451,12 @@ impl FilesStore for MemStore {
         Ok(node.clone())
     }
 
-    async fn soft_delete_node(&self, _ws: Uuid, node_id: Uuid, deleted_by: Uuid) -> CoreResult<()> {
+    async fn soft_delete_node(
+        &self,
+        _ws: Uuid,
+        node_id: Uuid,
+        deleted_by: Uuid,
+    ) -> CoreResult<chrono::DateTime<Utc>> {
         // Soft-delete the node and its live subtree.
         let ids = {
             let state = self.lock();
@@ -495,24 +470,17 @@ impl FilesStore for MemStore {
             }
             all
         };
+        let deleted_at = Utc::now();
+        let purge_after = deleted_at + chrono::Duration::days(limits::DELETED_NODE_RETENTION_DAYS);
         let mut state = self.lock();
         for id in ids {
             if let Some(node) = state.nodes.get_mut(&id) {
-                node.deleted_at = Some(Utc::now());
+                node.deleted_at = Some(deleted_at);
                 node.deleted_by = Some(deleted_by);
+                node.purge_after = Some(purge_after);
             }
         }
-        Ok(())
-    }
-
-    async fn restore_node(&self, _ws: Uuid, node_id: Uuid, restored_by: Uuid) -> CoreResult<Node> {
-        let mut state = self.lock();
-        let node = state.nodes.get_mut(&node_id).expect("node");
-        node.deleted_at = None;
-        node.deleted_by = None;
-        node.updated_by = restored_by;
-        node.updated_at = Utc::now();
-        Ok(node.clone())
+        Ok(purge_after)
     }
 }
 
@@ -1096,16 +1064,20 @@ async fn rm_folder_without_recursive_is_conflict() {
 async fn rm_document_succeeds_without_recursive() {
     let (svc, store) = service(Some(Role::Editor));
     let doc = store.add_document(store.root_id, "n.md", "x");
-    svc.delete_node(
-        actor(),
-        store.workspace_id,
-        DeleteNode {
-            node_id: doc,
-            recursive: false,
-        },
-    )
-    .await
-    .unwrap();
+    let result = svc
+        .delete_node(
+            actor(),
+            store.workspace_id,
+            DeleteNode {
+                node_id: doc,
+                recursive: false,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.node_id, doc);
+    assert_eq!(result.path, "/n.md");
+    assert!(result.purge_after > Utc::now());
     assert!(
         store
             .find_node(store.workspace_id, doc)
@@ -1113,56 +1085,6 @@ async fn rm_document_succeeds_without_recursive() {
             .unwrap()
             .is_none()
     );
-}
-
-// --- restore ---
-
-#[tokio::test]
-async fn restore_rejects_when_ancestor_deleted() {
-    let (svc, store) = service(Some(Role::Editor));
-    let parent = store.add_folder(store.root_id, "parent");
-    let child = store.add_document(parent, "note.md", "x");
-    // Delete the child, then also delete the parent (ancestor still deleted).
-    store.mark_deleted(child);
-    store.mark_deleted(parent);
-    let err = svc
-        .restore_node(actor(), store.workspace_id, RestoreNode { node_id: child })
-        .await
-        .unwrap_err();
-    assert!(matches!(err, ServiceError::Conflict(_)));
-}
-
-#[tokio::test]
-async fn restore_succeeds_with_live_ancestor() {
-    let (svc, store) = service(Some(Role::Editor));
-    let parent = store.add_folder(store.root_id, "parent");
-    let child = store.add_document(parent, "note.md", "x");
-    store.mark_deleted(child);
-    let view = svc
-        .restore_node(actor(), store.workspace_id, RestoreNode { node_id: child })
-        .await
-        .unwrap();
-    assert_eq!(view.path, "/parent/note.md");
-    assert!(view.node.deleted_at.is_none());
-}
-
-#[tokio::test]
-async fn restore_rejects_sibling_name_conflict() {
-    let (svc, store) = service(Some(Role::Editor));
-    let parent = store.add_folder(store.root_id, "parent");
-    let deleted = store.add_document(parent, "note.md", "x");
-    store.mark_deleted(deleted);
-    // A live sibling now occupies the same name.
-    store.add_document(parent, "note.md", "y");
-    let err = svc
-        .restore_node(
-            actor(),
-            store.workspace_id,
-            RestoreNode { node_id: deleted },
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, ServiceError::Conflict(_)));
 }
 
 // --- ls pagination ---

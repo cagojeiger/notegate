@@ -5,6 +5,7 @@
 //! re-checked in-tx against `subtree_delete_max_nodes`; a larger subtree is
 //! rejected so a synchronous delete never touches an unbounded number of rows.
 
+use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ pub async fn soft_delete_node(
     workspace_id: Uuid,
     node_id: Uuid,
     deleted_by: Uuid,
-) -> Result<()> {
+) -> Result<DateTime<Utc>> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_workspace(&mut tx, workspace_id).await?;
@@ -51,6 +52,13 @@ pub async fn soft_delete_node(
         )));
     }
 
+    let purge_after: DateTime<Utc> =
+        sqlx::query_scalar("SELECT now() + ($1::bigint * interval '1 day')")
+            .bind(limits::DELETED_NODE_RETENTION_DAYS)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+
     // Soft-delete the whole live subtree in one statement.
     sqlx::query(
         "WITH RECURSIVE subtree AS ( \
@@ -60,16 +68,17 @@ pub async fn soft_delete_node(
             SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
             WHERE n.workspace_id = $1 AND n.deleted_at IS NULL \
          ) \
-         UPDATE nodes SET deleted_at = now(), deleted_by = $3 \
+         UPDATE nodes SET deleted_at = now(), deleted_by = $3, purge_after = $4 \
          WHERE workspace_id = $1 AND id IN (SELECT id FROM subtree)",
     )
     .bind(workspace_id)
     .bind(node_id)
     .bind(deleted_by)
+    .bind(purge_after)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
-    Ok(())
+    Ok(purge_after)
 }

@@ -1,4 +1,4 @@
-//! `files_rm`: soft-delete a path (`docs/spec/mcp/files.md`). Requires `editor`.
+//! `files_rm`: delete a path (`docs/spec/mcp/files.md`). Requires `editor`.
 //!
 //! Resolves the path to a node, then soft-deletes it. Folder deletion requires
 //! `recursive=true`; root deletion is forbidden; an over-large subtree is
@@ -56,7 +56,7 @@ pub async fn call(
         .await
         .map_err(service_error)?;
 
-    state
+    let result = state
         .files
         .delete_node(
             account_id,
@@ -71,7 +71,9 @@ pub async fn call(
 
     Ok(Json(json!({
         "workspace": resolved.name(),
-        "path": node.path,
+        "path": result.path,
+        "node_id": result.node_id,
         "deleted": true,
+        "purge_after": result.purge_after,
     })))
 }

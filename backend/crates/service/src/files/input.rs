@@ -100,9 +100,3 @@ pub struct DeleteNode {
     /// Folder deletion requires `recursive=true`.
     pub recursive: bool,
 }
-
-/// Restore command (`restore`): un-soft-delete a node.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RestoreNode {
-    pub node_id: Uuid,
-}

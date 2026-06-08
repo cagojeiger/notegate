@@ -20,6 +20,7 @@ pub struct NodeRow {
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub deleted_by: Option<Uuid>,
+    pub purge_after: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -40,6 +41,7 @@ impl NodeRow {
             created_by: self.created_by,
             updated_by: self.updated_by,
             deleted_by: self.deleted_by,
+            purge_after: self.purge_after,
             created_at: self.created_at,
             updated_at: self.updated_at,
             deleted_at: self.deleted_at,
@@ -81,7 +83,7 @@ impl From<DocumentRow> for Document {
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
 pub const NODE_COLUMNS: &str = "id, workspace_id, parent_id, name, kind, sort_order, \
-     created_by, updated_by, deleted_by, created_at, updated_at, deleted_at";
+     created_by, updated_by, deleted_by, purge_after, created_at, updated_at, deleted_at";
 
 /// Selectable columns of `documents`, in [`DocumentRow`] order.
 pub const DOCUMENT_COLUMNS: &str = "node_id, workspace_id, content_md, content_sha256, \

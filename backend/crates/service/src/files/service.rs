@@ -1,5 +1,5 @@
 //! File-tree command service: `ls` / `stat` / `mkdir` / `touch` / `read` /
-//! `write` / `patch` / `mv` / `rm` / `restore`.
+//! `write` / `patch` / `mv` / `rm`.
 //!
 //! Every command takes `(caller_account_id, workspace_id, ...)`. The service:
 //!
@@ -25,10 +25,11 @@ use crate::error::{ServiceError, ServiceResult};
 use super::content;
 use super::input::{
     ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, MoveNode, PatchDocument,
-    ReadDocument, RestoreNode, WriteDocument, WriteTarget,
+    ReadDocument, WriteDocument, WriteTarget,
 };
 use super::output::{
-    ChildrenCursor, ChildrenPage, DocumentView, NodeView, PatchResult, ReadContent, ReadResult,
+    ChildrenCursor, ChildrenPage, DeleteResult, DocumentView, NodeView, PatchResult, ReadContent,
+    ReadResult,
 };
 use super::patch::{apply_edits, unified_diff};
 use super::policy::{self, FileCommand};
@@ -572,13 +573,17 @@ where
         self.node_view(workspace_id, updated).await
     }
 
-    /// Soft-delete a node (`rm`). Requires `editor`.
+    /// Delete a node (`rm`). Requires `editor`.
+    ///
+    /// The node is hidden immediately by soft-deleting the live subtree. Public
+    /// recovery is intentionally not part of the product contract; the returned
+    /// `purge_after` is when an internal purge job may hard-delete the rows.
     pub async fn delete_node(
         &self,
         caller_account_id: Uuid,
         workspace_id: Uuid,
         command: DeleteNode,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<DeleteResult> {
         self.authorize(workspace_id, caller_account_id, FileCommand::Rm)
             .await?;
 
@@ -604,83 +609,17 @@ where
             }
         }
 
-        self.store
+        let path = self.path_of(workspace_id, node.id).await?;
+        let purge_after = self
+            .store
             .soft_delete_node(workspace_id, node.id, caller_account_id)
             .await?;
-        Ok(())
-    }
 
-    /// Restore a soft-deleted node (`restore`). Requires `editor`.
-    ///
-    /// Re-validates sibling-name uniqueness, fanout, and resulting depth against
-    /// the current (live) tree, and rejects the restore if any ancestor is still
-    /// soft-deleted (a deleted parent chain would orphan the node) with an
-    /// actionable hint to restore the ancestor first.
-    pub async fn restore_node(
-        &self,
-        caller_account_id: Uuid,
-        workspace_id: Uuid,
-        command: RestoreNode,
-    ) -> ServiceResult<NodeView> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Restore)
-            .await?;
-
-        let node = self
-            .store
-            .find_deleted_node(workspace_id, command.node_id)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("deleted node not found".to_owned()))?;
-
-        let Some(parent_id) = node.parent_id else {
-            return Err(ServiceError::Conflict(
-                "the root node is never deleted".to_owned(),
-            ));
-        };
-
-        // Reject when the parent chain is still deleted.
-        if self
-            .store
-            .has_deleted_ancestor(workspace_id, command.node_id)
-            .await?
-        {
-            return Err(ServiceError::Conflict(
-                "an ancestor is still deleted; restore the ancestor folder first".to_owned(),
-            ));
-        }
-
-        // Sibling-name uniqueness against the now-live parent.
-        if let Some(conflict) = self
-            .store
-            .find_live_child_by_name(workspace_id, parent_id, &node.name)
-            .await?
-            && conflict.id != node.id
-        {
-            return Err(ServiceError::Conflict(format!(
-                "a live node named '{}' already exists; rename before restoring",
-                node.name
-            )));
-        }
-
-        // Fanout and resulting depth.
-        let children = self
-            .store
-            .count_live_children(workspace_id, parent_id)
-            .await?;
-        validation::validate_fanout(children, self.limits)?;
-
-        let parent_path = self.path_of(workspace_id, parent_id).await?;
-        let parent_depth = path_depth(&parent_path);
-        let subtree_depth = self
-            .store
-            .subtree_relative_depth(workspace_id, command.node_id)
-            .await?;
-        validation::validate_depth(parent_depth + 1 + subtree_depth)?;
-
-        let restored = self
-            .store
-            .restore_node(workspace_id, command.node_id, caller_account_id)
-            .await?;
-        self.node_view(workspace_id, restored).await
+        Ok(DeleteResult {
+            node_id: node.id,
+            path,
+            purge_after,
+        })
     }
 
     // --- internal helpers ---

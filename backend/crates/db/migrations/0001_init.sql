@@ -93,6 +93,7 @@ CREATE TABLE nodes (
     created_by UUID NOT NULL REFERENCES accounts(id),
     updated_by UUID NOT NULL REFERENCES accounts(id),
     deleted_by UUID REFERENCES accounts(id),
+    purge_after TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -111,10 +112,14 @@ CREATE TABLE nodes (
     CHECK (kind <> 'document' OR name LIKE '%.md'),
     CHECK (kind <> 'folder' OR parent_id IS NULL OR name NOT LIKE '%.md'),
     CHECK (
-        (deleted_at IS NULL AND deleted_by IS NULL)
-        OR (deleted_at IS NOT NULL AND deleted_by IS NOT NULL)
+        (deleted_at IS NULL AND deleted_by IS NULL AND purge_after IS NULL)
+        OR (deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND purge_after IS NOT NULL)
     )
 );
+
+CREATE INDEX nodes_purge_due_idx
+    ON nodes(purge_after, workspace_id, id)
+    WHERE deleted_at IS NOT NULL;
 
 CREATE UNIQUE INDEX nodes_one_root_per_workspace
     ON nodes(workspace_id)

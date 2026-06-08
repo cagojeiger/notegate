@@ -4,6 +4,7 @@
 
 use std::future::Future;
 
+use chrono::{DateTime, Utc};
 use notegate_core::Result as CoreResult;
 use notegate_model::{Document, Node, Role};
 use uuid::Uuid;
@@ -14,9 +15,8 @@ use super::output::ChildrenCursor;
 /// Persistence and authorization for the file tree. The `db` crate implements
 /// this; the service stays free of sqlx/axum.
 ///
-/// Read methods exclude soft-deleted rows unless the name says otherwise
-/// (`find_deleted_node`, `has_deleted_ancestor`). Count methods count only live
-/// rows. Mutations are attributed via the trailing account argument.
+/// Read methods exclude soft-deleted rows. Count methods count only live rows.
+/// Mutations are attributed via the trailing account argument.
 pub trait FilesStore: Clone + Send + Sync + 'static {
     // --- authorization ---
 
@@ -34,13 +34,6 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
 
     /// Load a live node by id within a workspace.
     fn find_node(
-        &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-    ) -> impl Future<Output = CoreResult<Option<Node>>> + Send;
-
-    /// Load a soft-deleted node by id (used by `restore`).
-    fn find_deleted_node(
         &self,
         workspace_id: Uuid,
         node_id: Uuid,
@@ -122,7 +115,7 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
 
     /// The maximum depth of any live descendant relative to `node_id` (0 if the
     /// node has no live children). Used to validate resulting subtree depth on
-    /// move and restore.
+    /// move.
     fn subtree_relative_depth(
         &self,
         workspace_id: Uuid,
@@ -144,14 +137,6 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
         workspace_id: Uuid,
         node_id: Uuid,
         candidate_id: Uuid,
-    ) -> impl Future<Output = CoreResult<bool>> + Send;
-
-    /// Whether any ancestor of `node_id` is currently soft-deleted. Used to
-    /// reject restoring a node whose parent chain is still deleted.
-    fn has_deleted_ancestor(
-        &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
     ) -> impl Future<Output = CoreResult<bool>> + Send;
 
     // --- mutations (attributed) ---
@@ -208,21 +193,14 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
         updated_by: Uuid,
     ) -> impl Future<Output = CoreResult<Node>> + Send;
 
-    /// Soft-delete a node (and its live subtree for folders), attributing it.
+    /// Soft-delete a node (and its live subtree for folders), attributing it and
+    /// returning the purge eligibility timestamp.
     fn soft_delete_node(
         &self,
         workspace_id: Uuid,
         node_id: Uuid,
         deleted_by: Uuid,
-    ) -> impl Future<Output = CoreResult<()>> + Send;
-
-    /// Restore a soft-deleted node (and its subtree), attributing the update.
-    fn restore_node(
-        &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-        restored_by: Uuid,
-    ) -> impl Future<Output = CoreResult<Node>> + Send;
+    ) -> impl Future<Output = CoreResult<DateTime<Utc>>> + Send;
 }
 
 /// Pre-computed document content plus its metrics, handed to the store so the

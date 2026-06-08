@@ -112,6 +112,8 @@ pub const DOCUMENT_MAX_LINES: usize = 2_000;
 
 /// Maximum nodes a synchronous folder delete may touch.
 pub const SUBTREE_DELETE_MAX_NODES: usize = 1_000;
+/// Days a deleted node is retained before it is eligible for hard purge.
+pub const DELETED_NODE_RETENTION_DAYS: i64 = 30;
 
 // --- API pagination limits ---
 

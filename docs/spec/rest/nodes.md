@@ -123,5 +123,5 @@ Rules:
 - Document delete does not require `recursive=true`.
 - Folder delete requires `recursive=true`.
 - Delete is soft delete on `nodes`; deleted nodes disappear from normal list/search/resolve.
-- Deleted nodes are not user-restorable in the current REST contract.
+- Deleted nodes are not recoverable through the current REST contract.
 - Deleted nodes are retained until `purge_after`; after that an internal purge job may hard-delete them.

@@ -22,7 +22,7 @@ use notegate_db::{FilesRepo, WorkspaceRepo};
 use notegate_service::files::input::Edit;
 use notegate_service::files::{
     ChildrenCursor, CreateDocument, CreateFolder, DeleteNode, FilesService, FilesStore, MoveNode,
-    PatchDocument, ReadDocument, RestoreNode, WriteDocument, WriteTarget,
+    PatchDocument, ReadDocument, WriteDocument, WriteTarget,
 };
 use notegate_service::search::{FindCursor, SearchStore};
 use notegate_service::workspaces::{CreateWorkspace, WorkspaceStore};
@@ -48,8 +48,8 @@ async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (U
 }
 
 /// The full lifecycle: create ws → mkdir → touch → write → read → patch →
-/// find(name) → grep → mv → rm → restore, asserting attribution is
-/// populated throughout and the derived path follows an O(1) move.
+/// find(name) → grep → mv → rm, asserting attribution is populated throughout
+/// and the derived path follows an O(1) move.
 #[tokio::test]
 async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -220,8 +220,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         "derived path reflects the move",
     );
 
-    // --- rm: soft-delete the moved document ---
-    files
+    // --- rm: hide the moved document and mark it purge-eligible later ---
+    let deleted = files
         .delete_node(
             owner,
             ws,
@@ -231,29 +231,22 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             },
         )
         .await?;
+    assert_eq!(deleted.node_id, note_id);
+    assert_eq!(deleted.path, "/archive/note.md");
     assert!(
         repo.find_node(ws, note_id).await?.is_none(),
-        "rm soft-deletes (no longer live)"
+        "rm hides the node from live reads"
     );
-    let deleted = repo
-        .find_deleted_node(ws, note_id)
-        .await?
-        .expect("deleted row");
-    assert_eq!(deleted.deleted_by, Some(owner), "rm sets deleted_by");
-
-    // --- restore: bring the document back under its (live) parent ---
-    let restored = files
-        .restore_node(owner, ws, RestoreNode { node_id: note_id })
+    let (deleted_by, purge_after): (Option<Uuid>, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as(
+            "SELECT deleted_by, purge_after FROM nodes WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(ws)
+        .bind(note_id)
+        .fetch_one(&db.pool)
         .await?;
-    assert_eq!(
-        restored.path, "/archive/note.md",
-        "restore derives the path"
-    );
-    assert!(restored.node.deleted_at.is_none());
-    assert!(
-        repo.find_node(ws, note_id).await?.is_some(),
-        "restore makes the node live again"
-    );
+    assert_eq!(deleted_by, Some(owner), "rm sets deleted_by");
+    assert_eq!(purge_after, Some(deleted.purge_after));
 
     db.cleanup().await;
     Ok(())

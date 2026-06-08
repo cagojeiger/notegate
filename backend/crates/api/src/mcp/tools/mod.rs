@@ -19,7 +19,6 @@ pub mod files_mkdir;
 pub mod files_mv;
 pub mod files_patch;
 pub mod files_read;
-pub mod files_restore;
 pub mod files_rm;
 pub mod files_stat;
 pub mod files_touch;

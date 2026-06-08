@@ -212,7 +212,7 @@ pub async fn require_byte_budget(
 }
 
 /// Enforce sibling-name uniqueness among live children of `parent_id`, ignoring
-/// `ignore_id` (the node being moved/restored, for in-place operations).
+/// `ignore_id` (the node being moved, for in-place operations).
 pub async fn require_sibling_unique(
     tx: &mut PgConnection,
     workspace_id: Uuid,

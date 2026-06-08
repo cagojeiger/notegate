@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! viewer = list/stat/read/find/grep
-//! editor = viewer + write/patch/mkdir/touch/move/delete (+ restore)
+//! editor = viewer + write/patch/mkdir/touch/move/delete
 //! owner  = editor
 //! ```
 //!
@@ -41,10 +41,8 @@ pub enum FileCommand {
     Patch,
     /// Move or rename a node.
     Mv,
-    /// Soft-delete a node.
+    /// Delete a node.
     Rm,
-    /// Restore a soft-deleted node.
-    Restore,
 }
 
 impl FileCommand {
@@ -52,13 +50,9 @@ impl FileCommand {
     pub fn min_role(self) -> Role {
         match self {
             Self::Ls | Self::Stat | Self::Read | Self::Find | Self::Grep => Role::Viewer,
-            Self::Mkdir
-            | Self::Touch
-            | Self::Write
-            | Self::Patch
-            | Self::Mv
-            | Self::Rm
-            | Self::Restore => Role::Editor,
+            Self::Mkdir | Self::Touch | Self::Write | Self::Patch | Self::Mv | Self::Rm => {
+                Role::Editor
+            }
         }
     }
 
@@ -76,7 +70,6 @@ impl FileCommand {
             Self::Patch => "patch",
             Self::Mv => "mv",
             Self::Rm => "rm",
-            Self::Restore => "restore",
         }
     }
 }
@@ -134,7 +127,6 @@ mod tests {
             FileCommand::Patch,
             FileCommand::Mv,
             FileCommand::Rm,
-            FileCommand::Restore,
         ];
         for command in mutate {
             assert!(
@@ -155,7 +147,6 @@ mod tests {
             FileCommand::Patch,
             FileCommand::Mv,
             FileCommand::Rm,
-            FileCommand::Restore,
         ];
         for command in mutate {
             assert!(
@@ -179,7 +170,6 @@ mod tests {
             FileCommand::Patch,
             FileCommand::Mv,
             FileCommand::Rm,
-            FileCommand::Restore,
         ];
         for command in all {
             assert!(

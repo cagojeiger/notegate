@@ -2,8 +2,8 @@
 //!
 //! `GET /paths/resolve?path=`, `GET /nodes/{id}`, `GET /nodes/{id}/children`
 //! (paginated), `POST /nodes` (create folder/document), `PATCH /nodes/{id}`
-//! (rename / reorder), `POST /nodes/{id}/move`, `DELETE /nodes/{id}`, and
-//! `POST /nodes/{id}/restore`. All handlers delegate to the files service,
+//! (rename / reorder), `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
+//! All handlers delegate to the files service,
 //! which owns authorization (no live role ⇒ 404, lesser role ⇒ 403) and
 //! validation.
 
@@ -24,7 +24,7 @@ use crate::state::AppState;
 use notegate_service::cursor;
 use notegate_service::files::{
     ChildrenCursor, ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, MoveNode,
-    RestoreNode, WriteDocument, WriteTarget,
+    WriteDocument, WriteTarget,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -45,10 +45,6 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
             post(move_node),
-        )
-        .route(
-            "/v1/workspaces/{workspace_id}/nodes/{node_id}/restore",
-            post(restore),
         )
 }
 
@@ -407,33 +403,4 @@ pub(crate) async fn delete(
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Restore a soft-deleted node (and its subtree). Requires `editor`. A deleted
-/// node is addressed by id (it no longer resolves by path). The files service
-/// re-validates sibling-name uniqueness, fanout, and depth, and rejects the
-/// restore with a conflict when an ancestor is still deleted (the locked orphan
-/// rule) — restore the ancestor first.
-#[utoipa::path(
-    post,
-    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/restore",
-    tag = "nodes",
-    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    responses((status = 200, description = "Restore node", body = NodeOut)),
-    security(("bearer_auth" = []))
-)]
-pub(crate) async fn restore(
-    State(state): State<AppState>,
-    Extension(caller): Extension<Caller>,
-    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<NodeOut>, ApiError> {
-    let view = state
-        .files
-        .restore_node(caller.account_id(), workspace_id, RestoreNode { node_id })
-        .await?;
-    let refs = state
-        .accounts
-        .find_account_refs(&attribution_ids([&view]))
-        .await?;
-    Ok(Json(NodeOut::from_view(&view, &refs)))
 }

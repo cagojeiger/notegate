@@ -7,6 +7,5 @@ pub mod checks;
 pub mod create;
 pub mod delete;
 pub mod move_node;
-pub mod restore;
 pub mod save;
 pub mod update;

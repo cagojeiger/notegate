@@ -18,10 +18,11 @@ pub mod validation;
 pub use content::{Metrics, compute as content_metrics};
 pub use input::{
     ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, Edit, MoveNode, PatchDocument,
-    ReadDocument, RestoreNode, WriteDocument, WriteTarget,
+    ReadDocument, WriteDocument, WriteTarget,
 };
 pub use output::{
-    ChildrenCursor, ChildrenPage, DocumentView, NodeView, PatchResult, ReadContent, ReadResult,
+    ChildrenCursor, ChildrenPage, DeleteResult, DocumentView, NodeView, PatchResult, ReadContent,
+    ReadResult,
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::{FileCommand, require as require_role};

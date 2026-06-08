@@ -216,7 +216,7 @@ impl McpServer {
 
     #[tool(
         name = "files_rm",
-        description = "Soft-delete a path.",
+        description = "Delete a path.",
         output_schema = object_output_schema()
     )]
     pub async fn files_rm_tool(
@@ -225,19 +225,6 @@ impl McpServer {
         params: Parameters<tools::files_rm::Input>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::files_rm::call(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_restore",
-        description = "Restore a soft-deleted node by id.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_restore_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files_restore::Input>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files_restore::call(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -366,7 +353,7 @@ mod tests {
     fn every_tool_output_schema_is_a_valid_object() {
         let router = McpServer::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 16, "expected me + 15 file/workspace tools");
+        assert_eq!(tools.len(), 15, "expected me + 14 file/workspace tools");
         for tool in &tools {
             if let Some(schema) = &tool.output_schema {
                 assert_eq!(

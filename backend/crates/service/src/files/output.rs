@@ -3,6 +3,7 @@
 //! Every view carries the derived display `path` (never stored on the node — ADR
 //! Option B). Read/patch outputs carry the range/metric fields the spec returns.
 
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use notegate_model::{Document, Node};
@@ -39,6 +40,15 @@ pub struct ChildrenPage {
     pub limit: i64,
     pub has_more: bool,
     pub next_cursor: Option<ChildrenCursor>,
+}
+
+/// Result of `rm`: the root node is hidden immediately and eligible for hard
+/// purge at `purge_after`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteResult {
+    pub node_id: Uuid,
+    pub path: String,
+    pub purge_after: DateTime<Utc>,
 }
 
 /// The result of a `read`/`open`: either a bounded content slice, or an

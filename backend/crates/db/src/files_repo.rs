@@ -10,6 +10,7 @@
 //! derived by workspace-bounded recursive CTEs (see `files::queries`);
 //! move/rename updates only the moved node's row (O(1), no descendant rewrite).
 
+use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_model::{Document, Node, NodeKind, Role};
@@ -48,10 +49,6 @@ impl FilesStore for FilesRepo {
 
     async fn find_node(&self, workspace_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
         queries::node::find_node(&self.pool, workspace_id, node_id).await
-    }
-
-    async fn find_deleted_node(&self, workspace_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
-        queries::node::find_deleted_node(&self.pool, workspace_id, node_id).await
     }
 
     async fn node_path(&self, workspace_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
@@ -125,10 +122,6 @@ impl FilesStore for FilesRepo {
         candidate_id: Uuid,
     ) -> Result<bool> {
         queries::node::is_self_or_descendant(&self.pool, workspace_id, node_id, candidate_id).await
-    }
-
-    async fn has_deleted_ancestor(&self, workspace_id: Uuid, node_id: Uuid) -> Result<bool> {
-        queries::node::has_deleted_ancestor(&self.pool, workspace_id, node_id).await
     }
 
     async fn insert_folder(
@@ -230,18 +223,8 @@ impl FilesStore for FilesRepo {
         workspace_id: Uuid,
         node_id: Uuid,
         deleted_by: Uuid,
-    ) -> Result<()> {
+    ) -> Result<DateTime<Utc>> {
         commands::delete::soft_delete_node(&self.pool, workspace_id, node_id, deleted_by).await
-    }
-
-    async fn restore_node(
-        &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-        restored_by: Uuid,
-    ) -> Result<Node> {
-        commands::restore::restore_node(&self.pool, workspace_id, node_id, restored_by, self.limits)
-            .await
     }
 }
 

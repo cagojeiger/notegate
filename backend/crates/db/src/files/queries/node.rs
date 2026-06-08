@@ -60,24 +60,6 @@ pub async fn find_node(pool: &PgPool, workspace_id: Uuid, node_id: Uuid) -> Resu
     row.map(NodeRow::into_node).transpose()
 }
 
-/// Load a soft-deleted node by id (used by `restore`).
-pub async fn find_deleted_node(
-    pool: &PgPool,
-    workspace_id: Uuid,
-    node_id: Uuid,
-) -> Result<Option<Node>> {
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NOT NULL"
-    ))
-    .bind(workspace_id)
-    .bind(node_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(map_sqlx_error)?;
-    row.map(NodeRow::into_node).transpose()
-}
-
 /// The derived absolute display path of a live node (root = `/`), or `None`.
 ///
 /// Walks the parent chain upward via a recursive CTE, prepending each ancestor's
@@ -328,38 +310,6 @@ pub async fn is_self_or_descendant(
     Ok(found)
 }
 
-/// Whether any ancestor of `node_id` is currently soft-deleted. Walks the parent
-/// chain upward without the live filter, checking each ancestor's `deleted_at`.
-pub async fn has_deleted_ancestor(
-    pool: &PgPool,
-    workspace_id: Uuid,
-    node_id: Uuid,
-) -> Result<bool> {
-    let found: bool = sqlx::query_scalar(
-        "WITH RECURSIVE chain AS ( \
-            SELECT id, parent_id, deleted_at, 0 AS depth \
-            FROM nodes \
-            WHERE workspace_id = $1 AND id = $2 \
-            UNION ALL \
-            SELECT n.id, n.parent_id, n.deleted_at, c.depth + 1 \
-            FROM nodes n \
-            JOIN chain c ON n.id = c.parent_id \
-            WHERE n.workspace_id = $1 \
-         ) \
-         SELECT EXISTS ( \
-            SELECT 1 FROM chain WHERE depth > 0 AND deleted_at IS NOT NULL \
-         )",
-    )
-    .bind(workspace_id)
-    .bind(node_id)
-    .fetch_one(pool)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(found)
-}
-
-/// Convert a non-negative `count(*)`/`max(depth)` to `usize`, erroring on a
-/// negative value (impossible, but checked instead of silently wrapping).
 fn to_usize(value: i64, label: &str) -> Result<usize> {
     usize::try_from(value)
         .map_err(|_error| notegate_core::Error::internal(format!("negative {label} count")))

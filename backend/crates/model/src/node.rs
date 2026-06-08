@@ -53,6 +53,7 @@ pub struct Node {
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub deleted_by: Option<Uuid>,
+    pub purge_after: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,

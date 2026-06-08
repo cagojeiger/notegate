@@ -273,5 +273,5 @@ Rules:
 - Folder deletion requires `recursive=true`.
 - Root deletion is forbidden.
 - Subtree larger than the synchronous delete limit is rejected with a narrowing hint.
-- Deleted nodes are not user-restorable in the current MCP contract.
+- Deleted nodes are not recoverable through the current MCP contract.
 - `purge_after` is the earliest time an internal purge job may hard-delete the rows.
