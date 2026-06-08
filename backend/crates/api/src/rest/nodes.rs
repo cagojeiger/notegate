@@ -55,7 +55,10 @@ pub(crate) struct ResolveQuery {
     get,
     path = "/api/v1/workspaces/{workspace_id}/paths/resolve",
     tag = "nodes",
-    params(("workspace_id" = Uuid, Path, description = "Workspace id")),
+    params(
+        ("workspace_id" = Uuid, Path, description = "Workspace id"),
+        ("path" = String, Query, description = "Absolute path inside the workspace"),
+    ),
     responses((status = 200, description = "Resolve a path to a node", body = NodeOut)),
     security(("bearer_auth" = []))
 )]
@@ -117,7 +120,12 @@ pub(crate) struct ChildrenResponse {
     get,
     path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
     tag = "nodes",
-    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    params(
+        ("workspace_id" = Uuid, Path),
+        ("node_id" = Uuid, Path),
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
     responses((status = 200, description = "List children", body = ChildrenResponse)),
     security(("bearer_auth" = []))
 )]
@@ -350,7 +358,11 @@ pub(crate) struct DeleteQuery {
     delete,
     path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
     tag = "nodes",
-    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    params(
+        ("workspace_id" = Uuid, Path),
+        ("node_id" = Uuid, Path),
+        ("recursive" = Option<bool>, Query, description = "Required to delete folders"),
+    ),
     responses((status = 204, description = "Delete node")),
     security(("bearer_auth" = []))
 )]

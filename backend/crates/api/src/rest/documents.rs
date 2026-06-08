@@ -84,7 +84,14 @@ pub(crate) struct ReadUnchangedOut {
     get,
     path = "/api/v1/workspaces/{workspace_id}/documents/{node_id}",
     tag = "documents",
-    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    params(
+        ("workspace_id" = Uuid, Path),
+        ("node_id" = Uuid, Path),
+        ("start_line" = Option<i64>, Query, description = "1-based first line to return"),
+        ("max_lines" = Option<i64>, Query, description = "Maximum lines to return"),
+        ("max_bytes" = Option<usize>, Query, description = "Maximum bytes to return"),
+        ("if_none_match_sha256" = Option<String>, Query, description = "Conditional read content hash"),
+    ),
     responses((status = 200, description = "Read document", body = ReadResponse)),
     security(("bearer_auth" = []))
 )]

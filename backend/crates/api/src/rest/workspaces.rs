@@ -37,7 +37,7 @@ pub(crate) struct ListQuery {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct ListResponse {
+pub(crate) struct WorkspacesListResponse {
     workspaces: Vec<WorkspaceOut>,
     page: Page,
 }
@@ -56,14 +56,18 @@ pub(crate) struct RenameBody {
     get,
     path = "/api/v1/workspaces",
     tag = "workspaces",
-    responses((status = 200, description = "List workspaces", body = ListResponse)),
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List workspaces", body = WorkspacesListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<ListResponse>, ApiError> {
+) -> Result<Json<WorkspacesListResponse>, ApiError> {
     let page = state
         .workspaces
         .list(
@@ -75,7 +79,7 @@ pub(crate) async fn list(
         )
         .await?;
     let workspaces = page.items.iter().map(WorkspaceOut::from).collect();
-    Ok(Json(ListResponse {
+    Ok(Json(WorkspacesListResponse {
         workspaces,
         page: Page::new(
             page.limit,

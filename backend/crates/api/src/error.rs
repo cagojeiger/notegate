@@ -5,13 +5,23 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use notegate_core::Error as CoreError;
 use notegate_service::ServiceError;
+use serde::Serialize;
 use serde_json::json;
+use utoipa::ToSchema;
 
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+}
+
+/// Common REST error response body. Runtime construction happens in [`ApiError::into_response`].
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ErrorResponse {
+    pub error: String,
+    pub kind: String,
+    pub message: String,
 }
 
 impl ApiError {

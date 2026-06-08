@@ -60,7 +60,7 @@ impl From<&Agent> for AgentOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct ListResponse {
+pub(crate) struct AgentsListResponse {
     agents: Vec<AgentOut>,
     page: Page,
 }
@@ -97,14 +97,18 @@ pub(crate) struct CreatedKeyOut {
     get,
     path = "/api/v1/agents",
     tag = "agents",
-    responses((status = 200, description = "List agents", body = ListResponse)),
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List agents", body = AgentsListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<ListResponse>, ApiError> {
+) -> Result<Json<AgentsListResponse>, ApiError> {
     let page = state
         .agents
         .list_agents_page(
@@ -117,7 +121,7 @@ pub(crate) async fn list(
         )
         .await?;
     let agents = page.items.iter().map(AgentOut::from).collect();
-    Ok(Json(ListResponse {
+    Ok(Json(AgentsListResponse {
         agents,
         page: Page::new(
             page.limit,

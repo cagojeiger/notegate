@@ -1,5 +1,9 @@
 use axum::Router;
 use notegate_core::Config;
+use utoipa::openapi::Ref;
+use utoipa::openapi::content::Content;
+use utoipa::openapi::path::{Operation, PathItem};
+use utoipa::openapi::response::Response;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
@@ -41,6 +45,7 @@ use crate::state::AppState;
         rest::agents::create_key,
         rest::agents::revoke_key,
     ),
+    components(schemas(crate::error::ErrorResponse)),
     modifiers(&SecurityAddon),
     tags(
         (name = "identity", description = "Current caller identity"),
@@ -68,7 +73,45 @@ impl Modify for SecurityAddon {
                     .build(),
             ),
         );
+
+        add_default_error_response(openapi);
     }
+}
+
+fn add_default_error_response(openapi: &mut utoipa::openapi::OpenApi) {
+    for item in openapi.paths.paths.values_mut() {
+        for operation in operations_mut(item) {
+            operation
+                .responses
+                .responses
+                .entry("default".to_owned())
+                .or_insert_with(|| error_response().into());
+        }
+    }
+}
+
+fn operations_mut(item: &mut PathItem) -> impl Iterator<Item = &mut Operation> {
+    [
+        item.get.as_mut(),
+        item.put.as_mut(),
+        item.post.as_mut(),
+        item.delete.as_mut(),
+        item.options.as_mut(),
+        item.head.as_mut(),
+        item.patch.as_mut(),
+        item.trace.as_mut(),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+fn error_response() -> Response {
+    let mut response = Response::new("Common REST error response");
+    response.content.insert(
+        "application/json".to_owned(),
+        Content::new(Some(Ref::from_schema_name("ErrorResponse"))),
+    );
+    response
 }
 
 pub fn routes(config: &Config) -> Router<AppState> {
@@ -103,6 +146,139 @@ mod tests {
         let doc = ApiDoc::openapi();
         let components = doc.components.expect("components present");
         assert!(components.security_schemes.contains_key("bearer_auth"));
+    }
+
+    #[test]
+    fn openapi_uses_distinct_list_response_schemas() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+        let schemas = value["components"]["schemas"]
+            .as_object()
+            .expect("schemas object");
+
+        for schema in [
+            "WorkspacesListResponse",
+            "AccessListResponse",
+            "AgentsListResponse",
+            "ErrorResponse",
+        ] {
+            assert!(schemas.contains_key(schema), "missing schema: {schema}");
+        }
+        assert!(
+            !schemas.contains_key("ListResponse"),
+            "generic ListResponse schema should not collide across categories"
+        );
+
+        assert_eq!(
+            response_ref(&value, "/api/v1/workspaces", "get", "200"),
+            "#/components/schemas/WorkspacesListResponse"
+        );
+        assert_eq!(
+            response_ref(
+                &value,
+                "/api/v1/workspaces/{workspace_id}/access",
+                "get",
+                "200"
+            ),
+            "#/components/schemas/AccessListResponse"
+        );
+        assert_eq!(
+            response_ref(&value, "/api/v1/agents", "get", "200"),
+            "#/components/schemas/AgentsListResponse"
+        );
+    }
+
+    #[test]
+    fn openapi_documents_rest_query_parameters() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+
+        assert_query_params(&value, "/api/v1/workspaces", "get", &["limit", "cursor"]);
+        assert_query_params(&value, "/api/v1/agents", "get", &["limit", "cursor"]);
+        assert_query_params(
+            &value,
+            "/api/v1/workspaces/{workspace_id}/access",
+            "get",
+            &["limit", "cursor"],
+        );
+        assert_query_params(
+            &value,
+            "/api/v1/workspaces/{workspace_id}/paths/resolve",
+            "get",
+            &["path"],
+        );
+        assert_query_params(
+            &value,
+            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
+            "get",
+            &["limit", "cursor"],
+        );
+        assert_query_params(
+            &value,
+            "/api/v1/workspaces/{workspace_id}/documents/{node_id}",
+            "get",
+            &[
+                "start_line",
+                "max_lines",
+                "max_bytes",
+                "if_none_match_sha256",
+            ],
+        );
+        assert_query_params(
+            &value,
+            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "delete",
+            &["recursive"],
+        );
+    }
+
+    #[test]
+    fn openapi_adds_common_error_response_to_every_operation() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+        let paths = value["paths"].as_object().expect("paths object");
+
+        for (path, item) in paths {
+            let item = item.as_object().expect("path item object");
+            for (method, operation) in item {
+                if !matches!(
+                    method.as_str(),
+                    "get" | "put" | "post" | "delete" | "patch" | "options" | "head" | "trace"
+                ) {
+                    continue;
+                }
+                let schema_ref = operation["responses"]["default"]["content"]["application/json"]
+                    ["schema"]["$ref"]
+                    .as_str()
+                    .unwrap_or_default();
+                assert_eq!(
+                    schema_ref, "#/components/schemas/ErrorResponse",
+                    "missing default ErrorResponse for {method} {path}"
+                );
+            }
+        }
+    }
+
+    fn response_ref(value: &serde_json::Value, path: &str, method: &str, status: &str) -> String {
+        value["paths"][path][method]["responses"][status]["content"]["application/json"]
+            ["schema"]["$ref"]
+            .as_str()
+            .expect("response schema ref")
+            .to_owned()
+    }
+
+    fn assert_query_params(value: &serde_json::Value, path: &str, method: &str, expected: &[&str]) {
+        let parameters = value["paths"][path][method]["parameters"]
+            .as_array()
+            .expect("parameters array");
+        for name in expected {
+            assert!(
+                parameters.iter().any(|param| {
+                    param["name"] == *name && param["in"].as_str() == Some("query")
+                }),
+                "missing query parameter {name} for {method} {path}"
+            );
+        }
     }
 
     #[test]

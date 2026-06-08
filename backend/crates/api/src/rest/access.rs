@@ -45,7 +45,7 @@ pub(crate) struct AccessOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct ListResponse {
+pub(crate) struct AccessListResponse {
     access: Vec<AccessOut>,
     page: Page,
 }
@@ -59,8 +59,12 @@ pub(crate) struct GrantBody {
     get,
     path = "/api/v1/workspaces/{workspace_id}/access",
     tag = "access",
-    params(("workspace_id" = Uuid, Path)),
-    responses((status = 200, description = "List access", body = ListResponse)),
+    params(
+        ("workspace_id" = Uuid, Path),
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List access", body = AccessListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list(
@@ -68,7 +72,7 @@ pub(crate) async fn list(
     Extension(caller): Extension<Caller>,
     Path(workspace_id): Path<Uuid>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<ListResponse>, ApiError> {
+) -> Result<Json<AccessListResponse>, ApiError> {
     let page = state
         .access
         .list_page(
@@ -92,7 +96,7 @@ pub(crate) async fn list(
             granted_at: grant.granted_at,
         })
         .collect();
-    Ok(Json(ListResponse {
+    Ok(Json(AccessListResponse {
         access,
         page: Page::new(
             page.limit,
