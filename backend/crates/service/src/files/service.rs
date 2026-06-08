@@ -698,16 +698,25 @@ where
             .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))
     }
 
-    /// Load a live document or 404 (also 404 when the node is a folder).
+    /// Load a live document, distinguishing a folder from a missing document.
     async fn load_document(
         &self,
         workspace_id: Uuid,
         node_id: Uuid,
     ) -> ServiceResult<(Node, Document)> {
-        self.store
-            .find_document(workspace_id, node_id)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("document not found".to_owned()))
+        if let Some(document) = self.store.find_document(workspace_id, node_id).await? {
+            return Ok(document);
+        }
+
+        if let Some(node) = self.store.find_node(workspace_id, node_id).await?
+            && node.kind == NodeKind::Folder
+        {
+            return Err(ServiceError::InvalidInput(
+                "target is a folder, not a document".to_owned(),
+            ));
+        }
+
+        Err(ServiceError::NotFound("document not found".to_owned()))
     }
 
     /// The derived path of a node or 404.
@@ -1607,6 +1616,29 @@ mod tests {
         assert_eq!(content.returned_lines, 2);
         assert!(content.truncated);
         assert_eq!(content.next_start_line, Some(3));
+    }
+
+    #[tokio::test]
+    async fn read_folder_reports_folder_not_missing_document() {
+        let (svc, store) = service(Some(Role::Viewer));
+        let folder = store.add_folder(store.root_id, "notes");
+        let err = svc
+            .read_document(
+                actor(),
+                store.workspace_id,
+                ReadDocument {
+                    node_id: folder,
+                    start_line: None,
+                    max_lines: None,
+                    max_bytes: None,
+                    if_none_match_sha256: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ServiceError::InvalidInput(message) if message == "target is a folder, not a document")
+        );
     }
 
     // --- write ---
