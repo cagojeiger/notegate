@@ -1,8 +1,9 @@
 //! Update-metadata command (`PATCH /nodes/{id}`): rename and/or reorder a node
 //! in place, without changing its parent.
 //!
-//! Runs in one transaction: the node must exist and be live; the root cannot be
-//! renamed; a rename re-checks sibling-name uniqueness at the current parent. Only
+//! Runs in one transaction serialized by the workspace row: the node must exist
+//! and be live; the root cannot be renamed; a rename re-checks sibling-name
+//! uniqueness at the current parent. Only
 //! the supplied fields change (`NULL` leaves a column unchanged via `COALESCE`),
 //! plus attribution.
 
@@ -27,6 +28,8 @@ pub async fn update_node_metadata(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
+    checks::lock_workspace(&mut tx, workspace_id).await?;
+
     let node = checks::live_node(&mut tx, workspace_id, node_id)
         .await?
         .ok_or_else(|| Error::not_found("node not found"))?;
@@ -45,16 +48,17 @@ pub async fn update_node_metadata(
          SET name = COALESCE($3, name), \
              sort_order = COALESCE($4, sort_order), \
              updated_by = $5, updated_at = now() \
-         WHERE workspace_id = $1 AND id = $2 RETURNING {NODE_COLUMNS}"
+         WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
     ))
     .bind(workspace_id)
     .bind(node_id)
     .bind(new_name)
     .bind(new_sort_order)
     .bind(updated_by)
-    .fetch_one(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
-    .map_err(map_constraint_error)?;
+    .map_err(map_constraint_error)?
+    .ok_or_else(|| Error::not_found("node not found"))?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
     row.into_node()

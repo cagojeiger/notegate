@@ -11,8 +11,9 @@ use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
 
-/// Serialize quota-sensitive mutations in a workspace. This closes races where
-/// two transactions both observe a count below a workspace cap, then both commit.
+/// Serialize file-tree mutations in a workspace. This closes races where two
+/// transactions both observe state below a cap, or one mutation updates a node
+/// while another concurrently moves/deletes it.
 pub async fn lock_workspace(tx: &mut PgConnection, workspace_id: Uuid) -> Result<()> {
     let found: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 FOR UPDATE")

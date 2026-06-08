@@ -18,6 +18,7 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
+use notegate_core::Error;
 use notegate_db::{FilesRepo, WorkspaceRepo};
 use notegate_service::files::input::Edit;
 use notegate_service::files::{
@@ -247,6 +248,39 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert_eq!(deleted_by, Some(owner), "rm sets deleted_by");
     assert_eq!(purge_after, Some(deleted.purge_after));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// Repo-level root delete must return a clean conflict instead of relying on the
+/// root CHECK constraint to fail the UPDATE as an internal DB error.
+#[tokio::test]
+async fn repo_soft_delete_root_is_conflict() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = WorkspaceRepo::new(db.pool.clone());
+    let repo = FilesRepo::new(db.pool.clone());
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_workspace(&ws_repo, owner, "rootguard").await;
+
+    let err = FilesStore::soft_delete_node(&repo, ws, root, owner)
+        .await
+        .expect_err("root delete must be rejected cleanly");
+    assert!(
+        matches!(err, Error::Conflict(ref message) if message == "cannot delete the root node"),
+        "root delete should be a conflict, got {err:?}"
+    );
+
+    let root_deleted_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT deleted_at FROM nodes WHERE workspace_id = $1 AND id = $2")
+            .bind(ws)
+            .bind(root)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(root_deleted_at.is_none(), "root remains live");
 
     db.cleanup().await;
     Ok(())

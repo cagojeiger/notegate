@@ -1,7 +1,8 @@
 //! Soft-delete command (`rm`).
 //!
 //! Soft-deletes the node and its entire live subtree (folders are recursive) in
-//! one transaction, setting `deleted_at`/`deleted_by`. The subtree size is
+//! one workspace-serialized transaction, setting `deleted_at`/`deleted_by`. The
+//! root is rejected before the update. The subtree size is
 //! re-checked in-tx against `subtree_delete_max_nodes`; a larger subtree is
 //! rejected so a synchronous delete never touches an unbounded number of rows.
 
@@ -24,6 +25,13 @@ pub async fn soft_delete_node(
 
     checks::lock_workspace(&mut tx, workspace_id).await?;
 
+    let node = checks::live_node(&mut tx, workspace_id, node_id)
+        .await?
+        .ok_or_else(|| Error::not_found("node not found"))?;
+    if node.parent_id.is_none() {
+        return Err(Error::conflict("cannot delete the root node"));
+    }
+
     // Bound the synchronous delete by the live subtree size.
     let subtree: i64 = sqlx::query_scalar(
         "WITH RECURSIVE subtree AS ( \
@@ -42,9 +50,6 @@ pub async fn soft_delete_node(
     .map_err(map_sqlx_error)?;
     let subtree =
         usize::try_from(subtree).map_err(|_error| Error::internal("negative subtree count"))?;
-    if subtree == 0 {
-        return Err(Error::not_found("node not found"));
-    }
     if subtree > limits::SUBTREE_DELETE_MAX_NODES {
         return Err(Error::conflict(format!(
             "subtree of {subtree} nodes exceeds the synchronous delete limit of {}",
