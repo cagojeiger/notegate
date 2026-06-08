@@ -102,7 +102,7 @@ missing limit    -> endpoint default
 limit < 1        -> 1
 limit > max      -> max
 malformed limit  -> 400
-malformed cursor -> 400
+malformed/tampered cursor -> 400
 ```
 
 Cursor contract:
@@ -162,7 +162,7 @@ client changes cursor  -> invalid cursor or undefined page position
 401 -> missing/invalid auth
 403 -> authenticated but not allowed or inactive/not registered
 404 -> not found or cross-workspace hidden resource
-400 -> invalid field/name/path, malformed limit, malformed cursor
+400 -> invalid field/name/path, malformed limit, malformed/tampered cursor
 409 -> state conflict, quota conflict, stale hash, duplicate destination, subtree too large
 500 -> redacted internal error
 ```

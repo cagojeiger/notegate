@@ -128,6 +128,7 @@ grep_default_limit = 20
 grep_max_limit = 100
 grep_default_context = 2
 grep_max_context = 5
+search_query_max_chars = 256
 ```
 
 Branching:
@@ -140,7 +141,11 @@ missing context    -> grep_default_context
 context < 0        -> 0
 context > max      -> grep_max_context
 empty query        -> 400 invalid input
+multiline query    -> 400 invalid input
+query > 256 chars  -> 400 invalid input
 malformed cursor   -> 400 invalid input
+tampered cursor    -> 400 invalid input
+missing scope path -> 404 not found / MCP invalid params kind=not_found
 ```
 
 Cursor tuples:

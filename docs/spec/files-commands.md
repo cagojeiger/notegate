@@ -247,6 +247,9 @@ scope path
 
 - pagination 필수.
 - 기본 scope는 `/`이지만, LLM/MCP는 좁은 scope를 선호해야 한다.
+- folder scope는 subtree를 검색하고, document scope는 해당 document 하나만 검색한다.
+- resolve되지 않는 scope path는 not found로 거부한다.
+- query는 single-line, non-empty, 최대 256 characters다.
 
 ### `grep`
 
@@ -260,7 +263,8 @@ documents.content_md 후보 검색 후 application code에서 line-split
 
 규칙:
 
-- scope path를 지원한다.
+- scope path를 지원한다. Folder scope는 subtree를 검색하고, document scope는 해당 document 하나만 검색한다.
+- query는 single-line, non-empty, 최대 256 characters다.
 - context line 수는 제한한다.
 - pagination 필수.
 - 결과 path는 parent chain에서 derive한 최신 path다.
