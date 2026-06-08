@@ -8,7 +8,7 @@ use axum::http::header::{CONTENT_TYPE, HeaderName};
 use axum::http::{HeaderValue, Request};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::Response;
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde::Serialize;
 use tower::ServiceBuilder;
@@ -63,7 +63,7 @@ fn auth_routes() -> Router<AppState> {
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/success", get(success))
-        .route("/auth/logout", get(logout))
+        .route("/auth/logout", post(logout))
 }
 
 fn metadata_routes(state: &AppState) -> Router<AppState> {

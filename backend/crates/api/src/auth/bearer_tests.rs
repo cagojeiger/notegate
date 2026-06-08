@@ -445,13 +445,22 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    for path in ["/auth/logout"] {
-        let response = app
-            .clone()
-            .oneshot(Request::builder().uri(path).body(Body::empty())?)
-            .await?;
-        assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    }
+    let logout_get = app
+        .clone()
+        .oneshot(Request::builder().uri("/auth/logout").body(Body::empty())?)
+        .await?;
+    assert_eq!(logout_get.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let logout_post = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(logout_post.status(), StatusCode::SEE_OTHER);
 
     for path in [
         "/.well-known/oauth-authorization-server",
