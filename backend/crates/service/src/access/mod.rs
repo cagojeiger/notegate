@@ -9,7 +9,6 @@
 use std::future::Future;
 
 use notegate_core::Result as CoreResult;
-use notegate_core::limits;
 use notegate_model::{Role, WorkspaceAccess};
 use uuid::Uuid;
 
@@ -133,12 +132,6 @@ where
         }
         Ok(())
     }
-}
-
-/// Reject a grant when the workspace already has the maximum active accounts.
-/// Shared with the db layer's in-transaction check.
-pub fn access_quota_exceeded(active_accounts: usize) -> bool {
-    active_accounts >= limits::WORKSPACE_ACCESS_MAX_ACCOUNTS
 }
 
 /// True when changing `account_id` to `next_role` (or revoking it when

@@ -5,10 +5,12 @@
 //! ```text
 //! viewer = list/stat/read/find/grep
 //! editor = viewer + write/patch/mkdir/touch/move/delete (+ restore)
-//! owner  = editor + workspace access management
+//! owner  = editor
 //! ```
 //!
-//! The service resolves the caller's live [`Role`] first (no role ⇒ `404`), then
+//! Workspace access management is gated in `AccessService`, not in this file-tree
+//! policy. The file service resolves the caller's live [`Role`] first (no role ⇒
+//! `404`), then
 //! calls [`require`] before doing any work. A role below the command's minimum is
 //! reported as forbidden (`403`).
 
@@ -16,7 +18,7 @@ use notegate_model::Role;
 
 use crate::error::{ServiceError, ServiceResult};
 
-/// A file-tree (or workspace-access) command, used to gate by role.
+/// A file-tree command, used to gate by role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileCommand {
     /// List a folder's direct children.
@@ -43,8 +45,6 @@ pub enum FileCommand {
     Rm,
     /// Restore a soft-deleted node.
     Restore,
-    /// Manage workspace access (grant/revoke).
-    ManageAccess,
 }
 
 impl FileCommand {
@@ -59,7 +59,6 @@ impl FileCommand {
             | Self::Mv
             | Self::Rm
             | Self::Restore => Role::Editor,
-            Self::ManageAccess => Role::Owner,
         }
     }
 
@@ -78,7 +77,6 @@ impl FileCommand {
             Self::Mv => "mv",
             Self::Rm => "rm",
             Self::Restore => "restore",
-            Self::ManageAccess => "manage access",
         }
     }
 }
@@ -137,7 +135,6 @@ mod tests {
             FileCommand::Mv,
             FileCommand::Rm,
             FileCommand::Restore,
-            FileCommand::ManageAccess,
         ];
         for command in mutate {
             assert!(
@@ -148,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn editor_can_mutate_but_not_manage_access() {
+    fn editor_can_mutate() {
         let mutate = [
             FileCommand::Ls,
             FileCommand::Read,
@@ -166,7 +163,6 @@ mod tests {
                 "editor should allow {command:?}"
             );
         }
-        assert!(!allowed(Role::Editor, FileCommand::ManageAccess));
     }
 
     #[test]
@@ -184,7 +180,6 @@ mod tests {
             FileCommand::Mv,
             FileCommand::Rm,
             FileCommand::Restore,
-            FileCommand::ManageAccess,
         ];
         for command in all {
             assert!(

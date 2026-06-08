@@ -339,13 +339,6 @@ fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     }
 }
 
-/// Reject a create when the owner already holds the maximum workspaces. Shared
-/// with the db layer's in-transaction check; kept here so callers can surface a
-/// clean error without a round-trip when the count is already known.
-pub fn owner_quota_exceeded(active_owned: usize) -> bool {
-    active_owned >= limits::OWNED_WORKSPACES_MAX
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(
