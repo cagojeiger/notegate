@@ -118,7 +118,10 @@ async fn twenty_first_owned_workspace_is_rejected() -> Result<(), Box<dyn std::e
             },
         )
         .await;
-    assert!(result.is_err(), "21st owned workspace must be rejected");
+    assert!(
+        matches!(result, Err(Error::Conflict(_))),
+        "21st owned workspace must be rejected as conflict"
+    );
 
     let owned: i64 =
         sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE owner_account_id = $1")
@@ -268,8 +271,8 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         )
         .await;
     assert!(
-        result.is_err(),
-        "21st active access account must be rejected"
+        matches!(result, Err(Error::Conflict(_))),
+        "21st active access account must be rejected as conflict"
     );
 
     // Updating an already-active account at the cap must still succeed (it does
@@ -442,8 +445,8 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
         )
         .await;
     assert!(
-        demote_last.is_err(),
-        "demoting the only owner must be rejected"
+        matches!(demote_last, Err(Error::Conflict(_))),
+        "demoting the only owner must be rejected as conflict"
     );
     assert_eq!(
         AccessStore::role_for(&access_repo, workspace_id, owner).await?,
@@ -453,8 +456,8 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
 
     let revoke_last = access_repo.revoke_access(workspace_id, owner, owner).await;
     assert!(
-        revoke_last.is_err(),
-        "revoking the only owner must be rejected"
+        matches!(revoke_last, Err(Error::Conflict(_))),
+        "revoking the only owner must be rejected as conflict"
     );
     assert_eq!(
         AccessStore::role_for(&access_repo, workspace_id, owner).await?,
@@ -524,7 +527,7 @@ async fn last_owner_guard_counts_only_active_owners() -> Result<(), Box<dyn std:
         )
         .await;
     assert!(
-        demote.is_err(),
+        matches!(demote, Err(Error::Conflict(_))),
         "inactive owner row must not satisfy the last-owner guard"
     );
     assert_eq!(

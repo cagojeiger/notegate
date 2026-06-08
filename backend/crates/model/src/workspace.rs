@@ -54,8 +54,8 @@ pub struct WorkspaceAccess {
     pub workspace_id: Uuid,
     pub account_id: Uuid,
     pub role: Role,
-    pub created_by: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
+    pub granted_by: Option<Uuid>,
+    pub granted_at: DateTime<Utc>,
     pub revoked_at: Option<DateTime<Utc>>,
     pub revoked_by: Option<Uuid>,
 }

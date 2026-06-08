@@ -36,7 +36,7 @@ Branching:
 
 ```text
 create/grant within cap -> allowed
-create/grant over cap   -> rejected by the owning endpoint
+create/grant over cap   -> 409 conflict
 ```
 
 ## Name and path limits

@@ -137,7 +137,10 @@ async fn select_workspace(
             .await
             .map_err(service_error)?
             .ok_or_else(|| {
-                ErrorData::invalid_params("workspace_id is not accessible to this caller", None)
+                ErrorData::invalid_params(
+                    "workspace_id is not accessible to this caller",
+                    error_meta("not_found"),
+                )
             });
     }
 
@@ -152,7 +155,7 @@ async fn select_workspace(
         return match matches.len() {
             0 => Err(ErrorData::invalid_params(
                 format!("no accessible workspace named '{name}'"),
-                None,
+                error_meta("not_found"),
             )),
             1 => Ok(matches.remove(0)),
             _ => Err(ambiguity_error(name, &matches)),
@@ -205,7 +208,10 @@ fn pick_workspace(
             .into_iter()
             .find(|view| view.workspace.id == id)
             .ok_or_else(|| {
-                ErrorData::invalid_params("workspace_id is not accessible to this caller", None)
+                ErrorData::invalid_params(
+                    "workspace_id is not accessible to this caller",
+                    error_meta("not_found"),
+                )
             });
     }
 
@@ -220,7 +226,7 @@ fn pick_workspace(
         return match matches.len() {
             0 => Err(ErrorData::invalid_params(
                 format!("no accessible workspace named '{name}'"),
-                None,
+                error_meta("not_found"),
             )),
             1 => Ok(matches.remove(0)),
             _ => Err(ambiguity_error(name, &matches)),
@@ -476,6 +482,17 @@ mod tests {
         let accessible = vec![view("a", Uuid::new_v4())];
         let error = pick_workspace(accessible, None, Some(Uuid::new_v4())).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        let data = error.data.expect("inaccessible id carries not_found data");
+        assert_eq!(data["kind"], "not_found");
+    }
+
+    #[test]
+    fn name_matching_no_accessible_workspace_is_not_found() {
+        let accessible = vec![view("a", Uuid::new_v4())];
+        let error = pick_workspace(accessible, Some("missing"), None).unwrap_err();
+        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        let data = error.data.expect("missing name carries not_found data");
+        assert_eq!(data["kind"], "not_found");
     }
 
     #[test]

@@ -56,13 +56,13 @@ pub trait AccessStore: Clone + Send + Sync + 'static {
         workspace_id: Uuid,
     ) -> impl Future<Output = CoreResult<Vec<WorkspaceAccess>>> + Send;
 
-    /// Insert or update a grant, recording the actor in `created_by`. The live
+    /// Insert or update a grant, recording the actor in `granted_by`. The live
     /// grant cap (`WORKSPACE_ACCESS_MAX_ACCOUNTS`) is enforced in this
     /// transaction; revoked/inactive/deleted accounts do not count.
     fn upsert_access(
         &self,
         command: &GrantAccess,
-        created_by: Uuid,
+        granted_by: Uuid,
     ) -> impl Future<Output = CoreResult<WorkspaceAccess>> + Send;
 
     /// Revoke a grant by setting `revoked_at`/`revoked_by`.
@@ -258,14 +258,14 @@ mod tests {
         async fn upsert_access(
             &self,
             command: &GrantAccess,
-            created_by: Uuid,
+            granted_by: Uuid,
         ) -> CoreResult<WorkspaceAccess> {
             Ok(WorkspaceAccess {
                 workspace_id: command.workspace_id,
                 account_id: command.account_id,
                 role: command.role,
-                created_by: Some(created_by),
-                created_at: Utc::now(),
+                granted_by: Some(granted_by),
+                granted_at: Utc::now(),
                 revoked_at: None,
                 revoked_by: None,
             })
@@ -327,8 +327,8 @@ mod tests {
                     workspace_id,
                     account_id: first,
                     role: Role::Viewer,
-                    created_by: Some(owner),
-                    created_at: now,
+                    granted_by: Some(owner),
+                    granted_at: now,
                     revoked_at: None,
                     revoked_by: None,
                 },
@@ -336,8 +336,8 @@ mod tests {
                     workspace_id,
                     account_id: second,
                     role: Role::Editor,
-                    created_by: Some(owner),
-                    created_at: now,
+                    granted_by: Some(owner),
+                    granted_at: now,
                     revoked_at: None,
                     revoked_by: None,
                 },
@@ -345,8 +345,8 @@ mod tests {
                     workspace_id,
                     account_id: third,
                     role: Role::Owner,
-                    created_by: Some(owner),
-                    created_at: now,
+                    granted_by: Some(owner),
+                    granted_at: now,
                     revoked_at: None,
                     revoked_by: None,
                 },
@@ -434,8 +434,8 @@ mod tests {
             workspace_id,
             account_id: owner,
             role: Role::Owner,
-            created_by: Some(owner),
-            created_at: Utc::now(),
+            granted_by: Some(owner),
+            granted_at: Utc::now(),
             revoked_at: None,
             revoked_by: None,
         }];

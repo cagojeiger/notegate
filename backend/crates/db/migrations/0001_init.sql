@@ -74,8 +74,8 @@ CREATE TABLE workspace_access (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('viewer', 'editor', 'owner')),
-    created_by UUID REFERENCES accounts(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    granted_by UUID REFERENCES accounts(id),
+    granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at TIMESTAMPTZ,
     revoked_by UUID REFERENCES accounts(id),
     PRIMARY KEY (workspace_id, account_id)

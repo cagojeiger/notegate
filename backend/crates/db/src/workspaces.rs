@@ -126,7 +126,7 @@ impl WorkspaceStore for WorkspaceRepo {
         let owned =
             usize::try_from(owned).map_err(|_error| Error::internal("negative workspace count"))?;
         if owned >= limits::OWNED_WORKSPACES_MAX {
-            return Err(Error::validation(format!(
+            return Err(Error::conflict(format!(
                 "owner already has the maximum of {} workspaces",
                 limits::OWNED_WORKSPACES_MAX
             )));
@@ -147,7 +147,7 @@ impl WorkspaceStore for WorkspaceRepo {
 
         // Grant the owner `owner` in the same transaction.
         sqlx::query(
-            "INSERT INTO workspace_access (workspace_id, account_id, role, created_by) \
+            "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
              VALUES ($1, $2, 'owner', $3)",
         )
         .bind(row.id)
@@ -277,7 +277,7 @@ impl WorkspaceStore for WorkspaceRepo {
 
     async fn root_node_id(&self, workspace_id: Uuid) -> Result<Option<Uuid>> {
         let id: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL",
+            "SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)

@@ -40,7 +40,7 @@ pub(crate) struct ListQuery {
 pub(crate) struct AccessOut {
     account: AccountRef,
     role: String,
-    created_at: DateTime<Utc>,
+    granted_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -88,7 +88,7 @@ pub(crate) async fn list(
         .map(|grant: &WorkspaceAccess| AccessOut {
             account: AccountRef::resolve(grant.account_id, &refs),
             role: grant.role.as_str().to_owned(),
-            created_at: grant.created_at,
+            granted_at: grant.granted_at,
         })
         .collect();
     Ok(Json(ListResponse {
@@ -133,7 +133,7 @@ pub(crate) async fn grant(
     Ok(Json(AccessOut {
         account: AccountRef::resolve(grant.account_id, &refs),
         role: grant.role.as_str().to_owned(),
-        created_at: grant.created_at,
+        granted_at: grant.granted_at,
     }))
 }
 

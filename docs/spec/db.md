@@ -165,8 +165,8 @@ CREATE TABLE workspace_access (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     role         TEXT NOT NULL CHECK (role IN ('viewer', 'editor', 'owner')),
-    created_by   UUID REFERENCES accounts(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    granted_by   UUID REFERENCES accounts(id),
+    granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at   TIMESTAMPTZ,
     revoked_by   UUID REFERENCES accounts(id),
 
@@ -190,6 +190,7 @@ owner  = editor + workspace access management
 - `accounts.is_active=false`이거나 `accounts.deleted_at IS NOT NULL`인 account는 live access로 인정하지 않는다.
 - 한 workspace의 active access account는 최대 `20`개다. 활성 account의 revoke되지 않은 access만 계산하고 grant transaction에서 검사한다.
 - 마지막 owner 보호 규칙도 활성 account의 revoke되지 않은 owner access만 live owner로 계산한다.
+- `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
 
 ## nodes
 

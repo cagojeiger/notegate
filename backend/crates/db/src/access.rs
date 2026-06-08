@@ -28,8 +28,8 @@ struct WorkspaceAccessRow {
     workspace_id: Uuid,
     account_id: Uuid,
     role: String,
-    created_by: Option<Uuid>,
-    created_at: DateTime<Utc>,
+    granted_by: Option<Uuid>,
+    granted_at: DateTime<Utc>,
     revoked_at: Option<DateTime<Utc>>,
     revoked_by: Option<Uuid>,
 }
@@ -42,8 +42,8 @@ impl WorkspaceAccessRow {
             workspace_id: self.workspace_id,
             account_id: self.account_id,
             role,
-            created_by: self.created_by,
-            created_at: self.created_at,
+            granted_by: self.granted_by,
+            granted_at: self.granted_at,
             revoked_at: self.revoked_at,
             revoked_by: self.revoked_by,
         })
@@ -51,8 +51,8 @@ impl WorkspaceAccessRow {
 }
 
 const ACCESS_RETURNING_COLUMNS: &str =
-    "workspace_id, account_id, role, created_by, created_at, revoked_at, revoked_by";
-const ACCESS_SELECT_COLUMNS: &str = "wa.workspace_id, wa.account_id, wa.role, wa.created_by, wa.created_at, wa.revoked_at, wa.revoked_by";
+    "workspace_id, account_id, role, granted_by, granted_at, revoked_at, revoked_by";
+const ACCESS_SELECT_COLUMNS: &str = "wa.workspace_id, wa.account_id, wa.role, wa.granted_by, wa.granted_at, wa.revoked_at, wa.revoked_by";
 
 impl AccessStore for AccessRepo {
     async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
@@ -65,7 +65,7 @@ impl AccessStore for AccessRepo {
              JOIN accounts acc ON acc.id = wa.account_id \
              WHERE wa.workspace_id = $1 AND wa.revoked_at IS NULL \
                AND acc.is_active = true AND acc.deleted_at IS NULL \
-             ORDER BY wa.created_at, wa.account_id"
+             ORDER BY wa.granted_at, wa.account_id"
         ))
         .bind(workspace_id)
         .fetch_all(&self.pool)
@@ -79,7 +79,7 @@ impl AccessStore for AccessRepo {
     async fn upsert_access(
         &self,
         command: &GrantAccess,
-        created_by: Uuid,
+        granted_by: Uuid,
     ) -> Result<WorkspaceAccess> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -112,7 +112,7 @@ impl AccessStore for AccessRepo {
         let active_others = usize::try_from(active_others)
             .map_err(|_error| Error::internal("negative access count"))?;
         if active_others >= limits::WORKSPACE_ACCESS_MAX_ACCOUNTS {
-            return Err(Error::validation(format!(
+            return Err(Error::conflict(format!(
                 "workspace already has the maximum of {} active access accounts",
                 limits::WORKSPACE_ACCESS_MAX_ACCOUNTS
             )));
@@ -121,17 +121,17 @@ impl AccessStore for AccessRepo {
         // PK is (workspace_id, account_id): re-granting (including reviving a
         // revoked row) updates in place and clears the revocation.
         let row = sqlx::query_as::<_, WorkspaceAccessRow>(&format!(
-            "INSERT INTO workspace_access (workspace_id, account_id, role, created_by) \
+            "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
              VALUES ($1, $2, $3, $4) \
              ON CONFLICT (workspace_id, account_id) DO UPDATE \
-             SET role = EXCLUDED.role, created_by = EXCLUDED.created_by, \
-                 created_at = now(), revoked_at = NULL, revoked_by = NULL \
+             SET role = EXCLUDED.role, granted_by = EXCLUDED.granted_by, \
+                 granted_at = now(), revoked_at = NULL, revoked_by = NULL \
              RETURNING {ACCESS_RETURNING_COLUMNS}"
         ))
         .bind(command.workspace_id)
         .bind(command.account_id)
         .bind(command.role.as_str())
-        .bind(created_by)
+        .bind(granted_by)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -240,9 +240,7 @@ async fn guard_last_owner(
     let target_is_owner = owners.contains(&account_id);
     let target_remains_owner = next_role == Some(Role::Owner);
     if target_is_owner && !target_remains_owner && owners.len() <= 1 {
-        return Err(Error::validation(
-            "workspace must retain at least one owner",
-        ));
+        return Err(Error::conflict("workspace must retain at least one owner"));
     }
 
     Ok(())

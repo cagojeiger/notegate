@@ -34,7 +34,7 @@ PUT /api/v1/workspaces/{workspace_id}/access/{account_id}
 }
 ```
 
-대상 account가 active 상태일 때 access를 생성하거나 role을 변경한다. 이미 revoke된 row가 있으면 같은 `(workspace_id, account_id)` row를 다시 활성화한다.
+대상 account가 active 상태일 때 access를 생성하거나 role을 변경한다. 이미 revoke된 row가 있으면 같은 `(workspace_id, account_id)` row를 다시 활성화한다. 이때 현재 grant 상태의 `granted_by`/`granted_at`을 갱신한다. active access account가 `20`개를 넘으면 `409 conflict`로 거부한다.
 
 ### Revoke access
 
@@ -42,4 +42,4 @@ PUT /api/v1/workspaces/{workspace_id}/access/{account_id}
 DELETE /api/v1/workspaces/{workspace_id}/access/{account_id}
 ```
 
-대상 access에 `revoked_at`/`revoked_by`를 설정한다. 현재 상태 attribution field는 그대로 유지한다. 마지막 live `owner`를 revoke하는 요청은 거부한다. 이미 live grant가 없는 account를 revoke하는 요청은 caller owner check 후 성공으로 처리한다.
+대상 access에 `revoked_at`/`revoked_by`를 설정한다. 현재 grant attribution field는 그대로 유지한다. 마지막 live `owner`를 revoke하는 요청은 거부한다. 이미 live grant가 없는 account를 revoke하는 요청은 caller owner check 후 성공으로 처리한다.
