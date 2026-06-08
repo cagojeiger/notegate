@@ -8,8 +8,8 @@
 use axum::extract::{Extension, Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -44,7 +44,40 @@ pub(crate) struct ReadQuery {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ReadResponse {
     node: NodeRef,
-    document: Value,
+    document: ReadDocumentOut,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub(crate) enum ReadDocumentOut {
+    Content(ReadContentOut),
+    Unchanged(ReadUnchangedOut),
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ReadContentOut {
+    node_id: Uuid,
+    content_md: String,
+    content_sha256: String,
+    byte_len: i32,
+    line_count: i32,
+    start_line: i64,
+    end_line: i64,
+    returned_lines: i64,
+    truncated: bool,
+    next_start_line: Option<i64>,
+    updated_by: AccountRef,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ReadUnchangedOut {
+    node_id: Uuid,
+    unchanged: bool,
+    content_returned: bool,
+    content_sha256: String,
+    byte_len: i32,
+    line_count: i32,
 }
 
 #[utoipa::path(
@@ -77,7 +110,7 @@ pub(crate) async fn read(
         .await?;
 
     let updated_by = self_updated_by(&state, &result.node).await?;
-    let document = read_document_json(&result, updated_by);
+    let document = read_document_out(&result, updated_by);
     Ok(Json(ReadResponse {
         node: NodeRef::from(&result.node),
         document,
@@ -97,7 +130,7 @@ pub(crate) struct ReplaceBody {
     tag = "documents",
     params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = ReplaceBody,
-    responses((status = 200, description = "Replace document")),
+    responses((status = 200, description = "Replace document", body = DocumentResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn replace(
@@ -105,7 +138,7 @@ pub(crate) async fn replace(
     Extension(caller): Extension<notegate_model::Caller>,
     Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReplaceBody>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<DocumentResponse>, ApiError> {
     let view = state
         .files
         .write_document(
@@ -119,7 +152,7 @@ pub(crate) async fn replace(
         )
         .await?;
     let updated_by = self_updated_by(&state, &view.node).await?;
-    Ok(Json(document_view_json(&view, updated_by)))
+    Ok(Json(document_response(&view, updated_by)))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -135,13 +168,48 @@ pub(crate) struct PatchBody {
     expected_sha256: Option<String>,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct DocumentResponse {
+    node: NodeRef,
+    document: DocumentMetaOut,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct DocumentMetaOut {
+    node_id: Uuid,
+    content_sha256: String,
+    byte_len: i32,
+    line_count: i32,
+    updated_by: AccountRef,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct PatchResponse {
+    node: NodeRef,
+    document: PatchDocumentOut,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct PatchDocumentOut {
+    node_id: Uuid,
+    content_sha256: String,
+    byte_len: i32,
+    line_count: i32,
+    previous_sha256: String,
+    edits_applied: usize,
+    diff: String,
+    updated_by: AccountRef,
+    updated_at: DateTime<Utc>,
+}
+
 #[utoipa::path(
     patch,
     path = "/api/v1/workspaces/{workspace_id}/documents/{node_id}",
     tag = "documents",
     params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = PatchBody,
-    responses((status = 200, description = "Patch document")),
+    responses((status = 200, description = "Patch document", body = PatchResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn patch(
@@ -149,7 +217,7 @@ pub(crate) async fn patch(
     Extension(caller): Extension<notegate_model::Caller>,
     Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PatchBody>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<PatchResponse>, ApiError> {
     let edits = body
         .edits
         .into_iter()
@@ -172,7 +240,7 @@ pub(crate) async fn patch(
         )
         .await?;
     let updated_by = self_updated_by(&state, &result.node).await?;
-    Ok(Json(patch_result_json(&result, updated_by)))
+    Ok(Json(patch_response(&result, updated_by)))
 }
 
 /// Resolve the `updated_by` account ref for a node view.
@@ -186,70 +254,62 @@ async fn self_updated_by(state: &AppState, view: &NodeView) -> Result<AccountRef
 
 /// Build the `document` object for a read response, covering both the full-content
 /// slice and the `unchanged` (conditional-read hit) shapes.
-fn read_document_json(result: &ReadResult, updated_by: AccountRef) -> Value {
+fn read_document_out(result: &ReadResult, updated_by: AccountRef) -> ReadDocumentOut {
     match &result.content {
-        None => json!({
-            "node_id": result.node.node.id,
-            "unchanged": true,
-            "content_returned": false,
-            "content_sha256": result.content_sha256,
-            "byte_len": result.byte_len,
-            "line_count": result.line_count,
+        None => ReadDocumentOut::Unchanged(ReadUnchangedOut {
+            node_id: result.node.node.id,
+            unchanged: true,
+            content_returned: false,
+            content_sha256: result.content_sha256.clone(),
+            byte_len: result.byte_len,
+            line_count: result.line_count,
         }),
-        Some(content) => json!({
-            "node_id": result.node.node.id,
-            "content_md": content.content_md,
-            "content_sha256": result.content_sha256,
-            "byte_len": result.byte_len,
-            "line_count": result.line_count,
-            "start_line": content.start_line,
-            "end_line": content.end_line,
-            "returned_lines": content.returned_lines,
-            "truncated": content.truncated,
-            "next_start_line": content.next_start_line,
-            "updated_by": account_ref_json(&updated_by),
-            "updated_at": result.node.node.updated_at,
+        Some(content) => ReadDocumentOut::Content(ReadContentOut {
+            node_id: result.node.node.id,
+            content_md: content.content_md.clone(),
+            content_sha256: result.content_sha256.clone(),
+            byte_len: result.byte_len,
+            line_count: result.line_count,
+            start_line: content.start_line,
+            end_line: content.end_line,
+            returned_lines: content.returned_lines,
+            truncated: content.truncated,
+            next_start_line: content.next_start_line,
+            updated_by,
+            updated_at: result.node.node.updated_at,
         }),
     }
 }
 
-/// Build the `document` object returned after a successful replace.
-fn document_view_json(view: &DocumentView, updated_by: AccountRef) -> Value {
-    json!({
-        "node": NodeRef::from(&view.node),
-        "document": {
-            "node_id": view.document.node_id,
-            "content_sha256": view.document.content_sha256,
-            "byte_len": view.document.byte_len,
-            "line_count": view.document.line_count,
-            "updated_by": account_ref_json(&updated_by),
-            "updated_at": view.document.updated_at,
-        }
-    })
+/// Build the response returned after a successful replace.
+fn document_response(view: &DocumentView, updated_by: AccountRef) -> DocumentResponse {
+    DocumentResponse {
+        node: NodeRef::from(&view.node),
+        document: DocumentMetaOut {
+            node_id: view.document.node_id,
+            content_sha256: view.document.content_sha256.clone(),
+            byte_len: view.document.byte_len,
+            line_count: view.document.line_count,
+            updated_by,
+            updated_at: view.document.updated_at,
+        },
+    }
 }
 
 /// Build the response after a successful patch (new metrics + previous hash).
-fn patch_result_json(result: &PatchResult, updated_by: AccountRef) -> Value {
-    json!({
-        "node": NodeRef::from(&result.node),
-        "document": {
-            "node_id": result.document.node_id,
-            "content_sha256": result.document.content_sha256,
-            "byte_len": result.document.byte_len,
-            "line_count": result.document.line_count,
-            "previous_sha256": result.previous_sha256,
-            "edits_applied": result.edits_applied,
-            "diff": result.diff,
-            "updated_by": account_ref_json(&updated_by),
-            "updated_at": result.document.updated_at,
-        }
-    })
-}
-
-fn account_ref_json(account: &AccountRef) -> Value {
-    json!({
-        "id": account.id,
-        "kind": account.kind,
-        "display_name": account.display_name,
-    })
+fn patch_response(result: &PatchResult, updated_by: AccountRef) -> PatchResponse {
+    PatchResponse {
+        node: NodeRef::from(&result.node),
+        document: PatchDocumentOut {
+            node_id: result.document.node_id,
+            content_sha256: result.document.content_sha256.clone(),
+            byte_len: result.document.byte_len,
+            line_count: result.document.line_count,
+            previous_sha256: result.previous_sha256.clone(),
+            edits_applied: result.edits_applied,
+            diff: result.diff.clone(),
+            updated_by,
+            updated_at: result.document.updated_at,
+        },
+    }
 }
