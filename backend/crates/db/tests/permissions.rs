@@ -197,7 +197,7 @@ async fn setup(db: &TestDb) -> Result<Fixture, Box<dyn std::error::Error>> {
     })
 }
 
-/// viewer CAN list/stat/read/find/grep; CANNOT mkdir/touch/write/patch/mv/rm (403).
+/// viewer CAN list/stat/read/find/grep; CANNOT mkdir/touch/write/patch/mv/rm/restore (403).
 #[tokio::test]
 async fn viewer_can_read_but_not_mutate() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
