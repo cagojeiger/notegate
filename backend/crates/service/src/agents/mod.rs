@@ -15,6 +15,7 @@ use notegate_model::{Agent, AgentKey};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::pagination::{clamp_limit, paginate_by_id};
 
 /// Input to create an agent.
 #[derive(Debug, Clone)]
@@ -29,6 +30,22 @@ pub struct CreateAgentKey {
     pub name: String,
     pub scopes: Vec<String>,
     pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Input to list agents created by the caller.
+#[derive(Debug, Clone, Default)]
+pub struct ListAgents {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// A page of agents.
+#[derive(Debug, Clone)]
+pub struct AgentPage {
+    pub items: Vec<Agent>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
 }
 
 /// A freshly minted agent key, including the one-time plaintext token.
@@ -134,9 +151,31 @@ where
         Ok(self.store.insert_agent(&command, caller_account_id).await?)
     }
 
-    /// List the active agents created by the caller.
+    /// List all active agents created by the caller.
     pub async fn list_agents(&self, caller_account_id: Uuid) -> ServiceResult<Vec<Agent>> {
         Ok(self.store.list_agents_by_creator(caller_account_id).await?)
+    }
+
+    /// List active agents created by the caller, paginated with an opaque cursor.
+    pub async fn list_agents_page(
+        &self,
+        caller_account_id: Uuid,
+        request: ListAgents,
+    ) -> ServiceResult<AgentPage> {
+        let limit = clamp_limit(
+            request.limit,
+            limits::AGENTS_DEFAULT_LIMIT,
+            limits::AGENTS_MAX_LIMIT,
+        );
+        let agents = self.store.list_agents_by_creator(caller_account_id).await?;
+        let (items, has_more, next_cursor) =
+            paginate_by_id(agents, |agent| agent.id, limit, request.cursor.as_deref())?;
+        Ok(AgentPage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
     }
 
     /// Create an agent key. Only a `kind='user'` caller may create keys; the
@@ -262,6 +301,7 @@ mod tests {
         clippy::unwrap_in_result
     )]
     use super::*;
+    use crate::cursor;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
@@ -269,6 +309,7 @@ mod tests {
         agent_count: usize,
         key_count: usize,
         owned_agent_exists: bool,
+        agents: Vec<Agent>,
         inserted_agents: Arc<Mutex<Vec<(String, Uuid)>>>,
         deleted_agents: Arc<Mutex<Vec<Uuid>>>,
         revoked_keys: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
@@ -280,6 +321,7 @@ mod tests {
                 agent_count: 0,
                 key_count: 0,
                 owned_agent_exists: true,
+                agents: Vec::new(),
                 inserted_agents: Arc::new(Mutex::new(Vec::new())),
                 deleted_agents: Arc::new(Mutex::new(Vec::new())),
                 revoked_keys: Arc::new(Mutex::new(Vec::new())),
@@ -301,7 +343,7 @@ mod tests {
         }
 
         async fn list_agents_by_creator(&self, _creator: Uuid) -> CoreResult<Vec<Agent>> {
-            Ok(Vec::new())
+            Ok(self.agents.clone())
         }
 
         async fn count_agents_by_creator(&self, _creator: Uuid) -> CoreResult<usize> {
@@ -425,6 +467,80 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn list_agents_page_returns_opaque_cursor() {
+        let creator = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let third = Uuid::new_v4();
+        let service = AgentService::new(MockStore {
+            agents: vec![
+                Agent {
+                    id: first,
+                    name: "first".to_owned(),
+                    created_by: creator,
+                },
+                Agent {
+                    id: second,
+                    name: "second".to_owned(),
+                    created_by: creator,
+                },
+                Agent {
+                    id: third,
+                    name: "third".to_owned(),
+                    created_by: creator,
+                },
+            ],
+            ..MockStore::default()
+        });
+
+        let first_page = service
+            .list_agents_page(
+                creator,
+                ListAgents {
+                    limit: Some(2),
+                    cursor: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            first_page
+                .items
+                .iter()
+                .map(|agent| agent.id)
+                .collect::<Vec<_>>(),
+            vec![first, second]
+        );
+        assert_eq!(first_page.limit, 2);
+        assert!(first_page.has_more);
+        let cursor = first_page.next_cursor.expect("next cursor");
+        assert_eq!(cursor::decode::<Uuid>(&cursor).unwrap(), second);
+
+        let second_page = service
+            .list_agents_page(
+                creator,
+                ListAgents {
+                    limit: Some(2),
+                    cursor: Some(cursor),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            second_page
+                .items
+                .iter()
+                .map(|agent| agent.id)
+                .collect::<Vec<_>>(),
+            vec![third]
+        );
+        assert!(!second_page.has_more);
+        assert!(second_page.next_cursor.is_none());
     }
 
     #[tokio::test]

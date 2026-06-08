@@ -6,13 +6,11 @@
 
 use uuid::Uuid;
 
-use super::output::ChildrenCursor;
-
 /// Children listing request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
     pub limit: Option<i64>,
-    pub cursor: Option<ChildrenCursor>,
+    pub cursor: Option<String>,
 }
 
 /// Create-folder command (`mkdir`).

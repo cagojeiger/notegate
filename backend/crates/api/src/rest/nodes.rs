@@ -11,20 +11,17 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use notegate_core::limits;
 use notegate_model::{Caller, NodeKind};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{NodeOut, NodeRef, Page, attribution_ids, clamp_limit, parse_kind};
+use crate::rest::dto::{NodeOut, NodeRef, Page, attribution_ids, parse_kind};
 use crate::state::AppState;
 
-use notegate_service::cursor;
 use notegate_service::files::{
-    ChildrenCursor, ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, MoveNode,
-    WriteDocument, WriteTarget,
+    ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, MoveNode, WriteDocument, WriteTarget,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -129,19 +126,6 @@ pub(crate) async fn children(
     Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<ChildrenQuery>,
 ) -> Result<Json<ChildrenResponse>, ApiError> {
-    let cursor = match query.cursor.as_deref() {
-        None => None,
-        Some(raw) => Some(
-            cursor::decode::<ChildrenCursor>(raw)
-                .map_err(|_error| ApiError::invalid_field("invalid cursor"))?,
-        ),
-    };
-    let limit = clamp_limit(
-        query.limit,
-        limits::CHILDREN_DEFAULT_LIMIT,
-        limits::CHILDREN_MAX_LIMIT,
-    );
-
     let page = state
         .files
         .children(
@@ -149,18 +133,11 @@ pub(crate) async fn children(
             workspace_id,
             node_id,
             ChildrenRequest {
-                limit: Some(limit),
-                cursor,
+                limit: query.limit,
+                cursor: query.cursor,
             },
         )
         .await?;
-
-    let next_cursor = page
-        .next_cursor
-        .as_ref()
-        .map(cursor::encode)
-        .transpose()
-        .map_err(|_error| ApiError::internal("failed to encode cursor"))?;
 
     let mut all = vec![&page.parent];
     all.extend(page.items.iter());
@@ -182,7 +159,7 @@ pub(crate) async fn children(
             limit: page.limit,
             returned: page.items.len() as i64,
             has_more: page.has_more,
-            next_cursor,
+            next_cursor: page.next_cursor,
         },
     }))
 }

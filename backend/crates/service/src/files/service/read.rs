@@ -2,6 +2,7 @@ use notegate_core::limits;
 use notegate_model::NodeKind;
 use uuid::Uuid;
 
+use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
@@ -92,17 +93,25 @@ where
             .await?;
 
         let limit = clamp_children_limit(request.limit);
+        let cursor = match request.cursor.as_deref() {
+            None => None,
+            Some(raw) => Some(cursor::decode::<ChildrenCursor>(raw)?),
+        };
         let (rows, has_more) = self
             .store
-            .paged_children(workspace_id, parent_node_id, limit, request.cursor.as_ref())
+            .paged_children(workspace_id, parent_node_id, limit, cursor.as_ref())
             .await?;
 
         let next_cursor = if has_more {
-            rows.last().map(|node| ChildrenCursor {
-                sort_order: node.sort_order,
-                name: node.name.clone(),
-                id: node.id,
-            })
+            rows.last()
+                .map(|node| ChildrenCursor {
+                    sort_order: node.sort_order,
+                    name: node.name.clone(),
+                    id: node.id,
+                })
+                .map(|cursor| cursor::encode(&cursor))
+                .transpose()
+                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
         } else {
             None
         };

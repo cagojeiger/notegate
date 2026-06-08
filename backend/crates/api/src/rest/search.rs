@@ -1,23 +1,20 @@
 //! Search category: `POST /search/find` and `POST /search/grep`.
 //!
 //! Workspace-scoped search. Authorization is checked once by the search service.
-//! Request validation (limit clamping, kind parsing) happens here so malformed
-//! input is a clean `400` regardless.
+//! Surface-specific parsing happens here; limit/cursor policy stays in the service.
 
 use axum::extract::{Extension, Path, State};
 use axum::routing::post;
 use axum::{Json, Router};
-use notegate_core::limits;
 use notegate_model::Caller;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{NodeOut, Page, attribution_ids, clamp_limit, parse_kind};
+use crate::rest::dto::{NodeOut, Page, attribution_ids, parse_kind};
 use crate::state::AppState;
 
-use notegate_service::cursor;
 use notegate_service::search::{FindRequest, GrepRequest};
 
 pub fn routes() -> Router<AppState> {
@@ -64,12 +61,6 @@ pub(crate) async fn find(
         None => None,
         Some(value) => Some(parse_kind(value)?),
     };
-    let limit = clamp_limit(
-        body.limit,
-        limits::FIND_DEFAULT_LIMIT,
-        limits::FIND_MAX_LIMIT,
-    );
-
     let page = state
         .search
         .find(
@@ -79,18 +70,11 @@ pub(crate) async fn find(
                 q: body.q,
                 path: body.path,
                 kind,
-                limit: Some(limit),
+                limit: body.limit,
                 cursor: body.cursor,
             },
         )
         .await?;
-
-    let next_cursor = page
-        .next_cursor
-        .as_ref()
-        .map(cursor::encode)
-        .transpose()
-        .map_err(|_error| ApiError::internal("failed to encode cursor"))?;
 
     let refs = state
         .accounts
@@ -108,7 +92,7 @@ pub(crate) async fn find(
             limit: page.limit,
             returned: page.items.len() as i64,
             has_more: page.has_more,
-            next_cursor,
+            next_cursor: page.next_cursor,
         },
     }))
 }
@@ -157,12 +141,6 @@ pub(crate) async fn grep(
     Path(workspace_id): Path<Uuid>,
     Json(body): Json<GrepBody>,
 ) -> Result<Json<GrepResponse>, ApiError> {
-    let limit = clamp_limit(
-        body.limit,
-        limits::GREP_DEFAULT_LIMIT,
-        limits::GREP_MAX_LIMIT,
-    );
-
     let page = state
         .search
         .grep(
@@ -172,18 +150,11 @@ pub(crate) async fn grep(
                 q: body.q,
                 path: body.path,
                 context: body.context,
-                limit: Some(limit),
+                limit: body.limit,
                 cursor: body.cursor,
             },
         )
         .await?;
-
-    let next_cursor = page
-        .next_cursor
-        .as_ref()
-        .map(cursor::encode)
-        .transpose()
-        .map_err(|_error| ApiError::internal("failed to encode cursor"))?;
 
     let matches: Vec<GrepMatchOut> = page
         .items
@@ -205,7 +176,7 @@ pub(crate) async fn grep(
             limit: page.limit,
             returned,
             has_more: page.has_more,
-            next_cursor,
+            next_cursor: page.next_cursor,
         },
     }))
 }

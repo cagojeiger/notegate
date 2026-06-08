@@ -11,10 +11,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use notegate_core::limits;
 use notegate_service::search::GrepRequest;
 
-use super::common::{clamp_limit, page_json};
+use super::common::page_json;
 use super::resolve::{WorkspaceSelector, caller, resolve_workspace, service_error};
 use crate::state::AppState;
 
@@ -49,12 +48,6 @@ pub async fn call(
     let resolved = resolve_workspace(state, caller, &input.selector).await?;
     let workspace = resolved.name().to_owned();
 
-    let limit = clamp_limit(
-        input.limit,
-        limits::GREP_DEFAULT_LIMIT,
-        limits::GREP_MAX_LIMIT,
-    );
-
     let page = state
         .search
         .grep(
@@ -64,7 +57,7 @@ pub async fn call(
                 q: input.q,
                 path: input.path,
                 context: input.context,
-                limit: Some(limit),
+                limit: input.limit,
                 cursor: input.cursor,
             },
         )
@@ -90,8 +83,8 @@ pub async fn call(
         page.limit,
         returned,
         page.has_more,
-        page.next_cursor.as_ref(),
-    )?;
+        page.next_cursor.as_deref(),
+    );
 
     Ok(Json(json!({
         "workspace": workspace,

@@ -9,10 +9,28 @@
 use std::future::Future;
 
 use notegate_core::Result as CoreResult;
+use notegate_core::limits;
 use notegate_model::{Role, WorkspaceAccess};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::pagination::{clamp_limit, paginate_by_id};
+
+/// Input to list workspace access grants.
+#[derive(Debug, Clone, Default)]
+pub struct ListAccess {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// A page of access grants.
+#[derive(Debug, Clone)]
+pub struct AccessPage {
+    pub items: Vec<WorkspaceAccess>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
 
 /// Input to grant (or update) an account's role in a workspace.
 #[derive(Debug, Clone)]
@@ -69,7 +87,7 @@ where
         Self { store }
     }
 
-    /// List access for a workspace. Requires `owner`.
+    /// List all access grants for a workspace. Requires `owner`.
     pub async fn list(
         &self,
         caller_account_id: Uuid,
@@ -77,6 +95,34 @@ where
     ) -> ServiceResult<Vec<WorkspaceAccess>> {
         self.require_owner(workspace_id, caller_account_id).await?;
         Ok(self.store.list_access(workspace_id).await?)
+    }
+
+    /// List access grants for a workspace, paginated with an opaque cursor.
+    pub async fn list_page(
+        &self,
+        caller_account_id: Uuid,
+        workspace_id: Uuid,
+        request: ListAccess,
+    ) -> ServiceResult<AccessPage> {
+        self.require_owner(workspace_id, caller_account_id).await?;
+        let limit = clamp_limit(
+            request.limit,
+            limits::ACCESS_DEFAULT_LIMIT,
+            limits::ACCESS_MAX_LIMIT,
+        );
+        let grants = self.store.list_access(workspace_id).await?;
+        let (items, has_more, next_cursor) = paginate_by_id(
+            grants,
+            |grant| grant.account_id,
+            limit,
+            request.cursor.as_deref(),
+        )?;
+        Ok(AccessPage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
     }
 
     /// Grant or change an account's role. Requires `owner`.
@@ -170,6 +216,7 @@ mod tests {
         clippy::unwrap_in_result
     )]
     use super::*;
+    use crate::cursor;
     use chrono::Utc;
     use std::sync::{Arc, Mutex};
 
@@ -262,6 +309,96 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn list_page_returns_opaque_cursor() {
+        let workspace_id = Uuid::new_v4();
+        let owner = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let third = Uuid::new_v4();
+        let now = Utc::now();
+        let service = AccessService::new(MockStore::with_access(
+            Some(Role::Owner),
+            vec![
+                WorkspaceAccess {
+                    workspace_id,
+                    account_id: first,
+                    role: Role::Viewer,
+                    created_by: Some(owner),
+                    created_at: now,
+                    revoked_at: None,
+                    revoked_by: None,
+                },
+                WorkspaceAccess {
+                    workspace_id,
+                    account_id: second,
+                    role: Role::Editor,
+                    created_by: Some(owner),
+                    created_at: now,
+                    revoked_at: None,
+                    revoked_by: None,
+                },
+                WorkspaceAccess {
+                    workspace_id,
+                    account_id: third,
+                    role: Role::Owner,
+                    created_by: Some(owner),
+                    created_at: now,
+                    revoked_at: None,
+                    revoked_by: None,
+                },
+            ],
+        ));
+
+        let first_page = service
+            .list_page(
+                owner,
+                workspace_id,
+                ListAccess {
+                    limit: Some(2),
+                    cursor: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            first_page
+                .items
+                .iter()
+                .map(|grant| grant.account_id)
+                .collect::<Vec<_>>(),
+            vec![first, second]
+        );
+        assert_eq!(first_page.limit, 2);
+        assert!(first_page.has_more);
+        let cursor = first_page.next_cursor.expect("next cursor");
+        assert_eq!(cursor::decode::<Uuid>(&cursor).unwrap(), second);
+
+        let second_page = service
+            .list_page(
+                owner,
+                workspace_id,
+                ListAccess {
+                    limit: Some(2),
+                    cursor: Some(cursor),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            second_page
+                .items
+                .iter()
+                .map(|grant| grant.account_id)
+                .collect::<Vec<_>>(),
+            vec![third]
+        );
+        assert!(!second_page.has_more);
+        assert!(second_page.next_cursor.is_none());
     }
 
     #[tokio::test]

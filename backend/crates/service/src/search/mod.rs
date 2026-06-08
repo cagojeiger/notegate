@@ -15,6 +15,7 @@ use crate::error::{ServiceError, ServiceResult};
 use crate::files::NodeView;
 use crate::files::policy::{self, FileCommand};
 use crate::files::validation;
+use crate::pagination::clamp_limit;
 
 /// `find` request.
 #[derive(Debug, Clone)]
@@ -69,7 +70,7 @@ pub struct FindPage {
     pub items: Vec<NodeView>,
     pub limit: i64,
     pub has_more: bool,
-    pub next_cursor: Option<FindCursor>,
+    pub next_cursor: Option<String>,
 }
 
 /// A grep result page.
@@ -78,7 +79,7 @@ pub struct GrepPage {
     pub items: Vec<GrepMatch>,
     pub limit: i64,
     pub has_more: bool,
-    pub next_cursor: Option<GrepCursor>,
+    pub next_cursor: Option<String>,
 }
 
 /// A candidate document for grep line-splitting.
@@ -194,10 +195,14 @@ where
 
         // The next cursor is the LAST returned row's `(name, id)` keyset.
         let next_cursor = if has_more {
-            rows.last().map(|(node, _path, _has_children)| FindCursor {
-                name: node.name.clone(),
-                id: node.id,
-            })
+            rows.last()
+                .map(|(node, _path, _has_children)| FindCursor {
+                    name: node.name.clone(),
+                    id: node.id,
+                })
+                .map(|cursor| cursor::encode(&cursor))
+                .transpose()
+                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
         } else {
             None
         };
@@ -335,7 +340,14 @@ where
 
         // `next_cursor` is only meaningful when more results remain; the loop
         // already set `cursor` to the resume point when it broke early.
-        let next_cursor = if has_more { cursor } else { None };
+        let next_cursor = if has_more {
+            cursor
+                .map(|cursor| cursor::encode(&cursor))
+                .transpose()
+                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
+        } else {
+            None
+        };
 
         Ok(GrepPage {
             items: matches,
@@ -384,15 +396,6 @@ fn validate_query(q: &str) -> ServiceResult<&str> {
         )));
     }
     Ok(trimmed)
-}
-
-/// Clamp a requested page limit to `1..=max`, defaulting to `default` when absent.
-fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
-    match limit {
-        None => default,
-        Some(value) if value < 1 => 1,
-        Some(value) => value.min(max),
-    }
 }
 
 /// Clamp grep context lines to `0..=GREP_MAX_CONTEXT`, defaulting to
@@ -517,14 +520,6 @@ mod tests {
             Err(ServiceError::InvalidInput(_))
         ));
         assert_eq!(validate_query("  note  ").unwrap(), "note");
-    }
-
-    #[test]
-    fn limit_is_clamped_to_range() {
-        assert_eq!(clamp_limit(None, 50, 100), 50, "absent → default");
-        assert_eq!(clamp_limit(Some(0), 50, 100), 1, "below 1 → 1");
-        assert_eq!(clamp_limit(Some(250), 50, 100), 100, "above max → max");
-        assert_eq!(clamp_limit(Some(30), 50, 100), 30, "in range → as-is");
     }
 
     #[test]

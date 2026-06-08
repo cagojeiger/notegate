@@ -465,7 +465,7 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
         match page.next_cursor {
             Some(c) => {
                 assert!(page.has_more, "next_cursor implies has_more");
-                cursor = Some(notegate_service::cursor::encode(&c)?);
+                cursor = Some(c);
             }
             None => {
                 assert!(!page.has_more, "no next_cursor implies no more pages");
@@ -540,7 +540,7 @@ async fn grep_cursor_resumes_within_a_document() -> Result<(), Box<dyn std::erro
         }
         match page.next_cursor {
             Some(c) => {
-                cursor = Some(notegate_service::cursor::encode(&c)?);
+                cursor = Some(c);
             }
             None => break,
         }

@@ -109,7 +109,8 @@ db/postgres_pool
 - API layer는 HTTP/MCP DTO, auth extraction, error mapping만 담당한다.
 - Model layer는 persistence/API에 독립적인 데이터 타입을 담당한다.
 - Service layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
-- DB layer는 query/transaction/pagination cursor 구현만 담당한다.
+- Service layer는 opaque pagination cursor 인코딩/디코딩과 command pagination 정책을 담당한다.
+- DB layer는 query/transaction/keyset tuple 조회를 담당한다.
 
 ## 문서 구성
 

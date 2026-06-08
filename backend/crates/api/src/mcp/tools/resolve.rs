@@ -358,18 +358,6 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
     value
 }
 
-/// Decode an opaque cursor, mapping a bad cursor to a `400`-class error.
-pub fn decode_cursor<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, ErrorData> {
-    notegate_service::cursor::decode(raw)
-        .map_err(|_error| ErrorData::invalid_params("invalid cursor", None))
-}
-
-/// Encode an opaque cursor, mapping a failure to an internal error.
-pub fn encode_cursor<T: serde::Serialize>(value: &T) -> Result<String, ErrorData> {
-    notegate_service::cursor::encode(value)
-        .map_err(|_error| ErrorData::internal_error("failed to encode cursor", None))
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(

@@ -10,13 +10,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use notegate_core::limits;
-use notegate_service::files::{ChildrenCursor, ChildrenRequest};
+use notegate_service::files::ChildrenRequest;
 
-use super::common::{clamp_limit, page_json};
-use super::resolve::{
-    WorkspaceSelector, caller, decode_cursor, node_summary, resolve_target, service_error,
-};
+use super::common::page_json;
+use super::resolve::{WorkspaceSelector, caller, node_summary, resolve_target, service_error};
 use crate::state::AppState;
 
 /// `files_ls` input: a workspace selector plus the folder `path` (or `target`).
@@ -61,16 +58,6 @@ pub async fn call(
         .await
         .map_err(service_error)?;
 
-    let cursor = match input.cursor.as_deref() {
-        None => None,
-        Some(raw) => Some(decode_cursor::<ChildrenCursor>(raw)?),
-    };
-    let limit = clamp_limit(
-        input.limit,
-        limits::CHILDREN_DEFAULT_LIMIT,
-        limits::CHILDREN_MAX_LIMIT,
-    );
-
     let page = state
         .files
         .children(
@@ -78,8 +65,8 @@ pub async fn call(
             workspace_id,
             folder.node.id,
             ChildrenRequest {
-                limit: Some(limit),
-                cursor,
+                limit: input.limit,
+                cursor: input.cursor,
             },
         )
         .await
@@ -91,8 +78,8 @@ pub async fn call(
         page.limit,
         returned,
         page.has_more,
-        page.next_cursor.as_ref(),
-    )?;
+        page.next_cursor.as_deref(),
+    );
 
     Ok(Json(json!({
         "workspace": resolved.name(),

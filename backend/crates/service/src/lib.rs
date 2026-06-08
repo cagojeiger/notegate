@@ -10,6 +10,7 @@ pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod identity;
+mod pagination;
 pub mod search;
 pub mod workspaces;
 

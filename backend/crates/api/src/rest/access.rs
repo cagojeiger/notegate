@@ -10,17 +10,16 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_core::limits;
 use notegate_model::{Caller, WorkspaceAccess};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{AccountRef, Page, clamp_limit, paginate_by_id, parse_role};
+use crate::rest::dto::{AccountRef, Page, parse_role};
 use crate::state::AppState;
 
-use notegate_service::access::GrantAccess;
+use notegate_service::access::{GrantAccess, ListAccess};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -69,30 +68,38 @@ pub(crate) async fn list(
     Path(workspace_id): Path<Uuid>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<ListResponse>, ApiError> {
-    let limit = clamp_limit(
-        query.limit,
-        limits::ACCESS_DEFAULT_LIMIT,
-        limits::ACCESS_MAX_LIMIT,
-    );
-    let grants = state.access.list(caller.account_id(), workspace_id).await?;
-    let (window, page) = paginate_by_id(
-        &grants,
-        |grant| grant.account_id,
-        limit,
-        query.cursor.as_deref(),
-    )?;
+    let page = state
+        .access
+        .list_page(
+            caller.account_id(),
+            workspace_id,
+            ListAccess {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
 
-    let ids: Vec<Uuid> = window.iter().map(|grant| grant.account_id).collect();
+    let ids: Vec<Uuid> = page.items.iter().map(|grant| grant.account_id).collect();
     let refs = state.accounts.find_account_refs(&ids).await?;
-    let access = window
-        .into_iter()
+    let access = page
+        .items
+        .iter()
         .map(|grant: &WorkspaceAccess| AccessOut {
             account: AccountRef::resolve(grant.account_id, &refs),
             role: grant.role.as_str().to_owned(),
             created_at: grant.created_at,
         })
         .collect();
-    Ok(Json(ListResponse { access, page }))
+    Ok(Json(ListResponse {
+        access,
+        page: Page {
+            limit: page.limit,
+            returned: page.items.len() as i64,
+            has_more: page.has_more,
+            next_cursor: page.next_cursor,
+        },
+    }))
 }
 
 #[utoipa::path(

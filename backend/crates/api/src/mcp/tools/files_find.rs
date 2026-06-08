@@ -11,11 +11,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use notegate_core::limits;
 use notegate_model::NodeKind;
 use notegate_service::search::FindRequest;
 
-use super::common::{clamp_limit, page_json};
+use super::common::page_json;
 use super::resolve::{WorkspaceSelector, caller, node_summary, resolve_workspace, service_error};
 use crate::state::AppState;
 
@@ -53,11 +52,6 @@ pub async fn call(
         None => None,
         Some(value) => Some(parse_kind(value)?),
     };
-    let limit = clamp_limit(
-        input.limit,
-        limits::FIND_DEFAULT_LIMIT,
-        limits::FIND_MAX_LIMIT,
-    );
 
     let page = state
         .search
@@ -68,7 +62,7 @@ pub async fn call(
                 q: input.q,
                 path: input.path,
                 kind,
-                limit: Some(limit),
+                limit: input.limit,
                 cursor: input.cursor,
             },
         )
@@ -81,8 +75,8 @@ pub async fn call(
         page.limit,
         returned,
         page.has_more,
-        page.next_cursor.as_ref(),
-    )?;
+        page.next_cursor.as_deref(),
+    );
 
     Ok(Json(json!({
         "workspace": resolved.name(),

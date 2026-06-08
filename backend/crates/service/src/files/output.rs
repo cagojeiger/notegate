@@ -49,7 +49,7 @@ pub struct ChildrenPage {
     pub items: Vec<NodeView>,
     pub limit: i64,
     pub has_more: bool,
-    pub next_cursor: Option<ChildrenCursor>,
+    pub next_cursor: Option<String>,
 }
 
 /// Result of `rm`: the root node is hidden immediately and eligible for hard

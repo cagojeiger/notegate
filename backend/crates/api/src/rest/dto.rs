@@ -173,62 +173,6 @@ pub fn attribution_ids<'a>(views: impl IntoIterator<Item = &'a NodeView>) -> Vec
     ids
 }
 
-/// Clamp a requested page limit to `1..=max`, defaulting to `default` when the
-/// client did not supply one. A non-positive limit clamps to `1`.
-pub fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
-    match limit {
-        None => default,
-        Some(value) if value < 1 => 1,
-        Some(value) => value.min(max),
-    }
-}
-
-/// Keyset-paginate a fully-materialized, stably-ordered slice by item id.
-///
-/// The service layer returns these small bounded lists (workspaces ≤ owner quota,
-/// access ≤ 20, agents ≤ 50) already ordered; this slices a window after the
-/// cursor id and reports `has_more` plus the next cursor (the last item's id,
-/// base64-encoded). Returns `Err` only when the cursor fails to decode (`400`).
-pub fn paginate_by_id<'a, T>(
-    items: &'a [T],
-    id_of: impl Fn(&T) -> Uuid,
-    limit: i64,
-    cursor: Option<&str>,
-) -> Result<(Vec<&'a T>, Page), crate::error::ApiError> {
-    let start = match cursor {
-        None => 0,
-        Some(raw) => {
-            let after: Uuid = notegate_service::cursor::decode(raw)
-                .map_err(|_error| crate::error::ApiError::invalid_field("invalid cursor"))?;
-            items
-                .iter()
-                .position(|item| id_of(item) == after)
-                .map(|index| index + 1)
-                .unwrap_or(items.len())
-        }
-    };
-
-    let window: Vec<&T> = items.iter().skip(start).take(limit as usize).collect();
-    let has_more = start + window.len() < items.len();
-    let next_cursor = if has_more {
-        window
-            .last()
-            .map(|item| notegate_service::cursor::encode(&id_of(item)))
-            .transpose()
-            .map_err(|_error| crate::error::ApiError::internal("failed to encode cursor"))?
-    } else {
-        None
-    };
-
-    let page = Page {
-        limit,
-        returned: window.len() as i64,
-        has_more,
-        next_cursor,
-    };
-    Ok((window, page))
-}
-
 /// Parse a `kind` query/body string into a [`NodeKind`], rejecting unknowns.
 pub fn parse_kind(value: &str) -> Result<NodeKind, crate::error::ApiError> {
     NodeKind::parse(value)

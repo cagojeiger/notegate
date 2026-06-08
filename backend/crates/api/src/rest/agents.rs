@@ -14,17 +14,16 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_core::limits;
 use notegate_model::{Agent, Caller};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{Page, clamp_limit, paginate_by_id};
+use crate::rest::dto::Page;
 use crate::state::AppState;
 
-use notegate_service::agents::{CreateAgent, CreateAgentKey};
+use notegate_service::agents::{CreateAgent, CreateAgentKey, ListAgents};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -106,15 +105,26 @@ pub(crate) async fn list(
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<ListResponse>, ApiError> {
-    let limit = clamp_limit(
-        query.limit,
-        limits::AGENTS_DEFAULT_LIMIT,
-        limits::AGENTS_MAX_LIMIT,
-    );
-    let agents = state.agents.list_agents(caller.account_id()).await?;
-    let (window, page) = paginate_by_id(&agents, |agent| agent.id, limit, query.cursor.as_deref())?;
-    let agents = window.into_iter().map(AgentOut::from).collect();
-    Ok(Json(ListResponse { agents, page }))
+    let page = state
+        .agents
+        .list_agents_page(
+            caller.account_id(),
+            ListAgents {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let agents = page.items.iter().map(AgentOut::from).collect();
+    Ok(Json(ListResponse {
+        agents,
+        page: Page {
+            limit: page.limit,
+            returned: page.items.len() as i64,
+            has_more: page.has_more,
+            next_cursor: page.next_cursor,
+        },
+    }))
 }
 
 #[utoipa::path(

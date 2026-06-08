@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
+use crate::pagination::clamp_limit;
 
 /// Input to create a workspace.
 #[derive(Debug, Clone)]
@@ -329,14 +330,6 @@ where
 /// The not-found error used to hide workspaces the caller cannot see.
 fn not_found() -> ServiceError {
     ServiceError::NotFound("workspace not found".to_owned())
-}
-
-fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
-    match limit {
-        None => default,
-        Some(value) if value < 1 => 1,
-        Some(value) => value.min(max),
-    }
 }
 
 #[cfg(test)]
