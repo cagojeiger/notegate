@@ -16,12 +16,13 @@ use notegate_service::search::FindRequest;
 
 use super::common::page_json;
 use super::resolve::{
-    WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_workspace, service_error,
+    WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_target,
+    resolve_workspace, service_error,
 };
 use crate::state::AppState;
 
-/// `files_find` input: a workspace selector, the query, and optional scope/kind/
-/// paging fields.
+/// `files_find` input: a workspace selector, the query, and optional target/
+/// scope/kind/paging fields.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Input {
     #[serde(flatten)]
@@ -31,6 +32,9 @@ pub struct Input {
     /// Optional absolute scope path to search within.
     #[serde(default)]
     pub path: Option<String>,
+    /// Compact `<workspace>:/<scope-path>` target (alternative to workspace+path).
+    #[serde(default)]
+    pub target: Option<String>,
     /// Optional kind filter: `folder` or `document`.
     #[serde(default)]
     pub kind: Option<String>,
@@ -48,7 +52,17 @@ pub async fn call(
     Parameters(input): Parameters<Input>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let resolved = resolve_workspace(state, caller, &input.selector).await?;
+    let (resolved, scope_path) = match input.target.as_deref() {
+        Some(target) => {
+            let (resolved, path) =
+                resolve_target(state, caller, &input.selector, Some(target), None).await?;
+            (resolved, Some(path))
+        }
+        None => (
+            resolve_workspace(state, caller, &input.selector).await?,
+            input.path,
+        ),
+    };
 
     let kind = match input.kind.as_deref() {
         None => None,
@@ -62,7 +76,7 @@ pub async fn call(
             resolved.workspace_id(),
             FindRequest {
                 q: input.q,
-                path: input.path,
+                path: scope_path,
                 kind,
                 limit: input.limit,
                 cursor: input.cursor,

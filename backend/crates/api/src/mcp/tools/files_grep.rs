@@ -14,11 +14,11 @@ use serde_json::{Value, json};
 use notegate_service::search::GrepRequest;
 
 use super::common::page_json;
-use super::resolve::{WorkspaceSelector, caller, resolve_workspace, service_error};
+use super::resolve::{WorkspaceSelector, caller, resolve_target, resolve_workspace, service_error};
 use crate::state::AppState;
 
-/// `files_grep` input: a workspace selector, the query, and optional scope/
-/// context/paging fields.
+/// `files_grep` input: a workspace selector, the query, and optional target/
+/// scope/context/paging fields.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Input {
     #[serde(flatten)]
@@ -28,6 +28,9 @@ pub struct Input {
     /// Optional absolute scope path to search within.
     #[serde(default)]
     pub path: Option<String>,
+    /// Compact `<workspace>:/<scope-path>` target (alternative to workspace+path).
+    #[serde(default)]
+    pub target: Option<String>,
     /// Lines of surrounding context to include per match.
     #[serde(default)]
     pub context: Option<i64>,
@@ -45,7 +48,17 @@ pub async fn call(
     Parameters(input): Parameters<Input>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let resolved = resolve_workspace(state, caller, &input.selector).await?;
+    let (resolved, scope_path) = match input.target.as_deref() {
+        Some(target) => {
+            let (resolved, path) =
+                resolve_target(state, caller, &input.selector, Some(target), None).await?;
+            (resolved, Some(path))
+        }
+        None => (
+            resolve_workspace(state, caller, &input.selector).await?,
+            input.path,
+        ),
+    };
     let workspace = resolved.name().to_owned();
 
     let page = state
@@ -55,7 +68,7 @@ pub async fn call(
             resolved.workspace_id(),
             GrepRequest {
                 q: input.q,
-                path: input.path,
+                path: scope_path,
                 context: input.context,
                 limit: input.limit,
                 cursor: input.cursor,

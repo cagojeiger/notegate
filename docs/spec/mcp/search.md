@@ -1,12 +1,18 @@
 # MCP Search
 
-MCP search is path-first. Tools select a workspace through `workspace`, `workspace_id`, `target`, or the single visible workspace fallback described in `README.md`.
+MCP search는 path-first이다. Tool은 `workspace`, `workspace_id`, `target`, 또는 `README.md`의 single visible workspace fallback으로 workspace를 선택한다.
 
-The `path` field is a scope path, not a path substring query. A folder scope searches that folder subtree. A document scope searches that document only. An unresolved scope path returns `invalid params` with `data.kind=not_found`.
+`path`는 path substring query가 아니라 scope path다. Folder scope는 해당 folder subtree를 검색하고, document scope는 해당 document 하나만 검색한다. Scope path가 live node로 해석되지 않으면 `invalid params`와 `data.kind=not_found`를 반환한다.
+
+`target`은 `workspace`와 `path`를 함께 전달하는 축약형이다.
+
+```json
+{"target": "personal:/projects", "q": "note"}
+```
 
 ## `files_find`
 
-Find nodes by name metadata under an optional scope path.
+선택된 workspace 안에서 node name metadata를 검색한다.
 
 Input:
 
@@ -21,7 +27,7 @@ Input:
 }
 ```
 
-`q` is single-line, non-empty, and at most 256 characters.
+`q`는 single-line, non-empty, 최대 256 characters다.
 
 Output:
 
@@ -51,7 +57,7 @@ Output:
 
 ## `files_grep`
 
-Search Markdown body lines.
+Markdown body line을 검색한다.
 
 Input:
 
@@ -66,7 +72,15 @@ Input:
 }
 ```
 
-`q` is single-line, non-empty, and at most 256 characters.
+`q`는 single-line, non-empty, 최대 256 characters다.
+
+Branching:
+
+```text
+missing context -> default context
+context < 0     -> 0
+context > max   -> max context
+```
 
 Output:
 
@@ -92,4 +106,4 @@ Output:
 }
 ```
 
-`files_grep` does not return `node_id`; MCP callers should use the returned path as the next command target.
+`files_grep`은 `node_id`를 반환하지 않는다. MCP caller는 반환된 `path`를 다음 command target으로 사용한다.
