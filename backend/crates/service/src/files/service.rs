@@ -412,13 +412,17 @@ where
         )?;
 
         let stored = metrics.into_stored(new_content);
+        let save_guard = command
+            .expected_sha256
+            .as_deref()
+            .unwrap_or(&previous_sha256);
         let (node, document) = self
             .store
             .save_document_content(
                 workspace_id,
                 node.id,
                 &stored,
-                command.expected_sha256.as_deref(),
+                Some(save_guard),
                 caller_account_id,
             )
             .await?;

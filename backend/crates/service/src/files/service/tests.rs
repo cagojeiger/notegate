@@ -27,6 +27,7 @@ struct MemStore {
 struct State {
     nodes: HashMap<Uuid, Node>,
     documents: HashMap<Uuid, Document>,
+    mutate_before_save: Option<String>,
 }
 
 fn actor() -> Uuid {
@@ -49,6 +50,7 @@ impl MemStore {
             state: Arc::new(Mutex::new(State {
                 nodes,
                 documents: HashMap::new(),
+                mutate_before_save: None,
             })),
         }
     }
@@ -98,6 +100,10 @@ impl MemStore {
             },
         );
         id
+    }
+
+    fn mutate_before_next_save(&self, content: &str) {
+        self.lock().mutate_before_save = Some(content.to_owned());
     }
 
     fn derive_path(state: &State, id: Uuid) -> Option<String> {
@@ -413,6 +419,14 @@ impl FilesStore for MemStore {
         updated_by: Uuid,
     ) -> CoreResult<(Node, Document)> {
         let mut state = self.lock();
+        if let Some(content_md) = state.mutate_before_save.take() {
+            let metrics = content::compute(&content_md);
+            let doc = state.documents.get_mut(&node_id).expect("doc");
+            doc.content_md = content_md;
+            doc.content_sha256 = metrics.content_sha256;
+            doc.byte_len = metrics.byte_len as i32;
+            doc.line_count = metrics.line_count as i32;
+        }
         let current_sha256 = state
             .documents
             .get(&node_id)
@@ -898,6 +912,31 @@ async fn patch_empty_edits_is_invalid_input() {
         .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::InvalidInput(_)));
+}
+
+#[tokio::test]
+async fn patch_without_user_sha_still_guards_loaded_version() {
+    let (svc, store) = service(Some(Role::Editor));
+    let id = store.add_document(store.root_id, "n.md", "hello world\n");
+    store.mutate_before_next_save("concurrent change\n");
+
+    let err = svc
+        .patch_document(
+            actor(),
+            store.workspace_id,
+            PatchDocument {
+                node_id: id,
+                edits: vec![Edit {
+                    old_text: "world".to_owned(),
+                    new_text: "there".to_owned(),
+                }],
+                expected_sha256: None,
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ServiceError::Conflict(_)));
 }
 
 #[tokio::test]
