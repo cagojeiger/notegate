@@ -366,6 +366,7 @@ impl AccessStore for WorkspaceRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         lock_workspace(&mut tx, command.workspace_id).await?;
+        ensure_account_exists(&mut tx, command.account_id).await?;
 
         guard_last_owner(
             &mut tx,
@@ -452,6 +453,18 @@ async fn lock_workspace(tx: &mut sqlx::PgConnection, workspace_id: Uuid) -> Resu
             .map_err(map_sqlx_error)?;
     if found.is_none() {
         return Err(Error::not_found("workspace not found"));
+    }
+    Ok(())
+}
+
+async fn ensure_account_exists(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
+    let found: Option<Uuid> = sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1")
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+    if found.is_none() {
+        return Err(Error::not_found("account not found"));
     }
     Ok(())
 }

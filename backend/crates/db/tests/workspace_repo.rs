@@ -14,6 +14,7 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
+use notegate_core::Error;
 use notegate_db::WorkspaceRepo;
 use notegate_model::Role;
 use notegate_service::access::{AccessStore, GrantAccess};
@@ -257,6 +258,33 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         Some(Role::Editor),
         "re-grant of an existing active account is allowed at the cap"
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn grant_unknown_account_is_not_found() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "shared").await;
+
+    let err = repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: Uuid::new_v4(),
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
 
     db.cleanup().await;
     Ok(())
