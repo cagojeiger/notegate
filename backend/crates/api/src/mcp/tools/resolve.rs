@@ -274,19 +274,30 @@ fn ambiguity_error(name: &str, matches: &[WorkspaceView]) -> ErrorData {
 /// detail.
 pub fn service_error(error: ServiceError) -> ErrorData {
     match error {
-        ServiceError::NotFound(message) => ErrorData::invalid_params(Cow::Owned(message), None),
-        ServiceError::InvalidInput(message) => ErrorData::invalid_params(Cow::Owned(message), None),
+        ServiceError::NotFound(message) => {
+            ErrorData::invalid_params(Cow::Owned(message), error_meta("not_found"))
+        }
+        ServiceError::InvalidInput(message) => {
+            ErrorData::invalid_params(Cow::Owned(message), error_meta("invalid_input"))
+        }
         ServiceError::Forbidden(message) => {
-            ErrorData::invalid_request(Cow::Owned(message), Some(json!({"code": "forbidden"})))
+            ErrorData::invalid_request(Cow::Owned(message), error_meta("forbidden"))
         }
         ServiceError::Conflict(message) => {
-            ErrorData::invalid_request(Cow::Owned(message), Some(json!({"code": "conflict"})))
+            ErrorData::invalid_request(Cow::Owned(message), error_meta("conflict"))
         }
         ServiceError::Internal(message) => {
             tracing::error!(event = "mcp.error.internal", detail = %message);
-            ErrorData::internal_error("internal server error", None)
+            ErrorData::internal_error("internal server error", error_meta("internal"))
         }
     }
+}
+
+fn error_meta(kind: &'static str) -> Option<serde_json::Value> {
+    Some(json!({
+        "kind": kind,
+        "code": kind,
+    }))
 }
 
 /// Split an absolute path into its parent path and basename.
@@ -413,6 +424,21 @@ mod tests {
         assert_eq!(data["code"], "workspace_ambiguous");
         assert_eq!(data["matches"].as_array().unwrap().len(), 2);
         assert!(data["hint"].as_str().unwrap().contains("workspaces_list"));
+    }
+
+    #[test]
+    fn service_error_carries_structured_kind_data() {
+        let missing = service_error(ServiceError::NotFound("missing".to_owned()));
+        assert_eq!(missing.code, ErrorCode::INVALID_PARAMS);
+        let missing_data = missing.data.expect("not_found carries data");
+        assert_eq!(missing_data["kind"], "not_found");
+        assert_eq!(missing_data["code"], "not_found");
+
+        let conflict = service_error(ServiceError::Conflict("stale".to_owned()));
+        assert_eq!(conflict.code, ErrorCode::INVALID_REQUEST);
+        let conflict_data = conflict.data.expect("conflict carries data");
+        assert_eq!(conflict_data["kind"], "conflict");
+        assert_eq!(conflict_data["code"], "conflict");
     }
 
     #[test]
