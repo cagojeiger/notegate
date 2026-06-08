@@ -33,17 +33,17 @@ pub enum FilesValidationError {
     Name(ValidationError),
     /// The parent folder already holds the maximum live direct children.
     FanoutExceeded {
-        /// The configured maximum ([`limits::FOLDER_MAX_CHILDREN`]).
+        /// The configured maximum ([`limits::folder_max_children()`]).
         max: usize,
     },
     /// The workspace already holds the maximum live nodes.
     WorkspaceNodesExceeded {
-        /// The configured maximum ([`limits::WORKSPACE_MAX_NODES`]).
+        /// The configured maximum ([`limits::workspace_max_nodes()`]).
         max: usize,
     },
     /// The workspace already holds the maximum live documents.
     WorkspaceDocumentsExceeded {
-        /// The configured maximum ([`limits::WORKSPACE_MAX_DOCUMENTS`]).
+        /// The configured maximum ([`limits::workspace_max_documents()`]).
         max: usize,
     },
     /// The document content exceeds the per-document byte cap.
@@ -58,7 +58,7 @@ pub enum FilesValidationError {
     },
     /// Storing the document would exceed the workspace's total live byte budget.
     WorkspaceDocumentBytesExceeded {
-        /// The configured maximum ([`limits::WORKSPACE_MAX_DOCUMENT_BYTES`]).
+        /// The configured maximum ([`limits::workspace_max_document_bytes()`]).
         max: usize,
     },
 }
@@ -140,35 +140,35 @@ pub fn validate_path_len(path: &str) -> Result<(), FilesValidationError> {
 }
 
 /// Reject creating/moving a child into a parent that already holds the maximum
-/// live direct children ([`limits::FOLDER_MAX_CHILDREN`]).
+/// live direct children ([`limits::folder_max_children()`]).
 pub fn validate_fanout(live_children: usize) -> Result<(), FilesValidationError> {
-    if live_children >= limits::FOLDER_MAX_CHILDREN {
+    if live_children >= limits::folder_max_children() {
         return Err(FilesValidationError::FanoutExceeded {
-            max: limits::FOLDER_MAX_CHILDREN,
+            max: limits::folder_max_children(),
         });
     }
     Ok(())
 }
 
 /// Reject creating a node when the workspace already holds the maximum live
-/// nodes ([`limits::WORKSPACE_MAX_NODES`]).
+/// nodes ([`limits::workspace_max_nodes()`]).
 pub fn validate_workspace_node_count(live_nodes: usize) -> Result<(), FilesValidationError> {
-    if live_nodes >= limits::WORKSPACE_MAX_NODES {
+    if live_nodes >= limits::workspace_max_nodes() {
         return Err(FilesValidationError::WorkspaceNodesExceeded {
-            max: limits::WORKSPACE_MAX_NODES,
+            max: limits::workspace_max_nodes(),
         });
     }
     Ok(())
 }
 
 /// Reject creating a document when the workspace already holds the maximum live
-/// documents ([`limits::WORKSPACE_MAX_DOCUMENTS`]).
+/// documents ([`limits::workspace_max_documents()`]).
 pub fn validate_workspace_document_count(
     live_documents: usize,
 ) -> Result<(), FilesValidationError> {
-    if live_documents >= limits::WORKSPACE_MAX_DOCUMENTS {
+    if live_documents >= limits::workspace_max_documents() {
         return Err(FilesValidationError::WorkspaceDocumentsExceeded {
-            max: limits::WORKSPACE_MAX_DOCUMENTS,
+            max: limits::workspace_max_documents(),
         });
     }
     Ok(())
@@ -195,7 +195,7 @@ pub fn validate_document_content(
 }
 
 /// Reject a write/patch that would push the workspace's total live document
-/// bytes over [`limits::WORKSPACE_MAX_DOCUMENT_BYTES`].
+/// bytes over [`limits::workspace_max_document_bytes()`].
 ///
 /// `current_total_bytes` is the workspace's current live document byte sum,
 /// `previous_byte_len` is the byte length of the document being replaced (0 for
@@ -208,9 +208,9 @@ pub fn validate_workspace_document_bytes(
     let projected = current_total_bytes
         .saturating_sub(previous_byte_len)
         .saturating_add(new_byte_len);
-    if projected > limits::WORKSPACE_MAX_DOCUMENT_BYTES {
+    if projected > limits::workspace_max_document_bytes() {
         return Err(FilesValidationError::WorkspaceDocumentBytesExceeded {
-            max: limits::WORKSPACE_MAX_DOCUMENT_BYTES,
+            max: limits::workspace_max_document_bytes(),
         });
     }
     Ok(())
@@ -286,25 +286,25 @@ mod tests {
 
     #[test]
     fn fanout_boundary() {
-        assert!(validate_fanout(limits::FOLDER_MAX_CHILDREN - 1).is_ok());
+        assert!(validate_fanout(limits::folder_max_children() - 1).is_ok());
         assert_eq!(
-            validate_fanout(limits::FOLDER_MAX_CHILDREN),
+            validate_fanout(limits::folder_max_children()),
             Err(FilesValidationError::FanoutExceeded {
-                max: limits::FOLDER_MAX_CHILDREN
+                max: limits::folder_max_children()
             })
         );
     }
 
     #[test]
     fn workspace_node_and_document_count_boundaries() {
-        assert!(validate_workspace_node_count(limits::WORKSPACE_MAX_NODES - 1).is_ok());
+        assert!(validate_workspace_node_count(limits::workspace_max_nodes() - 1).is_ok());
         assert!(matches!(
-            validate_workspace_node_count(limits::WORKSPACE_MAX_NODES),
+            validate_workspace_node_count(limits::workspace_max_nodes()),
             Err(FilesValidationError::WorkspaceNodesExceeded { .. })
         ));
-        assert!(validate_workspace_document_count(limits::WORKSPACE_MAX_DOCUMENTS - 1).is_ok());
+        assert!(validate_workspace_document_count(limits::workspace_max_documents() - 1).is_ok());
         assert!(matches!(
-            validate_workspace_document_count(limits::WORKSPACE_MAX_DOCUMENTS),
+            validate_workspace_document_count(limits::workspace_max_documents()),
             Err(FilesValidationError::WorkspaceDocumentsExceeded { .. })
         ));
     }
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn workspace_document_bytes_accounts_for_replacement() {
-        let max = limits::WORKSPACE_MAX_DOCUMENT_BYTES;
+        let max = limits::workspace_max_document_bytes();
         // Replacing a doc of equal size at the cap stays at the cap (ok).
         assert!(validate_workspace_document_bytes(max, 10, 10).is_ok());
         // Growing past the cap is rejected.

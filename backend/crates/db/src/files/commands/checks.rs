@@ -125,10 +125,10 @@ pub async fn require_fanout(
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if to_usize(children, "child")? >= limits::FOLDER_MAX_CHILDREN {
+    if to_usize(children, "child")? >= limits::folder_max_children() {
         return Err(Error::validation(format!(
             "folder already has the maximum of {} children",
-            limits::FOLDER_MAX_CHILDREN
+            limits::folder_max_children()
         )));
     }
     Ok(())
@@ -143,10 +143,10 @@ pub async fn require_node_budget(tx: &mut PgConnection, workspace_id: Uuid) -> R
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if to_usize(nodes, "node")? >= limits::WORKSPACE_MAX_NODES {
+    if to_usize(nodes, "node")? >= limits::workspace_max_nodes() {
         return Err(Error::validation(format!(
             "workspace already has the maximum of {} nodes",
-            limits::WORKSPACE_MAX_NODES
+            limits::workspace_max_nodes()
         )));
     }
     Ok(())
@@ -163,10 +163,10 @@ pub async fn require_document_budget(tx: &mut PgConnection, workspace_id: Uuid) 
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if to_usize(docs, "document")? >= limits::WORKSPACE_MAX_DOCUMENTS {
+    if to_usize(docs, "document")? >= limits::workspace_max_documents() {
         return Err(Error::validation(format!(
             "workspace already has the maximum of {} documents",
-            limits::WORKSPACE_MAX_DOCUMENTS
+            limits::workspace_max_documents()
         )));
     }
     Ok(())
@@ -191,10 +191,10 @@ pub async fn require_byte_budget(
     .await
     .map_err(map_sqlx_error)?;
     let projected = total - previous_bytes + new_bytes;
-    if projected > limits::WORKSPACE_MAX_DOCUMENT_BYTES as i64 {
+    if projected > limits::workspace_max_document_bytes() as i64 {
         return Err(Error::validation(format!(
             "write would exceed the workspace document byte budget of {}",
-            limits::WORKSPACE_MAX_DOCUMENT_BYTES
+            limits::workspace_max_document_bytes()
         )));
     }
     Ok(())

@@ -209,19 +209,15 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(moved.path, "/archive/note.md", "move derives the new path");
     assert_eq!(moved.node.updated_by, owner, "move sets updated_by");
 
-    // Pre-mortem S3: find by NEW path hits, by OLD path misses (path is derived,
-    // so the move — which touched only the moved node's row — is reflected).
-    let new_path_hits = repo.find_nodes(ws, "archive", None, None, 50, None).await?;
-    assert!(
-        new_path_hits.iter().any(|(n, _, _)| n.id == note_id),
-        "after move, find by NEW path must hit"
-    );
-    let old_path_hits = repo
-        .find_nodes(ws, "projects/note", None, None, 50, None)
-        .await?;
-    assert!(
-        !old_path_hits.iter().any(|(n, _, _)| n.id == note_id),
-        "after move, find by OLD path must miss"
+    // find is name-only; the moved document keeps its name, and its derived
+    // path (for display) reflects the move even though the match is on name.
+    let by_name = repo.find_nodes(ws, "note", None, None, 50, None).await?;
+    let hit = by_name.iter().find(|(n, _, _)| n.id == note_id);
+    assert!(hit.is_some(), "find by name must hit the moved document");
+    assert_eq!(
+        hit.map(|(_, p, _)| p.as_str()),
+        Some("/archive/note.md"),
+        "derived path reflects the move",
     );
 
     // --- rm: soft-delete the moved document ---

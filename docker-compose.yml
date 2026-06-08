@@ -34,6 +34,12 @@ services:
       NOTEGATE_JWKS_CACHE_TTL_SECS: 300
       NOTEGATE_BROWSER_SESSION_SECRET: dev-notegate-browser-session-secret-32b
       NOTEGATE_BROWSER_SESSION_TTL_SECS: 3600
+      # Count caps are env-overridable (default to spec values when unset).
+      # Uncomment with small values to exercise boundaries cheaply in dev/test:
+      # NOTEGATE_FOLDER_MAX_CHILDREN: "3"
+      # NOTEGATE_WORKSPACE_MAX_NODES: "5"
+      # NOTEGATE_WORKSPACE_MAX_DOCUMENTS: "2"
+      # NOTEGATE_WORKSPACE_MAX_DOCUMENT_BYTES: "1024"
     ports:
       - "9191:9191"
     depends_on:

@@ -160,22 +160,22 @@ async fn require_restore_budget(
     .await
     .map_err(map_sqlx_error)?;
 
-    if live_nodes + restore_nodes > limits::WORKSPACE_MAX_NODES as i64 {
+    if live_nodes + restore_nodes > limits::workspace_max_nodes() as i64 {
         return Err(Error::conflict(format!(
             "restore would exceed the workspace node limit of {}",
-            limits::WORKSPACE_MAX_NODES
+            limits::workspace_max_nodes()
         )));
     }
-    if live_documents + restore_documents > limits::WORKSPACE_MAX_DOCUMENTS as i64 {
+    if live_documents + restore_documents > limits::workspace_max_documents() as i64 {
         return Err(Error::conflict(format!(
             "restore would exceed the workspace document limit of {}",
-            limits::WORKSPACE_MAX_DOCUMENTS
+            limits::workspace_max_documents()
         )));
     }
-    if live_bytes + restore_bytes > limits::WORKSPACE_MAX_DOCUMENT_BYTES as i64 {
+    if live_bytes + restore_bytes > limits::workspace_max_document_bytes() as i64 {
         return Err(Error::conflict(format!(
             "restore would exceed the workspace document byte budget of {}",
-            limits::WORKSPACE_MAX_DOCUMENT_BYTES
+            limits::workspace_max_document_bytes()
         )));
     }
 

@@ -380,8 +380,8 @@ async fn duplicate_owner_name_is_a_clean_error() -> Result<(), Box<dyn std::erro
         .await;
 
     match result {
-        Err(notegate_core::Error::Validation(_)) => {}
-        other => panic!("expected a validation error on duplicate name, got {other:?}"),
+        Err(notegate_core::Error::Conflict(_)) => {}
+        other => panic!("expected a conflict error on duplicate name, got {other:?}"),
     }
 
     // The same name is fine for a different owner (name is not global-unique).

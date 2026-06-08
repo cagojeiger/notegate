@@ -1947,7 +1947,7 @@ mod tests {
         let moving = store.add_document(src_parent, "note.md", "x");
         let dest = store.add_folder(store.root_id, "dest");
         // Fill the destination to the fanout cap.
-        for i in 0..limits::FOLDER_MAX_CHILDREN {
+        for i in 0..limits::folder_max_children() {
             store.add_document(dest, &format!("f{i}.md"), "y");
         }
         let err = svc

@@ -32,17 +32,43 @@ pub const DOCUMENT_TITLE_STEM_MAX_LEN: usize = 125;
 pub const MAX_PATH_LEN: usize = 645;
 /// Maximum path depth, in segments below the workspace root.
 pub const MAX_PATH_DEPTH: usize = 5;
-/// Maximum live nodes per workspace.
-pub const WORKSPACE_MAX_NODES: usize = 10_000;
-/// Maximum live documents per workspace.
-pub const WORKSPACE_MAX_DOCUMENTS: usize = 5_000;
-/// Maximum total live document bytes per workspace (256 MiB).
-pub const WORKSPACE_MAX_DOCUMENT_BYTES: usize = 268_435_456;
+/// Maximum live nodes per workspace (env `NOTEGATE_WORKSPACE_MAX_NODES`).
+const WORKSPACE_MAX_NODES_DEFAULT: usize = 10_000;
+pub fn workspace_max_nodes() -> usize {
+    env_usize("NOTEGATE_WORKSPACE_MAX_NODES", WORKSPACE_MAX_NODES_DEFAULT)
+}
+/// Maximum live documents per workspace (env `NOTEGATE_WORKSPACE_MAX_DOCUMENTS`).
+const WORKSPACE_MAX_DOCUMENTS_DEFAULT: usize = 5_000;
+pub fn workspace_max_documents() -> usize {
+    env_usize("NOTEGATE_WORKSPACE_MAX_DOCUMENTS", WORKSPACE_MAX_DOCUMENTS_DEFAULT)
+}
+/// Maximum total live document bytes per workspace, 256 MiB (env `NOTEGATE_WORKSPACE_MAX_DOCUMENT_BYTES`).
+const WORKSPACE_MAX_DOCUMENT_BYTES_DEFAULT: usize = 268_435_456;
+pub fn workspace_max_document_bytes() -> usize {
+    env_usize(
+        "NOTEGATE_WORKSPACE_MAX_DOCUMENT_BYTES",
+        WORKSPACE_MAX_DOCUMENT_BYTES_DEFAULT,
+    )
+}
 
 // --- Listing and folder fanout limits ---
 
-/// Maximum live direct children per folder.
-pub const FOLDER_MAX_CHILDREN: usize = 200;
+/// Read a positive `usize` limit from env `key`, falling back to `default`.
+/// Lets dev/test shrink expensive count caps without a rebuild; production
+/// leaves the env unset and gets the spec defaults.
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(default)
+}
+
+/// Maximum live direct children per folder (env `NOTEGATE_FOLDER_MAX_CHILDREN`).
+const FOLDER_MAX_CHILDREN_DEFAULT: usize = 200;
+pub fn folder_max_children() -> usize {
+    env_usize("NOTEGATE_FOLDER_MAX_CHILDREN", FOLDER_MAX_CHILDREN_DEFAULT)
+}
 /// Default children listing page size.
 pub const CHILDREN_DEFAULT_LIMIT: i64 = 100;
 /// Maximum children listing page size.

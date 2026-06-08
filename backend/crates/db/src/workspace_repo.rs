@@ -505,7 +505,7 @@ async fn guard_last_owner(
 fn map_constraint_error(error: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db_error) = &error {
         if db_error.is_unique_violation() {
-            return Error::validation("a workspace with this name already exists");
+            return Error::conflict("a workspace with this name already exists");
         }
         if db_error.is_check_violation() {
             return Error::validation("workspace name is invalid");
