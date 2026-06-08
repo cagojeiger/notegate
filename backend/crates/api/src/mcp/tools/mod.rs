@@ -7,6 +7,7 @@ pub mod resolve;
 
 pub mod me;
 
+pub mod workspaces_create;
 pub mod workspaces_get;
 pub mod workspaces_list;
 

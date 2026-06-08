@@ -85,6 +85,19 @@ impl McpServer {
     }
 
     #[tool(
+        name = "workspaces_create",
+        description = "Create a workspace owned by the authenticated caller.",
+        output_schema = object_output_schema()
+    )]
+    pub async fn workspaces_create_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::workspaces_create::Input>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::workspaces_create::call(&self.state, &parts, params).await
+    }
+
+    #[tool(
         name = "workspaces_get",
         description = "Return one workspace by name.",
         output_schema = object_output_schema()
@@ -353,7 +366,7 @@ mod tests {
     fn every_tool_output_schema_is_a_valid_object() {
         let router = McpServer::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 15, "expected me + 14 file/workspace tools");
+        assert_eq!(tools.len(), 16, "expected me + 15 file/workspace tools");
         for tool in &tools {
             if let Some(schema) = &tool.output_schema {
                 assert_eq!(
