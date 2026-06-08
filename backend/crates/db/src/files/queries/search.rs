@@ -84,7 +84,7 @@ pub async fn resolve_scope_node(
 
 /// Find live nodes whose name matches `q` (ILIKE), optionally filtered by
 /// `kind` and restricted to the subtree of `scope_node_id`. Keyset ordered by
-/// `(name, id)`. Returns `limit + 1` rows so the caller can detect a next page.
+/// `(name, id)`. The caller passes the exact fetch size, including any lookahead.
 /// Each row carries the node, its derived path, and whether it has any live
 /// children (so the caller can build a complete node view without an extra
 /// per-row query).
@@ -99,7 +99,7 @@ pub async fn find_nodes(
 ) -> Result<Vec<(Node, String, bool)>> {
     let pattern = like_contains(q);
     let kind_filter = kind.map(|k| k.as_str());
-    let fetch = limit + 1;
+    let fetch = limit;
 
     // The scope subtree (when present) restricts candidates; `tree` derives the
     // display path returned with each row. `$2` is always the scope node id
@@ -165,8 +165,9 @@ pub async fn find_nodes(
 
 /// Fetch grep candidate documents whose content matches `q` (ILIKE), optionally
 /// restricted to the subtree of `scope_node_id`. Ordered by `(updated_at DESC,
-/// node_id)` to use `documents_workspace_updated_idx`. Returns `limit + 1` rows;
-/// each carries the derived path and content for service-side line splitting.
+/// node_id)` to use `documents_workspace_updated_idx`. The caller passes the exact
+/// fetch size, including any lookahead. Each row carries the derived path and
+/// content for service-side line splitting.
 pub async fn grep_candidates(
     pool: &PgPool,
     workspace_id: Uuid,
@@ -176,7 +177,7 @@ pub async fn grep_candidates(
     cursor: Option<&GrepCursor>,
 ) -> Result<Vec<GrepCandidate>> {
     let pattern = like_contains(q);
-    let fetch = limit + 1;
+    let fetch = limit;
 
     let base = format!(
         "{TREE_CTE}, scope AS ( \
