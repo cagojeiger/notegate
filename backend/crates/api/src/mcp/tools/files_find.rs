@@ -15,9 +15,8 @@ use notegate_core::limits;
 use notegate_model::NodeKind;
 use notegate_service::search::FindRequest;
 
-use super::resolve::{
-    WorkspaceSelector, caller, encode_cursor, node_summary, resolve_workspace, service_error,
-};
+use super::common::{clamp_limit, page_json};
+use super::resolve::{WorkspaceSelector, caller, node_summary, resolve_workspace, service_error};
 use crate::state::AppState;
 
 /// `files_find` input: a workspace selector, the query, and optional scope/kind/
@@ -54,7 +53,7 @@ pub async fn call(
         None => None,
         Some(value) => Some(parse_kind(value)?),
     };
-    let limit = clamp(
+    let limit = clamp_limit(
         input.limit,
         limits::FIND_DEFAULT_LIMIT,
         limits::FIND_MAX_LIMIT,
@@ -76,23 +75,19 @@ pub async fn call(
         .await
         .map_err(service_error)?;
 
-    let next_cursor = match page.next_cursor.as_ref() {
-        Some(cursor) => Some(encode_cursor(cursor)?),
-        None => None,
-    };
-
     let items: Vec<Value> = page.items.iter().map(node_summary).collect();
     let returned = items.len();
+    let page_out = page_json(
+        page.limit,
+        returned,
+        page.has_more,
+        page.next_cursor.as_ref(),
+    )?;
 
     Ok(Json(json!({
         "workspace": resolved.name(),
         "items": items,
-        "page": {
-            "limit": page.limit,
-            "returned": returned,
-            "has_more": page.has_more,
-            "next_cursor": next_cursor,
-        },
+        "page": page_out,
     })))
 }
 
@@ -100,13 +95,4 @@ pub async fn call(
 fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
     NodeKind::parse(value)
         .ok_or_else(|| ErrorData::invalid_params("kind must be 'folder' or 'document'", None))
-}
-
-/// Clamp a requested limit to `1..=max`, defaulting to `default`.
-fn clamp(limit: Option<i64>, default: i64, max: i64) -> i64 {
-    match limit {
-        None => default,
-        Some(value) if value < 1 => 1,
-        Some(value) => value.min(max),
-    }
 }

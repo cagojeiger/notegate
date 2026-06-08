@@ -3,6 +3,7 @@
 //! (workspace-name resolution, target parsing, error mapping) lives in
 //! [`resolve`].
 
+pub mod common;
 pub mod resolve;
 
 pub mod me;

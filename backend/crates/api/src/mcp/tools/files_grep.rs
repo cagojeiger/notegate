@@ -14,7 +14,8 @@ use serde_json::{Value, json};
 use notegate_core::limits;
 use notegate_service::search::GrepRequest;
 
-use super::resolve::{WorkspaceSelector, caller, encode_cursor, resolve_workspace, service_error};
+use super::common::{clamp_limit, page_json};
+use super::resolve::{WorkspaceSelector, caller, resolve_workspace, service_error};
 use crate::state::AppState;
 
 /// `files_grep` input: a workspace selector, the query, and optional scope/
@@ -48,7 +49,7 @@ pub async fn call(
     let resolved = resolve_workspace(state, caller, &input.selector).await?;
     let workspace = resolved.name().to_owned();
 
-    let limit = clamp(
+    let limit = clamp_limit(
         input.limit,
         limits::GREP_DEFAULT_LIMIT,
         limits::GREP_MAX_LIMIT,
@@ -70,11 +71,6 @@ pub async fn call(
         .await
         .map_err(service_error)?;
 
-    let next_cursor = match page.next_cursor.as_ref() {
-        Some(cursor) => Some(encode_cursor(cursor)?),
-        None => None,
-    };
-
     let matches: Vec<Value> = page
         .items
         .iter()
@@ -90,24 +86,16 @@ pub async fn call(
         })
         .collect();
     let returned = matches.len();
+    let page_out = page_json(
+        page.limit,
+        returned,
+        page.has_more,
+        page.next_cursor.as_ref(),
+    )?;
 
     Ok(Json(json!({
         "workspace": workspace,
         "matches": matches,
-        "page": {
-            "limit": page.limit,
-            "returned": returned,
-            "has_more": page.has_more,
-            "next_cursor": next_cursor,
-        },
+        "page": page_out,
     })))
-}
-
-/// Clamp a requested limit to `1..=max`, defaulting to `default`.
-fn clamp(limit: Option<i64>, default: i64, max: i64) -> i64 {
-    match limit {
-        None => default,
-        Some(value) if value < 1 => 1,
-        Some(value) => value.min(max),
-    }
 }
