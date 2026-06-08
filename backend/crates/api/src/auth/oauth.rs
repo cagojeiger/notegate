@@ -151,9 +151,10 @@ pub async fn callback(
         email: userinfo.email.unwrap_or_default(),
         name: userinfo.name.unwrap_or_default(),
     };
-    match state.resolver.resolve_browser(attrs.clone()).await {
+    let session_sub = attrs.sub.clone();
+    match state.resolver.resolve_browser(attrs).await {
         Ok(_caller) => {
-            let session = match create_browser_session(&state, &attrs.sub) {
+            let session = match create_browser_session(&state, &session_sub) {
                 Ok(session) => session,
                 Err(error) => {
                     tracing::error!(event = "oauth.session_failed", %error);
