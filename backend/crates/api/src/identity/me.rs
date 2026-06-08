@@ -76,7 +76,7 @@ pub fn build_me(caller: &Caller) -> MeOutput {
         ),
     };
     let capabilities = CapabilitiesOutput {
-        can_create_workspace: true,
+        can_create_workspace: caller.account.kind == AccountKind::User,
         can_manage_agents: caller.account.kind == AccountKind::User,
     };
     MeOutput {
@@ -170,7 +170,7 @@ mod tests {
             out.agent.expect("agent detail present").name,
             "research-agent"
         );
-        assert!(out.capabilities.can_create_workspace);
+        assert!(!out.capabilities.can_create_workspace);
         assert!(!out.capabilities.can_manage_agents);
     }
 }

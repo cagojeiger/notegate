@@ -6,6 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
+use notegate_model::account::AccountKind;
 use notegate_model::{Role, WorkspaceAccess};
 use notegate_service::access::{AccessStore, GrantAccess};
 use sqlx::{FromRow, PgPool};
@@ -84,7 +85,7 @@ impl AccessStore for AccessRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         lock_workspace(&mut tx, command.workspace_id).await?;
-        ensure_account_exists(&mut tx, command.account_id).await?;
+        ensure_account_can_receive_role(&mut tx, command.account_id, command.role).await?;
 
         guard_last_owner(
             &mut tx,
@@ -200,17 +201,26 @@ async fn lock_workspace(tx: &mut sqlx::PgConnection, workspace_id: Uuid) -> Resu
     Ok(())
 }
 
-async fn ensure_account_exists(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
-    let found: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM accounts \
+async fn ensure_account_can_receive_role(
+    tx: &mut sqlx::PgConnection,
+    account_id: Uuid,
+    role: Role,
+) -> Result<()> {
+    let kind: Option<String> = sqlx::query_scalar(
+        "SELECT kind FROM accounts \
          WHERE id = $1 AND is_active = true AND deleted_at IS NULL",
     )
     .bind(account_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if found.is_none() {
-        return Err(Error::not_found("account not found"));
+    let kind = kind.ok_or_else(|| Error::not_found("account not found"))?;
+    let kind = AccountKind::parse(&kind)
+        .ok_or_else(|| Error::internal(format!("unknown account kind: {kind}")))?;
+    if kind == AccountKind::Agent && role == Role::Owner {
+        return Err(Error::validation(
+            "agent accounts cannot receive workspace owner role",
+        ));
     }
     Ok(())
 }

@@ -33,6 +33,26 @@ async fn make_workspace(repo: &WorkspaceRepo, owner: Uuid, name: &str) -> Uuid {
     .id
 }
 
+async fn insert_agent_account(
+    pool: &sqlx::PgPool,
+    creator: Uuid,
+    name: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO accounts (kind, display_name) VALUES ('agent', $1) RETURNING id",
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await?;
+    sqlx::query("INSERT INTO agents (id, name, created_by) VALUES ($1, $2, $3)")
+        .bind(id)
+        .bind(name)
+        .bind(creator)
+        .execute(pool)
+        .await?;
+    Ok(id)
+}
+
 /// (a) Creating a workspace materializes exactly one root node, attributed to
 /// the creator on both created_by and updated_by (Pre-mortem S1).
 #[tokio::test]
@@ -153,7 +173,36 @@ async fn inactive_owner_cannot_create_workspace() -> Result<(), Box<dyn std::err
         .await
         .unwrap_err();
 
-    assert!(matches!(err, Error::NotFound(message) if message == "owner account not found"));
+    assert!(
+        matches!(err, Error::NotFound(message) if message == "workspace owner user account not found")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn agent_account_cannot_create_workspace() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let creator = insert_user_account(&db.pool, "creator", "c@example.test").await?;
+    let agent = insert_agent_account(&db.pool, creator, "bot").await?;
+
+    let err = repo
+        .create_workspace(
+            agent,
+            &CreateWorkspace {
+                name: "agent-owned".to_owned(),
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, Error::NotFound(message) if message == "workspace owner user account not found")
+    );
 
     db.cleanup().await;
     Ok(())
@@ -418,6 +467,58 @@ async fn grant_inactive_account_is_not_found() -> Result<(), Box<dyn std::error:
         .unwrap_err();
 
     assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn agent_account_can_receive_editor_but_not_owner() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let agent = insert_agent_account(&db.pool, owner, "bot").await?;
+    let workspace_id = make_workspace(&repo, owner, "shared").await;
+
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: agent,
+                role: Role::Editor,
+            },
+            owner,
+        )
+        .await?;
+    assert_eq!(
+        AccessStore::role_for(&access_repo, workspace_id, agent).await?,
+        Some(Role::Editor)
+    );
+
+    let err = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: agent,
+                role: Role::Owner,
+            },
+            owner,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, Error::Validation(message) if message == "agent accounts cannot receive workspace owner role")
+    );
+    assert_eq!(
+        AccessStore::role_for(&access_repo, workspace_id, agent).await?,
+        Some(Role::Editor),
+        "rejected owner grant must leave the previous role unchanged"
+    );
 
     db.cleanup().await;
     Ok(())

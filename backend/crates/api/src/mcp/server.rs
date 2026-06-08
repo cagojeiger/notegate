@@ -86,7 +86,7 @@ impl McpServer {
 
     #[tool(
         name = "workspaces_create",
-        description = "Create a workspace owned by the authenticated caller.",
+        description = "Create a workspace owned by the authenticated user caller.",
         output_schema = object_output_schema()
     )]
     pub async fn workspaces_create_tool(

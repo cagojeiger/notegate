@@ -182,7 +182,8 @@ API key는 장기/자동화 credential이므로 항상 `agent`로 처리한다.
 - 같은 parent folder 안에서 살아있는 node 이름은 unique하다.
 - 다른 folder에서는 같은 이름을 사용할 수 있다.
 - path는 `parent_id + name` tree에서 derive하며, path uniqueness는 sibling unique invariant로 보장한다.
-- owner account당 workspace는 최대 `20`개다.
+- workspace 생성/소유와 workspace `owner` role은 user account만 가능하다. agent account는 workspace `viewer/editor` 작업자로만 접근한다.
+- user owner account당 workspace는 최대 `20`개다.
 - workspace live access account는 최대 `20`개다.
 - creator account당 active agent는 최대 `50`개, agent당 live key는 최대 `10`개다.
 - 파일트리 최대 depth는 `5`, folder당 live direct children은 최대 `200`, workspace live nodes는 최대 `10000`개다.

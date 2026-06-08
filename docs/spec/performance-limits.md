@@ -26,7 +26,7 @@ unknown limit key -> configuration error
 ## Account, workspace, and credential limits
 
 ```text
-owned_workspaces_max = 20 per owner account
+owned_workspaces_max = 20 per user owner account
 workspace_access_max_accounts = 20 active accounts per workspace
 agents_per_creator_max = 50 active agents per creator account
 agent_keys_per_agent_max = 10 live keys per agent

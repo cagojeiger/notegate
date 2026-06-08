@@ -1,10 +1,10 @@
 # MCP Workspaces
 
-Workspace tools let an LLM/CLI caller bootstrap and choose the workspace used by file tools.
+Workspace tool은 LLM/CLI caller가 파일 tool에서 사용할 workspace를 조회, 생성, 선택하기 위한 전역 tool이다.
 
 ## `workspaces_list`
 
-List workspaces accessible to the authenticated caller.
+인증된 caller가 접근 가능한 workspace 목록을 반환한다.
 
 Input:
 
@@ -22,7 +22,7 @@ missing limit   -> 50
 limit < 1       -> 1
 limit > 100     -> 100
 invalid cursor  -> invalid params
-no workspaces   -> empty list; caller can use workspaces_create
+no workspaces   -> empty list; user caller는 workspaces_create를 사용할 수 있고, agent caller는 owner의 access grant가 필요하다
 ```
 
 Output:
@@ -36,11 +36,11 @@ Output:
 }
 ```
 
-`root_node_id` is derived from the workspace root node lookup; it is not stored on the workspace row.
+`root_node_id`는 workspace row에 저장하지 않고 workspace root node lookup으로 derive한다.
 
 ## `workspaces_create`
 
-Create a workspace owned by the authenticated caller.
+인증된 user caller가 소유하는 workspace를 생성한다. Agent caller는 workspace를 생성할 수 없다.
 
 Input:
 
@@ -51,12 +51,13 @@ Input:
 Branching:
 
 ```text
-valid name and owned workspaces < 20 -> create workspace + root node + owner access
-invalid name                         -> invalid params
-owned workspaces >= 20               -> conflict
+user caller and owned workspaces < 20 -> create workspace + root node + owner access
+agent caller                          -> invalid request with kind=forbidden
+invalid name                          -> invalid params
+owned workspaces >= 20                -> conflict
 ```
 
-Output is one workspace summary:
+Output은 workspace summary 하나다.
 
 ```json
 {"id": "workspace-id", "name": "personal", "role": "owner", "root_node_id": "root-node-id"}
@@ -64,7 +65,7 @@ Output is one workspace summary:
 
 ## `workspaces_get`
 
-Return one workspace by selector.
+Selector로 workspace 하나를 반환한다.
 
 Input by name:
 

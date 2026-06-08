@@ -32,7 +32,7 @@ Agent caller 출력:
   "account": {"id": "account-id", "kind": "agent", "display_name": "research-agent"},
   "agent": {"name": "research-agent"},
   "capabilities": {
-    "can_create_workspace": true,
+    "can_create_workspace": false,
     "can_manage_agents": false
   }
 }
@@ -40,7 +40,7 @@ Agent caller 출력:
 
 Capability 의미:
 
-- `can_create_workspace`: caller가 owner로 workspace를 생성할 수 있다.
+- `can_create_workspace`: caller가 user account로 workspace를 생성하고 owner가 될 수 있다. `user` account는 `true`, `agent` account는 `false`다.
 - `can_manage_agents`: caller가 user-only agent management endpoint로 agent list/create/delete와 key mint/revoke를 수행할 수 있다. `user` account는 `true`, `agent` account는 `false`다.
 
 Bootstrap 흐름은 `/me`로 identity를 확인한 뒤 `GET /api/v1/workspaces`로 workspace를 선택하거나 초기 workspace를 생성한다.

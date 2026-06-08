@@ -22,7 +22,7 @@ POST /api/v1/workspaces
 }
 ```
 
-Workspace를 생성하고, 생성자에게 `owner` access를 부여하며, canonical root node `/`를 만든다. 단일/default workspace 제한은 없다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다. Owner account는 최대 `20`개의 active workspace를 소유할 수 있다.
+User caller만 workspace를 생성할 수 있다. 생성된 workspace는 caller user account가 소유하고, 생성자에게 `owner` access를 부여하며, canonical root node `/`를 만든다. Agent caller의 생성 요청은 `403 forbidden`으로 거부한다. 단일/default workspace 제한은 없다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다. User owner account는 최대 `20`개의 active workspace를 소유할 수 있다.
 
 ### Get workspace
 

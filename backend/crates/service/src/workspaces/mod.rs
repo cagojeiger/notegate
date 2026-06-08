@@ -1,11 +1,12 @@
 //! Workspace lifecycle: create / get / rename / delete.
 //!
-//! POLICY: workspace access is the authorization boundary. `create` grants the
-//! creator `owner` and relies on the DB trigger to materialize the canonical
-//! root node; an owner account may own at most [`limits::OWNED_WORKSPACES_MAX`]
-//! workspaces (enforced in the create transaction). `get` is visible to any
-//! live role; `rename`/`delete` require `owner`. A workspace the caller cannot
-//! see (no live role) is reported as not-found so the api returns `404`.
+//! POLICY: workspace access is the authorization boundary. `create` is user-only,
+//! grants the creator `owner`, and relies on the DB trigger to materialize the
+//! canonical root node; a user owner account may own at most
+//! [`limits::OWNED_WORKSPACES_MAX`] workspaces (enforced in the create
+//! transaction). `get` is visible to any live role; `rename`/`delete` require
+//! `owner`. A workspace the caller cannot see (no live role) is reported as
+//! not-found so the api returns `404`.
 
 use std::future::Future;
 
@@ -13,15 +14,15 @@ use chrono::{DateTime, Utc};
 use notegate_core::Result as CoreResult;
 use notegate_core::limits;
 use notegate_core::validation::validate_workspace_name;
-use notegate_model::{Role, Workspace};
+use notegate_model::{AccountKind, Role, Workspace};
 use uuid::Uuid;
 
 use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::clamp_limit;
 
-/// Input to create a workspace. The owner is always the authenticated caller
-/// and is passed separately to the service/store boundary.
+/// Input to create a workspace. The owner is the authenticated user caller and
+/// is passed separately to the service/store boundary.
 #[derive(Debug, Clone)]
 pub struct CreateWorkspace {
     pub name: String,
@@ -75,7 +76,7 @@ pub trait WorkspaceStore: Clone + Send + Sync + 'static {
         account_id: Uuid,
     ) -> impl Future<Output = CoreResult<Option<Role>>> + Send;
 
-    /// Insert a workspace owned by `owner_account_id`, relying on the DB trigger
+    /// Insert a workspace owned by the user `owner_account_id`, relying on the DB trigger
     /// to create the root node, and grant that owner `owner` in the same
     /// transaction. The owner-quota ([`limits::OWNED_WORKSPACES_MAX`]) is
     /// enforced in that transaction.
@@ -149,13 +150,15 @@ where
         Self { store }
     }
 
-    /// Create a workspace owned by the authenticated caller, granting that
-    /// account `owner`. Enforces the owner quota and a clean name conflict.
+    /// Create a workspace owned by the authenticated user caller, granting that
+    /// user account `owner`. Enforces the owner quota and a clean name conflict.
     pub async fn create(
         &self,
+        caller_kind: AccountKind,
         caller_account_id: Uuid,
         command: CreateWorkspace,
     ) -> ServiceResult<WorkspaceView> {
+        require_user_caller(caller_kind)?;
         validate_workspace_name(&command.name)?;
 
         let workspace = self
@@ -332,6 +335,17 @@ where
     }
 }
 
+/// Reject any caller that is not a user account. Agents can work inside granted
+/// workspaces but cannot own/create workspaces.
+fn require_user_caller(kind: AccountKind) -> ServiceResult<()> {
+    match kind {
+        AccountKind::User => Ok(()),
+        AccountKind::Agent => Err(ServiceError::Forbidden(
+            "only user accounts may create workspaces".to_owned(),
+        )),
+    }
+}
+
 /// The not-found error used to hide workspaces the caller cannot see.
 fn not_found() -> ServiceError {
     ServiceError::NotFound("workspace not found".to_owned())
@@ -468,6 +482,7 @@ mod tests {
         let service = WorkspaceService::new(MockStore::with_role(None));
         let view = service
             .create(
+                AccountKind::User,
                 Uuid::new_v4(),
                 CreateWorkspace {
                     name: "notes".to_owned(),
@@ -480,10 +495,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_cannot_create_workspace() {
+        let service = WorkspaceService::new(MockStore::with_role(None));
+        let err = service
+            .create(
+                AccountKind::Agent,
+                Uuid::new_v4(),
+                CreateWorkspace {
+                    name: "notes".to_owned(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ServiceError::Forbidden(_)));
+    }
+
+    #[tokio::test]
     async fn create_rejects_invalid_name() {
         let service = WorkspaceService::new(MockStore::with_role(None));
         let err = service
             .create(
+                AccountKind::User,
                 Uuid::new_v4(),
                 CreateWorkspace {
                     name: ".hidden".to_owned(),

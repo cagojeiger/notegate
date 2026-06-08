@@ -77,7 +77,7 @@ target present                         -> parse workspace + path from target
 workspace_id present                   -> select that accessible workspace
 workspace present                      -> select accessible workspace by name
 no workspace and exactly one visible   -> select that workspace
-no workspace and zero visible          -> invalid params; call workspaces_create first
+no workspace and zero visible          -> invalid params; user caller는 workspaces_create 가능, agent caller는 access grant 필요
 no workspace and multiple visible      -> invalid params; pass workspace
 same visible name matches more than one -> invalid params with ambiguity data
 workspace_id inaccessible              -> invalid params

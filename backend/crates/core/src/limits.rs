@@ -10,7 +10,7 @@
 
 // --- Account, workspace, and credential limits ---
 
-/// Maximum workspaces a single owner account may own.
+/// Maximum workspaces a single user owner account may own.
 pub const OWNED_WORKSPACES_MAX: usize = 20;
 /// Maximum active accounts that may have access to one workspace.
 pub const WORKSPACE_ACCESS_MAX_ACCOUNTS: usize = 20;

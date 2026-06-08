@@ -125,8 +125,7 @@ CREATE TABLE agent_keys (
 
 ## workspaces
 
-workspace는 개인 노트 파일트리의 격리 경계다. workspace는 user account도, agent
-account도 소유할 수 있으며, 단일/default workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
+workspace는 개인 노트 파일트리의 격리 경계다. workspace 소유와 생성은 user account만 가능하다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작한다. 단일/default workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
 
 ```sql
 CREATE TABLE workspaces (
@@ -148,10 +147,10 @@ CREATE TABLE workspaces (
 - 서버는 인증된 account와 `workspace_access`로 workspace 접근 권한을 검증한다.
 - MCP/CLI path API는 요청 context에서 workspace를 resolve한 뒤 파일 path를 해석한다.
 - workspace `name`은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이다. `/`, `:`, 공백은 허용하지 않는다.
-- `(owner_account_id, name)`은 unique다. 사용자/agent 자신의 workspace는 이름만으로 안정적으로 선택할 수 있다.
-- 다른 owner의 workspace를 agent가 함께 볼 수 있으므로 name은 global unique가 아니다.
-- owner account가 소유할 수 있는 workspace는 최대 `20`개다. workspace 생성 transaction에서 검사한다.
-- workspace 생성자는 `workspace_access.role = 'owner'`를 자동으로 받는다.
+- `(owner_account_id, name)`은 unique다. user owner 자신의 workspace는 이름만으로 안정적으로 선택할 수 있다.
+- agent는 여러 user owner의 workspace를 공유받을 수 있으므로 workspace name은 global unique가 아니다.
+- user owner account가 소유할 수 있는 workspace는 최대 `20`개다. workspace 생성 transaction에서 검사한다.
+- workspace 생성자인 user account는 `workspace_access.role = 'owner'`를 자동으로 받는다.
 - workspace가 생성되면 DB trigger가 canonical root node `/`를 같은 workspace에 만든다.
 - workspace 삭제는 일반 owner operation이며 해당 workspace의 access row, node, document 전체 삭제를 의미한다.
 
@@ -189,7 +188,8 @@ owner  = editor + workspace access management
 - `revoked_at`이 있는 access row는 권한으로 인정하지 않는다.
 - `accounts.is_active=false`이거나 `accounts.deleted_at IS NOT NULL`인 account는 live access로 인정하지 않는다.
 - 한 workspace의 active access account는 최대 `20`개다. 활성 account의 revoke되지 않은 access만 계산하고 grant transaction에서 검사한다.
-- 마지막 owner 보호 규칙도 활성 account의 revoke되지 않은 owner access만 live owner로 계산한다.
+- `owner` role은 user account에만 부여할 수 있다. agent account에는 `viewer` 또는 `editor`만 부여할 수 있다.
+- 마지막 owner 보호 규칙도 활성 user account의 revoke되지 않은 owner access만 live owner로 계산한다.
 - `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
 
 ## nodes

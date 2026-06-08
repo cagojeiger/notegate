@@ -1,4 +1,4 @@
-//! `workspaces_create`: create a workspace owned by the authenticated caller.
+//! `workspaces_create`: create a workspace owned by the authenticated user caller.
 
 use axum::http::request::Parts;
 use rmcp::handler::server::wrapper::Parameters;
@@ -26,7 +26,11 @@ pub async fn call(
     let caller = caller(parts)?;
     let view = state
         .workspaces
-        .create(caller.account_id(), CreateWorkspace { name: input.name })
+        .create(
+            caller.account.kind,
+            caller.account_id(),
+            CreateWorkspace { name: input.name },
+        )
         .await
         .map_err(service_error)?;
     Ok(Json(workspace_summary(&view)))

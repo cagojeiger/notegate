@@ -104,7 +104,7 @@ impl WorkspaceStore for WorkspaceRepo {
 
         let owner_exists: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM accounts \
-             WHERE id = $1 AND is_active = true AND deleted_at IS NULL \
+             WHERE id = $1 AND kind = 'user' AND is_active = true AND deleted_at IS NULL \
              FOR UPDATE",
         )
         .bind(owner_account_id)
@@ -112,7 +112,7 @@ impl WorkspaceStore for WorkspaceRepo {
         .await
         .map_err(map_sqlx_error)?;
         if owner_exists.is_none() {
-            return Err(Error::not_found("owner account not found"));
+            return Err(Error::not_found("workspace owner user account not found"));
         }
 
         // Enforce the owner quota inside the transaction so a concurrent create

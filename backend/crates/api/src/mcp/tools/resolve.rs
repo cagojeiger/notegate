@@ -175,7 +175,7 @@ async fn select_workspace(
         .map_err(service_error)?;
     match page.items.len() {
         0 => Err(ErrorData::invalid_params(
-            "this caller has no accessible workspaces; call workspaces_create first",
+            "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
             None,
         )),
         1 if !page.has_more => page
@@ -239,7 +239,7 @@ fn pick_workspace(
     match (count, iter.next()) {
         (1, Some(view)) => Ok(view),
         (0, _) => Err(ErrorData::invalid_params(
-            "this caller has no accessible workspaces; call workspaces_create first",
+            "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
             None,
         )),
         _ => Err(ErrorData::invalid_params(
