@@ -353,7 +353,27 @@ mod tests {
     fn every_tool_output_schema_is_a_valid_object() {
         let router = McpServer::tool_router();
         let tools = router.list_all();
-        assert_eq!(tools.len(), 15, "expected me + 14 file/workspace tools");
+        let tool_names: std::collections::BTreeSet<_> =
+            tools.iter().map(|tool| tool.name.as_ref()).collect();
+        let expected_tool_names = std::collections::BTreeSet::from([
+            "me",
+            "workspaces_list",
+            "workspaces_create",
+            "workspaces_get",
+            "files_ls",
+            "files_stat",
+            "files_mkdir",
+            "files_touch",
+            "files_read",
+            "files_write",
+            "files_patch",
+            "files_mv",
+            "files_rm",
+            "files_find",
+            "files_grep",
+        ]);
+        assert_eq!(tool_names, expected_tool_names);
+
         for tool in &tools {
             if let Some(schema) = &tool.output_schema {
                 assert_eq!(
