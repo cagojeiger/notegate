@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["backend/crates/*"]
+members = [
+    "backend/crates/api",
+    "backend/crates/core",
+    "backend/crates/db",
+    "backend/crates/model",
+    "backend/crates/service",
+]
 
 [workspace.package]
 version = "0.1.0"
