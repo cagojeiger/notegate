@@ -185,7 +185,7 @@ API key는 장기/자동화 credential이므로 항상 `agent`로 처리한다.
 - workspace 생성/소유와 workspace `owner` role은 user account만 가능하다. agent account는 workspace `viewer/editor` 작업자로만 접근한다.
 - user owner account당 workspace는 최대 `20`개다.
 - workspace live access account는 최대 `20`개다.
-- creator account당 active agent는 최대 `50`개, agent당 live key는 최대 `10`개다.
+- user creator account당 active agent는 최대 `50`개, agent당 live key는 최대 `10`개다.
 - 파일트리 최대 depth는 `5`, folder당 live direct children은 최대 `200`, workspace live nodes는 최대 `10000`개다.
 - workspace live documents는 최대 `5000`개이고, live document 원문 총량은 최대 `268435456` bytes다.
 - Markdown document 하나는 최대 `524288` bytes, `2000` lines다.

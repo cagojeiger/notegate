@@ -2,8 +2,9 @@
 //!
 //! POLICY: only `kind='user'` callers may manage agents or keys; an agent caller
 //! is forbidden. Active-agent and live-key counts are enforced against
-//! `core::limits` before each insert. The plaintext key token is generated here,
-//! hashed with SHA-256, and only the hash is persisted.
+//! `core::limits` before each insert; the database repo repeats these caps
+//! inside transactions for real persistence. The plaintext key token is
+//! generated here, hashed with SHA-256, and only the hash is persisted.
 
 use std::future::Future;
 
@@ -65,13 +66,13 @@ pub trait AgentStore: Clone + Send + Sync + 'static {
         created_by: Uuid,
     ) -> impl Future<Output = CoreResult<Agent>> + Send;
 
-    /// List active agents created by an account.
+    /// List active agents created by a user account.
     fn list_agents_by_creator(
         &self,
         creator_account_id: Uuid,
     ) -> impl Future<Output = CoreResult<Vec<Agent>>> + Send;
 
-    /// Count active agents created by an account.
+    /// Count active agents created by a user account.
     fn count_agents_by_creator(
         &self,
         creator_account_id: Uuid,
@@ -127,7 +128,7 @@ where
     }
 
     /// Create an agent. Only a `kind='user'` caller may create agents; the
-    /// caller may own at most [`limits::AGENTS_PER_CREATOR_MAX`] active agents.
+    /// user caller may create at most [`limits::AGENTS_PER_CREATOR_MAX`] active agents.
     pub async fn create_agent(
         &self,
         caller_kind: AccountKind,
@@ -197,8 +198,7 @@ where
         require_user_caller(caller_kind)?;
         if !command.scopes.is_empty() {
             return Err(ServiceError::InvalidInput(
-                "agent key scopes are reserved and must be empty until scope enforcement is implemented"
-                    .to_owned(),
+                "agent key scopes must be empty".to_owned(),
             ));
         }
         if command
@@ -640,7 +640,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_empty_key_scopes_are_rejected_until_enforced() {
+    async fn non_empty_key_scopes_are_rejected() {
         let service = AgentService::new(MockStore::default());
         let err = service
             .create_key(

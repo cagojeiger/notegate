@@ -26,7 +26,7 @@ POST /api/v1/agents
 }
 ```
 
-`agent` account를 생성한다. Workspace 접근 권한은 workspace access API로 별도 부여한다. 하나의 creator account는 최대 `50`개의 active agent를 가질 수 있다.
+`agent` account를 생성한다. Workspace 접근 권한은 workspace access API로 별도 부여한다. 하나의 user creator account는 최대 `50`개의 active agent를 가질 수 있다.
 
 ### Delete agent
 
@@ -50,7 +50,7 @@ POST /api/v1/agents/{agent_id}/keys
 }
 ```
 
-평문 key는 생성 응답에서 정확히 한 번만 반환한다.
+평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다.
 
 Live key는 다음 조건을 모두 만족한다.
 

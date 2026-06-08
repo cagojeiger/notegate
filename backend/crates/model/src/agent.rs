@@ -23,7 +23,7 @@ pub struct AgentKey {
     /// Hash of the key's plaintext token. Never the plaintext.
     pub token_hash: String,
     pub name: String,
-    /// Reserved scope vocabulary; non-empty values are rejected until enforced.
+    /// Current contract requires this to be empty.
     pub scopes: Vec<String>,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,

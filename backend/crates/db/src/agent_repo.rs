@@ -7,7 +7,7 @@
 //! inactive credentials.
 
 use chrono::{DateTime, Utc};
-use notegate_core::{Error, Result};
+use notegate_core::{Error, Result, limits};
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::{Agent, AgentKey};
 use notegate_service::agents::{AgentStore, CreateAgent, CreateAgentKey};
@@ -153,16 +153,19 @@ impl AgentRepo {
     pub async fn delete_agent(&self, agent_id: Uuid, deleted_by: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE accounts \
              SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
-             WHERE id = $1 AND deleted_at IS NULL",
+             WHERE id = $1 AND kind = 'agent' AND deleted_at IS NULL",
         )
         .bind(agent_id)
         .bind(deleted_by)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        if result.rows_affected() == 0 {
+            return Err(Error::not_found("agent not found"));
+        }
 
         sqlx::query(
             "UPDATE agent_keys SET revoked_at = now(), revoked_by = $2 \
@@ -192,6 +195,37 @@ impl AgentRepo {
 impl AgentStore for AgentRepo {
     async fn insert_agent(&self, command: &CreateAgent, created_by: Uuid) -> Result<Agent> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        let creator_exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM accounts \
+             WHERE id = $1 AND kind = 'user' AND is_active = true AND deleted_at IS NULL \
+             FOR UPDATE",
+        )
+        .bind(created_by)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if creator_exists.is_none() {
+            return Err(Error::not_found("agent creator user account not found"));
+        }
+
+        let active: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM agents a \
+             JOIN accounts acc ON acc.id = a.id \
+             WHERE a.created_by = $1 AND acc.is_active = true AND acc.deleted_at IS NULL",
+        )
+        .bind(created_by)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let active =
+            usize::try_from(active).map_err(|_error| Error::internal("negative agent count"))?;
+        if active >= limits::AGENTS_PER_CREATOR_MAX {
+            return Err(Error::conflict(format!(
+                "creator already has the maximum of {} active agents",
+                limits::AGENTS_PER_CREATOR_MAX
+            )));
+        }
 
         let id: Uuid = sqlx::query(
             "INSERT INTO accounts (kind, display_name) VALUES ('agent', $1) RETURNING id",
@@ -271,6 +305,44 @@ impl AgentStore for AgentRepo {
         token_hash: &str,
         created_by: Uuid,
     ) -> Result<AgentKey> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        let agent_exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT a.id FROM agents a \
+             JOIN accounts agent_acc ON agent_acc.id = a.id \
+             JOIN accounts creator_acc ON creator_acc.id = a.created_by \
+             WHERE a.id = $1 AND a.created_by = $2 \
+               AND agent_acc.is_active = true AND agent_acc.deleted_at IS NULL \
+               AND creator_acc.kind = 'user' \
+               AND creator_acc.is_active = true AND creator_acc.deleted_at IS NULL \
+             FOR UPDATE OF agent_acc",
+        )
+        .bind(command.agent_id)
+        .bind(created_by)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if agent_exists.is_none() {
+            return Err(Error::not_found("agent not found"));
+        }
+
+        let live: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM agent_keys \
+             WHERE agent_id = $1 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > now())",
+        )
+        .bind(command.agent_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let live = usize::try_from(live).map_err(|_error| Error::internal("negative key count"))?;
+        if live >= limits::AGENT_KEYS_PER_AGENT_MAX {
+            return Err(Error::conflict(format!(
+                "agent already has the maximum of {} live keys",
+                limits::AGENT_KEYS_PER_AGENT_MAX
+            )));
+        }
+
         let row = sqlx::query_as::<_, AgentKeyRow>(&format!(
             "INSERT INTO agent_keys (agent_id, token_hash, name, scopes, created_by, expires_at) \
              VALUES ($1, $2, $3, $4, $5, $6) RETURNING {AGENT_KEY_COLUMNS}"
@@ -281,9 +353,10 @@ impl AgentStore for AgentRepo {
         .bind(&command.scopes)
         .bind(created_by)
         .bind(command.expires_at)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(AgentKey::from(row))
     }
 

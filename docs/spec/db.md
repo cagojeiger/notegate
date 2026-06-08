@@ -91,7 +91,7 @@ CREATE TABLE agents (
 - agent 삭제 상태는 `agents`가 아니라 공통 parent인 `accounts`에서 관리한다.
 - agent 삭제는 account deactivate/soft delete다.
 - agent 삭제 시 active `agent_keys`와 `workspace_access`를 함께 revoke한다.
-- 한 creator account가 만들 수 있는 active agent는 최대 `50`개다.
+- 한 user creator account가 만들 수 있는 active agent는 최대 `50`개다.
 - 과거 `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
 
 ## agent_keys
