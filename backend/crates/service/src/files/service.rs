@@ -28,8 +28,8 @@ use super::input::{
     ReadDocument, WriteDocument, WriteTarget,
 };
 use super::output::{
-    ChildrenCursor, ChildrenPage, DeleteResult, DocumentView, NodeView, PatchResult, ReadContent,
-    ReadResult,
+    ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
+    ReadContent, ReadResult,
 };
 use super::patch::{apply_edits, unified_diff};
 use super::policy::{self, FileCommand};
@@ -233,19 +233,7 @@ where
             )
             .await?;
         let path = join_path(&parent_path, &node.name);
-        Ok(DocumentView {
-            node: NodeView {
-                node,
-                path,
-                has_children: false,
-                document: Some(crate::files::DocumentStats {
-                    content_sha256: document.content_sha256.clone(),
-                    byte_len: document.byte_len,
-                    line_count: document.line_count,
-                }),
-            },
-            document,
-        })
+        Ok(document_view_at_path(node, path, document))
     }
 
     /// Read a document with range limits (`read`/`open`). Requires `viewer`.
@@ -258,7 +246,9 @@ where
         self.authorize(workspace_id, caller_account_id, FileCommand::Read)
             .await?;
         let (node, document) = self.load_document(workspace_id, command.node_id).await?;
-        let view = self.node_view(workspace_id, node).await?;
+        let view = self
+            .document_node_view(workspace_id, node, &document)
+            .await?;
 
         // Conditional read: unchanged when the caller's hash matches.
         if let Some(ref hash) = command.if_none_match_sha256
@@ -724,8 +714,27 @@ where
         node: Node,
         document: Document,
     ) -> ServiceResult<DocumentView> {
-        let node = self.node_view(workspace_id, node).await?;
+        let node = self
+            .document_node_view(workspace_id, node, &document)
+            .await?;
         Ok(DocumentView { node, document })
+    }
+
+    /// Build a document node view from an already-loaded document, avoiding an
+    /// extra metrics lookup through [`FilesStore::document_stats`].
+    async fn document_node_view(
+        &self,
+        workspace_id: Uuid,
+        node: Node,
+        document: &Document,
+    ) -> ServiceResult<NodeView> {
+        let path = self.path_of(workspace_id, node.id).await?;
+        Ok(NodeView {
+            node,
+            path,
+            has_children: false,
+            document: Some(stats_from_document(document)),
+        })
     }
 
     /// Shared create pre-checks for mkdir/touch/write-create: parent is a live
@@ -800,6 +809,27 @@ fn path_depth(path: &str) -> usize {
     path.split('/')
         .filter(|segment| !segment.is_empty())
         .count()
+}
+
+fn document_view_at_path(node: Node, path: String, document: Document) -> DocumentView {
+    let stats = stats_from_document(&document);
+    DocumentView {
+        node: NodeView {
+            node,
+            path,
+            has_children: false,
+            document: Some(stats),
+        },
+        document,
+    }
+}
+
+fn stats_from_document(document: &Document) -> DocumentStats {
+    DocumentStats {
+        content_sha256: document.content_sha256.clone(),
+        byte_len: document.byte_len,
+        line_count: document.line_count,
+    }
 }
 
 /// Compare an optional `expected_sha256` to the current hash; conflict on mismatch.
