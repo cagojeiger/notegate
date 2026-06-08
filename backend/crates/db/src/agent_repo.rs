@@ -148,8 +148,8 @@ impl AgentRepo {
         Ok(row.map(Agent::from))
     }
 
-    /// Soft-deactivate an agent account and revoke its active keys and access in
-    /// one transaction.
+    /// Soft-deactivate an agent account and revoke its non-revoked keys and
+    /// access in one transaction.
     pub async fn delete_agent(&self, agent_id: Uuid, deleted_by: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -287,9 +287,11 @@ impl AgentStore for AgentRepo {
         Ok(AgentKey::from(row))
     }
 
-    async fn count_active_keys(&self, agent_id: Uuid) -> Result<usize> {
+    async fn count_live_keys(&self, agent_id: Uuid) -> Result<usize> {
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM agent_keys WHERE agent_id = $1 AND revoked_at IS NULL",
+            "SELECT count(*) FROM agent_keys \
+             WHERE agent_id = $1 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > now())",
         )
         .bind(agent_id)
         .fetch_one(&self.pool)

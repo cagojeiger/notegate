@@ -34,7 +34,7 @@ POST /api/v1/agents
 DELETE /api/v1/agents/{agent_id}
 ```
 
-Agent의 underlying account를 soft-deactivate하고, active key와 workspace access를 revoke한다.
+Agent의 underlying account를 soft-deactivate하고, revoke되지 않은 key와 workspace access를 revoke한다.
 
 ### Create agent key
 
@@ -52,13 +52,22 @@ POST /api/v1/agents/{agent_id}/keys
 
 평문 key는 생성 응답에서 정확히 한 번만 반환한다.
 
+Live key는 다음 조건을 모두 만족한다.
+
+```text
+agent_keys.revoked_at IS NULL
+agent_keys.expires_at IS NULL OR agent_keys.expires_at > now()
+```
+
 Branching 규칙:
 
 ```text
-active keys < 10     -> key 생성
-active keys >= 10    -> 409 conflict
-scopes omitted or [] -> 허용
-scopes non-empty     -> 400 invalid input
+live keys < 10             -> key 생성
+live keys >= 10            -> 409 conflict
+scopes omitted or []       -> 허용
+scopes non-empty           -> 400 invalid input
+expires_at omitted/future  -> 허용
+expires_at past or now     -> 400 invalid input
 ```
 
 ### Revoke agent key

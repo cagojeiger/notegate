@@ -259,7 +259,7 @@ async fn count_and_list_active_agents_per_creator() -> Result<(), Box<dyn std::e
 }
 
 #[tokio::test]
-async fn count_active_keys_excludes_revoked() -> Result<(), Box<dyn std::error::Error>> {
+async fn count_live_keys_excludes_revoked_and_expired() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -290,10 +290,21 @@ async fn count_active_keys_excludes_revoked() -> Result<(), Box<dyn std::error::
         creator,
     )
     .await?;
-    assert_eq!(repo.count_active_keys(agent_id).await?, 2);
+    repo.insert_agent_key(
+        &CreateAgentKey {
+            agent_id,
+            name: "expired".to_owned(),
+            scopes: Vec::new(),
+            expires_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)),
+        },
+        &hash_token("expired"),
+        creator,
+    )
+    .await?;
+    assert_eq!(repo.count_live_keys(agent_id).await?, 2);
 
     repo.revoke_key(agent_id, k1.id, creator).await?;
-    assert_eq!(repo.count_active_keys(agent_id).await?, 1);
+    assert_eq!(repo.count_live_keys(agent_id).await?, 1);
 
     db.cleanup().await;
     Ok(())
@@ -339,7 +350,7 @@ async fn revoke_key_is_scoped_to_agent_id() -> Result<(), Box<dyn std::error::Er
     );
 
     repo.revoke_key(agent_b, key_b.id, creator).await?;
-    assert_eq!(repo.count_active_keys(agent_b).await?, 0);
+    assert_eq!(repo.count_live_keys(agent_b).await?, 0);
 
     db.cleanup().await;
     Ok(())

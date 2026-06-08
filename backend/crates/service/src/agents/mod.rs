@@ -1,7 +1,7 @@
 //! Agent lifecycle: create / delete agents and their keys.
 //!
 //! POLICY: only `kind='user'` callers may manage agents or keys; an agent caller
-//! is forbidden. Active-agent and active-key counts are enforced against
+//! is forbidden. Active-agent and live-key counts are enforced against
 //! `core::limits` before each insert. The plaintext key token is generated here,
 //! hashed with SHA-256, and only the hash is persisted.
 
@@ -93,8 +93,8 @@ pub trait AgentStore: Clone + Send + Sync + 'static {
         created_by: Uuid,
     ) -> impl Future<Output = CoreResult<AgentKey>> + Send;
 
-    /// Count active keys for an agent.
-    fn count_active_keys(&self, agent_id: Uuid) -> impl Future<Output = CoreResult<usize>> + Send;
+    /// Count live keys for an agent.
+    fn count_live_keys(&self, agent_id: Uuid) -> impl Future<Output = CoreResult<usize>> + Send;
 
     /// Soft-delete an owned active agent and revoke its keys/access.
     fn delete_agent(
@@ -187,7 +187,7 @@ where
     }
 
     /// Create an agent key. Only a `kind='user'` caller may create keys; the
-    /// agent may have at most [`limits::AGENT_KEYS_PER_AGENT_MAX`] active keys.
+    /// agent may have at most [`limits::AGENT_KEYS_PER_AGENT_MAX`] live keys.
     pub async fn create_key(
         &self,
         caller_kind: AccountKind,
@@ -201,13 +201,21 @@ where
                     .to_owned(),
             ));
         }
+        if command
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= Utc::now())
+        {
+            return Err(ServiceError::InvalidInput(
+                "agent key expires_at must be in the future".to_owned(),
+            ));
+        }
         self.require_owned_active_agent(command.agent_id, caller_account_id)
             .await?;
 
-        let active = self.store.count_active_keys(command.agent_id).await?;
-        if active >= limits::AGENT_KEYS_PER_AGENT_MAX {
+        let live = self.store.count_live_keys(command.agent_id).await?;
+        if live >= limits::AGENT_KEYS_PER_AGENT_MAX {
             return Err(ServiceError::Conflict(format!(
-                "agent already has the maximum of {} active keys",
+                "agent already has the maximum of {} live keys",
                 limits::AGENT_KEYS_PER_AGENT_MAX
             )));
         }
@@ -394,7 +402,7 @@ mod tests {
             })
         }
 
-        async fn count_active_keys(&self, _agent_id: Uuid) -> CoreResult<usize> {
+        async fn count_live_keys(&self, _agent_id: Uuid) -> CoreResult<usize> {
             Ok(self.key_count)
         }
 
@@ -643,6 +651,25 @@ mod tests {
                     name: "key".to_owned(),
                     scopes: vec!["files:read".to_owned()],
                     expires_at: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ServiceError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn expired_key_creation_is_rejected() {
+        let service = AgentService::new(MockStore::default());
+        let err = service
+            .create_key(
+                AccountKind::User,
+                Uuid::new_v4(),
+                CreateAgentKey {
+                    agent_id: Uuid::new_v4(),
+                    name: "key".to_owned(),
+                    scopes: Vec::new(),
+                    expires_at: Some(Utc::now() - chrono::Duration::seconds(1)),
                 },
             )
             .await

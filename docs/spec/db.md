@@ -119,8 +119,9 @@ CREATE TABLE agent_keys (
 
 - API key / agent key 인증은 항상 `agent` account로 처리한다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다.
+- `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 받지 않는다.
-- 한 agent가 동시에 가질 수 있는 active key는 최대 `10`개다.
+- 한 agent가 동시에 가질 수 있는 live key는 최대 `10`개다.
 
 ## workspaces
 
