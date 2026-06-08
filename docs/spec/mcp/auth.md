@@ -1,35 +1,32 @@
 # MCP Auth
 
-
-이 문서는 notegate MCP tool의 request/response 계약을 정의한다. MCP tools는 LLM/CLI 친화 surface이며, 가능하면 `node_id` workflow를 숨기고 path-first 입력을 사용한다.
-
-Surface:
-
-```text
-/mcp
-```
-
-Auth:
-
-```text
-Bearer token only
-```
-
-MCP accepts bearer credentials only; browser/session cookies are not accepted.
-
-Identity mapping:
-
-```text
-MCP OAuth 2.1 via authgate -> user account
-API key / agent key        -> agent account
-```
-
-Device flow through authgate is also a user login. API keys are always agent
-credentials, even when they were created by a user.
+MCP auth details for the `/mcp` surface. The common bearer-only identity mapping is defined in
+[README.md](README.md#authentication).
 
 ## First-time user setup
 
-MCP OAuth login proves an authgate identity. The authgate MCP client is `notegate-mcp`; clients must request the notegate MCP resource/audience (for local dev, `http://localhost:9191/mcp`). If the local notegate user/account does not exist yet, the caller must complete browser login once through `/auth/login`, wait for the `/auth/success` confirmation page, then reconnect the MCP client.
+MCP OAuth login proves an authgate identity, but bearer-token MCP calls only resolve already-created
+local notegate user accounts.
+
+Branching:
+
+```text
+local user exists     -> MCP OAuth bearer resolves to user caller
+local user missing    -> 403 not_registered with login_url and mcp_url
+browser login success -> local user account is upserted, then MCP reconnect can succeed
+```
+
+Onboarding flow:
+
+```text
+1. MCP client discovers protected resource metadata.
+2. MCP client authenticates through authgate with client id notegate-mcp and resource/audience http://localhost:9191/mcp in local dev.
+3. If not_registered, open /auth/login in a browser.
+4. Wait for /auth/success.
+5. Reconnect the MCP client.
+```
+
+## Discovery
 
 MCP OAuth discovery uses:
 
@@ -39,7 +36,25 @@ MCP OAuth discovery uses:
 /.well-known/oauth-protected-resource/mcp
 ```
 
-Unauthenticated `/mcp` requests return `401` with a `WWW-Authenticate` challenge containing `resource_metadata` and the scope hint `openid offline_access`.
+Unauthenticated `/mcp` requests return `401` with:
 
-If an authenticated MCP caller has no local account, `/mcp` returns `403 not_registered` with
-`login_url` and `mcp_url` onboarding hints.
+```text
+WWW-Authenticate: Bearer resource_metadata="...", scope="openid offline_access"
+```
+
+Protected resource metadata returns the configured MCP public client id:
+
+```json
+{
+  "mcp_client_id": "notegate-mcp"
+}
+```
+
+## Credential boundary
+
+```text
+browser/session cookie on /mcp -> 401
+OAuth bearer token             -> user account
+API key / agent key bearer     -> agent account
+raw bearer/API key plaintext   -> never returned by auth errors
+```

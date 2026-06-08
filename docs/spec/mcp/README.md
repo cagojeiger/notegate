@@ -35,6 +35,8 @@ Discovery endpoints:
 /.well-known/oauth-protected-resource/mcp
 ```
 
+MCP-specific onboarding and discovery details live in [auth.md](auth.md).
+
 ## Tool set
 
 ```text
