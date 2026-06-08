@@ -20,7 +20,7 @@ Used by command palette, deep links, breadcrumbs, and search-result navigation. 
 GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}
 ```
 
-Returns node metadata. Useful for refresh after optimistic UI updates. The `path` field is derived from the parent chain, not stored as canonical full path.
+Returns node metadata. Useful for refresh after optimistic UI updates. The `path` field is derived from the parent chain, not stored as canonical full path. Document nodes include `content_sha256`, `byte_len`, and `line_count`; folder nodes omit them.
 
 ### List children
 

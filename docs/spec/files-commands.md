@@ -62,8 +62,10 @@ path 또는 node_id의 metadata를 반환한다.
 출력:
 
 ```text
-id, parent_id, name, kind, path, has_children, byte_len?, line_count?, created_at, updated_at
+id, parent_id, name, kind, path, has_children, content_sha256?, byte_len?, line_count?, created_at, updated_at
 ```
+
+`content_sha256`, `byte_len`, `line_count`는 document node stat에서만 포함한다. bulk `ls` 항목에는 document metrics를 포함하지 않는다.
 
 ### `mkdir`
 

@@ -71,6 +71,7 @@ where
             node,
             path: "/".to_owned(),
             has_children,
+            document: None,
         })
     }
 
@@ -155,6 +156,7 @@ where
                 node,
                 path,
                 has_children,
+                document: None,
             });
         }
 
@@ -163,6 +165,7 @@ where
                 node: parent,
                 path: parent_path,
                 has_children: parent_has_children,
+                document: None,
             },
             items,
             limit,
@@ -195,6 +198,7 @@ where
             node,
             path,
             has_children: false,
+            document: None,
         })
     }
 
@@ -234,6 +238,11 @@ where
                 node,
                 path,
                 has_children: false,
+                document: Some(crate::files::DocumentStats {
+                    content_sha256: document.content_sha256.clone(),
+                    byte_len: document.byte_len,
+                    line_count: document.line_count,
+                }),
             },
             document,
         })
@@ -683,10 +692,16 @@ where
     async fn node_view(&self, workspace_id: Uuid, node: Node) -> ServiceResult<NodeView> {
         let path = self.path_of(workspace_id, node.id).await?;
         let has_children = self.store.has_children(workspace_id, node.id).await?;
+        let document = if node.kind == NodeKind::Document {
+            self.store.document_stats(workspace_id, node.id).await?
+        } else {
+            None
+        };
         Ok(NodeView {
             node,
             path,
             has_children,
+            document,
         })
     }
 

@@ -100,6 +100,12 @@ pub struct NodeOut {
     pub path: String,
     pub sort_order: i32,
     pub has_children: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub byte_len: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_count: Option<i32>,
     pub created_by: AccountRef,
     pub updated_by: AccountRef,
     pub created_at: DateTime<Utc>,
@@ -120,6 +126,12 @@ impl NodeOut {
             path: view.path.clone(),
             sort_order: node.sort_order,
             has_children: view.has_children,
+            content_sha256: view
+                .document
+                .as_ref()
+                .map(|document| document.content_sha256.clone()),
+            byte_len: view.document.as_ref().map(|document| document.byte_len),
+            line_count: view.document.as_ref().map(|document| document.line_count),
             created_by: AccountRef::resolve(node.created_by, refs),
             updated_by: AccountRef::resolve(node.updated_by, refs),
             created_at: node.created_at,

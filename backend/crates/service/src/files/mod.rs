@@ -21,8 +21,8 @@ pub use input::{
     ReadDocument, WriteDocument, WriteTarget,
 };
 pub use output::{
-    ChildrenCursor, ChildrenPage, DeleteResult, DocumentView, NodeView, PatchResult, ReadContent,
-    ReadResult,
+    ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
+    ReadContent, ReadResult,
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::{FileCommand, require as require_role};

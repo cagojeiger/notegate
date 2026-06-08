@@ -338,7 +338,7 @@ pub fn workspace_summary(view: &WorkspaceView) -> serde_json::Value {
 /// results). Path is the canonical derived absolute path; `node_id` is included
 /// for callers that need a stable identity but is never required as input.
 pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Value {
-    json!({
+    let mut value = json!({
         "path": view.path,
         "name": view.node.name,
         "kind": view.node.kind.as_str(),
@@ -347,7 +347,15 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         "sort_order": view.node.sort_order,
         "created_at": view.node.created_at,
         "updated_at": view.node.updated_at,
-    })
+    });
+    if let Some(document) = &view.document
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("content_sha256".to_owned(), json!(document.content_sha256));
+        object.insert("byte_len".to_owned(), json!(document.byte_len));
+        object.insert("line_count".to_owned(), json!(document.line_count));
+    }
+    value
 }
 
 /// Decode an opaque cursor, mapping a bad cursor to a `400`-class error.

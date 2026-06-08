@@ -208,6 +208,7 @@ where
                 node,
                 path,
                 has_children,
+                document: None,
             })
             .collect();
 

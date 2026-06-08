@@ -17,7 +17,9 @@ use notegate_model::{Document, Node, NodeKind, Role};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use notegate_service::files::{ChildrenCursor, CreateFolder, FilesStore, MoveNode, StoredContent};
+use notegate_service::files::{
+    ChildrenCursor, CreateFolder, DocumentStats, FilesStore, MoveNode, StoredContent,
+};
 use notegate_service::search::{FindCursor, GrepCandidate, GrepCursor, SearchStore};
 
 use crate::files::{commands, queries};
@@ -86,6 +88,14 @@ impl FilesStore for FilesRepo {
 
     async fn sum_live_document_bytes(&self, workspace_id: Uuid) -> Result<usize> {
         queries::document::sum_live_document_bytes(&self.pool, workspace_id).await
+    }
+
+    async fn document_stats(
+        &self,
+        workspace_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<DocumentStats>> {
+        queries::document::document_stats(&self.pool, workspace_id, node_id).await
     }
 
     async fn find_document(

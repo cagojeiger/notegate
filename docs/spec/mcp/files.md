@@ -27,7 +27,7 @@ Output:
 
 ## `files_stat`
 
-Return metadata for a path.
+Return metadata for a path. Document nodes include `content_sha256`, `byte_len`, and `line_count`; folder nodes omit them.
 
 Input:
 

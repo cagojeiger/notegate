@@ -266,6 +266,28 @@ impl FilesStore for MemStore {
             .sum())
     }
 
+    async fn document_stats(
+        &self,
+        _ws: Uuid,
+        id: Uuid,
+    ) -> CoreResult<Option<crate::files::DocumentStats>> {
+        let state = self.lock();
+        let Some(node) = state.nodes.get(&id).filter(|n| n.deleted_at.is_none()) else {
+            return Ok(None);
+        };
+        if node.kind != NodeKind::Document {
+            return Ok(None);
+        }
+        Ok(state
+            .documents
+            .get(&id)
+            .map(|doc| crate::files::DocumentStats {
+                content_sha256: doc.content_sha256.clone(),
+                byte_len: doc.byte_len,
+                line_count: doc.line_count,
+            }))
+    }
+
     async fn find_document(&self, _ws: Uuid, id: Uuid) -> CoreResult<Option<(Node, Document)>> {
         let state = self.lock();
         let Some(node) = state
@@ -599,6 +621,35 @@ async fn touch_creates_empty_document() {
 }
 
 // --- read ---
+
+#[tokio::test]
+async fn stat_document_includes_metrics_but_ls_omits_them() {
+    let (svc, store) = service(Some(Role::Viewer));
+    let doc = store.add_document(store.root_id, "note.md", "hello\n");
+
+    let stat = svc.stat(actor(), store.workspace_id, doc).await.unwrap();
+    let metrics = stat.document.expect("document stat includes metrics");
+    assert_eq!(metrics.byte_len, 6);
+    assert_eq!(metrics.line_count, 1);
+
+    let page = svc
+        .children(
+            actor(),
+            store.workspace_id,
+            store.root_id,
+            ChildrenRequest {
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert!(
+        page.items[0].document.is_none(),
+        "ls keeps entries lightweight"
+    );
+}
 
 #[tokio::test]
 async fn read_unchanged_when_hash_matches() {

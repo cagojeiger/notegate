@@ -3,11 +3,38 @@
 
 use notegate_core::Result;
 use notegate_model::{Document, Node};
+use notegate_service::files::DocumentStats;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
 use super::super::rows::{DOCUMENT_COLUMNS, DocumentRow, NODE_COLUMNS, NodeRow};
+
+/// Load live document metrics without the Markdown body.
+pub async fn document_stats(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    node_id: Uuid,
+) -> Result<Option<DocumentStats>> {
+    let row: Option<(String, i32, i32)> = sqlx::query_as(
+        "SELECT d.content_sha256, d.byte_len, d.line_count FROM documents d \
+         JOIN nodes n ON n.id = d.node_id AND n.workspace_id = d.workspace_id \
+         WHERE d.workspace_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    Ok(
+        row.map(|(content_sha256, byte_len, line_count)| DocumentStats {
+            content_sha256,
+            byte_len,
+            line_count,
+        }),
+    )
+}
 
 /// Load a live document (its node + content) by node id, or `None` when the node
 /// is missing, soft-deleted, or a folder.

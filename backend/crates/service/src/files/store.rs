@@ -10,7 +10,7 @@ use notegate_model::{Document, Node, Role};
 use uuid::Uuid;
 
 use super::input::{CreateFolder, MoveNode};
-use super::output::ChildrenCursor;
+use super::output::{ChildrenCursor, DocumentStats};
 
 /// Persistence and authorization for the file tree. The `db` crate implements
 /// this; the service stays free of sqlx/axum.
@@ -95,6 +95,13 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
         &self,
         workspace_id: Uuid,
     ) -> impl Future<Output = CoreResult<usize>> + Send;
+
+    /// Load live document metrics without content by node id.
+    fn document_stats(
+        &self,
+        workspace_id: Uuid,
+        node_id: Uuid,
+    ) -> impl Future<Output = CoreResult<Option<DocumentStats>>> + Send;
 
     /// Load a live document (node + content) by node id.
     fn find_document(

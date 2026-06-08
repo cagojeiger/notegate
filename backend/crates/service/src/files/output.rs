@@ -8,6 +8,14 @@ use uuid::Uuid;
 
 use notegate_model::{Document, Node};
 
+/// Lightweight document metrics exposed by single-node `stat` outputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentStats {
+    pub content_sha256: String,
+    pub byte_len: i32,
+    pub line_count: i32,
+}
+
 /// A node plus its derived display path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeView {
@@ -15,6 +23,8 @@ pub struct NodeView {
     /// Derived from the parent chain at read time.
     pub path: String,
     pub has_children: bool,
+    /// Filled for document `stat`/path-resolution outputs; omitted from bulk `ls`.
+    pub document: Option<DocumentStats>,
 }
 
 /// A node-with-document view (used by `stat` of a document and after mutations).
