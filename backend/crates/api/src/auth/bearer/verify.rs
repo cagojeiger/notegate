@@ -1,7 +1,7 @@
 use notegate_model::Caller;
 
-use crate::auth::bearer::AuthError;
-use crate::identity::{IdentityError, ResolveAttrs};
+use crate::auth::bearer::{AuthError, map_identity_error};
+use crate::identity::ResolveAttrs;
 use crate::state::AppState;
 
 pub async fn verify_bearer(state: &AppState, token: &str) -> Result<Caller, AuthError> {
@@ -27,12 +27,4 @@ pub async fn verify_bearer_mcp(state: &AppState, token: &str) -> Result<Caller, 
 /// the verified attributes into a `Caller`.
 async fn authenticate(state: &AppState, token: &str) -> Result<ResolveAttrs, AuthError> {
     state.jwt.verify(token).await
-}
-
-fn map_identity_error(error: IdentityError) -> AuthError {
-    match error {
-        IdentityError::NotRegistered => AuthError::NotRegistered,
-        IdentityError::Inactive => AuthError::Inactive,
-        IdentityError::Internal(_message) => AuthError::Internal,
-    }
 }

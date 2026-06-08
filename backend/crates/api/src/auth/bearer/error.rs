@@ -5,7 +5,19 @@ use axum::response::{IntoResponse, Response};
 use crate::auth::metadata::{
     challenge_header, protected_resource_metadata_url, scoped_challenge_header,
 };
+use crate::identity::IdentityError;
 use crate::state::AppState;
+
+/// Map an identity-resolution failure to an [`AuthError`]. Shared by the bearer
+/// and browser-session paths, which treat an unregistered subject the same way.
+/// Agent-key auth maps `NotRegistered` differently and keeps its own variant.
+pub fn map_identity_error(error: IdentityError) -> AuthError {
+    match error {
+        IdentityError::NotRegistered => AuthError::NotRegistered,
+        IdentityError::Inactive => AuthError::Inactive,
+        IdentityError::Internal(_message) => AuthError::Internal,
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {

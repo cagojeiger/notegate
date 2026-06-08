@@ -3,8 +3,7 @@ use notegate_model::Caller;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::bearer::AuthError;
-use crate::identity::IdentityError;
+use crate::auth::bearer::{AuthError, map_identity_error};
 use crate::state::AppState;
 
 pub const BROWSER_SESSION_COOKIE: &str = "notegate_browser_session";
@@ -57,12 +56,4 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
         .resolve_browser_session(data.claims.sub)
         .await
         .map_err(map_identity_error)
-}
-
-fn map_identity_error(error: IdentityError) -> AuthError {
-    match error {
-        IdentityError::NotRegistered => AuthError::NotRegistered,
-        IdentityError::Inactive => AuthError::Inactive,
-        IdentityError::Internal(_message) => AuthError::Internal,
-    }
 }

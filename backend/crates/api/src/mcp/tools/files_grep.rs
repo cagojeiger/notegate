@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use notegate_service::search::GrepRequest;
 
-use super::common::page_json;
+use super::support::page_json;
 use super::resolve::{WorkspaceSelector, caller, resolve_target, resolve_workspace, service_error};
 use crate::state::AppState;
 

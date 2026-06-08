@@ -1,10 +1,10 @@
 //! MCP tools, one per file. Each module exposes a `call(...)` entry the
 //! `#[tool_router]` in [`crate::mcp::server`] dispatches to. Shared plumbing
 //! (workspace-name resolution, target parsing, error mapping) lives in
-//! [`resolve`].
+//! [`resolve`]; small shared helpers live in [`support`].
 
-pub mod common;
 pub mod resolve;
+pub mod support;
 
 pub mod me;
 

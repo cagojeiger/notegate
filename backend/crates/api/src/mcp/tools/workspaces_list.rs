@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::common::page_json;
+use super::support::page_json;
 use super::resolve::{caller, service_error, workspace_summary};
 use crate::state::AppState;
 use notegate_service::workspaces::ListWorkspaces;

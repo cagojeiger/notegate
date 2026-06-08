@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use notegate_model::NodeKind;
 use notegate_service::search::FindRequest;
 
-use super::common::page_json;
+use super::support::page_json;
 use super::resolve::{
     WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_target,
     resolve_workspace, service_error,

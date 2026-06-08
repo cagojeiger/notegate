@@ -343,6 +343,13 @@ fn mcp_auth_response(state: &AppState, error: AuthError) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
 

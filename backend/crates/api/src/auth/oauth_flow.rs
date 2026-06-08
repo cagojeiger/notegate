@@ -41,14 +41,25 @@ pub(super) async fn new_login_flow(oidc: &OidcProvider) -> notegate_core::Result
     })
 }
 
-pub(super) fn flow_cookie(name: &'static str, value: String, secure: bool) -> Cookie<'static> {
+/// Build a hardened cookie (path=/, HttpOnly, SameSite=Lax) with the given
+/// max-age. Shared by every auth cookie so the security flags never drift.
+pub(super) fn hardened_cookie(
+    name: &'static str,
+    value: String,
+    max_age_secs: i64,
+    secure: bool,
+) -> Cookie<'static> {
     Cookie::build((name, value))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
         .secure(secure)
-        .max_age(CookieDuration::seconds(FLOW_COOKIE_MAX_AGE_SECS))
+        .max_age(CookieDuration::seconds(max_age_secs))
         .build()
+}
+
+pub(super) fn flow_cookie(name: &'static str, value: String, secure: bool) -> Cookie<'static> {
+    hardened_cookie(name, value, FLOW_COOKIE_MAX_AGE_SECS, secure)
 }
 
 pub(super) fn clear_flow_cookies(jar: CookieJar, secure: bool) -> CookieJar {
@@ -58,13 +69,7 @@ pub(super) fn clear_flow_cookies(jar: CookieJar, secure: bool) -> CookieJar {
 }
 
 fn expired_cookie(name: &'static str, secure: bool) -> Cookie<'static> {
-    Cookie::build((name, ""))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .secure(secure)
-        .max_age(CookieDuration::seconds(0))
-        .build()
+    hardened_cookie(name, String::new(), 0, secure)
 }
 
 #[cfg(test)]

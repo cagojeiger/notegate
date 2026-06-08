@@ -2,15 +2,14 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
-use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum_extra::extract::cookie::Cookie;
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
-use time::Duration as CookieDuration;
 
 use crate::auth::oauth_exchange::exchange_code_for_userinfo;
 use crate::auth::oauth_flow::{
     LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE, clear_flow_cookies, flow_cookie,
-    new_login_flow,
+    hardened_cookie, new_login_flow,
 };
 use crate::auth::page::html_page;
 use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
@@ -212,23 +211,14 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {
 }
 
 fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
-    Cookie::build((BROWSER_SESSION_COOKIE, value))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .secure(state.config.secure_cookies)
-        .max_age(CookieDuration::seconds(
-            state.config.browser_session_ttl.as_secs() as i64,
-        ))
-        .build()
+    hardened_cookie(
+        BROWSER_SESSION_COOKIE,
+        value,
+        state.config.browser_session_ttl.as_secs() as i64,
+        state.config.secure_cookies,
+    )
 }
 
 fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
-    Cookie::build((BROWSER_SESSION_COOKIE, ""))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .secure(secure)
-        .max_age(CookieDuration::seconds(0))
-        .build()
+    hardened_cookie(BROWSER_SESSION_COOKIE, String::new(), 0, secure)
 }

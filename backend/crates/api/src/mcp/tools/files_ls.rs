@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use notegate_service::files::ChildrenRequest;
 
-use super::common::page_json;
+use super::support::page_json;
 use super::resolve::{WorkspaceSelector, caller, node_summary, resolve_target, service_error};
 use crate::state::AppState;
 
