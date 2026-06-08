@@ -57,8 +57,9 @@ impl AppState {
         let access = AccessService::new(AccessRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents = AgentService::new(agent_repo.clone());
-        let files = FilesService::new(FilesRepo::new(db.clone()));
-        let search = SearchService::new(FilesRepo::new(db.clone()));
+        let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
+        let files = FilesService::with_limits(files_repo.clone(), config.limits);
+        let search = SearchService::new(files_repo);
         let accounts = AccountRepo::new(db.clone());
         Self {
             db,

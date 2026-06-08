@@ -18,7 +18,7 @@
 //! current counts (children/nodes/documents/bytes) it has already read in the
 //! transaction.
 
-use notegate_core::limits;
+use notegate_core::limits::{self, Limits};
 use notegate_core::validation::{
     self, ValidationError, validate_document_name, validate_folder_name,
 };
@@ -33,17 +33,17 @@ pub enum FilesValidationError {
     Name(ValidationError),
     /// The parent folder already holds the maximum live direct children.
     FanoutExceeded {
-        /// The configured maximum ([`limits::folder_max_children()`]).
+        /// The configured maximum.
         max: usize,
     },
     /// The workspace already holds the maximum live nodes.
     WorkspaceNodesExceeded {
-        /// The configured maximum ([`limits::workspace_max_nodes()`]).
+        /// The configured maximum.
         max: usize,
     },
     /// The workspace already holds the maximum live documents.
     WorkspaceDocumentsExceeded {
-        /// The configured maximum ([`limits::workspace_max_documents()`]).
+        /// The configured maximum.
         max: usize,
     },
     /// The document content exceeds the per-document byte cap.
@@ -58,7 +58,7 @@ pub enum FilesValidationError {
     },
     /// Storing the document would exceed the workspace's total live byte budget.
     WorkspaceDocumentBytesExceeded {
-        /// The configured maximum ([`limits::workspace_max_document_bytes()`]).
+        /// The configured maximum.
         max: usize,
     },
 }
@@ -140,35 +140,39 @@ pub fn validate_path_len(path: &str) -> Result<(), FilesValidationError> {
 }
 
 /// Reject creating/moving a child into a parent that already holds the maximum
-/// live direct children ([`limits::folder_max_children()`]).
-pub fn validate_fanout(live_children: usize) -> Result<(), FilesValidationError> {
-    if live_children >= limits::folder_max_children() {
+/// live direct children.
+pub fn validate_fanout(live_children: usize, limits: Limits) -> Result<(), FilesValidationError> {
+    if live_children >= limits.folder_max_children {
         return Err(FilesValidationError::FanoutExceeded {
-            max: limits::folder_max_children(),
+            max: limits.folder_max_children,
         });
     }
     Ok(())
 }
 
 /// Reject creating a node when the workspace already holds the maximum live
-/// nodes ([`limits::workspace_max_nodes()`]).
-pub fn validate_workspace_node_count(live_nodes: usize) -> Result<(), FilesValidationError> {
-    if live_nodes >= limits::workspace_max_nodes() {
+/// nodes.
+pub fn validate_workspace_node_count(
+    live_nodes: usize,
+    limits: Limits,
+) -> Result<(), FilesValidationError> {
+    if live_nodes >= limits.workspace_max_nodes {
         return Err(FilesValidationError::WorkspaceNodesExceeded {
-            max: limits::workspace_max_nodes(),
+            max: limits.workspace_max_nodes,
         });
     }
     Ok(())
 }
 
 /// Reject creating a document when the workspace already holds the maximum live
-/// documents ([`limits::workspace_max_documents()`]).
+/// documents.
 pub fn validate_workspace_document_count(
     live_documents: usize,
+    limits: Limits,
 ) -> Result<(), FilesValidationError> {
-    if live_documents >= limits::workspace_max_documents() {
+    if live_documents >= limits.workspace_max_documents {
         return Err(FilesValidationError::WorkspaceDocumentsExceeded {
-            max: limits::workspace_max_documents(),
+            max: limits.workspace_max_documents,
         });
     }
     Ok(())
@@ -195,7 +199,7 @@ pub fn validate_document_content(
 }
 
 /// Reject a write/patch that would push the workspace's total live document
-/// bytes over [`limits::workspace_max_document_bytes()`].
+/// bytes over the configured workspace byte budget.
 ///
 /// `current_total_bytes` is the workspace's current live document byte sum,
 /// `previous_byte_len` is the byte length of the document being replaced (0 for
@@ -204,13 +208,14 @@ pub fn validate_workspace_document_bytes(
     current_total_bytes: usize,
     previous_byte_len: usize,
     new_byte_len: usize,
+    limits: Limits,
 ) -> Result<(), FilesValidationError> {
     let projected = current_total_bytes
         .saturating_sub(previous_byte_len)
         .saturating_add(new_byte_len);
-    if projected > limits::workspace_max_document_bytes() {
+    if projected > limits.workspace_max_document_bytes {
         return Err(FilesValidationError::WorkspaceDocumentBytesExceeded {
-            max: limits::workspace_max_document_bytes(),
+            max: limits.workspace_max_document_bytes,
         });
     }
     Ok(())
@@ -286,25 +291,29 @@ mod tests {
 
     #[test]
     fn fanout_boundary() {
-        assert!(validate_fanout(limits::folder_max_children() - 1).is_ok());
+        let caps = Limits::default();
+        assert!(validate_fanout(limits::FOLDER_MAX_CHILDREN - 1, caps).is_ok());
         assert_eq!(
-            validate_fanout(limits::folder_max_children()),
+            validate_fanout(limits::FOLDER_MAX_CHILDREN, caps),
             Err(FilesValidationError::FanoutExceeded {
-                max: limits::folder_max_children()
+                max: limits::FOLDER_MAX_CHILDREN
             })
         );
     }
 
     #[test]
     fn workspace_node_and_document_count_boundaries() {
-        assert!(validate_workspace_node_count(limits::workspace_max_nodes() - 1).is_ok());
+        let caps = Limits::default();
+        assert!(validate_workspace_node_count(limits::WORKSPACE_MAX_NODES - 1, caps).is_ok());
         assert!(matches!(
-            validate_workspace_node_count(limits::workspace_max_nodes()),
+            validate_workspace_node_count(limits::WORKSPACE_MAX_NODES, caps),
             Err(FilesValidationError::WorkspaceNodesExceeded { .. })
         ));
-        assert!(validate_workspace_document_count(limits::workspace_max_documents() - 1).is_ok());
+        assert!(
+            validate_workspace_document_count(limits::WORKSPACE_MAX_DOCUMENTS - 1, caps).is_ok()
+        );
         assert!(matches!(
-            validate_workspace_document_count(limits::workspace_max_documents()),
+            validate_workspace_document_count(limits::WORKSPACE_MAX_DOCUMENTS, caps),
             Err(FilesValidationError::WorkspaceDocumentsExceeded { .. })
         ));
     }
@@ -327,16 +336,17 @@ mod tests {
 
     #[test]
     fn workspace_document_bytes_accounts_for_replacement() {
-        let max = limits::workspace_max_document_bytes();
+        let max = limits::WORKSPACE_MAX_DOCUMENT_BYTES;
+        let caps = Limits::default();
         // Replacing a doc of equal size at the cap stays at the cap (ok).
-        assert!(validate_workspace_document_bytes(max, 10, 10).is_ok());
+        assert!(validate_workspace_document_bytes(max, 10, 10, caps).is_ok());
         // Growing past the cap is rejected.
         assert!(matches!(
-            validate_workspace_document_bytes(max, 0, 1),
+            validate_workspace_document_bytes(max, 0, 1, caps),
             Err(FilesValidationError::WorkspaceDocumentBytesExceeded { .. })
         ));
         // Shrinking is always fine.
-        assert!(validate_workspace_document_bytes(max, 100, 1).is_ok());
+        assert!(validate_workspace_document_bytes(max, 100, 1, caps).is_ok());
     }
 
     #[test]

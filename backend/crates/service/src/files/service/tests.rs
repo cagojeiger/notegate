@@ -517,8 +517,12 @@ impl FilesStore for MemStore {
 }
 
 fn service(role: Option<Role>) -> (FilesService<MemStore>, MemStore) {
+    service_with_limits(role, Limits::default())
+}
+
+fn service_with_limits(role: Option<Role>, limits: Limits) -> (FilesService<MemStore>, MemStore) {
     let store = MemStore::new(role);
-    (FilesService::new(store.clone()), store)
+    (FilesService::with_limits(store.clone(), limits), store)
 }
 
 // --- authorization wiring ---
@@ -1003,12 +1007,16 @@ async fn mv_same_path_is_noop_success() {
 
 #[tokio::test]
 async fn mv_into_full_destination_is_conflict() {
-    let (svc, store) = service(Some(Role::Editor));
+    let limits = Limits {
+        folder_max_children: 3,
+        ..Limits::default()
+    };
+    let (svc, store) = service_with_limits(Some(Role::Editor), limits);
     let src_parent = store.add_folder(store.root_id, "src");
     let moving = store.add_document(src_parent, "note.md", "x");
     let dest = store.add_folder(store.root_id, "dest");
     // Fill the destination to the fanout cap.
-    for i in 0..limits::folder_max_children() {
+    for i in 0..limits.folder_max_children {
         store.add_document(dest, &format!("f{i}.md"), "y");
     }
     let err = svc

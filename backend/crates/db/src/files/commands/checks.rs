@@ -4,7 +4,8 @@
 //! the mutation's transaction so a concurrent writer cannot slip past a count or
 //! depth bound between the pre-check and the write.
 
-use notegate_core::{Error, Result, limits};
+use notegate_core::limits::Limits;
+use notegate_core::{Error, Result};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -115,6 +116,7 @@ pub async fn require_fanout(
     tx: &mut PgConnection,
     workspace_id: Uuid,
     parent_id: Uuid,
+    caps: Limits,
 ) -> Result<()> {
     let children: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM nodes \
@@ -125,17 +127,21 @@ pub async fn require_fanout(
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if to_usize(children, "child")? >= limits::folder_max_children() {
+    if to_usize(children, "child")? >= caps.folder_max_children {
         return Err(Error::validation(format!(
             "folder already has the maximum of {} children",
-            limits::folder_max_children()
+            caps.folder_max_children
         )));
     }
     Ok(())
 }
 
 /// Enforce the workspace live-node cap.
-pub async fn require_node_budget(tx: &mut PgConnection, workspace_id: Uuid) -> Result<()> {
+pub async fn require_node_budget(
+    tx: &mut PgConnection,
+    workspace_id: Uuid,
+    caps: Limits,
+) -> Result<()> {
     let nodes: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM nodes WHERE workspace_id = $1 AND deleted_at IS NULL",
     )
@@ -143,17 +149,21 @@ pub async fn require_node_budget(tx: &mut PgConnection, workspace_id: Uuid) -> R
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if to_usize(nodes, "node")? >= limits::workspace_max_nodes() {
+    if to_usize(nodes, "node")? >= caps.workspace_max_nodes {
         return Err(Error::validation(format!(
             "workspace already has the maximum of {} nodes",
-            limits::workspace_max_nodes()
+            caps.workspace_max_nodes
         )));
     }
     Ok(())
 }
 
 /// Enforce the workspace live-document cap.
-pub async fn require_document_budget(tx: &mut PgConnection, workspace_id: Uuid) -> Result<()> {
+pub async fn require_document_budget(
+    tx: &mut PgConnection,
+    workspace_id: Uuid,
+    caps: Limits,
+) -> Result<()> {
     let docs: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM documents d \
          JOIN nodes n ON n.id = d.node_id AND n.workspace_id = d.workspace_id \
@@ -163,10 +173,10 @@ pub async fn require_document_budget(tx: &mut PgConnection, workspace_id: Uuid) 
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if to_usize(docs, "document")? >= limits::workspace_max_documents() {
+    if to_usize(docs, "document")? >= caps.workspace_max_documents {
         return Err(Error::validation(format!(
             "workspace already has the maximum of {} documents",
-            limits::workspace_max_documents()
+            caps.workspace_max_documents
         )));
     }
     Ok(())
@@ -180,6 +190,7 @@ pub async fn require_byte_budget(
     workspace_id: Uuid,
     previous_bytes: i64,
     new_bytes: i64,
+    caps: Limits,
 ) -> Result<()> {
     let total: i64 = sqlx::query_scalar(
         "SELECT COALESCE(sum(d.byte_len), 0)::bigint FROM documents d \
@@ -191,10 +202,10 @@ pub async fn require_byte_budget(
     .await
     .map_err(map_sqlx_error)?;
     let projected = total - previous_bytes + new_bytes;
-    if projected > limits::workspace_max_document_bytes() as i64 {
+    if projected > caps.workspace_max_document_bytes as i64 {
         return Err(Error::validation(format!(
             "write would exceed the workspace document byte budget of {}",
-            limits::workspace_max_document_bytes()
+            caps.workspace_max_document_bytes
         )));
     }
     Ok(())

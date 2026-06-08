@@ -35,12 +35,13 @@ use super::policy::{self, FileCommand};
 use super::store::FilesStore;
 use super::validation;
 
-use notegate_core::limits;
+use notegate_core::limits::{self, Limits};
 
 /// File-tree service.
 #[derive(Debug, Clone)]
 pub struct FilesService<S> {
     store: S,
+    limits: Limits,
 }
 
 impl<S> FilesService<S>
@@ -48,7 +49,11 @@ where
     S: FilesStore,
 {
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self::with_limits(store, Limits::default())
+    }
+
+    pub fn with_limits(store: S, limits: Limits) -> Self {
+        Self { store, limits }
     }
 
     /// The workspace root node, as a view. Requires `viewer`.
@@ -208,7 +213,7 @@ where
 
         // A document also consumes the live-document quota.
         let documents = self.store.count_live_documents(workspace_id).await?;
-        validation::validate_workspace_document_count(documents)?;
+        validation::validate_workspace_document_count(documents, self.limits)?;
 
         let empty = content::compute("").into_stored(String::new());
         let (node, document) = self
@@ -302,6 +307,7 @@ where
                     total,
                     document.byte_len.max(0) as usize,
                     metrics.byte_len,
+                    self.limits,
                 )?;
 
                 let stored = metrics.into_stored(command.content_md);
@@ -333,9 +339,14 @@ where
 
                 // New-document quotas: live-document count and total byte budget.
                 let documents = self.store.count_live_documents(workspace_id).await?;
-                validation::validate_workspace_document_count(documents)?;
+                validation::validate_workspace_document_count(documents, self.limits)?;
                 let total = self.store.sum_live_document_bytes(workspace_id).await?;
-                validation::validate_workspace_document_bytes(total, 0, metrics.byte_len)?;
+                validation::validate_workspace_document_bytes(
+                    total,
+                    0,
+                    metrics.byte_len,
+                    self.limits,
+                )?;
 
                 let stored = metrics.into_stored(command.content_md);
                 let (node, document) = self
@@ -386,6 +397,7 @@ where
             total,
             document.byte_len.max(0) as usize,
             metrics.byte_len,
+            self.limits,
         )?;
 
         let stored = metrics.into_stored(new_content);
@@ -490,7 +502,7 @@ where
                 .store
                 .count_live_children(workspace_id, command.new_parent_node_id)
                 .await?;
-            validation::validate_fanout(children)?;
+            validation::validate_fanout(children, self.limits)?;
         }
 
         let moved = self
@@ -654,7 +666,7 @@ where
             .store
             .count_live_children(workspace_id, parent_id)
             .await?;
-        validation::validate_fanout(children)?;
+        validation::validate_fanout(children, self.limits)?;
 
         let parent_path = self.path_of(workspace_id, parent_id).await?;
         let parent_depth = path_depth(&parent_path);
@@ -788,10 +800,10 @@ where
             .store
             .count_live_children(workspace_id, parent_node_id)
             .await?;
-        validation::validate_fanout(children)?;
+        validation::validate_fanout(children, self.limits)?;
 
         let nodes = self.store.count_live_nodes(workspace_id).await?;
-        validation::validate_workspace_node_count(nodes)?;
+        validation::validate_workspace_node_count(nodes, self.limits)?;
 
         Ok(parent_path)
     }

@@ -8,7 +8,8 @@
 //! and every currently-deleted descendant reachable through deleted nodes, and
 //! bumps the target's `updated_by`/`updated_at`.
 
-use notegate_core::{Error, Result, limits};
+use notegate_core::limits::{self, Limits};
+use notegate_core::{Error, Result};
 use notegate_model::Node;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -24,6 +25,7 @@ pub async fn restore_node(
     workspace_id: Uuid,
     node_id: Uuid,
     restored_by: Uuid,
+    caps: Limits,
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -70,7 +72,7 @@ pub async fn restore_node(
 
     // Re-validate against the now-live parent.
     checks::require_sibling_unique(&mut tx, workspace_id, parent_id, &name, Some(node_id)).await?;
-    checks::require_fanout(&mut tx, workspace_id, parent_id).await?;
+    checks::require_fanout(&mut tx, workspace_id, parent_id, caps).await?;
 
     // Resulting depth: parent depth + 1 + the deleted subtree's relative depth.
     let parent_depth = checks::node_depth(&mut tx, workspace_id, parent_id).await?;
@@ -82,7 +84,7 @@ pub async fn restore_node(
         )));
     }
 
-    require_restore_budget(&mut tx, workspace_id, node_id).await?;
+    require_restore_budget(&mut tx, workspace_id, node_id, caps).await?;
 
     // Clear deletion on the target + every deleted descendant reachable through
     // deleted nodes (the subtree that was deleted with it).
@@ -124,6 +126,7 @@ async fn require_restore_budget(
     tx: &mut sqlx::PgConnection,
     workspace_id: Uuid,
     node_id: Uuid,
+    caps: Limits,
 ) -> Result<()> {
     let (restore_nodes, restore_documents, restore_bytes): (i64, i64, i64) = sqlx::query_as(
         "WITH RECURSIVE subtree AS ( \
@@ -160,22 +163,22 @@ async fn require_restore_budget(
     .await
     .map_err(map_sqlx_error)?;
 
-    if live_nodes + restore_nodes > limits::workspace_max_nodes() as i64 {
+    if live_nodes + restore_nodes > caps.workspace_max_nodes as i64 {
         return Err(Error::conflict(format!(
             "restore would exceed the workspace node limit of {}",
-            limits::workspace_max_nodes()
+            caps.workspace_max_nodes
         )));
     }
-    if live_documents + restore_documents > limits::workspace_max_documents() as i64 {
+    if live_documents + restore_documents > caps.workspace_max_documents as i64 {
         return Err(Error::conflict(format!(
             "restore would exceed the workspace document limit of {}",
-            limits::workspace_max_documents()
+            caps.workspace_max_documents
         )));
     }
-    if live_bytes + restore_bytes > limits::workspace_max_document_bytes() as i64 {
+    if live_bytes + restore_bytes > caps.workspace_max_document_bytes as i64 {
         return Err(Error::conflict(format!(
             "restore would exceed the workspace document byte budget of {}",
-            limits::workspace_max_document_bytes()
+            caps.workspace_max_document_bytes
         )));
     }
 

@@ -6,7 +6,8 @@
 //! budget) — then inserts the node (and the `documents` row for a document) with
 //! attribution = the caller.
 
-use notegate_core::{Error, Result, limits};
+use notegate_core::limits::{self, Limits};
+use notegate_core::{Error, Result};
 use notegate_model::{Document, Node};
 use notegate_service::files::StoredContent;
 use sqlx::PgPool;
@@ -23,11 +24,12 @@ pub async fn insert_folder(
     parent_id: Uuid,
     name: &str,
     created_by: Uuid,
+    caps: Limits,
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_workspace(&mut tx, workspace_id).await?;
-    prepare_create(&mut tx, workspace_id, parent_id, name).await?;
+    prepare_create(&mut tx, workspace_id, parent_id, name, caps).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
         "INSERT INTO nodes (workspace_id, parent_id, name, kind, created_by, updated_by) \
@@ -54,13 +56,15 @@ pub async fn insert_document(
     name: &str,
     content: &StoredContent,
     created_by: Uuid,
+    caps: Limits,
 ) -> Result<(Node, Document)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_workspace(&mut tx, workspace_id).await?;
-    prepare_create(&mut tx, workspace_id, parent_id, name).await?;
-    checks::require_document_budget(&mut tx, workspace_id).await?;
-    checks::require_byte_budget(&mut tx, workspace_id, 0, i64::from(content.byte_len)).await?;
+    prepare_create(&mut tx, workspace_id, parent_id, name, caps).await?;
+    checks::require_document_budget(&mut tx, workspace_id, caps).await?;
+    checks::require_byte_budget(&mut tx, workspace_id, 0, i64::from(content.byte_len), caps)
+        .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
         "INSERT INTO nodes (workspace_id, parent_id, name, kind, created_by, updated_by) \
@@ -102,6 +106,7 @@ async fn prepare_create(
     workspace_id: Uuid,
     parent_id: Uuid,
     name: &str,
+    caps: Limits,
 ) -> Result<()> {
     checks::require_live_folder(tx, workspace_id, parent_id).await?;
 
@@ -114,7 +119,7 @@ async fn prepare_create(
     }
 
     checks::require_sibling_unique(tx, workspace_id, parent_id, name, None).await?;
-    checks::require_fanout(tx, workspace_id, parent_id).await?;
-    checks::require_node_budget(tx, workspace_id).await?;
+    checks::require_fanout(tx, workspace_id, parent_id, caps).await?;
+    checks::require_node_budget(tx, workspace_id, caps).await?;
     Ok(())
 }

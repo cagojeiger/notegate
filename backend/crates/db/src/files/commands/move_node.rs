@@ -7,7 +7,8 @@
 //! itself or its own subtree, sibling-name is unique at the destination, the
 //! resulting subtree depth ≤ 5, and the destination fanout < 200.
 
-use notegate_core::{Error, Result, limits};
+use notegate_core::limits::{self, Limits};
+use notegate_core::{Error, Result};
 use notegate_model::Node;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -25,6 +26,7 @@ pub async fn move_node(
     new_parent_id: Uuid,
     new_name: Option<&str>,
     updated_by: Uuid,
+    caps: Limits,
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -94,7 +96,7 @@ pub async fn move_node(
 
     // Destination fanout, only when actually changing parent.
     if moved.parent_id != Some(new_parent_id) {
-        checks::require_fanout(&mut tx, workspace_id, new_parent_id).await?;
+        checks::require_fanout(&mut tx, workspace_id, new_parent_id, caps).await?;
     }
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(

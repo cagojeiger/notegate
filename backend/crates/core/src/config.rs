@@ -14,6 +14,7 @@ use url::Url;
 use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::error::{Error, Result};
+use crate::limits::Limits;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
@@ -22,12 +23,8 @@ const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 
 /// Server + database configuration.
-///
-/// Unknown fields are ignored (not denied): the loader ingests the shared
-/// `NOTEGATE_*` env namespace, which also carries vars read elsewhere — e.g. the
-/// count-cap overrides in [`crate::limits`] (`NOTEGATE_FOLDER_MAX_CHILDREN`, …).
-/// Denying unknowns here would crash startup whenever such a var is set.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
@@ -64,6 +61,9 @@ pub struct Config {
     pub browser_session_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
+    /// Runtime-overridable capacity limits. Defaults match `docs/spec/performance-limits.md`.
+    #[serde(default)]
+    pub limits: Limits,
     /// Whether login flow cookies must carry the Secure flag.
     #[serde(skip)]
     pub secure_cookies: bool,
@@ -106,6 +106,7 @@ impl Validate for Config {
         if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
             errors.add("browser_session_ttl", ValidationError::new("range"));
         }
+        validate_limits(&self.limits, &mut errors);
 
         if errors.is_empty() {
             Ok(())
@@ -155,7 +156,12 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
     }
 
     let mut config = builder
-        .add_source(environment.try_parsing(true))
+        .add_source(
+            environment
+                .separator("__")
+                .prefix_separator("_")
+                .try_parsing(true),
+        )
         .build()
         .map_err(map_config_error)?
         .try_deserialize::<Config>()
@@ -206,6 +212,27 @@ fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), Val
         Ok(())
     } else {
         Err(ValidationError::new("range"))
+    }
+}
+
+fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
+    if limits.workspace_max_nodes == 0 {
+        errors.add("limits.workspace_max_nodes", ValidationError::new("range"));
+    }
+    if limits.workspace_max_documents == 0 {
+        errors.add(
+            "limits.workspace_max_documents",
+            ValidationError::new("range"),
+        );
+    }
+    if limits.workspace_max_document_bytes == 0 {
+        errors.add(
+            "limits.workspace_max_document_bytes",
+            ValidationError::new("range"),
+        );
+    }
+    if limits.folder_max_children == 0 {
+        errors.add("limits.folder_max_children", ValidationError::new("range"));
     }
 }
 
@@ -260,6 +287,8 @@ mod tests {
     use secrecy::SecretString;
     use validator::Validate;
 
+    use crate::limits::Limits;
+
     use super::{Config, load_from_sources};
 
     fn valid_config() -> Config {
@@ -279,6 +308,7 @@ mod tests {
             ),
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
+            limits: Limits::default(),
             secure_cookies: false,
         }
     }
@@ -329,6 +359,40 @@ mod tests {
             config.browser_session_ttl.as_secs(),
             super::DEFAULT_BROWSER_SESSION_TTL_SECS
         );
+        assert_eq!(config.limits, Limits::default());
+        Ok(())
+    }
+
+    #[test]
+    fn environment_layer_accepts_nested_limit_overrides() -> crate::Result<()> {
+        let config = load_from_sources(
+            false,
+            test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
+                (
+                    "NOTEGATE_OAUTH_REDIRECT_URL",
+                    "http://localhost:9191/auth/callback",
+                ),
+                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                (
+                    "NOTEGATE_BROWSER_SESSION_SECRET",
+                    "env-browser-session-secret-32-bytes",
+                ),
+                ("NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN", "3"),
+                ("NOTEGATE_LIMITS__WORKSPACE_MAX_NODES", "5"),
+                ("NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS", "2"),
+                ("NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES", "1024"),
+            ]),
+        )?;
+
+        assert_eq!(config.limits.folder_max_children, 3);
+        assert_eq!(config.limits.workspace_max_nodes, 5);
+        assert_eq!(config.limits.workspace_max_documents, 2);
+        assert_eq!(config.limits.workspace_max_document_bytes, 1024);
         Ok(())
     }
 

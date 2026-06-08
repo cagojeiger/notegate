@@ -11,6 +11,7 @@
 //! move/rename updates only the moved node's row (O(1), no descendant rewrite).
 
 use notegate_core::Result;
+use notegate_core::limits::Limits;
 use notegate_model::{Document, Node, NodeKind, Role};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -23,11 +24,16 @@ use crate::files::{commands, queries};
 #[derive(Debug, Clone)]
 pub struct FilesRepo {
     pool: PgPool,
+    limits: Limits,
 }
 
 impl FilesRepo {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self::with_limits(pool, Limits::default())
+    }
+
+    pub fn with_limits(pool: PgPool, limits: Limits) -> Self {
+        Self { pool, limits }
     }
 }
 
@@ -137,6 +143,7 @@ impl FilesStore for FilesRepo {
             command.parent_node_id,
             &command.name,
             created_by,
+            self.limits,
         )
         .await
     }
@@ -156,6 +163,7 @@ impl FilesStore for FilesRepo {
             name,
             content,
             created_by,
+            self.limits,
         )
         .await
     }
@@ -175,6 +183,7 @@ impl FilesStore for FilesRepo {
             content,
             expected_sha256,
             updated_by,
+            self.limits,
         )
         .await
     }
@@ -192,6 +201,7 @@ impl FilesStore for FilesRepo {
             command.new_parent_node_id,
             command.new_name.as_deref(),
             updated_by,
+            self.limits,
         )
         .await
     }
@@ -230,7 +240,8 @@ impl FilesStore for FilesRepo {
         node_id: Uuid,
         restored_by: Uuid,
     ) -> Result<Node> {
-        commands::restore::restore_node(&self.pool, workspace_id, node_id, restored_by).await
+        commands::restore::restore_node(&self.pool, workspace_id, node_id, restored_by, self.limits)
+            .await
     }
 }
 

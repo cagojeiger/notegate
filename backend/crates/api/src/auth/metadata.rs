@@ -158,6 +158,7 @@ mod tests {
             ),
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
+            limits: notegate_core::limits::Limits::default(),
             secure_cookies: false,
         }
     }

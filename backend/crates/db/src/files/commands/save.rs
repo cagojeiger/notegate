@@ -4,6 +4,7 @@
 //! the workspace byte budget for the replacement, updates `documents` content +
 //! metrics + attribution, and bumps the node's `updated_by`/`updated_at`.
 
+use notegate_core::limits::Limits;
 use notegate_core::{Error, Result};
 use notegate_model::{Document, Node};
 use notegate_service::files::StoredContent;
@@ -23,6 +24,7 @@ pub async fn save_document_content(
     content: &StoredContent,
     expected_sha256: Option<&str>,
     updated_by: Uuid,
+    caps: Limits,
 ) -> Result<(Node, Document)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -58,6 +60,7 @@ pub async fn save_document_content(
         workspace_id,
         previous_bytes,
         i64::from(content.byte_len),
+        caps,
     )
     .await?;
 
