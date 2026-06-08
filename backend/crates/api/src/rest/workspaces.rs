@@ -101,10 +101,7 @@ pub(crate) async fn create(
 ) -> Result<(StatusCode, Json<WorkspaceOut>), ApiError> {
     let view = state
         .workspaces
-        .create(CreateWorkspace {
-            owner_account_id: caller.account_id(),
-            name: body.name,
-        })
+        .create(caller.account_id(), CreateWorkspace { name: body.name })
         .await?;
     Ok((StatusCode::CREATED, Json(WorkspaceOut::from(&view))))
 }

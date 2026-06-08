@@ -97,8 +97,8 @@ impl WorkspaceStore for WorkspaceRepo {
 
     async fn create_workspace(
         &self,
+        owner_account_id: Uuid,
         command: &CreateWorkspace,
-        created_by: Uuid,
     ) -> Result<Workspace> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -107,7 +107,7 @@ impl WorkspaceStore for WorkspaceRepo {
              WHERE id = $1 AND is_active = true AND deleted_at IS NULL \
              FOR UPDATE",
         )
-        .bind(command.owner_account_id)
+        .bind(owner_account_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -119,7 +119,7 @@ impl WorkspaceStore for WorkspaceRepo {
         // cannot slip past the cap.
         let owned: i64 =
             sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE owner_account_id = $1")
-                .bind(command.owner_account_id)
+                .bind(owner_account_id)
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
@@ -138,21 +138,21 @@ impl WorkspaceStore for WorkspaceRepo {
             "INSERT INTO workspaces (owner_account_id, name, created_by) \
              VALUES ($1, $2, $3) RETURNING {WORKSPACE_COLUMNS}"
         ))
-        .bind(command.owner_account_id)
+        .bind(owner_account_id)
         .bind(&command.name)
-        .bind(created_by)
+        .bind(owner_account_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
 
-        // Grant the creator `owner` in the same transaction.
+        // Grant the owner `owner` in the same transaction.
         sqlx::query(
             "INSERT INTO workspace_access (workspace_id, account_id, role, created_by) \
              VALUES ($1, $2, 'owner', $3)",
         )
         .bind(row.id)
-        .bind(command.owner_account_id)
-        .bind(created_by)
+        .bind(owner_account_id)
+        .bind(owner_account_id)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;

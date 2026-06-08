@@ -26,10 +26,7 @@ pub async fn call(
     let caller = caller(parts)?;
     let view = state
         .workspaces
-        .create(CreateWorkspace {
-            owner_account_id: caller.account_id(),
-            name: input.name,
-        })
+        .create(caller.account_id(), CreateWorkspace { name: input.name })
         .await
         .map_err(service_error)?;
     Ok(Json(workspace_summary(&view)))

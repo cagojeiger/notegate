@@ -20,10 +20,10 @@ use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::clamp_limit;
 
-/// Input to create a workspace.
+/// Input to create a workspace. The owner is always the authenticated caller
+/// and is passed separately to the service/store boundary.
 #[derive(Debug, Clone)]
 pub struct CreateWorkspace {
-    pub owner_account_id: Uuid,
     pub name: String,
 }
 
@@ -75,13 +75,14 @@ pub trait WorkspaceStore: Clone + Send + Sync + 'static {
         account_id: Uuid,
     ) -> impl Future<Output = CoreResult<Option<Role>>> + Send;
 
-    /// Insert a workspace, relying on the DB trigger to create the root node,
-    /// and grant the creator `owner` in the same transaction. The owner-quota
-    /// ([`limits::OWNED_WORKSPACES_MAX`]) is enforced in that transaction.
+    /// Insert a workspace owned by `owner_account_id`, relying on the DB trigger
+    /// to create the root node, and grant that owner `owner` in the same
+    /// transaction. The owner-quota ([`limits::OWNED_WORKSPACES_MAX`]) is
+    /// enforced in that transaction.
     fn create_workspace(
         &self,
+        owner_account_id: Uuid,
         command: &CreateWorkspace,
-        created_by: Uuid,
     ) -> impl Future<Output = CoreResult<Workspace>> + Send;
 
     /// Load a workspace by id, regardless of caller access.
@@ -148,14 +149,18 @@ where
         Self { store }
     }
 
-    /// Create a workspace owned by `command.owner_account_id`, granting that
+    /// Create a workspace owned by the authenticated caller, granting that
     /// account `owner`. Enforces the owner quota and a clean name conflict.
-    pub async fn create(&self, command: CreateWorkspace) -> ServiceResult<WorkspaceView> {
+    pub async fn create(
+        &self,
+        caller_account_id: Uuid,
+        command: CreateWorkspace,
+    ) -> ServiceResult<WorkspaceView> {
         validate_workspace_name(&command.name)?;
 
         let workspace = self
             .store
-            .create_workspace(&command, command.owner_account_id)
+            .create_workspace(caller_account_id, &command)
             .await?;
 
         let root_node_id = self
@@ -378,14 +383,14 @@ mod tests {
 
         async fn create_workspace(
             &self,
+            owner_account_id: Uuid,
             command: &CreateWorkspace,
-            created_by: Uuid,
         ) -> CoreResult<Workspace> {
             Ok(Workspace {
                 id: Uuid::new_v4(),
-                owner_account_id: command.owner_account_id,
+                owner_account_id,
                 name: command.name.clone(),
-                created_by,
+                created_by: owner_account_id,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             })
@@ -462,10 +467,12 @@ mod tests {
     async fn create_returns_owner_view() {
         let service = WorkspaceService::new(MockStore::with_role(None));
         let view = service
-            .create(CreateWorkspace {
-                owner_account_id: Uuid::new_v4(),
-                name: "notes".to_owned(),
-            })
+            .create(
+                Uuid::new_v4(),
+                CreateWorkspace {
+                    name: "notes".to_owned(),
+                },
+            )
             .await
             .unwrap();
         assert_eq!(view.role, Role::Owner);
@@ -476,10 +483,12 @@ mod tests {
     async fn create_rejects_invalid_name() {
         let service = WorkspaceService::new(MockStore::with_role(None));
         let err = service
-            .create(CreateWorkspace {
-                owner_account_id: Uuid::new_v4(),
-                name: ".hidden".to_owned(),
-            })
+            .create(
+                Uuid::new_v4(),
+                CreateWorkspace {
+                    name: ".hidden".to_owned(),
+                },
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::InvalidInput(_)));

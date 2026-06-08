@@ -23,11 +23,10 @@ use uuid::Uuid;
 
 async fn make_workspace(repo: &WorkspaceRepo, owner: Uuid, name: &str) -> Uuid {
     repo.create_workspace(
+        owner,
         &CreateWorkspace {
-            owner_account_id: owner,
             name: name.to_owned(),
         },
-        owner,
     )
     .await
     .expect("workspace insert")
@@ -113,11 +112,10 @@ async fn twenty_first_owned_workspace_is_rejected() -> Result<(), Box<dyn std::e
 
     let result = repo
         .create_workspace(
+            owner,
             &CreateWorkspace {
-                owner_account_id: owner,
                 name: "ws-overflow".to_owned(),
             },
-            owner,
         )
         .await;
     assert!(result.is_err(), "21st owned workspace must be rejected");
@@ -144,11 +142,10 @@ async fn inactive_owner_cannot_create_workspace() -> Result<(), Box<dyn std::err
 
     let err = repo
         .create_workspace(
+            owner,
             &CreateWorkspace {
-                owner_account_id: owner,
                 name: "personal".to_owned(),
             },
-            owner,
         )
         .await
         .unwrap_err();
@@ -553,11 +550,10 @@ async fn duplicate_owner_name_is_a_clean_error() -> Result<(), Box<dyn std::erro
 
     let result = repo
         .create_workspace(
+            owner,
             &CreateWorkspace {
-                owner_account_id: owner,
                 name: "personal".to_owned(),
             },
-            owner,
         )
         .await;
 
@@ -570,11 +566,10 @@ async fn duplicate_owner_name_is_a_clean_error() -> Result<(), Box<dyn std::erro
     let other_owner = insert_user_account(&db.pool, "other", "o2@example.test").await?;
     assert!(
         repo.create_workspace(
+            other_owner,
             &CreateWorkspace {
-                owner_account_id: other_owner,
                 name: "personal".to_owned(),
             },
-            other_owner,
         )
         .await
         .is_ok()

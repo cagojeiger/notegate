@@ -93,11 +93,10 @@ async fn setup(db: &TestDb) -> Result<Fixture, Box<dyn std::error::Error>> {
 
     let ws = ws_repo
         .create_workspace(
+            owner,
             &CreateWorkspace {
-                owner_account_id: owner,
                 name: "personal".to_owned(),
             },
-            owner,
         )
         .await?;
     let workspace_id = ws.id;
@@ -158,11 +157,10 @@ async fn setup(db: &TestDb) -> Result<Fixture, Box<dyn std::error::Error>> {
     // A second workspace (same owner) for the cross-workspace 404 case.
     let other = ws_repo
         .create_workspace(
+            owner,
             &CreateWorkspace {
-                owner_account_id: owner,
                 name: "other".to_owned(),
             },
-            owner,
         )
         .await?;
     let other_workspace_id = other.id;

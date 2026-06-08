@@ -30,11 +30,10 @@ use uuid::Uuid;
 async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
     let ws = ws_repo
         .create_workspace(
+            owner,
             &CreateWorkspace {
-                owner_account_id: owner,
                 name: name.to_owned(),
             },
-            owner,
         )
         .await
         .expect("create workspace");
