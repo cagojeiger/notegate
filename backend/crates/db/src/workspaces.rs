@@ -267,11 +267,14 @@ impl WorkspaceStore for WorkspaceRepo {
 
     async fn delete_workspace(&self, workspace_id: Uuid) -> Result<()> {
         // ON DELETE CASCADE removes workspace_access, nodes, and documents.
-        sqlx::query("DELETE FROM workspaces WHERE id = $1")
+        let result = sqlx::query("DELETE FROM workspaces WHERE id = $1")
             .bind(workspace_id)
             .execute(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
+        if result.rows_affected() == 0 {
+            return Err(Error::not_found("workspace not found"));
+        }
         Ok(())
     }
 

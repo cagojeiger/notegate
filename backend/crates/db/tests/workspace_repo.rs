@@ -750,6 +750,12 @@ async fn rename_and_delete_workspace() -> Result<(), Box<dyn std::error::Error>>
             .is_none()
     );
 
+    let missing = repo.delete_workspace(Uuid::new_v4()).await;
+    assert!(
+        matches!(missing, Err(Error::NotFound(message)) if message == "workspace not found"),
+        "deleting a missing workspace must be a clean not-found"
+    );
+
     // The cascade removed the root node too.
     let nodes: i64 = sqlx::query_scalar("SELECT count(*) FROM nodes WHERE workspace_id = $1")
         .bind(workspace_id)
