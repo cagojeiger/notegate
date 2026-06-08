@@ -3,7 +3,7 @@
 //!
 //! POLICY: managing access is `owner`-only. A caller with no live role sees the
 //! workspace as not-found (404); a caller with a lesser role is forbidden (403).
-//! A workspace may have at most [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`] active
+//! A workspace may have at most `WORKSPACE_ACCESS_MAX_ACCOUNTS` active
 //! grants, enforced in the grant transaction; revoked rows do not count.
 
 use std::future::Future;
@@ -38,7 +38,7 @@ pub trait AccessStore: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = CoreResult<Vec<WorkspaceAccess>>> + Send;
 
     /// Insert or update a grant, recording the actor in `created_by`. The active
-    /// grant cap ([`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`]) is enforced in this
+    /// grant cap (`WORKSPACE_ACCESS_MAX_ACCOUNTS`) is enforced in this
     /// transaction; revoked rows do not count.
     fn upsert_access(
         &self,
