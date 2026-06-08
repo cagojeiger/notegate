@@ -101,7 +101,7 @@ fn parse_workspace_id(raw: Option<&str>) -> Result<Option<Uuid>, ErrorData> {
 ///
 /// `target` (`<ws>:/<path>`) takes precedence; it supplies both the workspace
 /// name and the path. Otherwise the workspace is resolved from the selector and
-/// the path is taken from `path`. A path must be present from exactly one source.
+/// the path is taken from `path`.
 pub async fn resolve_target(
     state: &AppState,
     caller: &Caller,

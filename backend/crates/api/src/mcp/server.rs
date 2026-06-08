@@ -99,7 +99,7 @@ impl McpServer {
 
     #[tool(
         name = "workspaces_get",
-        description = "Return one workspace by name.",
+        description = "Return one accessible workspace by name, id, or single-workspace fallback.",
         output_schema = object_output_schema()
     )]
     pub async fn workspaces_get_tool(

@@ -65,7 +65,7 @@ Output은 workspace summary 하나다.
 
 ## `workspaces_get`
 
-Selector로 workspace 하나를 반환한다.
+Selector로 accessible workspace 하나를 반환한다.
 
 Input by name:
 
@@ -79,11 +79,21 @@ Input by id:
 {"workspace_id": "workspace-id"}
 ```
 
+Input omitted:
+
+```json
+{}
+```
+
 Branching:
 
 ```text
-one accessible match    -> workspace summary
-no accessible match     -> invalid params with data.kind=not_found
-same visible name > 1   -> invalid params with ambiguity data
-workspace_id invisible  -> invalid params with data.kind=not_found
+workspace_id visible              -> workspace summary
+workspace name matches exactly one -> workspace summary
+selector omitted and exactly one   -> workspace summary
+selector omitted and zero visible  -> invalid params; user는 workspaces_create 가능, agent는 access grant 필요
+selector omitted and many visible  -> invalid params; pass workspace
+no accessible name match           -> invalid params with data.kind=not_found
+same visible name > 1              -> invalid params with ambiguity data
+workspace_id invisible             -> invalid params with data.kind=not_found
 ```
