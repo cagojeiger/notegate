@@ -107,7 +107,7 @@ path = /projects/note.md
 5. workspace live nodes가 `10000` 미만인지 확인한다.
 6. workspace live documents가 `5000` 미만인지 확인한다.
 7. `nodes(kind='document')`와 `documents` row를 하나의 transaction에서 만든다.
-8. 빈 문서 원본 row를 만들고 `content_sha256`, `byte_len`, `line_count` 기본값을 유지한다.
+8. 빈 원문 `''`에 대한 metrics를 계산해 저장한다. `content_sha256`은 빈 문자열의 SHA-256이고, `byte_len=0`, `line_count=0`이다.
 
 ### `read` / `open`
 

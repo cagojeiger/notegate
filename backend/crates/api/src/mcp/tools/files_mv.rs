@@ -12,7 +12,9 @@ use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::borrow::Cow;
 
+use notegate_core::validation::normalize_path;
 use notegate_service::files::MoveNode;
 
 use super::resolve::{
@@ -41,17 +43,18 @@ pub async fn call(
     let account_id = caller.account_id();
     let workspace_id = resolved.workspace_id();
 
-    if !input.source_path.starts_with('/') || !input.destination_path.starts_with('/') {
-        return Err(ErrorData::invalid_params("paths must start with '/'", None));
-    }
+    let source_path = normalize_path(&input.source_path)
+        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+    let destination_path = normalize_path(&input.destination_path)
+        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
 
     let source = state
         .files
-        .resolve_path(account_id, workspace_id, &input.source_path)
+        .resolve_path(account_id, workspace_id, &source_path)
         .await
         .map_err(service_error)?;
 
-    let (dest_parent_path, new_name) = split_parent_name(&input.destination_path)?;
+    let (dest_parent_path, new_name) = split_parent_name(&destination_path)?;
     let dest_parent = state
         .files
         .resolve_path(account_id, workspace_id, &dest_parent_path)
