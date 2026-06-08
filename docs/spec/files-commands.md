@@ -224,6 +224,25 @@ recursive=false|true
 - subtree size limit을 넘는 동기 delete는 거부한다.
 - 삭제된 node는 목록/검색/resolve에서 보이지 않는다.
 
+### `restore`
+
+soft delete된 node를 복원한다.
+
+삭제된 node는 live path로 resolve되지 않으므로 restore는 `node_id`를 기본 입력으로 사용한다.
+
+입력:
+
+```text
+node_id
+```
+
+규칙:
+
+- editor 권한이 필요하다.
+- target node와 그 아래 deleted subtree를 복원한다.
+- ancestor가 아직 삭제 상태면 거부한다. 이 경우 ancestor folder를 먼저 restore해야 한다.
+- 현재 live tree 기준 sibling name uniqueness, destination fanout, depth limit을 다시 검사한다.
+
 ### `find`
 
 node metadata를 검색한다.
