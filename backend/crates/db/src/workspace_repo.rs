@@ -475,7 +475,7 @@ async fn guard_last_owner(
     .await
     .map_err(map_sqlx_error)?;
 
-    let target_is_owner = owners.iter().any(|id| *id == account_id);
+    let target_is_owner = owners.contains(&account_id);
     let target_remains_owner = next_role == Some(Role::Owner);
     if target_is_owner && !target_remains_owner && owners.len() <= 1 {
         return Err(Error::validation(
