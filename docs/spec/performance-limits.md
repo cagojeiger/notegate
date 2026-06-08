@@ -84,7 +84,7 @@ Branching:
 create node over workspace_max_nodes                    -> 409 conflict
 create document over workspace_max_documents            -> 409 conflict
 write/patch/create over workspace_max_document_bytes    -> 409 conflict
-create/move/restore over folder_max_children            -> 409 conflict
+create/move over folder_max_children                    -> 409 conflict
 ```
 
 ## List pagination limits
@@ -200,4 +200,6 @@ recursive delete subtree > max            -> 409 conflict
 folder move/rename                        -> update moved node only
 folder delete                             -> soft-delete every live descendant in the bounded subtree
 soft-deleted nodes                        -> excluded from list/search/live counts
+deleted node retention                    -> 30 days before purge eligibility
+purge job                                 -> may hard-delete rows whose purge_after has passed
 ```

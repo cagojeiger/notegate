@@ -49,7 +49,7 @@ Contract:
 
 ```text
 viewer = list/stat/read/find/grep
-editor = viewer + write/patch/mkdir/touch/move/delete/restore
+editor = viewer + write/patch/mkdir/touch/move/delete
 owner  = editor + workspace access management
 ```
 

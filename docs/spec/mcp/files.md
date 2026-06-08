@@ -244,7 +244,7 @@ Rules:
 
 ## `files_rm`
 
-Soft-delete a path.
+Delete a path. The node is immediately hidden from normal tools and internally retained until purge.
 
 Input:
 
@@ -256,31 +256,22 @@ Input:
 }
 ```
 
-Rules:
-
-- Folder deletion requires `recursive=true`.
-- Root deletion is forbidden.
-- Subtree larger than the synchronous delete limit is rejected with a narrowing hint.
-
-## `files_restore`
-
-Restore a soft-deleted node by id.
-
-Deleted nodes do not resolve by path, so restore is the one file tool that uses
-`node_id` as its primary target.
-
-Input:
+Output:
 
 ```json
 {
   "workspace": "personal",
-  "node_id": "deleted-node-id"
+  "path": "/projects/old",
+  "node_id": "deleted-root-node-id",
+  "deleted": true,
+  "purge_after": "2026-07-08T00:00:00Z"
 }
 ```
 
 Rules:
 
-- Requires `editor`.
-- Restores the deleted node and the deleted subtree beneath it.
-- Ancestors live -> restore; deleted ancestor -> conflict with restore-ancestor hint.
-- Restore re-checks sibling-name uniqueness, destination fanout, and max depth.
+- Folder deletion requires `recursive=true`.
+- Root deletion is forbidden.
+- Subtree larger than the synchronous delete limit is rejected with a narrowing hint.
+- Deleted nodes are not user-restorable in the current MCP contract.
+- `purge_after` is the earliest time an internal purge job may hard-delete the rows.

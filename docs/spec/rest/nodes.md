@@ -123,17 +123,5 @@ Rules:
 - Document delete does not require `recursive=true`.
 - Folder delete requires `recursive=true`.
 - Delete is soft delete on `nodes`; deleted nodes disappear from normal list/search/resolve.
-
-### Restore node
-
-```http
-POST /api/v1/workspaces/{workspace_id}/nodes/{node_id}/restore
-```
-
-Rules:
-
-- Requires `editor`.
-- `node_id` must identify a soft-deleted node in the workspace.
-- Restores the node and the deleted subtree beneath it.
-- Ancestors must already be live; otherwise restore the ancestor folder first.
-- Restore re-checks sibling-name uniqueness, destination fanout, and max depth.
+- Deleted nodes are not user-restorable in the current REST contract.
+- Deleted nodes are retained until `purge_after`; after that an internal purge job may hard-delete them.

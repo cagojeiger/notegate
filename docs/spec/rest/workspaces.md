@@ -52,4 +52,4 @@ Requires `owner`.
 DELETE /api/v1/workspaces/{workspace_id}
 ```
 
-Requires `owner`. Workspace deletion is a normal supported operation and deletes the workspace boundary, access rows, nodes, and documents according to the DB cascade/retention policy.
+Requires `owner`. Workspace deletion is a normal supported operation and deletes the workspace boundary, access rows, nodes, and documents by DB cascade.

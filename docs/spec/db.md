@@ -177,7 +177,7 @@ CREATE TABLE workspace_access (
 
 ```text
 viewer = list/stat/read/find/grep
-editor = viewer + write/patch/mkdir/touch/move/delete/restore
+editor = viewer + write/patch/mkdir/touch/move/delete
 owner  = editor + workspace access management
 ```
 
@@ -204,6 +204,7 @@ CREATE TABLE nodes (
     created_by    UUID NOT NULL REFERENCES accounts(id),
     updated_by    UUID NOT NULL REFERENCES accounts(id),
     deleted_by    UUID REFERENCES accounts(id),
+    purge_after   TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at    TIMESTAMPTZ,
@@ -223,16 +224,16 @@ CREATE TABLE nodes (
     CHECK (kind <> 'document' OR name LIKE '%.md'),
     CHECK (kind <> 'folder' OR parent_id IS NULL OR name NOT LIKE '%.md'),
     CHECK (
-        (deleted_at IS NULL AND deleted_by IS NULL)
+        (deleted_at IS NULL AND deleted_by IS NULL AND purge_after IS NULL)
         OR
-        (deleted_at IS NOT NULL AND deleted_by IS NOT NULL)
+        (deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND purge_after IS NOT NULL)
     )
 );
 ```
 
 `nodes.created_by`는 node를 만든 account, `updated_by`는 마지막으로 node metadata를
-바꾼 account, `deleted_by`는 soft delete한 account다. document content 변경자는
-`documents.updated_by`에 기록한다.
+바꾼 account, `deleted_by`는 delete를 요청한 account다. `purge_after`는 내부 purge job이
+hard delete할 수 있는 가장 이른 시각이다. document content 변경자는 `documents.updated_by`에 기록한다.
 
 `sort_order`는 같은 parent folder 안에서 사용자 지정 정렬을 위한 optional ordering key다.
 기본값 `0`이면 이름순 fallback을 사용한다.
@@ -296,7 +297,7 @@ folder_max_children = 200
 - workspace 안 live nodes는 최대 `10000`개다.
 - workspace 안 live documents는 최대 `5000`개다. document create transaction에서 검사한다.
 - workspace 안 live document 원문 총량은 최대 `268435456` bytes다. write/patch transaction에서 검사한다.
-- child 수와 workspace node 수 제한은 partial unique/check constraint로 표현하기 어렵기 때문에 create/move/restore transaction에서 count 후 검증한다.
+- child 수와 workspace node 수 제한은 partial unique/check constraint로 표현하기 어렵기 때문에 create/move transaction에서 count 후 검증한다.
 - `max_path_len=645`는 ASCII node name 최대 `128` chars와 depth `5`에서 도출되는 최대 absolute path 길이다.
 
 ### Name constraints
@@ -400,13 +401,14 @@ CREATE TABLE documents (
 - 문서는 개별 최대 `524288` bytes, `2000` lines까지만 저장한다.
 - workspace의 live document 원문 총량은 최대 `268435456` bytes다. 초과 시 문서를 나누거나 workspace를 분리하도록 유도한다.
 
-## Soft delete
+## Soft delete and purge
 
 - account 삭제는 `accounts.deleted_at`, `accounts.deleted_by`, `accounts.is_active=false`로 처리한다.
-- node 삭제는 `nodes.deleted_at`과 `nodes.deleted_by`를 설정한다.
+- node 삭제는 `nodes.deleted_at`, `nodes.deleted_by`, `nodes.purge_after`를 설정한다.
+- node delete는 사용자-facing 복구 기능을 제공하지 않는다. soft delete는 비동기 hard delete를 위한 내부 상태다.
 - query는 반드시 `accounts.is_active`, `revoked_at`, `nodes.deleted_at IS NULL`을 고려한다.
-
-장기적으로는 retention 정책에 따라 soft-deleted document를 purge하는 job을 둘 수 있다.
+- `nodes.purge_after <= now()`인 deleted node/document는 내부 purge job으로 hard delete될 수 있다.
+- 기본 node retention은 30일이다.
 
 ## Reset policy
 

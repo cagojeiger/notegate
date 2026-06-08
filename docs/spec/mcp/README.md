@@ -53,7 +53,6 @@ files_write
 files_patch
 files_mv
 files_rm
-files_restore
 files_find
 files_grep
 ```
