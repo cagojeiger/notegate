@@ -1,6 +1,6 @@
 //! Agent lifecycle: create / delete agents and their keys.
 //!
-//! POLICY: only `kind='user'` callers may create agents or keys; an agent caller
+//! POLICY: only `kind='user'` callers may manage agents or keys; an agent caller
 //! is forbidden. Active-agent and active-key counts are enforced against
 //! `core::limits` before each insert. The plaintext key token is generated here,
 //! hashed with SHA-256, and only the hash is persisted.
@@ -151,17 +151,25 @@ where
         Ok(self.store.insert_agent(&command, caller_account_id).await?)
     }
 
-    /// List all active agents created by the caller.
-    pub async fn list_agents(&self, caller_account_id: Uuid) -> ServiceResult<Vec<Agent>> {
+    /// List all active agents created by the caller. Only user callers may manage agents.
+    pub async fn list_agents(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+    ) -> ServiceResult<Vec<Agent>> {
+        require_user_caller(caller_kind)?;
         Ok(self.store.list_agents_by_creator(caller_account_id).await?)
     }
 
     /// List active agents created by the caller, paginated with an opaque cursor.
+    /// Only user callers may manage agents.
     pub async fn list_agents_page(
         &self,
+        caller_kind: AccountKind,
         caller_account_id: Uuid,
         request: ListAgents,
     ) -> ServiceResult<AgentPage> {
+        require_user_caller(caller_kind)?;
         let limit = clamp_limit(
             request.limit,
             limits::AGENTS_DEFAULT_LIMIT,
@@ -429,6 +437,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_caller_cannot_list_agents() {
+        let service = AgentService::new(MockStore::default());
+        let err = service
+            .list_agents_page(
+                AccountKind::Agent,
+                Uuid::new_v4(),
+                ListAgents {
+                    limit: None,
+                    cursor: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ServiceError::Forbidden(_)));
+    }
+
+    #[tokio::test]
     async fn fifty_first_agent_is_rejected() {
         let store = MockStore {
             agent_count: limits::AGENTS_PER_CREATOR_MAX,
@@ -498,6 +523,7 @@ mod tests {
 
         let first_page = service
             .list_agents_page(
+                AccountKind::User,
                 creator,
                 ListAgents {
                     limit: Some(2),
@@ -522,6 +548,7 @@ mod tests {
 
         let second_page = service
             .list_agents_page(
+                AccountKind::User,
                 creator,
                 ListAgents {
                     limit: Some(2),
@@ -583,6 +610,25 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn agent_caller_cannot_delete_or_revoke_keys() {
+        let service = AgentService::new(MockStore::default());
+        let caller = Uuid::new_v4();
+        let agent_id = Uuid::new_v4();
+
+        let delete = service
+            .delete_agent(AccountKind::Agent, caller, agent_id)
+            .await
+            .unwrap_err();
+        assert!(matches!(delete, ServiceError::Forbidden(_)));
+
+        let revoke = service
+            .revoke_key(AccountKind::Agent, caller, agent_id, Uuid::new_v4())
+            .await
+            .unwrap_err();
+        assert!(matches!(revoke, ServiceError::Forbidden(_)));
     }
 
     #[tokio::test]

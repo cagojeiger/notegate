@@ -4,7 +4,7 @@
 //! `POST` to create, `DELETE /{agent_id}`, `POST /{agent_id}/keys` (returns the
 //! plaintext key exactly once), and `DELETE /{agent_id}/keys/{key_id}`.
 //!
-//! LOCKED: only `kind='user'` callers may manage agents/keys; the agents service
+//! LOCKED: only `kind='user'` callers may list/manage agents/keys; the agents service
 //! owns ownership, active-account, and lifecycle checks. `GET /agents` returns
 //! active agents created by the caller only. An agent the caller did not create
 //! is reported as not-found (`404`).
@@ -108,6 +108,7 @@ pub(crate) async fn list(
     let page = state
         .agents
         .list_agents_page(
+            caller.account.kind,
             caller.account_id(),
             ListAgents {
                 limit: query.limit,
