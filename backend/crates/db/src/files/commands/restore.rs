@@ -80,6 +80,8 @@ pub async fn restore_node(
         )));
     }
 
+    require_restore_budget(&mut tx, workspace_id, node_id).await?;
+
     // Clear deletion on the target + every deleted descendant reachable through
     // deleted nodes (the subtree that was deleted with it).
     sqlx::query(
@@ -112,6 +114,70 @@ pub async fn restore_node(
 
     tx.commit().await.map_err(map_sqlx_error)?;
     restored.into_node()
+}
+
+/// Enforce live workspace quotas for the deleted subtree that is about to become
+/// live again.
+async fn require_restore_budget(
+    tx: &mut sqlx::PgConnection,
+    workspace_id: Uuid,
+    node_id: Uuid,
+) -> Result<()> {
+    let (restore_nodes, restore_documents, restore_bytes): (i64, i64, i64) = sqlx::query_as(
+        "WITH RECURSIVE subtree AS ( \
+            SELECT id FROM nodes \
+            WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NOT NULL \
+            UNION ALL \
+            SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
+            WHERE n.workspace_id = $1 AND n.deleted_at IS NOT NULL \
+         ) \
+         SELECT count(s.id)::bigint, \
+                count(d.node_id)::bigint, \
+                COALESCE(sum(d.byte_len), 0)::bigint \
+         FROM subtree s \
+         LEFT JOIN documents d ON d.workspace_id = $1 AND d.node_id = s.id",
+    )
+    .bind(workspace_id)
+    .bind(node_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    let (live_nodes, live_documents, live_bytes): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+            (SELECT count(*)::bigint FROM nodes WHERE workspace_id = $1 AND deleted_at IS NULL), \
+            (SELECT count(*)::bigint FROM documents d \
+             JOIN nodes n ON n.id = d.node_id AND n.workspace_id = d.workspace_id \
+             WHERE d.workspace_id = $1 AND n.deleted_at IS NULL), \
+            (SELECT COALESCE(sum(d.byte_len), 0)::bigint FROM documents d \
+             JOIN nodes n ON n.id = d.node_id AND n.workspace_id = d.workspace_id \
+             WHERE d.workspace_id = $1 AND n.deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    if live_nodes + restore_nodes > limits::WORKSPACE_MAX_NODES as i64 {
+        return Err(Error::conflict(format!(
+            "restore would exceed the workspace node limit of {}",
+            limits::WORKSPACE_MAX_NODES
+        )));
+    }
+    if live_documents + restore_documents > limits::WORKSPACE_MAX_DOCUMENTS as i64 {
+        return Err(Error::conflict(format!(
+            "restore would exceed the workspace document limit of {}",
+            limits::WORKSPACE_MAX_DOCUMENTS
+        )));
+    }
+    if live_bytes + restore_bytes > limits::WORKSPACE_MAX_DOCUMENT_BYTES as i64 {
+        return Err(Error::conflict(format!(
+            "restore would exceed the workspace document byte budget of {}",
+            limits::WORKSPACE_MAX_DOCUMENT_BYTES
+        )));
+    }
+
+    Ok(())
 }
 
 /// Maximum depth of the deleted subtree rooted at `node_id` relative to it (0 if
