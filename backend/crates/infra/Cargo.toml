@@ -1,0 +1,17 @@
+[package]
+name = "notegate-infra"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+notegate-core.workspace = true
+notegate-model.workspace = true
+
+sqlx.workspace = true
+reqwest.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

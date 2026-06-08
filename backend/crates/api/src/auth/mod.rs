@@ -1,3 +1,4 @@
+pub mod api_key;
 pub mod bearer;
 #[cfg(test)]
 mod bearer_tests;

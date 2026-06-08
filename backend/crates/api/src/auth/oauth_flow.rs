@@ -69,6 +69,13 @@ fn expired_cookie(name: &'static str, secure: bool) -> Cookie<'static> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
     use axum_extra::extract::CookieJar;
     use axum_extra::extract::cookie::SameSite;
     use time::Duration as CookieDuration;

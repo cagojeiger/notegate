@@ -3,7 +3,9 @@ use axum::extract::State;
 use axum::http::Request;
 use axum::middleware::Next;
 use axum::response::Response;
+use notegate_model::Channel;
 
+use crate::auth::api_key::verify_api_key;
 use crate::auth::bearer::{
     AuthError, auth_error_response, extract_bearer, extract_cookie_value, verify_bearer,
 };
@@ -27,13 +29,23 @@ pub async fn require_bearer(
     next.run(request).await
 }
 
+/// REST auth chain: bearer JWT → user, then the same bearer as an agent key →
+/// agent, then browser cookie → user.
 async fn verify_request_caller(
     state: &AppState,
     bearer_token: Option<String>,
     browser_session: Option<String>,
-) -> Result<notegate_domain::Caller, AuthError> {
+) -> Result<notegate_model::Caller, AuthError> {
     if let Some(token) = bearer_token {
-        return verify_bearer(state, &token).await;
+        return match verify_bearer(state, &token).await {
+            Ok(caller) => Ok(caller),
+            // A bearer that is not a valid JWT may still be an agent key.
+            Err(AuthError::InvalidToken | AuthError::MissingToken) => {
+                verify_api_key(state, &token, Channel::Api).await
+            }
+            // A valid JWT whose account is missing/inactive is terminal.
+            Err(error) => Err(error),
+        };
     }
 
     if let Some(session) = browser_session {

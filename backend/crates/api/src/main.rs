@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     // aborts startup instead of leaving us without graceful shutdown.
     let signals = ShutdownSignals::install()?;
 
-    let pool = notegate_db::connect(&config).await?;
+    let pool = notegate_infra::connect(&config).await?;
     notegate_db::run_migrations(&pool).await?;
     info!(
         event = "db.ready",
@@ -49,8 +49,11 @@ async fn main() -> anyhow::Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let jwks_url = format!("{}/keys", config.authgate_url);
-    let user_repo = notegate_db::UserRepo::new(pool.clone());
-    let resolver = notegate_domain::Resolver::new(user_repo);
+    // The db-backed identity resolver: account_repo resolves users, agent_repo
+    // authenticates agent keys.
+    let account_repo = notegate_db::AccountRepo::new(pool.clone());
+    let agent_repo = notegate_db::AgentRepo::new(pool.clone());
+    let resolver = notegate_service::identity::Resolver::new(account_repo, agent_repo);
     let config = std::sync::Arc::new(config);
     let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));

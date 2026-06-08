@@ -1,9 +1,10 @@
-//! HTTP error type. Domain/db errors map into this on their way out.
+//! HTTP error type. Domain/db/service errors map into this on their way out.
 
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use notegate_core::Error as CoreError;
+use notegate_service::ServiceError;
 use serde_json::json;
 
 #[derive(Debug)]
@@ -30,12 +31,33 @@ impl ApiError {
         Self::new(StatusCode::BAD_REQUEST, "invalid_field", message)
     }
 
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::FORBIDDEN, "forbidden", message)
+    }
+
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, "conflict", message)
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
+    }
+}
+
+/// Map a service-layer error to an HTTP response per `rest-api.md` Error policy.
+/// Internal failures are logged but their detail is never returned to the client.
+impl From<ServiceError> for ApiError {
+    fn from(error: ServiceError) -> Self {
+        match error {
+            ServiceError::NotFound(message) => Self::not_found(message),
+            ServiceError::InvalidInput(message) => Self::invalid_field(message),
+            ServiceError::Forbidden(message) => Self::forbidden(message),
+            ServiceError::Conflict(message) => Self::conflict(message),
+            ServiceError::Internal(message) => {
+                tracing::error!(event = "error.internal", detail = %message);
+                Self::internal("internal server error")
+            }
+        }
     }
 }
 

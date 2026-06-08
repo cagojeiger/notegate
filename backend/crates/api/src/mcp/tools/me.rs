@@ -1,5 +1,5 @@
 use axum::http::request::Parts;
-use notegate_domain::Caller;
+use notegate_model::Caller;
 use rmcp::ErrorData;
 use rmcp::Json;
 

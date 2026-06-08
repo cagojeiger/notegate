@@ -308,6 +308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1559,7 +1569,9 @@ dependencies = [
  "jsonwebtoken",
  "notegate-core",
  "notegate-db",
- "notegate-domain",
+ "notegate-infra",
+ "notegate-model",
+ "notegate-service",
  "openidconnect",
  "rand 0.8.6",
  "reqwest",
@@ -1590,6 +1602,7 @@ name = "notegate-core"
 version = "0.1.0"
 dependencies = [
  "config",
+ "regex",
  "secrecy",
  "serde",
  "thiserror 2.0.18",
@@ -1603,7 +1616,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "notegate-core",
- "notegate-domain",
+ "notegate-model",
+ "notegate-service",
  "sqlx",
  "tokio",
  "tracing",
@@ -1611,12 +1625,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "notegate-domain"
+name = "notegate-infra"
+version = "0.1.0"
+dependencies = [
+ "notegate-core",
+ "notegate-model",
+ "reqwest",
+ "sqlx",
+ "uuid",
+]
+
+[[package]]
+name = "notegate-model"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "notegate-core",
  "serde",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "notegate-service"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "notegate-core",
+ "notegate-model",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
@@ -2684,6 +2727,15 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "similar"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6505efef05804732ed8a3f2d4f279429eb485bd69d5b0cc6b19cc02005cda16"
+dependencies = [
+ "bstr",
+]
 
 [[package]]
 name = "simple_asn1"

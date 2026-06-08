@@ -20,6 +20,13 @@ pub fn extract_cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
     use axum::http::HeaderMap;
     use axum::http::header::{AUTHORIZATION, COOKIE};
 

@@ -1,4 +1,4 @@
 mod adapter;
 pub mod me;
 
-pub use adapter::CallerResolver;
+pub use adapter::{CallerResolver, IdentityError, ResolveAttrs};

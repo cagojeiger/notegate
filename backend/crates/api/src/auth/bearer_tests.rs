@@ -1,3 +1,10 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_in_result
+)]
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
@@ -5,10 +12,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
+use axum::http::header::{CONTENT_TYPE, WWW_AUTHENTICATE};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use notegate_domain::{Caller, Channel, IdentityError, ResolveAttrs, User};
+use notegate_model::account::{Account, AccountKind};
+use notegate_model::{Caller, CallerIdentity, Channel, User};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
@@ -16,7 +25,7 @@ use tower::ServiceExt as _;
 use uuid::Uuid;
 
 use crate::auth::jwt::JwtAuthority;
-use crate::identity::CallerResolver;
+use crate::identity::{CallerResolver, IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
 use crate::auth::bearer::{AuthError, verify_bearer};
@@ -93,6 +102,16 @@ impl CallerResolver for TestResolver {
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move { self.resolve(attrs, Channel::Mcp) })
     }
+
+    fn resolve_api_key(
+        &self,
+        _token: String,
+        _channel: Channel,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        // The bearer test harness only exercises the JWT/cookie paths; an
+        // unrecognized agent key resolves to nothing.
+        Box::pin(async { Err(IdentityError::NotRegistered) })
+    }
 }
 
 impl TestResolver {
@@ -100,28 +119,44 @@ impl TestResolver {
         match self.mode {
             ResolverMode::Missing => Err(IdentityError::NotRegistered),
             ResolverMode::Registered(active) if !active => Err(IdentityError::Inactive),
-            ResolverMode::Registered(_active) => Ok(Caller {
-                user: test_user(attrs),
-                channel,
-            }),
+            ResolverMode::Registered(_active) => Ok(test_caller(attrs, channel)),
         }
     }
 }
 
-fn test_user(attrs: ResolveAttrs) -> User {
+fn test_caller(attrs: ResolveAttrs, channel: Channel) -> Caller {
     let now = Utc::now();
-    User {
+    let account = Account {
         id: Uuid::nil(),
-        sub: attrs.sub,
-        email: attrs.email,
+        kind: AccountKind::User,
         display_name: attrs.name,
         is_active: true,
+        deleted_at: None,
+        deleted_by: None,
         created_at: now,
         updated_at: now,
+    };
+    let user = User {
+        id: Uuid::nil(),
+        sub: Some(attrs.sub),
+        email: Some(attrs.email),
+        anonymized_at: None,
+    };
+    Caller {
+        account,
+        identity: CallerIdentity::User(user),
+        channel,
     }
 }
 
 fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
+    state_with_resource(mode, "https://api.example.test")
+}
+
+fn state_with_resource(
+    mode: ResolverMode,
+    resource_url: &str,
+) -> Result<AppState, Box<dyn std::error::Error>> {
     let pool =
         PgPoolOptions::new().connect_lazy("postgres://notegate:notegate@localhost/notegate")?;
     let config = Arc::new(notegate_core::Config {
@@ -130,9 +165,10 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
         db_max_connections: 1,
         authgate_url: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
-        oauth_client_id: "client".to_owned(),
+        oauth_client_id: "notegate-web".to_owned(),
+        mcp_oauth_client_id: "notegate-mcp".to_owned(),
         oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
-        resource_url: "https://api.example.test".to_owned(),
+        resource_url: resource_url.to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
         browser_session_secret: secrecy::SecretString::from(
             "test-browser-session-secret-32-bytes".to_owned(),
@@ -202,7 +238,10 @@ async fn verify_accepts_valid_token() -> Result<(), Box<dyn std::error::Error>> 
         "kid-1",
     )?;
     let caller = verify_bearer(&state, &token).await?;
-    assert_eq!(caller.user.sub, "sub-1");
+    assert_eq!(
+        caller.user().and_then(|user| user.sub.as_deref()),
+        Some("sub-1")
+    );
     Ok(())
 }
 
@@ -262,7 +301,10 @@ async fn verify_accepts_aud_array_and_trailing_slash() -> Result<(), Box<dyn std
         "kid-1",
     )?;
     let caller = verify_bearer(&state, &token).await?;
-    assert_eq!(caller.user.sub, "sub-1");
+    assert_eq!(
+        caller.user().and_then(|user| user.sub.as_deref()),
+        Some("sub-1")
+    );
     Ok(())
 }
 
@@ -339,7 +381,10 @@ async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::er
 
 #[tokio::test]
 async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::error::Error>> {
-    let state = state(ResolverMode::Registered(true))?;
+    let state = state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?;
     let session = create_browser_session(&state, "sub-cookie")?;
     let app = crate::routes::app(state);
     let response = app
@@ -353,6 +398,14 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
         .await?;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let challenge = response
+        .headers()
+        .get(WWW_AUTHENTICATE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(challenge.contains("resource_metadata="));
+    assert!(challenge.contains("/.well-known/oauth-protected-resource/mcp"));
+    assert!(challenge.contains("scope=\"openid offline_access\""));
     Ok(())
 }
 
@@ -373,12 +426,51 @@ async fn unknown_api_routes_still_require_bearer() -> Result<(), Box<dyn std::er
 
 #[tokio::test]
 async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?);
     let response = app
+        .clone()
         .oneshot(Request::builder().uri("/health").body(Body::empty())?)
         .await?;
-
     assert_eq!(response.status(), StatusCode::OK);
+
+    for path in ["/auth/success", "/success"] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    for path in ["/auth/logout", "/logout"] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    }
+
+    for path in [
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-protected-resource/mcp/tools",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json; charset=utf-8")
+        );
+    }
     Ok(())
 }
 

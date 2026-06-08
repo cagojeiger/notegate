@@ -6,14 +6,16 @@ members = ["backend/crates/*"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95.0"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/cagojeiger/notegate"
 
 [workspace.dependencies]
 # Internal crates
 notegate-core = { path = "backend/crates/core" }
 notegate-db = { path = "backend/crates/db" }
-notegate-domain = { path = "backend/crates/domain" }
+notegate-infra = { path = "backend/crates/infra" }
+notegate-model = { path = "backend/crates/model" }
+notegate-service = { path = "backend/crates/service" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -53,6 +55,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
+regex = "1"
 
 # Auth / OAuth / MCP
 aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }
@@ -71,6 +74,7 @@ subtle = "2"
 rmcp = { version = "1.7.0", features = ["transport-streamable-http-server"] }
 schemars = { version = "1", features = ["derive"] }
 time = "0.3"
+similar = "3"
 
 # Lints applied to every crate via `[lints] workspace = true`.
 # Mirrors the house style: deny-by-warning the panic-prone patterns so they

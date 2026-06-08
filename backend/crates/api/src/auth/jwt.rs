@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::identity::ResolveAttrs;
 use aliri::jwt::{Audiences, BasicClaims, CoreClaims, IssuerRef, SubjectRef};
 use aliri::{Jwt, jwa, jwt};
 use aliri_oauth2::{Authority, AuthorityError, HasScope, Scope, ScopePolicy};
-use notegate_domain::ResolveAttrs;
 use serde::Deserialize;
 
 use crate::auth::bearer::AuthError;

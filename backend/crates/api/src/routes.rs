@@ -2,10 +2,12 @@
 
 use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::{MatchedPath, State};
-use axum::http::Request;
-use axum::http::header::HeaderName;
-use axum::middleware::from_fn_with_state;
+use axum::http::header::{CONTENT_TYPE, HeaderName};
+use axum::http::{HeaderValue, Request};
+use axum::middleware::{Next, from_fn, from_fn_with_state};
+use axum::response::Response;
 use axum::routing::{any, get};
 use axum::{Json, Router};
 use serde::Serialize;
@@ -15,8 +17,10 @@ use tower_http::trace::TraceLayer;
 use tracing::{Span, info, info_span};
 
 use crate::auth::bearer::require_bearer;
-use crate::auth::metadata::{protected_resource_metadata, protected_resource_metadata_url};
-use crate::auth::oauth::{callback, login, logout};
+use crate::auth::metadata::{
+    authorization_server_metadata, protected_resource_metadata, protected_resource_metadata_url,
+};
+use crate::auth::oauth::{callback, login, logout, success};
 use crate::error::ApiError;
 use crate::mcp::server::mcp_handler;
 use crate::state::AppState;
@@ -43,6 +47,7 @@ pub fn app(state: AppState) -> Router {
                         .make_span_with(make_request_span)
                         .on_response(log_request_end),
                 )
+                .layer(from_fn(add_json_charset))
                 .layer(PropagateRequestIdLayer::new(x_request_id)),
         )
 }
@@ -55,20 +60,50 @@ fn system_routes() -> Router<AppState> {
 
 fn auth_routes() -> Router<AppState> {
     Router::new()
+        .route("/auth/login", get(login))
+        .route("/auth/callback", get(callback))
+        .route("/auth/success", get(success))
+        .route("/auth/logout", get(logout))
+        // Compatibility aliases: the current authgate `notegate-web` client is
+        // registered with `http://localhost:9191/callback`. Keep these until the
+        // external client registration moves to `/auth/callback`.
         .route("/login", get(login))
         .route("/callback", get(callback))
+        .route("/success", get(success))
         .route("/logout", get(logout))
 }
 
 fn metadata_routes(state: &AppState) -> Router<AppState> {
     let metadata_path = protected_resource_metadata_url(&state.config.resource_url).route_path;
-    Router::new().route(&metadata_path, get(protected_resource_metadata))
+    let wildcard_path = format!("{metadata_path}/{{*path}}");
+    let router = Router::new()
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(authorization_server_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(protected_resource_metadata),
+        );
+
+    if metadata_path == "/.well-known/oauth-protected-resource" {
+        router.route(&wildcard_path, get(protected_resource_metadata))
+    } else {
+        router
+            .route(&metadata_path, get(protected_resource_metadata))
+            .route(&wildcard_path, get(protected_resource_metadata))
+    }
 }
 
 fn rest_api_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(crate::rest::me::routes())
-        .merge(crate::rest::files::routes())
+        .merge(crate::rest::workspaces::routes())
+        .merge(crate::rest::nodes::routes())
+        .merge(crate::rest::documents::routes())
+        .merge(crate::rest::search::routes())
+        .merge(crate::rest::access::routes())
+        .merge(crate::rest::agents::routes())
         .fallback(api_not_found)
         .layer(from_fn_with_state(state, require_bearer))
 }
@@ -93,6 +128,35 @@ async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, Ap
 
 async fn api_not_found() -> axum::http::StatusCode {
     axum::http::StatusCode::NOT_FOUND
+}
+
+async fn add_json_charset(request: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let is_json = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .is_some_and(is_application_json);
+    if is_json {
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+    }
+    response
+}
+
+fn is_application_json(value: &HeaderValue) -> bool {
+    value
+        .to_str()
+        .map(|content_type| {
+            content_type
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .eq_ignore_ascii_case("application/json")
+        })
+        .unwrap_or(false)
 }
 
 fn log_request_end<B>(response: &axum::http::Response<B>, latency: Duration, _span: &Span) {

@@ -1,30 +1,26 @@
-//! Database access: connection pool construction and migrations.
+//! Database access: migrations and aggregate repositories.
+//!
+//! Pool construction lives in `notegate-infra`. Repositories here implement the
+//! `notegate-service` store traits. Queries use runtime-checked
+//! `query_as::<_, Row>()` / `query()` (not the `query!` macro) so a schema reset
+//! never blocks compilation.
 
-use notegate_core::{Config, Error, Result};
-use sqlx::postgres::PgPoolOptions;
+use notegate_core::{Error, Result};
 
+pub mod account_repo;
+pub mod agent_repo;
 pub mod files;
-pub mod user_repo;
+pub mod files_repo;
+pub mod workspace_repo;
 
-pub use files::FilesRepo;
-pub use notegate_domain::files::{
-    Children, CreateDocument, CreateFolder, Document, DocumentBundle, FilesError, FilesResult,
-    FilesService, FindRequest, GrepMatch, GrepRequest, MoveNode, Node, NodeKind, SaveDocument,
-};
+pub use account_repo::AccountRepo;
+pub use agent_repo::AgentRepo;
+pub use files_repo::FilesRepo;
 pub use sqlx::PgPool;
-pub use user_repo::UserRepo;
+pub use workspace_repo::WorkspaceRepo;
 
 /// Embedded migrations from `migrations/`, run at startup via [`run_migrations`].
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
-/// Build a Postgres connection pool from configuration.
-pub async fn connect(config: &Config) -> Result<PgPool> {
-    PgPoolOptions::new()
-        .max_connections(config.db_max_connections)
-        .connect(&config.database_url)
-        .await
-        .map_err(|e| Error::internal(format!("failed to connect to database: {e}")))
-}
 
 /// Apply any pending migrations.
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {

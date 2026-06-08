@@ -3,12 +3,28 @@
 use std::sync::Arc;
 
 use notegate_core::Config;
-use notegate_db::PgPool;
+use notegate_db::{AccountRepo, AgentRepo, FilesRepo, PgPool, WorkspaceRepo};
+use notegate_service::access::AccessService;
+use notegate_service::agents::AgentService;
+use notegate_service::files::FilesService;
+use notegate_service::search::SearchService;
+use notegate_service::workspaces::WorkspaceService;
 
 use crate::identity::CallerResolver;
 
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
+
+/// Workspace lifecycle service over the db-backed [`WorkspaceRepo`].
+pub type Workspaces = WorkspaceService<WorkspaceRepo>;
+/// Access-management service over the db-backed [`WorkspaceRepo`].
+pub type Access = AccessService<WorkspaceRepo>;
+/// Agent lifecycle service over the db-backed [`AgentRepo`].
+pub type Agents = AgentService<AgentRepo>;
+/// File-tree command service over the db-backed [`FilesRepo`].
+pub type Files = FilesService<FilesRepo>;
+/// Search service over the db-backed [`FilesRepo`].
+pub type Search = SearchService<FilesRepo>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -18,9 +34,17 @@ pub struct AppState {
     pub oidc: Arc<OidcProvider>,
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
+    pub workspaces: Workspaces,
+    pub access: Access,
+    pub agents: Agents,
+    pub files: Files,
+    pub search: Search,
+    /// Account lookup for resolving attribution refs in REST output.
+    pub accounts: AccountRepo,
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: PgPool,
         config: Arc<Config>,
@@ -29,6 +53,13 @@ impl AppState {
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
     ) -> Self {
+        let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
+        let access = AccessService::new(WorkspaceRepo::new(db.clone()));
+        let agent_repo = AgentRepo::new(db.clone());
+        let agents = AgentService::new(agent_repo.clone());
+        let files = FilesService::new(FilesRepo::new(db.clone()));
+        let search = SearchService::new(FilesRepo::new(db.clone()));
+        let accounts = AccountRepo::new(db.clone());
         Self {
             db,
             config,
@@ -36,6 +67,12 @@ impl AppState {
             oidc,
             resolver,
             http,
+            workspaces,
+            access,
+            agents,
+            files,
+            search,
+            accounts,
         }
     }
 }

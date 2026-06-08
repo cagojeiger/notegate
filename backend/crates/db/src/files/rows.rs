@@ -1,99 +1,88 @@
+//! Row types for the file tree (`nodes`) and document content (`documents`),
+//! plus the shared column lists. There is no stored `path` column — the display
+//! path is derived via a recursive CTE (see `queries`).
+
 use chrono::{DateTime, Utc};
+use notegate_core::{Error, Result};
+use notegate_model::{Document, Node, NodeKind};
+use sqlx::FromRow;
 use uuid::Uuid;
 
-use notegate_domain::files::{Document, DocumentBundle, GrepCandidate, Node, NodeKind};
-
-#[derive(sqlx::FromRow)]
-pub(super) struct NodeRow {
-    pub(super) id: Uuid,
-    parent_id: Option<Uuid>,
-    name: String,
-    kind: String,
-    path_cache: String,
-    sort_order: i32,
-    has_children: bool,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+/// A row from `nodes`.
+#[derive(Debug, FromRow)]
+pub struct NodeRow {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub kind: String,
+    pub sort_order: i32,
+    pub created_by: Uuid,
+    pub updated_by: Uuid,
+    pub deleted_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl NodeRow {
-    pub(super) fn into_node(self) -> Node {
-        Node {
+    /// Convert into the domain [`Node`], parsing the kind.
+    pub fn into_node(self) -> Result<Node> {
+        let kind = NodeKind::parse(&self.kind)
+            .ok_or_else(|| Error::internal(format!("unknown node kind: {}", self.kind)))?;
+        Ok(Node {
             id: self.id,
+            workspace_id: self.workspace_id,
             parent_id: self.parent_id,
             name: self.name,
-            kind: NodeKind::from_storage(&self.kind),
-            path: self.path_cache,
+            kind,
             sort_order: self.sort_order,
-            has_children: self.has_children,
+            created_by: self.created_by,
+            updated_by: self.updated_by,
+            deleted_by: self.deleted_by,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            deleted_at: self.deleted_at,
+        })
+    }
+}
+
+/// A row from `documents`.
+#[derive(Debug, FromRow)]
+pub struct DocumentRow {
+    pub node_id: Uuid,
+    pub workspace_id: Uuid,
+    pub content_md: String,
+    pub content_sha256: String,
+    pub byte_len: i32,
+    pub line_count: i32,
+    pub created_by: Uuid,
+    pub updated_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<DocumentRow> for Document {
+    fn from(row: DocumentRow) -> Self {
+        Self {
+            node_id: row.node_id,
+            workspace_id: row.workspace_id,
+            content_md: row.content_md,
+            content_sha256: row.content_sha256,
+            byte_len: row.byte_len,
+            line_count: row.line_count,
+            created_by: row.created_by,
+            updated_by: row.updated_by,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }
     }
 }
 
-#[derive(sqlx::FromRow)]
-pub(super) struct DocumentBundleRow {
-    id: Uuid,
-    parent_id: Option<Uuid>,
-    name: String,
-    kind: String,
-    path_cache: String,
-    sort_order: i32,
-    has_children: bool,
-    node_created_at: DateTime<Utc>,
-    node_updated_at: DateTime<Utc>,
-    node_id: Uuid,
-    workspace_id: Uuid,
-    content_md: String,
-    content_sha256: String,
-    byte_len: i32,
-    line_count: i32,
-    document_created_at: DateTime<Utc>,
-    document_updated_at: DateTime<Utc>,
-}
+/// Selectable columns of `nodes`, in [`NodeRow`] order.
+pub const NODE_COLUMNS: &str = "id, workspace_id, parent_id, name, kind, sort_order, \
+     created_by, updated_by, deleted_by, created_at, updated_at, deleted_at";
 
-impl DocumentBundleRow {
-    pub(super) fn into_bundle(self) -> DocumentBundle {
-        DocumentBundle {
-            node: Node {
-                id: self.id,
-                parent_id: self.parent_id,
-                name: self.name,
-                kind: NodeKind::from_storage(&self.kind),
-                path: self.path_cache,
-                sort_order: self.sort_order,
-                has_children: self.has_children,
-                created_at: self.node_created_at,
-                updated_at: self.node_updated_at,
-            },
-            document: Document {
-                node_id: self.node_id,
-                workspace_id: self.workspace_id,
-                content_md: self.content_md,
-                content_sha256: self.content_sha256,
-                byte_len: self.byte_len,
-                line_count: self.line_count,
-                created_at: self.document_created_at,
-                updated_at: self.document_updated_at,
-            },
-        }
-    }
-}
-
-#[derive(sqlx::FromRow)]
-pub(super) struct GrepCandidateRow {
-    pub(super) node_id: Uuid,
-    pub(super) path_cache: String,
-    pub(super) content_md: String,
-}
-
-impl GrepCandidateRow {
-    pub(super) fn into_candidate(self) -> GrepCandidate {
-        GrepCandidate {
-            node_id: self.node_id,
-            path: self.path_cache,
-            content_md: self.content_md,
-        }
-    }
-}
+/// Selectable columns of `documents`, in [`DocumentRow`] order.
+pub const DOCUMENT_COLUMNS: &str = "node_id, workspace_id, content_md, content_sha256, \
+     byte_len, line_count, created_by, updated_by, created_at, updated_at";

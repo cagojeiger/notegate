@@ -1,0 +1,439 @@
+//! Nodes category: tree metadata under `/api/v1/workspaces/{workspace_id}`.
+//!
+//! `GET /paths/resolve?path=`, `GET /nodes/{id}`, `GET /nodes/{id}/children`
+//! (paginated), `POST /nodes` (create folder/document), `PATCH /nodes/{id}`
+//! (rename / reorder), `POST /nodes/{id}/move`, `DELETE /nodes/{id}`, and
+//! `POST /nodes/{id}/restore`. All handlers delegate to the files service,
+//! which owns authorization (no live role ⇒ 404, lesser role ⇒ 403) and
+//! validation.
+
+use axum::extract::{Extension, Path, Query, State};
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use notegate_core::limits;
+use notegate_model::{Caller, NodeKind};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::error::ApiError;
+use crate::rest::dto::{NodeOut, NodeRef, Page, attribution_ids, clamp_limit, parse_kind};
+use crate::state::AppState;
+
+use notegate_service::cursor;
+use notegate_service::files::{
+    ChildrenCursor, ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, MoveNode,
+    RestoreNode, WriteDocument, WriteTarget,
+};
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/v1/workspaces/{workspace_id}/paths/resolve",
+            get(resolve_path),
+        )
+        .route("/v1/workspaces/{workspace_id}/nodes", post(create))
+        .route(
+            "/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            get(get_node).patch(update).delete(delete),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
+            get(children),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
+            post(move_node),
+        )
+        .route(
+            "/v1/workspaces/{workspace_id}/nodes/{node_id}/restore",
+            post(restore),
+        )
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ResolveQuery {
+    path: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/workspaces/{workspace_id}/paths/resolve",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path, description = "Workspace id")),
+    responses((status = 200, description = "Resolve a path to a node", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn resolve_path(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(workspace_id): Path<Uuid>,
+    Query(query): Query<ResolveQuery>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .resolve_path(caller.account_id(), workspace_id, &query.path)
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses((status = 200, description = "Get node", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn get_node(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .stat(caller.account_id(), workspace_id, node_id)
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ChildrenQuery {
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ChildrenResponse {
+    parent: NodeRef,
+    children: Vec<NodeOut>,
+    page: Page,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses((status = 200, description = "List children", body = ChildrenResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn children(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<ChildrenQuery>,
+) -> Result<Json<ChildrenResponse>, ApiError> {
+    let cursor = match query.cursor.as_deref() {
+        None => None,
+        Some(raw) => Some(
+            cursor::decode::<ChildrenCursor>(raw)
+                .map_err(|_error| ApiError::invalid_field("invalid cursor"))?,
+        ),
+    };
+    let limit = clamp_limit(
+        query.limit,
+        limits::CHILDREN_DEFAULT_LIMIT,
+        limits::CHILDREN_MAX_LIMIT,
+    );
+
+    let page = state
+        .files
+        .children(
+            caller.account_id(),
+            workspace_id,
+            node_id,
+            ChildrenRequest {
+                limit: Some(limit),
+                cursor,
+            },
+        )
+        .await?;
+
+    let next_cursor = page
+        .next_cursor
+        .as_ref()
+        .map(cursor::encode)
+        .transpose()
+        .map_err(|_error| ApiError::internal("failed to encode cursor"))?;
+
+    let mut all = vec![&page.parent];
+    all.extend(page.items.iter());
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids(all))
+        .await?;
+
+    let children = page
+        .items
+        .iter()
+        .map(|view| NodeOut::from_view(view, &refs))
+        .collect();
+
+    Ok(Json(ChildrenResponse {
+        parent: NodeRef::from(&page.parent),
+        children,
+        page: Page {
+            limit: page.limit,
+            returned: page.items.len() as i64,
+            has_more: page.has_more,
+            next_cursor,
+        },
+    }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct CreateNodeBody {
+    parent_id: Uuid,
+    kind: String,
+    name: String,
+    #[serde(default)]
+    content_md: Option<String>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/workspaces/{workspace_id}/nodes",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path)),
+    request_body = CreateNodeBody,
+    responses((status = 201, description = "Create node", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn create(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(workspace_id): Path<Uuid>,
+    Json(body): Json<CreateNodeBody>,
+) -> Result<(StatusCode, Json<NodeOut>), ApiError> {
+    let kind = parse_kind(&body.kind)?;
+    let account_id = caller.account_id();
+
+    let view = match kind {
+        NodeKind::Folder => {
+            state
+                .files
+                .create_folder(
+                    account_id,
+                    workspace_id,
+                    CreateFolder {
+                        parent_node_id: body.parent_id,
+                        name: body.name,
+                    },
+                )
+                .await?
+        }
+        NodeKind::Document => {
+            // With initial content, create-and-write; otherwise create empty.
+            match body.content_md {
+                Some(content_md) => {
+                    state
+                        .files
+                        .write_document(
+                            account_id,
+                            workspace_id,
+                            WriteDocument {
+                                target: WriteTarget::Create {
+                                    parent_node_id: body.parent_id,
+                                    name: body.name,
+                                },
+                                content_md,
+                                expected_sha256: None,
+                            },
+                        )
+                        .await?
+                        .node
+                }
+                None => {
+                    state
+                        .files
+                        .create_document(
+                            account_id,
+                            workspace_id,
+                            CreateDocument {
+                                parent_node_id: body.parent_id,
+                                name: body.name,
+                            },
+                        )
+                        .await?
+                        .node
+                }
+            }
+        }
+    };
+
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok((StatusCode::CREATED, Json(NodeOut::from_view(&view, &refs))))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct UpdateNodeBody {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    sort_order: Option<i32>,
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    request_body = UpdateNodeBody,
+    responses((status = 200, description = "Rename or reorder node", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn update(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateNodeBody>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .update_node(
+            caller.account_id(),
+            workspace_id,
+            node_id,
+            body.name,
+            body.sort_order,
+        )
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct MoveNodeBody {
+    new_parent_id: Uuid,
+    #[serde(default)]
+    new_name: Option<String>,
+    /// Optional optimistic guard. When present and it does not match the node's
+    /// current parent, the move is rejected as a conflict.
+    #[serde(default)]
+    expected_parent_id: Option<Uuid>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    request_body = MoveNodeBody,
+    responses((status = 200, description = "Move node", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn move_node(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<MoveNodeBody>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let account_id = caller.account_id();
+
+    // Optimistic parent guard: compare the node's current parent before moving.
+    if let Some(expected) = body.expected_parent_id {
+        let current = state.files.stat(account_id, workspace_id, node_id).await?;
+        if current.node.parent_id != Some(expected) {
+            return Err(ApiError::conflict(
+                "expected_parent_id does not match the node's current parent; refresh and retry",
+            ));
+        }
+    }
+
+    let view = state
+        .files
+        .move_node(
+            account_id,
+            workspace_id,
+            MoveNode {
+                node_id,
+                new_parent_node_id: body.new_parent_id,
+                new_name: body.new_name,
+            },
+        )
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DeleteQuery {
+    #[serde(default)]
+    recursive: bool,
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses((status = 204, description = "Delete node")),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn delete(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<DeleteQuery>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .files
+        .delete_node(
+            caller.account_id(),
+            workspace_id,
+            DeleteNode {
+                node_id,
+                recursive: query.recursive,
+            },
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Restore a soft-deleted node (and its subtree). Requires `editor`. A deleted
+/// node is addressed by id (it no longer resolves by path). The files service
+/// re-validates sibling-name uniqueness, fanout, and depth, and rejects the
+/// restore with a conflict when an ancestor is still deleted (the locked orphan
+/// rule) — restore the ancestor first.
+#[utoipa::path(
+    post,
+    path = "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/restore",
+    tag = "nodes",
+    params(("workspace_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses((status = 200, description = "Restore node", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn restore(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((workspace_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .restore_node(caller.account_id(), workspace_id, RestoreNode { node_id })
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}

@@ -4,26 +4,53 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::rest;
 use crate::state::AppState;
 
+/// The OpenAPI document is generated from `#[utoipa::path]` annotations on the
+/// actual REST handlers, so route/method drift is caught close to the code that
+/// serves the endpoint. `docs/spec/rest-api.md` remains the design narrative;
+/// `/openapi.json` is the machine-readable contract.
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::rest::files::handlers::root,
-        crate::rest::files::handlers::resolve,
-        crate::rest::files::handlers::children,
-        crate::rest::files::handlers::create_folder,
-        crate::rest::files::handlers::create_document,
-        crate::rest::files::handlers::open_document,
-        crate::rest::files::handlers::save_document,
-        crate::rest::files::handlers::move_node,
-        crate::rest::files::handlers::delete_node,
-        crate::rest::files::handlers::find,
-        crate::rest::files::handlers::grep,
+        rest::me::get_me,
+        rest::workspaces::list,
+        rest::workspaces::create,
+        rest::workspaces::get_one,
+        rest::workspaces::rename,
+        rest::workspaces::delete,
+        rest::nodes::resolve_path,
+        rest::nodes::create,
+        rest::nodes::get_node,
+        rest::nodes::update,
+        rest::nodes::delete,
+        rest::nodes::children,
+        rest::nodes::move_node,
+        rest::nodes::restore,
+        rest::documents::read,
+        rest::documents::replace,
+        rest::documents::patch,
+        rest::search::find,
+        rest::search::grep,
+        rest::access::list,
+        rest::access::grant,
+        rest::access::revoke,
+        rest::agents::list,
+        rest::agents::create,
+        rest::agents::delete_agent,
+        rest::agents::create_key,
+        rest::agents::revoke_key,
     ),
     modifiers(&SecurityAddon),
     tags(
-        (name = "files", description = "UI-oriented files API")
+        (name = "identity", description = "Current caller identity"),
+        (name = "workspaces", description = "Workspace lifecycle"),
+        (name = "nodes", description = "Folder/document tree metadata"),
+        (name = "documents", description = "Markdown content read/write/patch"),
+        (name = "search", description = "find / grep within a workspace"),
+        (name = "access", description = "Workspace role grant/revoke"),
+        (name = "agents", description = "Agent account and key lifecycle"),
     )
 )]
 pub struct ApiDoc;
@@ -61,19 +88,49 @@ pub fn json_pretty() -> serde_json::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
     use utoipa::OpenApi;
 
     use super::ApiDoc;
 
     #[test]
-    fn openapi_contains_files_paths() {
+    fn openapi_defines_bearer_security_scheme() {
         let doc = ApiDoc::openapi();
-        assert!(doc.paths.paths.contains_key("/api/v1/files/root"));
-        assert!(
-            doc.paths
-                .paths
-                .contains_key("/api/v1/files/nodes/{node_id}/children")
-        );
-        assert!(doc.components.is_some());
+        let components = doc.components.expect("components present");
+        assert!(components.security_schemes.contains_key("bearer_auth"));
+    }
+
+    #[test]
+    fn openapi_lists_every_rest_category() {
+        let doc = ApiDoc::openapi();
+        let paths = &doc.paths.paths;
+        for path in [
+            "/api/v1/me",
+            "/api/v1/workspaces",
+            "/api/v1/workspaces/{workspace_id}",
+            "/api/v1/workspaces/{workspace_id}/paths/resolve",
+            "/api/v1/workspaces/{workspace_id}/nodes",
+            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
+            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
+            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/restore",
+            "/api/v1/workspaces/{workspace_id}/documents/{node_id}",
+            "/api/v1/workspaces/{workspace_id}/search/find",
+            "/api/v1/workspaces/{workspace_id}/search/grep",
+            "/api/v1/workspaces/{workspace_id}/access",
+            "/api/v1/workspaces/{workspace_id}/access/{account_id}",
+            "/api/v1/agents",
+            "/api/v1/agents/{agent_id}",
+            "/api/v1/agents/{agent_id}/keys",
+            "/api/v1/agents/{agent_id}/keys/{key_id}",
+        ] {
+            assert!(paths.contains_key(path), "missing OpenAPI path: {path}");
+        }
     }
 }

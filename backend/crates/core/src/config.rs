@@ -36,8 +36,10 @@ pub struct Config {
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
     #[serde(rename = "public_url")]
     pub notegate_public_url: String,
-    /// Public OAuth client id registered in authgate.
+    /// Public browser OAuth client id registered in authgate.
     pub oauth_client_id: String,
+    /// Public MCP OAuth client id registered in authgate.
+    pub mcp_oauth_client_id: String,
     /// Exact redirect URL registered in authgate.
     pub oauth_redirect_url: String,
     /// Resource/audience URL for REST and MCP, with trailing slash trimmed.
@@ -81,6 +83,9 @@ impl Validate for Config {
         }
         if self.oauth_client_id.is_empty() {
             errors.add("oauth_client_id", ValidationError::new("length"));
+        }
+        if self.mcp_oauth_client_id.is_empty() {
+            errors.add("mcp_oauth_client_id", ValidationError::new("length"));
         }
         if validate_http_url_value(&self.oauth_redirect_url).is_err() {
             errors.add("oauth_redirect_url", ValidationError::new("http_url"));
@@ -236,6 +241,13 @@ fn map_validation_error(error: validator::ValidationErrors) -> Error {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::time::Duration;
@@ -254,6 +266,7 @@ mod tests {
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
+            mcp_oauth_client_id: "notegate-mcp".to_owned(),
             oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
@@ -283,6 +296,7 @@ mod tests {
                 ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
                 (
                     "NOTEGATE_OAUTH_REDIRECT_URL",
                     "http://localhost:9191/callback",
@@ -301,6 +315,8 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert_eq!(config.oauth_client_id, "notegate-web");
+        assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
         assert_eq!(
             config.jwks_cache_ttl.as_secs(),
             super::DEFAULT_JWKS_CACHE_TTL_SECS

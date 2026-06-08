@@ -3,7 +3,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use notegate_domain::{IdentityError, ResolveAttrs};
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
 use time::Duration as CookieDuration;
@@ -15,6 +14,7 @@ use crate::auth::oauth_flow::{
 };
 use crate::auth::page::html_page;
 use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
+use crate::identity::{IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -170,7 +170,7 @@ pub async fn callback(
             };
             (
                 jar.add(browser_session_cookie(&state, session)),
-                Redirect::to("/"),
+                Redirect::to("/auth/success"),
             )
                 .into_response()
         }
@@ -192,6 +192,14 @@ pub async fn callback(
                 .into_response()
         }
     }
+}
+
+pub async fn success() -> Response {
+    html_page(
+        StatusCode::OK,
+        "Login complete",
+        "Login complete. You can close this tab and reconnect your MCP client.",
+    )
 }
 
 pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {

@@ -1,6 +1,7 @@
-use notegate_domain::{Caller, IdentityError, ResolveAttrs};
+use notegate_model::Caller;
 
 use crate::auth::bearer::AuthError;
+use crate::identity::{IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
 pub async fn verify_bearer(state: &AppState, token: &str) -> Result<Caller, AuthError> {
@@ -32,6 +33,6 @@ fn map_identity_error(error: IdentityError) -> AuthError {
     match error {
         IdentityError::NotRegistered => AuthError::NotRegistered,
         IdentityError::Inactive => AuthError::Inactive,
-        IdentityError::Store(_error) => AuthError::Internal,
+        IdentityError::Internal(_message) => AuthError::Internal,
     }
 }
