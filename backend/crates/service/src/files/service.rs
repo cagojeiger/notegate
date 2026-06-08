@@ -98,9 +98,10 @@ where
     ) -> ServiceResult<NodeView> {
         self.authorize(workspace_id, caller_account_id, FileCommand::Stat)
             .await?;
+        let path = validation::normalize_path(path)?;
         let node_id = self
             .store
-            .resolve_path(workspace_id, path)
+            .resolve_path(workspace_id, &path)
             .await?
             .ok_or_else(|| ServiceError::NotFound("path does not resolve to a node".to_owned()))?;
         let node = self.load_node(workspace_id, node_id).await?;

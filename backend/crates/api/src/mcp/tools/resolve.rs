@@ -17,7 +17,7 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use notegate_core::validation::validate_workspace_name;
+use notegate_core::validation::{normalize_path, validate_workspace_name};
 use notegate_model::Caller;
 use notegate_service::ServiceError;
 use notegate_service::files::parse_target;
@@ -117,11 +117,10 @@ pub async fn resolve_target(
 
     let path = path
         .ok_or_else(|| ErrorData::invalid_params("provide a 'path' or a 'target' string", None))?;
-    if !path.starts_with('/') {
-        return Err(ErrorData::invalid_params("path must start with '/'", None));
-    }
+    let path = normalize_path(path)
+        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
     let resolved = resolve_workspace(state, caller, selector).await?;
-    Ok((resolved, path.to_owned()))
+    Ok((resolved, path))
 }
 
 /// Core name/id resolution against the caller's accessible workspaces.
@@ -305,11 +304,9 @@ fn error_meta(kind: &'static str) -> Option<serde_json::Value> {
 /// The root path (`/`) and empty/relative paths have no basename and are an
 /// error (the caller cannot create or address "root" by basename).
 pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
-    if !path.starts_with('/') {
-        return Err(ErrorData::invalid_params("path must start with '/'", None));
-    }
-    let trimmed = path.trim_end_matches('/');
-    let Some((parent, name)) = trimmed.rsplit_once('/') else {
+    let normalized = normalize_path(path)
+        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+    let Some((parent, name)) = normalized.rsplit_once('/') else {
         return Err(ErrorData::invalid_params("path must start with '/'", None));
     };
     if name.is_empty() {
@@ -510,11 +507,16 @@ mod tests {
             split_parent_name("/note.md").unwrap(),
             ("/".to_owned(), "note.md".to_owned())
         );
+        assert_eq!(
+            split_parent_name("/projects//note.md/").unwrap(),
+            ("/projects".to_owned(), "note.md".to_owned())
+        );
     }
 
     #[test]
     fn split_parent_name_rejects_root_and_relative() {
         assert!(split_parent_name("/").is_err());
         assert!(split_parent_name("relative.md").is_err());
+        assert!(split_parent_name("/a/../b.md").is_err());
     }
 }

@@ -144,7 +144,7 @@ matching if_none_match hash -> unchanged response without content
 ## Output and error contract
 
 ```text
-paths                    -> canonical absolute paths
+paths                    -> normalized canonical absolute paths; duplicate slash and trailing slash collapse, `.`/`..` reject
 internal errors           -> redacted
 bearer/API key plaintext  -> never returned except newly-created API key plaintext once
 OAuth code/PKCE verifier  -> never returned

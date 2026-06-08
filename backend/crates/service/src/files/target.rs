@@ -5,7 +5,7 @@
 //! restricted name grammar), so the target splits on the first `:`; the remainder
 //! must be an absolute path inside the workspace.
 
-use notegate_core::validation::validate_workspace_name;
+use notegate_core::validation::{normalize_path, validate_workspace_name};
 
 use crate::error::{ServiceError, ServiceResult};
 
@@ -29,15 +29,11 @@ pub fn parse_target(target: &str) -> ServiceResult<Target> {
 
     validate_workspace_name(workspace)?;
 
-    if !path.starts_with('/') {
-        return Err(ServiceError::InvalidInput(
-            "target path must start with '/'".to_owned(),
-        ));
-    }
+    let path = normalize_path(path)?;
 
     Ok(Target {
         workspace: workspace.to_owned(),
-        path: path.to_owned(),
+        path,
     })
 }
 
@@ -64,6 +60,12 @@ mod tests {
         let target = parse_target("personal:/").unwrap();
         assert_eq!(target.workspace, "personal");
         assert_eq!(target.path, "/");
+    }
+
+    #[test]
+    fn normalizes_path() {
+        let target = parse_target("personal:/notes//test.md/").unwrap();
+        assert_eq!(target.path, "/notes/test.md");
     }
 
     #[test]

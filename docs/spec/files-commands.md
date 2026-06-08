@@ -8,9 +8,9 @@ semantics를 따른다.
 
 - 모든 path는 `/`로 시작한다.
 - root는 `/`이고 workspace마다 실제 `nodes` row로 존재한다.
-- root 외 trailing slash는 canonical path로 인정하지 않는다.
-- 빈 segment, `.`, `..` segment는 허용하지 않는다.
-- path는 server에서 canonical form으로 normalize한다.
+- 입력 path는 server에서 canonical absolute path로 normalize한다.
+- 중복 slash와 root 외 trailing slash는 canonical 응답에서 제거된다.
+- `.`, `..` segment는 허용하지 않는다.
 - MCP/CLI 표시에서는 `workspace:/path/to/file.md` 축약 표기를 사용할 수 있다.
 - DB source of truth는 full path string이 아니라 `parent_id + name` tree다. path는 parent chain에서 derive한다.
 - 최대 path 길이와 depth는 [`performance-limits.md`](performance-limits.md)를 따른다. 현재 최대 depth는 `5`다.

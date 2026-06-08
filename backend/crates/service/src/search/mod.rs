@@ -14,6 +14,7 @@ use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::NodeView;
 use crate::files::policy::{self, FileCommand};
+use crate::files::validation;
 
 /// `find` request.
 #[derive(Debug, Clone)]
@@ -168,13 +169,19 @@ where
             Some(raw) => Some(cursor::decode(raw)?),
         };
 
+        let scope_path = request
+            .path
+            .as_deref()
+            .map(validation::normalize_path)
+            .transpose()?;
+
         // Fetch `limit + 1` to detect a next page without a second query.
         let rows = self
             .store
             .find_nodes(
                 workspace_id,
                 q,
-                request.path.as_deref(),
+                scope_path.as_deref(),
                 request.kind,
                 limit + 1,
                 cursor.as_ref(),
@@ -243,6 +250,11 @@ where
             None => None,
             Some(raw) => Some(cursor::decode(raw)?),
         };
+        let scope_path = request
+            .path
+            .as_deref()
+            .map(validation::normalize_path)
+            .transpose()?;
 
         // Accumulate up to `limit + 1` matches to detect a next page. Iterate
         // candidate documents in keyset order, line-splitting each; a document
@@ -263,7 +275,7 @@ where
                 .grep_candidates(
                     workspace_id,
                     q,
-                    request.path.as_deref(),
+                    scope_path.as_deref(),
                     want,
                     cursor.as_ref(),
                 )

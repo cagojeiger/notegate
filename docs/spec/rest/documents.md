@@ -23,6 +23,7 @@ Returns document metadata and a bounded content slice.
     "line_count": 1,
     "start_line": 1,
     "end_line": 1,
+    "returned_lines": 1,
     "truncated": false,
     "next_start_line": null,
     "updated_by": {"id": "account-id", "kind": "user", "display_name": "Kang"},
