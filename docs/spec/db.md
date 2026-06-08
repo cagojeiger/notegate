@@ -177,7 +177,7 @@ CREATE TABLE workspace_access (
 
 ```text
 viewer = list/stat/read/find/grep
-editor = viewer + write/patch/mkdir/touch/move/delete
+editor = viewer + write/patch/mkdir/touch/move/delete/restore
 owner  = editor + workspace access management
 ```
 

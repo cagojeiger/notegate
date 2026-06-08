@@ -123,6 +123,8 @@ List/search page shape:
 }
 ```
 
+`next_cursor` is `null` when `has_more=false`.
+
 Branching:
 
 ```text

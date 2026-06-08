@@ -9,7 +9,7 @@
 //! - `ServiceError::NotFound`   -> 404 (no live role / cross-workspace node)
 //!
 //! Matrix asserted here:
-//! - viewer  CAN list/stat/read/find/grep, CANNOT mkdir/touch/write/patch/mv/rm (403)
+//! - viewer  CAN list/stat/read/find/grep, CANNOT mkdir/touch/write/patch/mv/rm/restore (403)
 //! - editor  CAN mutate, CANNOT manage access (403)
 //! - owner   CAN manage access
 //! - a node id from another workspace -> 404

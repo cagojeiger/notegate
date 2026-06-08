@@ -2,7 +2,7 @@
 
 ## Access
 
-Owner-only APIs for granting users or agents access to a workspace. A workspace has at most `20` active access accounts.
+Owner-only APIs for granting users or agents access to a workspace. A workspace has at most `20` active access accounts. At least one live `owner` must remain.
 
 ### List access
 
@@ -30,4 +30,4 @@ PUT /api/v1/workspaces/{workspace_id}/access/{account_id}
 DELETE /api/v1/workspaces/{workspace_id}/access/{account_id}
 ```
 
-Revokes access by setting `revoked_at`/`revoked_by`; current-state attribution fields remain valid.
+Revokes access by setting `revoked_at`/`revoked_by`; current-state attribution fields remain valid. Revoking the last live `owner` is rejected. Revoking an account that already has no live grant is idempotent and returns success after the caller owner check.

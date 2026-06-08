@@ -32,7 +32,7 @@ Output:
   "workspaces": [
     {"id": "workspace-id", "name": "personal", "role": "owner", "root_node_id": "root-node-id"}
   ],
-  "page": {"limit": 50, "returned": 1, "has_more": false}
+  "page": {"limit": 50, "returned": 1, "has_more": false, "next_cursor": null}
 }
 ```
 

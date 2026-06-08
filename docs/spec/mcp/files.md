@@ -21,7 +21,7 @@ Output:
   "workspace": "personal",
   "path": "/projects",
   "children": [],
-  "page": {"limit": 100, "returned": 0, "has_more": false}
+  "page": {"limit": 100, "returned": 0, "has_more": false, "next_cursor": null}
 }
 ```
 
