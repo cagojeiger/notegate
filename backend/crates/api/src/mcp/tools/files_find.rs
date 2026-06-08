@@ -15,7 +15,9 @@ use notegate_model::NodeKind;
 use notegate_service::search::FindRequest;
 
 use super::common::page_json;
-use super::resolve::{WorkspaceSelector, caller, node_summary, resolve_workspace, service_error};
+use super::resolve::{
+    WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_workspace, service_error,
+};
 use crate::state::AppState;
 
 /// `files_find` input: a workspace selector, the query, and optional scope/kind/
@@ -87,6 +89,5 @@ pub async fn call(
 
 /// Parse a `kind` filter, rejecting unknown values.
 fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
-    NodeKind::parse(value)
-        .ok_or_else(|| ErrorData::invalid_params("kind must be 'folder' or 'document'", None))
+    NodeKind::parse(value).ok_or_else(|| invalid_input_error("kind must be 'folder' or 'document'"))
 }

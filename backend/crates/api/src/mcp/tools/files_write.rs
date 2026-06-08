@@ -18,7 +18,8 @@ use notegate_service::ServiceError;
 use notegate_service::files::{WriteDocument, WriteTarget};
 
 use super::resolve::{
-    WorkspaceSelector, caller, node_summary, resolve_target, service_error, split_parent_name,
+    WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_target, service_error,
+    split_parent_name,
 };
 use crate::state::AppState;
 
@@ -79,9 +80,8 @@ pub async fn call(
         },
         None => {
             if !input.create {
-                return Err(ErrorData::invalid_params(
+                return Err(invalid_input_error(
                     "document does not exist; pass create=true to create it",
-                    None,
                 ));
             }
             let (parent_path, name) = split_parent_name(&path)?;

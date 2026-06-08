@@ -7,18 +7,17 @@
 //! sibling-conflict, and move-into-descendant rules live in the files service.
 
 use axum::http::request::Parts;
+use notegate_core::validation::normalize_path;
+use notegate_service::files::MoveNode;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::borrow::Cow;
-
-use notegate_core::validation::normalize_path;
-use notegate_service::files::MoveNode;
 
 use super::resolve::{
-    WorkspaceSelector, caller, node_summary, resolve_workspace, service_error, split_parent_name,
+    WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_workspace, service_error,
+    split_parent_name,
 };
 use crate::state::AppState;
 
@@ -44,9 +43,9 @@ pub async fn call(
     let workspace_id = resolved.workspace_id();
 
     let source_path = normalize_path(&input.source_path)
-        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+        .map_err(|error| invalid_input_error(error.to_string()))?;
     let destination_path = normalize_path(&input.destination_path)
-        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+        .map_err(|error| invalid_input_error(error.to_string()))?;
 
     let source = state
         .files

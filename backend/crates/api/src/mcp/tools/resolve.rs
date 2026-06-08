@@ -47,7 +47,7 @@ pub fn caller(parts: &Parts) -> Result<&Caller, ErrorData> {
     parts
         .extensions
         .get::<Caller>()
-        .ok_or_else(|| ErrorData::invalid_params("authenticated caller extension missing", None))
+        .ok_or_else(|| invalid_input_error("authenticated caller extension missing"))
 }
 
 /// A resolved workspace selection: the chosen workspace view. The path (when a
@@ -92,7 +92,7 @@ fn parse_workspace_id(raw: Option<&str>) -> Result<Option<Uuid>, ErrorData> {
         None => Ok(None),
         Some(value) => Uuid::parse_str(value)
             .map(Some)
-            .map_err(|_error| ErrorData::invalid_params("workspace_id must be a UUID", None)),
+            .map_err(|_error| invalid_input_error("workspace_id must be a UUID")),
     }
 }
 
@@ -115,10 +115,8 @@ pub async fn resolve_target(
         return Ok((ResolvedWorkspace { view }, parsed.path));
     }
 
-    let path = path
-        .ok_or_else(|| ErrorData::invalid_params("provide a 'path' or a 'target' string", None))?;
-    let path = normalize_path(path)
-        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+    let path = path.ok_or_else(|| invalid_input_error("provide a 'path' or a 'target' string"))?;
+    let path = normalize_path(path).map_err(|error| invalid_input_error(error.to_string()))?;
     let resolved = resolve_workspace(state, caller, selector).await?;
     Ok((resolved, path))
 }
@@ -145,8 +143,7 @@ async fn select_workspace(
     }
 
     if let Some(name) = name {
-        validate_workspace_name(name)
-            .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+        validate_workspace_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
         let mut matches = state
             .workspaces
             .find_visible_by_name(caller.account_id(), name, 2)
@@ -174,18 +171,16 @@ async fn select_workspace(
         .await
         .map_err(service_error)?;
     match page.items.len() {
-        0 => Err(ErrorData::invalid_params(
+        0 => Err(invalid_input_error(
             "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
-            None,
         )),
         1 if !page.has_more => page
             .items
             .into_iter()
             .next()
             .ok_or_else(|| ErrorData::internal_error("failed to select workspace", None)),
-        _ => Err(ErrorData::invalid_params(
+        _ => Err(invalid_input_error(
             "multiple workspaces are accessible; pass 'workspace' (see workspaces_list)",
-            None,
         )),
     }
 }
@@ -217,8 +212,7 @@ fn pick_workspace(
 
     // Name selector: must match exactly one accessible workspace.
     if let Some(name) = name {
-        validate_workspace_name(name)
-            .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+        validate_workspace_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
         let mut matches: Vec<WorkspaceView> = accessible
             .into_iter()
             .filter(|view| view.workspace.name == name)
@@ -238,13 +232,11 @@ fn pick_workspace(
     let mut iter = accessible.into_iter();
     match (count, iter.next()) {
         (1, Some(view)) => Ok(view),
-        (0, _) => Err(ErrorData::invalid_params(
+        (0, _) => Err(invalid_input_error(
             "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
-            None,
         )),
-        _ => Err(ErrorData::invalid_params(
+        _ => Err(invalid_input_error(
             "multiple workspaces are accessible; pass 'workspace' (see workspaces_list)",
-            None,
         )),
     }
 }
@@ -265,6 +257,7 @@ fn ambiguity_error(name: &str, matches: &[WorkspaceView]) -> ErrorData {
     ErrorData::invalid_params(
         format!("workspace name '{name}' is ambiguous; pass 'workspace_id'"),
         Some(json!({
+            "kind": "invalid_input",
             "code": "workspace_ambiguous",
             "workspace": name,
             "matches": workspaces,
@@ -304,21 +297,24 @@ fn error_meta(kind: &'static str) -> Option<serde_json::Value> {
     }))
 }
 
+pub fn invalid_input_error(message: impl Into<Cow<'static, str>>) -> ErrorData {
+    ErrorData::invalid_params(message, error_meta("invalid_input"))
+}
+
 /// Split an absolute path into its parent path and basename.
 ///
 /// `/projects/note.md` → (`/projects`, `note.md`); `/note.md` → (`/`, `note.md`).
 /// The root path (`/`) and empty/relative paths have no basename and are an
 /// error (the caller cannot create or address "root" by basename).
 pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
-    let normalized = normalize_path(path)
-        .map_err(|error| ErrorData::invalid_params(Cow::Owned(error.to_string()), None))?;
+    let normalized =
+        normalize_path(path).map_err(|error| invalid_input_error(error.to_string()))?;
     let Some((parent, name)) = normalized.rsplit_once('/') else {
-        return Err(ErrorData::invalid_params("path must start with '/'", None));
+        return Err(invalid_input_error("path must start with '/'"));
     };
     if name.is_empty() {
-        return Err(ErrorData::invalid_params(
+        return Err(invalid_input_error(
             "path must name a node, not the workspace root",
-            None,
         ));
     }
     let parent = if parent.is_empty() {
@@ -419,6 +415,7 @@ mod tests {
         ];
         let error = ambiguity_error("shared", &matches);
         let data = error.data.expect("ambiguity carries data");
+        assert_eq!(data["kind"], "invalid_input");
         assert_eq!(data["code"], "workspace_ambiguous");
         assert_eq!(data["matches"].as_array().unwrap().len(), 2);
         assert!(data["hint"].as_str().unwrap().contains("workspaces_list"));
@@ -448,6 +445,7 @@ mod tests {
         let error = pick_workspace(accessible, Some("shared"), None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("ambiguity carries data");
+        assert_eq!(data["kind"], "invalid_input");
         assert_eq!(data["code"], "workspace_ambiguous");
         assert_eq!(data["matches"].as_array().unwrap().len(), 2);
     }
@@ -475,6 +473,8 @@ mod tests {
         let accessible = vec![view("a", Uuid::new_v4()), view("b", Uuid::new_v4())];
         let error = pick_workspace(accessible, None, None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        let data = error.data.expect("invalid selection carries data");
+        assert_eq!(data["kind"], "invalid_input");
     }
 
     #[test]
@@ -508,6 +508,8 @@ mod tests {
     fn bad_workspace_name_grammar_is_rejected() {
         let error = pick_workspace(Vec::new(), Some(".secret"), None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        let data = error.data.expect("invalid name carries data");
+        assert_eq!(data["kind"], "invalid_input");
     }
 
     #[test]
@@ -528,8 +530,10 @@ mod tests {
 
     #[test]
     fn split_parent_name_rejects_root_and_relative() {
-        assert!(split_parent_name("/").is_err());
-        assert!(split_parent_name("relative.md").is_err());
-        assert!(split_parent_name("/a/../b.md").is_err());
+        for path in ["/", "relative.md", "/a/../b.md"] {
+            let error = split_parent_name(path).unwrap_err();
+            let data = error.data.expect("invalid path carries data");
+            assert_eq!(data["kind"], "invalid_input");
+        }
     }
 }

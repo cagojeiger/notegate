@@ -151,15 +151,17 @@ OAuth code/PKCE verifier  -> never returned
 raw Authorization header  -> never returned
 ```
 
-Service error mapping:
+Error mapping:
 
 ```text
-not_found     -> invalid params with kind=not_found
-invalid_input -> invalid params with kind=invalid_input
-forbidden     -> invalid request with kind=forbidden
-conflict      -> invalid request with kind=conflict
-internal      -> internal error with redacted message
+not_found     -> invalid params with data.kind=not_found
+invalid_input -> invalid params with data.kind=invalid_input
+forbidden     -> invalid request with data.kind=forbidden
+conflict      -> invalid request with data.kind=conflict
+internal      -> internal error with data.kind=internal and redacted message
 ```
+
+`MCP` tool-level validation 오류도 `data.kind=invalid_input`을 포함한다. 세부 validation 오류는 더 좁은 `data.code`를 사용할 수 있지만, 공통 분류인 `data.kind`는 유지한다.
 
 ## Category documents
 

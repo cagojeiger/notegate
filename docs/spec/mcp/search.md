@@ -2,7 +2,7 @@
 
 MCP search is path-first. Tools select a workspace through `workspace`, `workspace_id`, `target`, or the single visible workspace fallback described in `README.md`.
 
-The `path` field is a scope path, not a path substring query. A folder scope searches that folder subtree. A document scope searches that document only. An unresolved scope path returns `invalid params` with `kind=not_found`.
+The `path` field is a scope path, not a path substring query. A folder scope searches that folder subtree. A document scope searches that document only. An unresolved scope path returns `invalid params` with `data.kind=not_found`.
 
 ## `files_find`
 

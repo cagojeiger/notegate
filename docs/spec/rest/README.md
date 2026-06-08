@@ -158,11 +158,14 @@ client changes cursor  -> invalid cursor or undefined page position
 
 ## Error contract
 
+REST 오류 응답은 `error`, `kind`, `message`를 포함한다. `error`와 `kind`는 같은 값을 가지며, `kind`는 MCP `data.kind`와 같은 공통 오류 분류다.
+
 ```text
-401 -> missing/invalid auth
-403 -> authenticated but not allowed or inactive/not registered
-404 -> not found or cross-workspace hidden resource
-400 -> invalid field/name/path, malformed limit, malformed/tampered cursor
-409 -> state conflict, quota conflict, stale hash, duplicate destination, subtree too large
-500 -> redacted internal error
+missing_token/invalid_token -> 401 auth failure
+not_registered/inactive_account -> 403 auth registration/state failure
+forbidden -> 403 authenticated but not allowed
+not_found -> 404 not found or cross-workspace hidden resource
+invalid_input -> 400 invalid field/name/path, malformed limit, malformed/tampered cursor
+conflict -> 409 state conflict, quota conflict, stale hash, duplicate destination, subtree too large
+internal_error -> 500 redacted internal error
 ```

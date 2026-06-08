@@ -26,12 +26,14 @@ pub fn auth_error_body(state: &AppState, error: &AuthError) -> serde_json::Value
     match error {
         AuthError::NotRegistered => serde_json::json!({
             "error": code,
+            "kind": code,
             "message": message_for_error(error),
             "login_url": login_url(state),
             "mcp_url": mcp_url(state),
         }),
         _ => serde_json::json!({
             "error": code,
+            "kind": code,
             "message": message_for_error(error),
         }),
     }

@@ -27,8 +27,12 @@ impl ApiError {
         Self::new(StatusCode::NOT_FOUND, "not_found", message)
     }
 
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "invalid_input", message)
+    }
+
     pub fn invalid_field(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, "invalid_field", message)
+        Self::invalid_input(message)
     }
 
     pub fn forbidden(message: impl Into<String>) -> Self {
@@ -83,9 +87,22 @@ impl IntoResponse for ApiError {
             self.status,
             Json(json!({
                 "error": self.code,
+                "kind": self.code,
                 "message": self.message,
             })),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_field_uses_common_invalid_input_kind() {
+        let error = ApiError::invalid_field("bad field");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, "invalid_input");
     }
 }

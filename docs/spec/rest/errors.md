@@ -2,10 +2,31 @@
 
 ## Error policy
 
-- Missing/invalid auth: `401`
-- Authenticated but no active local account: `403`
-- Insufficient workspace role: `403`
-- Not found or cross-workspace access: `404`
-- Invalid field/name/path, malformed limit, or malformed/tampered cursor: `400`
-- Hash mismatch, root move/delete, duplicate destination, subtree too large: `409`
-- Internal errors: `500` with redacted message
+REST 오류 응답은 항상 같은 기본 shape을 사용한다.
+
+```json
+{
+  "error": "invalid_input",
+  "kind": "invalid_input",
+  "message": "human readable message"
+}
+```
+
+`error`와 `kind`는 같은 값을 가진다. `error`는 기존 REST client를 위한 필드이고, `kind`는 MCP `data.kind`와 같은 의미의 공통 분류다.
+
+```text
+invalid_input  -> 400 invalid field/name/path, malformed limit, malformed/tampered cursor
+forbidden      -> 403 authenticated but not allowed
+not_found      -> 404 not found or cross-workspace hidden resource
+conflict       -> 409 state conflict, quota conflict, stale hash, duplicate destination, subtree too large
+internal_error -> 500 redacted internal error
+```
+
+Auth middleware 오류도 같은 기본 shape을 사용한다. `not_registered`는 client onboarding을 위해 `login_url`과 `mcp_url`을 추가로 포함한다.
+
+```text
+missing_token    -> 401 missing/malformed auth
+invalid_token    -> 401 invalid auth
+not_registered   -> 403 authenticated but no active local account
+inactive_account -> 403 inactive local account
+```

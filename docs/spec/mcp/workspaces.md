@@ -52,7 +52,7 @@ Branching:
 
 ```text
 user caller and owned workspaces < 20 -> create workspace + root node + owner access
-agent caller                          -> invalid request with kind=forbidden
+agent caller                          -> invalid request with data.kind=forbidden
 invalid name                          -> invalid params
 owned workspaces >= 20                -> conflict
 ```
@@ -83,7 +83,7 @@ Branching:
 
 ```text
 one accessible match    -> workspace summary
-no accessible match     -> invalid params with kind=not_found
+no accessible match     -> invalid params with data.kind=not_found
 same visible name > 1   -> invalid params with ambiguity data
-workspace_id invisible  -> invalid params with kind=not_found
+workspace_id invisible  -> invalid params with data.kind=not_found
 ```
