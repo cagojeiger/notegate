@@ -190,12 +190,17 @@ client changes cursor  -> invalid cursor or undefined page position
   "path": "/projects/note.md",
   "sort_order": 0,
   "has_children": false,
+  "content_sha256": "sha256...",
+  "byte_len": 7,
+  "line_count": 1,
   "created_by": {"id": "account-id", "kind": "user", "display_name": "Kang"},
   "updated_by": {"id": "account-id", "kind": "agent", "display_name": "research-agent"},
   "created_at": "2026-01-01T00:00:00Z",
   "updated_at": "2026-01-01T00:00:00Z"
 }
 ```
+
+`content_sha256`, `byte_len`, `line_count`는 document node를 단건 조회하거나 path resolve할 때 포함될 수 있다. Folder node와 bulk children/search item에서 document metrics가 없으면 필드를 생략한다.
 
 ## Error contract
 

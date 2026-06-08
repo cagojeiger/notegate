@@ -47,7 +47,8 @@ Response:
   "page": {
     "limit": 50,
     "returned": 1,
-    "has_more": false
+    "has_more": false,
+    "next_cursor": null
   }
 }
 ```
@@ -89,7 +90,8 @@ Response:
   "page": {
     "limit": 20,
     "returned": 1,
-    "has_more": false
+    "has_more": false,
+    "next_cursor": null
   }
 }
 ```

@@ -37,7 +37,7 @@ Rules:
 
 ```json
 {
-  "parent": {"id": "folder-id", "path": "/projects"},
+  "parent": {"id": "folder-id", "path": "/projects", "kind": "folder"},
   "children": [],
   "page": {"limit": 100, "returned": 0, "has_more": false, "next_cursor": null}
 }
@@ -72,6 +72,8 @@ Rules:
 - `kind='folder'` name must not end with `.md`.
 - Same parent folder cannot contain duplicate live names.
 
+Response is a `Node output`.
+
 ### Update node metadata
 
 ```http
@@ -86,6 +88,8 @@ PATCH /api/v1/workspaces/{workspace_id}/nodes/{node_id}
 ```
 
 Use this for rename or custom ordering. Root rename is rejected.
+
+Response is a `Node output`.
 
 ### Move node
 
@@ -110,6 +114,8 @@ Rules:
 - Move/rename updates only the moved node parent/name metadata; descendant paths are derived and must not be rewritten.
 - The destination sibling name must be unique.
 - `expected_parent_id` is optional but recommended for optimistic UI safety.
+
+Response is a `Node output`.
 
 ### Delete node
 

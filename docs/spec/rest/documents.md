@@ -76,6 +76,22 @@ Rules:
 - Writes that would make workspace live document content exceed `268435456` bytes are rejected.
 - If `expected_sha256` is present and does not match current content, return `409 conflict`.
 
+Response:
+
+```json
+{
+  "node": {"id": "node-id", "path": "/projects/note.md", "kind": "document"},
+  "document": {
+    "node_id": "node-id",
+    "content_sha256": "sha256...",
+    "byte_len": 10,
+    "line_count": 1,
+    "updated_by": {"id": "account-id", "kind": "user", "display_name": "Kang"},
+    "updated_at": "2026-01-01T00:00:00Z"
+  }
+}
+```
+
 ### Patch document
 
 ```http
@@ -108,3 +124,22 @@ Rules:
 - Resulting content over `524288` bytes or `2000` lines is rejected.
 - Patches that would make workspace live document content exceed `268435456` bytes are rejected.
 - Successful response includes the new `content_sha256`, `byte_len`, and `line_count`.
+
+Response:
+
+```json
+{
+  "node": {"id": "node-id", "path": "/projects/note.md", "kind": "document"},
+  "document": {
+    "node_id": "node-id",
+    "content_sha256": "sha256...",
+    "byte_len": 10,
+    "line_count": 1,
+    "previous_sha256": "previous-sha256",
+    "edits_applied": 1,
+    "diff": "--- before\n+++ after\n...",
+    "updated_by": {"id": "account-id", "kind": "user", "display_name": "Kang"},
+    "updated_at": "2026-01-01T00:00:00Z"
+  }
+}
+```
