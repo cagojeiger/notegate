@@ -7,9 +7,9 @@
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
+use notegate_model::GrantAccess;
 use notegate_model::account::AccountKind;
 use notegate_model::{Role, WorkspaceAccess};
-use notegate_service::access::{AccessStore, GrantAccess};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -56,12 +56,12 @@ const ACCESS_RETURNING_COLUMNS: &str =
     "workspace_id, account_id, role, granted_by, granted_at, revoked_at, revoked_by";
 const ACCESS_SELECT_COLUMNS: &str = "wa.workspace_id, wa.account_id, wa.role, wa.granted_by, wa.granted_at, wa.revoked_at, wa.revoked_by";
 
-impl AccessStore for AccessRepo {
-    async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
+impl AccessRepo {
+    pub async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
         live_role(&self.pool, workspace_id, account_id).await
     }
 
-    async fn list_access(&self, workspace_id: Uuid) -> Result<Vec<WorkspaceAccess>> {
+    pub async fn list_access(&self, workspace_id: Uuid) -> Result<Vec<WorkspaceAccess>> {
         let rows = sqlx::query_as::<_, WorkspaceAccessRow>(&format!(
             "SELECT {ACCESS_SELECT_COLUMNS} FROM workspace_access wa \
              JOIN accounts acc ON acc.id = wa.account_id \
@@ -78,7 +78,7 @@ impl AccessStore for AccessRepo {
             .collect()
     }
 
-    async fn upsert_access(
+    pub async fn upsert_access(
         &self,
         command: &GrantAccess,
         granted_by: Uuid,
@@ -142,7 +142,7 @@ impl AccessStore for AccessRepo {
         row.into_access()
     }
 
-    async fn revoke_access(
+    pub async fn revoke_access(
         &self,
         workspace_id: Uuid,
         account_id: Uuid,

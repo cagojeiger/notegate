@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::{Agent, AgentKey};
-use notegate_service::agents::{AgentStore, CreateAgent, CreateAgentKey};
-use notegate_service::identity::AgentAuthStore;
+use notegate_model::{CreateAgent, CreateAgentKey};
+
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -193,8 +193,8 @@ impl AgentRepo {
     }
 }
 
-impl AgentStore for AgentRepo {
-    async fn insert_agent(&self, command: &CreateAgent, created_by: Uuid) -> Result<Agent> {
+impl AgentRepo {
+    pub async fn insert_agent(&self, command: &CreateAgent, created_by: Uuid) -> Result<Agent> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         let creator_exists: Option<Uuid> = sqlx::query_scalar(
@@ -252,7 +252,7 @@ impl AgentStore for AgentRepo {
         Ok(Agent::from(row))
     }
 
-    async fn list_agents_by_creator(&self, creator_account_id: Uuid) -> Result<Vec<Agent>> {
+    pub async fn list_agents_by_creator(&self, creator_account_id: Uuid) -> Result<Vec<Agent>> {
         let rows = sqlx::query_as::<_, AgentRow>(&format!(
             "SELECT a.{cols} FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
@@ -267,7 +267,7 @@ impl AgentStore for AgentRepo {
         Ok(rows.into_iter().map(Agent::from).collect())
     }
 
-    async fn count_agents_by_creator(&self, creator_account_id: Uuid) -> Result<usize> {
+    pub async fn count_agents_by_creator(&self, creator_account_id: Uuid) -> Result<usize> {
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
@@ -280,7 +280,7 @@ impl AgentStore for AgentRepo {
         usize::try_from(count).map_err(|_error| Error::internal("negative agent count"))
     }
 
-    async fn find_active_agent_by_creator(
+    pub async fn find_active_agent_by_creator(
         &self,
         agent_id: Uuid,
         creator_account_id: Uuid,
@@ -300,7 +300,7 @@ impl AgentStore for AgentRepo {
         Ok(row.map(Agent::from))
     }
 
-    async fn insert_agent_key(
+    pub async fn insert_agent_key(
         &self,
         command: &CreateAgentKey,
         token_hash: &str,
@@ -361,7 +361,7 @@ impl AgentStore for AgentRepo {
         Ok(AgentKey::from(row))
     }
 
-    async fn count_live_keys(&self, agent_id: Uuid) -> Result<usize> {
+    pub async fn count_live_keys(&self, agent_id: Uuid) -> Result<usize> {
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM agent_keys \
              WHERE agent_id = $1 AND revoked_at IS NULL \
@@ -373,18 +373,13 @@ impl AgentStore for AgentRepo {
         .map_err(map_sqlx_error)?;
         usize::try_from(count).map_err(|_error| Error::internal("negative key count"))
     }
-
-    async fn delete_agent(&self, agent_id: Uuid, deleted_by: Uuid) -> Result<()> {
-        AgentRepo::delete_agent(self, agent_id, deleted_by).await
-    }
-
-    async fn revoke_key(&self, agent_id: Uuid, key_id: Uuid, revoked_by: Uuid) -> Result<()> {
-        AgentRepo::revoke_key(self, agent_id, key_id, revoked_by).await
-    }
 }
 
-impl AgentAuthStore for AgentRepo {
-    async fn find_agent_by_key_hash(&self, token_hash: &str) -> Result<Option<(Account, Agent)>> {
+impl AgentRepo {
+    pub async fn find_agent_by_key_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<(Account, Agent)>> {
         // Reject revoked, expired, and inactive credentials at the SQL layer so
         // a stale key never resolves to a caller.
         let agent_id: Option<Uuid> = sqlx::query(

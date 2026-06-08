@@ -2,7 +2,7 @@
 //!
 //! Depends on `notegate-core` and `notegate-model` only. It must NOT depend on
 //! any transport (axum/rmcp) or storage driver (sqlx) — those edges are guarded
-//! in CI. Each feature defines a `Store` trait that the `db` crate implements.
+//! in CI. Services use concrete Postgres repositories from the `db` crate.
 
 pub mod access;
 pub mod agents;

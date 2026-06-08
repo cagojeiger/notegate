@@ -1,6 +1,6 @@
 //! Database access: migrations and aggregate repositories.
 //!
-//! Repositories here implement the `notegate-service` store traits. Pool
+//! Repositories here expose concrete Postgres-backed persistence methods. Pool
 //! construction also lives here so Postgres infrastructure stays with the
 //! Postgres adapter. Queries use runtime-checked
 //! `query_as::<_, Row>()` / `query()` (not the `query!` macro) so a schema reset

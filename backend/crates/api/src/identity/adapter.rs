@@ -9,7 +9,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use notegate_model::{Caller, Channel};
-use notegate_service::identity::{AgentAuthStore, Resolver, UserStore};
+use notegate_service::identity::Resolver;
 
 pub use notegate_service::identity::{IdentityError, ResolveAttrs};
 
@@ -44,11 +44,7 @@ pub trait CallerResolver: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
 }
 
-impl<U, A> CallerResolver for Resolver<U, A>
-where
-    U: UserStore,
-    A: AgentAuthStore,
-{
+impl CallerResolver for Resolver {
     fn resolve_browser(
         &self,
         attrs: ResolveAttrs,

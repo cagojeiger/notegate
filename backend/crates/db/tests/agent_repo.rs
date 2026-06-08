@@ -16,9 +16,14 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_core::{Error, limits};
 use notegate_db::AgentRepo;
-use notegate_service::agents::{AgentStore, CreateAgent, CreateAgentKey, hash_token};
-use notegate_service::identity::AgentAuthStore;
+use notegate_model::{CreateAgent, CreateAgentKey};
+use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
+
+fn hash_token(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    format!("{digest:x}")
+}
 
 async fn make_agent(repo: &AgentRepo, creator: Uuid, name: &str) -> Uuid {
     repo.insert_agent(

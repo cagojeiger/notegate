@@ -12,12 +12,8 @@ use crate::files::{
 
 use super::view::document_view_at_path;
 use super::{FilesService, join_path, path_depth};
-use crate::files::FilesStore;
 
-impl<S> FilesService<S>
-where
-    S: FilesStore,
-{
+impl FilesService {
     /// Create a folder (`mkdir`). Requires `editor`.
     pub async fn create_folder(
         &self,

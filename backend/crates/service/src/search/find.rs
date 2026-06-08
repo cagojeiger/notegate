@@ -9,12 +9,9 @@ use crate::files::policy::FileCommand;
 use crate::files::validation;
 use crate::pagination::clamp_limit;
 
-use super::{FindCursor, FindPage, FindRequest, SearchService, SearchStore, validate_query};
+use super::{FindCursor, FindPage, FindRequest, SearchService, validate_query};
 
-impl<S> SearchService<S>
-where
-    S: SearchStore,
-{
+impl SearchService {
     /// Find nodes by name, optionally filtered by `kind` and scoped to a path's
     /// subtree. Keyset-paginated by `(name, id)`.
     ///

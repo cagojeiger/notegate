@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 notegate-core.workspace = true
 notegate-model.workspace = true
-notegate-service.workspace = true
 sqlx.workspace = true
 tracing.workspace = true
 uuid.workspace = true
@@ -16,6 +15,7 @@ chrono.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

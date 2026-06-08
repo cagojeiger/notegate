@@ -2,11 +2,11 @@
 //!
 //! Drives the full command lifecycle through `FilesService` over the real
 //! `FilesRepo` (so validation + SQL run end-to-end), plus search via the
-//! `SearchStore` queries directly.
+//! concrete repository search queries directly.
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
-//!  cargo test -p notegate-db --test files_lifecycle`
+//!  cargo test -p notegate-service --test files_lifecycle`
 
 #![allow(
     clippy::unwrap_used,
@@ -22,11 +22,11 @@ use notegate_core::Error;
 use notegate_db::{FilesRepo, WorkspaceRepo};
 use notegate_service::files::Edit;
 use notegate_service::files::{
-    ChildrenCursor, CreateDocument, CreateFolder, DeleteNode, FilesService, FilesStore, MoveNode,
+    ChildrenCursor, CreateDocument, CreateFolder, DeleteNode, FilesService, MoveNode,
     PatchDocument, ReadDocument, WriteDocument, WriteTarget,
 };
-use notegate_service::search::{FindCursor, SearchStore};
-use notegate_service::workspaces::{CreateWorkspace, WorkspaceStore};
+use notegate_service::search::FindCursor;
+use notegate_service::workspaces::CreateWorkspace;
 use uuid::Uuid;
 
 /// Create a workspace owned by `owner` and return `(workspace_id, root_id)`.
@@ -40,7 +40,8 @@ async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (U
         )
         .await
         .expect("create workspace");
-    let root = WorkspaceStore::root_node_id(ws_repo, ws.id)
+    let root = ws_repo
+        .root_node_id(ws.id)
         .await
         .expect("root id query")
         .expect("root id present");
@@ -266,7 +267,8 @@ async fn repo_soft_delete_root_is_conflict() -> Result<(), Box<dyn std::error::E
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let (ws, root) = setup_workspace(&ws_repo, owner, "rootguard").await;
 
-    let err = FilesStore::soft_delete_node(&repo, ws, root, owner)
+    let err = repo
+        .soft_delete_node(ws, root, owner)
         .await
         .expect_err("root delete must be rejected cleanly");
     assert!(
@@ -321,8 +323,7 @@ async fn keyset_pagination_is_stable() -> Result<(), Box<dyn std::error::Error>>
     let mut cursor: Option<ChildrenCursor> = None;
 
     loop {
-        let (rows, has_more) =
-            FilesStore::paged_children(&repo, ws, root, 100, cursor.as_ref()).await?;
+        let (rows, has_more) = repo.paged_children(ws, root, 100, cursor.as_ref()).await?;
         assert!(!rows.is_empty(), "each page returns at least one row");
         for node in &rows {
             // Strict monotonicity by name (names are unique here).
@@ -447,7 +448,7 @@ async fn repo_find_document(
     workspace_id: Uuid,
     node_id: Uuid,
 ) -> (notegate_model::Node, notegate_model::Document) {
-    FilesStore::find_document(repo, workspace_id, node_id)
+    repo.find_document(workspace_id, node_id)
         .await
         .expect("find_document query")
         .expect("document present")

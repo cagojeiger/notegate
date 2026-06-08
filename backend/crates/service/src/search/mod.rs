@@ -5,14 +5,12 @@
 //! [`find`] and [`grep`] submodules; shared types, the store trait, the role
 //! gate, and query validation live here.
 
-use std::future::Future;
-
-use notegate_core::Result as CoreResult;
 use notegate_core::limits;
+use notegate_db::FilesRepo;
+use notegate_model::Role;
 pub use notegate_model::search::{
     FindCursor, FindPage, FindRequest, GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest,
 };
-use notegate_model::{Node, NodeKind, Role};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -21,53 +19,15 @@ use crate::files::policy::{self, FileCommand};
 mod find;
 mod grep;
 
-/// Persistence for search queries.
-pub trait SearchStore: Clone + Send + Sync + 'static {
-    /// The caller's live role in a workspace, or `None` if no live grant. Used to
-    /// authorize search the same way file commands are (no role ⇒ `404`).
-    fn role_for(
-        &self,
-        workspace_id: Uuid,
-        account_id: Uuid,
-    ) -> impl Future<Output = CoreResult<Option<Role>>> + Send;
-
-    /// Find nodes by name within a workspace (keyset). Each row carries the
-    /// node, its derived display path, and whether it has any live children, so
-    /// the service can assemble a [`NodeView`] without an extra per-row query.
-    fn find_nodes(
-        &self,
-        workspace_id: Uuid,
-        q: &str,
-        scope: Option<&str>,
-        kind: Option<NodeKind>,
-        limit: i64,
-        cursor: Option<&FindCursor>,
-    ) -> impl Future<Output = CoreResult<Vec<(Node, String, bool)>>> + Send;
-
-    /// Fetch grep candidate documents (content match + scope), keyset by
-    /// `(updated_at, node_id)`.
-    fn grep_candidates(
-        &self,
-        workspace_id: Uuid,
-        q: &str,
-        scope: Option<&str>,
-        limit: i64,
-        cursor: Option<&GrepCursor>,
-    ) -> impl Future<Output = CoreResult<Vec<GrepCandidate>>> + Send;
-}
-
 /// Search service. The `find`/`grep` query methods are implemented in the
 /// [`find`] and [`grep`] submodules.
 #[derive(Debug, Clone)]
-pub struct SearchService<S> {
-    store: S,
+pub struct SearchService {
+    store: FilesRepo,
 }
 
-impl<S> SearchService<S>
-where
-    S: SearchStore,
-{
-    pub fn new(store: S) -> Self {
+impl SearchService {
+    pub fn new(store: FilesRepo) -> Self {
         Self { store }
     }
 

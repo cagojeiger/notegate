@@ -2,14 +2,11 @@ use notegate_model::{Document, Node, NodeKind};
 use uuid::Uuid;
 
 use crate::error::ServiceResult;
-use crate::files::{DocumentStats, DocumentView, FilesStore, NodeView};
+use crate::files::{DocumentStats, DocumentView, NodeView};
 
 use super::FilesService;
 
-impl<S> FilesService<S>
-where
-    S: FilesStore,
-{
+impl FilesService {
     /// Build a [`NodeView`] for an existing node (derives path + has_children).
     pub(super) async fn node_view(
         &self,
@@ -45,7 +42,7 @@ where
     }
 
     /// Build a document node view from an already-loaded document, avoiding an
-    /// extra metrics lookup through [`FilesStore::document_stats`].
+    /// extra metrics lookup through `document_stats`.
     pub(super) async fn document_node_view(
         &self,
         workspace_id: Uuid,

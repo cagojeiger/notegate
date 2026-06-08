@@ -11,12 +11,8 @@ use crate::files::{
 };
 
 use super::{FilesService, join_path};
-use crate::files::FilesStore;
 
-impl<S> FilesService<S>
-where
-    S: FilesStore,
-{
+impl FilesService {
     /// The workspace root node, as a view. Requires `viewer`.
     pub async fn root(
         &self,

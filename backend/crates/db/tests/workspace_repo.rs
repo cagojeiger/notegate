@@ -17,8 +17,7 @@ use common::{TestDb, deactivate_account, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{AccessRepo, WorkspaceRepo};
 use notegate_model::Role;
-use notegate_service::access::{AccessStore, GrantAccess};
-use notegate_service::workspaces::{CreateWorkspace, WorkspaceStore};
+use notegate_model::{CreateWorkspace, GrantAccess};
 use uuid::Uuid;
 
 async fn make_workspace(repo: &WorkspaceRepo, owner: Uuid, name: &str) -> Uuid {
@@ -87,7 +86,7 @@ async fn create_makes_single_root_node_with_creator_attribution()
     assert_eq!(updated_by, owner, "root updated_by must be the creator");
 
     // The derived root id is reachable through the store helper.
-    let root_id = WorkspaceStore::root_node_id(&repo, workspace_id).await?;
+    let root_id = repo.root_node_id(workspace_id).await?;
     assert!(root_id.is_some());
 
     db.cleanup().await;
@@ -105,12 +104,12 @@ async fn creator_is_auto_granted_owner() -> Result<(), Box<dyn std::error::Error
 
     let workspace_id = make_workspace(&repo, owner, "personal").await;
 
-    let role = WorkspaceStore::role_for(&repo, workspace_id, owner).await?;
+    let role = repo.role_for(workspace_id, owner).await?;
     assert_eq!(role, Some(Role::Owner));
 
     // A non-member resolves to no role (treated as 404 by the service layer).
     let stranger = insert_user_account(&db.pool, "stranger", "s@example.test").await?;
-    let none = WorkspaceStore::role_for(&repo, workspace_id, stranger).await?;
+    let none = repo.role_for(workspace_id, stranger).await?;
     assert_eq!(none, None);
 
     db.cleanup().await;
@@ -234,7 +233,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         )
         .await?;
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, member).await?,
+        access_repo.role_for(workspace_id, member).await?,
         Some(Role::Viewer)
     );
 
@@ -249,7 +248,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         )
         .await?;
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, member).await?,
+        access_repo.role_for(workspace_id, member).await?,
         Some(Role::Editor)
     );
 
@@ -261,10 +260,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
     access_repo
         .revoke_access(workspace_id, member, owner)
         .await?;
-    assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, member).await?,
-        None
-    );
+    assert_eq!(access_repo.role_for(workspace_id, member).await?, None);
     let live_after = access_repo.list_access(workspace_id).await?;
     assert_eq!(live_after.len(), 1, "revoked grant must not be listed");
 
@@ -280,7 +276,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         )
         .await?;
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, member).await?,
+        access_repo.role_for(workspace_id, member).await?,
         Some(Role::Viewer)
     );
 
@@ -337,7 +333,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         )
         .await?;
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, member).await?,
+        access_repo.role_for(workspace_id, member).await?,
         Some(Role::Editor),
         "re-grant of an existing active account is allowed at the cap"
     );
@@ -409,12 +405,12 @@ async fn inactive_accounts_are_not_live_access() -> Result<(), Box<dyn std::erro
     deactivate_account(&db.pool, inactive, owner).await?;
 
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, inactive).await?,
+        access_repo.role_for(workspace_id, inactive).await?,
         None,
         "inactive account is not a live access grant"
     );
     assert_eq!(
-        WorkspaceStore::role_for(&repo, workspace_id, inactive).await?,
+        repo.role_for(workspace_id, inactive).await?,
         None,
         "workspace role lookup must also ignore inactive accounts"
     );
@@ -431,7 +427,7 @@ async fn inactive_accounts_are_not_live_access() -> Result<(), Box<dyn std::erro
         "access list includes only active non-revoked accounts"
     );
     assert_eq!(
-        WorkspaceStore::list_workspace_views_for(&repo, inactive, 100, None)
+        repo.list_workspace_views_for(inactive, 100, None)
             .await?
             .len(),
         0,
@@ -495,7 +491,7 @@ async fn agent_account_can_receive_editor_but_not_owner() -> Result<(), Box<dyn 
         )
         .await?;
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, agent).await?,
+        access_repo.role_for(workspace_id, agent).await?,
         Some(Role::Editor)
     );
 
@@ -515,7 +511,7 @@ async fn agent_account_can_receive_editor_but_not_owner() -> Result<(), Box<dyn 
         matches!(err, Error::Validation(message) if message == "agent accounts cannot receive workspace owner role")
     );
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, agent).await?,
+        access_repo.role_for(workspace_id, agent).await?,
         Some(Role::Editor),
         "rejected owner grant must leave the previous role unchanged"
     );
@@ -550,7 +546,7 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
         "demoting the only owner must be rejected as conflict"
     );
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
+        access_repo.role_for(workspace_id, owner).await?,
         Some(Role::Owner),
         "rejected demotion must leave the owner role intact"
     );
@@ -561,7 +557,7 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
         "revoking the only owner must be rejected as conflict"
     );
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
+        access_repo.role_for(workspace_id, owner).await?,
         Some(Role::Owner),
         "rejected revoke must leave the owner role intact"
     );
@@ -581,12 +577,12 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
         .revoke_access(workspace_id, owner, second_owner)
         .await?;
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
+        access_repo.role_for(workspace_id, owner).await?,
         None,
         "one owner can be revoked while another owner remains"
     );
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, second_owner).await?,
+        access_repo.role_for(workspace_id, second_owner).await?,
         Some(Role::Owner)
     );
 
@@ -632,7 +628,7 @@ async fn last_owner_guard_counts_only_active_owners() -> Result<(), Box<dyn std:
         "inactive owner row must not satisfy the last-owner guard"
     );
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
+        access_repo.role_for(workspace_id, owner).await?,
         Some(Role::Owner)
     );
 
@@ -679,7 +675,7 @@ async fn last_owner_guard_ignores_agent_owner_rows() -> Result<(), Box<dyn std::
         "agent owner rows must not satisfy the user-owner guard"
     );
     assert_eq!(
-        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
+        access_repo.role_for(workspace_id, owner).await?,
         Some(Role::Owner)
     );
 
@@ -744,11 +740,7 @@ async fn rename_and_delete_workspace() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(renamed.name, "after");
 
     repo.delete_workspace(workspace_id).await?;
-    assert!(
-        WorkspaceStore::find_workspace(&repo, workspace_id)
-            .await?
-            .is_none()
-    );
+    assert!(repo.find_workspace(workspace_id).await?.is_none());
 
     let missing = repo.delete_workspace(Uuid::new_v4()).await;
     assert!(
@@ -783,13 +775,11 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
 
     // Owner sees both; member sees none yet.
     assert_eq!(
-        WorkspaceStore::list_workspace_views_for(&repo, owner, 100, None)
-            .await?
-            .len(),
+        repo.list_workspace_views_for(owner, 100, None).await?.len(),
         2
     );
     assert_eq!(
-        WorkspaceStore::list_workspace_views_for(&repo, member, 100, None)
+        repo.list_workspace_views_for(member, 100, None)
             .await?
             .len(),
         0
@@ -807,7 +797,7 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
         )
         .await?;
     assert_eq!(
-        WorkspaceStore::list_workspace_views_for(&repo, member, 100, None)
+        repo.list_workspace_views_for(member, 100, None)
             .await?
             .len(),
         1
@@ -815,7 +805,7 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
 
     access_repo.revoke_access(ws1, member, owner).await?;
     assert_eq!(
-        WorkspaceStore::list_workspace_views_for(&repo, member, 100, None)
+        repo.list_workspace_views_for(member, 100, None)
             .await?
             .len(),
         0,

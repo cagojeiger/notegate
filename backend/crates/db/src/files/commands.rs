@@ -260,8 +260,8 @@ pub mod create {
 
     use notegate_core::limits::{self, Limits};
     use notegate_core::{Error, Result};
+    use notegate_model::files::StoredContent;
     use notegate_model::{Document, Node};
-    use notegate_service::files::StoredContent;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -606,8 +606,8 @@ pub mod save {
 
     use notegate_core::limits::Limits;
     use notegate_core::{Error, Result};
+    use notegate_model::files::StoredContent;
     use notegate_model::{Document, Node};
-    use notegate_service::files::StoredContent;
     use sqlx::PgPool;
     use uuid::Uuid;
 

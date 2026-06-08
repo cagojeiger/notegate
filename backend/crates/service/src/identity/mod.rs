@@ -12,12 +12,10 @@
 //! - an agent key resolves a `kind='agent'` account, rejecting revoked, expired,
 //!   or inactive credentials (enforced at the db layer).
 
-use std::future::Future;
-
-use notegate_core::Result as CoreResult;
+use notegate_db::{AccountRepo, AgentRepo};
 pub use notegate_model::ResolveAttrs;
 use notegate_model::account::AccountKind;
-use notegate_model::{Account, Agent, Caller, CallerIdentity, Channel, User};
+use notegate_model::{Account, Caller, CallerIdentity, Channel, User};
 
 /// Why caller resolution failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -39,54 +37,15 @@ impl From<notegate_core::Error> for IdentityError {
     }
 }
 
-/// Persistence for the common `accounts` table.
-pub trait AccountStore: Clone + Send + Sync + 'static {
-    /// Load an account by id.
-    fn find_account(
-        &self,
-        id: uuid::Uuid,
-    ) -> impl Future<Output = CoreResult<Option<Account>>> + Send;
-}
-
-/// Persistence for user-account OAuth detail.
-pub trait UserStore: Clone + Send + Sync + 'static {
-    /// Create the account+user pair for a new `sub`, or return the existing one
-    /// (reactivated, with a refreshed display name).
-    fn upsert_user_by_sub(
-        &self,
-        attrs: &ResolveAttrs,
-    ) -> impl Future<Output = CoreResult<(Account, User)>> + Send;
-
-    /// Load the account+user pair for a `sub`, if registered.
-    fn find_user_by_sub(
-        &self,
-        sub: &str,
-    ) -> impl Future<Output = CoreResult<Option<(Account, User)>>> + Send;
-}
-
-/// Persistence for agent authentication by key hash.
-pub trait AgentAuthStore: Clone + Send + Sync + 'static {
-    /// Resolve an agent account from a key token hash, honoring revocation,
-    /// expiry, and account state. Returns `None` when no live key matches.
-    fn find_agent_by_key_hash(
-        &self,
-        token_hash: &str,
-    ) -> impl Future<Output = CoreResult<Option<(Account, Agent)>>> + Send;
-}
-
 /// Resolves verified credentials into an authenticated [`Caller`].
 #[derive(Debug, Clone)]
-pub struct Resolver<U, A> {
-    users: U,
-    agents: A,
+pub struct Resolver {
+    users: AccountRepo,
+    agents: AgentRepo,
 }
 
-impl<U, A> Resolver<U, A>
-where
-    U: UserStore,
-    A: AgentAuthStore,
-{
-    pub fn new(users: U, agents: A) -> Self {
+impl Resolver {
+    pub fn new(users: AccountRepo, agents: AgentRepo) -> Self {
         Self { users, agents }
     }
 

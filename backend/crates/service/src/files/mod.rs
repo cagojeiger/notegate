@@ -1,16 +1,15 @@
 //! File-tree feature: command inputs, output views, validation, the role gate,
-//! the patch engine, and the [`FilesService`] over a [`FilesStore`].
+//! the patch engine, and the [`FilesService`].
 //!
 //! Command semantics follow the shared file-command spec
 //! (`docs/spec/files-commands.md`) and are exposed through REST/MCP-specific
 //! contracts. The service is pure logic plus the store/authorization trait; the
-//! `db` crate implements [`FilesStore`]. Paths are derived from parent links —
+//! Paths are derived from parent links —
 //! never stored.
 
 pub mod content;
 pub mod patch;
 pub mod policy;
-pub mod store;
 pub mod target;
 pub mod types;
 pub mod validation;
@@ -22,7 +21,6 @@ mod view;
 pub use content::{Metrics, compute as content_metrics};
 pub use patch::{PatchError, apply_edits};
 pub use policy::{FileCommand, require as require_role};
-pub use store::FilesStore;
 pub use target::{Target, parse_target};
 pub use types::{
     ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
@@ -34,9 +32,8 @@ pub use types::{
 };
 pub use validation::FilesValidationError;
 
-#[cfg(test)]
-use notegate_core::limits;
 use notegate_core::limits::Limits;
+use notegate_db::FilesRepo;
 use notegate_model::{Document, Node, NodeKind, Role};
 use uuid::Uuid;
 
@@ -47,7 +44,7 @@ use crate::error::{ServiceError, ServiceResult};
 ///
 /// Every command takes `(caller_account_id, workspace_id, ...)`. The service:
 ///
-/// 1. Resolves the caller's live [`Role`] via [`FilesStore::role_for`] FIRST. No
+/// 1. Resolves the caller's live [`Role`] through the repository role lookup FIRST. No
 ///    live role ⇒ not-found (`404`, hides the workspace); an insufficient role ⇒
 ///    forbidden (`403`, via [`policy::require`]).
 /// 2. Validates input format (name, `.md`, depth, path length, document size)
@@ -61,28 +58,22 @@ use crate::error::{ServiceError, ServiceResult};
 /// Paths are never stored on a node — the display path is derived from parents;
 /// `move`/`rename` change only the moved node's `parent_id`/`name`.
 #[derive(Debug, Clone)]
-pub struct FilesService<S> {
-    store: S,
+pub struct FilesService {
+    store: FilesRepo,
     limits: Limits,
 }
 
-impl<S> FilesService<S>
-where
-    S: FilesStore,
-{
-    pub fn new(store: S) -> Self {
+impl FilesService {
+    pub fn new(store: FilesRepo) -> Self {
         Self::with_limits(store, Limits::default())
     }
 
-    pub fn with_limits(store: S, limits: Limits) -> Self {
+    pub fn with_limits(store: FilesRepo, limits: Limits) -> Self {
         Self { store, limits }
     }
 }
 
-impl<S> FilesService<S>
-where
-    S: FilesStore,
-{
+impl FilesService {
     // --- internal helpers ---
 
     /// Resolve the caller's role (no role ⇒ 404) and gate by command (lesser
@@ -202,6 +193,3 @@ pub(super) fn path_depth(path: &str) -> usize {
         .filter(|segment| !segment.is_empty())
         .count()
 }
-
-#[cfg(test)]
-mod tests;

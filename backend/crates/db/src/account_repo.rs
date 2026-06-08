@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
+use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
-use notegate_service::identity::{AccountStore, ResolveAttrs, UserStore};
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -170,8 +170,8 @@ impl AccountRepo {
     }
 }
 
-impl AccountStore for AccountRepo {
-    async fn find_account(&self, id: Uuid) -> Result<Option<Account>> {
+impl AccountRepo {
+    pub async fn find_account(&self, id: Uuid) -> Result<Option<Account>> {
         let row = sqlx::query_as::<_, AccountRow>(&format!(
             "SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE id = $1"
         ))
@@ -184,8 +184,8 @@ impl AccountStore for AccountRepo {
     }
 }
 
-impl UserStore for AccountRepo {
-    async fn upsert_user_by_sub(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
+impl AccountRepo {
+    pub async fn upsert_user_by_sub(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         // Serialize self-registration for the same external subject. Without
@@ -272,7 +272,7 @@ impl UserStore for AccountRepo {
         Ok((account_row.into_account()?, User::from(user_row)))
     }
 
-    async fn find_user_by_sub(&self, sub: &str) -> Result<Option<(Account, User)>> {
+    pub async fn find_user_by_sub(&self, sub: &str) -> Result<Option<(Account, User)>> {
         let user_row = sqlx::query_as::<_, UserRow>(&format!(
             "SELECT {USER_COLUMNS} FROM users WHERE sub = $1"
         ))

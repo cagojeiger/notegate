@@ -11,14 +11,10 @@ use crate::files::validation;
 use crate::pagination::clamp_limit;
 
 use super::{
-    GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest, SearchService, SearchStore,
-    validate_query,
+    GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest, SearchService, validate_query,
 };
 
-impl<S> SearchService<S>
-where
-    S: SearchStore,
-{
+impl SearchService {
     /// Grep document content: fetch candidate documents (content match + scope),
     /// then split each candidate's content into lines here in the service so a
     /// match carries its 1-based `line_no` and `context` lines before/after.

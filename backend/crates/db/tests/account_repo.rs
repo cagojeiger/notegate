@@ -15,7 +15,7 @@ mod common;
 
 use common::TestDb;
 use notegate_db::AccountRepo;
-use notegate_service::identity::{AccountStore, ResolveAttrs, UserStore};
+use notegate_model::ResolveAttrs;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
     ResolveAttrs {

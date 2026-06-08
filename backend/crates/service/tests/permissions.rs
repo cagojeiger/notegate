@@ -21,7 +21,7 @@
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
-//!  cargo test -p notegate-db --test permissions`
+//!  cargo test -p notegate-service --test permissions`
 
 #![allow(
     clippy::unwrap_used,
@@ -44,7 +44,7 @@ use notegate_service::files::{
     WriteDocument, WriteTarget,
 };
 use notegate_service::search::{FindRequest, GrepRequest, SearchService};
-use notegate_service::workspaces::{CreateWorkspace, WorkspaceStore};
+use notegate_service::workspaces::CreateWorkspace;
 use uuid::Uuid;
 
 /// Assert a result is `Forbidden` (403).
@@ -66,9 +66,9 @@ fn assert_not_found<T: std::fmt::Debug>(result: Result<T, ServiceError>, what: &
 /// A fixture: an owner with a workspace containing one folder and one document,
 /// plus a viewer and an editor account already granted access.
 struct Fixture {
-    files: FilesService<FilesRepo>,
-    search: SearchService<FilesRepo>,
-    access: AccessService<AccessRepo>,
+    files: FilesService,
+    search: SearchService,
+    access: AccessService,
     workspace_id: Uuid,
     root_id: Uuid,
     folder_id: Uuid,
@@ -100,9 +100,7 @@ async fn setup(db: &TestDb) -> Result<Fixture, Box<dyn std::error::Error>> {
         )
         .await?;
     let workspace_id = ws.id;
-    let root_id = WorkspaceStore::root_node_id(&ws_repo, workspace_id)
-        .await?
-        .expect("root id");
+    let root_id = ws_repo.root_node_id(workspace_id).await?.expect("root id");
 
     // Owner seeds a folder and a document (owner is editor+).
     let folder = files
@@ -164,7 +162,8 @@ async fn setup(db: &TestDb) -> Result<Fixture, Box<dyn std::error::Error>> {
         )
         .await?;
     let other_workspace_id = other.id;
-    let other_root = WorkspaceStore::root_node_id(&ws_repo, other_workspace_id)
+    let other_root = ws_repo
+        .root_node_id(other_workspace_id)
         .await?
         .expect("other root id");
     let other_folder = files

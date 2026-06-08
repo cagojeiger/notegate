@@ -6,7 +6,7 @@
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
-//!  cargo test -p notegate-db --test search`
+//!  cargo test -p notegate-service --test search`
 
 #![allow(
     clippy::unwrap_used,
@@ -23,7 +23,7 @@ use notegate_service::files::{
     CreateDocument, CreateFolder, FilesService, WriteDocument, WriteTarget,
 };
 use notegate_service::search::{FindRequest, GrepRequest, SearchService};
-use notegate_service::workspaces::{CreateWorkspace, WorkspaceStore};
+use notegate_service::workspaces::CreateWorkspace;
 use uuid::Uuid;
 
 /// Create a workspace owned by `owner` and return `(workspace_id, root_id)`.
@@ -37,7 +37,8 @@ async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (U
         )
         .await
         .expect("create workspace");
-    let root = WorkspaceStore::root_node_id(ws_repo, ws.id)
+    let root = ws_repo
+        .root_node_id(ws.id)
         .await
         .expect("root id query")
         .expect("root id present");
@@ -45,26 +46,14 @@ async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (U
 }
 
 /// Build the trio of services/repos used by every test.
-fn services(
-    db: &TestDb,
-) -> (
-    WorkspaceRepo,
-    FilesService<FilesRepo>,
-    SearchService<FilesRepo>,
-) {
+fn services(db: &TestDb) -> (WorkspaceRepo, FilesService, SearchService) {
     let ws_repo = WorkspaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
     let search = SearchService::new(FilesRepo::new(db.pool.clone()));
     (ws_repo, files, search)
 }
 
-async fn mkdir(
-    files: &FilesService<FilesRepo>,
-    owner: Uuid,
-    ws: Uuid,
-    parent: Uuid,
-    name: &str,
-) -> Uuid {
+async fn mkdir(files: &FilesService, owner: Uuid, ws: Uuid, parent: Uuid, name: &str) -> Uuid {
     files
         .create_folder(
             owner,
@@ -81,7 +70,7 @@ async fn mkdir(
 }
 
 async fn write_doc(
-    files: &FilesService<FilesRepo>,
+    files: &FilesService,
     owner: Uuid,
     ws: Uuid,
     parent: Uuid,

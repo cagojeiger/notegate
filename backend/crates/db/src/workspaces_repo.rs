@@ -7,10 +7,8 @@
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
+use notegate_model::{CreateWorkspace, WorkspaceCursor, WorkspaceView};
 use notegate_model::{Role, Workspace};
-use notegate_service::workspaces::{
-    CreateWorkspace, WorkspaceCursor, WorkspaceStore, WorkspaceView,
-};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -91,12 +89,12 @@ const WORKSPACE_VIEW_SELECT: &str = "SELECT w.id, w.owner_account_id, w.name, w.
                                           AND root.parent_id IS NULL \
                                           AND root.deleted_at IS NULL";
 
-impl WorkspaceStore for WorkspaceRepo {
-    async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
+impl WorkspaceRepo {
+    pub async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
         live_role(&self.pool, workspace_id, account_id).await
     }
 
-    async fn create_workspace(
+    pub async fn create_workspace(
         &self,
         owner_account_id: Uuid,
         command: &CreateWorkspace,
@@ -162,7 +160,7 @@ impl WorkspaceStore for WorkspaceRepo {
         Ok(Workspace::from(row))
     }
 
-    async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>> {
+    pub async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>> {
         let row = sqlx::query_as::<_, WorkspaceRow>(&format!(
             "SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE id = $1"
         ))
@@ -173,7 +171,7 @@ impl WorkspaceStore for WorkspaceRepo {
         Ok(row.map(Workspace::from))
     }
 
-    async fn find_workspace_view_for(
+    pub async fn find_workspace_view_for(
         &self,
         account_id: Uuid,
         workspace_id: Uuid,
@@ -191,7 +189,7 @@ impl WorkspaceStore for WorkspaceRepo {
         row.map(WorkspaceViewRow::into_view).transpose()
     }
 
-    async fn list_workspace_views_by_name_for(
+    pub async fn list_workspace_views_by_name_for(
         &self,
         account_id: Uuid,
         name: &str,
@@ -212,7 +210,7 @@ impl WorkspaceStore for WorkspaceRepo {
         rows.into_iter().map(WorkspaceViewRow::into_view).collect()
     }
 
-    async fn list_workspace_views_for(
+    pub async fn list_workspace_views_for(
         &self,
         account_id: Uuid,
         limit: i64,
@@ -252,7 +250,7 @@ impl WorkspaceStore for WorkspaceRepo {
         rows.into_iter().map(WorkspaceViewRow::into_view).collect()
     }
 
-    async fn rename_workspace(&self, workspace_id: Uuid, new_name: &str) -> Result<Workspace> {
+    pub async fn rename_workspace(&self, workspace_id: Uuid, new_name: &str) -> Result<Workspace> {
         let row = sqlx::query_as::<_, WorkspaceRow>(&format!(
             "UPDATE workspaces SET name = $2, updated_at = now() \
              WHERE id = $1 RETURNING {WORKSPACE_COLUMNS}"
@@ -266,7 +264,7 @@ impl WorkspaceStore for WorkspaceRepo {
         Ok(Workspace::from(row))
     }
 
-    async fn delete_workspace(&self, workspace_id: Uuid) -> Result<()> {
+    pub async fn delete_workspace(&self, workspace_id: Uuid) -> Result<()> {
         // ON DELETE CASCADE removes workspace_access, nodes, and documents.
         let result = sqlx::query("DELETE FROM workspaces WHERE id = $1")
             .bind(workspace_id)
@@ -279,7 +277,7 @@ impl WorkspaceStore for WorkspaceRepo {
         Ok(())
     }
 
-    async fn root_node_id(&self, workspace_id: Uuid) -> Result<Option<Uuid>> {
+    pub async fn root_node_id(&self, workspace_id: Uuid) -> Result<Option<Uuid>> {
         let id: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
         )

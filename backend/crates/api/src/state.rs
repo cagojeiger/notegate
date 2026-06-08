@@ -16,15 +16,15 @@ use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 
 /// Workspace lifecycle service over the db-backed [`WorkspaceRepo`].
-pub type Workspaces = WorkspaceService<WorkspaceRepo>;
+pub type Workspaces = WorkspaceService;
 /// Access-management service over the db-backed [`AccessRepo`].
-pub type Access = AccessService<AccessRepo>;
+pub type Access = AccessService;
 /// Agent lifecycle service over the db-backed [`AgentRepo`].
-pub type Agents = AgentService<AgentRepo>;
+pub type Agents = AgentService;
 /// File-tree command service over the db-backed [`FilesRepo`].
-pub type Files = FilesService<FilesRepo>;
+pub type Files = FilesService;
 /// Search service over the db-backed [`FilesRepo`].
-pub type Search = SearchService<FilesRepo>;
+pub type Search = SearchService;
 
 #[derive(Clone)]
 pub struct AppState {

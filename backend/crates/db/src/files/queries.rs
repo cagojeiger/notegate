@@ -4,8 +4,8 @@ pub mod document {
     //! document count / total byte sum used by the in-tx capacity checks.
 
     use notegate_core::Result;
+    use notegate_model::files::DocumentStats;
     use notegate_model::{Document, Node};
-    use notegate_service::files::DocumentStats;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -123,8 +123,7 @@ pub mod node {
 
     /// The caller's live workspace role, or `None` if no non-revoked grant from an
     /// active account exists.
-    /// Shared by the [`FilesStore`](notegate_service::files::FilesStore) and
-    /// [`SearchStore`](notegate_service::search::SearchStore) authorization paths.
+    /// Shared by the file and search authorization authorization paths.
     pub async fn role_for(
         pool: &PgPool,
         workspace_id: Uuid,
@@ -457,7 +456,7 @@ pub mod search {
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{NODE_COLUMNS, NodeRow};
-    use notegate_service::search::{FindCursor, GrepCandidate, GrepCursor};
+    use notegate_model::search::{FindCursor, GrepCandidate, GrepCursor};
 
     /// The recursive CTE that derives every live node's absolute path top-down.
     /// Yields `(id, path)` where the root is `/` and a child is `parent || '/' ||
