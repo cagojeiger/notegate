@@ -68,7 +68,8 @@ MCP        /mcp
 
 ## Implementation layers
 
-구현도 API category와 같은 방향으로 나눈다.
+구현은 아래 방향의 의존성으로 나눈다. 핵심 규칙은 `api`가 업무 규칙을 직접 구현하지
+않고 `service`를 호출하며, `db`는 `service`가 정의한 store port를 구현한다는 점이다.
 
 ```text
 api/auth
@@ -81,13 +82,6 @@ api/rest/access
 api/rest/agents
 api/mcp
 
-model/account
-model/user
-model/agent
-model/workspace
-model/node
-model/document
-
 service/identity
 service/workspaces
 service/files
@@ -95,22 +89,42 @@ service/search
 service/access
 service/agents
 
-db/account_repo
-db/workspaces
-db/access
-db/files_repo
-db/agent_repo
-db/postgres_pool
+db/account_repo       -> service/identity account/user store, REST account ref lookup
+db/workspaces         -> service/workspaces store
+db/access             -> service/access store
+db/files_repo         -> service/files + service/search store
+db/agent_repo         -> service/agents store, service/identity agent auth store
+db/postgres_pool      -> connection/migration/readiness primitive
+
+model/account
+model/user
+model/agent
+model/workspace
+model/node
+model/document
+```
+
+의존성 방향:
+
+```text
+api  ──calls──> service ──uses──> model/core
+ │                ▲
+ │                │ implements service store ports
+ └──constructs──> db ─────uses──> model/core
 ```
 
 레이어 규칙:
 
 - Auth layer는 OAuth redirect/callback/session 발급과 bearer challenge metadata를 담당한다.
-- API layer는 HTTP/MCP DTO, auth extraction, error mapping만 담당한다.
+- API layer는 HTTP/MCP DTO, auth extraction, service 호출, error mapping을 담당한다.
+- API layer는 파일/권한/workspace 업무 규칙을 직접 구현하지 않는다.
+- REST 응답에 표시할 account ref처럼 화면 출력용 enrichment는 API layer에서 조회할 수 있다.
+  단, 권한 판단이나 lifecycle 변경은 service layer를 거친다.
+- System endpoint(`/ready`)는 dependency readiness 확인을 위해 DB ping을 직접 수행할 수 있다.
 - Model layer는 persistence/API에 독립적인 데이터 타입을 담당한다.
 - Service layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
 - Service layer는 opaque pagination cursor 인코딩/디코딩과 command pagination 정책을 담당한다.
-- DB layer는 query/transaction/keyset tuple 조회를 담당한다.
+- DB layer는 query/transaction/keyset tuple 조회와 service store port 구현을 담당한다.
 
 ## 문서 구성
 

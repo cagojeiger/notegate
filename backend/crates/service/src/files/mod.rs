@@ -1,9 +1,11 @@
 //! File-tree feature: command inputs, output views, validation, the role gate,
 //! the patch engine, and the [`FilesService`] over a [`FilesStore`].
 //!
-//! Command semantics follow `docs/spec/files-commands.md`. The service is pure
-//! logic plus the store/authorization trait; the `db` crate implements
-//! [`FilesStore`]. Paths are derived from parent links — never stored.
+//! Command semantics follow the shared file-command spec
+//! (`docs/spec/files-commands.md`) and are exposed through REST/MCP-specific
+//! contracts. The service is pure logic plus the store/authorization trait; the
+//! `db` crate implements [`FilesStore`]. Paths are derived from parent links —
+//! never stored.
 
 pub mod content;
 pub mod input;
