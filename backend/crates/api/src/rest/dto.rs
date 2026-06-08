@@ -1,7 +1,7 @@
 //! Shared REST data-transfer objects and the mappers from service/model types.
 //!
-//! These mirror the exact JSON shapes in `docs/spec/rest/README.md` (Page,
-//! AccountRef, Workspace output, Node output, Document output). The api layer
+//! These mirror the exact JSON shapes in `docs/spec/rest/README.md`
+//! (AccountRef, Workspace output, Node output, Document output). The api layer
 //! owns these so the `model`/`service` types stay transport-free; mapping here is
 //! thin (no domain logic).
 
@@ -15,16 +15,6 @@ use uuid::Uuid;
 use notegate_model::{AccountRef as ModelAccountRef, NodeKind, Role};
 use notegate_service::files::NodeView;
 use notegate_service::workspaces::WorkspaceView;
-
-/// Pagination metadata returned by every list/search response.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct Page {
-    pub limit: i64,
-    pub returned: i64,
-    pub has_more: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-}
 
 /// A lightweight account reference: `{id, kind, display_name}`.
 #[derive(Debug, Clone, Serialize, ToSchema)]

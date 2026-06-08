@@ -12,7 +12,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{NodeOut, Page, attribution_ids, parse_kind};
+use crate::page::Page;
+use crate::rest::dto::{NodeOut, attribution_ids, parse_kind};
 use crate::state::AppState;
 
 use notegate_service::search::{FindRequest, GrepRequest};
@@ -88,12 +89,12 @@ pub(crate) async fn find(
 
     Ok(Json(FindResponse {
         items,
-        page: Page {
-            limit: page.limit,
-            returned: page.items.len() as i64,
-            has_more: page.has_more,
-            next_cursor: page.next_cursor,
-        },
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 
@@ -169,14 +170,8 @@ pub(crate) async fn grep(
         })
         .collect();
 
-    let returned = matches.len() as i64;
     Ok(Json(GrepResponse {
+        page: Page::new(page.limit, matches.len(), page.has_more, page.next_cursor),
         matches,
-        page: Page {
-            limit: page.limit,
-            returned,
-            has_more: page.has_more,
-            next_cursor: page.next_cursor,
-        },
     }))
 }

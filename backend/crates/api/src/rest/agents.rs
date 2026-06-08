@@ -20,7 +20,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::Page;
+use crate::page::Page;
 use crate::state::AppState;
 
 use notegate_service::agents::{CreateAgent, CreateAgentKey, ListAgents};
@@ -119,12 +119,12 @@ pub(crate) async fn list(
     let agents = page.items.iter().map(AgentOut::from).collect();
     Ok(Json(ListResponse {
         agents,
-        page: Page {
-            limit: page.limit,
-            returned: page.items.len() as i64,
-            has_more: page.has_more,
-            next_cursor: page.next_cursor,
-        },
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 

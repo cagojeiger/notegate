@@ -17,7 +17,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{NodeOut, NodeRef, Page, attribution_ids, parse_kind};
+use crate::page::Page;
+use crate::rest::dto::{NodeOut, NodeRef, attribution_ids, parse_kind};
 use crate::state::AppState;
 
 use notegate_service::files::{
@@ -155,12 +156,12 @@ pub(crate) async fn children(
     Ok(Json(ChildrenResponse {
         parent: NodeRef::from(&page.parent),
         children,
-        page: Page {
-            limit: page.limit,
-            returned: page.items.len() as i64,
-            has_more: page.has_more,
-            next_cursor: page.next_cursor,
-        },
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 

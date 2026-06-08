@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::common::page_json;
 use super::resolve::{caller, service_error, workspace_summary};
 use crate::state::AppState;
 use notegate_service::workspaces::ListWorkspaces;
@@ -49,11 +50,11 @@ pub async fn call(
 
     Ok(Json(json!({
         "workspaces": workspaces,
-        "page": {
-            "limit": page.limit,
-            "returned": returned,
-            "has_more": page.has_more,
-            "next_cursor": page.next_cursor,
-        },
+        "page": page_json(
+            page.limit,
+            returned,
+            page.has_more,
+            page.next_cursor.as_deref(),
+        ),
     })))
 }

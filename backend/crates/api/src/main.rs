@@ -14,6 +14,7 @@ mod error;
 mod identity;
 mod mcp;
 mod openapi;
+mod page;
 mod rest;
 mod routes;
 mod state;

@@ -15,7 +15,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{Page, WorkspaceOut};
+use crate::page::Page;
+use crate::rest::dto::WorkspaceOut;
 use crate::state::AppState;
 
 use notegate_service::workspaces::{CreateWorkspace, ListWorkspaces, RenameWorkspace};
@@ -73,16 +74,15 @@ pub(crate) async fn list(
             },
         )
         .await?;
-    let returned = page.items.len() as i64;
     let workspaces = page.items.iter().map(WorkspaceOut::from).collect();
     Ok(Json(ListResponse {
         workspaces,
-        page: Page {
-            limit: page.limit,
-            returned,
-            has_more: page.has_more,
-            next_cursor: page.next_cursor,
-        },
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 

@@ -16,7 +16,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{AccountRef, Page, parse_role};
+use crate::page::Page;
+use crate::rest::dto::{AccountRef, parse_role};
 use crate::state::AppState;
 
 use notegate_service::access::{GrantAccess, ListAccess};
@@ -93,12 +94,12 @@ pub(crate) async fn list(
         .collect();
     Ok(Json(ListResponse {
         access,
-        page: Page {
-            limit: page.limit,
-            returned: page.items.len() as i64,
-            has_more: page.has_more,
-            next_cursor: page.next_cursor,
-        },
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 
