@@ -34,6 +34,8 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
+const MCP_SERVER_INSTRUCTIONS: &str = "Path-first workspace, file, and search tools for notegate.";
+
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
 /// Those tools return dynamic JSON objects (`Json<Value>`); rmcp 1.7 cannot
@@ -262,7 +264,7 @@ impl ServerHandler for McpServer {
             .with_server_info(
                 Implementation::new("notegate", env!("CARGO_PKG_VERSION")).with_title("notegate"),
             )
-            .with_instructions("Identity tools for notegate.")
+            .with_instructions(MCP_SERVER_INSTRUCTIONS)
     }
 }
 
@@ -342,6 +344,7 @@ fn mcp_auth_response(state: &AppState, error: AuthError) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
 
     /// Building the tool router materializes every tool's input/output schema —
     /// the same path rmcp runs when answering `tools/list`. Before the fix, the
@@ -353,9 +356,99 @@ mod tests {
     fn every_tool_output_schema_is_a_valid_object() {
         let router = McpServer::tool_router();
         let tools = router.list_all();
-        let tool_names: std::collections::BTreeSet<_> =
-            tools.iter().map(|tool| tool.name.as_ref()).collect();
-        let expected_tool_names = std::collections::BTreeSet::from([
+        let tool_names: BTreeSet<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
+        let expected_tool_names = expected_tool_names();
+        assert_eq!(tool_names, expected_tool_names);
+
+        for tool in &tools {
+            if let Some(schema) = &tool.output_schema {
+                assert_eq!(
+                    schema.get("type").and_then(Value::as_str),
+                    Some("object"),
+                    "tool `{}` outputSchema root must be type=object",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_tool_input_schema_matches_contract_fields() {
+        let router = McpServer::tool_router();
+        let tools: BTreeMap<_, _> = router
+            .list_all()
+            .into_iter()
+            .map(|tool| (tool.name.to_string(), tool))
+            .collect();
+
+        assert_eq!(
+            tools.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+            expected_tool_names()
+        );
+
+        for (tool_name, properties, required) in [
+            ("me", "", ""),
+            ("workspaces_list", "limit cursor", ""),
+            ("workspaces_create", "name", "name"),
+            ("workspaces_get", "workspace workspace_id", ""),
+            (
+                "files_ls",
+                "workspace workspace_id path target limit cursor",
+                "",
+            ),
+            ("files_stat", "workspace workspace_id path target", ""),
+            ("files_mkdir", "workspace workspace_id path target", ""),
+            ("files_touch", "workspace workspace_id path target", ""),
+            (
+                "files_read",
+                "workspace workspace_id path target start_line max_lines max_bytes if_none_match_sha256",
+                "",
+            ),
+            (
+                "files_write",
+                "workspace workspace_id path target content_md create expected_sha256",
+                "content_md",
+            ),
+            (
+                "files_patch",
+                "workspace workspace_id path target edits expected_sha256",
+                "edits",
+            ),
+            (
+                "files_mv",
+                "workspace workspace_id source_path destination_path",
+                "source_path destination_path",
+            ),
+            (
+                "files_rm",
+                "workspace workspace_id path target recursive",
+                "",
+            ),
+            (
+                "files_find",
+                "workspace workspace_id q path target kind limit cursor",
+                "q",
+            ),
+            (
+                "files_grep",
+                "workspace workspace_id q path target context limit cursor",
+                "q",
+            ),
+        ] {
+            assert_input_properties(&tools, tool_name, properties);
+            assert_required_properties(&tools, tool_name, required);
+        }
+    }
+
+    #[test]
+    fn server_instructions_describe_all_mcp_categories() {
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("workspace"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("file"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
+    }
+
+    fn expected_tool_names() -> BTreeSet<&'static str> {
+        BTreeSet::from([
             "me",
             "workspaces_list",
             "workspaces_create",
@@ -371,18 +464,47 @@ mod tests {
             "files_rm",
             "files_find",
             "files_grep",
-        ]);
-        assert_eq!(tool_names, expected_tool_names);
+        ])
+    }
 
-        for tool in &tools {
-            if let Some(schema) = &tool.output_schema {
-                assert_eq!(
-                    schema.get("type").and_then(Value::as_str),
-                    Some("object"),
-                    "tool `{}` outputSchema root must be type=object",
-                    tool.name
-                );
-            }
+    fn assert_input_properties(
+        tools: &BTreeMap<String, rmcp::model::Tool>,
+        tool_name: &str,
+        expected: &str,
+    ) {
+        let tool = tools.get(tool_name).expect("tool exists");
+        let properties = tool
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("input schema properties object");
+        for property in expected.split_whitespace() {
+            assert!(
+                properties.contains_key(property),
+                "tool `{tool_name}` input schema missing property `{property}`"
+            );
+        }
+    }
+
+    fn assert_required_properties(
+        tools: &BTreeMap<String, rmcp::model::Tool>,
+        tool_name: &str,
+        expected: &str,
+    ) {
+        let tool = tools.get(tool_name).expect("tool exists");
+        let required: BTreeSet<_> = tool
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        for property in expected.split_whitespace() {
+            assert!(
+                required.contains(property),
+                "tool `{tool_name}` input schema should require `{property}`"
+            );
         }
     }
 }
