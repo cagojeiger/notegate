@@ -254,7 +254,6 @@ fn ambiguity_error(name: &str, matches: &[WorkspaceView]) -> ErrorData {
                 "id": view.workspace.id,
                 "name": view.workspace.name,
                 "role": view.role.as_str(),
-                "owner_account_id": view.workspace.owner_account_id,
             })
         })
         .collect();
