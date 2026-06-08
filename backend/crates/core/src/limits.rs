@@ -40,7 +40,10 @@ pub fn workspace_max_nodes() -> usize {
 /// Maximum live documents per workspace (env `NOTEGATE_WORKSPACE_MAX_DOCUMENTS`).
 const WORKSPACE_MAX_DOCUMENTS_DEFAULT: usize = 5_000;
 pub fn workspace_max_documents() -> usize {
-    env_usize("NOTEGATE_WORKSPACE_MAX_DOCUMENTS", WORKSPACE_MAX_DOCUMENTS_DEFAULT)
+    env_usize(
+        "NOTEGATE_WORKSPACE_MAX_DOCUMENTS",
+        WORKSPACE_MAX_DOCUMENTS_DEFAULT,
+    )
 }
 /// Maximum total live document bytes per workspace, 256 MiB (env `NOTEGATE_WORKSPACE_MAX_DOCUMENT_BYTES`).
 const WORKSPACE_MAX_DOCUMENT_BYTES_DEFAULT: usize = 268_435_456;
