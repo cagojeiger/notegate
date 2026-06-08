@@ -115,4 +115,47 @@ mod tests {
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "invalid_input");
     }
+
+    #[test]
+    fn service_errors_map_to_rest_kinds() {
+        let cases = [
+            (
+                ServiceError::NotFound("missing".to_owned()),
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "missing",
+            ),
+            (
+                ServiceError::InvalidInput("bad".to_owned()),
+                StatusCode::BAD_REQUEST,
+                "invalid_input",
+                "bad",
+            ),
+            (
+                ServiceError::Forbidden("no".to_owned()),
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                "no",
+            ),
+            (
+                ServiceError::Conflict("stale".to_owned()),
+                StatusCode::CONFLICT,
+                "conflict",
+                "stale",
+            ),
+            (
+                ServiceError::Internal("db detail".to_owned()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "internal server error",
+            ),
+        ];
+
+        for (service_error, status, code, message) in cases {
+            let api_error = ApiError::from(service_error);
+            assert_eq!(api_error.status, status);
+            assert_eq!(api_error.code, code);
+            assert_eq!(api_error.message, message);
+        }
+    }
 }

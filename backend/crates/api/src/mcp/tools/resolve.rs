@@ -175,7 +175,7 @@ async fn select_workspace(
             "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
         )),
         1 if !page.has_more => page.items.into_iter().next().ok_or_else(|| {
-            ErrorData::internal_error("failed to select workspace", error_meta("internal"))
+            ErrorData::internal_error("failed to select workspace", error_meta("internal_error"))
         }),
         _ => Err(invalid_input_error(
             "multiple workspaces are accessible; pass 'workspace' (see workspaces_list)",
@@ -283,7 +283,7 @@ pub fn service_error(error: ServiceError) -> ErrorData {
         }
         ServiceError::Internal(message) => {
             tracing::error!(event = "mcp.error.internal", detail = %message);
-            ErrorData::internal_error("internal server error", error_meta("internal"))
+            ErrorData::internal_error("internal server error", error_meta("internal_error"))
         }
     }
 }
@@ -427,11 +427,30 @@ mod tests {
         assert_eq!(missing_data["kind"], "not_found");
         assert_eq!(missing_data["code"], "not_found");
 
+        let invalid = service_error(ServiceError::InvalidInput("bad".to_owned()));
+        assert_eq!(invalid.code, ErrorCode::INVALID_PARAMS);
+        let invalid_data = invalid.data.expect("invalid_input carries data");
+        assert_eq!(invalid_data["kind"], "invalid_input");
+        assert_eq!(invalid_data["code"], "invalid_input");
+
+        let forbidden = service_error(ServiceError::Forbidden("no".to_owned()));
+        assert_eq!(forbidden.code, ErrorCode::INVALID_REQUEST);
+        let forbidden_data = forbidden.data.expect("forbidden carries data");
+        assert_eq!(forbidden_data["kind"], "forbidden");
+        assert_eq!(forbidden_data["code"], "forbidden");
+
         let conflict = service_error(ServiceError::Conflict("stale".to_owned()));
         assert_eq!(conflict.code, ErrorCode::INVALID_REQUEST);
         let conflict_data = conflict.data.expect("conflict carries data");
         assert_eq!(conflict_data["kind"], "conflict");
         assert_eq!(conflict_data["code"], "conflict");
+
+        let internal = service_error(ServiceError::Internal("db detail".to_owned()));
+        assert_eq!(internal.code, ErrorCode::INTERNAL_ERROR);
+        assert_eq!(internal.message, "internal server error");
+        let internal_data = internal.data.expect("internal_error carries data");
+        assert_eq!(internal_data["kind"], "internal_error");
+        assert_eq!(internal_data["code"], "internal_error");
     }
 
     #[test]
