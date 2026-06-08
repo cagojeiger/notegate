@@ -640,6 +640,53 @@ async fn last_owner_guard_counts_only_active_owners() -> Result<(), Box<dyn std:
     Ok(())
 }
 
+#[tokio::test]
+async fn last_owner_guard_ignores_agent_owner_rows() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let agent = insert_agent_account(&db.pool, owner, "legacy-owner-agent").await?;
+    let workspace_id = make_workspace(&repo, owner, "owned").await;
+
+    // This bypasses AccessRepo's normal role-kind guard to represent a legacy or
+    // manually corrupted row. The last-owner guard must still protect the last
+    // live user owner.
+    sqlx::query(
+        "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
+         VALUES ($1, $2, 'owner', $3)",
+    )
+    .bind(workspace_id)
+    .bind(agent)
+    .bind(owner)
+    .execute(&db.pool)
+    .await?;
+
+    let demote = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: owner,
+                role: Role::Editor,
+            },
+            owner,
+        )
+        .await;
+    assert!(
+        matches!(demote, Err(Error::Conflict(_))),
+        "agent owner rows must not satisfy the user-owner guard"
+    );
+    assert_eq!(
+        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
+        Some(Role::Owner)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// (e) A duplicate `(owner_account_id, name)` surfaces as a clean error, not a
 /// raw internal failure.
 #[tokio::test]

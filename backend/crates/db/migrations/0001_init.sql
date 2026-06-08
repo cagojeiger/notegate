@@ -57,7 +57,7 @@ CREATE TABLE agent_keys (
 );
 CREATE INDEX agent_keys_agent_active_idx ON agent_keys(agent_id) WHERE revoked_at IS NULL;
 
--- workspaces: a named, owner-scoped tree.
+-- workspaces: a named, user-owned tree.
 CREATE TABLE workspaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_account_id UUID NOT NULL REFERENCES accounts(id),

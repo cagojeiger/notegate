@@ -239,7 +239,7 @@ async fn guard_last_owner(
         "SELECT wa.account_id FROM workspace_access wa \
          JOIN accounts acc ON acc.id = wa.account_id \
          WHERE wa.workspace_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
-           AND acc.is_active = true AND acc.deleted_at IS NULL \
+           AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
          FOR UPDATE OF wa",
     )
     .bind(workspace_id)

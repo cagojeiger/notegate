@@ -123,6 +123,14 @@ CREATE TABLE agent_keys (
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 받지 않는다.
 - 한 agent가 동시에 가질 수 있는 live key는 최대 `10`개다.
 
+Live key 조회/집계 보조 index:
+
+```sql
+CREATE INDEX agent_keys_agent_active_idx
+    ON agent_keys(agent_id)
+    WHERE revoked_at IS NULL;
+```
+
 ## workspaces
 
 workspace는 개인 노트 파일트리의 격리 경계다. workspace 소유와 생성은 user account만 가능하다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작한다. 단일/default workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
@@ -192,6 +200,14 @@ owner  = editor + workspace access management
 - 마지막 owner 보호 규칙도 활성 user account의 revoke되지 않은 owner access만 live owner로 계산한다.
 - `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
 
+Caller의 live workspace 조회 보조 index:
+
+```sql
+CREATE INDEX workspace_access_account_idx
+    ON workspace_access(account_id)
+    WHERE revoked_at IS NULL;
+```
+
 ## nodes
 
 `nodes`는 folder와 document의 공통 tree entry다. directory 위치의 source of truth는
@@ -255,6 +271,14 @@ CREATE UNIQUE INDEX nodes_one_root_per_workspace
 `parent_id IS NULL`은 root에만 허용한다. root는 soft delete 대상이 아니며,
 root 이동/삭제/rename은 conflict다. `workspaces.root_node_id`는 두지 않고
 `nodes(parent_id IS NULL)`로 root를 찾는다.
+
+삭제 예정 node를 찾기 위한 purge index:
+
+```sql
+CREATE INDEX nodes_purge_due_idx
+    ON nodes(purge_after, workspace_id, id)
+    WHERE deleted_at IS NOT NULL;
+```
 
 Workspace 생성 시 root 자동 생성:
 
@@ -387,6 +411,7 @@ CREATE TABLE documents (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    UNIQUE (node_id, workspace_id),
     FOREIGN KEY (node_id, workspace_id)
         REFERENCES nodes(id, workspace_id)
         ON DELETE CASCADE,
@@ -404,6 +429,16 @@ CREATE TABLE documents (
 - document create는 `workspace_max_nodes=10000`과 `workspace_max_documents=5000`을 모두 만족해야 한다.
 - 문서는 개별 최대 `524288` bytes, `2000` lines까지만 저장한다.
 - workspace의 live document 원문 총량은 최대 `268435456` bytes다. 초과 시 문서를 나누거나 workspace를 분리하도록 유도한다.
+
+검색/정렬 보조 index:
+
+```sql
+CREATE INDEX documents_content_trgm_idx
+    ON documents USING gin (content_md gin_trgm_ops);
+
+CREATE INDEX documents_workspace_updated_idx
+    ON documents(workspace_id, updated_at DESC, node_id);
+```
 
 ## Soft delete and purge
 
