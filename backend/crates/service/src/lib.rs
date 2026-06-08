@@ -1,8 +1,8 @@
 //! Business logic for notegate, split per feature like opsgate.
 //!
 //! Depends on `notegate-core` and `notegate-model` only. It must NOT depend on
-//! any transport (axum/rmcp) or storage driver (sqlx) — those edges are guarded
-//! in CI. Services use concrete Postgres repositories from the `db` crate.
+//! any transport (axum/rmcp). Services use concrete Postgres repositories from
+//! the `db` crate; transport mapping stays in `api`.
 
 pub mod access;
 pub mod agents;

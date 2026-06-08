@@ -3,7 +3,7 @@
 //! The api holds the resolver behind `Arc<dyn CallerResolver>` so `AppState`
 //! stays object-safe. The concrete resolver is the `notegate-service`
 //! [`Resolver`], implemented here for the api trait. `IdentityError` and
-//! `ResolveAttrs` are owned by the service and re-exported for the auth layer.
+//! `ResolveAttrs` are re-exported by the service for the auth layer.
 
 use std::future::Future;
 use std::pin::Pin;

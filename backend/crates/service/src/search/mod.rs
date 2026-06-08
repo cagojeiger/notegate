@@ -2,8 +2,7 @@
 //!
 //! The service owns authorization, limit clamping, opaque cursors, and
 //! service-side grep line splitting. The two query implementations live in the
-//! [`find`] and [`grep`] submodules; shared types, the store trait, the role
-//! gate, and query validation live here.
+//! [`find`] and [`grep`] submodules; shared types, the role gate, and query validation live here.
 
 use notegate_core::limits;
 use notegate_db::FilesRepo;

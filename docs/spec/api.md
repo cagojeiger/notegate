@@ -77,7 +77,7 @@ MCP        /mcp
 ## Implementation layers
 
 구현은 아래 방향의 의존성으로 나눈다. 핵심 규칙은 `api`가 업무 규칙을 직접 구현하지
-않고 `service`를 호출하며, `db`는 `service`가 정의한 store port를 구현한다는 점이다.
+않고 `service`를 호출하며, `service`는 concrete `db` repo를 사용한다는 점이다.
 
 ```text
 api/auth
@@ -117,7 +117,7 @@ model/document
 ```text
 api  ──calls──> service ──uses──> model/core
  │                ▲
- │                │ implements service store ports
+ │                │ concrete repo methods
  └──constructs──> db ─────uses──> model/core
 ```
 
@@ -132,7 +132,7 @@ api  ──calls──> service ──uses──> model/core
 - Model layer는 persistence/API에 독립적인 데이터 타입을 담당한다.
 - Service layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
 - Service layer는 opaque pagination cursor 인코딩/디코딩과 command pagination 정책을 담당한다.
-- DB layer는 query/transaction/keyset tuple 조회와 service store port 구현을 담당한다.
+- DB layer는 query/transaction/keyset tuple 조회와 concrete repo method를 담당한다.
 
 ## 문서 구성
 
