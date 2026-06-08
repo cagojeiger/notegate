@@ -187,6 +187,16 @@ impl UserStore for AccountRepo {
     async fn upsert_user_by_sub(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
+        // Serialize self-registration for the same external subject. Without
+        // this, two first-logins for the same `sub` can both observe no user,
+        // both insert an account, and one then hits the unique users.sub
+        // constraint after creating an orphan account row.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(&attrs.sub)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+
         // Look up an existing user account by sub inside the transaction.
         let existing_id: Option<Uuid> = sqlx::query("SELECT id FROM users WHERE sub = $1")
             .bind(&attrs.sub)
