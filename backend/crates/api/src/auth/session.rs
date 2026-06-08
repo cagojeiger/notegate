@@ -4,7 +4,7 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::bearer::AuthError;
-use crate::identity::{IdentityError, ResolveAttrs};
+use crate::identity::IdentityError;
 use crate::state::AppState;
 
 pub const BROWSER_SESSION_COOKIE: &str = "notegate_browser_session";
@@ -54,11 +54,7 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
 
     state
         .resolver
-        .resolve_api(ResolveAttrs {
-            sub: data.claims.sub,
-            email: String::new(),
-            name: String::new(),
-        })
+        .resolve_browser_session(data.claims.sub)
         .await
         .map_err(map_identity_error)
 }

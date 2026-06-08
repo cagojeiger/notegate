@@ -21,6 +21,11 @@ pub trait CallerResolver: Send + Sync {
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
 
+    fn resolve_browser_session(
+        &self,
+        sub: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
+
     fn resolve_api(
         &self,
         attrs: ResolveAttrs,
@@ -49,6 +54,13 @@ where
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move { self.resolve_browser(attrs).await })
+    }
+
+    fn resolve_browser_session(
+        &self,
+        sub: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        Box::pin(async move { self.resolve_browser_session(&sub).await })
     }
 
     fn resolve_api(

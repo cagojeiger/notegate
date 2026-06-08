@@ -29,7 +29,9 @@ use crate::identity::{CallerResolver, IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
 use crate::auth::bearer::{AuthError, verify_bearer};
-use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
+use crate::auth::session::{
+    BROWSER_SESSION_COOKIE, create_browser_session, verify_browser_session,
+};
 
 const KEY: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCx8TUdJX0WeXTQ
@@ -86,7 +88,23 @@ impl CallerResolver for TestResolver {
         &self,
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        self.resolve_api(attrs)
+        Box::pin(async move { self.resolve(attrs, Channel::Browser) })
+    }
+
+    fn resolve_browser_session(
+        &self,
+        sub: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        Box::pin(async move {
+            self.resolve(
+                ResolveAttrs {
+                    sub,
+                    email: String::new(),
+                    name: String::new(),
+                },
+                Channel::Browser,
+            )
+        })
     }
 
     fn resolve_api(
@@ -377,6 +395,21 @@ async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::er
         .await?;
 
     assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn browser_session_resolves_browser_channel() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+
+    let caller = verify_browser_session(&state, &session).await?;
+
+    assert_eq!(caller.channel, Channel::Browser);
+    assert_eq!(
+        caller.user().and_then(|user| user.sub.as_deref()),
+        Some("sub-cookie")
+    );
     Ok(())
 }
 

@@ -4,6 +4,8 @@
 //! [`Caller`]:
 //!
 //! - browser login (OAuth callback) upserts + activates a user account;
+//! - browser session cookies resolve an already-registered user account on the
+//!   browser channel;
 //! - REST/MCP bearer tokens resolve an already-registered user account
 //!   (an authenticated authgate identity with no local account is
 //!   [`IdentityError::NotRegistered`] — the spec onboarding path);
@@ -100,6 +102,11 @@ where
     pub async fn resolve_browser(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
         let (account, user) = self.users.upsert_user_by_sub(&attrs).await?;
         user_caller(account, user, Channel::Browser)
+    }
+
+    /// Resolve a browser session cookie for an already-registered user account.
+    pub async fn resolve_browser_session(&self, sub: &str) -> Result<Caller, IdentityError> {
+        self.resolve_registered_user(sub, Channel::Browser).await
     }
 
     /// Resolve a REST bearer for an already-registered user account.
