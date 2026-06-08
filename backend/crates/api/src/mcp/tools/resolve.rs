@@ -174,11 +174,9 @@ async fn select_workspace(
         0 => Err(invalid_input_error(
             "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
         )),
-        1 if !page.has_more => page
-            .items
-            .into_iter()
-            .next()
-            .ok_or_else(|| ErrorData::internal_error("failed to select workspace", None)),
+        1 if !page.has_more => page.items.into_iter().next().ok_or_else(|| {
+            ErrorData::internal_error("failed to select workspace", error_meta("internal"))
+        }),
         _ => Err(invalid_input_error(
             "multiple workspaces are accessible; pass 'workspace' (see workspaces_list)",
         )),
