@@ -2,4 +2,4 @@
 
 mod caller;
 
-pub use caller::{Caller, CallerIdentity, Channel};
+pub use caller::{Caller, CallerIdentity, Channel, ResolveAttrs};

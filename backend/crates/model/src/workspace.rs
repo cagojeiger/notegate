@@ -59,3 +59,71 @@ pub struct WorkspaceAccess {
     pub revoked_at: Option<DateTime<Utc>>,
     pub revoked_by: Option<Uuid>,
 }
+
+/// Input to create a workspace.
+#[derive(Debug, Clone)]
+pub struct CreateWorkspace {
+    pub name: String,
+}
+
+/// Input to rename a workspace.
+#[derive(Debug, Clone)]
+pub struct RenameWorkspace {
+    pub workspace_id: Uuid,
+    pub new_name: String,
+}
+
+/// Input to list visible workspaces.
+#[derive(Debug, Clone, Default)]
+pub struct ListWorkspaces {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// Keyset cursor for workspace list order `(created_at, id)`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkspaceCursor {
+    pub created_at: DateTime<Utc>,
+    pub id: Uuid,
+}
+
+/// A workspace plus the caller's role and derived root node id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceView {
+    pub workspace: Workspace,
+    pub role: Role,
+    pub root_node_id: Uuid,
+}
+
+/// A page of workspace views.
+#[derive(Debug, Clone)]
+pub struct WorkspacePage {
+    pub items: Vec<WorkspaceView>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+/// Input to list workspace access grants.
+#[derive(Debug, Clone, Default)]
+pub struct ListAccess {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// A page of access grants.
+#[derive(Debug, Clone)]
+pub struct AccessPage {
+    pub items: Vec<WorkspaceAccess>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+/// Input to grant or update an account's role in a workspace.
+#[derive(Debug, Clone)]
+pub struct GrantAccess {
+    pub workspace_id: Uuid,
+    pub account_id: Uuid,
+    pub role: Role,
+}

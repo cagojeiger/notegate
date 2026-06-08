@@ -11,35 +11,12 @@ use std::future::Future;
 
 use notegate_core::Result as CoreResult;
 use notegate_core::limits;
+pub use notegate_model::{AccessPage, GrantAccess, ListAccess};
 use notegate_model::{Role, WorkspaceAccess};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::{clamp_limit, paginate_by_id};
-
-/// Input to list workspace access grants.
-#[derive(Debug, Clone, Default)]
-pub struct ListAccess {
-    pub limit: Option<i64>,
-    pub cursor: Option<String>,
-}
-
-/// A page of access grants.
-#[derive(Debug, Clone)]
-pub struct AccessPage {
-    pub items: Vec<WorkspaceAccess>,
-    pub limit: i64,
-    pub has_more: bool,
-    pub next_cursor: Option<String>,
-}
-
-/// Input to grant (or update) an account's role in a workspace.
-#[derive(Debug, Clone)]
-pub struct GrantAccess {
-    pub workspace_id: Uuid,
-    pub account_id: Uuid,
-    pub role: Role,
-}
 
 /// Persistence for workspace access grants.
 pub trait AccessStore: Clone + Send + Sync + 'static {

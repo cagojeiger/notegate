@@ -8,54 +8,16 @@
 
 use std::future::Future;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use notegate_core::Result as CoreResult;
 use notegate_core::limits;
 use notegate_model::account::AccountKind;
 use notegate_model::{Agent, AgentKey};
+pub use notegate_model::{AgentPage, CreateAgent, CreateAgentKey, ListAgents, MintedAgentKey};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::{clamp_limit, paginate_by_id};
-
-/// Input to create an agent.
-#[derive(Debug, Clone)]
-pub struct CreateAgent {
-    pub name: String,
-}
-
-/// Input to create an agent key.
-#[derive(Debug, Clone)]
-pub struct CreateAgentKey {
-    pub agent_id: Uuid,
-    pub name: String,
-    pub scopes: Vec<String>,
-    pub expires_at: Option<DateTime<Utc>>,
-}
-
-/// Input to list agents created by the caller.
-#[derive(Debug, Clone, Default)]
-pub struct ListAgents {
-    pub limit: Option<i64>,
-    pub cursor: Option<String>,
-}
-
-/// A page of agents.
-#[derive(Debug, Clone)]
-pub struct AgentPage {
-    pub items: Vec<Agent>,
-    pub limit: i64,
-    pub has_more: bool,
-    pub next_cursor: Option<String>,
-}
-
-/// A freshly minted agent key, including the one-time plaintext token.
-#[derive(Debug, Clone)]
-pub struct MintedAgentKey {
-    pub key: AgentKey,
-    /// The plaintext token, returned exactly once at creation.
-    pub token: String,
-}
 
 /// Persistence for agents and agent keys.
 pub trait AgentStore: Clone + Send + Sync + 'static {

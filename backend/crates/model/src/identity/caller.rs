@@ -52,3 +52,11 @@ impl Caller {
         }
     }
 }
+
+/// Verified OAuth attributes extracted from a bearer/browser credential.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveAttrs {
+    pub sub: String,
+    pub email: String,
+    pub name: String,
+}

@@ -10,62 +10,18 @@
 
 use std::future::Future;
 
-use chrono::{DateTime, Utc};
 use notegate_core::Result as CoreResult;
 use notegate_core::limits;
 use notegate_core::validation::validate_workspace_name;
 use notegate_model::{AccountKind, Role, Workspace};
+pub use notegate_model::{
+    CreateWorkspace, ListWorkspaces, RenameWorkspace, WorkspaceCursor, WorkspacePage, WorkspaceView,
+};
 use uuid::Uuid;
 
 use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::clamp_limit;
-
-/// Input to create a workspace. The owner is the authenticated user caller and
-/// is passed separately to the service/store boundary.
-#[derive(Debug, Clone)]
-pub struct CreateWorkspace {
-    pub name: String,
-}
-
-/// Input to rename a workspace.
-#[derive(Debug, Clone)]
-pub struct RenameWorkspace {
-    pub workspace_id: Uuid,
-    pub new_name: String,
-}
-
-/// Input to list visible workspaces.
-#[derive(Debug, Clone, Default)]
-pub struct ListWorkspaces {
-    pub limit: Option<i64>,
-    pub cursor: Option<String>,
-}
-
-/// Keyset cursor for workspace list order `(created_at, id)`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct WorkspaceCursor {
-    pub created_at: DateTime<Utc>,
-    pub id: Uuid,
-}
-
-/// A workspace plus the caller's role and derived root node id, returned by
-/// `get` and `list`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceView {
-    pub workspace: Workspace,
-    pub role: Role,
-    pub root_node_id: Uuid,
-}
-
-/// A page of workspace views.
-#[derive(Debug, Clone)]
-pub struct WorkspacePage {
-    pub items: Vec<WorkspaceView>,
-    pub limit: i64,
-    pub has_more: bool,
-    pub next_cursor: Option<String>,
-}
 
 /// Persistence for workspaces and the per-workspace role lookup.
 pub trait WorkspaceStore: Clone + Send + Sync + 'static {

@@ -22,11 +22,11 @@ mod view;
 pub use content::{Metrics, compute as content_metrics};
 pub use patch::{PatchError, apply_edits};
 pub use policy::{FileCommand, require as require_role};
-pub use store::{FilesStore, StoredContent};
+pub use store::FilesStore;
 pub use target::{Target, parse_target};
 pub use types::{
     ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
-    ReadContent, ReadResult,
+    ReadContent, ReadResult, StoredContent,
 };
 pub use types::{
     ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, Edit, MoveNode, PatchDocument,

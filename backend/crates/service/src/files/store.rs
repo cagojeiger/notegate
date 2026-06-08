@@ -10,7 +10,7 @@ use notegate_model::{Document, Node, Role};
 use uuid::Uuid;
 
 use super::types::{ChildrenCursor, DocumentStats};
-use super::types::{CreateFolder, MoveNode};
+use super::types::{CreateFolder, MoveNode, StoredContent};
 
 /// Persistence and authorization for the file tree. The `db` crate implements
 /// this; the service stays free of sqlx/axum.
@@ -208,14 +208,4 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
         node_id: Uuid,
         deleted_by: Uuid,
     ) -> impl Future<Output = CoreResult<DateTime<Utc>>> + Send;
-}
-
-/// Pre-computed document content plus its metrics, handed to the store so the
-/// hash/byte/line values the service validated are exactly what is persisted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredContent {
-    pub content_md: String,
-    pub content_sha256: String,
-    pub byte_len: i32,
-    pub line_count: i32,
 }

@@ -32,3 +32,41 @@ pub struct AgentKey {
     pub revoked_at: Option<DateTime<Utc>>,
     pub revoked_by: Option<Uuid>,
 }
+
+/// Input to create an agent.
+#[derive(Debug, Clone)]
+pub struct CreateAgent {
+    pub name: String,
+}
+
+/// Input to create an agent key.
+#[derive(Debug, Clone)]
+pub struct CreateAgentKey {
+    pub agent_id: Uuid,
+    pub name: String,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// Input to list agents created by the caller.
+#[derive(Debug, Clone, Default)]
+pub struct ListAgents {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// A page of agents.
+#[derive(Debug, Clone)]
+pub struct AgentPage {
+    pub items: Vec<Agent>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+/// A freshly minted agent key, including the one-time plaintext token.
+#[derive(Debug, Clone)]
+pub struct MintedAgentKey {
+    pub key: AgentKey,
+    pub token: String,
+}

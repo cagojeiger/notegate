@@ -4,7 +4,7 @@
 //! per-document and workspace caps. `write` and `patch` compute them once here so
 //! the validated values are exactly what the store writes.
 
-use super::store::StoredContent;
+use super::types::StoredContent;
 
 /// The derived metrics of a document's content.
 #[derive(Debug, Clone, PartialEq, Eq)]

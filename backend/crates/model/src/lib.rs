@@ -7,15 +7,22 @@
 pub mod account;
 pub mod agent;
 pub mod document;
+pub mod files;
 pub mod identity;
 pub mod node;
+pub mod search;
 pub mod user;
 pub mod workspace;
 
 pub use account::{Account, AccountKind, AccountRef};
-pub use agent::{Agent, AgentKey};
+pub use agent::{
+    Agent, AgentKey, AgentPage, CreateAgent, CreateAgentKey, ListAgents, MintedAgentKey,
+};
 pub use document::Document;
-pub use identity::{Caller, CallerIdentity, Channel};
+pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use node::{Node, NodeKind};
 pub use user::User;
-pub use workspace::{Role, Workspace, WorkspaceAccess};
+pub use workspace::{
+    AccessPage, CreateWorkspace, GrantAccess, ListAccess, ListWorkspaces, RenameWorkspace, Role,
+    Workspace, WorkspaceAccess, WorkspaceCursor, WorkspacePage, WorkspaceView,
+};

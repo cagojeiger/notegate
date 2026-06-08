@@ -9,89 +9,17 @@ use std::future::Future;
 
 use notegate_core::Result as CoreResult;
 use notegate_core::limits;
+pub use notegate_model::search::{
+    FindCursor, FindPage, FindRequest, GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest,
+};
 use notegate_model::{Node, NodeKind, Role};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
-use crate::files::NodeView;
 use crate::files::policy::{self, FileCommand};
 
 mod find;
 mod grep;
-
-/// `find` request.
-#[derive(Debug, Clone)]
-pub struct FindRequest {
-    pub q: String,
-    pub path: Option<String>,
-    pub kind: Option<NodeKind>,
-    pub limit: Option<i64>,
-    pub cursor: Option<String>,
-}
-
-/// `find` keyset cursor over `(name, id)`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct FindCursor {
-    pub name: String,
-    pub id: Uuid,
-}
-
-/// `grep` request.
-#[derive(Debug, Clone)]
-pub struct GrepRequest {
-    pub q: String,
-    pub path: Option<String>,
-    pub context: Option<i64>,
-    pub limit: Option<i64>,
-    pub cursor: Option<String>,
-}
-
-/// `grep` keyset cursor over `(updated_at, node_id)` plus an intra-document
-/// match offset.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct GrepCursor {
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub node_id: Uuid,
-    pub match_offset: i64,
-}
-
-/// One grep match with context.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GrepMatch {
-    pub node_id: Uuid,
-    pub path: String,
-    pub line_no: i64,
-    pub line: String,
-    pub before: Vec<String>,
-    pub after: Vec<String>,
-}
-
-/// A find result page.
-#[derive(Debug, Clone)]
-pub struct FindPage {
-    pub items: Vec<NodeView>,
-    pub limit: i64,
-    pub has_more: bool,
-    pub next_cursor: Option<String>,
-}
-
-/// A grep result page.
-#[derive(Debug, Clone)]
-pub struct GrepPage {
-    pub items: Vec<GrepMatch>,
-    pub limit: i64,
-    pub has_more: bool,
-    pub next_cursor: Option<String>,
-}
-
-/// A candidate document for grep line-splitting.
-#[derive(Debug, Clone)]
-pub struct GrepCandidate {
-    pub node_id: Uuid,
-    pub path: String,
-    pub content_md: String,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-}
 
 /// Persistence for search queries.
 pub trait SearchStore: Clone + Send + Sync + 'static {

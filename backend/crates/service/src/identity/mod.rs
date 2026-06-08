@@ -15,16 +15,9 @@
 use std::future::Future;
 
 use notegate_core::Result as CoreResult;
+pub use notegate_model::ResolveAttrs;
 use notegate_model::account::AccountKind;
 use notegate_model::{Account, Agent, Caller, CallerIdentity, Channel, User};
-
-/// Verified OAuth attributes extracted from a bearer/browser credential.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolveAttrs {
-    pub sub: String,
-    pub email: String,
-    pub name: String,
-}
 
 /// Why caller resolution failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
