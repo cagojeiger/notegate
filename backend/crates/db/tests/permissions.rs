@@ -34,7 +34,7 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_db::{FilesRepo, WorkspaceRepo};
+use notegate_db::{AccessRepo, FilesRepo, WorkspaceRepo};
 use notegate_model::Role;
 use notegate_service::access::{AccessService, GrantAccess};
 use notegate_service::error::ServiceError;
@@ -68,7 +68,7 @@ fn assert_not_found<T: std::fmt::Debug>(result: Result<T, ServiceError>, what: &
 struct Fixture {
     files: FilesService<FilesRepo>,
     search: SearchService<FilesRepo>,
-    access: AccessService<WorkspaceRepo>,
+    access: AccessService<AccessRepo>,
     workspace_id: Uuid,
     root_id: Uuid,
     folder_id: Uuid,
@@ -85,7 +85,7 @@ async fn setup(db: &TestDb) -> Result<Fixture, Box<dyn std::error::Error>> {
     let ws_repo = WorkspaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
     let search = SearchService::new(FilesRepo::new(db.pool.clone()));
-    let access = AccessService::new(WorkspaceRepo::new(db.pool.clone()));
+    let access = AccessService::new(AccessRepo::new(db.pool.clone()));
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let editor = insert_user_account(&db.pool, "editor", "e@example.test").await?;

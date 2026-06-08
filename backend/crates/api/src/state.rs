@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use notegate_core::Config;
-use notegate_db::{AccountRepo, AgentRepo, FilesRepo, PgPool, WorkspaceRepo};
+use notegate_db::{AccessRepo, AccountRepo, AgentRepo, FilesRepo, PgPool, WorkspaceRepo};
 use notegate_service::access::AccessService;
 use notegate_service::agents::AgentService;
 use notegate_service::files::FilesService;
@@ -17,8 +17,8 @@ use crate::auth::oidc::OidcProvider;
 
 /// Workspace lifecycle service over the db-backed [`WorkspaceRepo`].
 pub type Workspaces = WorkspaceService<WorkspaceRepo>;
-/// Access-management service over the db-backed [`WorkspaceRepo`].
-pub type Access = AccessService<WorkspaceRepo>;
+/// Access-management service over the db-backed [`AccessRepo`].
+pub type Access = AccessService<AccessRepo>;
 /// Agent lifecycle service over the db-backed [`AgentRepo`].
 pub type Agents = AgentService<AgentRepo>;
 /// File-tree command service over the db-backed [`FilesRepo`].
@@ -54,7 +54,7 @@ impl AppState {
         http: reqwest::Client,
     ) -> Self {
         let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
-        let access = AccessService::new(WorkspaceRepo::new(db.clone()));
+        let access = AccessService::new(AccessRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents = AgentService::new(agent_repo.clone());
         let files = FilesService::new(FilesRepo::new(db.clone()));

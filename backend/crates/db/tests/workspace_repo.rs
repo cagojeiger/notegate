@@ -15,7 +15,7 @@ mod common;
 
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
-use notegate_db::WorkspaceRepo;
+use notegate_db::{AccessRepo, WorkspaceRepo};
 use notegate_model::Role;
 use notegate_service::access::{AccessStore, GrantAccess};
 use notegate_service::workspaces::{CreateWorkspace, WorkspaceStore};
@@ -141,65 +141,71 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         return Ok(());
     };
     let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let workspace_id = make_workspace(&repo, owner, "shared").await;
 
     let member = insert_user_account(&db.pool, "member", "m@example.test").await?;
 
     // Grant viewer, then upgrade to editor; role_for reflects each change.
-    repo.upsert_access(
-        &GrantAccess {
-            workspace_id,
-            account_id: member,
-            role: Role::Viewer,
-        },
-        owner,
-    )
-    .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: member,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await?;
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, member).await?,
+        AccessStore::role_for(&access_repo, workspace_id, member).await?,
         Some(Role::Viewer)
     );
 
-    repo.upsert_access(
-        &GrantAccess {
-            workspace_id,
-            account_id: member,
-            role: Role::Editor,
-        },
-        owner,
-    )
-    .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: member,
+                role: Role::Editor,
+            },
+            owner,
+        )
+        .await?;
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, member).await?,
+        AccessStore::role_for(&access_repo, workspace_id, member).await?,
         Some(Role::Editor)
     );
 
     // list_access shows the live grants (owner + member).
-    let live = repo.list_access(workspace_id).await?;
+    let live = access_repo.list_access(workspace_id).await?;
     assert_eq!(live.len(), 2);
 
     // Revoke clears role_for and drops the row from the live list.
-    repo.revoke_access(workspace_id, member, owner).await?;
+    access_repo
+        .revoke_access(workspace_id, member, owner)
+        .await?;
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, member).await?,
+        AccessStore::role_for(&access_repo, workspace_id, member).await?,
         None
     );
-    let live_after = repo.list_access(workspace_id).await?;
+    let live_after = access_repo.list_access(workspace_id).await?;
     assert_eq!(live_after.len(), 1, "revoked grant must not be listed");
 
     // Re-granting a revoked account succeeds and re-activates the row.
-    repo.upsert_access(
-        &GrantAccess {
-            workspace_id,
-            account_id: member,
-            role: Role::Viewer,
-        },
-        owner,
-    )
-    .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: member,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await?;
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, member).await?,
+        AccessStore::role_for(&access_repo, workspace_id, member).await?,
         Some(Role::Viewer)
     );
 
@@ -207,15 +213,16 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
     for index in 0..18 {
         let extra =
             insert_user_account(&db.pool, &format!("extra-{index}"), "e@example.test").await?;
-        repo.upsert_access(
-            &GrantAccess {
-                workspace_id,
-                account_id: extra,
-                role: Role::Viewer,
-            },
-            owner,
-        )
-        .await?;
+        access_repo
+            .upsert_access(
+                &GrantAccess {
+                    workspace_id,
+                    account_id: extra,
+                    role: Role::Viewer,
+                },
+                owner,
+            )
+            .await?;
     }
     let active: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM workspace_access WHERE workspace_id = $1 AND revoked_at IS NULL",
@@ -227,7 +234,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
 
     // The 21st distinct active account is rejected.
     let overflow = insert_user_account(&db.pool, "overflow", "x@example.test").await?;
-    let result = repo
+    let result = access_repo
         .upsert_access(
             &GrantAccess {
                 workspace_id,
@@ -244,17 +251,18 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
 
     // Updating an already-active account at the cap must still succeed (it does
     // not add a new active account).
-    repo.upsert_access(
-        &GrantAccess {
-            workspace_id,
-            account_id: member,
-            role: Role::Editor,
-        },
-        owner,
-    )
-    .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: member,
+                role: Role::Editor,
+            },
+            owner,
+        )
+        .await?;
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, member).await?,
+        AccessStore::role_for(&access_repo, workspace_id, member).await?,
         Some(Role::Editor),
         "re-grant of an existing active account is allowed at the cap"
     );
@@ -269,10 +277,11 @@ async fn grant_unknown_account_is_not_found() -> Result<(), Box<dyn std::error::
         return Ok(());
     };
     let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let workspace_id = make_workspace(&repo, owner, "shared").await;
 
-    let err = repo
+    let err = access_repo
         .upsert_access(
             &GrantAccess {
                 workspace_id,
@@ -296,11 +305,12 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
         return Ok(());
     };
     let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let second_owner = insert_user_account(&db.pool, "second", "s@example.test").await?;
     let workspace_id = make_workspace(&repo, owner, "owned").await;
 
-    let demote_last = repo
+    let demote_last = access_repo
         .upsert_access(
             &GrantAccess {
                 workspace_id,
@@ -315,41 +325,43 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
         "demoting the only owner must be rejected"
     );
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, owner).await?,
+        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
         Some(Role::Owner),
         "rejected demotion must leave the owner role intact"
     );
 
-    let revoke_last = repo.revoke_access(workspace_id, owner, owner).await;
+    let revoke_last = access_repo.revoke_access(workspace_id, owner, owner).await;
     assert!(
         revoke_last.is_err(),
         "revoking the only owner must be rejected"
     );
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, owner).await?,
+        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
         Some(Role::Owner),
         "rejected revoke must leave the owner role intact"
     );
 
-    repo.upsert_access(
-        &GrantAccess {
-            workspace_id,
-            account_id: second_owner,
-            role: Role::Owner,
-        },
-        owner,
-    )
-    .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: second_owner,
+                role: Role::Owner,
+            },
+            owner,
+        )
+        .await?;
 
-    repo.revoke_access(workspace_id, owner, second_owner)
+    access_repo
+        .revoke_access(workspace_id, owner, second_owner)
         .await?;
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, owner).await?,
+        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
         None,
         "one owner can be revoked while another owner remains"
     );
     assert_eq!(
-        AccessStore::role_for(&repo, workspace_id, second_owner).await?,
+        AccessStore::role_for(&access_repo, workspace_id, second_owner).await?,
         Some(Role::Owner)
     );
 
@@ -440,6 +452,7 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
         return Ok(());
     };
     let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let member = insert_user_account(&db.pool, "member", "m@example.test").await?;
 
@@ -461,15 +474,16 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
     );
 
     // Grant then revoke on ws1: member sees it, then stops seeing it.
-    repo.upsert_access(
-        &GrantAccess {
-            workspace_id: ws1,
-            account_id: member,
-            role: Role::Viewer,
-        },
-        owner,
-    )
-    .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id: ws1,
+                account_id: member,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await?;
     assert_eq!(
         WorkspaceStore::list_workspace_views_for(&repo, member, 100, None)
             .await?
@@ -477,7 +491,7 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
         1
     );
 
-    repo.revoke_access(ws1, member, owner).await?;
+    access_repo.revoke_access(ws1, member, owner).await?;
     assert_eq!(
         WorkspaceStore::list_workspace_views_for(&repo, member, 100, None)
             .await?

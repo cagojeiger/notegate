@@ -8,19 +8,21 @@
 
 use notegate_core::{Error, Result};
 
+pub mod access;
 pub mod account_repo;
 pub mod agent_repo;
 pub mod files;
 pub mod files_repo;
 pub mod postgres_pool;
-pub mod workspace_repo;
+pub mod workspaces;
 
+pub use access::AccessRepo;
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
 pub use files_repo::FilesRepo;
 pub use postgres_pool::connect;
 pub use sqlx::PgPool;
-pub use workspace_repo::WorkspaceRepo;
+pub use workspaces::WorkspaceRepo;
 
 /// Embedded migrations from `migrations/`, run at startup via [`run_migrations`].
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
