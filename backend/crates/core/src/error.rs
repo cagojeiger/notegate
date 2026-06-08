@@ -17,6 +17,10 @@ pub enum Error {
     #[error("invalid input: {0}")]
     Validation(String),
 
+    /// The operation conflicts with current state.
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     /// A dependency (db, external service) failed.
     #[error("internal error: {0}")]
     Internal(String),
@@ -29,6 +33,10 @@ impl Error {
 
     pub fn validation(msg: impl fmt::Display) -> Self {
         Self::Validation(msg.to_string())
+    }
+
+    pub fn conflict(msg: impl fmt::Display) -> Self {
+        Self::Conflict(msg.to_string())
     }
 
     pub fn internal(msg: impl fmt::Display) -> Self {

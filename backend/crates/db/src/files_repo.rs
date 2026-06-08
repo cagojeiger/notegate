@@ -165,6 +165,7 @@ impl FilesStore for FilesRepo {
         workspace_id: Uuid,
         node_id: Uuid,
         content: &StoredContent,
+        expected_sha256: Option<&str>,
         updated_by: Uuid,
     ) -> Result<(Node, Document)> {
         commands::save::save_document_content(
@@ -172,6 +173,7 @@ impl FilesStore for FilesRepo {
             workspace_id,
             node_id,
             content,
+            expected_sha256,
             updated_by,
         )
         .await

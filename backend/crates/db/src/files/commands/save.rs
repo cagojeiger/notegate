@@ -21,15 +21,19 @@ pub async fn save_document_content(
     workspace_id: Uuid,
     node_id: Uuid,
     content: &StoredContent,
+    expected_sha256: Option<&str>,
     updated_by: Uuid,
 ) -> Result<(Node, Document)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    // Current byte length (for the budget delta); the document must exist+live.
-    let previous_bytes: Option<i64> = sqlx::query_scalar(
-        "SELECT d.byte_len::bigint FROM documents d \
+    // Current byte length/hash (for budget delta + optimistic guard); the
+    // document row is locked so `expected_sha256` is compared atomically with
+    // the following update.
+    let previous: Option<(i64, String)> = sqlx::query_as(
+        "SELECT d.byte_len::bigint, d.content_sha256 FROM documents d \
          JOIN nodes n ON n.id = d.node_id AND n.workspace_id = d.workspace_id \
-         WHERE d.workspace_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL",
+         WHERE d.workspace_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL \
+         FOR UPDATE OF d",
     )
     .bind(workspace_id)
     .bind(node_id)
@@ -37,7 +41,15 @@ pub async fn save_document_content(
     .await
     .map_err(map_sqlx_error)?;
 
-    let previous_bytes = previous_bytes.ok_or_else(|| Error::not_found("document not found"))?;
+    let (previous_bytes, previous_sha256) =
+        previous.ok_or_else(|| Error::not_found("document not found"))?;
+    if let Some(expected) = expected_sha256
+        && expected != previous_sha256
+    {
+        return Err(Error::conflict(
+            "expected_sha256 does not match the current document; read it again",
+        ));
+    }
 
     checks::require_byte_budget(
         &mut tx,

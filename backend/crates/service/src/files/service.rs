@@ -307,7 +307,13 @@ where
                 let stored = metrics.into_stored(command.content_md);
                 let (node, document) = self
                     .store
-                    .save_document_content(workspace_id, node.id, &stored, caller_account_id)
+                    .save_document_content(
+                        workspace_id,
+                        node.id,
+                        &stored,
+                        command.expected_sha256.as_deref(),
+                        caller_account_id,
+                    )
                     .await?;
                 self.document_view(workspace_id, node, document).await
             }
@@ -385,7 +391,13 @@ where
         let stored = metrics.into_stored(new_content);
         let (node, document) = self
             .store
-            .save_document_content(workspace_id, node.id, &stored, caller_account_id)
+            .save_document_content(
+                workspace_id,
+                node.id,
+                &stored,
+                command.expected_sha256.as_deref(),
+                caller_account_id,
+            )
             .await?;
         let view = self.document_view(workspace_id, node, document).await?;
 
@@ -1320,9 +1332,23 @@ mod tests {
             _ws: Uuid,
             node_id: Uuid,
             content: &StoredContent,
+            expected_sha256: Option<&str>,
             updated_by: Uuid,
         ) -> CoreResult<(Node, Document)> {
             let mut state = self.lock();
+            let current_sha256 = state
+                .documents
+                .get(&node_id)
+                .expect("doc")
+                .content_sha256
+                .clone();
+            if let Some(expected) = expected_sha256
+                && expected != current_sha256
+            {
+                return Err(notegate_core::Error::conflict(
+                    "expected_sha256 does not match the current document; read it again",
+                ));
+            }
             let node = state.nodes.get_mut(&node_id).expect("node");
             node.updated_by = updated_by;
             node.updated_at = Utc::now();

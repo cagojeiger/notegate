@@ -183,6 +183,7 @@ pub trait FilesStore: Clone + Send + Sync + 'static {
         workspace_id: Uuid,
         node_id: Uuid,
         content: &StoredContent,
+        expected_sha256: Option<&str>,
         updated_by: Uuid,
     ) -> impl Future<Output = CoreResult<(Node, Document)>> + Send;
 

@@ -68,6 +68,7 @@ impl From<CoreError> for ApiError {
         match error {
             CoreError::NotFound(msg) => Self::not_found(msg),
             CoreError::Validation(msg) => Self::invalid_field(msg),
+            CoreError::Conflict(msg) => Self::conflict(msg),
             CoreError::Internal(msg) => {
                 tracing::error!(event = "error.internal", detail = %msg);
                 Self::internal("internal server error")

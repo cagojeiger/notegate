@@ -32,6 +32,7 @@ impl From<CoreError> for ServiceError {
         match error {
             CoreError::NotFound(message) => Self::NotFound(message),
             CoreError::Validation(message) => Self::InvalidInput(message),
+            CoreError::Conflict(message) => Self::Conflict(message),
             CoreError::Internal(message) => Self::Internal(message),
         }
     }
