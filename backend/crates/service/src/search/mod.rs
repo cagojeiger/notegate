@@ -279,7 +279,7 @@ where
             let mut skip_in_first = cursor.as_ref().map(|c| c.match_offset).unwrap_or(0);
 
             for candidate in candidates {
-                let doc_matches = grep_document(&candidate, &request.q, context);
+                let doc_matches = grep_document(&candidate, q, context);
 
                 let start = std::mem::take(&mut skip_in_first).max(0) as usize;
                 let mut emitted_in_doc = start;

@@ -288,7 +288,7 @@ async fn grep_line_no_context_and_clamp() -> Result<(), Box<dyn std::error::Erro
             owner,
             ws,
             GrepRequest {
-                q: "needle".to_owned(),
+                q: "  needle  ".to_owned(),
                 path: None,
                 context: Some(2),
                 limit: None,
