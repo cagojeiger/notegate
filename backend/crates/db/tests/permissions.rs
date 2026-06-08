@@ -33,7 +33,7 @@
 
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, deactivate_account, insert_user_account};
 use notegate_db::{AccessRepo, FilesRepo, WorkspaceRepo};
 use notegate_model::Role;
 use notegate_service::access::{AccessService, GrantAccess};
@@ -607,6 +607,40 @@ async fn no_role_is_not_found() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await,
         "stranger manage-access",
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn inactive_grant_is_not_found() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let f = setup(&db).await?;
+
+    deactivate_account(&db.pool, f.viewer, f.owner).await?;
+
+    assert_not_found(
+        f.files.stat(f.viewer, f.workspace_id, f.folder_id).await,
+        "inactive viewer stat",
+    );
+    assert_not_found(
+        f.search
+            .find(
+                f.viewer,
+                f.workspace_id,
+                FindRequest {
+                    q: "note".to_owned(),
+                    path: None,
+                    kind: None,
+                    limit: None,
+                    cursor: None,
+                },
+            )
+            .await,
+        "inactive viewer find",
     );
 
     db.cleanup().await;

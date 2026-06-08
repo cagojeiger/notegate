@@ -112,3 +112,22 @@ pub async fn insert_user_account(
         .await?;
     Ok(id)
 }
+
+/// Deactivate an account as a soft-delete, matching the production account lifecycle.
+#[allow(dead_code)]
+pub async fn deactivate_account(
+    pool: &PgPool,
+    account_id: Uuid,
+    deleted_by: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE accounts \
+         SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(account_id)
+    .bind(deleted_by)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

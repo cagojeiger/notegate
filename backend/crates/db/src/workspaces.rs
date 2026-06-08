@@ -85,6 +85,7 @@ const WORKSPACE_VIEW_SELECT: &str = "SELECT w.id, w.owner_account_id, w.name, w.
                                   a.role, root.id AS root_node_id \
                            FROM workspaces w \
                            JOIN workspace_access a ON a.workspace_id = w.id \
+                           JOIN accounts acc ON acc.id = a.account_id \
                            JOIN nodes root ON root.workspace_id = w.id \
                                           AND root.parent_id IS NULL \
                                           AND root.deleted_at IS NULL";
@@ -101,12 +102,15 @@ impl WorkspaceStore for WorkspaceRepo {
     ) -> Result<Workspace> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        let owner_exists: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1 FOR UPDATE")
-                .bind(command.owner_account_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?;
+        let owner_exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM accounts \
+             WHERE id = $1 AND is_active = true AND deleted_at IS NULL \
+             FOR UPDATE",
+        )
+        .bind(command.owner_account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         if owner_exists.is_none() {
             return Err(Error::not_found("owner account not found"));
         }
@@ -175,7 +179,8 @@ impl WorkspaceStore for WorkspaceRepo {
     ) -> Result<Option<WorkspaceView>> {
         let row = sqlx::query_as::<_, WorkspaceViewRow>(&format!(
             "{WORKSPACE_VIEW_SELECT} \
-             WHERE a.account_id = $1 AND a.revoked_at IS NULL AND w.id = $2"
+             WHERE a.account_id = $1 AND a.revoked_at IS NULL \
+               AND acc.is_active = true AND acc.deleted_at IS NULL AND w.id = $2"
         ))
         .bind(account_id)
         .bind(workspace_id)
@@ -193,7 +198,8 @@ impl WorkspaceStore for WorkspaceRepo {
     ) -> Result<Vec<WorkspaceView>> {
         let rows = sqlx::query_as::<_, WorkspaceViewRow>(&format!(
             "{WORKSPACE_VIEW_SELECT} \
-             WHERE a.account_id = $1 AND a.revoked_at IS NULL AND w.name = $2 \
+             WHERE a.account_id = $1 AND a.revoked_at IS NULL \
+               AND acc.is_active = true AND acc.deleted_at IS NULL AND w.name = $2 \
              ORDER BY w.created_at, w.id LIMIT $3"
         ))
         .bind(account_id)
@@ -216,6 +222,7 @@ impl WorkspaceStore for WorkspaceRepo {
                 sqlx::query_as::<_, WorkspaceViewRow>(&format!(
                     "{WORKSPACE_VIEW_SELECT} \
                      WHERE a.account_id = $1 AND a.revoked_at IS NULL \
+                       AND acc.is_active = true AND acc.deleted_at IS NULL \
                      ORDER BY w.created_at, w.id LIMIT $2"
                 ))
                 .bind(account_id)
@@ -227,6 +234,7 @@ impl WorkspaceStore for WorkspaceRepo {
                 sqlx::query_as::<_, WorkspaceViewRow>(&format!(
                     "{WORKSPACE_VIEW_SELECT} \
                      WHERE a.account_id = $1 AND a.revoked_at IS NULL \
+                       AND acc.is_active = true AND acc.deleted_at IS NULL \
                        AND (w.created_at, w.id) > ($2, $3) \
                      ORDER BY w.created_at, w.id LIMIT $4"
                 ))
@@ -279,11 +287,14 @@ impl WorkspaceStore for WorkspaceRepo {
     }
 }
 
-/// The caller's live role in a workspace, or `None` if no non-revoked grant.
+/// The caller's live role in a workspace, or `None` if no non-revoked grant
+/// from an active account.
 async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM workspace_access \
-         WHERE workspace_id = $1 AND account_id = $2 AND revoked_at IS NULL",
+        "SELECT a.role FROM workspace_access a \
+         JOIN accounts acc ON acc.id = a.account_id \
+         WHERE a.workspace_id = $1 AND a.account_id = $2 AND a.revoked_at IS NULL \
+           AND acc.is_active = true AND acc.deleted_at IS NULL",
     )
     .bind(workspace_id)
     .bind(account_id)

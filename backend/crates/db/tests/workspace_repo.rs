@@ -13,7 +13,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, deactivate_account, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{AccessRepo, WorkspaceRepo};
 use notegate_model::Role;
@@ -128,6 +128,32 @@ async fn twenty_first_owned_workspace_is_rejected() -> Result<(), Box<dyn std::e
             .fetch_one(&db.pool)
             .await?;
     assert_eq!(owned, 20, "the rejected create must not persist");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn inactive_owner_cannot_create_workspace() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    deactivate_account(&db.pool, owner, owner).await?;
+
+    let err = repo
+        .create_workspace(
+            &CreateWorkspace {
+                owner_account_id: owner,
+                name: "personal".to_owned(),
+            },
+            owner,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotFound(message) if message == "owner account not found"));
 
     db.cleanup().await;
     Ok(())
@@ -300,6 +326,104 @@ async fn grant_unknown_account_is_not_found() -> Result<(), Box<dyn std::error::
 }
 
 #[tokio::test]
+async fn inactive_accounts_are_not_live_access() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let member = insert_user_account(&db.pool, "member", "m@example.test").await?;
+    let inactive = insert_user_account(&db.pool, "inactive", "i@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "shared").await;
+
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: member,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: inactive,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await?;
+    deactivate_account(&db.pool, inactive, owner).await?;
+
+    assert_eq!(
+        AccessStore::role_for(&access_repo, workspace_id, inactive).await?,
+        None,
+        "inactive account is not a live access grant"
+    );
+    assert_eq!(
+        WorkspaceStore::role_for(&repo, workspace_id, inactive).await?,
+        None,
+        "workspace role lookup must also ignore inactive accounts"
+    );
+    let live = access_repo.list_access(workspace_id).await?;
+    let mut live_ids = live
+        .iter()
+        .map(|grant| grant.account_id)
+        .collect::<Vec<_>>();
+    live_ids.sort();
+    let mut expected_ids = vec![owner, member];
+    expected_ids.sort();
+    assert_eq!(
+        live_ids, expected_ids,
+        "access list includes only active non-revoked accounts"
+    );
+    assert_eq!(
+        WorkspaceStore::list_workspace_views_for(&repo, inactive, 100, None)
+            .await?
+            .len(),
+        0,
+        "inactive account cannot list workspaces through a stale access row"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn grant_inactive_account_is_not_found() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let inactive = insert_user_account(&db.pool, "inactive", "i@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "shared").await;
+    deactivate_account(&db.pool, inactive, owner).await?;
+
+    let err = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: inactive,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -362,6 +486,52 @@ async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Err
     );
     assert_eq!(
         AccessStore::role_for(&access_repo, workspace_id, second_owner).await?,
+        Some(Role::Owner)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn last_owner_guard_counts_only_active_owners() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let inactive_owner = insert_user_account(&db.pool, "inactive-owner", "i@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "owned").await;
+
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: inactive_owner,
+                role: Role::Owner,
+            },
+            owner,
+        )
+        .await?;
+    deactivate_account(&db.pool, inactive_owner, owner).await?;
+
+    let demote = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: owner,
+                role: Role::Editor,
+            },
+            owner,
+        )
+        .await;
+    assert!(
+        demote.is_err(),
+        "inactive owner row must not satisfy the last-owner guard"
+    );
+    assert_eq!(
+        AccessStore::role_for(&access_repo, workspace_id, owner).await?,
         Some(Role::Owner)
     );
 

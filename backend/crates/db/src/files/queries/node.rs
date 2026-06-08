@@ -12,13 +12,16 @@ use uuid::Uuid;
 use super::super::error::map_sqlx_error;
 use super::super::rows::{NODE_COLUMNS, NodeRow};
 
-/// The caller's live (non-revoked) workspace role, or `None` if no live grant.
+/// The caller's live workspace role, or `None` if no non-revoked grant from an
+/// active account exists.
 /// Shared by the [`FilesStore`](notegate_service::files::FilesStore) and
 /// [`SearchStore`](notegate_service::search::SearchStore) authorization paths.
 pub async fn role_for(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM workspace_access \
-         WHERE workspace_id = $1 AND account_id = $2 AND revoked_at IS NULL",
+        "SELECT wa.role FROM workspace_access wa \
+         JOIN accounts acc ON acc.id = wa.account_id \
+         WHERE wa.workspace_id = $1 AND wa.account_id = $2 AND wa.revoked_at IS NULL \
+           AND acc.is_active = true AND acc.deleted_at IS NULL",
     )
     .bind(workspace_id)
     .bind(account_id)

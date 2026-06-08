@@ -4,8 +4,8 @@
 //! creator `owner` and relies on the DB trigger to materialize the canonical
 //! root node; an owner account may own at most [`limits::OWNED_WORKSPACES_MAX`]
 //! workspaces (enforced in the create transaction). `get` is visible to any
-//! non-revoked role; `rename`/`delete` require `owner`. A workspace the caller
-//! cannot see (no live role) is reported as not-found so the api returns `404`.
+//! live role; `rename`/`delete` require `owner`. A workspace the caller cannot
+//! see (no live role) is reported as not-found so the api returns `404`.
 
 use std::future::Future;
 
@@ -90,16 +90,16 @@ pub trait WorkspaceStore: Clone + Send + Sync + 'static {
         workspace_id: Uuid,
     ) -> impl Future<Output = CoreResult<Option<Workspace>>> + Send;
 
-    /// Load one workspace view by id if the account has a non-revoked role.
+    /// Load one workspace view by id if the account has a live role.
     fn find_workspace_view_for(
         &self,
         account_id: Uuid,
         workspace_id: Uuid,
     ) -> impl Future<Output = CoreResult<Option<WorkspaceView>>> + Send;
 
-    /// List workspace views matching an exact name where the account has a
-    /// non-revoked role. Used by MCP name selection; callers usually request 2
-    /// rows to detect ambiguity without scanning every accessible workspace.
+    /// List workspace views matching an exact name where the account has a live
+    /// role. Used by MCP name selection; callers usually request 2 rows to
+    /// detect ambiguity without scanning every accessible workspace.
     fn list_workspace_views_by_name_for(
         &self,
         account_id: Uuid,
@@ -107,8 +107,8 @@ pub trait WorkspaceStore: Clone + Send + Sync + 'static {
         limit: i64,
     ) -> impl Future<Output = CoreResult<Vec<WorkspaceView>>> + Send;
 
-    /// List workspace views where the account has a non-revoked role. Returns
-    /// up to `limit` rows in `(created_at, id)` order.
+    /// List workspace views where the account has a live role. Returns up to
+    /// `limit` rows in `(created_at, id)` order.
     fn list_workspace_views_for(
         &self,
         account_id: Uuid,

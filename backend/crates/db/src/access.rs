@@ -50,8 +50,9 @@ impl WorkspaceAccessRow {
     }
 }
 
-const ACCESS_COLUMNS: &str =
+const ACCESS_RETURNING_COLUMNS: &str =
     "workspace_id, account_id, role, created_by, created_at, revoked_at, revoked_by";
+const ACCESS_SELECT_COLUMNS: &str = "wa.workspace_id, wa.account_id, wa.role, wa.created_by, wa.created_at, wa.revoked_at, wa.revoked_by";
 
 impl AccessStore for AccessRepo {
     async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
@@ -60,9 +61,11 @@ impl AccessStore for AccessRepo {
 
     async fn list_access(&self, workspace_id: Uuid) -> Result<Vec<WorkspaceAccess>> {
         let rows = sqlx::query_as::<_, WorkspaceAccessRow>(&format!(
-            "SELECT {ACCESS_COLUMNS} FROM workspace_access \
-             WHERE workspace_id = $1 AND revoked_at IS NULL \
-             ORDER BY created_at, account_id"
+            "SELECT {ACCESS_SELECT_COLUMNS} FROM workspace_access wa \
+             JOIN accounts acc ON acc.id = wa.account_id \
+             WHERE wa.workspace_id = $1 AND wa.revoked_at IS NULL \
+               AND acc.is_active = true AND acc.deleted_at IS NULL \
+             ORDER BY wa.created_at, wa.account_id"
         ))
         .bind(workspace_id)
         .fetch_all(&self.pool)
@@ -91,12 +94,15 @@ impl AccessStore for AccessRepo {
         )
         .await?;
 
-        // Count active accounts other than the target so re-granting an existing
+        // Count live accounts other than the target so re-granting an existing
         // account never trips the cap, but activating a new (or revoked) account
-        // respects [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`].
+        // respects [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`]. Inactive/deleted
+        // accounts are not live access accounts.
         let active_others: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM workspace_access \
-             WHERE workspace_id = $1 AND account_id <> $2 AND revoked_at IS NULL",
+            "SELECT count(*) FROM workspace_access wa \
+             JOIN accounts acc ON acc.id = wa.account_id \
+             WHERE wa.workspace_id = $1 AND wa.account_id <> $2 AND wa.revoked_at IS NULL \
+               AND acc.is_active = true AND acc.deleted_at IS NULL",
         )
         .bind(command.workspace_id)
         .bind(command.account_id)
@@ -120,7 +126,7 @@ impl AccessStore for AccessRepo {
              ON CONFLICT (workspace_id, account_id) DO UPDATE \
              SET role = EXCLUDED.role, created_by = EXCLUDED.created_by, \
                  created_at = now(), revoked_at = NULL, revoked_by = NULL \
-             RETURNING {ACCESS_COLUMNS}"
+             RETURNING {ACCESS_RETURNING_COLUMNS}"
         ))
         .bind(command.workspace_id)
         .bind(command.account_id)
@@ -159,11 +165,14 @@ impl AccessStore for AccessRepo {
     }
 }
 
-/// The caller's live role in a workspace, or `None` if no non-revoked grant.
+/// The caller's live role in a workspace, or `None` if no non-revoked grant
+/// from an active account.
 async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM workspace_access \
-         WHERE workspace_id = $1 AND account_id = $2 AND revoked_at IS NULL",
+        "SELECT wa.role FROM workspace_access wa \
+         JOIN accounts acc ON acc.id = wa.account_id \
+         WHERE wa.workspace_id = $1 AND wa.account_id = $2 AND wa.revoked_at IS NULL \
+           AND acc.is_active = true AND acc.deleted_at IS NULL",
     )
     .bind(workspace_id)
     .bind(account_id)
@@ -192,11 +201,14 @@ async fn lock_workspace(tx: &mut sqlx::PgConnection, workspace_id: Uuid) -> Resu
 }
 
 async fn ensure_account_exists(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
-    let found: Option<Uuid> = sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1")
-        .bind(account_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
+    let found: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM accounts \
+         WHERE id = $1 AND is_active = true AND deleted_at IS NULL",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
     if found.is_none() {
         return Err(Error::not_found("account not found"));
     }
@@ -204,8 +216,9 @@ async fn ensure_account_exists(tx: &mut sqlx::PgConnection, account_id: Uuid) ->
 }
 
 /// Lock the live owner rows and reject a change that would leave the workspace
-/// with no owner. The service pre-checks this for a clean conflict response; the
-/// transaction guard keeps concurrent owner changes from racing through it.
+/// with no active owner. The service pre-checks this for a clean conflict
+/// response; the transaction guard keeps concurrent owner changes from racing
+/// through it.
 async fn guard_last_owner(
     tx: &mut sqlx::PgConnection,
     workspace_id: Uuid,
@@ -213,9 +226,11 @@ async fn guard_last_owner(
     next_role: Option<Role>,
 ) -> Result<()> {
     let owners: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT account_id FROM workspace_access \
-         WHERE workspace_id = $1 AND role = 'owner' AND revoked_at IS NULL \
-         FOR UPDATE",
+        "SELECT wa.account_id FROM workspace_access wa \
+         JOIN accounts acc ON acc.id = wa.account_id \
+         WHERE wa.workspace_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
+           AND acc.is_active = true AND acc.deleted_at IS NULL \
+         FOR UPDATE OF wa",
     )
     .bind(workspace_id)
     .fetch_all(&mut *tx)

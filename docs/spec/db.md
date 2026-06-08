@@ -186,7 +186,9 @@ owner  = editor + workspace access management
 - 요청 시작 시 `workspace_access`로 workspace 권한을 확인한다.
 - 파일 목록/검색/읽기 쿼리는 권한 join 없이 `workspace_id` 조건으로 실행한다.
 - `revoked_at`이 있는 access row는 권한으로 인정하지 않는다.
-- 한 workspace의 active access account는 최대 `20`개다. grant transaction에서 검사한다.
+- `accounts.is_active=false`이거나 `accounts.deleted_at IS NOT NULL`인 account는 live access로 인정하지 않는다.
+- 한 workspace의 active access account는 최대 `20`개다. 활성 account의 revoke되지 않은 access만 계산하고 grant transaction에서 검사한다.
+- 마지막 owner 보호 규칙도 활성 account의 revoke되지 않은 owner access만 live owner로 계산한다.
 
 ## nodes
 

@@ -127,7 +127,7 @@ db/postgres_pool
 
 REST는 화면을 위한 API다. UI는 파일트리 node를 펼치고 선택 상태를 유지해야 하므로
 `workspace_id + node_id` 중심 계약을 사용한다. `workspace_id`는 secret이 아니며
-서버가 매 요청마다 `workspace_access`로 권한을 검증한다.
+서버가 매 요청마다 live access 기준으로 workspace 권한을 검증한다.
 
 ```text
 me(identity/capabilities) -> workspaces(role/root_node_id) -> children(workspace_id, root_node_id) -> document(workspace_id, node_id)
@@ -172,7 +172,7 @@ API key는 장기/자동화 credential이므로 항상 `agent`로 처리한다.
 
 - 모든 작업은 인증된 account가 접근 권한을 가진 workspace 안에서만 실행한다.
 - 클라이언트는 호출자 `user_id`나 `account_id`를 직접 보내지 않는다.
-- REST 클라이언트는 URL에 `workspace_id`를 명시하고, 서버는 `workspace_access`로 권한을 검증한다.
+- REST 클라이언트는 URL에 `workspace_id`를 명시하고, 서버는 live access 기준으로 workspace 권한을 검증한다.
 - MCP는 path 중심으로 호출하되 내부에서 workspace context와 path를 resolve한다.
 - root는 workspace마다 정확히 하나이며, workspace 생성 시 canonical root node `/`가 자동 생성된다. `parent_id = NULL`은 root에만 허용한다.
 - workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이다.
@@ -183,7 +183,7 @@ API key는 장기/자동화 credential이므로 항상 `agent`로 처리한다.
 - 다른 folder에서는 같은 이름을 사용할 수 있다.
 - path는 `parent_id + name` tree에서 derive하며, path uniqueness는 sibling unique invariant로 보장한다.
 - owner account당 workspace는 최대 `20`개다.
-- workspace active access account는 최대 `20`개다.
+- workspace live access account는 최대 `20`개다.
 - creator account당 active agent는 최대 `50`개, agent당 active key는 최대 `10`개다.
 - 파일트리 최대 depth는 `5`, folder당 live direct children은 최대 `200`, workspace live nodes는 최대 `10000`개다.
 - workspace live documents는 최대 `5000`개이고, live document 원문 총량은 최대 `268435456` bytes다.

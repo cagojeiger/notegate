@@ -8,7 +8,7 @@
 GET /api/v1/workspaces?limit=50&cursor=...
 ```
 
-Returns workspaces where the caller has non-revoked `workspace_access`. Default limit is `50`; max limit is `100`.
+호출자가 live access를 가진 workspace 목록을 반환한다. Default limit은 `50`, max limit은 `100`이다.
 
 ### Create workspace
 
@@ -22,7 +22,7 @@ POST /api/v1/workspaces
 }
 ```
 
-Creates a workspace, grants the creator `owner`, and creates the canonical root node `/`. There is no single/default workspace restriction. Workspace name must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`. The owner account owns at most `20` active workspaces.
+Workspace를 생성하고, 생성자에게 `owner` access를 부여하며, canonical root node `/`를 만든다. 단일/default workspace 제한은 없다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다. Owner account는 최대 `20`개의 active workspace를 소유할 수 있다.
 
 ### Get workspace
 
@@ -30,7 +30,7 @@ Creates a workspace, grants the creator `owner`, and creates the canonical root 
 GET /api/v1/workspaces/{workspace_id}
 ```
 
-Returns workspace metadata, caller role, and derived `root_node_id`.
+Workspace metadata, caller role, derive된 `root_node_id`를 반환한다.
 
 ### Rename workspace
 
@@ -44,7 +44,7 @@ PATCH /api/v1/workspaces/{workspace_id}
 }
 ```
 
-Requires `owner`.
+`owner` 권한이 필요하다.
 
 ### Delete workspace
 
@@ -52,4 +52,4 @@ Requires `owner`.
 DELETE /api/v1/workspaces/{workspace_id}
 ```
 
-Requires `owner`. Workspace deletion is a normal supported operation and deletes the workspace boundary, access rows, nodes, and documents by DB cascade.
+`owner` 권한이 필요하다. Workspace 삭제는 정상 지원되는 작업이며 workspace boundary, access row, node, document를 DB cascade로 삭제한다.
