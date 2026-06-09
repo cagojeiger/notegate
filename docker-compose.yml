@@ -22,22 +22,6 @@ x-api-environment: &api-environment
   # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS: "2"
   # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES: "1024"
 
-x-api-service: &api-service
-  build:
-    context: .
-    dockerfile: backend/Dockerfile
-  environment:
-    <<: *api-environment
-  depends_on:
-    postgres:
-      condition: service_healthy
-  read_only: true
-  cap_drop:
-    - ALL
-  security_opt:
-    - no-new-privileges:true
-  restart: unless-stopped
-
 services:
   postgres:
     image: postgres:17-alpine
@@ -56,15 +40,38 @@ services:
       retries: 5
     restart: unless-stopped
 
-  api-1:
-    <<: *api-service
+  api:
+    # Local default runs two replicas so MCP/API horizontal scaling is exercised
+    # during normal docker compose development.
+    scale: 2
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      <<: *api-environment
+    expose:
+      - "9191"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Local reverse proxy. It owns the public 9191 port so the api service can
+  # be scaled without host port conflicts.
+  proxy:
+    image: nginx:1.27-alpine
     ports:
       - "9191:9191"
-
-  api-2:
-    <<: *api-service
-    ports:
-      - "9192:9191"
+    volumes:
+      - ./deploy/nginx/notegate.conf:/etc/nginx/conf.d/notegate.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   pgdata:
