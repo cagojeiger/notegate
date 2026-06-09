@@ -36,7 +36,7 @@ pub trait CallerResolver: Send + Sync {
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
 
-    /// Resolve an agent key (the raw plaintext token) into an agent caller.
+    /// Resolve an API key (the raw plaintext token) into a user or agent caller.
     fn resolve_api_key(
         &self,
         token: String,

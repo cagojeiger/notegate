@@ -396,6 +396,41 @@ impl AgentRepo {
 }
 
 impl AgentRepo {
+    pub async fn find_active_agent_by_id(
+        &self,
+        agent_id: Uuid,
+    ) -> Result<Option<(Account, Agent)>> {
+        let account_row = sqlx::query_as::<_, AccountRow>(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM accounts \
+             WHERE id = $1 AND kind = 'agent' \
+               AND is_active = true AND deleted_at IS NULL"
+        ))
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let Some(account_row) = account_row else {
+            return Ok(None);
+        };
+
+        let agent_row = sqlx::query_as::<_, AgentRow>(&format!(
+            "SELECT {AGENT_COLUMNS} FROM agents WHERE id = $1"
+        ))
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let Some(agent_row) = agent_row else {
+            return Ok(None);
+        };
+
+        let agent = Agent::from(agent_row);
+        let account = account_row.into_agent_account(agent.name.clone())?;
+        Ok(Some((account, agent)))
+    }
+
     pub async fn find_agent_by_key_hash(
         &self,
         token_hash: &str,

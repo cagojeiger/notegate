@@ -9,11 +9,11 @@
 //! - REST/MCP bearer tokens resolve an already-registered user account
 //!   (an authenticated authgate identity with no local account is
 //!   [`IdentityError::NotRegistered`] — the spec onboarding path);
-//! - an agent key resolves a `kind='agent'` account, rejecting revoked, expired,
-//!   or inactive credentials (enforced at the db layer).
+//! - an API key resolves either a `kind='user'` or `kind='agent'` account,
+//!   rejecting revoked, expired, or inactive credentials (enforced at the db layer).
 
 use notegate_core::security::PiiCrypto;
-use notegate_db::{AccountRepo, AgentRepo};
+use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo};
 pub use notegate_model::ResolveAttrs;
 use notegate_model::account::AccountKind;
 use notegate_model::{Account, Caller, CallerIdentity, Channel, User};
@@ -43,14 +43,21 @@ impl From<notegate_core::Error> for IdentityError {
 pub struct Resolver {
     users: AccountRepo,
     agents: AgentRepo,
+    api_keys: ApiKeyRepo,
     crypto: PiiCrypto,
 }
 
 impl Resolver {
-    pub fn new(users: AccountRepo, agents: AgentRepo, crypto: PiiCrypto) -> Self {
+    pub fn new(
+        users: AccountRepo,
+        agents: AgentRepo,
+        api_keys: ApiKeyRepo,
+        crypto: PiiCrypto,
+    ) -> Self {
         Self {
             users,
             agents,
+            api_keys,
             crypto,
         }
     }
@@ -77,7 +84,7 @@ impl Resolver {
         self.resolve_registered_user(&attrs.sub, Channel::Mcp).await
     }
 
-    /// Resolve an agent key into an agent caller on the given channel.
+    /// Resolve an API key into a user or agent caller on the given channel.
     pub async fn resolve_api_key(
         &self,
         token: &str,
@@ -87,12 +94,25 @@ impl Resolver {
             return Err(IdentityError::NotRegistered);
         };
         let token_hash = self.crypto.api_key_hash(&key_id.to_string(), secret)?;
-        let resolved = self.agents.find_agent_by_key_hash(&token_hash).await?;
+        let account_id = self
+            .api_keys
+            .find_live_account_id_by_token_hash(&token_hash)
+            .await?
+            .ok_or(IdentityError::NotRegistered)?;
+
+        if let Some((account, user)) = self.users.find_caller_by_account_id(account_id).await? {
+            if account.kind != AccountKind::User {
+                return Err(IdentityError::Inactive);
+            }
+            return user_caller(account, user, channel);
+        }
+
+        let resolved = self.agents.find_active_agent_by_id(account_id).await?;
         let (account, agent) = resolved.ok_or(IdentityError::NotRegistered)?;
-        // The db query already excludes inactive accounts; double-check defensively.
-        if !account.is_active || account.kind != AccountKind::Agent {
+        if account.kind != AccountKind::Agent {
             return Err(IdentityError::Inactive);
         }
+
         Ok(Caller {
             account,
             identity: CallerIdentity::Agent(agent),

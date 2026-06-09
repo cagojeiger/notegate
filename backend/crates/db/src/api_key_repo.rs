@@ -4,7 +4,7 @@ use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{ApiKey, CreateApiKey};
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -55,6 +55,38 @@ impl ApiKeyRepo {
         .await
         .map_err(map_sqlx_error)?;
         Ok(row.map(ApiKey::from))
+    }
+
+    pub async fn find_live_account_id_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<Uuid>> {
+        let account_id: Option<Uuid> = sqlx::query(
+            "SELECT k.account_id FROM api_keys k \
+             JOIN accounts acc ON acc.id = k.account_id \
+             WHERE k.token_hash = $1 \
+               AND k.revoked_at IS NULL \
+               AND (k.expires_at IS NULL OR k.expires_at > now()) \
+               AND acc.is_active = true \
+               AND acc.deleted_at IS NULL",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?
+        .map(|row| row.get::<Uuid, _>("account_id"));
+
+        if account_id.is_some()
+            && let Err(error) =
+                sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE token_hash = $1")
+                    .bind(token_hash)
+                    .execute(&self.pool)
+                    .await
+        {
+            tracing::warn!(event = "api_key.last_used_update_failed", %error);
+        }
+
+        Ok(account_id)
     }
 
     pub async fn count_live_keys(&self, account_id: Uuid) -> Result<usize> {

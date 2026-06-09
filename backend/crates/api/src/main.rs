@@ -69,8 +69,8 @@ async fn main() -> anyhow::Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let jwks_url = format!("{}/keys", config.authgate_url);
-    // The db-backed identity resolver: account_repo resolves users, agent_repo
-    // authenticates API keys.
+    // The db-backed identity resolver: account_repo resolves users, api_key_repo
+    // resolves key ownership, and agent_repo resolves agent callers.
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
     let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto.clone());
     let agent_repo = notegate_db::AgentRepo::with_lookup_key(
@@ -78,8 +78,17 @@ async fn main() -> anyhow::Result<()> {
         pii_crypto.lookup_key_id(),
         pii_crypto.version(),
     );
-    let resolver =
-        notegate_service::identity::Resolver::new(account_repo, agent_repo, pii_crypto.clone());
+    let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
+        pool.clone(),
+        pii_crypto.lookup_key_id(),
+        pii_crypto.version(),
+    );
+    let resolver = notegate_service::identity::Resolver::new(
+        account_repo,
+        agent_repo,
+        api_key_repo,
+        pii_crypto.clone(),
+    );
     let config = std::sync::Arc::new(config);
     let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));
