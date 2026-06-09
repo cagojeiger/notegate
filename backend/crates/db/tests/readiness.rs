@@ -41,3 +41,47 @@ async fn readiness_rejects_missing_migration_row() -> Result<(), Box<dyn std::er
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn crypto_key_epoch_bootstrap_and_verify() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    sqlx::query("DELETE FROM crypto_key_epochs")
+        .execute(&db.pool)
+        .await?;
+
+    let crypto = notegate_core::security::PiiCrypto::test();
+    let repo = notegate_db::CryptoKeyEpochRepo::new(db.pool.clone());
+
+    assert!(repo.verify_active(&crypto).await.is_err());
+    repo.bootstrap_active(&crypto).await?;
+    repo.verify_active(&crypto).await?;
+
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM crypto_key_epochs")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(count, 2);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn crypto_key_epoch_verify_rejects_wrong_secret() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let wrong_crypto = notegate_core::security::PiiCrypto::from_root_secrets(
+        "test-enc",
+        &secrecy::SecretString::from("wrong-enc-root-secret-32-bytes-long".to_owned()),
+        "test-lookup",
+        &secrecy::SecretString::from("wrong-lookup-root-secret-32-bytes-long".to_owned()),
+    );
+    let repo = notegate_db::CryptoKeyEpochRepo::new(db.pool.clone());
+
+    assert!(repo.verify_active(&wrong_crypto).await.is_err());
+
+    db.cleanup().await;
+    Ok(())
+}

@@ -24,10 +24,12 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    if std::env::args().any(|arg| arg == "--print-openapi") {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--print-openapi") {
         println!("{}", openapi::json_pretty()?);
         return Ok(());
     }
+    let bootstrap_crypto = args.iter().any(|arg| arg == "--bootstrap-crypto");
 
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
@@ -46,6 +48,21 @@ async fn main() -> anyhow::Result<()> {
         max_connections = config.db_max_connections
     );
 
+    let pii_crypto = PiiCrypto::from_root_secrets(
+        config.enc_root_key_id.clone(),
+        &config.enc_root_secret,
+        config.lookup_root_key_id.clone(),
+        &config.lookup_root_secret,
+    );
+    let key_epochs = notegate_db::CryptoKeyEpochRepo::new(pool.clone());
+    if bootstrap_crypto {
+        key_epochs.bootstrap_active(&pii_crypto).await?;
+        info!(event = "crypto_key_epochs.bootstrapped");
+        pool.close().await;
+        return Ok(());
+    }
+    key_epochs.verify_active(&pii_crypto).await?;
+
     let bind_addr = config.bind_addr;
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -53,13 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
     let jwks_url = format!("{}/keys", config.authgate_url);
     // The db-backed identity resolver: account_repo resolves users, agent_repo
-    // authenticates agent keys.
-    let pii_crypto = PiiCrypto::from_root_secrets(
-        config.enc_root_key_id.clone(),
-        &config.enc_root_secret,
-        config.lookup_root_key_id.clone(),
-        &config.lookup_root_secret,
-    );
+    // authenticates API keys.
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
     let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto.clone());
     let agent_repo = notegate_db::AgentRepo::with_lookup_key(

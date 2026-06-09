@@ -1693,6 +1693,7 @@ dependencies = [
  "chrono",
  "notegate-core",
  "notegate-model",
+ "secrecy",
  "sha2",
  "sqlx",
  "tokio",
