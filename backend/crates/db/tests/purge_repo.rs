@@ -15,9 +15,11 @@ use sqlx::Row as _;
 use uuid::Uuid;
 
 const PURGE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5055_5247_4501;
+static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
 async fn purge_deletes_due_workspaces_and_nodes() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -95,6 +97,7 @@ async fn purge_deletes_due_workspaces_and_nodes() -> Result<(), Box<dyn std::err
 
 #[tokio::test]
 async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };

@@ -42,6 +42,21 @@ impl TestDb {
         };
         let schema = format!("notegate_test_{}", Uuid::new_v4().simple());
         let mut admin = PgConnection::connect(&database_url).await?;
+        // Extensions are database-global and not schema-isolated. Install them
+        // once in `public` before running the per-test schema migration; applying
+        // CREATE EXTENSION concurrently inside throwaway schemas races on a fresh DB.
+        sqlx::query("SELECT pg_advisory_lock(hashtextextended('notegate_test_extensions', 0))")
+            .execute(&mut admin)
+            .await?;
+        sqlx::query("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
+            .execute(&mut admin)
+            .await?;
+        sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+            .execute(&mut admin)
+            .await?;
+        sqlx::query("SELECT pg_advisory_unlock(hashtextextended('notegate_test_extensions', 0))")
+            .execute(&mut admin)
+            .await?;
         sqlx::query(&format!("CREATE SCHEMA {schema}"))
             .execute(&mut admin)
             .await?;
@@ -58,7 +73,13 @@ impl TestDb {
             .connect_with(options)
             .await?;
 
-        sqlx::raw_sql(MIGRATION).execute(&pool).await?;
+        let schema_migration = MIGRATION
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("CREATE EXTENSION"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sqlx::raw_sql(&schema_migration).execute(&pool).await?;
+        record_migration_ledger(&pool).await?;
 
         Ok(Some(Self {
             database_url,
@@ -88,6 +109,36 @@ impl TestDb {
         }
         let _ = admin.close().await;
     }
+}
+
+async fn record_migration_ledger(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "CREATE TABLE _sqlx_migrations (
+            version BIGINT PRIMARY KEY,
+            description TEXT NOT NULL,
+            installed_on TIMESTAMPTZ NOT NULL DEFAULT now(),
+            success BOOLEAN NOT NULL,
+            checksum BYTEA NOT NULL,
+            execution_time BIGINT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    for migration in notegate_db::MIGRATOR.iter() {
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations \
+             (version, description, success, checksum, execution_time) \
+             VALUES ($1, $2, true, $3, 0)",
+        )
+        .bind(migration.version)
+        .bind(migration.description.to_string())
+        .bind(migration.checksum.as_ref())
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
 }
 
 /// Insert a `kind='user'` account + matching `users` row, returning the id.

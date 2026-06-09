@@ -14,8 +14,10 @@
 mod common;
 
 use common::TestDb;
-use notegate_db::{AccessRepo, AccountRepo, AgentRepo};
-use notegate_model::{CreateAgent, CreateAgentKey, GrantAccess, ResolveAttrs, Role};
+use notegate_db::{AccessRepo, AccountRepo, AgentRepo, WorkspaceRepo};
+use notegate_model::{
+    CreateAgent, CreateAgentKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role,
+};
 use sqlx::Row as _;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
@@ -186,6 +188,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
     let accounts = AccountRepo::new(db.pool.clone());
     let agents = AgentRepo::new(db.pool.clone());
     let access = AccessRepo::new(db.pool.clone());
+    let workspaces = WorkspaceRepo::new(db.pool.clone());
 
     let (owner, _) = accounts
         .upsert_user_by_sub(&attrs("owner-sub", "owner@example.test", "Owner"))
@@ -194,12 +197,15 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
         .upsert_user_by_sub(&attrs("member-sub", "member@example.test", "Member"))
         .await?;
 
-    let workspace_id: uuid::Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name) VALUES ($1, 'owned') RETURNING id",
-    )
-    .bind(owner.id)
-    .fetch_one(&db.pool)
-    .await?;
+    let workspace_id = workspaces
+        .create_workspace(
+            owner.id,
+            &CreateWorkspace {
+                name: "owned".to_owned(),
+            },
+        )
+        .await?
+        .id;
 
     let agent = agents
         .insert_agent(
