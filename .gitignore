@@ -15,6 +15,7 @@ config/local.toml
 .omc/
 .omx/
 .codex/
+.sisyphus/
 
 # OS
 .DS_Store
