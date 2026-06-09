@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiCrypto};
-use notegate_core::{Error, Result};
+use notegate_core::{Error, Result, limits};
 use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
@@ -183,11 +183,92 @@ impl AccountRepo {
     pub async fn anonymize_user(&self, account_id: Uuid, deleted_by: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
+        let locked: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM accounts \
+             WHERE id = $1 AND kind = 'user' AND is_active = true AND deleted_at IS NULL \
+             FOR UPDATE",
+        )
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if locked.is_none() {
+            return Err(Error::not_found("active user account not found"));
+        }
+
+        let owned_workspaces: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM workspaces WHERE created_by = $1 AND deleted_at IS NULL FOR UPDATE",
+        )
+        .bind(account_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let owned_agents: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT a.id FROM agents a \
+             JOIN accounts acc ON acc.id = a.id \
+             WHERE a.created_by = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
+             FOR UPDATE OF acc",
+        )
+        .bind(account_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
+            "UPDATE workspaces \
+             SET deleted_at = now(), deleted_by = $2, \
+                 purge_after = now() + make_interval(days => $3::int), updated_at = now() \
+             WHERE id = ANY($1) AND deleted_at IS NULL",
+        )
+        .bind(&owned_workspaces)
+        .bind(deleted_by)
+        .bind(i32::try_from(limits::DELETED_NODE_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
+            "UPDATE accounts \
+             SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+             WHERE id = ANY($1) AND kind = 'agent' AND deleted_at IS NULL",
+        )
+        .bind(&owned_agents)
+        .bind(deleted_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
+            "UPDATE agent_keys \
+             SET revoked_at = now(), revoked_by = $2 \
+             WHERE agent_id = ANY($1) AND revoked_at IS NULL",
+        )
+        .bind(&owned_agents)
+        .bind(deleted_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
+            "UPDATE workspace_access \
+             SET revoked_at = now(), revoked_by = $3 \
+             WHERE revoked_at IS NULL \
+               AND (account_id = $1 OR account_id = ANY($2) OR workspace_id = ANY($4))",
+        )
+        .bind(account_id)
+        .bind(&owned_agents)
+        .bind(deleted_by)
+        .bind(&owned_workspaces)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
         sqlx::query(
             "UPDATE accounts \
              SET display_name_ciphertext = NULL, display_name_nonce = NULL, \
                  is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
-             WHERE id = $1 AND kind = 'user' AND deleted_at IS NULL",
+             WHERE id = $1 AND kind = 'user'",
         )
         .bind(account_id)
         .bind(deleted_by)

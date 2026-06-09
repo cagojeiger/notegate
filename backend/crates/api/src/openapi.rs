@@ -23,6 +23,7 @@ use crate::state::AppState;
 #[openapi(
     paths(
         rest::me::get_me,
+        rest::me::delete_me,
         rest::workspaces::list,
         rest::workspaces::create,
         rest::workspaces::get_one,
@@ -359,6 +360,7 @@ mod tests {
             "DELETE /api/v1/workspaces/{workspace_id}/access/{account_id}",
             "DELETE /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
             "GET /api/v1/agents",
+            "DELETE /api/v1/me",
             "GET /api/v1/me",
             "GET /api/v1/workspaces",
             "GET /api/v1/workspaces/{workspace_id}",

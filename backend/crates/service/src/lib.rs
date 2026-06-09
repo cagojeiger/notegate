@@ -5,6 +5,7 @@
 //! the `db` crate; transport mapping stays in `api`.
 
 pub mod access;
+pub mod accounts;
 pub mod agents;
 pub mod cursor;
 pub mod error;

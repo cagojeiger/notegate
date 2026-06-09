@@ -14,8 +14,8 @@
 mod common;
 
 use common::TestDb;
-use notegate_db::AccountRepo;
-use notegate_model::ResolveAttrs;
+use notegate_db::{AccessRepo, AccountRepo, AgentRepo};
+use notegate_model::{CreateAgent, CreateAgentKey, GrantAccess, ResolveAttrs, Role};
 use sqlx::Row as _;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
@@ -158,6 +158,126 @@ async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::
         row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("anonymized_at")
             .is_some()
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let accounts = AccountRepo::new(db.pool.clone());
+    let agents = AgentRepo::new(db.pool.clone());
+    let access = AccessRepo::new(db.pool.clone());
+
+    let (owner, _) = accounts
+        .upsert_user_by_sub(&attrs("owner-sub", "owner@example.test", "Owner"))
+        .await?;
+    let (member, _) = accounts
+        .upsert_user_by_sub(&attrs("member-sub", "member@example.test", "Member"))
+        .await?;
+
+    let workspace_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO workspaces (created_by, name) VALUES ($1, 'owned') RETURNING id",
+    )
+    .bind(owner.id)
+    .fetch_one(&db.pool)
+    .await?;
+
+    let agent = agents
+        .insert_agent(
+            &CreateAgent {
+                name: "owned-agent".to_owned(),
+            },
+            owner.id,
+        )
+        .await?;
+    let key = agents
+        .insert_agent_key(
+            &CreateAgentKey {
+                agent_id: agent.id,
+                name: "key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: None,
+            },
+            "hashed-token",
+            owner.id,
+        )
+        .await?;
+
+    access
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: member.id,
+                role: Role::Viewer,
+            },
+            owner.id,
+        )
+        .await?;
+    access
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: agent.id,
+                role: Role::Editor,
+            },
+            owner.id,
+        )
+        .await?;
+
+    accounts.anonymize_user(owner.id, owner.id).await?;
+
+    let account = accounts
+        .find_account(owner.id)
+        .await?
+        .ok_or("owner account remains as attribution target")?;
+    assert!(!account.is_active);
+    assert_eq!(account.display_name, "");
+    assert!(accounts.find_user_by_sub("owner-sub").await?.is_none());
+
+    let workspace_deleted: (
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<uuid::Uuid>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as("SELECT deleted_at, deleted_by, purge_after FROM workspaces WHERE id = $1")
+        .bind(workspace_id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert!(workspace_deleted.0.is_some());
+    assert_eq!(workspace_deleted.1, Some(owner.id));
+    assert!(workspace_deleted.2.is_some());
+
+    let agent_active: bool = sqlx::query_scalar("SELECT is_active FROM accounts WHERE id = $1")
+        .bind(agent.id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert!(!agent_active);
+
+    let key_revoked_by: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT revoked_by FROM agent_keys WHERE id = $1")
+            .bind(key.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(key_revoked_by, Some(owner.id));
+
+    let live_access: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM workspace_access WHERE workspace_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(workspace_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(live_access, 0);
+
+    let key_destroyed: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT destroyed_at FROM account_encryption_keys WHERE account_id = $1",
+    )
+    .bind(owner.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(key_destroyed.is_some());
 
     db.cleanup().await;
     Ok(())

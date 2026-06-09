@@ -124,7 +124,8 @@ accounts.deleted_at = now()
 PII ciphertext 제거
 lookup hash 제거 또는 정책에 따라 비활성화
 session/token/key revoke
-owned live workspace soft delete
+소유한 live workspace soft delete
+생성한 agent deactivate 및 key revoke
 workspace_access revoke
 ```
 

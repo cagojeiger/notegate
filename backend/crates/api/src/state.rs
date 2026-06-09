@@ -6,6 +6,7 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{AccessRepo, AccountRepo, AgentRepo, FilesRepo, PgPool, WorkspaceRepo};
 use notegate_service::access::AccessService;
+use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::files::FilesService;
 use notegate_service::search::SearchService;
@@ -18,6 +19,8 @@ use crate::auth::oidc::OidcProvider;
 
 /// Workspace lifecycle service over the db-backed [`WorkspaceRepo`].
 pub type Workspaces = WorkspaceService;
+/// Current-account lifecycle service over the db-backed [`AccountRepo`].
+pub type Accounts = AccountService;
 /// Access-management service over the db-backed [`AccessRepo`].
 pub type Access = AccessService;
 /// Agent lifecycle service over the db-backed [`AgentRepo`].
@@ -36,6 +39,7 @@ pub struct AppState {
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
     pub workspaces: Workspaces,
+    pub account_lifecycle: Accounts,
     pub access: Access,
     pub agents: Agents,
     pub files: Files,
@@ -56,6 +60,8 @@ impl AppState {
     ) -> Self {
         let pii_crypto = PiiCrypto::from_secrets(&config.pii_master_key, &config.pii_hash_pepper);
         let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
+        let account_lifecycle =
+            AccountService::new(AccountRepo::with_crypto(db.clone(), pii_crypto.clone()));
         let access = AccessService::new(AccessRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents = AgentService::new(agent_repo.clone());
@@ -71,6 +77,7 @@ impl AppState {
             resolver,
             http,
             workspaces,
+            account_lifecycle,
             access,
             agents,
             files,
