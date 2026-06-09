@@ -8,18 +8,75 @@
 //! `DELETE` is the user account teardown endpoint. It is intentionally REST-only:
 //! MCP remains a file/workspace tool surface and does not expose account deletion.
 
-use axum::extract::{Extension, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use notegate_model::Caller;
+use chrono::{DateTime, Utc};
+use notegate_model::{ApiKey, Caller, CreateApiKey};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/v1/me", get(get_me).delete(delete_me))
+    Router::new()
+        .route("/v1/me", get(get_me).delete(delete_me))
+        .route("/v1/me/keys", get(list_keys).post(create_key))
+        .route("/v1/me/keys/{key_id}", post(rotate_key).delete(revoke_key))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct CreateKeyBody {
+    name: String,
+    #[serde(default)]
+    scopes: Vec<String>,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct KeyOut {
+    id: Uuid,
+    account_id: Uuid,
+    name: String,
+    scopes: Vec<String>,
+    expires_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    revoked_at: Option<DateTime<Utc>>,
+}
+
+impl From<&ApiKey> for KeyOut {
+    fn from(key: &ApiKey) -> Self {
+        Self {
+            id: key.id,
+            account_id: key.account_id,
+            name: key.name.clone(),
+            scopes: key.scopes.clone(),
+            expires_at: key.expires_at,
+            created_at: key.created_at,
+            revoked_at: key.revoked_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct KeysListResponse {
+    keys: Vec<KeyOut>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CreatedKeyOut {
+    id: Uuid,
+    account_id: Uuid,
+    name: String,
+    scopes: Vec<String>,
+    expires_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    token: String,
 }
 
 #[utoipa::path(
@@ -31,6 +88,118 @@ pub fn routes() -> Router<AppState> {
 )]
 pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutput> {
     Json(build_me(&caller))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/keys",
+    tag = "identity",
+    responses((status = 200, description = "List current user API keys", body = KeysListResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn list_keys(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<KeysListResponse>, ApiError> {
+    let keys = state
+        .account_lifecycle
+        .list_keys(caller.account.kind, caller.account_id())
+        .await?;
+    Ok(Json(KeysListResponse {
+        keys: keys.iter().map(KeyOut::from).collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/keys",
+    tag = "identity",
+    request_body = CreateKeyBody,
+    responses((status = 201, description = "Create current user API key", body = CreatedKeyOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn create_key(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<CreateKeyBody>,
+) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+    let minted = state
+        .account_lifecycle
+        .create_key(
+            caller.account.kind,
+            caller.account_id(),
+            CreateApiKey {
+                name: body.name,
+                scopes: body.scopes,
+                expires_at: body.expires_at,
+            },
+        )
+        .await?;
+    let key = minted.key;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedKeyOut {
+            id: key.id,
+            account_id: key.account_id,
+            name: key.name,
+            scopes: key.scopes,
+            expires_at: key.expires_at,
+            created_at: key.created_at,
+            token: minted.token,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/keys/{key_id}",
+    tag = "identity",
+    params(("key_id" = Uuid, Path)),
+    responses((status = 201, description = "Rotate current user API key", body = CreatedKeyOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn rotate_key(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(key_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+    let minted = state
+        .account_lifecycle
+        .rotate_key(caller.account.kind, caller.account_id(), key_id)
+        .await?;
+    let key = minted.key;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedKeyOut {
+            id: key.id,
+            account_id: key.account_id,
+            name: key.name,
+            scopes: key.scopes,
+            expires_at: key.expires_at,
+            created_at: key.created_at,
+            token: minted.token,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/me/keys/{key_id}",
+    tag = "identity",
+    params(("key_id" = Uuid, Path)),
+    responses((status = 204, description = "Revoke current user API key")),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn revoke_key(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(key_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .account_lifecycle
+        .revoke_key(caller.account.kind, caller.account_id(), key_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

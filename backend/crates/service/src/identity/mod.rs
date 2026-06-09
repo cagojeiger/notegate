@@ -12,6 +12,7 @@
 //! - an agent key resolves a `kind='agent'` account, rejecting revoked, expired,
 //!   or inactive credentials (enforced at the db layer).
 
+use notegate_core::security::PiiCrypto;
 use notegate_db::{AccountRepo, AgentRepo};
 pub use notegate_model::ResolveAttrs;
 use notegate_model::account::AccountKind;
@@ -42,11 +43,16 @@ impl From<notegate_core::Error> for IdentityError {
 pub struct Resolver {
     users: AccountRepo,
     agents: AgentRepo,
+    crypto: PiiCrypto,
 }
 
 impl Resolver {
-    pub fn new(users: AccountRepo, agents: AgentRepo) -> Self {
-        Self { users, agents }
+    pub fn new(users: AccountRepo, agents: AgentRepo, crypto: PiiCrypto) -> Self {
+        Self {
+            users,
+            agents,
+            crypto,
+        }
     }
 
     /// Resolve a browser login: upsert + activate the user account, then return
@@ -77,7 +83,10 @@ impl Resolver {
         token: &str,
         channel: Channel,
     ) -> Result<Caller, IdentityError> {
-        let token_hash = crate::agents::hash_token(token);
+        let Some((key_id, secret)) = crate::agents::parse_token(token) else {
+            return Err(IdentityError::NotRegistered);
+        };
+        let token_hash = self.crypto.api_key_hash(&key_id.to_string(), secret)?;
         let resolved = self.agents.find_agent_by_key_hash(&token_hash).await?;
         let (account, agent) = resolved.ok_or(IdentityError::NotRegistered)?;
         // The db query already excludes inactive accounts; double-check defensively.

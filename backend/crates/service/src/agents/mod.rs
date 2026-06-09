@@ -7,11 +7,13 @@
 //! generated here, hashed with SHA-256, and only the hash is persisted.
 
 use chrono::Utc;
-use notegate_core::limits;
-use notegate_db::AgentRepo;
+use notegate_core::{limits, security::PiiCrypto};
+use notegate_db::{AgentRepo, ApiKeyRepo};
 use notegate_model::Agent;
 use notegate_model::account::AccountKind;
-pub use notegate_model::{AgentPage, CreateAgent, CreateAgentKey, ListAgents, MintedAgentKey};
+pub use notegate_model::{
+    AgentPage, ApiKey, CreateAgent, CreateAgentKey, CreateApiKey, ListAgents, MintedApiKey,
+};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -21,11 +23,17 @@ use crate::pagination::{clamp_limit, paginate_by_id};
 #[derive(Debug, Clone)]
 pub struct AgentService {
     store: AgentRepo,
+    api_keys: ApiKeyRepo,
+    crypto: PiiCrypto,
 }
 
 impl AgentService {
-    pub fn new(store: AgentRepo) -> Self {
-        Self { store }
+    pub fn with_crypto(store: AgentRepo, api_keys: ApiKeyRepo, crypto: PiiCrypto) -> Self {
+        Self {
+            store,
+            api_keys,
+            crypto,
+        }
     }
 
     /// Create an agent. Only a `kind='user'` caller may create agents; the
@@ -85,11 +93,11 @@ impl AgentService {
         caller_kind: AccountKind,
         caller_account_id: Uuid,
         command: CreateAgentKey,
-    ) -> ServiceResult<MintedAgentKey> {
+    ) -> ServiceResult<MintedApiKey> {
         require_user_caller(caller_kind)?;
         if !command.scopes.is_empty() {
             return Err(ServiceError::InvalidInput(
-                "agent key scopes must be empty".to_owned(),
+                "api key scopes must be empty".to_owned(),
             ));
         }
         if command
@@ -103,21 +111,19 @@ impl AgentService {
         self.require_owned_active_agent(command.agent_id, caller_account_id)
             .await?;
 
-        let live = self.store.count_live_keys(command.agent_id).await?;
-        if live >= limits::AGENT_KEYS_PER_AGENT_MAX {
-            return Err(ServiceError::Conflict(format!(
-                "agent already has the maximum of {} live keys",
-                limits::AGENT_KEYS_PER_AGENT_MAX
-            )));
-        }
-
-        let token = generate_token();
-        let token_hash = hash_token(&token);
-        let key = self
-            .store
-            .insert_agent_key(&command, &token_hash, caller_account_id)
-            .await?;
-        Ok(MintedAgentKey { key, token })
+        crate::accounts::create_key_for_account(
+            &self.api_keys,
+            &self.crypto,
+            command.agent_id,
+            caller_account_id,
+            CreateApiKey {
+                name: command.name,
+                scopes: command.scopes,
+                expires_at: command.expires_at,
+            },
+            None,
+        )
+        .await
     }
 
     /// Delete an agent created by the caller. Only user callers may manage
@@ -146,9 +152,55 @@ impl AgentService {
         self.require_owned_active_agent(agent_id, caller_account_id)
             .await?;
         Ok(self
-            .store
-            .revoke_key(agent_id, key_id, caller_account_id)
+            .api_keys
+            .revoke_key(agent_id, key_id, caller_account_id, None)
             .await?)
+    }
+
+    pub async fn list_keys(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        agent_id: Uuid,
+    ) -> ServiceResult<Vec<ApiKey>> {
+        require_user_caller(caller_kind)?;
+        self.require_owned_active_agent(agent_id, caller_account_id)
+            .await?;
+        Ok(self.api_keys.list_by_account(agent_id).await?)
+    }
+
+    pub async fn rotate_key(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        agent_id: Uuid,
+        key_id: Uuid,
+    ) -> ServiceResult<MintedApiKey> {
+        require_user_caller(caller_kind)?;
+        self.require_owned_active_agent(agent_id, caller_account_id)
+            .await?;
+        let old = self
+            .api_keys
+            .find_live_key(agent_id, key_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("api key not found".to_owned()))?;
+        let minted = crate::accounts::create_key_for_account(
+            &self.api_keys,
+            &self.crypto,
+            agent_id,
+            caller_account_id,
+            CreateApiKey {
+                name: old.name,
+                scopes: Vec::new(),
+                expires_at: old.expires_at,
+            },
+            Some(old.id),
+        )
+        .await?;
+        self.api_keys
+            .revoke_key(agent_id, key_id, caller_account_id, Some("rotated"))
+            .await?;
+        Ok(minted)
     }
 
     async fn require_owned_active_agent(
@@ -182,18 +234,43 @@ fn validate_agent_name(name: &str) -> ServiceResult<()> {
     Ok(())
 }
 
-/// Generate a random opaque token (256 bits of entropy, hex-encoded).
-fn generate_token() -> String {
-    use rand::RngCore as _;
-    let mut bytes = [0_u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+pub fn format_token(key_id: Uuid, secret: &str) -> String {
+    format!("ngk_v1_{key_id}_{secret}")
 }
 
-/// Hash a plaintext token for storage/lookup. Shared by minting and auth so the
-/// stored hash and the lookup hash never drift.
-pub fn hash_token(token: &str) -> String {
-    use sha2::{Digest as _, Sha256};
-    let digest = Sha256::digest(token.as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+pub fn token_prefix(key_id: Uuid) -> String {
+    format!("ngk_v1_{key_id}")
+}
+
+pub fn parse_token(token: &str) -> Option<(Uuid, &str)> {
+    let rest = token.strip_prefix("ngk_v1_")?;
+    let (key_id, secret) = rest.split_once('_')?;
+    let key_id = Uuid::parse_str(key_id).ok()?;
+    if secret.is_empty() {
+        return None;
+    }
+    Some((key_id, secret))
+}
+
+#[cfg(test)]
+mod api_key_token_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn api_key_token_round_trips_key_id_and_secret() {
+        let key_id = Uuid::new_v4();
+        let token = format_token(key_id, "secret-value");
+        let parsed = parse_token(&token).unwrap();
+        assert_eq!(parsed.0, key_id);
+        assert_eq!(parsed.1, "secret-value");
+        assert_eq!(token_prefix(key_id), format!("ngk_v1_{key_id}"));
+    }
+
+    #[test]
+    fn api_key_token_rejects_old_opaque_tokens() {
+        assert!(parse_token("old-token").is_none());
+        assert!(parse_token("ngk_v1_not-a-uuid_secret").is_none());
+        assert!(parse_token("ngk_v1_00000000-0000-0000-0000-000000000000_").is_none());
+    }
 }

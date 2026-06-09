@@ -6,6 +6,7 @@
 
 pub mod account;
 pub mod agent;
+pub mod api_key;
 pub mod document;
 pub mod files;
 pub mod identity;
@@ -18,6 +19,7 @@ pub use account::{Account, AccountKind, AccountRef};
 pub use agent::{
     Agent, AgentKey, AgentPage, CreateAgent, CreateAgentKey, ListAgents, MintedAgentKey,
 };
+pub use api_key::{ApiKey, CreateApiKey, MintedApiKey};
 pub use document::Document;
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use node::{Node, NodeKind};

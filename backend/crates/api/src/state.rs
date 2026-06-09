@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
-use notegate_db::{AccessRepo, AccountRepo, AgentRepo, FilesRepo, PgPool, WorkspaceRepo};
+use notegate_db::{
+    AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, FilesRepo, PgPool, WorkspaceRepo,
+};
 use notegate_service::access::AccessService;
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
@@ -61,15 +63,24 @@ impl AppState {
         pii_crypto: PiiCrypto,
     ) -> Self {
         let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
-        let account_lifecycle =
-            AccountService::new(AccountRepo::with_crypto(db.clone(), pii_crypto.clone()));
+        let api_key_repo = ApiKeyRepo::with_lookup_key(
+            db.clone(),
+            pii_crypto.lookup_key_id(),
+            pii_crypto.version(),
+        );
+        let account_lifecycle = AccountService::with_api_keys(
+            AccountRepo::with_crypto(db.clone(), pii_crypto.clone()),
+            api_key_repo.clone(),
+            pii_crypto.clone(),
+        );
         let access = AccessService::new(AccessRepo::new(db.clone()));
         let agent_repo = AgentRepo::with_lookup_key(
             db.clone(),
             pii_crypto.lookup_key_id(),
             pii_crypto.version(),
         );
-        let agents = AgentService::new(agent_repo.clone());
+        let agents =
+            AgentService::with_crypto(agent_repo.clone(), api_key_repo, pii_crypto.clone());
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
         let files = FilesService::with_limits(files_repo.clone(), config.limits);
         let search = SearchService::new(files_repo);

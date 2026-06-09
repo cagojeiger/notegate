@@ -303,8 +303,22 @@ impl AgentRepo {
         token_hash: &str,
         created_by: Uuid,
     ) -> Result<AgentKey> {
+        let key_id = Uuid::new_v4();
+        let token_prefix: String = token_hash.chars().take(12).collect();
+        self.insert_agent_key_with_id(key_id, command, &token_prefix, token_hash, created_by)
+            .await
+    }
+
+    pub async fn insert_agent_key_with_id(
+        &self,
+        key_id: Uuid,
+        command: &CreateAgentKey,
+        token_prefix: &str,
+        token_hash: &str,
+        created_by: Uuid,
+    ) -> Result<AgentKey> {
         if !command.scopes.is_empty() {
-            return Err(Error::validation("agent key scopes must be empty"));
+            return Err(Error::validation("api key scopes must be empty"));
         }
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
@@ -347,11 +361,12 @@ impl AgentRepo {
 
         let row = sqlx::query_as::<_, AgentKeyRow>(&format!(
             "INSERT INTO api_keys \
-             (account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {AGENT_KEY_COLUMNS}"
+             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING {AGENT_KEY_COLUMNS}"
         ))
+        .bind(key_id)
         .bind(command.agent_id)
-        .bind(token_prefix(token_hash))
+        .bind(token_prefix)
         .bind(token_hash)
         .bind(&self.lookup_key_id)
         .bind(self.hash_version)
@@ -378,10 +393,6 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
         usize::try_from(count).map_err(|_error| Error::internal("negative key count"))
     }
-}
-
-fn token_prefix(token_hash: &str) -> String {
-    token_hash.chars().take(12).collect()
 }
 
 impl AgentRepo {

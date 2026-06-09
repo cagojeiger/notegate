@@ -78,7 +78,8 @@ async fn main() -> anyhow::Result<()> {
         pii_crypto.lookup_key_id(),
         pii_crypto.version(),
     );
-    let resolver = notegate_service::identity::Resolver::new(account_repo, agent_repo);
+    let resolver =
+        notegate_service::identity::Resolver::new(account_repo, agent_repo, pii_crypto.clone());
     let config = std::sync::Arc::new(config);
     let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));

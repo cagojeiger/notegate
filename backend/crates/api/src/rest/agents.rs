@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{Agent, Caller};
+use notegate_model::{Agent, ApiKey, Caller};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -29,10 +29,13 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/agents", get(list).post(create))
         .route("/v1/agents/{agent_id}", axum::routing::delete(delete_agent))
-        .route("/v1/agents/{agent_id}/keys", post(create_key))
+        .route(
+            "/v1/agents/{agent_id}/keys",
+            get(list_keys).post(create_key),
+        )
         .route(
             "/v1/agents/{agent_id}/keys/{key_id}",
-            axum::routing::delete(revoke_key),
+            post(rotate_key).delete(revoke_key),
         )
 }
 
@@ -91,6 +94,36 @@ pub(crate) struct CreatedKeyOut {
     created_at: DateTime<Utc>,
     /// The plaintext key. Shown once; store it now.
     token: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct KeyOut {
+    id: Uuid,
+    account_id: Uuid,
+    name: String,
+    scopes: Vec<String>,
+    expires_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    revoked_at: Option<DateTime<Utc>>,
+}
+
+impl From<&ApiKey> for KeyOut {
+    fn from(key: &ApiKey) -> Self {
+        Self {
+            id: key.id,
+            account_id: key.account_id,
+            name: key.name.clone(),
+            scopes: key.scopes.clone(),
+            expires_at: key.expires_at,
+            created_at: key.created_at,
+            revoked_at: key.revoked_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct KeysListResponse {
+    keys: Vec<KeyOut>,
 }
 
 #[utoipa::path(
@@ -177,6 +210,28 @@ pub(crate) async fn delete_agent(
 }
 
 #[utoipa::path(
+    get,
+    path = "/api/v1/agents/{agent_id}/keys",
+    tag = "agents",
+    params(("agent_id" = Uuid, Path)),
+    responses((status = 200, description = "List agent keys", body = KeysListResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn list_keys(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(agent_id): Path<Uuid>,
+) -> Result<Json<KeysListResponse>, ApiError> {
+    let keys = state
+        .agents
+        .list_keys(caller.account.kind, caller.account_id(), agent_id)
+        .await?;
+    Ok(Json(KeysListResponse {
+        keys: keys.iter().map(KeyOut::from).collect(),
+    }))
+}
+
+#[utoipa::path(
     post,
     path = "/api/v1/agents/{agent_id}/keys",
     tag = "agents",
@@ -209,7 +264,39 @@ pub(crate) async fn create_key(
         StatusCode::CREATED,
         Json(CreatedKeyOut {
             id: key.id,
-            agent_id: key.agent_id,
+            agent_id: key.account_id,
+            name: key.name,
+            scopes: key.scopes,
+            expires_at: key.expires_at,
+            created_at: key.created_at,
+            token: minted.token,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/agents/{agent_id}/keys/{key_id}",
+    tag = "agents",
+    params(("agent_id" = Uuid, Path), ("key_id" = Uuid, Path)),
+    responses((status = 201, description = "Rotate agent key", body = CreatedKeyOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn rotate_key(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((agent_id, key_id)): Path<(Uuid, Uuid)>,
+) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+    let minted = state
+        .agents
+        .rotate_key(caller.account.kind, caller.account_id(), agent_id, key_id)
+        .await?;
+    let key = minted.key;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedKeyOut {
+            id: key.id,
+            agent_id: key.account_id,
             name: key.name,
             scopes: key.scopes,
             expires_at: key.expires_at,
