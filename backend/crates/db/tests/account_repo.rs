@@ -14,6 +14,7 @@
 mod common;
 
 use common::TestDb;
+use notegate_core::Error;
 use notegate_db::api_key_repo::InsertApiKey;
 use notegate_db::{AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, WorkspaceRepo};
 use notegate_model::{
@@ -72,6 +73,59 @@ async fn upsert_user_creates_account_and_user_rows() -> Result<(), Box<dyn std::
         .fetch_one(&db.pool)
         .await?;
     assert_eq!(access_count, 0, "new user does not auto-create access rows");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// P1-3: a stored PII enc version that diverges from the active crypto version
+/// surfaces a clear error before decryption; NULL-PII rows stay non-erroring.
+#[tokio::test]
+async fn mismatched_pii_version_returns_clear_error() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AccountRepo::new(db.pool.clone());
+    let (account, _) = repo
+        .upsert_user_by_sub(&attrs("ver-sub", "ver@example.test", "Ver"))
+        .await?;
+
+    // Corrupt the stored account display-name version to a value the active crypto
+    // does not match.
+    sqlx::query("UPDATE accounts SET display_name_enc_version = 999 WHERE id = $1")
+        .bind(account.id)
+        .execute(&db.pool)
+        .await?;
+    let err = repo.find_account(account.id).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Internal(message) if message.contains("PII enc version mismatch")),
+        "expected version-mismatch error, got {err:?}"
+    );
+
+    // Corrupt the stored email version too and assert the user read errors clearly.
+    sqlx::query("UPDATE accounts SET display_name_enc_version = 1 WHERE id = $1")
+        .bind(account.id)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("UPDATE users SET email_enc_version = 999 WHERE id = $1")
+        .bind(account.id)
+        .execute(&db.pool)
+        .await?;
+    let err = repo
+        .find_caller_by_account_id(account.id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Internal(message) if message.contains("PII enc version mismatch")),
+        "expected version-mismatch error, got {err:?}"
+    );
+
+    // A NULL-PII row (anonymized user) must read back without erroring.
+    repo.anonymize_user(account.id, account.id).await?;
+    let caller = repo.find_caller_by_account_id(account.id).await?;
+    let (anon_account, anon_user) = caller.expect("anonymized account still resolves");
+    assert_eq!(anon_account.display_name, "");
+    assert_eq!(anon_user.email, None);
 
     db.cleanup().await;
     Ok(())

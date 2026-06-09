@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Exposes the cursor default test signing key + test-only repo constructors via the
+# db edge. Default-off; the integration tests enable it via the dev-dependency
+# self-edge below.
+test-util = ["notegate-db/test-util"]
+
 [dependencies]
 notegate-core.workspace = true
 notegate-model.workspace = true
@@ -21,6 +27,7 @@ rand.workspace = true
 similar.workspace = true
 
 [dev-dependencies]
+notegate-service = { path = ".", features = ["test-util"] }
 tokio.workspace = true
 sqlx.workspace = true
 

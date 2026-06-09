@@ -122,6 +122,12 @@ impl Validate for Config {
         if validate_secret_min_32(&self.lookup_root_secret).is_err() {
             errors.add("lookup_root_secret", ValidationError::new("length"));
         }
+        if self.enc_root_key_id == self.lookup_root_key_id {
+            errors.add("lookup_root_key_id", ValidationError::new("reused_root"));
+        }
+        if self.enc_root_secret.expose_secret() == self.lookup_root_secret.expose_secret() {
+            errors.add("lookup_root_secret", ValidationError::new("reused_root"));
+        }
         match (&self.lookup_verify_0_key_id, &self.lookup_verify_0_secret) {
             (Some(key_id), Some(secret)) => {
                 if validate_key_id(key_id).is_err() {
@@ -332,7 +338,7 @@ mod tests {
     use std::time::Duration;
 
     use config::Environment;
-    use secrecy::SecretString;
+    use secrecy::{ExposeSecret, SecretString};
     use validator::Validate;
 
     use crate::limits::Limits;
@@ -496,6 +502,44 @@ mod tests {
         let mut config = valid_config();
         config.browser_session_ttl = Duration::from_secs(1);
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_reused_root_key_id_and_secret() {
+        // Equal key-ids are rejected.
+        let mut config = valid_config();
+        config.lookup_root_key_id = config.enc_root_key_id.clone();
+        assert!(config.validate().is_err());
+
+        // Equal secrets are rejected.
+        let mut config = valid_config();
+        config.lookup_root_secret =
+            SecretString::from("test-enc-root-secret-32-bytes-long".to_owned());
+        assert!(config.lookup_root_secret.expose_secret() == config.enc_root_secret.expose_secret());
+        assert!(config.validate().is_err());
+
+        // Distinct ids + secrets pass.
+        let config = valid_config();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn env_example_uses_distinct_root_secret_placeholders() {
+        let example = include_str!("../../../../.env.example");
+        let secret_line = |key: &str| -> String {
+            example
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .map(str::to_owned)
+                .unwrap_or_default()
+        };
+        let enc = secret_line("NOTEGATE_ENC_ROOT_SECRET=");
+        let lookup = secret_line("NOTEGATE_LOOKUP_ROOT_SECRET=");
+        assert!(!enc.is_empty() && !lookup.is_empty());
+        assert_ne!(
+            enc, lookup,
+            ".env.example ENC/LOOKUP root secrets must be distinct"
+        );
     }
 
     #[test]

@@ -229,7 +229,7 @@ async fn ensure_account_can_receive_role(
     .map_err(map_sqlx_error)?;
     if found.is_none() {
         if role == Role::Owner {
-            return Err(Error::validation(
+            return Err(Error::conflict(
                 "owner role requires an active user account",
             ));
         }

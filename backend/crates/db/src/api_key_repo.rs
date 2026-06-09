@@ -15,6 +15,7 @@ pub struct ApiKeyRepo {
 }
 
 impl ApiKeyRepo {
+    #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
         Self::with_lookup_key(pool, "test-lookup", 1)
     }
@@ -32,9 +33,13 @@ impl ApiKeyRepo {
     }
 
     pub async fn list_by_account(&self, account_id: Uuid) -> Result<Vec<ApiKey>> {
+        // `revoked_at IS NULL` here INTENTIONALLY diverges from `count_live_keys`,
+        // which also filters expired keys (`expires_at IS NULL OR expires_at > now()`).
+        // The spec defines list "live-only" as not-revoked only; do not "fix" this to
+        // match the cap predicate.
         let rows = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "SELECT {API_KEY_COLUMNS} FROM api_keys \
-             WHERE account_id = $1 ORDER BY created_at DESC, id DESC"
+             WHERE account_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC, id DESC"
         ))
         .bind(account_id)
         .fetch_all(&self.pool)
@@ -126,6 +131,77 @@ impl ApiKeyRepo {
         .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
+        Ok(ApiKey::from(row))
+    }
+
+    /// Insert a new API key while enforcing the per-account live-key cap inside one
+    /// transaction. Locks the account row (`SELECT id FROM accounts WHERE id=$1 FOR
+    /// UPDATE`) so concurrent creates serialize on it, re-counts live keys inside the
+    /// tx using the same predicate as [`count_live_keys`], and rejects with
+    /// `Conflict` when the account is at the cap.
+    ///
+    /// Lock-order invariant: every transaction in this codebase that locks an
+    /// `accounts` row AND writes `api_keys` takes the `accounts` row lock FIRST.
+    /// `accounts[id]` is therefore the single serialization point for per-account
+    /// key mutation, so no `accounts`<->`api_keys` lock cycle is constructible.
+    pub async fn insert_key_with_cap(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
+        if !args.command.scopes.is_empty() {
+            return Err(Error::validation("api key scopes must be empty"));
+        }
+
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        // Lock the account row so concurrent creates serialize on it.
+        let acct: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1 FOR UPDATE")
+                .bind(args.account_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+        if acct.is_none() {
+            return Err(Error::not_found("account not found"));
+        }
+
+        // Re-count live keys INSIDE the tx using the same predicate as count_live_keys.
+        let live: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM api_keys \
+             WHERE account_id = $1 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > now())",
+        )
+        .bind(args.account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let live = usize::try_from(live).map_err(|_error| Error::internal("negative key count"))?;
+        if live >= limits::API_KEYS_PER_ACCOUNT_MAX {
+            return Err(Error::conflict(format!(
+                "account already has the maximum of {} live API keys",
+                limits::API_KEYS_PER_ACCOUNT_MAX
+            )));
+        }
+
+        let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
+            "INSERT INTO api_keys \
+             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at, rotated_from_key_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
+             RETURNING {API_KEY_COLUMNS}"
+        ))
+        .bind(args.key_id)
+        .bind(args.account_id)
+        .bind(args.token_prefix)
+        .bind(args.token_hash)
+        .bind(&self.lookup_key_id)
+        .bind(self.hash_version)
+        .bind(&args.command.name)
+        .bind(&args.command.scopes)
+        .bind(args.created_by)
+        .bind(args.command.expires_at)
+        .bind(args.rotated_from_key_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(ApiKey::from(row))
     }
 

@@ -26,6 +26,7 @@ pub struct AccountRepo {
 }
 
 impl AccountRepo {
+    #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
         Self::with_crypto(pool, PiiCrypto::test())
     }
@@ -58,10 +59,20 @@ impl AccountRow {
         match kind {
             AccountKind::Agent => Ok(self.agent_name.clone().unwrap_or_default()),
             AccountKind::User => {
-                let _version = self.display_name_enc_version;
                 let Some(key_id) = self.display_name_enc_key_id.as_ref() else {
                     return Ok(String::new());
                 };
+                // Encrypted PII is present: the stored enc version must match the
+                // active crypto version BEFORE we attempt decryption, so a mismatch
+                // surfaces as a clear error instead of an opaque AEAD failure
+                // (PiiAad folds the version into the AAD).
+                let stored = self.display_name_enc_version;
+                if stored != Some(crypto.version()) {
+                    return Err(Error::internal(format!(
+                        "PII enc version mismatch: stored {stored:?} != current {}",
+                        crypto.version()
+                    )));
+                }
                 let aad = PiiAad::new(
                     PiiFieldKind::AccountDisplayName,
                     self.id.to_string(),
@@ -107,9 +118,18 @@ struct UserRow {
 
 impl UserRow {
     fn into_user(self, crypto: &PiiCrypto) -> Result<User> {
-        let _version = self.email_enc_version;
         let email = match self.email_enc_key_id.as_ref() {
             Some(key_id) => {
+                // Encrypted PII is present: assert the stored enc version matches the
+                // active crypto version BEFORE decrypting, so a mismatch surfaces as a
+                // clear error rather than an opaque AEAD failure (version is in the AAD).
+                let stored = self.email_enc_version;
+                if stored != Some(crypto.version()) {
+                    return Err(Error::internal(format!(
+                        "PII enc version mismatch: stored {stored:?} != current {}",
+                        crypto.version()
+                    )));
+                }
                 let aad = PiiAad::new(PiiFieldKind::UserEmail, self.id.to_string(), key_id);
                 decrypt_optional_string(
                     crypto,

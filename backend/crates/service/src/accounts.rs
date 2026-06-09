@@ -146,7 +146,7 @@ pub async fn create_key_for_account(
     let token = format_token(key_id, &secret);
     let token_hash = crypto.api_key_hash(&key_id.to_string(), &secret)?;
     let key = api_keys
-        .insert_key(InsertApiKey {
+        .insert_key_with_cap(InsertApiKey {
             key_id,
             account_id,
             command: &command,

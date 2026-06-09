@@ -129,23 +129,25 @@ impl PiiCrypto {
         enc_root_secret: &SecretString,
         lookup_key_id: impl Into<String>,
         lookup_root_secret: &SecretString,
-    ) -> Self {
+    ) -> Result<Self> {
         let enc_root = enc_root_secret.expose_secret().as_bytes();
         let lookup_root = lookup_root_secret.expose_secret().as_bytes();
-        Self {
+        Ok(Self {
             enc_key_id: enc_key_id.into(),
             lookup_key_id: lookup_key_id.into(),
-            enc_epoch_verify_key: hkdf_key(enc_root, ENC_EPOCH_VERIFY_LABEL),
-            lookup_epoch_verify_key: hkdf_key(lookup_root, LOOKUP_EPOCH_VERIFY_LABEL),
-            pii_field_key: hkdf_key(enc_root, PII_FIELD_LABEL),
-            provider_sub_hmac_key: hkdf_key(lookup_root, PROVIDER_SUB_HMAC_LABEL),
-            email_hmac_key: hkdf_key(lookup_root, EMAIL_HMAC_LABEL),
-            api_key_hmac_key: hkdf_key(lookup_root, API_KEY_HMAC_LABEL),
-            session_signing_key: hkdf_key(lookup_root, SESSION_SIGNING_LABEL),
-        }
+            enc_epoch_verify_key: hkdf_key(enc_root, ENC_EPOCH_VERIFY_LABEL)?,
+            lookup_epoch_verify_key: hkdf_key(lookup_root, LOOKUP_EPOCH_VERIFY_LABEL)?,
+            pii_field_key: hkdf_key(enc_root, PII_FIELD_LABEL)?,
+            provider_sub_hmac_key: hkdf_key(lookup_root, PROVIDER_SUB_HMAC_LABEL)?,
+            email_hmac_key: hkdf_key(lookup_root, EMAIL_HMAC_LABEL)?,
+            api_key_hmac_key: hkdf_key(lookup_root, API_KEY_HMAC_LABEL)?,
+            session_signing_key: hkdf_key(lookup_root, SESSION_SIGNING_LABEL)?,
+        })
     }
 
     /// Deterministic test/dev provider used by repository tests and lazy constructors.
+    #[cfg(any(test, feature = "test-util"))]
+    #[allow(clippy::expect_used)]
     pub fn test() -> Self {
         Self::from_root_secrets(
             "test-enc",
@@ -153,6 +155,7 @@ impl PiiCrypto {
             "test-lookup",
             &SecretString::from("notegate-test-lookup-root-secret-32-bytes".to_owned()),
         )
+        .expect("static test secrets derive")
     }
 
     pub fn enc_key_id(&self) -> &str {
@@ -225,13 +228,12 @@ pub fn normalize_email(email: &str) -> String {
     email.trim().to_ascii_lowercase()
 }
 
-fn hkdf_key(root: &[u8], label: &[u8]) -> [u8; KEY_LEN] {
+fn hkdf_key(root: &[u8], label: &[u8]) -> Result<[u8; KEY_LEN]> {
     let hk = Hkdf::<Sha256>::new(None, root);
     let mut out = [0_u8; KEY_LEN];
-    if hk.expand(label, &mut out).is_err() {
-        return [0_u8; KEY_LEN];
-    }
-    out
+    hk.expand(label, &mut out)
+        .map_err(|_error| Error::internal("hkdf expand failed"))?;
+    Ok(out)
 }
 
 fn encrypt_with_key_and_aad(

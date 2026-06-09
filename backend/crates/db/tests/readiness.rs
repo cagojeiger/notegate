@@ -106,7 +106,7 @@ async fn crypto_key_epoch_verify_rejects_wrong_secret() -> Result<(), Box<dyn st
         &secrecy::SecretString::from("wrong-enc-root-secret-32-bytes-long".to_owned()),
         "test-lookup",
         &secrecy::SecretString::from("wrong-lookup-root-secret-32-bytes-long".to_owned()),
-    );
+    )?;
     let repo = notegate_db::CryptoKeyEpochRepo::new(db.pool.clone());
 
     assert!(repo.verify_active(&wrong_crypto).await.is_err());

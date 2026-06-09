@@ -1692,6 +1692,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "notegate-core",
+ "notegate-db",
  "notegate-model",
  "secrecy",
  "sha2",
@@ -1720,6 +1721,7 @@ dependencies = [
  "notegate-core",
  "notegate-db",
  "notegate-model",
+ "notegate-service",
  "rand 0.8.6",
  "serde",
  "serde_json",

@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         &config.enc_root_secret,
         config.lookup_root_key_id.clone(),
         &config.lookup_root_secret,
-    );
+    )?;
     let key_epochs = notegate_db::CryptoKeyEpochRepo::new(pool.clone());
     key_epochs.ensure_active(&pii_crypto).await?;
     info!(event = "crypto_key_epochs.ensured");

@@ -219,7 +219,8 @@ fn state_with_resource(
             &config.enc_root_secret,
             config.lookup_root_key_id.clone(),
             &config.lookup_root_secret,
-        ),
+        )
+        .expect("derive test crypto"),
     ))
 }
 

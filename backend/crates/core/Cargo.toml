@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Exposes deterministic test/dev fixtures (e.g. `PiiCrypto::test`). Default-off so
+# release/production builds cannot reach them; enabled only by test targets.
+test-util = []
+
 [dependencies]
 rand.workspace = true
 sha2.workspace = true

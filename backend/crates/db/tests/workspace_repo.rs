@@ -514,13 +514,65 @@ async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
         .await
         .unwrap_err();
 
+    // P1-5: an owner grant to a non-user (agent) account is a 409 Conflict, not a
+    // 400 validation error.
     assert!(
-        matches!(err, Error::Validation(message) if message == "owner role requires an active user account")
+        matches!(err, Error::Conflict(message) if message == "owner role requires an active user account")
     );
     assert_eq!(
         access_repo.role_for(workspace_id, agent).await?,
         Some(Role::Editor),
         "rejected owner grant must leave the previous role unchanged"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// P1-5: an owner grant to an inactive account is a 409 Conflict; a valid owner
+/// grant to an active user still succeeds.
+#[tokio::test]
+async fn owner_grant_to_inactive_account_is_conflict() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let inactive = insert_user_account(&db.pool, "inactive", "i@example.test").await?;
+    let active = insert_user_account(&db.pool, "active", "a@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "shared").await;
+    deactivate_account(&db.pool, inactive, owner).await?;
+
+    let err = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: inactive,
+                role: Role::Owner,
+            },
+            owner,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Conflict(message) if message == "owner role requires an active user account")
+    );
+
+    // A valid owner grant to an active user still succeeds.
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: active,
+                role: Role::Owner,
+            },
+            owner,
+        )
+        .await?;
+    assert_eq!(
+        access_repo.role_for(workspace_id, active).await?,
+        Some(Role::Owner)
     );
 
     db.cleanup().await;

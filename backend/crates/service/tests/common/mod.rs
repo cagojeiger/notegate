@@ -79,6 +79,7 @@ impl TestDb {
             .collect::<Vec<_>>()
             .join("\n");
         sqlx::raw_sql(&schema_migration).execute(&pool).await?;
+        seed_crypto_key_epochs(&pool).await?;
         record_migration_ledger(&pool).await?;
 
         Ok(Some(Self {
@@ -109,6 +110,19 @@ impl TestDb {
         }
         let _ = admin.close().await;
     }
+}
+
+async fn seed_crypto_key_epochs(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO crypto_key_epochs \
+         (key_id, domain, status, verify_tag, version, activated_at) \
+         VALUES \
+         ('test-enc', 'enc', 'active', 'test-enc-verify-tag', 1, now()), \
+         ('test-lookup', 'lookup', 'active', 'test-lookup-verify-tag', 1, now())",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn record_migration_ledger(pool: &PgPool) -> Result<(), sqlx::Error> {

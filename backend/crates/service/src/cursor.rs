@@ -16,6 +16,7 @@ const CURSOR_VERSION: u8 = 1;
 const HMAC_SHA256_LEN: usize = 32;
 const HMAC_BLOCK_LEN: usize = 64;
 const MIN_SIGNING_KEY_LEN: usize = 32;
+#[cfg(any(test, feature = "test-util"))]
 const DEFAULT_TEST_SIGNING_KEY: &[u8] = b"notegate-test-cursor-signing-key-32-bytes";
 
 static SIGNING_KEY: OnceLock<Vec<u8>> = OnceLock::new();
@@ -64,11 +65,25 @@ pub fn decode<T: DeserializeOwned>(cursor: &str) -> Result<T, CursorError> {
     serde_json::from_slice(payload).map_err(|_error| CursorError)
 }
 
+// In a non-test build the signing key MUST be configured at boot
+// (`configure_signing_key` from `main.rs`); reaching `signing_key()` unconfigured is
+// a boot-ordering bug, so fail closed (`expect`) rather than sign with a default.
+#[allow(clippy::expect_used)]
 fn signing_key() -> &'static [u8] {
-    SIGNING_KEY
-        .get()
-        .map(Vec::as_slice)
-        .unwrap_or(DEFAULT_TEST_SIGNING_KEY)
+    #[cfg(any(test, feature = "test-util"))]
+    {
+        SIGNING_KEY
+            .get()
+            .map(Vec::as_slice)
+            .unwrap_or(DEFAULT_TEST_SIGNING_KEY)
+    }
+    #[cfg(not(any(test, feature = "test-util")))]
+    {
+        SIGNING_KEY
+            .get()
+            .map(Vec::as_slice)
+            .expect("cursor signing key not configured")
+    }
 }
 
 fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; HMAC_SHA256_LEN] {

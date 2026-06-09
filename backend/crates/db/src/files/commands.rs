@@ -19,7 +19,7 @@ pub mod checks {
     /// while another concurrently moves/deletes it.
     pub async fn lock_workspace(tx: &mut PgConnection, workspace_id: Uuid) -> Result<()> {
         let found: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 FOR UPDATE")
+            sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
                 .bind(workspace_id)
                 .fetch_optional(&mut *tx)
                 .await
