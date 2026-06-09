@@ -50,44 +50,49 @@ email_hash        = HMAC(pepper, normalize(email))
 - 로그인 또는 profile update 성공 시 최신 pepper version으로 hash를 갱신한다.
 - 충분한 migration 기간 뒤 old pepper를 폐기한다.
 
-## API key 저장과 hash secret rotation
+## Root secret과 목적별 subkey
+
+notegate는 application secret으로 root key id와 root secret을 받는다. Root secret은 DB에 저장하지 않는다.
+
+```text
+NOTEGATE_ROOT_KEY_ID=root-local-v1
+NOTEGATE_ROOT_SECRET=<random 32+ bytes secret>
+```
+
+Application은 startup 때 root secret을 읽고 HKDF로 목적별 subkey를 파생한다. Purpose label은 secret이 아닌 코드 상수다.
+
+```text
+pii_kek_subkey       = HKDF(root_secret, "notegate/pii-kek/v1")
+lookup_hmac_subkey   = HKDF(root_secret, "notegate/lookup-hmac/v1")
+api_key_hmac_subkey  = HKDF(root_secret, "notegate/api-key-hmac/v1")
+session_sign_subkey  = HKDF(root_secret, "notegate/session-signing/v1")
+```
+
+규칙:
+
+- `NOTEGATE_ROOT_SECRET`은 32 bytes 이상의 random secret이어야 한다.
+- 같은 raw root secret bytes를 암호화/HMAC/session signing에 직접 재사용하지 않는다.
+- root secret buffer는 subkey 파생 후 zeroize/drop한다.
+- runtime에는 목적별 subkey만 보관한다.
+- root secret, subkey, DEK, plaintext PII, API key plaintext는 log/error/audit payload에 기록하지 않는다.
+- DB row에는 key material이 아니라 root key id/version만 저장한다.
+
+## API key 저장과 rotation
 
 API key는 비밀번호와 같은 credential로 취급한다. API key plaintext는 DB에 저장하지 않고, DEK로 암호화해 복호화 가능하게 저장하지도 않는다.
 
 ```text
 plaintext token = ngk_v1_<key_id>_<secret>
-token_hash     = HMAC(api_key_hash_secret, key_id + ":" + secret)
+token_hash     = HMAC(api_key_hmac_subkey, key_id + ":" + secret)
 ```
 
 규칙:
 
 - 평문 token은 생성 또는 rotation 응답에서 정확히 한 번만 반환한다.
 - DB에는 `token_prefix`, `token_hash`, `hash_key_id`, `hash_version`만 저장한다.
-- `api_key_hash_secret` material은 DB 밖에서 관리한다.
-- `api_key_hash_keys`는 secret의 id/version/status metadata만 저장한다.
+- `hash_key_id`는 token_hash를 만든 root key id다.
 - API key 자체 rotation은 new token 발급 + old key revoke로 처리한다. Token 원문은 복구하거나 복호화하지 않는다.
-
-Hash secret status:
-
-```text
-current      -> 새 key 발급과 rehash에 사용
-verify_only  -> 정상 rotation 중 해당 hash key로 저장된 API key 검증에만 사용
-compromised  -> 유출 의심. 해당 hash_key_id의 live API key는 인증 거부/revoke 대상
-retired      -> 더 이상 검증에 사용하지 않음
-```
-
-정상 hash secret rotation:
-
-1. 새 `current` hash secret을 등록한다.
-2. 교체 대상 hash secret은 `verify_only`로 둔다.
-3. `verify_only` key로 검증 성공한 API key는 요청에 포함된 token plaintext를 이용해 current key로 opportunistic rehash할 수 있다.
-4. live DB와 backup retention에서 verify-only key 참조가 사라지면 `retired`로 전환하고 secret material을 폐기한다.
-
-Hash secret compromise 처리:
-
-- hash secret 유출이 의심되면 해당 `hash_key_id`를 `compromised`로 표시한다.
-- `compromised` hash key로 저장된 live API key는 투명 rehash하지 않고 revoke한다.
-- 사용자는 새 API key를 발급받아야 한다.
+- root secret 유출이 의심되면 해당 `hash_key_id`의 live API key를 revoke하고 새 root key id로 key를 재발급한다.
 - app runtime compromise가 의심되면 API key뿐 아니라 browser session secret, OAuth client secret, PII KEK 접근 가능성도 함께 조사한다.
 
 ## DEK/KEK 구조
@@ -95,7 +100,7 @@ Hash secret compromise 처리:
 Account별 data encryption key(DEK)를 사용한다. DEK는 key encryption key(KEK)로
 wrap해서 `account_encryption_keys.wrapped_dek`에 저장한다.
 
-Application은 설정 또는 KMS/HSM adapter로 주입되는 KEK를 사용한다. DB 스키마와 repository 계약은 KEK 제공 방식과 독립적이다.
+Application은 root secret에서 파생한 `pii_kek_subkey`를 KEK로 사용한다.
 
 ```text
 KEK

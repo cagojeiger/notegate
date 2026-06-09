@@ -11,7 +11,6 @@ REST와 MCP는 모두 이 구조 위에서 동작한다.
 accounts          user/agent 공통 행위자 identity
 users             authgate OAuth 사용자 상세
 agents            AI agent 상세
-api_key_hash_keys API key hash secret version/status metadata
 api_keys          user/agent 공용 API key credential hash
 account_encryption_keys account별 PII DEK wrapping metadata
 workspaces        개인 노트 workspace 경계
@@ -135,42 +134,6 @@ CREATE TABLE agents (
 - 한 user creator account가 만들 수 있는 active agent는 최대 `50`개다.
 - `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
 
-## api_key_hash_keys
-
-`api_key_hash_keys`는 API key token hash를 계산한 server-side HMAC secret의 version/status metadata다. 실제 secret material은 DB에 저장하지 않고 secret manager/env/KMS에서 관리한다.
-
-```sql
-CREATE TABLE api_key_hash_keys (
-    id             TEXT PRIMARY KEY,
-    version        INTEGER NOT NULL,
-    status         TEXT NOT NULL CHECK (status IN ('current', 'verify_only', 'compromised', 'retired')),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    compromised_at TIMESTAMPTZ,
-    retired_at     TIMESTAMPTZ,
-
-    CHECK (
-        (status = 'compromised' AND compromised_at IS NOT NULL)
-        OR (status <> 'compromised')
-    ),
-    CHECK (
-        (status = 'retired' AND retired_at IS NOT NULL)
-        OR (status <> 'retired')
-    )
-);
-
-CREATE UNIQUE INDEX api_key_hash_keys_one_current_uidx
-    ON api_key_hash_keys ((status))
-    WHERE status = 'current';
-```
-
-규칙:
-
-- `current`는 새 API key 발급과 opportunistic rehash에 사용한다.
-- `verify_only`는 정상 rotation 중 해당 hash key로 저장된 API key 검증에만 사용한다. 검증 성공 시 current key로 rehash할 수 있다.
-- `compromised`는 유출 의심 상태다. 이 status의 hash key로 저장된 live API key는 인증에 사용할 수 없고 revoke 대상이다.
-- `retired`는 live `api_keys`가 참조하지 않는 폐기 상태다.
-- 실제 HMAC secret은 DB 밖에서 관리하며, application log/error/audit payload에 기록하지 않는다.
-
 ## api_keys
 
 `api_keys`는 user와 agent 공용 API key credential hash를 저장한다. Token 원문은 저장하지 않고, 생성/rotation 응답에서 정확히 한 번만 반환한다. API key는 DEK로 암호화해 복호화 가능하게 저장하지 않는다.
@@ -182,7 +145,7 @@ CREATE TABLE api_keys (
     name                TEXT NOT NULL,
     token_prefix        TEXT NOT NULL,
     token_hash          TEXT NOT NULL UNIQUE,
-    hash_key_id         TEXT NOT NULL REFERENCES api_key_hash_keys(id),
+    hash_key_id         TEXT NOT NULL,
     hash_version        INTEGER NOT NULL DEFAULT 1,
     scopes              TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
     created_by          UUID REFERENCES accounts(id),
@@ -224,11 +187,10 @@ CREATE INDEX api_keys_rotated_from_idx
 - `accounts.kind='user'`에 연결된 key는 user API key이며 user caller로 동작한다.
 - `accounts.kind='agent'`에 연결된 key는 agent API key이며 agent caller로 동작한다.
 - token format은 `ngk_v1_<key_id>_<secret>` 계열의 opaque value다. `key_id`는 lookup용 공개 식별자이고, `secret`은 DB에 저장하지 않는다.
-- `token_hash`는 `HMAC(api_key_hash_secret, key_id + ':' + secret)` 결과다.
-- `hash_key_id`/`hash_version`은 어떤 server-side HMAC secret으로 `token_hash`를 만들었는지 기록한다.
+- `token_hash`는 `HMAC(api_key_hmac_subkey, key_id + ':' + secret)` 결과다.
+- `hash_key_id`/`hash_version`은 어떤 root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다.
 - `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
-- `hash_key_id`가 `compromised` 또는 `retired` 상태면 인증에 사용할 수 없다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
 - 한 account가 동시에 가질 수 있는 live API key는 최대 `10`개다.
 - API key 자체 rotation은 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.

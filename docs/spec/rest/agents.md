@@ -66,7 +66,6 @@ Live key는 다음 조건을 모두 만족한다.
 api_keys.account_id = agent_id
 api_keys.revoked_at IS NULL
 api_keys.expires_at IS NULL OR api_keys.expires_at > now()
-api_keys.hash_key_id status IN ('current', 'verify_only')
 ```
 
 Branching 규칙:

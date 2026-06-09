@@ -106,7 +106,7 @@ api_keys(token_hash only)
 - key 생성은 workspace 권한을 변경하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
 - account당 live API key 한도는 `10`이다.
-- token hash는 current `api_key_hash_keys` secret으로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
+- token hash는 `NOTEGATE_ROOT_SECRET`에서 파생한 API key HMAC subkey로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
 
 ### Workspace access grant/change
 
@@ -299,6 +299,6 @@ document row와 node row 관계가 깨짐
 ```text
 root 없는 workspace     -> 명확하면 root 재생성, 아니면 quarantine/soft delete
 owner 없는 workspace    -> 명확한 active creator가 있으면 owner row 복구, 아니면 soft delete/quarantine
-inactive/compromised API key -> revoke
+inactive/expired/revoked API key -> reject
 inactive account access -> revoke
 ```
