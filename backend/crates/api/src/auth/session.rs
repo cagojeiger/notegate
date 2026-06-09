@@ -1,6 +1,5 @@
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use notegate_model::Caller;
-use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::bearer::{AuthError, map_identity_error};
@@ -26,13 +25,7 @@ pub fn create_browser_session(state: &AppState, sub: &str) -> Result<String, Aut
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(
-            state
-                .config
-                .browser_session_secret
-                .expose_secret()
-                .as_bytes(),
-        ),
+        &EncodingKey::from_secret(state.security.session_signing_key()),
     )
     .map_err(|_error| AuthError::Internal)
 }
@@ -40,13 +33,7 @@ pub fn create_browser_session(state: &AppState, sub: &str) -> Result<String, Aut
 pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Caller, AuthError> {
     let data = decode::<BrowserSessionClaims>(
         token,
-        &DecodingKey::from_secret(
-            state
-                .config
-                .browser_session_secret
-                .expose_secret()
-                .as_bytes(),
-        ),
+        &DecodingKey::from_secret(state.security.session_signing_key()),
         &Validation::default(),
     )
     .map_err(|_error| AuthError::InvalidToken)?;

@@ -10,9 +10,10 @@ x-api-environment: &api-environment
   NOTEGATE_OAUTH_REDIRECT_URL: http://localhost:9191/auth/callback
   NOTEGATE_RESOURCE_URL: http://localhost:9191/mcp
   NOTEGATE_JWKS_CACHE_TTL_SECS: 300
-  NOTEGATE_BROWSER_SESSION_SECRET: dev-notegate-browser-session-secret-32b
-  NOTEGATE_PII_MASTER_KEY: dev-notegate-pii-master-key-32-bytes
-  NOTEGATE_PII_HASH_PEPPER: dev-notegate-pii-hash-pepper-32-bytes
+  NOTEGATE_ENC_ROOT_KEY_ID: dev-enc
+  NOTEGATE_ENC_ROOT_SECRET: dev-notegate-enc-root-secret-32-bytes
+  NOTEGATE_LOOKUP_ROOT_KEY_ID: dev-lookup
+  NOTEGATE_LOOKUP_ROOT_SECRET: dev-notegate-lookup-root-secret-32-bytes
   NOTEGATE_BROWSER_SESSION_TTL_SECS: 3600
   NOTEGATE_OPENAPI_ENABLED: "false"
   # Capacity caps default to spec values. Uncomment small values for cheap

@@ -73,6 +73,7 @@ rand = "0.8"
 sha2 = "0.10"
 aes-gcm = "0.10"
 hmac = "0.12"
+hkdf = "0.12"
 base64 = "0.22"
 url = "2"
 axum-extra = { version = "0.10", features = ["cookie"] }

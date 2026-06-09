@@ -153,11 +153,14 @@ mod tests {
             oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
-            browser_session_secret: SecretString::from(
-                "test-browser-session-secret-32-bytes".to_owned(),
+            enc_root_key_id: "test-enc".to_owned(),
+            enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
+            lookup_root_key_id: "test-lookup".to_owned(),
+            lookup_root_secret: SecretString::from(
+                "test-lookup-root-secret-32-bytes-long".to_owned(),
             ),
-            pii_master_key: SecretString::from("test-pii-master-key-32-bytes-long".to_owned()),
-            pii_hash_pepper: SecretString::from("test-pii-hash-pepper-32-bytes-long".to_owned()),
+            lookup_verify_0_key_id: None,
+            lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
             limits: notegate_core::limits::Limits::default(),

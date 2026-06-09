@@ -47,7 +47,7 @@ Auth/MCP local defaults are configured in `.env.example`:
 - `NOTEGATE_MCP_OAUTH_CLIENT_ID=notegate-mcp` (MCP OAuth client)
 - `NOTEGATE_OAUTH_REDIRECT_URL=http://localhost:9191/auth/callback`
 - `NOTEGATE_RESOURCE_URL=http://localhost:9191/mcp` (MCP URL/audience)
-- `NOTEGATE_BROWSER_SESSION_SECRET` must be at least 32 bytes; required for browser login sessions.
+- `NOTEGATE_ENC_ROOT_SECRET` and `NOTEGATE_LOOKUP_ROOT_SECRET` must be at least 32 bytes. The LOOKUP root derives browser session/API-key HMAC keys.
 
 First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login` once to create the local notegate user row, then reconnect the MCP client to `NOTEGATE_RESOURCE_URL`. MCP OAuth clients must request the advertised `resource` and use the registered `notegate-mcp` public client.
 

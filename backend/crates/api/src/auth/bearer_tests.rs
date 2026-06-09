@@ -187,13 +187,16 @@ fn state_with_resource(
         oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
         resource_url: resource_url.to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
-        browser_session_secret: secrecy::SecretString::from(
-            "test-browser-session-secret-32-bytes".to_owned(),
+        enc_root_key_id: "test-enc".to_owned(),
+        enc_root_secret: secrecy::SecretString::from(
+            "test-enc-root-secret-32-bytes-long".to_owned(),
         ),
-        pii_master_key: secrecy::SecretString::from("test-pii-master-key-32-bytes-long".to_owned()),
-        pii_hash_pepper: secrecy::SecretString::from(
-            "test-pii-hash-pepper-32-bytes-long".to_owned(),
+        lookup_root_key_id: "test-lookup".to_owned(),
+        lookup_root_secret: secrecy::SecretString::from(
+            "test-lookup-root-secret-32-bytes-long".to_owned(),
         ),
+        lookup_verify_0_key_id: None,
+        lookup_verify_0_secret: None,
         browser_session_ttl: Duration::from_secs(3600),
         openapi_enabled: false,
         limits: notegate_core::limits::Limits::default(),
@@ -206,11 +209,17 @@ fn state_with_resource(
     ));
     Ok(AppState::new(
         pool,
-        config,
+        config.clone(),
         jwt,
         oidc,
         Arc::new(TestResolver { mode }),
         reqwest::Client::new(),
+        notegate_core::security::PiiCrypto::from_root_secrets(
+            config.enc_root_key_id.clone(),
+            &config.enc_root_secret,
+            config.lookup_root_key_id.clone(),
+            &config.lookup_root_secret,
+        ),
     ))
 }
 

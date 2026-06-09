@@ -51,12 +51,18 @@ pub struct Config {
         deserialize_with = "duration_from_secs"
     )]
     pub jwks_cache_ttl: Duration,
-    /// Secret used to sign browser session cookies.
-    pub browser_session_secret: SecretString,
-    /// Secret used by the local PII KEK implementation.
-    pub pii_master_key: SecretString,
-    /// Pepper used for PII lookup HMAC hashes.
-    pub pii_hash_pepper: SecretString,
+    /// Active ENC root key id registered in crypto_key_epochs.
+    pub enc_root_key_id: String,
+    /// Active ENC root secret used to derive PII encryption subkeys.
+    pub enc_root_secret: SecretString,
+    /// Active LOOKUP root key id registered in crypto_key_epochs.
+    pub lookup_root_key_id: String,
+    /// Active LOOKUP root secret used to derive HMAC/session subkeys.
+    pub lookup_root_secret: SecretString,
+    /// Optional verify-only LOOKUP root key id for provider subject migration.
+    pub lookup_verify_0_key_id: Option<String>,
+    /// Optional verify-only LOOKUP root secret for provider subject migration.
+    pub lookup_verify_0_secret: Option<SecretString>,
     /// Browser session cookie TTL.
     #[serde(
         rename = "browser_session_ttl_secs",
@@ -104,14 +110,31 @@ impl Validate for Config {
         if validate_jwks_cache_ttl(&self.jwks_cache_ttl).is_err() {
             errors.add("jwks_cache_ttl", ValidationError::new("range"));
         }
-        if validate_secret_min_32(&self.browser_session_secret).is_err() {
-            errors.add("browser_session_secret", ValidationError::new("length"));
+        if validate_key_id(&self.enc_root_key_id).is_err() {
+            errors.add("enc_root_key_id", ValidationError::new("format"));
         }
-        if validate_secret_min_32(&self.pii_master_key).is_err() {
-            errors.add("pii_master_key", ValidationError::new("length"));
+        if validate_secret_min_32(&self.enc_root_secret).is_err() {
+            errors.add("enc_root_secret", ValidationError::new("length"));
         }
-        if validate_secret_min_32(&self.pii_hash_pepper).is_err() {
-            errors.add("pii_hash_pepper", ValidationError::new("length"));
+        if validate_key_id(&self.lookup_root_key_id).is_err() {
+            errors.add("lookup_root_key_id", ValidationError::new("format"));
+        }
+        if validate_secret_min_32(&self.lookup_root_secret).is_err() {
+            errors.add("lookup_root_secret", ValidationError::new("length"));
+        }
+        match (&self.lookup_verify_0_key_id, &self.lookup_verify_0_secret) {
+            (Some(key_id), Some(secret)) => {
+                if validate_key_id(key_id).is_err() {
+                    errors.add("lookup_verify_0_key_id", ValidationError::new("format"));
+                }
+                if validate_secret_min_32(secret).is_err() {
+                    errors.add("lookup_verify_0_secret", ValidationError::new("length"));
+                }
+            }
+            (None, None) => {}
+            _ => {
+                errors.add("lookup_verify_0", ValidationError::new("paired"));
+            }
         }
         if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
             errors.add("browser_session_ttl", ValidationError::new("range"));
@@ -254,6 +277,21 @@ fn validate_secret_min_32(value: &SecretString) -> std::result::Result<(), Valid
     }
 }
 
+fn validate_key_id(value: &str) -> std::result::Result<(), ValidationError> {
+    let valid = !value.is_empty()
+        && value.len() <= 127
+        && value.bytes().enumerate().all(|(idx, byte)| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => true,
+            b'.' | b'_' | b'-' => idx > 0,
+            _ => false,
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(ValidationError::new("format"))
+    }
+}
+
 fn secure_cookies_for_redirect(oauth_redirect_url: &str) -> bool {
     oauth_redirect_url.starts_with("https://")
 }
@@ -313,11 +351,14 @@ mod tests {
             oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
-            browser_session_secret: SecretString::from(
-                "test-browser-session-secret-32-bytes".to_owned(),
+            enc_root_key_id: "test-enc".to_owned(),
+            enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
+            lookup_root_key_id: "test-lookup".to_owned(),
+            lookup_root_secret: SecretString::from(
+                "test-lookup-root-secret-32-bytes-long".to_owned(),
             ),
-            pii_master_key: SecretString::from("test-pii-master-key-32-bytes-long".to_owned()),
-            pii_hash_pepper: SecretString::from("test-pii-hash-pepper-32-bytes-long".to_owned()),
+            lookup_verify_0_key_id: None,
+            lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
             limits: Limits::default(),
@@ -348,17 +389,15 @@ mod tests {
                     "http://localhost:9191/auth/callback",
                 ),
                 ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
-                    "NOTEGATE_BROWSER_SESSION_SECRET",
-                    "env-browser-session-secret-32-bytes",
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
                 ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
                 (
-                    "NOTEGATE_PII_MASTER_KEY",
-                    "env-pii-master-key-32-bytes-long",
-                ),
-                (
-                    "NOTEGATE_PII_HASH_PEPPER",
-                    "env-pii-hash-pepper-32-bytes-long",
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
                 ("PATH", "/bin"),
@@ -398,17 +437,15 @@ mod tests {
                     "http://localhost:9191/auth/callback",
                 ),
                 ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
-                    "NOTEGATE_BROWSER_SESSION_SECRET",
-                    "env-browser-session-secret-32-bytes",
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
                 ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
                 (
-                    "NOTEGATE_PII_MASTER_KEY",
-                    "env-pii-master-key-32-bytes-long",
-                ),
-                (
-                    "NOTEGATE_PII_HASH_PEPPER",
-                    "env-pii-hash-pepper-32-bytes-long",
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN", "3"),
                 ("NOTEGATE_LIMITS__WORKSPACE_MAX_NODES", "5"),
@@ -449,7 +486,11 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.browser_session_secret = SecretString::from("too-short".to_owned());
+        config.enc_root_secret = SecretString::from("too-short".to_owned());
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.lookup_root_key_id = "_bad".to_owned();
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

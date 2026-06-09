@@ -2,7 +2,6 @@ use std::io;
 
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
-use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
@@ -47,10 +46,6 @@ async fn main() -> anyhow::Result<()> {
         max_connections = config.db_max_connections
     );
 
-    notegate_service::cursor::configure_signing_key(
-        config.browser_session_secret.expose_secret().as_bytes(),
-    )?;
-
     let bind_addr = config.bind_addr;
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -59,8 +54,14 @@ async fn main() -> anyhow::Result<()> {
     let jwks_url = format!("{}/keys", config.authgate_url);
     // The db-backed identity resolver: account_repo resolves users, agent_repo
     // authenticates agent keys.
-    let pii_crypto = PiiCrypto::from_secrets(&config.pii_master_key, &config.pii_hash_pepper);
-    let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto);
+    let pii_crypto = PiiCrypto::from_root_secrets(
+        config.enc_root_key_id.clone(),
+        &config.enc_root_secret,
+        config.lookup_root_key_id.clone(),
+        &config.lookup_root_secret,
+    );
+    notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
+    let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto.clone());
     let agent_repo = notegate_db::AgentRepo::new(pool.clone());
     let resolver = notegate_service::identity::Resolver::new(account_repo, agent_repo);
     let config = std::sync::Arc::new(config);
@@ -73,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         oidc,
         std::sync::Arc::new(resolver),
         http,
+        pii_crypto,
     );
 
     let listener = TcpListener::bind(bind_addr).await?;

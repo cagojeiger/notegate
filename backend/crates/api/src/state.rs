@@ -38,6 +38,7 @@ pub struct AppState {
     pub oidc: Arc<OidcProvider>,
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
+    pub security: PiiCrypto,
     pub workspaces: Workspaces,
     pub account_lifecycle: Accounts,
     pub access: Access,
@@ -57,8 +58,8 @@ impl AppState {
         oidc: Arc<OidcProvider>,
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
+        pii_crypto: PiiCrypto,
     ) -> Self {
-        let pii_crypto = PiiCrypto::from_secrets(&config.pii_master_key, &config.pii_hash_pepper);
         let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
         let account_lifecycle =
             AccountService::new(AccountRepo::with_crypto(db.clone(), pii_crypto.clone()));
@@ -68,7 +69,7 @@ impl AppState {
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
         let files = FilesService::with_limits(files_repo.clone(), config.limits);
         let search = SearchService::new(files_repo);
-        let accounts = AccountRepo::with_crypto(db.clone(), pii_crypto);
+        let accounts = AccountRepo::with_crypto(db.clone(), pii_crypto.clone());
         Self {
             db,
             config,
@@ -76,6 +77,7 @@ impl AppState {
             oidc,
             resolver,
             http,
+            security: pii_crypto,
             workspaces,
             account_lifecycle,
             access,
