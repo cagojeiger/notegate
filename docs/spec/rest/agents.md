@@ -2,9 +2,9 @@
 
 ## Agents
 
-Agent API는 agent account와 API key를 관리하는 user-only endpoint다. Agent의 workspace별 권한은 Access category에서 따로 부여한다. API key는 인증 시 `agent` account로 처리한다. Agent key lifecycle은 workspace role이 아니라 agent 생성자/소유자 규칙으로 관리한다. Workspace lifecycle owner는 agent account에 viewer/editor workspace access를 grant/revoke할 수 있을 뿐, agent key를 관리하지 않는다.
+Agent API는 agent account와 API key를 관리하는 user-only endpoint다. Agent의 workspace별 권한은 Access category에서 따로 부여한다. API key는 인증 시 `agent` account로 처리한다. Agent key lifecycle은 workspace role이 아니라 agent 생성자/소유자 규칙으로 관리한다. Workspace owner는 agent account에 viewer/editor workspace access를 grant/revoke할 수 있을 뿐, agent key를 관리하지 않는다. Agent account는 owner role을 받을 수 없다.
 
-Agent caller는 이 category를 호출할 수 없다. Agent는 `/api/v1/me`로 자기 identity를 확인하고, workspace lifecycle owner는 Access category로 workspace별 agent access를 확인한다.
+Agent caller는 이 category를 호출할 수 없다. Agent는 `/api/v1/me`로 자기 identity를 확인하고, workspace owner는 Access category로 workspace별 agent access를 확인한다.
 
 ### List agents
 

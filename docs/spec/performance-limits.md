@@ -27,7 +27,7 @@ unknown limit key -> configuration error
 
 ```text
 owned_workspaces_max = 20 live workspaces per user creator account
-workspace_access_max_accounts = 20 active granted accounts per workspace, implicit owner 제외
+workspace_access_max_accounts = 20 active access rows per workspace, owner row 포함
 agents_per_creator_max = 50 active agents per user creator account
 agent_keys_per_agent_max = 10 live keys per agent
 ```

@@ -91,7 +91,7 @@ Contract:
 ```text
 viewer = read
 editor = read + write
-owner  = derived lifecycle owner + full file access + workspace access management
+owner  = workspace_access role; full file access + workspace lifecycle/access management
 
 read  = list/stat/read/find/grep
 write = mkdir/touch/write/patch/move/delete
