@@ -2,7 +2,7 @@
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
-use notegate_core::{Error, Result};
+use notegate_core::{Error, Result, limits};
 use notegate_model::{ApiKey, CreateApiKey};
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
@@ -126,6 +126,89 @@ impl ApiKeyRepo {
         .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
+        Ok(ApiKey::from(row))
+    }
+
+    pub async fn rotate_key(
+        &self,
+        args: InsertApiKey<'_>,
+        old_key_id: Uuid,
+        revoked_by: Uuid,
+    ) -> Result<ApiKey> {
+        if !args.command.scopes.is_empty() {
+            return Err(Error::validation("api key scopes must be empty"));
+        }
+
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        let old_exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM api_keys \
+             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > now()) \
+             FOR UPDATE",
+        )
+        .bind(old_key_id)
+        .bind(args.account_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if old_exists.is_none() {
+            return Err(Error::not_found("api key not found"));
+        }
+
+        let live_without_old: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM api_keys \
+             WHERE account_id = $1 AND id <> $2 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > now())",
+        )
+        .bind(args.account_id)
+        .bind(old_key_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let live_without_old = usize::try_from(live_without_old)
+            .map_err(|_error| Error::internal("negative key count"))?;
+        if live_without_old >= limits::API_KEYS_PER_ACCOUNT_MAX {
+            return Err(Error::conflict(format!(
+                "account already has the maximum of {} live API keys",
+                limits::API_KEYS_PER_ACCOUNT_MAX
+            )));
+        }
+
+        let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
+            "INSERT INTO api_keys \
+             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at, rotated_from_key_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
+             RETURNING {API_KEY_COLUMNS}"
+        ))
+        .bind(args.key_id)
+        .bind(args.account_id)
+        .bind(args.token_prefix)
+        .bind(args.token_hash)
+        .bind(&self.lookup_key_id)
+        .bind(self.hash_version)
+        .bind(&args.command.name)
+        .bind(&args.command.scopes)
+        .bind(args.created_by)
+        .bind(args.command.expires_at)
+        .bind(old_key_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
+            "UPDATE api_keys \
+             SET revoked_at = now(), revoked_by = $3, revoked_reason = 'rotated' \
+             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
+        )
+        .bind(old_key_id)
+        .bind(args.account_id)
+        .bind(revoked_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(ApiKey::from(row))
     }
 

@@ -14,9 +14,10 @@
 mod common;
 
 use common::TestDb;
-use notegate_db::{AccessRepo, AccountRepo, AgentRepo, WorkspaceRepo};
+use notegate_db::api_key_repo::InsertApiKey;
+use notegate_db::{AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, WorkspaceRepo};
 use notegate_model::{
-    CreateAgent, CreateAgentKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role,
+    CreateAgent, CreateAgentKey, CreateApiKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role,
 };
 use sqlx::Row as _;
 
@@ -223,6 +224,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
     };
     let accounts = AccountRepo::new(db.pool.clone());
     let agents = AgentRepo::new(db.pool.clone());
+    let api_keys = ApiKeyRepo::new(db.pool.clone());
     let access = AccessRepo::new(db.pool.clone());
     let workspaces = WorkspaceRepo::new(db.pool.clone());
 
@@ -262,6 +264,22 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
             "hashed-token",
             owner.id,
         )
+        .await?;
+    let user_key_id = uuid::Uuid::new_v4();
+    api_keys
+        .insert_key(InsertApiKey {
+            key_id: user_key_id,
+            account_id: owner.id,
+            command: &CreateApiKey {
+                name: "owner-key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: None,
+            },
+            token_prefix: "ngk_v1_owner",
+            token_hash: "hashed-owner-token",
+            created_by: owner.id,
+            rotated_from_key_id: None,
+        })
         .await?;
 
     access
@@ -319,6 +337,13 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
             .fetch_one(&db.pool)
             .await?;
     assert_eq!(key_revoked_by, Some(owner.id));
+
+    let user_key_revoked_by: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT revoked_by FROM api_keys WHERE id = $1")
+            .bind(user_key_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(user_key_revoked_by, Some(owner.id));
 
     let live_access: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM workspace_access WHERE workspace_id = $1 AND revoked_at IS NULL",

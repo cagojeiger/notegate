@@ -98,28 +98,19 @@ impl AccountService {
             .find_live_key(caller_account_id, key_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("api key not found".to_owned()))?;
-        let minted = create_key_for_account(
+        rotate_key_for_account(
             &self.api_keys,
             &self.crypto,
             caller_account_id,
             caller_account_id,
+            key_id,
             CreateApiKey {
                 name: old.name,
                 scopes: Vec::new(),
                 expires_at: old.expires_at,
             },
-            Some(old.id),
         )
-        .await?;
-        self.api_keys
-            .revoke_key(
-                caller_account_id,
-                key_id,
-                caller_account_id,
-                Some("rotated"),
-            )
-            .await?;
-        Ok(minted)
+        .await
     }
 }
 
@@ -141,19 +132,7 @@ pub async fn create_key_for_account(
     command: CreateApiKey,
     rotated_from_key_id: Option<Uuid>,
 ) -> ServiceResult<MintedApiKey> {
-    if !command.scopes.is_empty() {
-        return Err(ServiceError::InvalidInput(
-            "api key scopes must be empty".to_owned(),
-        ));
-    }
-    if command
-        .expires_at
-        .is_some_and(|expires_at| expires_at <= Utc::now())
-    {
-        return Err(ServiceError::InvalidInput(
-            "api key expires_at must be in the future".to_owned(),
-        ));
-    }
+    validate_key_command(&command)?;
     let live = api_keys.count_live_keys(account_id).await?;
     if live >= limits::API_KEYS_PER_ACCOUNT_MAX {
         return Err(ServiceError::Conflict(format!(
@@ -178,6 +157,55 @@ pub async fn create_key_for_account(
         })
         .await?;
     Ok(MintedApiKey { key, token })
+}
+
+pub async fn rotate_key_for_account(
+    api_keys: &ApiKeyRepo,
+    crypto: &PiiCrypto,
+    account_id: Uuid,
+    created_by: Uuid,
+    old_key_id: Uuid,
+    command: CreateApiKey,
+) -> ServiceResult<MintedApiKey> {
+    validate_key_command(&command)?;
+
+    let key_id = Uuid::new_v4();
+    let secret = generate_secret();
+    let token = format_token(key_id, &secret);
+    let token_hash = crypto.api_key_hash(&key_id.to_string(), &secret)?;
+    let key = api_keys
+        .rotate_key(
+            InsertApiKey {
+                key_id,
+                account_id,
+                command: &command,
+                token_prefix: &token_prefix(key_id),
+                token_hash: &token_hash,
+                created_by,
+                rotated_from_key_id: Some(old_key_id),
+            },
+            old_key_id,
+            created_by,
+        )
+        .await?;
+    Ok(MintedApiKey { key, token })
+}
+
+fn validate_key_command(command: &CreateApiKey) -> ServiceResult<()> {
+    if !command.scopes.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "api key scopes must be empty".to_owned(),
+        ));
+    }
+    if command
+        .expires_at
+        .is_some_and(|expires_at| expires_at <= Utc::now())
+    {
+        return Err(ServiceError::InvalidInput(
+            "api key expires_at must be in the future".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn generate_secret() -> String {

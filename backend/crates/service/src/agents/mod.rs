@@ -183,23 +183,19 @@ impl AgentService {
             .find_live_key(agent_id, key_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("api key not found".to_owned()))?;
-        let minted = crate::accounts::create_key_for_account(
+        crate::accounts::rotate_key_for_account(
             &self.api_keys,
             &self.crypto,
             agent_id,
             caller_account_id,
+            key_id,
             CreateApiKey {
                 name: old.name,
                 scopes: Vec::new(),
                 expires_at: old.expires_at,
             },
-            Some(old.id),
         )
-        .await?;
-        self.api_keys
-            .revoke_key(agent_id, key_id, caller_account_id, Some("rotated"))
-            .await?;
-        Ok(minted)
+        .await
     }
 
     async fn require_owned_active_agent(

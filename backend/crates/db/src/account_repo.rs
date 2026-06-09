@@ -260,10 +260,12 @@ impl AccountRepo {
         sqlx::query(
             "UPDATE api_keys \
              SET revoked_at = now(), revoked_by = $2 \
-             WHERE account_id = ANY($1) AND revoked_at IS NULL",
+             WHERE revoked_at IS NULL \
+               AND (account_id = $1 OR account_id = ANY($3))",
         )
-        .bind(&owned_agents)
+        .bind(account_id)
         .bind(deleted_by)
+        .bind(&owned_agents)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
