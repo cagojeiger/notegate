@@ -10,7 +10,7 @@ DB 컬럼 구조는 `docs/spec/db.md`를 따르고, 이 문서는 그 컬럼을 
 - 사람이 직접 식별될 수 있는 원문은 encrypted ciphertext 또는 HMAC hash로 분리한다.
 - API 응답은 권한이 있는 surface에서 필요한 최소 정보만 복호화해 반환한다.
 - root secret, 파생 subkey, plaintext PII, API key plaintext는 application log, error message, audit payload에 기록하지 않는다.
-- notegate runtime은 active root key 검증과 사용만 담당한다. 무중단 root key rotation은 현재 runtime 목표가 아니다.
+- notegate runtime은 active root key의 startup ensure/검증과 사용만 담당한다. 무중단 root key rotation은 현재 runtime 목표가 아니다.
 
 ## PII 분류
 
@@ -43,7 +43,7 @@ LOOKUP root
 
 ## 목적별 subkey
 
-Application은 startup 또는 admin command 실행 시 root secret을 읽고 HKDF로 목적별 subkey를 파생한다. Purpose label은 secret이 아닌 코드 상수다.
+Application은 startup 시 root secret을 읽고 HKDF로 목적별 subkey를 파생한다. Purpose label은 secret이 아닌 코드 상수다.
 
 ```text
 enc_epoch_verify_subkey    = HKDF(enc_root_secret, "notegate/enc/epoch-verify/v1")
@@ -72,7 +72,7 @@ session_sign_subkey        = HKDF(lookup_root_secret, "notegate/lookup/session-s
 
 ## Key epoch 검증
 
-`crypto_key_epochs`는 env 또는 admin input으로 주입된 root secret이 선언된 `key_id`와 맞는지 검증한다.
+`crypto_key_epochs`는 env로 주입된 root secret이 선언된 `key_id`와 맞는지 검증한다. Startup은 active `enc`/`lookup` row가 없으면 생성하지만, 이미 다른 active `key_id`가 있으면 실패하며 rotation하지 않는다.
 
 ```text
 verify_tag = HMAC(epoch_verify_subkey, "key-epoch:v1:" + domain + ":" + key_id)
@@ -81,7 +81,7 @@ verify_tag = HMAC(epoch_verify_subkey, "key-epoch:v1:" + domain + ":" + key_id)
 규칙:
 
 - startup 시 active ENC root와 active LOOKUP root의 `verify_tag`를 DB와 비교한다.
-- `key_id`가 DB에 없거나 `verify_tag`가 다르면 startup 또는 admin command는 실패한다.
+- Startup ensure 후 active row의 `key_id`나 `verify_tag`가 configured root와 다르면 startup은 실패한다.
 - `key_id`는 영구 식별자다. 한 번 등록한 `key_id`는 상태가 바뀌어도 다른 root secret에 재사용하지 않는다.
 - `status='active'` root만 새 encrypt/hash/sign에 사용할 수 있다.
 - `status='verify_only'` root는 runtime write에는 사용할 수 없다.

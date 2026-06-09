@@ -55,8 +55,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      crypto-bootstrap:
-        condition: service_completed_successfully
     read_only: true
     cap_drop:
       - ALL
@@ -64,22 +62,6 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  crypto-bootstrap:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    command: ["--bootstrap-crypto"]
-    environment:
-      <<: *api-environment
-    depends_on:
-      postgres:
-        condition: service_healthy
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: "no"
 
   # Local reverse proxy. It owns the public 9191 port so the api service can
   # be scaled without host port conflicts.

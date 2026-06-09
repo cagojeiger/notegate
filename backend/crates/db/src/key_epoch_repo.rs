@@ -1,4 +1,4 @@
-//! Crypto key epoch bootstrap and startup verification.
+//! Crypto key epoch startup ensure and verification.
 //!
 //! The database stores only epoch metadata and verify tags. Root secrets and
 //! derived subkeys stay in the application process and are supplied by
@@ -19,10 +19,13 @@ impl CryptoKeyEpochRepo {
         Self { pool }
     }
 
-    /// Insert active ENC/LOOKUP epochs if missing, or verify existing rows.
-    pub async fn bootstrap_active(&self, crypto: &PiiCrypto) -> Result<()> {
+    /// Ensure active ENC/LOOKUP epochs exist for the configured roots, then verify them.
+    ///
+    /// This is intentionally not rotation: if a different active key already
+    /// exists for a domain, startup fails instead of replacing it.
+    pub async fn ensure_active(&self, crypto: &PiiCrypto) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        upsert_active_epoch(
+        ensure_active_epoch(
             &mut tx,
             crypto.enc_key_id(),
             "enc",
@@ -30,7 +33,7 @@ impl CryptoKeyEpochRepo {
             crypto.version(),
         )
         .await?;
-        upsert_active_epoch(
+        ensure_active_epoch(
             &mut tx,
             crypto.lookup_key_id(),
             "lookup",
@@ -66,45 +69,52 @@ impl CryptoKeyEpochRepo {
 
 #[derive(Debug, FromRow)]
 struct EpochRow {
+    key_id: String,
     domain: String,
     status: String,
     verify_tag: String,
     version: i32,
 }
 
-async fn upsert_active_epoch(
+async fn ensure_active_epoch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     key_id: &str,
     domain: &str,
     verify_tag: &str,
     version: i32,
 ) -> Result<()> {
-    let existing = sqlx::query_as::<_, EpochRow>(
-        "SELECT domain, status, verify_tag, version FROM crypto_key_epochs WHERE key_id = $1",
+    sqlx::query(
+        "INSERT INTO crypto_key_epochs \
+         (key_id, domain, status, verify_tag, version, activated_at) \
+         VALUES ($1, $2, 'active', $3, $4, now()) \
+         ON CONFLICT DO NOTHING",
     )
     .bind(key_id)
-    .fetch_optional(&mut **tx)
+    .bind(domain)
+    .bind(verify_tag)
+    .bind(version)
+    .execute(&mut **tx)
     .await
     .map_err(map_sqlx_error)?;
 
-    match existing {
-        Some(row) => validate_epoch_row(key_id, domain, verify_tag, version, row),
-        None => {
-            sqlx::query(
-                "INSERT INTO crypto_key_epochs \
-                 (key_id, domain, status, verify_tag, version, activated_at) \
-                 VALUES ($1, $2, 'active', $3, $4, now())",
-            )
-            .bind(key_id)
-            .bind(domain)
-            .bind(verify_tag)
-            .bind(version)
-            .execute(&mut **tx)
-            .await
-            .map_err(map_sqlx_error)?;
-            Ok(())
-        }
+    let active = sqlx::query_as::<_, EpochRow>(
+        "SELECT key_id, domain, status, verify_tag, version FROM crypto_key_epochs \
+         WHERE domain = $1 AND status = 'active'",
+    )
+    .bind(domain)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::validation(format!("missing active {domain} crypto key epoch")))?;
+
+    if active.key_id != key_id {
+        return Err(Error::validation(format!(
+            "active {domain} crypto key epoch is {}, not configured {key_id}",
+            active.key_id
+        )));
     }
+
+    validate_epoch_row(key_id, domain, verify_tag, version, active)
 }
 
 async fn verify_active_epoch(
@@ -115,7 +125,7 @@ async fn verify_active_epoch(
     version: i32,
 ) -> Result<()> {
     let row = sqlx::query_as::<_, EpochRow>(
-        "SELECT domain, status, verify_tag, version FROM crypto_key_epochs WHERE key_id = $1",
+        "SELECT key_id, domain, status, verify_tag, version FROM crypto_key_epochs WHERE key_id = $1",
     )
     .bind(key_id)
     .fetch_optional(pool)
@@ -132,6 +142,11 @@ fn validate_epoch_row(
     version: i32,
     row: EpochRow,
 ) -> Result<()> {
+    if row.key_id != key_id {
+        return Err(Error::validation(format!(
+            "crypto key epoch row has wrong key_id: expected {key_id}"
+        )));
+    }
     if row.domain != domain {
         return Err(Error::validation(format!(
             "crypto key epoch {key_id} has wrong domain"

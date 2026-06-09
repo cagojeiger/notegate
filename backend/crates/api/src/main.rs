@@ -24,12 +24,10 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--print-openapi") {
+    if std::env::args().any(|arg| arg == "--print-openapi") {
         println!("{}", openapi::json_pretty()?);
         return Ok(());
     }
-    let bootstrap_crypto = args.iter().any(|arg| arg == "--bootstrap-crypto");
 
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
@@ -55,13 +53,8 @@ async fn main() -> anyhow::Result<()> {
         &config.lookup_root_secret,
     );
     let key_epochs = notegate_db::CryptoKeyEpochRepo::new(pool.clone());
-    if bootstrap_crypto {
-        key_epochs.bootstrap_active(&pii_crypto).await?;
-        info!(event = "crypto_key_epochs.bootstrapped");
-        pool.close().await;
-        return Ok(());
-    }
-    key_epochs.verify_active(&pii_crypto).await?;
+    key_epochs.ensure_active(&pii_crypto).await?;
+    info!(event = "crypto_key_epochs.ensured");
 
     let bind_addr = config.bind_addr;
     let http = reqwest::Client::builder()

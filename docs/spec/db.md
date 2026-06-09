@@ -63,7 +63,7 @@ CREATE UNIQUE INDEX crypto_key_epochs_one_active_per_domain
 - 일반 runtime은 각 domain의 active root를 하나씩 사용한다. Rotation/maintenance 경로는 필요한 old root를 별도 입력으로 받아 `verify_only` epoch를 검증/조회할 수 있다.
 - `verify_tag`는 root secret에서 파생한 key epoch verify subkey로 계산한다. 같은 `key_id`에 잘못된 secret이 주입되면 startup 또는 maintenance command가 실패해야 한다.
 - `active` epoch는 새 encrypt/hash/sign에 사용할 수 있다. `verify_only` epoch는 기존 데이터 decrypt/verify 또는 migration에만 사용할 수 있고 새 write에는 사용할 수 없다. `revoked` epoch는 사용할 수 없다. 각 row의 FK는 key 존재만 보장하며, `enc`/`lookup` domain 적합성은 service 정책으로 검증한다.
-- 최초 `crypto_key_epochs` row는 일반 application startup이 자동 생성하지 않는다. 운영 bootstrap/admin command가 active `enc`/`lookup` epoch를 먼저 등록해야 하며, application startup은 필수 epoch가 없으면 실패한다.
+- application startup은 configured root key ID/secret으로 active `enc`/`lookup` epoch row가 없을 때만 idempotent하게 생성한 뒤 검증한다. 이미 다른 `key_id`의 active epoch가 있으면 startup은 실패한다. Startup은 rotation을 수행하지 않는다.
 
 ## accounts
 

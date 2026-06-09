@@ -51,7 +51,7 @@ Auth/MCP local defaults are configured in `.env.example`:
 
 First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login` once to create the local notegate user row, then reconnect the MCP client to `NOTEGATE_RESOURCE_URL`. MCP OAuth clients must request the advertised `resource` and use the registered `notegate-mcp` public client.
 
-Fresh databases must have active ENC/LOOKUP key epochs before the API serves traffic. Local Docker Compose runs `notegate-api --bootstrap-crypto` once before starting API replicas.
+On startup, the API idempotently ensures missing active ENC/LOOKUP key epoch rows from the configured root key IDs/secrets, then verifies them. If the database already has a different active key for a domain, startup fails; rotation is not automatic.
 
 ## Checks
 
@@ -67,7 +67,7 @@ cargo test
 docker compose up --build
 ```
 
-Brings up Postgres + crypto bootstrap + two API replicas behind a local nginx proxy:
+Brings up Postgres + two API replicas behind a local nginx proxy:
 
 - `proxy` -> `http://localhost:9191`
 - `api` -> `scale: 2`, exposed only inside the compose network
