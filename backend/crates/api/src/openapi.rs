@@ -238,6 +238,21 @@ mod tests {
     }
 
     #[test]
+    fn openapi_documents_access_role_enum() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+
+        assert_eq!(
+            value["components"]["schemas"]["AccessRoleBody"]["enum"],
+            serde_json::json!(["owner", "editor", "viewer"])
+        );
+        assert_eq!(
+            value["components"]["schemas"]["GrantBody"]["properties"]["role"]["$ref"],
+            "#/components/schemas/AccessRoleBody"
+        );
+    }
+
+    #[test]
     fn openapi_adds_common_error_response_to_every_operation() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");

@@ -1,10 +1,10 @@
 //! Workspace access: list / grant / revoke, plus the role-check helper used by
 //! every later feature.
 //!
-//! POLICY: managing access is lifecycle-owner-only. The owner role is derived
-//! from `workspaces.created_by`; access rows store only viewer/editor grants. A
-//! caller with no live role sees the workspace as not-found (404); a caller with
-//! a lesser role is forbidden (403). A workspace may have at most
+//! POLICY: managing access is lifecycle-owner-only. Owner/editor/viewer roles
+//! are explicit live `workspace_access` rows. A caller with no live role sees
+//! the workspace as not-found (404); a caller with a lesser role is forbidden
+//! (403). A workspace may have at most
 //! `WORKSPACE_ACCESS_MAX_ACCOUNTS` live grants, enforced in the grant transaction.
 
 use notegate_core::limits;

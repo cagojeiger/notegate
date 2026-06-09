@@ -138,7 +138,8 @@ pub mod node {
          JOIN accounts caller ON caller.id = wa.account_id \
                               AND caller.is_active = true \
                               AND caller.deleted_at IS NULL \
-         WHERE w.id = $1 AND w.deleted_at IS NULL",
+         WHERE w.id = $1 AND w.deleted_at IS NULL \
+           AND (wa.role <> 'owner' OR caller.kind = 'user')",
         )
         .bind(workspace_id)
         .bind(account_id)

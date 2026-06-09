@@ -43,7 +43,7 @@ Capability 의미:
 - `can_create_workspace`: caller가 user account로 workspace를 생성할 수 있다. Workspace 생성 side effect는 `docs/spec/lifecycle.md`를 따른다. `user` account는 `true`, `agent` account는 `false`다.
 - `can_manage_agents`: caller가 user-only agent management endpoint로 agent list/create/delete와 key mint/revoke를 수행할 수 있다. `user` account는 `true`, `agent` account는 `false`다.
 
-Bootstrap 흐름은 `/me`로 identity를 확인한 뒤 `GET /api/v1/workspaces`로 workspace를 선택한다. 최초 user bootstrap과 재로그인 동작은 `docs/spec/lifecycle.md`의 Local user 최초 생성/User 재로그인 정책을 따른다. 사용자가 모든 workspace를 삭제한 경우에는 `POST /api/v1/workspaces`로 다시 생성한다.
+초기 진입 흐름은 `/me`로 identity를 확인한 뒤 `GET /api/v1/workspaces`로 workspace를 선택한다. 최초 user 생성과 재로그인 동작은 `docs/spec/lifecycle.md`의 Local user 최초 생성/User 재로그인 정책을 따른다. 신규 user나 모든 workspace를 삭제한 user는 `POST /api/v1/workspaces`로 workspace를 명시적으로 생성한다.
 
 ### Delete current user account
 

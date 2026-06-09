@@ -46,9 +46,9 @@ read  = 목록/메타데이터/읽기/검색
 write = 생성/수정/패치/이동/삭제
 ```
 
-workspace는 단일/default 제약 없이 자유롭게 생성/삭제할 수 있는 1급 리소스다. workspace 생성은 user만 가능하다. Agent는 workspace에 별도로 연결되며 `viewer` 또는 `editor` 역할만 받을 수 있다. Agent는 `owner`가 될 수 없다.
+workspace는 단일 제약 없이 자유롭게 생성/삭제할 수 있는 1급 리소스다. workspace 생성은 user만 가능하다. Agent는 workspace에 별도로 연결되며 `viewer` 또는 `editor` 역할만 받을 수 있다. Agent는 `owner`가 될 수 없다.
 
-생성/삭제 side effect, 기본 workspace bootstrap, owner row 보호, purge 흐름은 `docs/spec/lifecycle.md`가 정본이다. 사용자 PII 암호화와 탈퇴 시 redaction/anonymization 또는 crypto shredding은 `docs/spec/security.md`가 정본이다.
+생성/삭제 side effect, owner row 보호, purge 흐름은 `docs/spec/lifecycle.md`가 정본이다. 사용자 PII 암호화와 탈퇴 시 redaction/anonymization 또는 crypto shredding은 `docs/spec/security.md`가 정본이다.
 
 ## 근거
 

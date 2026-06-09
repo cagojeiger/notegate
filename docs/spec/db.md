@@ -174,7 +174,7 @@ CREATE INDEX agent_keys_agent_active_idx
 
 ## workspaces
 
-workspace는 개인 노트 파일트리의 격리 경계다. workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. 단일/default workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
+workspace는 개인 노트 파일트리의 격리 경계다. workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. 단일 workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
 
 ```sql
 CREATE TABLE workspaces (
@@ -204,7 +204,7 @@ CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
 
 - REST 클라이언트는 `workspace_id`를 URL에 명시할 수 있다. `workspace_id`는 secret이 아니다.
 - `workspaces.created_by`는 최초 생성자/audit attribution이다. 현재 권한 source는 `workspace_access`다.
-- workspace 생성/삭제, 기본 workspace bootstrap, owner row 생성은 `docs/spec/lifecycle.md`를 따른다.
+- workspace 생성/삭제와 owner row 생성은 `docs/spec/lifecycle.md`를 따른다.
 - workspace rename/delete/access 관리는 active `owner` role을 가진 user만 수행할 수 있다. agent는 grant를 받아도 lifecycle operation을 수행할 수 없다.
 - 서버는 live workspace(`deleted_at IS NULL`)와 인증된 account의 effective role로 workspace 접근 권한을 검증한다.
 - MCP/CLI path API는 요청 context에서 workspace를 resolve한 뒤 파일 path를 해석한다.

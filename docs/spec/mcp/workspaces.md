@@ -22,7 +22,7 @@ missing limit   -> 50
 limit < 1       -> 1
 limit > 100     -> 100
 invalid cursor  -> invalid params
-no workspaces   -> empty list; user caller는 workspaces_create를 사용할 수 있고, agent caller는 workspace owner의 access grant가 필요하다. 최초 user bootstrap과 재로그인 동작은 `docs/spec/lifecycle.md`를 따른다
+no workspaces   -> empty list; user caller는 workspaces_create로 첫 workspace를 명시적으로 만들 수 있고, agent caller는 workspace owner의 access grant가 필요하다
 ```
 
 Output:

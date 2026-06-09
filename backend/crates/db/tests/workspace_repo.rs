@@ -528,6 +528,49 @@ async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
 }
 
 #[tokio::test]
+async fn corrupted_agent_owner_row_is_not_an_effective_role()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let agent = insert_agent_account(&db.pool, owner, "bot").await?;
+    let workspace_id = make_workspace(&repo, owner, "corrupt").await;
+
+    sqlx::query(
+        "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
+         VALUES ($1, $2, 'owner', $3)",
+    )
+    .bind(workspace_id)
+    .bind(agent)
+    .bind(owner)
+    .execute(&db.pool)
+    .await?;
+
+    assert_eq!(access_repo.role_for(workspace_id, agent).await?, None);
+    assert_eq!(repo.role_for(workspace_id, agent).await?, None);
+    assert!(
+        repo.find_workspace_view_for(agent, workspace_id)
+            .await?
+            .is_none(),
+        "agent owner rows are hidden from workspace visibility"
+    );
+    assert!(
+        access_repo
+            .list_access(workspace_id)
+            .await?
+            .iter()
+            .all(|grant| grant.account_id != agent),
+        "agent owner rows are hidden from access listings"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn user_account_can_receive_owner_access() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());

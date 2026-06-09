@@ -10,14 +10,14 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{Caller, WorkspaceAccess};
+use notegate_model::{Caller, Role, WorkspaceAccess};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::{AccountRef, parse_role};
+use crate::rest::dto::AccountRef;
 use crate::state::AppState;
 
 use notegate_service::access::{GrantAccess, ListAccess};
@@ -51,8 +51,26 @@ pub(crate) struct AccessListResponse {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AccessRoleBody {
+    Owner,
+    Editor,
+    Viewer,
+}
+
+impl From<AccessRoleBody> for Role {
+    fn from(value: AccessRoleBody) -> Self {
+        match value {
+            AccessRoleBody::Owner => Self::Owner,
+            AccessRoleBody::Editor => Self::Editor,
+            AccessRoleBody::Viewer => Self::Viewer,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct GrantBody {
-    role: String,
+    role: AccessRoleBody,
 }
 
 #[utoipa::path(
@@ -122,7 +140,7 @@ pub(crate) async fn grant(
     Path((workspace_id, account_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<GrantBody>,
 ) -> Result<Json<AccessOut>, ApiError> {
-    let role = parse_role(&body.role)?;
+    let role = Role::from(body.role);
     let grant = state
         .access
         .grant(

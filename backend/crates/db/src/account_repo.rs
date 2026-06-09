@@ -423,7 +423,6 @@ impl AccountRepo {
                 .await
                 .map_err(map_sqlx_error)?;
 
-                bootstrap_default_workspace(&mut tx, id).await?;
                 id
             }
         };
@@ -518,32 +517,6 @@ impl AccountRepo {
         let wrapped = wrapped.ok_or_else(|| Error::internal("account DEK not found"))?;
         self.crypto.unwrap_dek(&wrapped)
     }
-}
-
-async fn bootstrap_default_workspace(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    account_id: Uuid,
-) -> Result<()> {
-    let workspace_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (name, created_by) \
-         VALUES ('personal', $1) RETURNING id",
-    )
-    .bind(account_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)?;
-
-    sqlx::query(
-        "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
-         VALUES ($1, $2, 'owner', $2)",
-    )
-    .bind(workspace_id)
-    .bind(account_id)
-    .execute(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)?;
-
-    Ok(())
 }
 
 fn decrypt_optional_string(

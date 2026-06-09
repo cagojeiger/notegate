@@ -66,6 +66,7 @@ impl AccessRepo {
              JOIN accounts acc ON acc.id = wa.account_id \
              WHERE wa.workspace_id = $1 AND wa.revoked_at IS NULL \
                AND acc.is_active = true AND acc.deleted_at IS NULL \
+               AND (wa.role <> 'owner' OR acc.kind = 'user') \
              ORDER BY wa.granted_at, wa.account_id"
         ))
         .bind(workspace_id)
@@ -178,7 +179,8 @@ async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Resul
          JOIN accounts caller ON caller.id = wa.account_id \
                               AND caller.is_active = true \
                               AND caller.deleted_at IS NULL \
-         WHERE w.id = $1 AND w.deleted_at IS NULL",
+         WHERE w.id = $1 AND w.deleted_at IS NULL \
+           AND (wa.role <> 'owner' OR caller.kind = 'user')",
     )
     .bind(workspace_id)
     .bind(account_id)
@@ -286,9 +288,13 @@ async fn live_role_for_update(
     account_id: Uuid,
 ) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM workspace_access \
-         WHERE workspace_id = $1 AND account_id = $2 AND revoked_at IS NULL \
-         FOR UPDATE",
+        "SELECT wa.role FROM workspace_access wa \
+         JOIN accounts acc ON acc.id = wa.account_id \
+                          AND acc.is_active = true \
+                          AND acc.deleted_at IS NULL \
+         WHERE wa.workspace_id = $1 AND wa.account_id = $2 AND wa.revoked_at IS NULL \
+           AND (wa.role <> 'owner' OR acc.kind = 'user') \
+         FOR UPDATE OF wa",
     )
     .bind(workspace_id)
     .bind(account_id)

@@ -101,6 +101,7 @@ const WORKSPACE_VIEW_SELECT: &str = "SELECT w.id, w.name, w.created_by, w.create
                            JOIN accounts caller ON caller.id = wa.account_id \
                                                 AND caller.is_active = true \
                                                 AND caller.deleted_at IS NULL \
+                                                AND (wa.role <> 'owner' OR caller.kind = 'user') \
                            JOIN nodes root ON root.workspace_id = w.id \
                                           AND root.parent_id IS NULL \
                                           AND root.deleted_at IS NULL";
@@ -320,7 +321,8 @@ async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Resul
          JOIN accounts caller ON caller.id = wa.account_id \
                               AND caller.is_active = true \
                               AND caller.deleted_at IS NULL \
-         WHERE w.id = $1 AND w.deleted_at IS NULL",
+         WHERE w.id = $1 AND w.deleted_at IS NULL \
+           AND (wa.role <> 'owner' OR caller.kind = 'user')",
     )
     .bind(workspace_id)
     .bind(account_id)

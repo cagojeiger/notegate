@@ -58,21 +58,17 @@ async fn upsert_user_creates_account_and_user_rows() -> Result<(), Box<dyn std::
         .await?;
     assert_eq!(accounts, 1);
     assert_eq!(users, 1);
-    let workspace_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM workspaces WHERE created_by = $1 AND name = 'personal'",
-    )
-    .bind(account.id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(workspace_count, 1, "new user gets default workspace");
-    let owner_access_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM workspace_access \
-         WHERE account_id = $1 AND role = 'owner' AND revoked_at IS NULL",
-    )
-    .bind(account.id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(owner_access_count, 1, "new user owns default workspace");
+    let workspace_count: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(
+        workspace_count, 0,
+        "new user does not auto-create a workspace"
+    );
+    let access_count: i64 = sqlx::query_scalar("SELECT count(*) FROM workspace_access")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(access_count, 0, "new user does not auto-create access rows");
 
     db.cleanup().await;
     Ok(())
@@ -103,15 +99,10 @@ async fn duplicate_sub_updates_and_does_not_duplicate() -> Result<(), Box<dyn st
         accounts, 1,
         "duplicate sub must not create a second account"
     );
-    let workspaces: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE created_by = $1")
-            .bind(first.id)
-            .fetch_one(&db.pool)
-            .await?;
-    assert_eq!(
-        workspaces, 1,
-        "duplicate sub must not create another default workspace"
-    );
+    let workspaces: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(workspaces, 0, "duplicate sub must not create workspaces");
 
     db.cleanup().await;
     Ok(())

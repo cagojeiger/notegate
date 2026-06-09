@@ -29,24 +29,19 @@ Background job / admin repair
 
 ### Local user 최초 생성
 
-Authgate OAuth/browser/MCP OAuth/device flow로 처음 확인된 local user는 하나의 transaction에서 다음을 생성한다.
+Browser login/onboarding flow로 처음 확인된 local user는 하나의 transaction에서 identity에 필요한 row만 생성한다.
 
 ```text
 accounts(kind='user')
 users
 account_encryption_keys
-workspaces(name='personal')
-workspace root node '/'
-workspace_access(role='owner') for created user
 ```
 
 규칙:
 
-- 기본 workspace 이름은 `personal`이다.
-- 기본 workspace는 일반 workspace와 동일하게 rename/delete할 수 있다.
-- 같은 auth subject의 재로그인은 기본 workspace를 다시 만들지 않는다.
-- 사용자가 모든 workspace를 삭제한 뒤 재로그인해도 기본 workspace를 자동 재생성하지 않는다. 이 경우 명시적인 workspace create를 사용한다.
-- agent, agent key, 추가 workspace access는 자동 생성하지 않는다.
+- user 생성은 workspace, root node, workspace access, agent, agent key를 자동 생성하지 않는다.
+- 첫 workspace는 사용자가 REST/MCP의 workspace create를 명시적으로 호출해 만든다.
+- REST/MCP bearer 인증은 이미 생성된 local user만 resolve한다. Local user가 없으면 `not_registered`로 거부한다.
 
 ### User 재로그인
 
@@ -255,7 +250,7 @@ agent key token_hash unique
 Service layer는 다음 정책을 transaction으로 보장한다.
 
 ```text
-user 최초 생성 + default workspace bootstrap
+user 최초 생성 identity row
 workspace 생성 + root + owner access
 workspace/access/agent/key count limit
 owner revoke/downgrade 보호

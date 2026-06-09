@@ -12,7 +12,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use notegate_model::{AccountRef as ModelAccountRef, NodeKind, Role};
+use notegate_model::{AccountRef as ModelAccountRef, NodeKind};
 use notegate_service::files::NodeView;
 use notegate_service::workspaces::WorkspaceView;
 
@@ -167,11 +167,4 @@ pub fn attribution_ids<'a>(views: impl IntoIterator<Item = &'a NodeView>) -> Vec
 pub fn parse_kind(value: &str) -> Result<NodeKind, crate::error::ApiError> {
     NodeKind::parse(value)
         .ok_or_else(|| crate::error::ApiError::invalid_field("kind must be 'folder' or 'document'"))
-}
-
-/// Parse a `role` body string into a [`Role`], rejecting unknowns.
-pub fn parse_role(value: &str) -> Result<Role, crate::error::ApiError> {
-    Role::parse(value).ok_or_else(|| {
-        crate::error::ApiError::invalid_field("role must be 'owner', 'editor', or 'viewer'")
-    })
 }
