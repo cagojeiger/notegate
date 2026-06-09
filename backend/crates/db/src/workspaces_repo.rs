@@ -1,8 +1,9 @@
 //! Workspace lifecycle persistence.
 //!
 //! Creating a workspace inserts the `workspaces` row (whose trigger materializes
-//! the canonical root node with attribution = the creator) and grants the creator
-//! `owner` in the same transaction, after enforcing the owner quota in-tx.
+//! the canonical root node with attribution = the creator). The creator user is
+//! the implicit lifecycle owner; `workspace_access` stores only viewer/editor
+//! grants for other accounts.
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
@@ -27,22 +28,26 @@ impl WorkspaceRepo {
 #[derive(Debug, FromRow)]
 struct WorkspaceRow {
     id: Uuid,
-    owner_account_id: Uuid,
     name: String,
     created_by: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    deleted_at: Option<DateTime<Utc>>,
+    deleted_by: Option<Uuid>,
+    purge_after: Option<DateTime<Utc>>,
 }
 
 impl From<WorkspaceRow> for Workspace {
     fn from(row: WorkspaceRow) -> Self {
         Self {
             id: row.id,
-            owner_account_id: row.owner_account_id,
             name: row.name,
             created_by: row.created_by,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            deleted_at: row.deleted_at,
+            deleted_by: row.deleted_by,
+            purge_after: row.purge_after,
         }
     }
 }
@@ -50,11 +55,13 @@ impl From<WorkspaceRow> for Workspace {
 #[derive(Debug, FromRow)]
 struct WorkspaceViewRow {
     id: Uuid,
-    owner_account_id: Uuid,
     name: String,
     created_by: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    deleted_at: Option<DateTime<Utc>>,
+    deleted_by: Option<Uuid>,
+    purge_after: Option<DateTime<Utc>>,
     role: String,
     root_node_id: Uuid,
 }
@@ -66,11 +73,13 @@ impl WorkspaceViewRow {
         Ok(WorkspaceView {
             workspace: Workspace {
                 id: self.id,
-                owner_account_id: self.owner_account_id,
                 name: self.name,
                 created_by: self.created_by,
                 created_at: self.created_at,
                 updated_at: self.updated_at,
+                deleted_at: self.deleted_at,
+                deleted_by: self.deleted_by,
+                purge_after: self.purge_after,
             },
             role,
             root_node_id: self.root_node_id,
@@ -78,13 +87,21 @@ impl WorkspaceViewRow {
     }
 }
 
-const WORKSPACE_COLUMNS: &str = "id, owner_account_id, name, created_by, created_at, updated_at";
+const WORKSPACE_COLUMNS: &str =
+    "id, name, created_by, created_at, updated_at, deleted_at, deleted_by, purge_after";
 
-const WORKSPACE_VIEW_SELECT: &str = "SELECT w.id, w.owner_account_id, w.name, w.created_by, w.created_at, w.updated_at, \
-                                  a.role, root.id AS root_node_id \
+const WORKSPACE_VIEW_SELECT: &str = "SELECT w.id, w.name, w.created_by, w.created_at, w.updated_at, \
+                                  w.deleted_at, w.deleted_by, w.purge_after, \
+                                  CASE WHEN w.created_by = $1 AND caller.kind = 'user' \
+                                       THEN 'owner' ELSE wa.role END AS role, \
+                                  root.id AS root_node_id \
                            FROM workspaces w \
-                           JOIN workspace_access a ON a.workspace_id = w.id \
-                           JOIN accounts acc ON acc.id = a.account_id \
+                           JOIN accounts caller ON caller.id = $1 \
+                                                AND caller.is_active = true \
+                                                AND caller.deleted_at IS NULL \
+                           LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                                        AND wa.account_id = $1 \
+                                                        AND wa.revoked_at IS NULL \
                            JOIN nodes root ON root.workspace_id = w.id \
                                           AND root.parent_id IS NULL \
                                           AND root.deleted_at IS NULL";
@@ -96,7 +113,7 @@ impl WorkspaceRepo {
 
     pub async fn create_workspace(
         &self,
-        owner_account_id: Uuid,
+        creator_account_id: Uuid,
         command: &CreateWorkspace,
     ) -> Result<Workspace> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
@@ -106,7 +123,7 @@ impl WorkspaceRepo {
              WHERE id = $1 AND kind = 'user' AND is_active = true AND deleted_at IS NULL \
              FOR UPDATE",
         )
-        .bind(owner_account_id)
+        .bind(creator_account_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -114,14 +131,15 @@ impl WorkspaceRepo {
             return Err(Error::not_found("workspace owner user account not found"));
         }
 
-        // Enforce the owner quota inside the transaction so a concurrent create
-        // cannot slip past the cap.
-        let owned: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE owner_account_id = $1")
-                .bind(owner_account_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?;
+        // Enforce the creator quota inside the transaction so a concurrent create
+        // cannot slip past the cap. Soft-deleted workspaces do not count.
+        let owned: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM workspaces WHERE created_by = $1 AND deleted_at IS NULL",
+        )
+        .bind(creator_account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         let owned =
             usize::try_from(owned).map_err(|_error| Error::internal("negative workspace count"))?;
         if owned >= limits::OWNED_WORKSPACES_MAX {
@@ -134,27 +152,14 @@ impl WorkspaceRepo {
         // Insert the workspace; the AFTER INSERT trigger creates the root node
         // with created_by = updated_by = this workspace's created_by.
         let row = sqlx::query_as::<_, WorkspaceRow>(&format!(
-            "INSERT INTO workspaces (owner_account_id, name, created_by) \
-             VALUES ($1, $2, $3) RETURNING {WORKSPACE_COLUMNS}"
+            "INSERT INTO workspaces (name, created_by) \
+             VALUES ($1, $2) RETURNING {WORKSPACE_COLUMNS}"
         ))
-        .bind(owner_account_id)
         .bind(&command.name)
-        .bind(owner_account_id)
+        .bind(creator_account_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
-
-        // Grant the owner `owner` in the same transaction.
-        sqlx::query(
-            "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
-             VALUES ($1, $2, 'owner', $3)",
-        )
-        .bind(row.id)
-        .bind(owner_account_id)
-        .bind(owner_account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Workspace::from(row))
@@ -162,7 +167,7 @@ impl WorkspaceRepo {
 
     pub async fn find_workspace(&self, workspace_id: Uuid) -> Result<Option<Workspace>> {
         let row = sqlx::query_as::<_, WorkspaceRow>(&format!(
-            "SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE id = $1"
+            "SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE id = $1 AND deleted_at IS NULL"
         ))
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -178,8 +183,8 @@ impl WorkspaceRepo {
     ) -> Result<Option<WorkspaceView>> {
         let row = sqlx::query_as::<_, WorkspaceViewRow>(&format!(
             "{WORKSPACE_VIEW_SELECT} \
-             WHERE a.account_id = $1 AND a.revoked_at IS NULL \
-               AND acc.is_active = true AND acc.deleted_at IS NULL AND w.id = $2"
+             WHERE w.id = $2 AND w.deleted_at IS NULL \
+               AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL)"
         ))
         .bind(account_id)
         .bind(workspace_id)
@@ -197,8 +202,8 @@ impl WorkspaceRepo {
     ) -> Result<Vec<WorkspaceView>> {
         let rows = sqlx::query_as::<_, WorkspaceViewRow>(&format!(
             "{WORKSPACE_VIEW_SELECT} \
-             WHERE a.account_id = $1 AND a.revoked_at IS NULL \
-               AND acc.is_active = true AND acc.deleted_at IS NULL AND w.name = $2 \
+             WHERE w.deleted_at IS NULL AND w.name = $2 \
+               AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL) \
              ORDER BY w.created_at, w.id LIMIT $3"
         ))
         .bind(account_id)
@@ -220,8 +225,8 @@ impl WorkspaceRepo {
             None => {
                 sqlx::query_as::<_, WorkspaceViewRow>(&format!(
                     "{WORKSPACE_VIEW_SELECT} \
-                     WHERE a.account_id = $1 AND a.revoked_at IS NULL \
-                       AND acc.is_active = true AND acc.deleted_at IS NULL \
+                     WHERE w.deleted_at IS NULL \
+                       AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL) \
                      ORDER BY w.created_at, w.id LIMIT $2"
                 ))
                 .bind(account_id)
@@ -232,8 +237,8 @@ impl WorkspaceRepo {
             Some(cursor) => {
                 sqlx::query_as::<_, WorkspaceViewRow>(&format!(
                     "{WORKSPACE_VIEW_SELECT} \
-                     WHERE a.account_id = $1 AND a.revoked_at IS NULL \
-                       AND acc.is_active = true AND acc.deleted_at IS NULL \
+                     WHERE w.deleted_at IS NULL \
+                       AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL) \
                        AND (w.created_at, w.id) > ($2, $3) \
                      ORDER BY w.created_at, w.id LIMIT $4"
                 ))
@@ -253,7 +258,7 @@ impl WorkspaceRepo {
     pub async fn rename_workspace(&self, workspace_id: Uuid, new_name: &str) -> Result<Workspace> {
         let row = sqlx::query_as::<_, WorkspaceRow>(&format!(
             "UPDATE workspaces SET name = $2, updated_at = now() \
-             WHERE id = $1 RETURNING {WORKSPACE_COLUMNS}"
+             WHERE id = $1 AND deleted_at IS NULL RETURNING {WORKSPACE_COLUMNS}"
         ))
         .bind(workspace_id)
         .bind(new_name)
@@ -264,13 +269,19 @@ impl WorkspaceRepo {
         Ok(Workspace::from(row))
     }
 
-    pub async fn delete_workspace(&self, workspace_id: Uuid) -> Result<()> {
-        // ON DELETE CASCADE removes workspace_access, nodes, and documents.
-        let result = sqlx::query("DELETE FROM workspaces WHERE id = $1")
-            .bind(workspace_id)
-            .execute(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
+    pub async fn delete_workspace(&self, workspace_id: Uuid, deleted_by: Uuid) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE workspaces \
+             SET deleted_at = now(), deleted_by = $2, \
+                 purge_after = now() + make_interval(days => $3::int), updated_at = now() \
+             WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(deleted_by)
+        .bind(i32::try_from(limits::DELETED_NODE_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
         if result.rows_affected() == 0 {
             return Err(Error::not_found("workspace not found"));
         }
@@ -279,7 +290,10 @@ impl WorkspaceRepo {
 
     pub async fn root_node_id(&self, workspace_id: Uuid) -> Result<Option<Uuid>> {
         let id: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL AND deleted_at IS NULL",
+            "SELECT root.id FROM nodes root \
+             JOIN workspaces w ON w.id = root.workspace_id \
+             WHERE root.workspace_id = $1 AND root.parent_id IS NULL \
+               AND root.deleted_at IS NULL AND w.deleted_at IS NULL",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -289,14 +303,22 @@ impl WorkspaceRepo {
     }
 }
 
-/// The caller's live role in a workspace, or `None` if no non-revoked grant
-/// from an active account.
+/// The caller's effective role in a live workspace, or `None` if the workspace is
+/// hidden/deleted or the caller has no live grant. `owner` is derived from the
+/// workspace creator; `workspace_access` stores only viewer/editor grants.
 async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT a.role FROM workspace_access a \
-         JOIN accounts acc ON acc.id = a.account_id \
-         WHERE a.workspace_id = $1 AND a.account_id = $2 AND a.revoked_at IS NULL \
-           AND acc.is_active = true AND acc.deleted_at IS NULL",
+        "SELECT CASE WHEN w.created_by = $2 AND caller.kind = 'user' \
+                    THEN 'owner' ELSE wa.role END AS role \
+         FROM workspaces w \
+         JOIN accounts caller ON caller.id = $2 \
+                              AND caller.is_active = true \
+                              AND caller.deleted_at IS NULL \
+         LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                      AND wa.account_id = $2 \
+                                      AND wa.revoked_at IS NULL \
+         WHERE w.id = $1 AND w.deleted_at IS NULL \
+           AND ((w.created_by = $2 AND caller.kind = 'user') OR wa.role IS NOT NULL)",
     )
     .bind(workspace_id)
     .bind(account_id)
@@ -313,7 +335,7 @@ async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Resul
 
 /// Map a unique/check violation to a clean validation error, falling back to the
 /// generic internal mapping for everything else. Used on workspace insert/rename
-/// so a `(owner_account_id, name)` conflict or bad name surfaces as 4xx.
+/// so a `(created_by, name)` conflict or bad name surfaces as 4xx.
 fn map_constraint_error(error: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db_error) = &error {
         if db_error.is_unique_violation() {

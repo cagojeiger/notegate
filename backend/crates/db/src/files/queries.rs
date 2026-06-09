@@ -130,10 +130,17 @@ pub mod node {
         account_id: Uuid,
     ) -> Result<Option<Role>> {
         let role: Option<String> = sqlx::query_scalar(
-            "SELECT wa.role FROM workspace_access wa \
-         JOIN accounts acc ON acc.id = wa.account_id \
-         WHERE wa.workspace_id = $1 AND wa.account_id = $2 AND wa.revoked_at IS NULL \
-           AND acc.is_active = true AND acc.deleted_at IS NULL",
+            "SELECT CASE WHEN w.created_by = $2 AND caller.kind = 'user' \
+                         THEN 'owner' ELSE wa.role END AS role \
+         FROM workspaces w \
+         JOIN accounts caller ON caller.id = $2 \
+                              AND caller.is_active = true \
+                              AND caller.deleted_at IS NULL \
+         LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                      AND wa.account_id = $2 \
+                                      AND wa.revoked_at IS NULL \
+         WHERE w.id = $1 AND w.deleted_at IS NULL \
+           AND ((w.created_by = $2 AND caller.kind = 'user') OR wa.role IS NOT NULL)",
         )
         .bind(workspace_id)
         .bind(account_id)
@@ -146,19 +153,6 @@ pub mod node {
                 .ok_or_else(|| Error::internal(format!("unknown workspace role: {value}")))
         })
         .transpose()
-    }
-
-    /// The workspace's canonical root node (`parent_id IS NULL`).
-    pub async fn root_node(pool: &PgPool, workspace_id: Uuid) -> Result<Node> {
-        let row = sqlx::query_as::<_, NodeRow>(&format!(
-            "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE workspace_id = $1 AND parent_id IS NULL"
-        ))
-        .bind(workspace_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        row.into_node()
     }
 
     /// Load a live node by id within a workspace.
@@ -473,7 +467,7 @@ pub mod search {
         WHERE n.workspace_id = $1 AND n.deleted_at IS NULL \
      )";
 
-    /// Resolve a scope path (e.g. `/projects/notes`) to a live folder node id within
+    /// Resolve a scope path (e.g. `/projects/notes`) to a live node id within
     /// the workspace, or `None` if it does not resolve to a live node. The root path
     /// (`/` or empty) resolves to the workspace root.
     pub async fn resolve_scope_node(

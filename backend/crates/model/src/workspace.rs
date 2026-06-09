@@ -4,15 +4,17 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A workspace: a named, owner-scoped tree of nodes.
+/// A workspace: a named tree whose lifecycle owner is `created_by`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Workspace {
     pub id: Uuid,
-    pub owner_account_id: Uuid,
     pub name: String,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub deleted_by: Option<Uuid>,
+    pub purge_after: Option<DateTime<Utc>>,
 }
 
 /// A role within a workspace, ordered from least to most privileged.
@@ -23,7 +25,7 @@ pub enum Role {
     Viewer,
     /// Read-write: viewer plus mutations.
     Editor,
-    /// Full control: editor plus access management.
+    /// Effective full control derived from `workspaces.created_by`; never stored in `workspace_access`.
     Owner,
 }
 

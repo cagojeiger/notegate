@@ -93,9 +93,9 @@ async fn create_makes_single_root_node_with_creator_attribution()
     Ok(())
 }
 
-/// (b) The creator is auto-granted `owner`; role_for returns Owner.
+/// (b) The creator derives `owner`; no workspace_access owner row is stored.
 #[tokio::test]
-async fn creator_is_auto_granted_owner() -> Result<(), Box<dyn std::error::Error>> {
+async fn creator_is_derived_owner_without_access_row() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -106,6 +106,13 @@ async fn creator_is_auto_granted_owner() -> Result<(), Box<dyn std::error::Error
 
     let role = repo.role_for(workspace_id, owner).await?;
     assert_eq!(role, Some(Role::Owner));
+
+    let access_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM workspace_access WHERE workspace_id = $1")
+            .bind(workspace_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(access_rows, 0, "owner is derived, not stored as a grant");
 
     // A non-member resolves to no role (treated as 404 by the service layer).
     let stranger = insert_user_account(&db.pool, "stranger", "s@example.test").await?;
@@ -142,11 +149,12 @@ async fn twenty_first_owned_workspace_is_rejected() -> Result<(), Box<dyn std::e
         "21st owned workspace must be rejected as conflict"
     );
 
-    let owned: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE owner_account_id = $1")
-            .bind(owner)
-            .fetch_one(&db.pool)
-            .await?;
+    let owned: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM workspaces WHERE created_by = $1 AND deleted_at IS NULL",
+    )
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
     assert_eq!(owned, 20, "the rejected create must not persist");
 
     db.cleanup().await;
@@ -252,9 +260,9 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         Some(Role::Editor)
     );
 
-    // list_access shows the live grants (owner + member).
+    // list_access shows explicit live grants only; implicit owner is not listed.
     let live = access_repo.list_access(workspace_id).await?;
-    assert_eq!(live.len(), 2);
+    assert_eq!(live.len(), 1);
 
     // Revoke clears role_for and drops the row from the live list.
     access_repo
@@ -262,7 +270,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         .await?;
     assert_eq!(access_repo.role_for(workspace_id, member).await?, None);
     let live_after = access_repo.list_access(workspace_id).await?;
-    assert_eq!(live_after.len(), 1, "revoked grant must not be listed");
+    assert_eq!(live_after.len(), 0, "revoked grant must not be listed");
 
     // Re-granting a revoked account succeeds and re-activates the row.
     access_repo
@@ -280,8 +288,8 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         Some(Role::Viewer)
     );
 
-    // Fill the cap: owner + member = 2 active; add 18 more for 20 total.
-    for index in 0..18 {
+    // Fill the cap: member = 1 active explicit grant; add 19 more for 20 total.
+    for index in 0..19 {
         let extra =
             insert_user_account(&db.pool, &format!("extra-{index}"), "e@example.test").await?;
         access_repo
@@ -420,7 +428,7 @@ async fn inactive_accounts_are_not_live_access() -> Result<(), Box<dyn std::erro
         .map(|grant| grant.account_id)
         .collect::<Vec<_>>();
     live_ids.sort();
-    let mut expected_ids = vec![owner, member];
+    let mut expected_ids = vec![member];
     expected_ids.sort();
     assert_eq!(
         live_ids, expected_ids,
@@ -469,8 +477,8 @@ async fn grant_inactive_account_is_not_found() -> Result<(), Box<dyn std::error:
 }
 
 #[tokio::test]
-async fn agent_account_can_receive_editor_but_not_owner() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -508,7 +516,7 @@ async fn agent_account_can_receive_editor_but_not_owner() -> Result<(), Box<dyn 
         .unwrap_err();
 
     assert!(
-        matches!(err, Error::Validation(message) if message == "agent accounts cannot receive workspace owner role")
+        matches!(err, Error::Validation(message) if message == "workspace access role must be viewer or editor")
     );
     assert_eq!(
         access_repo.role_for(workspace_id, agent).await?,
@@ -521,169 +529,72 @@ async fn agent_account_can_receive_editor_but_not_owner() -> Result<(), Box<dyn 
 }
 
 #[tokio::test]
-async fn workspace_must_retain_one_owner() -> Result<(), Box<dyn std::error::Error>> {
+async fn owner_role_cannot_be_stored_as_access_grant() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let repo = WorkspaceRepo::new(db.pool.clone());
     let access_repo = AccessRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let second_owner = insert_user_account(&db.pool, "second", "s@example.test").await?;
+    let member = insert_user_account(&db.pool, "member", "m@example.test").await?;
     let workspace_id = make_workspace(&repo, owner, "owned").await;
 
-    let demote_last = access_repo
+    let err = access_repo
         .upsert_access(
             &GrantAccess {
                 workspace_id,
-                account_id: owner,
-                role: Role::Editor,
-            },
-            owner,
-        )
-        .await;
-    assert!(
-        matches!(demote_last, Err(Error::Conflict(_))),
-        "demoting the only owner must be rejected as conflict"
-    );
-    assert_eq!(
-        access_repo.role_for(workspace_id, owner).await?,
-        Some(Role::Owner),
-        "rejected demotion must leave the owner role intact"
-    );
-
-    let revoke_last = access_repo.revoke_access(workspace_id, owner, owner).await;
-    assert!(
-        matches!(revoke_last, Err(Error::Conflict(_))),
-        "revoking the only owner must be rejected as conflict"
-    );
-    assert_eq!(
-        access_repo.role_for(workspace_id, owner).await?,
-        Some(Role::Owner),
-        "rejected revoke must leave the owner role intact"
-    );
-
-    access_repo
-        .upsert_access(
-            &GrantAccess {
-                workspace_id,
-                account_id: second_owner,
+                account_id: member,
                 role: Role::Owner,
             },
             owner,
         )
-        .await?;
+        .await
+        .unwrap_err();
 
-    access_repo
-        .revoke_access(workspace_id, owner, second_owner)
-        .await?;
-    assert_eq!(
-        access_repo.role_for(workspace_id, owner).await?,
-        None,
-        "one owner can be revoked while another owner remains"
+    assert!(
+        matches!(err, Error::Validation(message) if message == "workspace access role must be viewer or editor")
     );
-    assert_eq!(
-        access_repo.role_for(workspace_id, second_owner).await?,
-        Some(Role::Owner)
-    );
+    assert_eq!(repo.role_for(workspace_id, owner).await?, Some(Role::Owner));
+    assert_eq!(access_repo.role_for(workspace_id, member).await?, None);
 
     db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
-async fn last_owner_guard_counts_only_active_owners() -> Result<(), Box<dyn std::error::Error>> {
+async fn revoking_explicit_grant_does_not_affect_implicit_owner()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let repo = WorkspaceRepo::new(db.pool.clone());
     let access_repo = AccessRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let inactive_owner = insert_user_account(&db.pool, "inactive-owner", "i@example.test").await?;
+    let member = insert_user_account(&db.pool, "member", "m@example.test").await?;
     let workspace_id = make_workspace(&repo, owner, "owned").await;
 
     access_repo
         .upsert_access(
             &GrantAccess {
                 workspace_id,
-                account_id: inactive_owner,
-                role: Role::Owner,
+                account_id: member,
+                role: Role::Editor,
             },
             owner,
         )
         .await?;
-    deactivate_account(&db.pool, inactive_owner, owner).await?;
+    access_repo
+        .revoke_access(workspace_id, member, owner)
+        .await?;
 
-    let demote = access_repo
-        .upsert_access(
-            &GrantAccess {
-                workspace_id,
-                account_id: owner,
-                role: Role::Editor,
-            },
-            owner,
-        )
-        .await;
-    assert!(
-        matches!(demote, Err(Error::Conflict(_))),
-        "inactive owner row must not satisfy the last-owner guard"
-    );
-    assert_eq!(
-        access_repo.role_for(workspace_id, owner).await?,
-        Some(Role::Owner)
-    );
+    assert_eq!(repo.role_for(workspace_id, owner).await?, Some(Role::Owner));
+    assert_eq!(access_repo.role_for(workspace_id, member).await?, None);
 
     db.cleanup().await;
     Ok(())
 }
 
-#[tokio::test]
-async fn last_owner_guard_ignores_agent_owner_rows() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let repo = WorkspaceRepo::new(db.pool.clone());
-    let access_repo = AccessRepo::new(db.pool.clone());
-    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let agent = insert_agent_account(&db.pool, owner, "legacy-owner-agent").await?;
-    let workspace_id = make_workspace(&repo, owner, "owned").await;
-
-    // This bypasses AccessRepo's normal role-kind guard to represent a legacy or
-    // manually corrupted row. The last-owner guard must still protect the last
-    // live user owner.
-    sqlx::query(
-        "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
-         VALUES ($1, $2, 'owner', $3)",
-    )
-    .bind(workspace_id)
-    .bind(agent)
-    .bind(owner)
-    .execute(&db.pool)
-    .await?;
-
-    let demote = access_repo
-        .upsert_access(
-            &GrantAccess {
-                workspace_id,
-                account_id: owner,
-                role: Role::Editor,
-            },
-            owner,
-        )
-        .await;
-    assert!(
-        matches!(demote, Err(Error::Conflict(_))),
-        "agent owner rows must not satisfy the user-owner guard"
-    );
-    assert_eq!(
-        access_repo.role_for(workspace_id, owner).await?,
-        Some(Role::Owner)
-    );
-
-    db.cleanup().await;
-    Ok(())
-}
-
-/// (e) A duplicate `(owner_account_id, name)` surfaces as a clean error, not a
+/// (e) A duplicate live `(created_by, name)` surfaces as a clean error, not a
 /// raw internal failure.
 #[tokio::test]
 async fn duplicate_owner_name_is_a_clean_error() -> Result<(), Box<dyn std::error::Error>> {
@@ -739,10 +650,10 @@ async fn rename_and_delete_workspace() -> Result<(), Box<dyn std::error::Error>>
     let renamed = repo.rename_workspace(workspace_id, "after").await?;
     assert_eq!(renamed.name, "after");
 
-    repo.delete_workspace(workspace_id).await?;
+    repo.delete_workspace(workspace_id, owner).await?;
     assert!(repo.find_workspace(workspace_id).await?.is_none());
 
-    let missing = repo.delete_workspace(Uuid::new_v4()).await;
+    let missing = repo.delete_workspace(Uuid::new_v4(), owner).await;
     assert!(
         matches!(missing, Err(Error::NotFound(message)) if message == "workspace not found"),
         "deleting a missing workspace must be a clean not-found"
@@ -753,7 +664,10 @@ async fn rename_and_delete_workspace() -> Result<(), Box<dyn std::error::Error>>
         .bind(workspace_id)
         .fetch_one(&db.pool)
         .await?;
-    assert_eq!(nodes, 0, "deleting a workspace cascades to its nodes");
+    assert_eq!(
+        nodes, 1,
+        "soft-deleting a workspace keeps nodes until purge"
+    );
 
     db.cleanup().await;
     Ok(())

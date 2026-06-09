@@ -43,7 +43,7 @@ async fn insert_agent_account(
     name: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO accounts (kind, display_name) VALUES ('agent', $1) RETURNING id",
+        "INSERT INTO accounts (kind, display_name) VALUES ('agent') RETURNING id",
     )
     .bind(name)
     .fetch_one(pool)
@@ -471,8 +471,8 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
         )
         .await?;
     let workspace_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (owner_account_id, name, created_by) \
-         VALUES ($1, 'personal', $1) RETURNING id",
+        "INSERT INTO workspaces (created_by, name) \
+         VALUES ($1, 'personal') RETURNING id",
     )
     .bind(owner)
     .fetch_one(&db.pool)

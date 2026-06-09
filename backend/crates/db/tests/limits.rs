@@ -16,8 +16,8 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 async fn workspace_with_root(pool: &PgPool, sub: &str) -> Result<(Uuid, Uuid, Uuid), sqlx::Error> {
     let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
     let workspace: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (owner_account_id, name, created_by) \
-         VALUES ($1, $2, $1) RETURNING id",
+        "INSERT INTO workspaces (created_by, name) \
+         VALUES ($1, $2) RETURNING id",
     )
     .bind(account)
     .bind(format!("ws-{sub}"))
@@ -186,27 +186,21 @@ async fn workspace_name_check_and_owner_unique() -> TestResult {
     };
     let account = insert_user_account(&db.pool, "wsname", "wsname@example.com").await?;
     // Invalid workspace name (space) violates the CHECK.
-    let bad = sqlx::query(
-        "INSERT INTO workspaces (owner_account_id, name, created_by) VALUES ($1, 'bad name', $1)",
-    )
-    .bind(account)
-    .execute(&db.pool)
-    .await;
+    let bad = sqlx::query("INSERT INTO workspaces (created_by, name) VALUES ($1, 'bad name')")
+        .bind(account)
+        .execute(&db.pool)
+        .await;
     assert!(bad.is_err(), "workspace name with space must be rejected");
 
     // Duplicate (owner, name) violates the UNIQUE constraint.
-    sqlx::query(
-        "INSERT INTO workspaces (owner_account_id, name, created_by) VALUES ($1, 'personal', $1)",
-    )
-    .bind(account)
-    .execute(&db.pool)
-    .await?;
-    let dup = sqlx::query(
-        "INSERT INTO workspaces (owner_account_id, name, created_by) VALUES ($1, 'personal', $1)",
-    )
-    .bind(account)
-    .execute(&db.pool)
-    .await;
+    sqlx::query("INSERT INTO workspaces (created_by, name) VALUES ($1, 'personal')")
+        .bind(account)
+        .execute(&db.pool)
+        .await?;
+    let dup = sqlx::query("INSERT INTO workspaces (created_by, name) VALUES ($1, 'personal')")
+        .bind(account)
+        .execute(&db.pool)
+        .await;
     assert!(dup.is_err(), "duplicate (owner, name) must be rejected");
     db.cleanup().await;
     Ok(())

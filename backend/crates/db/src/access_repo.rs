@@ -1,14 +1,12 @@
 //! Workspace access persistence.
 //!
-//! This adapter implements access-list management separately from workspace
-//! lifecycle operations so RBAC changes remain isolated from workspace creation,
-//! rename, and delete queries.
+//! Access rows store viewer/editor file grants only. The lifecycle owner is
+//! derived from `workspaces.created_by` and is never stored in `workspace_access`.
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::GrantAccess;
-use notegate_model::account::AccountKind;
 use notegate_model::{Role, WorkspaceAccess};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -64,6 +62,7 @@ impl AccessRepo {
     pub async fn list_access(&self, workspace_id: Uuid) -> Result<Vec<WorkspaceAccess>> {
         let rows = sqlx::query_as::<_, WorkspaceAccessRow>(&format!(
             "SELECT {ACCESS_SELECT_COLUMNS} FROM workspace_access wa \
+             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
              JOIN accounts acc ON acc.id = wa.account_id \
              WHERE wa.workspace_id = $1 AND wa.revoked_at IS NULL \
                AND acc.is_active = true AND acc.deleted_at IS NULL \
@@ -88,18 +87,10 @@ impl AccessRepo {
         lock_workspace(&mut tx, command.workspace_id).await?;
         ensure_account_can_receive_role(&mut tx, command.account_id, command.role).await?;
 
-        guard_last_owner(
-            &mut tx,
-            command.workspace_id,
-            command.account_id,
-            Some(command.role),
-        )
-        .await?;
-
-        // Count live accounts other than the target so re-granting an existing
+        // Count live grants other than the target so re-granting an existing
         // account never trips the cap, but activating a new (or revoked) account
-        // respects [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`]. Inactive/deleted
-        // accounts are not live access accounts.
+        // respects [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`]. The implicit owner
+        // is not a row in this table and therefore does not count.
         let active_others: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM workspace_access wa \
              JOIN accounts acc ON acc.id = wa.account_id \
@@ -150,7 +141,6 @@ impl AccessRepo {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         lock_workspace(&mut tx, workspace_id).await?;
-        guard_last_owner(&mut tx, workspace_id, account_id, None).await?;
 
         sqlx::query(
             "UPDATE workspace_access SET revoked_at = now(), revoked_by = $3 \
@@ -167,14 +157,21 @@ impl AccessRepo {
     }
 }
 
-/// The caller's live role in a workspace, or `None` if no non-revoked grant
-/// from an active account.
+/// The caller's effective role in a live workspace, or `None` if the workspace is
+/// hidden/deleted or the caller has no live grant.
 async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT wa.role FROM workspace_access wa \
-         JOIN accounts acc ON acc.id = wa.account_id \
-         WHERE wa.workspace_id = $1 AND wa.account_id = $2 AND wa.revoked_at IS NULL \
-           AND acc.is_active = true AND acc.deleted_at IS NULL",
+        "SELECT CASE WHEN w.created_by = $2 AND caller.kind = 'user' \
+                    THEN 'owner' ELSE wa.role END AS role \
+         FROM workspaces w \
+         JOIN accounts caller ON caller.id = $2 \
+                              AND caller.is_active = true \
+                              AND caller.deleted_at IS NULL \
+         LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                      AND wa.account_id = $2 \
+                                      AND wa.revoked_at IS NULL \
+         WHERE w.id = $1 AND w.deleted_at IS NULL \
+           AND ((w.created_by = $2 AND caller.kind = 'user') OR wa.role IS NOT NULL)",
     )
     .bind(workspace_id)
     .bind(account_id)
@@ -190,12 +187,13 @@ async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Resul
 }
 
 async fn lock_workspace(tx: &mut sqlx::PgConnection, workspace_id: Uuid) -> Result<()> {
-    let found: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 FOR UPDATE")
-            .bind(workspace_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+    let found: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM workspaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
     if found.is_none() {
         return Err(Error::not_found("workspace not found"));
     }
@@ -207,52 +205,22 @@ async fn ensure_account_can_receive_role(
     account_id: Uuid,
     role: Role,
 ) -> Result<()> {
-    let kind: Option<String> = sqlx::query_scalar(
-        "SELECT kind FROM accounts \
+    if role == Role::Owner {
+        return Err(Error::validation(
+            "workspace access role must be viewer or editor",
+        ));
+    }
+
+    let found: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM accounts \
          WHERE id = $1 AND is_active = true AND deleted_at IS NULL",
     )
     .bind(account_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    let kind = kind.ok_or_else(|| Error::not_found("account not found"))?;
-    let kind = AccountKind::parse(&kind)
-        .ok_or_else(|| Error::internal(format!("unknown account kind: {kind}")))?;
-    if kind == AccountKind::Agent && role == Role::Owner {
-        return Err(Error::validation(
-            "agent accounts cannot receive workspace owner role",
-        ));
+    if found.is_none() {
+        return Err(Error::not_found("account not found"));
     }
-    Ok(())
-}
-
-/// Lock the live owner rows and reject a change that would leave the workspace
-/// with no active owner. The service pre-checks this for a clean conflict
-/// response; the transaction guard keeps concurrent owner changes from racing
-/// through it.
-async fn guard_last_owner(
-    tx: &mut sqlx::PgConnection,
-    workspace_id: Uuid,
-    account_id: Uuid,
-    next_role: Option<Role>,
-) -> Result<()> {
-    let owners: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT wa.account_id FROM workspace_access wa \
-         JOIN accounts acc ON acc.id = wa.account_id \
-         WHERE wa.workspace_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
-           AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-         FOR UPDATE OF wa",
-    )
-    .bind(workspace_id)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-
-    let target_is_owner = owners.contains(&account_id);
-    let target_remains_owner = next_role == Some(Role::Owner);
-    if target_is_owner && !target_remains_owner && owners.len() <= 1 {
-        return Err(Error::conflict("workspace must retain at least one owner"));
-    }
-
     Ok(())
 }

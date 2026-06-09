@@ -377,11 +377,13 @@ mod tests {
         WorkspaceView {
             workspace: Workspace {
                 id: Uuid::new_v4(),
-                owner_account_id: owner,
                 name: name.to_owned(),
                 created_by: owner,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                deleted_at: None,
+                deleted_by: None,
+                purge_after: None,
             },
             role: Role::Viewer,
             root_node_id: Uuid::new_v4(),

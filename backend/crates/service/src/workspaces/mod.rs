@@ -1,12 +1,10 @@
 //! Workspace lifecycle: create / get / rename / delete.
 //!
-//! POLICY: workspace access is the authorization boundary. `create` is user-only,
-//! grants the creator `owner`, and relies on the DB trigger to materialize the
-//! canonical root node; a user owner account may own at most
-//! [`limits::OWNED_WORKSPACES_MAX`] workspaces (enforced in the create
-//! transaction). `get` is visible to any live role; `rename`/`delete` require
-//! `owner`. A workspace the caller cannot see (no live role) is reported as
-//! not-found so the api returns `404`.
+//! POLICY: `create` is user-only and relies on the DB trigger to materialize
+//! the canonical root node. The creator user is the implicit lifecycle owner;
+//! `workspace_access` stores only viewer/editor grants. `get` is visible to any
+//! effective role; `rename`/`delete` require owner. A workspace the caller cannot
+//! see is reported as not-found so the api returns `404`.
 
 use notegate_core::limits;
 use notegate_core::validation::validate_workspace_name;
@@ -32,8 +30,8 @@ impl WorkspaceService {
         Self { store }
     }
 
-    /// Create a workspace owned by the authenticated user caller, granting that
-    /// user account `owner`. Enforces the owner quota and a clean name conflict.
+    /// Create a workspace owned by the authenticated user caller. Enforces the
+    /// creator quota and a clean name conflict.
     pub async fn create(
         &self,
         caller_kind: AccountKind,
@@ -194,7 +192,9 @@ impl WorkspaceService {
     /// Delete a workspace. Requires `owner`.
     pub async fn delete(&self, caller_account_id: Uuid, workspace_id: Uuid) -> ServiceResult<()> {
         self.require_owner(workspace_id, caller_account_id).await?;
-        self.store.delete_workspace(workspace_id).await?;
+        self.store
+            .delete_workspace(workspace_id, caller_account_id)
+            .await?;
         Ok(())
     }
 

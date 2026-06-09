@@ -1,11 +1,11 @@
 //! Workspace access: list / grant / revoke, plus the role-check helper used by
 //! every later feature.
 //!
-//! POLICY: managing access is `owner`-only. A caller with no live role sees the
-//! workspace as not-found (404); a caller with a lesser role is forbidden (403).
-//! A workspace may have at most `WORKSPACE_ACCESS_MAX_ACCOUNTS` live grants,
-//! enforced in the grant transaction; revoked/inactive/deleted accounts do not
-//! count.
+//! POLICY: managing access is lifecycle-owner-only. The owner role is derived
+//! from `workspaces.created_by`; access rows store only viewer/editor grants. A
+//! caller with no live role sees the workspace as not-found (404); a caller with
+//! a lesser role is forbidden (403). A workspace may have at most
+//! `WORKSPACE_ACCESS_MAX_ACCOUNTS` live grants, enforced in the grant transaction.
 
 use notegate_core::limits;
 use notegate_db::AccessRepo;
@@ -73,12 +73,6 @@ impl AccessService {
     ) -> ServiceResult<WorkspaceAccess> {
         self.require_owner(command.workspace_id, caller_account_id)
             .await?;
-        let grants = self.store.list_access(command.workspace_id).await?;
-        if would_remove_last_owner(&grants, command.account_id, Some(command.role)) {
-            return Err(ServiceError::Conflict(
-                "workspace must retain at least one owner".to_owned(),
-            ));
-        }
         Ok(self
             .store
             .upsert_access(&command, caller_account_id)
@@ -93,12 +87,6 @@ impl AccessService {
         account_id: Uuid,
     ) -> ServiceResult<()> {
         self.require_owner(workspace_id, caller_account_id).await?;
-        let grants = self.store.list_access(workspace_id).await?;
-        if would_remove_last_owner(&grants, account_id, None) {
-            return Err(ServiceError::Conflict(
-                "workspace must retain at least one owner".to_owned(),
-            ));
-        }
         self.store
             .revoke_access(workspace_id, account_id, caller_account_id)
             .await?;
@@ -118,30 +106,4 @@ impl AccessService {
         }
         Ok(())
     }
-}
-
-/// True when changing `account_id` to `next_role` (or revoking it when
-/// `next_role` is `None`) would leave a workspace with no live owner.
-fn would_remove_last_owner(
-    grants: &[WorkspaceAccess],
-    account_id: Uuid,
-    next_role: Option<Role>,
-) -> bool {
-    let target_is_owner = grants
-        .iter()
-        .any(|grant| grant.account_id == account_id && grant.role == Role::Owner);
-    if !target_is_owner {
-        return false;
-    }
-
-    let target_remains_owner = next_role == Some(Role::Owner);
-    if target_remains_owner {
-        return false;
-    }
-
-    let live_owners = grants
-        .iter()
-        .filter(|grant| grant.role == Role::Owner)
-        .count();
-    live_owners <= 1
 }

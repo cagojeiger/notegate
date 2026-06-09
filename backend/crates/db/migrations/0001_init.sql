@@ -57,23 +57,32 @@ CREATE TABLE agent_keys (
 );
 CREATE INDEX agent_keys_agent_active_idx ON agent_keys(agent_id) WHERE revoked_at IS NULL;
 
--- workspaces: a named, user-owned tree.
+-- workspaces: a named tree whose lifecycle owner is the creator user.
 CREATE TABLE workspaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_account_id UUID NOT NULL REFERENCES accounts(id),
     name TEXT NOT NULL,
     created_by UUID NOT NULL REFERENCES accounts(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (owner_account_id, name),
-    CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$')
+    deleted_at TIMESTAMPTZ,
+    deleted_by UUID REFERENCES accounts(id),
+    purge_after TIMESTAMPTZ,
+    CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'),
+    CHECK (
+        (deleted_at IS NULL AND deleted_by IS NULL AND purge_after IS NULL)
+        OR (deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND purge_after IS NOT NULL)
+    )
 );
 
--- workspace_access: per-account role grants.
+CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
+    ON workspaces(created_by, name)
+    WHERE deleted_at IS NULL;
+
+-- workspace_access: per-account file access grants. Owner is derived from workspaces.created_by.
 CREATE TABLE workspace_access (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('viewer', 'editor', 'owner')),
+    role TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
     granted_by UUID REFERENCES accounts(id),
     granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at TIMESTAMPTZ,
