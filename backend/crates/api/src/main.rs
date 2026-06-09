@@ -16,6 +16,7 @@ mod identity;
 mod mcp;
 mod openapi;
 mod page;
+mod purge_worker;
 mod rest;
 mod routes;
 mod state;
@@ -77,6 +78,9 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     info!(event = "server.listening", addr = %bind_addr);
 
+    let purge_shutdown_token = CancellationToken::new();
+    let purge_worker = purge_worker::spawn(pool.clone(), purge_shutdown_token.clone());
+
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
     let server = async move {
@@ -93,11 +97,16 @@ async fn main() -> anyhow::Result<()> {
 
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
+    purge_shutdown_token.cancel();
 
     let server_result = match server_result {
         Some(result) => result,
         None => server.await,
     };
+
+    if let Err(error) = purge_worker.await {
+        tracing::error!(event = "purge_worker.join_failed", %error);
+    }
 
     // Drain the connection pool before exiting so in-flight queries finish.
     pool.close().await;

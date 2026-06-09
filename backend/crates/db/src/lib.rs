@@ -14,6 +14,7 @@ pub mod agent_repo;
 pub mod files;
 pub mod files_repo;
 pub mod postgres_pool;
+pub mod purge_repo;
 pub mod workspaces_repo;
 
 pub use access_repo::AccessRepo;
@@ -21,6 +22,7 @@ pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
 pub use files_repo::FilesRepo;
 pub use postgres_pool::connect;
+pub use purge_repo::{PurgeRepo, PurgeRun};
 pub use sqlx::PgPool;
 pub use workspaces_repo::WorkspaceRepo;
 

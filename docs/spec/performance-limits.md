@@ -210,6 +210,8 @@ recursive delete subtree > max            -> 409 conflict
 folder move/rename                        -> update moved node only
 folder delete                             -> soft-delete every live descendant in the bounded subtree
 soft-deleted nodes                        -> excluded from list/search/live counts
-deleted node retention                    -> 30 days before purge eligibility
+deleted node/workspace retention          -> 30 days before purge eligibility
 purge job                                 -> may hard-delete rows whose purge_after has passed
+purge worker concurrency                  -> PostgreSQL advisory transaction lock; one active purge per DB
+purge batch                               -> workspaces <= 100, selected nodes <= 1000 per run
 ```

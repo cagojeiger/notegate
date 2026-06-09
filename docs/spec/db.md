@@ -505,8 +505,11 @@ CREATE INDEX documents_workspace_updated_idx
 - node 삭제는 `nodes.deleted_at`, `nodes.deleted_by`, `nodes.purge_after`를 설정한다.
 - node delete는 사용자-facing 복구 기능을 제공하지 않는다. soft delete는 비동기 hard delete를 위한 내부 상태다.
 - query는 반드시 `accounts.is_active`, `revoked_at`, `nodes.deleted_at IS NULL`을 고려한다.
+- `workspaces.purge_after <= now()`인 deleted workspace는 내부 purge job으로 hard delete될 수 있다. 이때 `workspace_access`, `nodes`, `documents`는 FK cascade로 제거된다.
 - `nodes.purge_after <= now()`인 deleted node/document는 내부 purge job으로 hard delete될 수 있다.
-- 기본 node retention은 30일이다.
+- purge job은 모든 서버 인스턴스에서 시작될 수 있지만, Postgres advisory transaction lock을 사용해 같은 DB에서 한 번에 하나의 purge transaction만 실행한다. Lock을 얻지 못한 worker tick은 즉시 skip한다.
+- purge job은 bounded batch로 실행한다. 현재 batch는 workspace 최대 100개, node 최대 1000개다.
+- 기본 node/workspace retention은 30일이다.
 
 ## Reset policy
 
