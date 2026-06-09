@@ -111,6 +111,42 @@ async fn duplicate_sub_updates_and_does_not_duplicate() -> Result<(), Box<dyn st
 }
 
 #[tokio::test]
+async fn duplicate_sub_does_not_reactivate_inactive_account()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AccountRepo::new(db.pool.clone());
+
+    let (first, _) = repo
+        .upsert_user_by_sub(&attrs("sub-inactive", "old@example.test", "Old Name"))
+        .await?;
+    sqlx::query(
+        "UPDATE accounts \
+         SET is_active = false, deleted_at = now(), deleted_by = $1 \
+         WHERE id = $1",
+    )
+    .bind(first.id)
+    .execute(&db.pool)
+    .await?;
+
+    let (second, user) = repo
+        .upsert_user_by_sub(&attrs("sub-inactive", "new@example.test", "New Name"))
+        .await?;
+
+    assert_eq!(first.id, second.id, "inactive account is not duplicated");
+    assert!(!second.is_active, "inactive account is not reactivated");
+    assert_eq!(
+        second.display_name, "Old Name",
+        "inactive account PII is not refreshed"
+    );
+    assert_eq!(user.email.as_deref(), Some("old@example.test"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn find_user_by_sub_and_account_resolve_the_pair() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());

@@ -52,7 +52,7 @@ accounts display name ciphertext
 users email ciphertext/hash
 ```
 
-재로그인은 workspace, owner access, agent, agent key를 새로 만들지 않는다. 탈퇴로 anonymize된 user는 provider subject lookup 대상이 아니므로 이전 account를 재활성화하지 않고 새 local user 최초 생성 흐름을 탄다.
+재로그인은 workspace, owner access, agent, agent key를 새로 만들지 않는다. 탈퇴로 anonymize된 user는 provider subject lookup 대상이 아니므로 이전 account를 재활성화하지 않고 새 local user 최초 생성 흐름을 탄다. provider subject가 남아 있는 inactive account가 발견되어도 자동 재활성화하지 않는다.
 
 ### Workspace 생성
 
@@ -102,7 +102,7 @@ agent_keys(token_hash only)
 
 - 평문 token은 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다.
 - key 생성은 workspace 권한을 변경하지 않는다.
-- `scopes`는 생략하거나 빈 배열이어야 한다.
+- `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
 - agent당 live key 한도는 `10`이다.
 
 ### Workspace access grant/change
@@ -170,6 +170,7 @@ workspace_access revoke 또는 workspace soft delete
 Workspace 처리 규칙:
 
 - 탈퇴 user가 유일한 active user owner인 live workspace는 soft delete한다.
+- 이 탈퇴 경로로 soft-delete되는 workspace는 일반 workspace delete와 달리 live `workspace_access`도 모두 revoke한다.
 - 다른 active user owner가 남는 workspace에서는 탈퇴 user의 access를 revoke한다.
 - 탈퇴 user가 만든 agent의 live workspace access도 revoke한다.
 

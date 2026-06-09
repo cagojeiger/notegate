@@ -80,7 +80,7 @@ CREATE TABLE agent_keys (
     agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     token_hash TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
-    scopes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    scopes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
     created_by UUID REFERENCES accounts(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at TIMESTAMPTZ,

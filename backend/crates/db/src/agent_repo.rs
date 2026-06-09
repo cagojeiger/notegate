@@ -289,6 +289,10 @@ impl AgentRepo {
         token_hash: &str,
         created_by: Uuid,
     ) -> Result<AgentKey> {
+        if !command.scopes.is_empty() {
+            return Err(Error::validation("agent key scopes must be empty"));
+        }
+
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         let agent_exists: Option<Uuid> = sqlx::query_scalar(

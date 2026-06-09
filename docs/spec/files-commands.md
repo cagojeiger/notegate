@@ -127,6 +127,8 @@ if_none_match_sha256
 
 - 대상은 document여야 한다.
 - 큰 문서는 line/byte 제한으로 잘라 반환한다.
+- 반환 content는 저장된 원문의 line ending을 보존한다. Byte 제한은 line 경계에서 적용하며, forward progress를 위해 첫 반환 line 하나는 `max_bytes`를 넘을 수 있다.
+- `max_bytes=0`은 invalid input이다.
 - 잘린 응답은 `truncated=true`, `next_start_line`을 포함한다.
 - `if_none_match_sha256`가 현재 content hash와 같으면 content 없이 unchanged 응답을 반환할 수 있다.
 
@@ -242,6 +244,7 @@ scope path
 
 `find` query는 node name에 매칭한다. path는 결과 display와 scope 제한에 사용하며, path substring
 검색은 현재 기본 `find` 계약에 포함하지 않는다.
+workspace root node는 `find` 결과에서 제외한다.
 
 규칙:
 

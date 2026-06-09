@@ -175,6 +175,7 @@ missing max_lines -> read_default_max_lines
 max_lines < 1     -> 1
 max_lines > max   -> read_max_lines
 missing max_bytes -> read_default_max_bytes
+max_bytes = 0     -> 400 invalid input
 max_bytes > max   -> read_max_bytes
 truncated read    -> truncated=true and next_start_line
 unchanged hash    -> metadata without content

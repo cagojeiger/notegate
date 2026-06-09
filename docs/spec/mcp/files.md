@@ -175,6 +175,12 @@ Output:
 현재 hash와 같음        -> content 없이 metadata만 반환
 ```
 
+Rules:
+
+- 반환 content는 저장된 원문의 line ending을 보존한다.
+- `max_bytes=0`은 `invalid_input`이다.
+- Byte 제한은 line 경계에서 적용하며, forward progress를 위해 첫 반환 line 하나는 `max_bytes`를 넘을 수 있다.
+
 변경 없음 output:
 
 ```json
@@ -223,8 +229,9 @@ Input:
 
 Rules:
 
-- `create=false`는 기존 document가 있어야 한다.
+- `create=false`는 기존 document가 있어야 한다. 대상이 없으면 `not_found`와 `create=true` hint를 반환한다.
 - `create=true`는 missing document를 `dirname(path)` 아래에 생성한다.
+- `create=true`는 공통 document 생성 규칙을 따른다: parent folder 존재, sibling name unique, workspace live nodes `10000`, live documents `5000`, parent children `200`, depth/path/name 제한을 모두 검사한다.
 - content가 `524288` bytes 또는 `2000` lines를 넘으면 문서 분리 hint와 함께 거부한다.
 - 새 document 생성 후 workspace live documents가 `5000`개를 넘으면 거부한다.
 - write 후 workspace live document content가 `268435456` bytes를 넘으면 거부한다.
@@ -328,6 +335,8 @@ Rules:
 - `source_path == destination_path`이면 no-op success다.
 - destination parent가 존재하고 folder이면 진행한다. 아니면 conflict/not_found다.
 - destination에 같은 이름의 live sibling이 있으면 conflict다.
+- destination parent의 live direct children이 이미 `200`개이면 conflict다.
+- 이동 결과 subtree depth는 최대 `5`를 넘을 수 없다.
 - folder를 자기 자신 또는 descendant 아래로 이동하는 것은 conflict다.
 - folder move/rename은 이동한 node만 갱신한다. descendant path는 parent chain에서 derive한다.
 

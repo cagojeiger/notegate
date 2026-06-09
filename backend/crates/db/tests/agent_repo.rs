@@ -147,6 +147,36 @@ async fn create_key_stores_hash_only() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[tokio::test]
+async fn create_key_rejects_non_empty_scopes() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AgentRepo::new(db.pool.clone());
+    let creator = insert_user_account(&db.pool, "creator", "c@example.test").await?;
+    let agent_id = make_agent(&repo, creator, "bot").await;
+
+    let err = repo
+        .insert_agent_key(
+            &CreateAgentKey {
+                agent_id,
+                name: "scoped-key".to_owned(),
+                scopes: vec!["files:read".to_owned()],
+                expires_at: None,
+            },
+            &hash_token("scoped-token"),
+            creator,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Validation(message) if message == "agent key scopes must be empty")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn create_key_requires_owned_active_agent() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());

@@ -145,7 +145,7 @@ CREATE TABLE agent_keys (
     agent_id     UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     token_hash   TEXT NOT NULL UNIQUE,
     name         TEXT NOT NULL,
-    scopes       TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    scopes       TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
     created_by   UUID REFERENCES accounts(id),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at TIMESTAMPTZ,
@@ -161,7 +161,7 @@ CREATE TABLE agent_keys (
 - agent key는 agent 생성 시 자동 생성하지 않고 명시적인 key 생성 lifecycle로만 만든다. 자세한 정책은 `docs/spec/lifecycle.md`를 따른다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다.
 - `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
-- `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 받지 않는다.
+- `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
 - 한 agent가 동시에 가질 수 있는 live key는 최대 `10`개다.
 
 Live key 조회/집계 보조 index:

@@ -100,6 +100,7 @@ nodes.kind
 `find.q`는 node name에만 매칭한다. Path는 검색 매칭 대상이 아니라 scope 제한과 결과 display에
 사용한다. 특정 경로 아래에서 찾고 싶으면 `scope_path`를 사용한다. Query는 single-line,
 non-empty, 최대 256 characters다.
+Workspace root node는 `find` 결과에서 제외한다.
 
 현재 query shape는 name/kind 후보를 먼저 찾고, 필요한 경우 scope subtree로 제한한다.
 path는 결과 조립 단계에서 derive한다.

@@ -253,7 +253,7 @@ impl FilesService {
             .load_node(workspace_id, command.new_parent_node_id)
             .await?;
         if dest_parent.kind != NodeKind::Folder {
-            return Err(ServiceError::InvalidInput(
+            return Err(ServiceError::Conflict(
                 "destination parent must be a folder".to_owned(),
             ));
         }

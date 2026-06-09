@@ -449,9 +449,9 @@ pub async fn write(
         },
         None => {
             if !input.create {
-                return Err(invalid_input_error(
-                    "document does not exist; pass create=true to create it",
-                ));
+                return Err(service_error(ServiceError::NotFound(
+                    "document does not exist; pass create=true to create it".to_owned(),
+                )));
             }
             let (parent_path, name) = split_parent_name(&path)?;
             let parent = state

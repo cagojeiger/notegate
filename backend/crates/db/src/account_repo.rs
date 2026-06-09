@@ -334,16 +334,20 @@ impl AccountRepo {
             .await
             .map_err(map_sqlx_error)?;
 
-        let existing_id: Option<Uuid> =
-            sqlx::query("SELECT id FROM users WHERE provider_sub_hash = $1")
-                .bind(&provider_sub_hash)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?
-                .map(|row| row.get::<Uuid, _>("id"));
+        let existing: Option<(Uuid, bool)> = sqlx::query_as(
+            "SELECT u.id, a.is_active \
+                 FROM users u \
+                 JOIN accounts a ON a.id = u.id \
+                 WHERE u.provider_sub_hash = $1",
+        )
+        .bind(&provider_sub_hash)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
 
-        let account_id = match existing_id {
-            Some(id) => {
+        let account_id = match existing {
+            Some((id, false)) => id,
+            Some((id, true)) => {
                 let dek = self.fetch_dek_for_update(&mut tx, id).await?;
                 let display_name = self.crypto.encrypt_string(&dek, &attrs.name)?;
                 let email = self.crypto.encrypt_string(&dek, &attrs.email)?;
