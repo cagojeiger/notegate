@@ -489,18 +489,30 @@ pub mod move_node {
     use super::super::rows::{NODE_COLUMNS, NodeRow};
     use super::checks;
 
+    pub struct MoveNodeArgs<'a> {
+        pub pool: &'a PgPool,
+        pub workspace_id: Uuid,
+        pub node_id: Uuid,
+        pub new_parent_id: Uuid,
+        pub new_name: Option<&'a str>,
+        pub expected_parent_id: Option<Uuid>,
+        pub updated_by: Uuid,
+        pub caps: Limits,
+    }
+
     /// Move/rename `node_id` to `new_parent_id` with optional `new_name`, attributing
     /// the update to `updated_by`. Updates only the moved node's row.
-    pub async fn move_node(
-        pool: &PgPool,
-        workspace_id: Uuid,
-        node_id: Uuid,
-        new_parent_id: Uuid,
-        new_name: Option<&str>,
-        expected_parent_id: Option<Uuid>,
-        updated_by: Uuid,
-        caps: Limits,
-    ) -> Result<Node> {
+    pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
+        let MoveNodeArgs {
+            pool,
+            workspace_id,
+            node_id,
+            new_parent_id,
+            new_name,
+            expected_parent_id,
+            updated_by,
+            caps,
+        } = args;
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_workspace(&mut tx, workspace_id).await?;

@@ -191,16 +191,16 @@ impl FilesRepo {
         command: &MoveNode,
         updated_by: Uuid,
     ) -> Result<Node> {
-        commands::move_node::move_node(
-            &self.pool,
+        commands::move_node::move_node(commands::move_node::MoveNodeArgs {
+            pool: &self.pool,
             workspace_id,
-            command.node_id,
-            command.new_parent_node_id,
-            command.new_name.as_deref(),
-            command.expected_parent_id,
+            node_id: command.node_id,
+            new_parent_id: command.new_parent_node_id,
+            new_name: command.new_name.as_deref(),
+            expected_parent_id: command.expected_parent_id,
             updated_by,
-            self.limits,
-        )
+            caps: self.limits,
+        })
         .await
     }
 
