@@ -23,7 +23,7 @@ DB layer
 Background job / admin repair
   - purge_after가 지난 soft-deleted row를 hard delete할 수 있다.
   - 깨진 invariant를 감지하고, 명확히 복구 가능한 경우만 별도 repair 경로로 복구한다.
-  - crypto_key_epochs bootstrap/rotation은 `docs/spec/security.md`의 maintenance key 정책을 따른다.
+  - crypto_key_epochs bootstrap과 key epoch 검증은 `docs/spec/security.md`의 key 정책을 따른다.
 ```
 
 ## 생성 lifecycle

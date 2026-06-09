@@ -48,10 +48,10 @@ Capability 의미:
 ### List current user API keys
 
 ```http
-GET /api/v1/me/keys?limit=100&cursor=...
+GET /api/v1/me/keys
 ```
 
-현재 user account에 연결된 live/revoked API key metadata를 반환한다. 평문 token은 반환하지 않는다. Agent caller는 user key를 관리할 수 없고 `403 forbidden`을 반환한다.
+현재 user account에 연결된 live/revoked API key metadata를 반환한다. Key는 account당 최대 `10`개라 이 목록은 pagination을 제공하지 않는다. 평문 token은 반환하지 않는다. Agent caller는 user key를 관리할 수 없고 `403 forbidden`을 반환한다.
 
 ### Create current user API key
 
@@ -83,7 +83,7 @@ expires_at past or now     -> 400 invalid input
 ### Rotate current user API key
 
 ```http
-POST /api/v1/me/keys/{key_id}/rotate
+POST /api/v1/me/keys/{key_id}
 ```
 
 같은 user account에 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 정확히 한 번만 반환한다. Token 원문은 복구하거나 재암호화하지 않는다.
@@ -94,7 +94,7 @@ POST /api/v1/me/keys/{key_id}/rotate
 DELETE /api/v1/me/keys/{key_id}
 ```
 
-대상 key에 `revoked_at`/`revoked_by`/`revoked_reason`을 설정한다. Revoke된 key는 인증에 사용할 수 없다.
+대상 key에 `revoked_at`/`revoked_by`를 설정한다. `revoked_reason`은 rotation/system revoke처럼 사유가 있는 경우에만 설정한다. Revoke된 key는 인증에 사용할 수 없다.
 
 ### Delete current user account
 

@@ -226,7 +226,7 @@ CREATE INDEX api_keys_rotated_from_idx
 - `accounts.kind='user'`에 연결된 key는 user API key이며 user caller로 동작한다.
 - `accounts.kind='agent'`에 연결된 key는 agent API key이며 agent caller로 동작한다.
 - token format은 `ngk_v1_<api_key_id>_<secret>` 계열의 opaque value다. `api_key_id`는 lookup용 공개 식별자이고, `secret`은 DB에 저장하지 않는다.
-- `token_hash`는 `HMAC(api_key_hmac_subkey, api_key_id + ':' + secret)` 결과다.
+- `token_hash` 계산식은 `docs/spec/security.md`의 API key 저장 정책을 따른다.
 - `hash_key_id`/`hash_version`은 어떤 `lookup` domain root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
 - `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.

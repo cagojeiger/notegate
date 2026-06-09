@@ -204,8 +204,9 @@ destination_path
 5. destination parent는 folder여야 한다.
 6. 자기 자신이나 descendant 아래로 이동할 수 없다.
 7. destination parent 안 같은 name이 있으면 conflict다.
-8. resulting subtree depth가 `5`를 넘으면 conflict다.
-9. move/rename은 moved node의 `parent_id`/`name`만 변경하고 descendant path rewrite를 하지 않는다.
+8. 다른 parent로 이동할 때 destination parent의 live direct children이 한도를 넘으면 conflict다.
+9. resulting subtree depth가 `5`를 넘으면 conflict다.
+10. move/rename은 moved node의 `parent_id`/`name`만 변경하고 descendant path rewrite를 하지 않는다.
 
 `source_path == destination_path`는 no-op success로 처리한다.
 

@@ -98,10 +98,11 @@ service/access
 service/agents
 
 db/account_repo       -> service/identity account/user store, REST account ref lookup
+db/api_key_repo       -> service/identity API key owner lookup, account/agent key lifecycle
 db/workspaces         -> service/workspaces store
 db/access             -> service/access store
 db/files_repo         -> service/files + service/search store
-db/agent_repo         -> service/agents store, service/identity agent auth store
+db/agent_repo         -> service/agents store, service/identity agent detail lookup
 db/postgres_pool      -> connection primitive
 db/lib                -> migration/readiness primitive
 
