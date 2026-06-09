@@ -27,12 +27,11 @@ impl AgentRepo {
     }
 }
 
-/// A row from `accounts`.
+/// A row from `accounts`. Agent display names are derived from `agents.name`.
 #[derive(Debug, FromRow)]
 struct AccountRow {
     id: Uuid,
     kind: String,
-    display_name: String,
     is_active: bool,
     deleted_at: Option<DateTime<Utc>>,
     deleted_by: Option<Uuid>,
@@ -41,13 +40,13 @@ struct AccountRow {
 }
 
 impl AccountRow {
-    fn into_account(self) -> Result<Account> {
+    fn into_agent_account(self, display_name: String) -> Result<Account> {
         let kind = AccountKind::parse(&self.kind)
             .ok_or_else(|| Error::internal(format!("unknown account kind: {}", self.kind)))?;
         Ok(Account {
             id: self.id,
             kind,
-            display_name: self.display_name,
+            display_name,
             is_active: self.is_active,
             deleted_at: self.deleted_at,
             deleted_by: self.deleted_by,
@@ -109,8 +108,7 @@ impl From<AgentKeyRow> for AgentKey {
     }
 }
 
-const ACCOUNT_COLUMNS: &str =
-    "id, kind, display_name, is_active, deleted_at, deleted_by, created_at, updated_at";
+const ACCOUNT_COLUMNS: &str = "id, kind, is_active, deleted_at, deleted_by, created_at, updated_at";
 const AGENT_COLUMNS: &str = "id, name, created_by";
 const AGENT_KEY_COLUMNS: &str = "id, agent_id, token_hash, name, scopes, created_by, \
      created_at, last_used_at, expires_at, revoked_at, revoked_by";
@@ -135,18 +133,6 @@ impl AgentRepo {
             return Err(Error::not_found("agent key not found"));
         }
         Ok(())
-    }
-
-    /// Load an agent's detail by id (regardless of account state).
-    pub async fn find_agent(&self, agent_id: Uuid) -> Result<Option<Agent>> {
-        let row = sqlx::query_as::<_, AgentRow>(&format!(
-            "SELECT {AGENT_COLUMNS} FROM agents WHERE id = $1"
-        ))
-        .bind(agent_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(row.map(Agent::from))
     }
 
     /// Soft-deactivate an agent account and revoke its non-revoked keys and
@@ -228,14 +214,11 @@ impl AgentRepo {
             )));
         }
 
-        let id: Uuid = sqlx::query(
-            "INSERT INTO accounts (kind, display_name) VALUES ('agent', $1) RETURNING id",
-        )
-        .bind(&command.name)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-        .get::<Uuid, _>("id");
+        let id: Uuid = sqlx::query("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?
+            .get::<Uuid, _>("id");
 
         let row = sqlx::query_as::<_, AgentRow>(&format!(
             "INSERT INTO agents (id, name, created_by) VALUES ($1, $2, $3) \
@@ -426,6 +409,9 @@ impl AgentRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(Some((account_row.into_account()?, Agent::from(agent_row))))
+        let agent = Agent::from(agent_row);
+        let account = account_row.into_agent_account(agent.name.clone())?;
+
+        Ok(Some((account, agent)))
     }
 }

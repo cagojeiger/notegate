@@ -14,6 +14,8 @@
 )]
 use std::str::FromStr;
 
+use notegate_db::AccountRepo;
+use notegate_model::ResolveAttrs;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
@@ -97,20 +99,15 @@ pub async fn insert_user_account(
     pool: &PgPool,
     sub: &str,
     email: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO accounts (kind, display_name) VALUES ('user', $1) RETURNING id",
-    )
-    .bind(format!("user-{sub}"))
-    .fetch_one(pool)
-    .await?;
-    sqlx::query("INSERT INTO users (id, sub, email) VALUES ($1, $2, $3)")
-        .bind(id)
-        .bind(sub)
-        .bind(email)
-        .execute(pool)
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let (account, _) = AccountRepo::new(pool.clone())
+        .upsert_user_by_sub(&ResolveAttrs {
+            sub: sub.to_owned(),
+            email: email.to_owned(),
+            name: format!("user-{sub}"),
+        })
         .await?;
-    Ok(id)
+    Ok(account.id)
 }
 
 /// Deactivate an account as a soft-delete, matching the production account lifecycle.

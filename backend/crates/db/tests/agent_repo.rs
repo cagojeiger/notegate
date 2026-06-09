@@ -42,12 +42,9 @@ async fn insert_agent_account(
     creator: Uuid,
     name: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO accounts (kind, display_name) VALUES ('agent') RETURNING id",
-    )
-    .bind(name)
-    .fetch_one(pool)
-    .await?;
+    let id: Uuid = sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
+        .fetch_one(pool)
+        .await?;
     sqlx::query("INSERT INTO agents (id, name, created_by) VALUES ($1, $2, $3)")
         .bind(id)
         .bind(name)

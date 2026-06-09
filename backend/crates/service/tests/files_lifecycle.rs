@@ -25,7 +25,6 @@ use notegate_service::files::{
     ChildrenCursor, CreateDocument, CreateFolder, DeleteNode, FilesService, MoveNode,
     PatchDocument, ReadDocument, WriteDocument, WriteTarget,
 };
-use notegate_service::search::FindCursor;
 use notegate_service::workspaces::CreateWorkspace;
 use uuid::Uuid;
 
@@ -452,11 +451,4 @@ async fn repo_find_document(
         .await
         .expect("find_document query")
         .expect("document present")
-}
-
-// Keep a reference so `FindCursor` import is exercised even if the lifecycle test
-// does not page find results; this documents the cursor type used by `find`.
-#[allow(dead_code)]
-fn _find_cursor_shape(c: FindCursor) -> Uuid {
-    c.id
 }

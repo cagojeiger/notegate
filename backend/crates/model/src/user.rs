@@ -4,13 +4,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// The user-specific OAuth identity. `sub`/`email` become `NULL` on
-/// anonymization, recorded by `anonymized_at`.
+/// The user-specific OAuth identity returned to internal callers.
+///
+/// Provider subject and email lookup hashes are storage-only security details.
+/// They are intentionally not exposed through the model or `/me` output.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
     /// Equal to the owning `accounts.id`.
     pub id: Uuid,
-    pub sub: Option<String>,
     pub email: Option<String>,
     pub anonymized_at: Option<DateTime<Utc>>,
 }

@@ -23,8 +23,6 @@ pub struct AccountRefOutput {
 #[derive(Debug, Clone, Serialize, JsonSchema, ToSchema, PartialEq, Eq)]
 pub struct UserDetailOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sub: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
 }
 
@@ -63,7 +61,6 @@ pub fn build_me(caller: &Caller) -> MeOutput {
     let (user, agent) = match &caller.identity {
         CallerIdentity::User(user) => (
             Some(UserDetailOutput {
-                sub: user.sub.clone(),
                 email: user.email.clone(),
             }),
             None,
@@ -119,7 +116,6 @@ mod tests {
         };
         let user = User {
             id: Uuid::nil(),
-            sub: Some("sub-1".to_owned()),
             email: Some("user@example.test".to_owned()),
             anonymized_at: None,
         };
@@ -133,7 +129,6 @@ mod tests {
         assert_eq!(out.account.kind, "user");
         assert_eq!(out.account.display_name, "Test User");
         let user = out.user.expect("user detail present");
-        assert_eq!(user.sub.as_deref(), Some("sub-1"));
         assert_eq!(user.email.as_deref(), Some("user@example.test"));
         assert!(out.agent.is_none());
         assert!(out.capabilities.can_create_workspace);

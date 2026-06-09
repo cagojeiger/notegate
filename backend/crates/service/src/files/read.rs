@@ -13,24 +13,6 @@ use crate::files::{
 use super::{FilesService, join_path};
 
 impl FilesService {
-    /// The workspace root node, as a view. Requires `viewer`.
-    pub async fn root(
-        &self,
-        caller_account_id: Uuid,
-        workspace_id: Uuid,
-    ) -> ServiceResult<NodeView> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Stat)
-            .await?;
-        let node = self.store.root_node(workspace_id).await?;
-        let has_children = self.store.has_children(workspace_id, node.id).await?;
-        Ok(NodeView {
-            node,
-            path: "/".to_owned(),
-            has_children,
-            document: None,
-        })
-    }
-
     /// Metadata for a node (`stat`). Requires `viewer`.
     pub async fn stat(
         &self,
@@ -266,7 +248,7 @@ pub(super) fn slice_document(
 
 /// Split content into logical lines (drops the single trailing newline so a
 /// document ending in `\n` is not counted as having a trailing empty line). This
-/// mirrors [`content_metrics`]'s line count.
+/// mirrors [`content::compute`](crate::files::content::compute)'s line count.
 fn split_lines(content: &str) -> Vec<&str> {
     if content.is_empty() {
         return Vec::new();

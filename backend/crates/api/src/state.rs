@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use notegate_core::Config;
+use notegate_core::security::PiiCrypto;
 use notegate_db::{AccessRepo, AccountRepo, AgentRepo, FilesRepo, PgPool, WorkspaceRepo};
 use notegate_service::access::AccessService;
 use notegate_service::agents::AgentService;
@@ -53,6 +54,7 @@ impl AppState {
         resolver: Arc<dyn CallerResolver>,
         http: reqwest::Client,
     ) -> Self {
+        let pii_crypto = PiiCrypto::from_secrets(&config.pii_master_key, &config.pii_hash_pepper);
         let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
         let access = AccessService::new(AccessRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
@@ -60,7 +62,7 @@ impl AppState {
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
         let files = FilesService::with_limits(files_repo.clone(), config.limits);
         let search = SearchService::new(files_repo);
-        let accounts = AccountRepo::new(db.clone());
+        let accounts = AccountRepo::with_crypto(db.clone(), pii_crypto);
         Self {
             db,
             config,

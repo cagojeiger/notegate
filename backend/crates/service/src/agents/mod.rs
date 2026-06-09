@@ -53,16 +53,6 @@ impl AgentService {
         Ok(self.store.insert_agent(&command, caller_account_id).await?)
     }
 
-    /// List all active agents created by the caller. Only user callers may manage agents.
-    pub async fn list_agents(
-        &self,
-        caller_kind: AccountKind,
-        caller_account_id: Uuid,
-    ) -> ServiceResult<Vec<Agent>> {
-        require_user_caller(caller_kind)?;
-        Ok(self.store.list_agents_by_creator(caller_account_id).await?)
-    }
-
     /// List active agents created by the caller, paginated with an opaque cursor.
     /// Only user callers may manage agents.
     pub async fn list_agents_page(

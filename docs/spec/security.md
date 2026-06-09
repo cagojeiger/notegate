@@ -52,19 +52,22 @@ email_hash        = HMAC(pepper, normalize(email))
 
 ## DEK/KEK 구조
 
-Account별 data encryption key(DEK)를 사용한다. DEK는 외부 KMS의 key encryption key(KEK)로
+Account별 data encryption key(DEK)를 사용한다. DEK는 key encryption key(KEK)로
 wrap해서 `account_encryption_keys.wrapped_dek`에 저장한다.
 
+현재 구현은 설정으로 주입되는 application master secret을 local KEK로 사용한다. 이 경계는
+나중에 KMS/HSM unwrap adapter로 교체할 수 있지만, DB 스키마와 repository 계약은 동일하게 유지한다.
+
 ```text
-KMS KEK
+KEK
   └─ account DEK
        └─ account/user PII ciphertext
 ```
 
 규칙:
 
-- KMS key material은 application DB에 저장하지 않는다.
-- application은 KMS unwrap 결과로 얻은 DEK를 필요한 작업 범위 안에서만 사용한다.
+- KEK material은 application DB에 저장하지 않는다.
+- application은 unwrap 결과로 얻은 DEK를 필요한 작업 범위 안에서만 사용한다.
 - account DEK는 account 단위 PII를 암호화하는 용도로만 사용한다.
 - document content 암호화가 필요해지면 별도 key domain으로 분리한다.
 

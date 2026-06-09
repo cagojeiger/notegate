@@ -15,8 +15,8 @@
 //!   (`Conflict`), carrying an actionable hint.
 //!
 //! Everything here is pure: no IO, no store access. The service supplies the
-//! current counts (children/nodes/documents/bytes) it has already read in the
-//! transaction.
+//! current counts (children/nodes/documents/bytes) it read for pre-checks; the
+//! DB repository re-checks capacity inside each mutating transaction.
 
 use notegate_core::limits::{self, Limits};
 use notegate_core::validation::{

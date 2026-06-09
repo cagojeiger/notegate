@@ -134,12 +134,6 @@ pub struct ReadResult {
     pub line_count: i32,
 }
 
-impl ReadResult {
-    pub fn unchanged(&self) -> bool {
-        self.content.is_none()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadContent {
     pub content_md: String,

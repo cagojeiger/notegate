@@ -39,10 +39,6 @@ impl FilesRepo {
 }
 
 impl FilesRepo {
-    pub async fn root_node(&self, workspace_id: Uuid) -> Result<Node> {
-        queries::node::root_node(&self.pool, workspace_id).await
-    }
-
     pub async fn find_node(&self, workspace_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
         queries::node::find_node(&self.pool, workspace_id, node_id).await
     }

@@ -13,28 +13,61 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE TABLE accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     kind TEXT NOT NULL CHECK (kind IN ('user', 'agent')),
-    display_name TEXT NOT NULL DEFAULT '',
+    display_name_ciphertext BYTEA,
+    display_name_nonce BYTEA,
     is_active BOOLEAN NOT NULL DEFAULT true,
     deleted_at TIMESTAMPTZ,
     deleted_by UUID REFERENCES accounts(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (
+        (display_name_ciphertext IS NULL AND display_name_nonce IS NULL)
+        OR (display_name_ciphertext IS NOT NULL AND display_name_nonce IS NOT NULL)
+    ),
+    CHECK (
         (deleted_at IS NULL AND deleted_by IS NULL)
         OR (deleted_at IS NOT NULL AND deleted_by IS NOT NULL)
     )
 );
 -- NOTE: accounts has NO created_by (self-registration; attribution target only).
+-- User display names are encrypted in accounts; agent display names are derived
+-- from agents.name, so accounts never stores plaintext user PII.
 
--- users: OAuth detail; id = accounts.id.
-CREATE TABLE users (
-    id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-    sub TEXT UNIQUE,
-    email TEXT,
-    anonymized_at TIMESTAMPTZ
+-- account_encryption_keys: one encrypted DEK per user account.
+CREATE TABLE account_encryption_keys (
+    account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    kek_id TEXT NOT NULL,
+    kek_version TEXT,
+    wrapped_dek BYTEA,
+    algorithm TEXT NOT NULL DEFAULT 'AES-256-GCM',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rewrapped_at TIMESTAMPTZ,
+    destroyed_at TIMESTAMPTZ,
+    CHECK (
+        (destroyed_at IS NULL AND wrapped_dek IS NOT NULL)
+        OR (destroyed_at IS NOT NULL AND wrapped_dek IS NULL)
+    )
 );
 
--- agents: machine-actor detail; id = accounts.id.
+-- users: OAuth detail; id = accounts.id. No plaintext subject/email is stored.
+CREATE TABLE users (
+    id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    provider_sub_hash TEXT UNIQUE,
+    provider_sub_hash_version INTEGER NOT NULL DEFAULT 1,
+    email_ciphertext BYTEA,
+    email_nonce BYTEA,
+    email_hash TEXT,
+    email_hash_version INTEGER,
+    anonymized_at TIMESTAMPTZ,
+    CHECK (
+        (email_ciphertext IS NULL AND email_nonce IS NULL)
+        OR (email_ciphertext IS NOT NULL AND email_nonce IS NOT NULL)
+    )
+);
+CREATE INDEX users_email_hash_idx ON users(email_hash) WHERE email_hash IS NOT NULL;
+
+-- agents: machine-actor detail; id = accounts.id. Agent name is non-PII product metadata.
 CREATE TABLE agents (
     id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,

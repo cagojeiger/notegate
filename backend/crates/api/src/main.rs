@@ -1,6 +1,7 @@
 use std::io;
 
 use notegate_core::Config;
+use notegate_core::security::PiiCrypto;
 use secrecy::ExposeSecret;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -57,7 +58,8 @@ async fn main() -> anyhow::Result<()> {
     let jwks_url = format!("{}/keys", config.authgate_url);
     // The db-backed identity resolver: account_repo resolves users, agent_repo
     // authenticates agent keys.
-    let account_repo = notegate_db::AccountRepo::new(pool.clone());
+    let pii_crypto = PiiCrypto::from_secrets(&config.pii_master_key, &config.pii_hash_pepper);
+    let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto);
     let agent_repo = notegate_db::AgentRepo::new(pool.clone());
     let resolver = notegate_service::identity::Resolver::new(account_repo, agent_repo);
     let config = std::sync::Arc::new(config);

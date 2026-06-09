@@ -156,6 +156,8 @@ mod tests {
             browser_session_secret: SecretString::from(
                 "test-browser-session-secret-32-bytes".to_owned(),
             ),
+            pii_master_key: SecretString::from("test-pii-master-key-32-bytes-long".to_owned()),
+            pii_hash_pepper: SecretString::from("test-pii-hash-pepper-32-bytes-long".to_owned()),
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
             limits: notegate_core::limits::Limits::default(),

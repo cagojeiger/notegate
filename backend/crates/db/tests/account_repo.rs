@@ -16,6 +16,7 @@ mod common;
 use common::TestDb;
 use notegate_db::AccountRepo;
 use notegate_model::ResolveAttrs;
+use sqlx::Row as _;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
     ResolveAttrs {
@@ -39,8 +40,15 @@ async fn upsert_user_creates_account_and_user_rows() -> Result<(), Box<dyn std::
     assert_eq!(account.kind.as_str(), "user");
     assert_eq!(account.display_name, "Kang");
     assert!(account.is_active);
-    assert_eq!(user.sub.as_deref(), Some("sub-1"));
     assert_eq!(user.email.as_deref(), Some("a@example.test"));
+
+    let plaintext_matches: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM accounts \
+         WHERE display_name_ciphertext::text LIKE '%Kang%'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(plaintext_matches, 0);
 
     let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM accounts")
         .fetch_one(&db.pool)
@@ -101,7 +109,7 @@ async fn find_user_by_sub_and_account_resolve_the_pair() -> Result<(), Box<dyn s
         .await?
         .ok_or("user resolves by sub")?;
     assert_eq!(account.id, created.id);
-    assert_eq!(user.sub.as_deref(), Some("sub-find"));
+    assert_eq!(user.email.as_deref(), Some("f@example.test"));
 
     let by_id = repo.find_caller_by_account_id(created.id).await?;
     assert_eq!(by_id.map(|(a, _)| a.id), Some(created.id));
@@ -136,17 +144,20 @@ async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::
     assert!(after.deleted_at.is_some());
     assert_eq!(after.deleted_by, Some(account.id));
 
-    let (sub, email, anonymized_at): (
-        Option<String>,
-        Option<String>,
-        Option<chrono::DateTime<chrono::Utc>>,
-    ) = sqlx::query_as("SELECT sub, email, anonymized_at FROM users WHERE id = $1")
-        .bind(account.id)
-        .fetch_one(&db.pool)
-        .await?;
-    assert!(sub.is_none());
-    assert!(email.is_none());
-    assert!(anonymized_at.is_some());
+    let row = sqlx::query(
+        "SELECT provider_sub_hash, email_hash, email_ciphertext, anonymized_at \
+         FROM users WHERE id = $1",
+    )
+    .bind(account.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(row.get::<Option<String>, _>("provider_sub_hash").is_none());
+    assert!(row.get::<Option<String>, _>("email_hash").is_none());
+    assert!(row.get::<Option<Vec<u8>>, _>("email_ciphertext").is_none());
+    assert!(
+        row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("anonymized_at")
+            .is_some()
+    );
 
     db.cleanup().await;
     Ok(())

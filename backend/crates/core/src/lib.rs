@@ -6,6 +6,7 @@
 pub mod config;
 pub mod error;
 pub mod limits;
+pub mod security;
 pub mod validation;
 
 pub use config::Config;

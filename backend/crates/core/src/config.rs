@@ -53,6 +53,10 @@ pub struct Config {
     pub jwks_cache_ttl: Duration,
     /// Secret used to sign browser session cookies.
     pub browser_session_secret: SecretString,
+    /// Secret used by the local PII KEK implementation.
+    pub pii_master_key: SecretString,
+    /// Pepper used for PII lookup HMAC hashes.
+    pub pii_hash_pepper: SecretString,
     /// Browser session cookie TTL.
     #[serde(
         rename = "browser_session_ttl_secs",
@@ -102,6 +106,12 @@ impl Validate for Config {
         }
         if validate_secret_min_32(&self.browser_session_secret).is_err() {
             errors.add("browser_session_secret", ValidationError::new("length"));
+        }
+        if validate_secret_min_32(&self.pii_master_key).is_err() {
+            errors.add("pii_master_key", ValidationError::new("length"));
+        }
+        if validate_secret_min_32(&self.pii_hash_pepper).is_err() {
+            errors.add("pii_hash_pepper", ValidationError::new("length"));
         }
         if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
             errors.add("browser_session_ttl", ValidationError::new("range"));
@@ -306,6 +316,8 @@ mod tests {
             browser_session_secret: SecretString::from(
                 "test-browser-session-secret-32-bytes".to_owned(),
             ),
+            pii_master_key: SecretString::from("test-pii-master-key-32-bytes-long".to_owned()),
+            pii_hash_pepper: SecretString::from("test-pii-hash-pepper-32-bytes-long".to_owned()),
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
             limits: Limits::default(),
@@ -339,6 +351,14 @@ mod tests {
                 (
                     "NOTEGATE_BROWSER_SESSION_SECRET",
                     "env-browser-session-secret-32-bytes",
+                ),
+                (
+                    "NOTEGATE_PII_MASTER_KEY",
+                    "env-pii-master-key-32-bytes-long",
+                ),
+                (
+                    "NOTEGATE_PII_HASH_PEPPER",
+                    "env-pii-hash-pepper-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
                 ("PATH", "/bin"),
@@ -381,6 +401,14 @@ mod tests {
                 (
                     "NOTEGATE_BROWSER_SESSION_SECRET",
                     "env-browser-session-secret-32-bytes",
+                ),
+                (
+                    "NOTEGATE_PII_MASTER_KEY",
+                    "env-pii-master-key-32-bytes-long",
+                ),
+                (
+                    "NOTEGATE_PII_HASH_PEPPER",
+                    "env-pii-hash-pepper-32-bytes-long",
                 ),
                 ("NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN", "3"),
                 ("NOTEGATE_LIMITS__WORKSPACE_MAX_NODES", "5"),

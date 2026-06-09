@@ -156,7 +156,6 @@ fn test_caller(attrs: ResolveAttrs, channel: Channel) -> Caller {
     };
     let user = User {
         id: Uuid::nil(),
-        sub: Some(attrs.sub),
         email: Some(attrs.email),
         anonymized_at: None,
     };
@@ -190,6 +189,10 @@ fn state_with_resource(
         jwks_cache_ttl: Duration::from_secs(300),
         browser_session_secret: secrecy::SecretString::from(
             "test-browser-session-secret-32-bytes".to_owned(),
+        ),
+        pii_master_key: secrecy::SecretString::from("test-pii-master-key-32-bytes-long".to_owned()),
+        pii_hash_pepper: secrecy::SecretString::from(
+            "test-pii-hash-pepper-32-bytes-long".to_owned(),
         ),
         browser_session_ttl: Duration::from_secs(3600),
         openapi_enabled: false,
@@ -258,8 +261,8 @@ async fn verify_accepts_valid_token() -> Result<(), Box<dyn std::error::Error>> 
     )?;
     let caller = verify_bearer(&state, &token).await?;
     assert_eq!(
-        caller.user().and_then(|user| user.sub.as_deref()),
-        Some("sub-1")
+        caller.user().and_then(|user| user.email.as_deref()),
+        Some("user@example.test")
     );
     Ok(())
 }
@@ -321,8 +324,8 @@ async fn verify_accepts_aud_array_and_trailing_slash() -> Result<(), Box<dyn std
     )?;
     let caller = verify_bearer(&state, &token).await?;
     assert_eq!(
-        caller.user().and_then(|user| user.sub.as_deref()),
-        Some("sub-1")
+        caller.user().and_then(|user| user.email.as_deref()),
+        Some("user@example.test")
     );
     Ok(())
 }
@@ -465,10 +468,7 @@ async fn browser_session_resolves_browser_channel() -> Result<(), Box<dyn std::e
     let caller = verify_browser_session(&state, &session).await?;
 
     assert_eq!(caller.channel, Channel::Browser);
-    assert_eq!(
-        caller.user().and_then(|user| user.sub.as_deref()),
-        Some("sub-cookie")
-    );
+    assert!(caller.user().is_some());
     Ok(())
 }
 

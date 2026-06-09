@@ -84,20 +84,26 @@ CREATE TABLE users (
 
 ## account_encryption_keys
 
-`account_encryption_keys`는 account별 PII data encryption key(DEK)를 외부 KMS key
-encryption key(KEK)로 wrap한 metadata를 저장한다. 구체적인 PII 분류, 암호화 방식,
+`account_encryption_keys`는 account별 PII data encryption key(DEK)를 key encryption key(KEK)로 wrap한 metadata를 저장한다. 구체적인 PII 분류, 암호화 방식,
 rotation, crypto shredding 정책은 `docs/spec/security.md`를 따른다.
 
 ```sql
 CREATE TABLE account_encryption_keys (
     account_id    UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-    wrapped_dek   BYTEA NOT NULL,
+    wrapped_dek   BYTEA,
     kek_id        TEXT NOT NULL,
     kek_version   TEXT,
     algorithm     TEXT NOT NULL DEFAULT 'AES-256-GCM',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     rewrapped_at  TIMESTAMPTZ,
-    destroyed_at  TIMESTAMPTZ
+    destroyed_at  TIMESTAMPTZ,
+
+    CHECK (
+        (destroyed_at IS NULL AND wrapped_dek IS NOT NULL)
+        OR
+        (destroyed_at IS NOT NULL AND wrapped_dek IS NULL)
+    )
 );
 ```
 
@@ -105,7 +111,7 @@ CREATE TABLE account_encryption_keys (
 
 - PII 원문 암호화와 HMAC lookup 정책은 `docs/spec/security.md`를 따른다.
 - `destroyed_at`이 설정된 account encryption key는 PII 복호화에 사용할 수 없다.
-- `wrapped_dek`, KMS `kek_id`, `kek_version`은 plaintext PII가 아니지만 보안 민감 정보로 취급한다.
+- `wrapped_dek`, `kek_id`, `kek_version`은 plaintext PII가 아니지만 보안 민감 정보로 취급한다.
 
 ## agents
 

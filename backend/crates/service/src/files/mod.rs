@@ -3,9 +3,9 @@
 //!
 //! Command semantics follow the shared file-command spec
 //! (`docs/spec/files-commands.md`) and are exposed through REST/MCP-specific
-//! contracts. The service is pure logic plus the store/authorization trait; the
-//! Paths are derived from parent links —
-//! never stored.
+//! contracts. The service owns authorization, validation, and command
+//! orchestration over the concrete database repository. Paths are derived from
+//! parent links — never stored.
 
 pub mod content;
 pub mod patch;
@@ -18,9 +18,8 @@ mod mutate;
 mod read;
 mod view;
 
-pub use content::{Metrics, compute as content_metrics};
 pub use patch::{PatchError, apply_edits};
-pub use policy::{FileCommand, require as require_role};
+pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use types::{
     ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,

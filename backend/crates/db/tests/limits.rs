@@ -13,7 +13,10 @@ use uuid::Uuid;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// Create an owner account + workspace; return (account_id, workspace_id, root_node_id).
-async fn workspace_with_root(pool: &PgPool, sub: &str) -> Result<(Uuid, Uuid, Uuid), sqlx::Error> {
+async fn workspace_with_root(
+    pool: &PgPool,
+    sub: &str,
+) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
     let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
     let workspace: Uuid = sqlx::query_scalar(
         "INSERT INTO workspaces (created_by, name) \
@@ -212,11 +215,10 @@ async fn agent_key_token_hash_is_unique() -> TestResult {
         return Ok(());
     };
     let creator = insert_user_account(&db.pool, "keyowner", "keyowner@example.com").await?;
-    let agent_account: Uuid = sqlx::query_scalar(
-        "INSERT INTO accounts (kind, display_name) VALUES ('agent', 'a') RETURNING id",
-    )
-    .fetch_one(&db.pool)
-    .await?;
+    let agent_account: Uuid =
+        sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
+            .fetch_one(&db.pool)
+            .await?;
     sqlx::query("INSERT INTO agents (id, name, created_by) VALUES ($1, 'agent', $2)")
         .bind(agent_account)
         .bind(creator)
