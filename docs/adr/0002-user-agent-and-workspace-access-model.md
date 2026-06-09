@@ -46,17 +46,9 @@ read  = 목록/메타데이터/읽기/검색
 write = 생성/수정/패치/이동/삭제
 ```
 
-workspace는 단일/default 제약 없이 자유롭게 생성/삭제할 수 있는 1급 리소스다. workspace 생성은
-user만 가능하고, 생성 transaction은 생성한 user에게 `owner` access row를 자동 생성한다. Agent는
-workspace에 별도로 연결되며 `viewer` 또는 `editor` 역할만 받을 수 있다. Agent는 `owner`가 될 수 없다.
+workspace는 단일/default 제약 없이 자유롭게 생성/삭제할 수 있는 1급 리소스다. workspace 생성은 user만 가능하다. Agent는 workspace에 별도로 연결되며 `viewer` 또는 `editor` 역할만 받을 수 있다. Agent는 `owner`가 될 수 없다.
 
-workspace 삭제는 soft delete로 처리한다. 삭제 시 workspace row에 `deleted_at`, `deleted_by`,
-`purge_after`를 설정하고 내부 node/document/access row는 즉시 갱신하지 않는다. `purge_after` 이후
-내부 purge job이 hard delete하면 FK cascade로 내부 row가 제거된다.
-
-사용자 탈퇴나 agent 삭제는 account hard delete가 아니라 비활성화/soft delete로 처리한다. 과거 문서의
-생성자/수정자/삭제자 참조가 깨지면 안 되기 때문이다. 사용자 PII는 별도 보안 정책에 따라 암호화하거나
-HMAC hash로 저장하고, 탈퇴 시 redaction/anonymization 또는 crypto shredding을 적용한다.
+생성/삭제 side effect, 기본 workspace bootstrap, owner row 보호, purge 흐름은 `docs/spec/lifecycle.md`가 정본이다. 사용자 PII 암호화와 탈퇴 시 redaction/anonymization 또는 crypto shredding은 `docs/spec/security.md`가 정본이다.
 
 ## 근거
 
@@ -69,9 +61,7 @@ agent credential로 취급하는 편이 권한 회수와 운영이 단순하다.
 workspace 단위 권한은 사용자가 이해하기 쉽고, agent 연결 UX와도 잘 맞는다. 사용자는 “이 agent가
 내 workspace를 읽게 한다/편집하게 한다”라고 이해할 수 있다.
 
-owner를 `workspace_access` row로 표현하면 access list에서 owner/viewer/editor가 같은 membership
-모델로 보인다. 대신 마지막 owner 보호, owner downgrade/revoke 방지, agent owner 금지 규칙을 transaction
-안에서 명시적으로 지켜야 한다.
+owner를 `workspace_access` row로 표현하면 access list에서 owner/viewer/editor가 같은 membership 모델로 보인다. 대신 owner 보호 규칙은 lifecycle transaction에서 명시적으로 지켜야 한다.
 
 검색 성능 면에서도 workspace 단위 권한이 단순하다. 파일별 ACL을 넣으면 검색마다 권한 상속과
 필터링이 필요해진다.
@@ -83,7 +73,7 @@ owner를 `workspace_access` row로 표현하면 access list에서 owner/viewer/e
 - 권한은 deny-by-default다. workspace 접근 권한이 없으면 접근할 수 없다.
 - workspace lifecycle 작업은 `workspace_access.role='owner'`인 active user만 수행한다.
 - `workspace_access`는 `owner`/`editor`/`viewer` membership과 권한을 저장한다.
-- workspace마다 active user owner가 최소 1명 있어야 하며 마지막 owner는 revoke/downgrade할 수 없다.
+- owner row 보호와 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다.
 - 파일/폴더 단위 공유는 보류한다.
 - 과거 attribution 보존을 위해 user/agent는 일반 product action으로 hard delete하지 않는다.
 - workspace와 node/document 삭제는 soft delete 후 purge job이 hard delete할 수 있다.

@@ -77,8 +77,8 @@ CREATE TABLE users (
 
 규칙:
 
-- 첫 local user account 생성 transaction은 기본 workspace `personal`과 해당 user의 owner access row를 함께 생성한다.
-- user 탈퇴는 account deactivate와 user PII redaction/anonymization으로 처리한다. 상세 정책은 `docs/spec/security.md`를 따른다.
+- user 최초 생성과 탈퇴의 lifecycle side effect는 `docs/spec/lifecycle.md`를 따른다.
+- user 탈퇴의 PII redaction/anonymization 상세 보안 정책은 `docs/spec/security.md`를 따른다.
 - OAuth provider subject 원문은 저장하지 않고 provider/sub 기반 HMAC hash로 로그인 매칭한다.
 - email 원문은 ciphertext로 저장하고, login/unique lookup이 필요하면 normalized email HMAC hash를 별도로 사용한다.
 - 과거 `created_by`, `updated_by`, `deleted_by` 참조 보존을 위해 일반 product action으로 user row를 물리 삭제하지 않는다.
@@ -130,8 +130,7 @@ CREATE TABLE agents (
 규칙:
 
 - agent 삭제 상태는 `agents`가 아니라 공통 parent인 `accounts`에서 관리한다.
-- agent 삭제는 account deactivate/soft delete다.
-- agent 삭제 시 active `agent_keys`와 `workspace_access`를 함께 revoke한다.
+- agent 생성/삭제와 key 생성/revoke lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 - 한 user creator account가 만들 수 있는 active agent는 최대 `50`개다.
 - 과거 `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
 
@@ -159,6 +158,7 @@ CREATE TABLE agent_keys (
 규칙:
 
 - API key / agent key 인증은 항상 `agent` account로 처리한다.
+- agent key는 agent 생성 시 자동 생성하지 않고 명시적인 key 생성 lifecycle로만 만든다. 자세한 정책은 `docs/spec/lifecycle.md`를 따른다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다.
 - `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 받지 않는다.
@@ -174,7 +174,7 @@ CREATE INDEX agent_keys_agent_active_idx
 
 ## workspaces
 
-workspace는 개인 노트 파일트리의 격리 경계다. workspace 생성은 user account만 가능하다. 현재 workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. 단일/default workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
+workspace는 개인 노트 파일트리의 격리 경계다. workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. 단일/default workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
 
 ```sql
 CREATE TABLE workspaces (
@@ -203,20 +203,17 @@ CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
 규칙:
 
 - REST 클라이언트는 `workspace_id`를 URL에 명시할 수 있다. `workspace_id`는 secret이 아니다.
-- workspace 생성은 user account만 가능하다. agent account는 workspace를 생성할 수 없다.
 - `workspaces.created_by`는 최초 생성자/audit attribution이다. 현재 권한 source는 `workspace_access`다.
+- workspace 생성/삭제, 기본 workspace bootstrap, owner row 생성은 `docs/spec/lifecycle.md`를 따른다.
 - workspace rename/delete/access 관리는 active `owner` role을 가진 user만 수행할 수 있다. agent는 grant를 받아도 lifecycle operation을 수행할 수 없다.
 - 서버는 live workspace(`deleted_at IS NULL`)와 인증된 account의 effective role로 workspace 접근 권한을 검증한다.
 - MCP/CLI path API는 요청 context에서 workspace를 resolve한 뒤 파일 path를 해석한다.
 - workspace `name`은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이다. `/`, `:`, 공백은 허용하지 않는다.
 - live workspace 이름은 `(created_by, name)` 기준으로 unique다. soft-deleted workspace 이름은 재사용할 수 있다.
 - agent는 여러 user creator의 workspace를 공유받을 수 있으므로 workspace name은 global unique가 아니다.
-- user creator account가 소유할 수 있는 live workspace는 최대 `20`개다. workspace 생성 transaction에서 검사한다.
-- workspace 생성 transaction은 생성한 user에게 active `owner` access row를 자동 생성한다.
-- 첫 local user account 생성 시 기본 workspace `personal`을 1회 자동 생성한다. 이 기본 workspace는 일반 workspace와 동일하게 rename/delete 가능하며, 사용자가 삭제한 뒤 재로그인해도 자동 재생성하지 않는다.
+- user creator account가 소유할 수 있는 live workspace는 최대 `20`개다.
 - workspace가 생성되면 DB trigger가 canonical root node `/`를 같은 workspace에 만든다.
-- workspace 삭제는 soft delete다. `deleted_at`, `deleted_by`, `purge_after`만 설정하고 내부 node/document/access row는 즉시 갱신하지 않는다.
-- 모든 workspace/list/file/search/access 조회는 live workspace만 대상으로 한다. `purge_after`가 지난 workspace는 background purge가 hard delete하고, 이때 access/node/document는 FK cascade로 제거된다.
+- 모든 workspace/list/file/search/access 조회는 live workspace만 대상으로 한다.
 
 ## workspace_access
 
@@ -259,7 +256,7 @@ write = mkdir/touch/write/patch/mv/rm
 - `revoked_at`이 있는 access row는 권한으로 인정하지 않는다.
 - `accounts.is_active=false`이거나 `accounts.deleted_at IS NOT NULL`인 account는 live access로 인정하지 않는다.
 - `owner` role은 active user account에만 부여할 수 있다. Agent account는 `viewer` 또는 `editor`만 받을 수 있다.
-- workspace마다 active user owner가 최소 1명 있어야 한다. 마지막 active owner는 revoke하거나 editor/viewer로 downgrade할 수 없다.
+- owner row 생성, 마지막 owner 보호, creator owner row 보호는 `docs/spec/lifecycle.md`를 따른다.
 - 한 workspace의 active access row는 최대 `20`개다. 생성 시 자동 owner row도 이 제한에 포함한다.
 - `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
 
@@ -279,8 +276,7 @@ CREATE INDEX workspace_access_owner_active_idx
     WHERE revoked_at IS NULL AND role = 'owner';
 ```
 
-Owner-row invariant는 단일 row CHECK만으로 표현할 수 없으므로 workspace create/grant/revoke/delete
-transaction에서 검증한다.
+Owner-row invariant는 단일 row CHECK만으로 표현할 수 없으므로 `docs/spec/lifecycle.md`의 owner 보호 규칙에 따라 service transaction에서 검증한다.
 
 ## nodes
 
@@ -516,9 +512,7 @@ CREATE INDEX documents_workspace_updated_idx
 
 ## Soft delete and purge
 
-- account 삭제는 `accounts.deleted_at`, `accounts.deleted_by`, `accounts.is_active=false`로 처리한다.
-- user 삭제 시 해당 user가 유일한 active owner인 live workspace는 soft delete한다. 다른 active owner가 남는 workspace에서는 해당 user의 access만 revoke한다.
-- node 삭제는 `nodes.deleted_at`, `nodes.deleted_by`, `nodes.purge_after`를 설정한다.
+- account/user/workspace/agent/node 삭제 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 - node delete는 사용자-facing 복구 기능을 제공하지 않는다. soft delete는 비동기 hard delete를 위한 내부 상태다.
 - query는 반드시 `accounts.is_active`, `revoked_at`, `nodes.deleted_at IS NULL`을 고려한다.
 - `workspaces.purge_after <= now()`인 deleted workspace는 내부 purge job으로 hard delete될 수 있다. 이때 `workspace_access`, `nodes`, `documents`는 FK cascade로 제거된다.

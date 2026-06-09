@@ -116,18 +116,7 @@ account_encryption_keys 갱신
 User 탈퇴나 agent 삭제는 account hard delete가 아니라 deactivate/soft delete로 처리한다.
 과거 `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 account row는 남긴다.
 
-탈퇴 처리:
-
-```text
-accounts.is_active = false
-accounts.deleted_at = now()
-PII ciphertext 제거
-lookup hash 제거 또는 정책에 따라 비활성화
-session/token/key revoke
-유일한 active owner인 live workspace soft delete
-생성한 agent deactivate 및 key revoke
-다른 owner가 남는 workspace의 workspace_access revoke
-```
+탈퇴 lifecycle side effect는 `docs/spec/lifecycle.md`의 User 탈퇴 정책을 따른다. 이 문서는 PII 제거와 crypto shredding의 보안 정책을 정본으로 둔다.
 
 더 강한 삭제가 필요한 경우 account DEK를 `destroyed_at` 처리해 crypto shredding한다. 이 경우
 남아 있는 ciphertext는 복호화할 수 없다.

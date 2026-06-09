@@ -26,7 +26,7 @@ POST /api/v1/agents
 }
 ```
 
-`agent` account를 생성한다. Workspace 접근 권한은 workspace access API로 별도 부여한다. 하나의 user creator account는 최대 `50`개의 active agent를 가질 수 있다.
+`agent` account를 생성한다. Agent 생성은 key나 workspace access를 자동 생성하지 않는다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다. 하나의 user creator account는 최대 `50`개의 active agent를 가질 수 있다.
 
 ### Delete agent
 
@@ -34,7 +34,7 @@ POST /api/v1/agents
 DELETE /api/v1/agents/{agent_id}
 ```
 
-Agent의 underlying account를 soft-deactivate하고, revoke되지 않은 key와 workspace access를 revoke한다.
+Agent 삭제 side effect는 `docs/spec/lifecycle.md`의 Agent 삭제 정책을 따른다.
 
 ### Create agent key
 
@@ -50,7 +50,7 @@ POST /api/v1/agents/{agent_id}/keys
 }
 ```
 
-평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다.
+Agent key는 명시 호출로만 생성한다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 
 Live key는 다음 조건을 모두 만족한다.
 

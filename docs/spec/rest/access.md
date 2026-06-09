@@ -2,7 +2,7 @@
 
 ## Access
 
-Access API는 workspace owner-only endpoint다. Owner는 `workspace_access.role='owner'`인 active user account다. Access row는 owner/editor/viewer membership을 저장하며, `workspaces.created_by`는 최초 생성자/audit attribution이다. Owner는 active account에 workspace role을 부여하거나 회수할 수 있다. 한 workspace는 자동 owner row를 포함해 최대 `20`개의 active access row를 가진다.
+Access API는 workspace owner-only endpoint다. Owner는 `workspace_access.role='owner'`인 active user account다. Access row는 owner/editor/viewer membership을 저장하며, `workspaces.created_by`는 최초 생성자/audit attribution이다. Grant/revoke/downgrade side effect와 owner 보호 규칙은 `docs/spec/lifecycle.md`를 따른다. 한 workspace는 자동 owner row를 포함해 최대 `20`개의 active access row를 가진다.
 
 Live access는 다음 조건을 모두 만족해야 한다.
 
@@ -34,7 +34,7 @@ PUT /api/v1/workspaces/{workspace_id}/access/{account_id}
 }
 ```
 
-대상 account가 active 상태일 때 `viewer`, `editor`, 또는 `owner` access를 생성하거나 role을 변경한다. `owner` role은 active user account에만 허용하고 agent account에는 허용하지 않는다. 이미 revoke된 row가 있으면 같은 `(workspace_id, account_id)` row를 다시 활성화한다. 이때 현재 grant 상태의 `granted_by`/`granted_at`을 갱신한다. active access row가 `20`개를 넘으면 `409 conflict`로 거부한다. 기존 owner를 editor/viewer로 downgrade하려면 같은 workspace에 다른 active user owner가 남아 있어야 한다.
+대상 account가 active 상태일 때 `viewer`, `editor`, 또는 `owner` access를 생성하거나 role을 변경한다. `owner` role은 active user account에만 허용하고 agent account에는 허용하지 않는다. 이미 revoke된 row가 있으면 같은 `(workspace_id, account_id)` row를 다시 활성화한다. 이때 현재 grant 상태의 `granted_by`/`granted_at`을 갱신한다. active access row가 `20`개를 넘으면 `409 conflict`로 거부한다. Creator owner row와 마지막 active user owner 보호는 `docs/spec/lifecycle.md`를 따른다.
 
 ### Revoke access
 
@@ -42,4 +42,4 @@ PUT /api/v1/workspaces/{workspace_id}/access/{account_id}
 DELETE /api/v1/workspaces/{workspace_id}/access/{account_id}
 ```
 
-대상 access에 `revoked_at`/`revoked_by`를 설정한다. 현재 grant attribution field는 그대로 유지한다. 마지막 active user owner는 revoke할 수 없으며 `409 conflict`로 거부한다. 이미 live grant가 없는 account를 revoke하는 요청은 caller owner check 후 성공으로 처리한다.
+대상 access에 `revoked_at`/`revoked_by`를 설정한다. 현재 grant attribution field는 그대로 유지한다. Creator owner row와 마지막 active user owner는 일반 Access API로 revoke할 수 없으며 `409 conflict`로 거부한다. 이미 live grant가 없는 account를 revoke하는 요청은 caller owner check 후 성공으로 처리한다.

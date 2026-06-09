@@ -206,7 +206,7 @@ API key는 장기/자동화 credential이므로 항상 `agent`로 처리한다.
 - 같은 parent folder 안에서 살아있는 node 이름은 unique하다.
 - 다른 folder에서는 같은 이름을 사용할 수 있다.
 - path는 `parent_id + name` tree에서 derive하며, path uniqueness는 sibling unique invariant로 보장한다.
-- 첫 local user account 생성 시 기본 workspace `personal`과 owner access row를 1회 자동 생성한다.
+- user/workspace/agent/key/access 생성·삭제 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 - workspace 생성은 user만 가능하다. workspace rename/delete/access 관리는 `workspace_access.role=owner`인 active user만 가능하다. agent account는 workspace 내부 `viewer/editor` 작업자로만 접근한다.
 - user creator account당 live workspace는 최대 `20`개다.
 - workspace active access row는 owner row를 포함해 최대 `20`개다.
