@@ -1,9 +1,9 @@
 //! Workspace lifecycle persistence.
 //!
 //! Creating a workspace inserts the `workspaces` row (whose trigger materializes
-//! the canonical root node with attribution = the creator). The creator user is
-//! the implicit lifecycle owner; `workspace_access` stores only viewer/editor
-//! grants for other accounts.
+//! the canonical root node with attribution = the creator) and an explicit
+//! `workspace_access(role='owner')` row for the creator. Runtime permissions are
+//! resolved from live access rows only.
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
@@ -92,16 +92,15 @@ const WORKSPACE_COLUMNS: &str =
 
 const WORKSPACE_VIEW_SELECT: &str = "SELECT w.id, w.name, w.created_by, w.created_at, w.updated_at, \
                                   w.deleted_at, w.deleted_by, w.purge_after, \
-                                  CASE WHEN w.created_by = $1 AND caller.kind = 'user' \
-                                       THEN 'owner' ELSE wa.role END AS role, \
+                                  wa.role AS role, \
                                   root.id AS root_node_id \
                            FROM workspaces w \
-                           JOIN accounts caller ON caller.id = $1 \
+                           JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                                   AND wa.account_id = $1 \
+                                                   AND wa.revoked_at IS NULL \
+                           JOIN accounts caller ON caller.id = wa.account_id \
                                                 AND caller.is_active = true \
                                                 AND caller.deleted_at IS NULL \
-                           LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
-                                                        AND wa.account_id = $1 \
-                                                        AND wa.revoked_at IS NULL \
                            JOIN nodes root ON root.workspace_id = w.id \
                                           AND root.parent_id IS NULL \
                                           AND root.deleted_at IS NULL";
@@ -161,6 +160,16 @@ impl WorkspaceRepo {
         .await
         .map_err(map_constraint_error)?;
 
+        sqlx::query(
+            "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
+             VALUES ($1, $2, 'owner', $2)",
+        )
+        .bind(row.id)
+        .bind(creator_account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Workspace::from(row))
     }
@@ -183,8 +192,7 @@ impl WorkspaceRepo {
     ) -> Result<Option<WorkspaceView>> {
         let row = sqlx::query_as::<_, WorkspaceViewRow>(&format!(
             "{WORKSPACE_VIEW_SELECT} \
-             WHERE w.id = $2 AND w.deleted_at IS NULL \
-               AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL)"
+             WHERE w.id = $2 AND w.deleted_at IS NULL"
         ))
         .bind(account_id)
         .bind(workspace_id)
@@ -203,7 +211,6 @@ impl WorkspaceRepo {
         let rows = sqlx::query_as::<_, WorkspaceViewRow>(&format!(
             "{WORKSPACE_VIEW_SELECT} \
              WHERE w.deleted_at IS NULL AND w.name = $2 \
-               AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL) \
              ORDER BY w.created_at, w.id LIMIT $3"
         ))
         .bind(account_id)
@@ -226,7 +233,6 @@ impl WorkspaceRepo {
                 sqlx::query_as::<_, WorkspaceViewRow>(&format!(
                     "{WORKSPACE_VIEW_SELECT} \
                      WHERE w.deleted_at IS NULL \
-                       AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL) \
                      ORDER BY w.created_at, w.id LIMIT $2"
                 ))
                 .bind(account_id)
@@ -238,7 +244,6 @@ impl WorkspaceRepo {
                 sqlx::query_as::<_, WorkspaceViewRow>(&format!(
                     "{WORKSPACE_VIEW_SELECT} \
                      WHERE w.deleted_at IS NULL \
-                       AND ((w.created_by = $1 AND caller.kind = 'user') OR wa.role IS NOT NULL) \
                        AND (w.created_at, w.id) > ($2, $3) \
                      ORDER BY w.created_at, w.id LIMIT $4"
                 ))
@@ -304,21 +309,18 @@ impl WorkspaceRepo {
 }
 
 /// The caller's effective role in a live workspace, or `None` if the workspace is
-/// hidden/deleted or the caller has no live grant. `owner` is derived from the
-/// workspace creator; `workspace_access` stores only viewer/editor grants.
+/// hidden/deleted or the caller has no live access row.
 async fn live_role(pool: &PgPool, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
     let role: Option<String> = sqlx::query_scalar(
-        "SELECT CASE WHEN w.created_by = $2 AND caller.kind = 'user' \
-                    THEN 'owner' ELSE wa.role END AS role \
+        "SELECT wa.role \
          FROM workspaces w \
-         JOIN accounts caller ON caller.id = $2 \
+         JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                 AND wa.account_id = $2 \
+                                 AND wa.revoked_at IS NULL \
+         JOIN accounts caller ON caller.id = wa.account_id \
                               AND caller.is_active = true \
                               AND caller.deleted_at IS NULL \
-         LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
-                                      AND wa.account_id = $2 \
-                                      AND wa.revoked_at IS NULL \
-         WHERE w.id = $1 AND w.deleted_at IS NULL \
-           AND ((w.created_by = $2 AND caller.kind = 'user') OR wa.role IS NOT NULL)",
+         WHERE w.id = $1 AND w.deleted_at IS NULL",
     )
     .bind(workspace_id)
     .bind(account_id)

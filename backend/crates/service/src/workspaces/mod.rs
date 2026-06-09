@@ -1,10 +1,9 @@
 //! Workspace lifecycle: create / get / rename / delete.
 //!
-//! POLICY: `create` is user-only and relies on the DB trigger to materialize
-//! the canonical root node. The creator user is the implicit lifecycle owner;
-//! `workspace_access` stores only viewer/editor grants. `get` is visible to any
-//! effective role; `rename`/`delete` require owner. A workspace the caller cannot
-//! see is reported as not-found so the api returns `404`.
+//! POLICY: `create` is user-only and creates an explicit owner access row.
+//! `get` is visible to any effective live access role; `rename`/`delete` require
+//! owner. A workspace the caller cannot see is reported as not-found so the api
+//! returns `404`.
 
 use notegate_core::limits;
 use notegate_core::validation::validate_workspace_name;

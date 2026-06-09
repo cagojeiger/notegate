@@ -111,7 +111,7 @@ CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
     ON workspaces(created_by, name)
     WHERE deleted_at IS NULL;
 
--- workspace_access: per-account file access grants. Owner is derived from workspaces.created_by.
+-- workspace_access: per-account owner/editor/viewer membership grants.
 CREATE TABLE workspace_access (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

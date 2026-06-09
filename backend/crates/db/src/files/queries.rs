@@ -130,17 +130,15 @@ pub mod node {
         account_id: Uuid,
     ) -> Result<Option<Role>> {
         let role: Option<String> = sqlx::query_scalar(
-            "SELECT CASE WHEN w.created_by = $2 AND caller.kind = 'user' \
-                         THEN 'owner' ELSE wa.role END AS role \
+            "SELECT wa.role \
          FROM workspaces w \
-         JOIN accounts caller ON caller.id = $2 \
+         JOIN workspace_access wa ON wa.workspace_id = w.id \
+                                 AND wa.account_id = $2 \
+                                 AND wa.revoked_at IS NULL \
+         JOIN accounts caller ON caller.id = wa.account_id \
                               AND caller.is_active = true \
                               AND caller.deleted_at IS NULL \
-         LEFT JOIN workspace_access wa ON wa.workspace_id = w.id \
-                                      AND wa.account_id = $2 \
-                                      AND wa.revoked_at IS NULL \
-         WHERE w.id = $1 AND w.deleted_at IS NULL \
-           AND ((w.created_by = $2 AND caller.kind = 'user') OR wa.role IS NOT NULL)",
+         WHERE w.id = $1 AND w.deleted_at IS NULL",
         )
         .bind(workspace_id)
         .bind(account_id)

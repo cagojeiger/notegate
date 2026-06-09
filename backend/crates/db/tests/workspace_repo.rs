@@ -90,9 +90,9 @@ async fn create_makes_single_root_node_with_creator_attribution()
     Ok(())
 }
 
-/// (b) The creator derives `owner`; no workspace_access owner row is stored.
+/// (b) Creating a workspace stores an explicit owner access row for the creator.
 #[tokio::test]
-async fn creator_is_derived_owner_without_access_row() -> Result<(), Box<dyn std::error::Error>> {
+async fn creator_gets_explicit_owner_access_row() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -104,12 +104,14 @@ async fn creator_is_derived_owner_without_access_row() -> Result<(), Box<dyn std
     let role = repo.role_for(workspace_id, owner).await?;
     assert_eq!(role, Some(Role::Owner));
 
-    let access_rows: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM workspace_access WHERE workspace_id = $1")
-            .bind(workspace_id)
-            .fetch_one(&db.pool)
-            .await?;
-    assert_eq!(access_rows, 0, "owner is derived, not stored as a grant");
+    let access_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM workspace_access          WHERE workspace_id = $1 AND account_id = $2 AND role = 'owner' AND revoked_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(owner)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(access_rows, 1, "creator owner is stored as a live grant");
 
     // A non-member resolves to no role (treated as 404 by the service layer).
     let stranger = insert_user_account(&db.pool, "stranger", "s@example.test").await?;
@@ -257,9 +259,9 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         Some(Role::Editor)
     );
 
-    // list_access shows explicit live grants only; implicit owner is not listed.
+    // list_access includes the explicit owner row and the member grant.
     let live = access_repo.list_access(workspace_id).await?;
-    assert_eq!(live.len(), 1);
+    assert_eq!(live.len(), 2);
 
     // Revoke clears role_for and drops the row from the live list.
     access_repo
@@ -267,7 +269,7 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         .await?;
     assert_eq!(access_repo.role_for(workspace_id, member).await?, None);
     let live_after = access_repo.list_access(workspace_id).await?;
-    assert_eq!(live_after.len(), 0, "revoked grant must not be listed");
+    assert_eq!(live_after.len(), 1, "only the owner grant remains listed");
 
     // Re-granting a revoked account succeeds and re-activates the row.
     access_repo
@@ -285,8 +287,8 @@ async fn grant_revoke_and_access_cap() -> Result<(), Box<dyn std::error::Error>>
         Some(Role::Viewer)
     );
 
-    // Fill the cap: member = 1 active explicit grant; add 19 more for 20 total.
-    for index in 0..19 {
+    // Fill the cap: owner + member = 2 active explicit grants; add 18 more for 20 total.
+    for index in 0..18 {
         let extra =
             insert_user_account(&db.pool, &format!("extra-{index}"), "e@example.test").await?;
         access_repo
@@ -425,7 +427,7 @@ async fn inactive_accounts_are_not_live_access() -> Result<(), Box<dyn std::erro
         .map(|grant| grant.account_id)
         .collect::<Vec<_>>();
     live_ids.sort();
-    let mut expected_ids = vec![member];
+    let mut expected_ids = vec![owner, member];
     expected_ids.sort();
     assert_eq!(
         live_ids, expected_ids,
@@ -513,7 +515,7 @@ async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
         .unwrap_err();
 
     assert!(
-        matches!(err, Error::Validation(message) if message == "workspace access role must be viewer or editor")
+        matches!(err, Error::Validation(message) if message == "owner role requires an active user account")
     );
     assert_eq!(
         access_repo.role_for(workspace_id, agent).await?,
@@ -526,7 +528,7 @@ async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
 }
 
 #[tokio::test]
-async fn owner_role_cannot_be_stored_as_access_grant() -> Result<(), Box<dyn std::error::Error>> {
+async fn user_account_can_receive_owner_access() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -536,7 +538,7 @@ async fn owner_role_cannot_be_stored_as_access_grant() -> Result<(), Box<dyn std
     let member = insert_user_account(&db.pool, "member", "m@example.test").await?;
     let workspace_id = make_workspace(&repo, owner, "owned").await;
 
-    let err = access_repo
+    access_repo
         .upsert_access(
             &GrantAccess {
                 workspace_id,
@@ -545,22 +547,95 @@ async fn owner_role_cannot_be_stored_as_access_grant() -> Result<(), Box<dyn std
             },
             owner,
         )
-        .await
-        .unwrap_err();
+        .await?;
 
-    assert!(
-        matches!(err, Error::Validation(message) if message == "workspace access role must be viewer or editor")
-    );
     assert_eq!(repo.role_for(workspace_id, owner).await?, Some(Role::Owner));
-    assert_eq!(access_repo.role_for(workspace_id, member).await?, None);
+    assert_eq!(
+        access_repo.role_for(workspace_id, member).await?,
+        Some(Role::Owner)
+    );
 
     db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
-async fn revoking_explicit_grant_does_not_affect_implicit_owner()
+async fn creator_owner_access_cannot_be_revoked_or_downgraded()
 -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "owned").await;
+
+    let downgrade = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: owner,
+                role: Role::Editor,
+            },
+            owner,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(downgrade, Error::Conflict(_)));
+
+    let revoke = access_repo
+        .revoke_access(workspace_id, owner, owner)
+        .await
+        .unwrap_err();
+    assert!(matches!(revoke, Error::Conflict(_)));
+    assert_eq!(
+        access_repo.role_for(workspace_id, owner).await?,
+        Some(Role::Owner)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn last_active_user_owner_cannot_be_revoked() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let creator = insert_user_account(&db.pool, "creator", "c@example.test").await?;
+    let co_owner = insert_user_account(&db.pool, "co-owner", "co@example.test").await?;
+    let workspace_id = make_workspace(&repo, creator, "owned").await;
+
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: co_owner,
+                role: Role::Owner,
+            },
+            creator,
+        )
+        .await?;
+    deactivate_account(&db.pool, creator, creator).await?;
+
+    let revoke = access_repo
+        .revoke_access(workspace_id, co_owner, co_owner)
+        .await
+        .unwrap_err();
+    assert!(matches!(revoke, Error::Conflict(_)));
+    assert_eq!(
+        access_repo.role_for(workspace_id, co_owner).await?,
+        Some(Role::Owner)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn revoking_member_grant_does_not_affect_owner() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
