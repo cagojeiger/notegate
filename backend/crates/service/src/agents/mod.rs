@@ -85,8 +85,8 @@ impl AgentService {
         })
     }
 
-    /// Create an agent key. Only a `kind='user'` caller may create keys; the
-    /// agent may have at most [`limits::AGENT_KEYS_PER_AGENT_MAX`] live keys.
+    /// Create an agent-bound API key. Only a `kind='user'` caller may create keys;
+    /// the agent account may have at most [`limits::API_KEYS_PER_ACCOUNT_MAX`] live keys.
     pub async fn create_key(
         &self,
         caller_kind: AccountKind,
@@ -104,7 +104,7 @@ impl AgentService {
             .is_some_and(|expires_at| expires_at <= Utc::now())
         {
             return Err(ServiceError::InvalidInput(
-                "agent key expires_at must be in the future".to_owned(),
+                "api key expires_at must be in the future".to_owned(),
             ));
         }
         self.require_owned_active_agent(command.agent_id, caller_account_id)

@@ -352,10 +352,10 @@ impl AgentRepo {
         .await
         .map_err(map_sqlx_error)?;
         let live = usize::try_from(live).map_err(|_error| Error::internal("negative key count"))?;
-        if live >= limits::AGENT_KEYS_PER_AGENT_MAX {
+        if live >= limits::API_KEYS_PER_ACCOUNT_MAX {
             return Err(Error::conflict(format!(
                 "agent already has the maximum of {} live keys",
-                limits::AGENT_KEYS_PER_AGENT_MAX
+                limits::API_KEYS_PER_ACCOUNT_MAX
             )));
         }
 

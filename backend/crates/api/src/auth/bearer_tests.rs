@@ -127,7 +127,7 @@ impl CallerResolver for TestResolver {
         _channel: Channel,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         // The bearer test harness only exercises the JWT/cookie paths; an
-        // unrecognized agent key resolves to nothing.
+        // An unrecognized notegate API key resolves to nothing.
         Box::pin(async { Err(IdentityError::NotRegistered) })
     }
 }

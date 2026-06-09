@@ -167,21 +167,6 @@ impl PiiCrypto {
         CRYPTO_VERSION
     }
 
-    /// Temporary compatibility name until `account_encryption_keys` is removed.
-    pub fn kek_id(&self) -> &str {
-        self.enc_key_id()
-    }
-
-    /// Temporary compatibility name until `account_encryption_keys` is removed.
-    pub fn kek_version(&self) -> Option<&str> {
-        Some("1")
-    }
-
-    /// Temporary compatibility name until hash key ids are wired through rows.
-    pub fn hash_version(&self) -> i32 {
-        self.version()
-    }
-
     pub fn session_signing_key(&self) -> &[u8] {
         &self.session_signing_key
     }

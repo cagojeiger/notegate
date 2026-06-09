@@ -155,10 +155,10 @@ pub async fn create_key_for_account(
         ));
     }
     let live = api_keys.count_live_keys(account_id).await?;
-    if live >= limits::AGENT_KEYS_PER_AGENT_MAX {
+    if live >= limits::API_KEYS_PER_ACCOUNT_MAX {
         return Err(ServiceError::Conflict(format!(
             "account already has the maximum of {} live API keys",
-            limits::AGENT_KEYS_PER_AGENT_MAX
+            limits::API_KEYS_PER_ACCOUNT_MAX
         )));
     }
 

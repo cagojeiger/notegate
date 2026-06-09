@@ -447,7 +447,7 @@ async fn create_key_enforces_live_key_cap_in_repo() -> Result<(), Box<dyn std::e
     let creator = insert_user_account(&db.pool, "creator", "c@example.test").await?;
     let agent_id = make_agent(&repo, creator, "bot").await;
 
-    for index in 0..limits::AGENT_KEYS_PER_AGENT_MAX {
+    for index in 0..limits::API_KEYS_PER_ACCOUNT_MAX {
         repo.insert_agent_key(
             &CreateAgentKey {
                 agent_id,
