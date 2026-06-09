@@ -14,7 +14,8 @@ Contract:
 
 ```text
 OAuth bearer token via authgate -> user account
-API key / agent key bearer     -> agent account
+user API key bearer           -> user account
+agent API key bearer          -> agent account
 browser/session cookie         -> rejected
 ```
 

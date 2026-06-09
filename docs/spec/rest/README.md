@@ -18,6 +18,7 @@ OpenAPI에 포함한다:
 
 ```text
 /api/v1/me
+/api/v1/me/keys
 /api/v1/workspaces
 /api/v1/workspaces/{workspace_id}/nodes
 /api/v1/workspaces/{workspace_id}/documents
@@ -72,7 +73,8 @@ Contract:
 ```text
 browser login via authgate -> user account
 bearer OAuth token         -> user account
-API key / agent key        -> agent account
+user API key               -> user account
+agent API key              -> agent account
 ```
 
 Branching:

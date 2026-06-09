@@ -185,11 +185,11 @@ MCP 내부 구현은 먼저 workspace name을 caller가 접근 가능한 workspa
 browser login via authgate       -> user account
 MCP OAuth 2.1 via authgate        -> user account
 device flow via authgate          -> user account
-API key / agent key               -> agent account
+user API key                      -> user account
+agent API key                     -> agent account
 ```
 
-OAuth 계열 인증은 사람 사용자를 증명하므로 항상 `user`로 처리한다.
-API key는 장기/자동화 credential이므로 항상 `agent`로 처리한다.
+OAuth 계열 인증은 사람 사용자를 증명하므로 항상 `user`로 처리한다. API key는 `api_keys.account_id`에 연결된 account kind로 caller를 결정한다.
 
 ## 공통 불변식
 

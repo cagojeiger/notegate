@@ -11,7 +11,8 @@ REST와 MCP는 모두 이 구조 위에서 동작한다.
 accounts          user/agent 공통 행위자 identity
 users             authgate OAuth 사용자 상세
 agents            AI agent 상세
-agent_keys        agent API key credential hash
+api_key_hash_keys API key hash secret version/status metadata
+api_keys          user/agent 공용 API key credential hash
 account_encryption_keys account별 PII DEK wrapping metadata
 workspaces        개인 노트 workspace 경계
 workspace_access  workspace membership과 owner/editor/viewer 권한
@@ -19,9 +20,9 @@ nodes             folder/document 공통 tree node
 documents         markdown document 본문
 ```
 
-현재 단계는 원본 Markdown 저장만 고려한다. grep은 `documents.content_md`를 `ILIKE`로
+Markdown 원본은 `documents.content_md`에 저장한다. grep은 `documents.content_md`를 `ILIKE`로
 후보 검색하고 application code에서 line-split한다. 권한은 workspace 단위로만 적용하고,
-file/folder/node 단위 ACL은 도입하지 않는다.
+file/folder/node 단위 ACL은 제공하지 않는다.
 
 ## accounts
 
@@ -51,7 +52,7 @@ CREATE TABLE accounts (
 규칙:
 
 - browser login, MCP OAuth 2.1, device flow via authgate는 `kind='user'` account다.
-- API key / agent key는 `kind='agent'` account다.
+- API key는 `api_keys.account_id`에 연결된 account로 인증된다. 연결 account가 `kind='user'`이면 user caller, `kind='agent'`이면 agent caller다.
 - 일반 product action에서 account hard delete는 하지 않는다.
 - user 탈퇴나 agent 삭제는 `accounts.is_active=false`, `deleted_at`, `deleted_by`로 deactivate/soft delete한다.
 - PII 원문은 평문으로 저장하지 않는다. 표시 이름과 사용자 상세 암호화 정책은 `docs/spec/security.md`를 따른다.
@@ -81,7 +82,7 @@ CREATE TABLE users (
 - user 탈퇴의 PII redaction/anonymization 상세 보안 정책은 `docs/spec/security.md`를 따른다.
 - OAuth provider subject 원문은 저장하지 않고 provider/sub 기반 HMAC hash로 로그인 매칭한다.
 - email 원문은 ciphertext로 저장하고, login/unique lookup이 필요하면 normalized email HMAC hash를 별도로 사용한다.
-- 과거 `created_by`, `updated_by`, `deleted_by` 참조 보존을 위해 일반 product action으로 user row를 물리 삭제하지 않는다.
+- `created_by`, `updated_by`, `deleted_by` 참조 보존을 위해 일반 product action으로 user row를 물리 삭제하지 않는다.
 
 ## account_encryption_keys
 
@@ -116,7 +117,7 @@ CREATE TABLE account_encryption_keys (
 
 ## agents
 
-`agents`는 API key / CLI / MCP key로 접속할 수 있는 AI agent 상세 테이블이다.
+`agents`는 AI agent 상세 테이블이다. Agent-bound API key, CLI, MCP key는 `api_keys.account_id = agents.id`로 연결된다.
 `agents.id`는 동시에 `accounts.id`다.
 
 ```sql
@@ -132,45 +133,105 @@ CREATE TABLE agents (
 - agent 삭제 상태는 `agents`가 아니라 공통 parent인 `accounts`에서 관리한다.
 - agent 생성/삭제와 key 생성/revoke lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 - 한 user creator account가 만들 수 있는 active agent는 최대 `50`개다.
-- 과거 `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
+- `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
 
-## agent_keys
+## api_key_hash_keys
 
-`agent_keys`는 agent 접속용 API key를 저장한다. token 원문은 저장하지 않고 hash만
-저장한다.
+`api_key_hash_keys`는 API key token hash를 계산한 server-side HMAC secret의 version/status metadata다. 실제 secret material은 DB에 저장하지 않고 secret manager/env/KMS에서 관리한다.
 
 ```sql
-CREATE TABLE agent_keys (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id     UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    token_hash   TEXT NOT NULL UNIQUE,
-    name         TEXT NOT NULL,
-    scopes       TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
-    created_by   UUID REFERENCES accounts(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at TIMESTAMPTZ,
-    expires_at   TIMESTAMPTZ,
-    revoked_at   TIMESTAMPTZ,
-    revoked_by   UUID REFERENCES accounts(id)
+CREATE TABLE api_key_hash_keys (
+    id             TEXT PRIMARY KEY,
+    version        INTEGER NOT NULL,
+    status         TEXT NOT NULL CHECK (status IN ('current', 'verify_only', 'compromised', 'retired')),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    compromised_at TIMESTAMPTZ,
+    retired_at     TIMESTAMPTZ,
+
+    CHECK (
+        (status = 'compromised' AND compromised_at IS NOT NULL)
+        OR (status <> 'compromised')
+    ),
+    CHECK (
+        (status = 'retired' AND retired_at IS NOT NULL)
+        OR (status <> 'retired')
+    )
 );
+
+CREATE UNIQUE INDEX api_key_hash_keys_one_current_uidx
+    ON api_key_hash_keys ((status))
+    WHERE status = 'current';
 ```
 
 규칙:
 
-- API key / agent key 인증은 항상 `agent` account로 처리한다.
-- agent key는 agent 생성 시 자동 생성하지 않고 명시적인 key 생성 lifecycle로만 만든다. 자세한 정책은 `docs/spec/lifecycle.md`를 따른다.
-- `revoked_at`이 있는 key는 인증에 사용할 수 없다.
-- `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
-- `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
-- 한 agent가 동시에 가질 수 있는 live key는 최대 `10`개다.
+- `current`는 새 API key 발급과 opportunistic rehash에 사용한다.
+- `verify_only`는 정상 rotation 중 해당 hash key로 저장된 API key 검증에만 사용한다. 검증 성공 시 current key로 rehash할 수 있다.
+- `compromised`는 유출 의심 상태다. 이 status의 hash key로 저장된 live API key는 인증에 사용할 수 없고 revoke 대상이다.
+- `retired`는 live `api_keys`가 참조하지 않는 폐기 상태다.
+- 실제 HMAC secret은 DB 밖에서 관리하며, application log/error/audit payload에 기록하지 않는다.
 
-Live key 조회/집계 보조 index:
+## api_keys
+
+`api_keys`는 user와 agent 공용 API key credential hash를 저장한다. Token 원문은 저장하지 않고, 생성/rotation 응답에서 정확히 한 번만 반환한다. API key는 DEK로 암호화해 복호화 가능하게 저장하지 않는다.
 
 ```sql
-CREATE INDEX agent_keys_agent_active_idx
-    ON agent_keys(agent_id)
+CREATE TABLE api_keys (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    token_prefix        TEXT NOT NULL,
+    token_hash          TEXT NOT NULL UNIQUE,
+    hash_key_id         TEXT NOT NULL REFERENCES api_key_hash_keys(id),
+    hash_version        INTEGER NOT NULL DEFAULT 1,
+    scopes              TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
+    created_by          UUID REFERENCES accounts(id),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at        TIMESTAMPTZ,
+    expires_at          TIMESTAMPTZ,
+    revoked_at          TIMESTAMPTZ,
+    revoked_by          UUID REFERENCES accounts(id),
+    revoked_reason      TEXT,
+    rotated_from_key_id UUID REFERENCES api_keys(id),
+
+    CHECK (
+        (revoked_at IS NULL AND revoked_by IS NULL)
+        OR (revoked_at IS NOT NULL AND revoked_by IS NOT NULL)
+    ),
+    CHECK (revoked_reason IS NULL OR revoked_at IS NOT NULL)
+);
+
+CREATE INDEX api_keys_account_live_idx
+    ON api_keys(account_id)
     WHERE revoked_at IS NULL;
+
+CREATE INDEX api_keys_hash_key_live_idx
+    ON api_keys(hash_key_id)
+    WHERE revoked_at IS NULL;
+
+CREATE INDEX api_keys_expiring_live_idx
+    ON api_keys(expires_at)
+    WHERE revoked_at IS NULL AND expires_at IS NOT NULL;
+
+CREATE INDEX api_keys_rotated_from_idx
+    ON api_keys(rotated_from_key_id)
+    WHERE rotated_from_key_id IS NOT NULL;
 ```
+
+규칙:
+
+- API key 인증은 `api_keys.account_id`의 account kind로 caller를 결정한다.
+- `accounts.kind='user'`에 연결된 key는 user API key이며 user caller로 동작한다.
+- `accounts.kind='agent'`에 연결된 key는 agent API key이며 agent caller로 동작한다.
+- token format은 `ngk_v1_<key_id>_<secret>` 계열의 opaque value다. `key_id`는 lookup용 공개 식별자이고, `secret`은 DB에 저장하지 않는다.
+- `token_hash`는 `HMAC(api_key_hash_secret, key_id + ':' + secret)` 결과다.
+- `hash_key_id`/`hash_version`은 어떤 server-side HMAC secret으로 `token_hash`를 만들었는지 기록한다.
+- `revoked_at`이 있는 key는 인증에 사용할 수 없다.
+- `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
+- `hash_key_id`가 `compromised` 또는 `retired` 상태면 인증에 사용할 수 없다.
+- `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
+- 한 account가 동시에 가질 수 있는 live API key는 최대 `10`개다.
+- API key 자체 rotation은 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
 
 ## workspaces
 
@@ -203,7 +264,7 @@ CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
 규칙:
 
 - REST 클라이언트는 `workspace_id`를 URL에 명시할 수 있다. `workspace_id`는 secret이 아니다.
-- `workspaces.created_by`는 최초 생성자/audit attribution이다. 현재 권한 source는 `workspace_access`다.
+- `workspaces.created_by`는 최초 생성자/audit attribution이다. 권한 source는 `workspace_access`다.
 - workspace 생성/삭제와 owner row 생성은 `docs/spec/lifecycle.md`를 따른다.
 - workspace rename/delete/access 관리는 active `owner` role을 가진 user만 수행할 수 있다. agent는 grant를 받아도 lifecycle operation을 수행할 수 없다.
 - 서버는 live workspace(`deleted_at IS NULL`)와 인증된 account의 effective role로 workspace 접근 권한을 검증한다.
@@ -246,7 +307,7 @@ write = mkdir/touch/write/patch/mv/rm
 ```
 
 `workspace_access.role='owner'`가 workspace owner의 source of truth다. `workspaces.created_by`는
-최초 생성자/audit attribution이며 현재 권한 판정에 직접 쓰지 않는다.
+최초 생성자/audit attribution이며 권한 판정에 직접 쓰지 않는다.
 
 성능 규칙:
 
@@ -523,6 +584,6 @@ CREATE INDEX documents_workspace_updated_idx
 
 ## Reset policy
 
-현재 단계에서 프로덕션 데이터가 없다면 migration을 누적 보정하지 않고, 새 스키마로
+프로덕션 데이터가 없는 환경은 migration을 누적 보정하지 않고, 정본 스키마로
 squash/reset하는 것을 허용한다. 프로덕션 데이터가 생기면 이후부터는 forward-only
 migration만 허용한다.

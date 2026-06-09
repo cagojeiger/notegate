@@ -2,7 +2,7 @@
 
 ## Agents
 
-Agent API는 agent account와 API key를 관리하는 user-only endpoint다. Agent의 workspace별 권한은 Access category에서 따로 부여한다. API key는 인증 시 `agent` account로 처리한다. Agent key lifecycle은 workspace role이 아니라 agent 생성자/소유자 규칙으로 관리한다. Workspace owner는 agent account에 viewer/editor workspace access를 grant/revoke할 수 있을 뿐, agent key를 관리하지 않는다. Agent account는 owner role을 받을 수 없다.
+Agent API는 agent account와 agent-bound API key를 관리하는 user-only endpoint다. Agent의 workspace별 권한은 Access category에서 따로 부여한다. Agent-bound API key는 인증 시 해당 `agent` account로 처리한다. Key lifecycle은 workspace role이 아니라 agent 생성자/소유자 규칙으로 관리한다. Workspace owner는 agent account에 viewer/editor workspace access를 grant/revoke할 수 있을 뿐, agent-bound API key를 관리하지 않는다. Agent account는 owner role을 받을 수 없다.
 
 Agent caller는 이 category를 호출할 수 없다. Agent는 `/api/v1/me`로 자기 identity를 확인하고, workspace owner는 Access category로 workspace별 agent access를 확인한다.
 
@@ -36,7 +36,15 @@ DELETE /api/v1/agents/{agent_id}
 
 Agent 삭제 side effect는 `docs/spec/lifecycle.md`의 Agent 삭제 정책을 따른다.
 
-### Create agent key
+### List agent API keys
+
+```http
+GET /api/v1/agents/{agent_id}/keys?limit=100&cursor=...
+```
+
+Caller가 생성한 active agent의 API key metadata를 반환한다. 평문 token은 반환하지 않는다.
+
+### Create agent API key
 
 ```http
 POST /api/v1/agents/{agent_id}/keys
@@ -50,13 +58,15 @@ POST /api/v1/agents/{agent_id}/keys
 }
 ```
 
-Agent key는 명시 호출로만 생성한다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
+Agent API key는 명시 호출로만 생성한다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. DB에는 통합 `api_keys` row로 저장하며, `account_id`는 대상 agent account다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 
 Live key는 다음 조건을 모두 만족한다.
 
 ```text
-agent_keys.revoked_at IS NULL
-agent_keys.expires_at IS NULL OR agent_keys.expires_at > now()
+api_keys.account_id = agent_id
+api_keys.revoked_at IS NULL
+api_keys.expires_at IS NULL OR api_keys.expires_at > now()
+api_keys.hash_key_id status IN ('current', 'verify_only')
 ```
 
 Branching 규칙:
@@ -70,10 +80,18 @@ expires_at omitted/future  -> 허용
 expires_at past or now     -> 400 invalid input
 ```
 
-### Revoke agent key
+### Rotate agent API key
+
+```http
+POST /api/v1/agents/{agent_id}/keys/{key_id}/rotate
+```
+
+같은 agent account에 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 정확히 한 번만 반환한다.
+
+### Revoke agent API key
 
 ```http
 DELETE /api/v1/agents/{agent_id}/keys/{key_id}
 ```
 
-대상 key에 `revoked_at`/`revoked_by`를 설정한다.
+대상 key에 `revoked_at`/`revoked_by`/`revoked_reason`을 설정한다.

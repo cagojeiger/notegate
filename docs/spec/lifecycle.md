@@ -39,20 +39,20 @@ account_encryption_keys
 
 규칙:
 
-- user 생성은 workspace, root node, workspace access, agent, agent key를 자동 생성하지 않는다.
+- user 생성은 workspace, root node, workspace access, agent, API key를 자동 생성하지 않는다.
 - 첫 workspace는 사용자가 REST/MCP의 workspace create를 명시적으로 호출해 만든다.
 - REST/MCP bearer 인증은 이미 생성된 local user만 resolve한다. Local user가 없으면 `not_registered`로 거부한다.
 
 ### User 재로그인
 
-기존 active local user가 다시 로그인하면 다음만 갱신한다.
+Active local user가 다시 로그인하면 다음만 갱신한다.
 
 ```text
 accounts display name ciphertext
 users email ciphertext/hash
 ```
 
-재로그인은 workspace, owner access, agent, agent key를 새로 만들지 않는다. 탈퇴로 anonymize된 user는 provider subject lookup 대상이 아니므로 이전 account를 재활성화하지 않고 새 local user 최초 생성 흐름을 탄다. provider subject가 남아 있는 inactive account가 발견되어도 자동 재활성화하지 않는다.
+재로그인은 workspace, owner access, agent, API key를 만들지 않는다. 탈퇴로 anonymize된 user는 provider subject lookup 대상이 아니므로 local user 최초 생성 흐름을 탄다. provider subject가 남아 있는 inactive account가 발견되어도 자동 재활성화하지 않는다.
 
 ### Workspace 생성
 
@@ -69,7 +69,7 @@ workspace_access(role='owner') for creator user
 규칙:
 
 - `workspaces.created_by`는 최초 생성자/audit attribution이다.
-- 현재 권한 source of truth는 `workspace_access`다.
+- 권한 source of truth는 `workspace_access`다.
 - creator의 owner access row는 생성 직후 active 상태여야 한다.
 - workspace 생성은 user creator account의 live workspace 한도 `20`을 넘을 수 없다.
 - root node 생성은 DB trigger로 보장할 수 있지만, lifecycle 관점에서는 workspace 생성 transaction의 일부다.
@@ -85,25 +85,28 @@ agents
 
 규칙:
 
-- agent key는 자동 생성하지 않는다.
+- API key는 자동 생성하지 않는다.
 - workspace access는 자동 생성하지 않는다.
 - agent는 workspace owner가 될 수 없다.
 - agent 생성자 user account당 active agent 한도는 `50`이다.
 
-### Agent key 생성
+### API key 생성
 
-Agent key는 agent 생성과 별도 명시 호출로만 만든다.
+API key는 user 또는 agent account에 연결되는 장기 credential이다. User caller만 key를 명시적으로 만들 수 있다.
 
 ```text
-agent_keys(token_hash only)
+api_keys(token_hash only)
 ```
 
 규칙:
 
-- 평문 token은 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다.
+- 평문 token은 생성/rotation 응답에서 정확히 한 번만 반환하고 저장하지 않는다.
+- user API key는 현재 user account 자신에게만 만들 수 있다.
+- agent API key는 caller가 생성한 active agent account에만 만들 수 있다.
 - key 생성은 workspace 권한을 변경하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
-- agent당 live key 한도는 `10`이다.
+- account당 live API key 한도는 `10`이다.
+- token hash는 current `api_key_hash_keys` secret으로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
 
 ### Workspace access grant/change
 
@@ -117,7 +120,7 @@ workspace_access insert/update
 
 - `owner` role은 active user account에만 부여할 수 있다.
 - agent account는 `viewer` 또는 `editor`만 받을 수 있다.
-- grant/change는 account, workspace, agent key를 새로 만들지 않는다.
+- grant/change는 account, workspace, API key를 새로 만들지 않는다.
 - 한 workspace의 active access row 한도는 owner row를 포함해 `20`이다.
 - owner 보호 규칙은 항상 적용한다.
 
@@ -163,7 +166,8 @@ accounts.deleted_at/deleted_by 설정
 users PII ciphertext/hash 제거
 account_encryption_keys.wrapped_dek 제거 및 destroyed_at 설정
 owned active agents deactivate
-owned live agent keys revoke
+owned live API keys revoke
+owned agents live API keys revoke
 workspace_access revoke 또는 workspace soft delete
 ```
 
@@ -181,20 +185,34 @@ Agent 삭제는 agent account의 deactivate/soft delete다.
 ```text
 accounts(kind='agent').is_active = false
 accounts.deleted_at/deleted_by 설정
-agent_keys revoke
+api_keys revoke
 workspace_access revoke
 ```
 
 `agents` row는 attribution 보존을 위해 일반 product action에서 hard delete하지 않는다.
 
-### Agent key revoke
+### API key revoke
 
 ```text
-agent_keys.revoked_at = now()
-agent_keys.revoked_by = caller
+api_keys.revoked_at = now()
+api_keys.revoked_by = caller
+api_keys.revoked_reason = reason
 ```
 
-revoke된 key는 인증에 사용할 수 없고 live key 한도 계산에서 제외한다.
+revoke된 key는 인증에 사용할 수 없고 live key 한도 계산에서 제외한다. User API key는 해당 user만 revoke할 수 있고, agent API key는 agent creator user만 revoke할 수 있다. Agent caller는 key를 만들거나 revoke할 수 없다.
+
+### API key rotation
+
+API key 자체 rotation은 token을 복호화하거나 재암호화하지 않는다. 같은 account에 new key를 만들고 old key를 같은 transaction에서 revoke한다.
+
+```text
+new api_keys(account_id = old.account_id, rotated_from_key_id = old.id)
+old api_keys.revoked_at = now()
+old api_keys.revoked_by = caller
+old api_keys.revoked_reason = 'rotated'
+```
+
+생성된 새 token은 rotation 응답에서 정확히 한 번만 반환한다. 정상적인 API key hash secret rotation은 `docs/spec/security.md`의 opportunistic rehash 정책을 따른다.
 
 ### Workspace access revoke
 
@@ -243,7 +261,8 @@ workspace당 root node 최대 1개
 live sibling name unique
 role enum 제한
 soft delete timestamp/deleted_by/purge_after 조합
-agent key token_hash unique
+api key token_hash unique
+api key hash key status enum
 ```
 
 ### Coordinate
@@ -253,7 +272,7 @@ Service layer는 다음 정책을 transaction으로 보장한다.
 ```text
 user 최초 생성 identity row
 workspace 생성 + root + owner access
-workspace/access/agent/key count limit
+workspace/access/agent/API key count limit
 owner revoke/downgrade 보호
 workspace/user/agent 삭제 side effect
 ```
@@ -280,6 +299,6 @@ document row와 node row 관계가 깨짐
 ```text
 root 없는 workspace     -> 명확하면 root 재생성, 아니면 quarantine/soft delete
 owner 없는 workspace    -> 명확한 active creator가 있으면 owner row 복구, 아니면 soft delete/quarantine
-inactive agent key      -> revoke
+inactive/compromised API key -> revoke
 inactive account access -> revoke
 ```
