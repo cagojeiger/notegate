@@ -42,7 +42,7 @@ OpenAPI에서 제외한다:
 - `/auth/*`는 redirect와 session cookie 발급 흐름이며 resource API가 아니다.
 - `/.well-known/*`는 OAuth discovery metadata다.
 - `/mcp`는 OpenAPI가 아니라 MCP tool schema로 정의한다.
-- `/health`, `/ready`는 운영용 system endpoint다.
+- `/health`, `/ready`는 운영용 system endpoint다. `/ready`는 DB 연결과 embedded migration 적용 상태를 확인한다.
 
 Swagger 샘플 호출 방법:
 

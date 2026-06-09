@@ -36,7 +36,7 @@ Health checks:
 
 ```sh
 curl localhost:9191/health   # liveness
-curl localhost:9191/ready    # readiness (pings the database)
+curl localhost:9191/ready    # readiness (database + applied migrations)
 ```
 
 Auth/MCP local defaults are configured in `.env.example`:

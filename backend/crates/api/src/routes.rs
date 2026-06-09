@@ -106,14 +106,13 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-/// Readiness: verify the database is reachable before reporting ready.
+/// Readiness: verify the database and embedded migrations before reporting ready.
 async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
-    sqlx::query("SELECT 1")
-        .execute(&state.db)
+    notegate_db::check_readiness(&state.db)
         .await
         .map_err(|error| {
-            tracing::error!(event = "ready.db_unreachable", %error);
-            ApiError::internal("database unreachable")
+            tracing::error!(event = "ready.failed", %error);
+            ApiError::internal("database not ready")
         })?;
 
     Ok(Json(HealthResponse { status: "ready" }))

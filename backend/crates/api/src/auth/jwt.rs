@@ -58,9 +58,17 @@ impl JwtAuthority {
             .authority
             .get_or_try_init(|| async {
                 let jwks_url = self.inner.jwks_url.clone().ok_or(AuthError::Internal)?;
+                tracing::info!(event = "jwks.initial_fetch.start");
                 let authority = Authority::new_from_url(jwks_url, self.inner.validator.clone())
                     .await
-                    .map_err(|_error| AuthError::Internal)?;
+                    .map_err(|error| {
+                        tracing::error!(event = "jwks.initial_fetch.failed", %error);
+                        AuthError::Internal
+                    })?;
+                tracing::info!(
+                    event = "jwks.initial_fetch.ok",
+                    refresh_interval_secs = self.inner.refresh_interval.as_secs(),
+                );
                 authority.spawn_refresh(self.inner.refresh_interval);
                 Ok(authority)
             })
@@ -73,10 +81,12 @@ impl JwtAuthority {
         match authority.verify_token::<JwtClaims>(&jwt, &ScopePolicy::allow_any()) {
             Ok(claims) => Ok(claims),
             Err(AuthorityError::UnknownKeyId) => {
-                authority
-                    .refresh()
-                    .await
-                    .map_err(|_error| AuthError::InvalidToken)?;
+                tracing::info!(event = "jwks.refresh.start", reason = "unknown_key_id");
+                authority.refresh().await.map_err(|error| {
+                    tracing::warn!(event = "jwks.refresh.failed", reason = "unknown_key_id", %error);
+                    AuthError::InvalidToken
+                })?;
+                tracing::info!(event = "jwks.refresh.ok", reason = "unknown_key_id");
                 authority
                     .verify_token::<JwtClaims>(&jwt, &ScopePolicy::allow_any())
                     .map_err(map_authority_error)

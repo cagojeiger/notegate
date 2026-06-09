@@ -102,7 +102,8 @@ db/workspaces         -> service/workspaces store
 db/access             -> service/access store
 db/files_repo         -> service/files + service/search store
 db/agent_repo         -> service/agents store, service/identity agent auth store
-db/postgres_pool      -> connection/migration/readiness primitive
+db/postgres_pool      -> connection primitive
+db/lib                -> migration/readiness primitive
 
 model/account
 model/user
@@ -128,7 +129,7 @@ api  ──calls──> service ──uses──> model/core
 - API layer는 파일/권한/workspace 업무 규칙을 직접 구현하지 않는다.
 - REST 응답에 표시할 account ref처럼 화면 출력용 enrichment는 API layer에서 조회할 수 있다.
   단, 권한 판단이나 lifecycle 변경은 service layer를 거친다.
-- System endpoint(`/ready`)는 dependency readiness 확인을 위해 DB ping을 직접 수행할 수 있다.
+- System endpoint(`/ready`)는 dependency readiness 확인을 위해 DB connectivity와 embedded migration 적용 상태를 확인한다.
 - Model layer는 persistence/API에 독립적인 데이터 타입을 담당한다.
 - Service layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
 - Service layer는 opaque pagination cursor 인코딩/디코딩과 command pagination 정책을 담당한다.

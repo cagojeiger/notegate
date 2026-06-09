@@ -48,3 +48,46 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
         .await
         .map_err(|e| Error::internal(format!("migration failed: {e}")))
 }
+
+/// Verify the database is usable by the API process.
+///
+/// This checks both connectivity and that every embedded migration has a
+/// successful row with the expected checksum. Startup already runs migrations;
+/// readiness repeats a cheap validation so load balancers do not route traffic
+/// to a process connected to the wrong or reset database.
+pub async fn check_readiness(pool: &PgPool) -> Result<()> {
+    sqlx::query("SELECT 1")
+        .execute(pool)
+        .await
+        .map_err(|e| Error::internal(format!("database ping failed: {e}")))?;
+
+    for migration in MIGRATOR.iter() {
+        let applied: Option<(Vec<u8>, bool)> =
+            sqlx::query_as("SELECT checksum, success FROM _sqlx_migrations WHERE version = $1")
+                .bind(migration.version)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| Error::internal(format!("migration readiness check failed: {e}")))?;
+
+        let Some((checksum, success)) = applied else {
+            return Err(Error::internal(format!(
+                "migration {} has not been applied",
+                migration.version
+            )));
+        };
+        if !success {
+            return Err(Error::internal(format!(
+                "migration {} was not successful",
+                migration.version
+            )));
+        }
+        if checksum.as_slice() != migration.checksum.as_ref() {
+            return Err(Error::internal(format!(
+                "migration {} checksum mismatch",
+                migration.version
+            )));
+        }
+    }
+
+    Ok(())
+}
