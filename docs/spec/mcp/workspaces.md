@@ -22,7 +22,7 @@ missing limit   -> 50
 limit < 1       -> 1
 limit > 100     -> 100
 invalid cursor  -> invalid params
-no workspaces   -> empty list; user caller는 workspaces_create를 사용할 수 있고, agent caller는 owner의 access grant가 필요하다
+no workspaces   -> empty list; user caller는 workspaces_create를 사용할 수 있고, agent caller는 lifecycle owner의 access grant가 필요하다
 ```
 
 Output:
@@ -40,7 +40,7 @@ Output:
 
 ## `workspaces_create`
 
-인증된 user caller가 소유하는 workspace를 생성한다. Agent caller는 workspace를 생성할 수 없다.
+인증된 user caller가 lifecycle owner가 되는 workspace를 생성한다. Agent caller는 workspace를 생성할 수 없다.
 
 Input:
 
@@ -51,10 +51,10 @@ Input:
 Branching:
 
 ```text
-user caller and owned workspaces < 20 -> create workspace + root node + owner access
+user caller and live workspaces < 20 -> workspace 생성 + root node 생성; owner role은 created_by에서 derive
 agent caller                          -> invalid request with data.kind=forbidden
 invalid name                          -> invalid params
-owned workspaces >= 20                -> conflict
+live workspaces >= 20                 -> conflict
 ```
 
 Output은 workspace summary 하나다.

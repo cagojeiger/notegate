@@ -15,7 +15,7 @@ User caller 출력:
 ```json
 {
   "account": {"id": "account-id", "kind": "user", "display_name": "Kang"},
-  "user": {"sub": "authgate-subject", "email": "user@example.com"},
+  "user": {"email": "user@example.com"},
   "capabilities": {
     "can_create_workspace": true,
     "can_manage_agents": true
@@ -49,4 +49,4 @@ agent account                          -> agent object 포함; can_create_worksp
 
 REST `GET /api/v1/me`와 MCP `me`는 같은 identity shape을 사용한다. Workspace-specific role은 `me`가 아니라 `workspaces_list`에서 확인한다.
 
-`can_create_workspace=true`는 caller가 user account로 workspace를 생성하고 owner가 될 수 있음을 의미한다. `can_manage_agents=true`는 caller가 user-only agent management endpoint로 agent list/create/delete와 key mint/revoke를 수행할 수 있음을 의미한다.
+`can_create_workspace=true`는 caller가 user account로 workspace를 생성하고 lifecycle owner가 될 수 있음을 의미한다. `can_manage_agents=true`는 caller가 user-only agent management endpoint로 agent list/create/delete와 key mint/revoke를 수행할 수 있음을 의미한다.

@@ -1,19 +1,20 @@
-# Files DB schema
+# 파일 DB 스키마
 
-notegate는 개인 Markdown 파일시스템을 Postgres에 저장한다. DB는 source of
-truth이며, REST와 MCP는 모두 이 구조 위에서 동작한다.
+notegate는 개인 Markdown 파일시스템을 Postgres에 저장한다. DB는 정본 저장소이며,
+REST와 MCP는 모두 이 구조 위에서 동작한다.
 
 ## 테이블 개요
 
-Canonical tables:
+정본 테이블:
 
 ```text
-accounts          user/agent 공통 actor identity
+accounts          user/agent 공통 행위자 identity
 users             authgate OAuth 사용자 상세
 agents            AI agent 상세
 agent_keys        agent API key credential hash
+account_encryption_keys account별 PII DEK wrapping metadata
 workspaces        개인 노트 workspace 경계
-workspace_access  workspace 단위 viewer/editor/owner 권한
+workspace_access  workspace 내부 파일 접근용 viewer/editor grant
 nodes             folder/document 공통 tree node
 documents         markdown document 본문
 ```
@@ -29,14 +30,15 @@ file/folder/node 단위 ACL은 도입하지 않는다.
 
 ```sql
 CREATE TABLE accounts (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind         TEXT NOT NULL CHECK (kind IN ('user', 'agent')),
-    display_name TEXT NOT NULL DEFAULT '',
-    is_active    BOOLEAN NOT NULL DEFAULT true,
-    deleted_at   TIMESTAMPTZ,
-    deleted_by   UUID REFERENCES accounts(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind                    TEXT NOT NULL CHECK (kind IN ('user', 'agent')),
+    display_name_ciphertext BYTEA,
+    display_name_nonce      BYTEA,
+    is_active               BOOLEAN NOT NULL DEFAULT true,
+    deleted_at              TIMESTAMPTZ,
+    deleted_by              UUID REFERENCES accounts(id),
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CHECK (
         (deleted_at IS NULL AND deleted_by IS NULL)
@@ -52,6 +54,7 @@ CREATE TABLE accounts (
 - API key / agent key는 `kind='agent'` account다.
 - 일반 product action에서 account hard delete는 하지 않는다.
 - user 탈퇴나 agent 삭제는 `accounts.is_active=false`, `deleted_at`, `deleted_by`로 deactivate/soft delete한다.
+- PII 원문은 평문으로 저장하지 않는다. 표시 이름과 사용자 상세 암호화 정책은 `docs/spec/security.md`를 따른다.
 - `created_by`, `updated_by`, `deleted_by` 계열 컬럼은 모두 `accounts.id`를 참조한다.
 
 ## users
@@ -61,17 +64,48 @@ CREATE TABLE accounts (
 
 ```sql
 CREATE TABLE users (
-    id            UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-    sub           TEXT UNIQUE,
-    email         TEXT,
-    anonymized_at TIMESTAMPTZ
+    id                        UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    provider_sub_hash          TEXT UNIQUE,
+    provider_sub_hash_version  INTEGER NOT NULL DEFAULT 1,
+    email_ciphertext           BYTEA,
+    email_nonce                BYTEA,
+    email_hash                 TEXT,
+    email_hash_version         INTEGER,
+    anonymized_at              TIMESTAMPTZ
 );
 ```
 
 규칙:
 
-- user 탈퇴는 account deactivate와 user PII redaction/anonymization으로 처리한다.
+- user 탈퇴는 account deactivate와 user PII redaction/anonymization으로 처리한다. 상세 정책은 `docs/spec/security.md`를 따른다.
+- OAuth provider subject 원문은 저장하지 않고 provider/sub 기반 HMAC hash로 로그인 매칭한다.
+- email 원문은 ciphertext로 저장하고, login/unique lookup이 필요하면 normalized email HMAC hash를 별도로 사용한다.
 - 과거 `created_by`, `updated_by`, `deleted_by` 참조 보존을 위해 일반 product action으로 user row를 물리 삭제하지 않는다.
+
+## account_encryption_keys
+
+`account_encryption_keys`는 account별 PII data encryption key(DEK)를 외부 KMS key
+encryption key(KEK)로 wrap한 metadata를 저장한다. 구체적인 PII 분류, 암호화 방식,
+rotation, crypto shredding 정책은 `docs/spec/security.md`를 따른다.
+
+```sql
+CREATE TABLE account_encryption_keys (
+    account_id    UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    wrapped_dek   BYTEA NOT NULL,
+    kek_id        TEXT NOT NULL,
+    kek_version   TEXT,
+    algorithm     TEXT NOT NULL DEFAULT 'AES-256-GCM',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rewrapped_at  TIMESTAMPTZ,
+    destroyed_at  TIMESTAMPTZ
+);
+```
+
+규칙:
+
+- PII 원문 암호화와 HMAC lookup 정책은 `docs/spec/security.md`를 따른다.
+- `destroyed_at`이 설정된 account encryption key는 PII 복호화에 사용할 수 없다.
+- `wrapped_dek`, KMS `kek_id`, `kek_version`은 plaintext PII가 아니지만 보안 민감 정보로 취급한다.
 
 ## agents
 
@@ -137,30 +171,44 @@ workspace는 개인 노트 파일트리의 격리 경계다. workspace 소유와
 
 ```sql
 CREATE TABLE workspaces (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_account_id UUID NOT NULL REFERENCES accounts(id),
-    name             TEXT NOT NULL,
-    created_by       UUID NOT NULL REFERENCES accounts(id),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT NOT NULL,
+    created_by  UUID NOT NULL REFERENCES accounts(id),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at  TIMESTAMPTZ,
+    deleted_by  UUID REFERENCES accounts(id),
+    purge_after TIMESTAMPTZ,
 
-    UNIQUE (owner_account_id, name),
-    CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$')
+    CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'),
+    CHECK (
+        (deleted_at IS NULL AND deleted_by IS NULL AND purge_after IS NULL)
+        OR
+        (deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND purge_after IS NOT NULL)
+    )
 );
+
+CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
+    ON workspaces(created_by, name)
+    WHERE deleted_at IS NULL;
 ```
 
 규칙:
 
 - REST 클라이언트는 `workspace_id`를 URL에 명시할 수 있다. `workspace_id`는 secret이 아니다.
-- 서버는 인증된 account와 `workspace_access`로 workspace 접근 권한을 검증한다.
+- workspace 생성은 user account만 가능하다. agent account는 workspace를 생성할 수 없다.
+- `workspaces.created_by`는 workspace 생성자이자 영구 lifecycle owner다. owner 이전은 지원하지 않는다.
+- workspace rename/delete/access 관리는 `created_by` user만 수행할 수 있다. agent는 grant를 받아도 lifecycle operation을 수행할 수 없다.
+- 서버는 live workspace(`deleted_at IS NULL`)와 인증된 account의 effective role로 workspace 접근 권한을 검증한다.
 - MCP/CLI path API는 요청 context에서 workspace를 resolve한 뒤 파일 path를 해석한다.
 - workspace `name`은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이다. `/`, `:`, 공백은 허용하지 않는다.
-- `(owner_account_id, name)`은 unique다. user owner 자신의 workspace는 이름만으로 안정적으로 선택할 수 있다.
-- agent는 여러 user owner의 workspace를 공유받을 수 있으므로 workspace name은 global unique가 아니다.
-- user owner account가 소유할 수 있는 workspace는 최대 `20`개다. workspace 생성 transaction에서 검사한다.
-- workspace 생성자인 user account는 `workspace_access.role = 'owner'`를 자동으로 받는다.
+- live workspace 이름은 `(created_by, name)` 기준으로 unique다. soft-deleted workspace 이름은 재사용할 수 있다.
+- agent는 여러 user creator의 workspace를 공유받을 수 있으므로 workspace name은 global unique가 아니다.
+- user creator account가 소유할 수 있는 live workspace는 최대 `20`개다. workspace 생성 transaction에서 검사한다.
+- workspace 생성 시 `workspace_access` row를 만들지 않는다. owner 권한은 `workspaces.created_by`에서 derive한다.
 - workspace가 생성되면 DB trigger가 canonical root node `/`를 같은 workspace에 만든다.
-- workspace 삭제는 일반 owner operation이며 해당 workspace의 access row, node, document 전체 삭제를 의미한다.
+- workspace 삭제는 soft delete다. `deleted_at`, `deleted_by`, `purge_after`만 설정하고 내부 node/document/access row는 즉시 갱신하지 않는다.
+- 모든 workspace/list/file/search/access 조회는 live workspace만 대상으로 한다. `purge_after`가 지난 workspace는 background purge가 hard delete하고, 이때 access/node/document는 FK cascade로 제거된다.
 
 ## workspace_access
 
@@ -171,7 +219,7 @@ CREATE TABLE workspaces (
 CREATE TABLE workspace_access (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    role         TEXT NOT NULL CHECK (role IN ('viewer', 'editor', 'owner')),
+    role         TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
     granted_by   UUID REFERENCES accounts(id),
     granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at   TIMESTAMPTZ,
@@ -184,20 +232,25 @@ CREATE TABLE workspace_access (
 역할:
 
 ```text
-viewer = list/stat/read/find/grep
-editor = viewer + write/patch/mkdir/touch/move/delete
-owner  = editor + workspace access management
+viewer = read
+editor = read + write
+
+read  = ls/stat/read/find/grep
+write = mkdir/touch/write/patch/mv/rm
 ```
+
+`workspace_access`에는 owner role을 저장하지 않는다. Workspace lifecycle owner는
+`workspaces.created_by`에서 derive한다.
 
 성능 규칙:
 
-- 요청 시작 시 `workspace_access`로 workspace 권한을 확인한다.
-- 파일 목록/검색/읽기 쿼리는 권한 join 없이 `workspace_id` 조건으로 실행한다.
+- 요청 시작 시 live workspace(`workspaces.deleted_at IS NULL`)와 effective role을 확인한다.
+- caller가 `workspaces.created_by`인 active user이면 effective role은 `owner`다.
+- 그 외 caller는 `workspace_access`의 live viewer/editor grant로 effective role을 계산한다.
+- 파일 목록/검색/읽기 쿼리는 권한 확인 이후 `workspace_id` 조건으로 실행한다.
 - `revoked_at`이 있는 access row는 권한으로 인정하지 않는다.
 - `accounts.is_active=false`이거나 `accounts.deleted_at IS NOT NULL`인 account는 live access로 인정하지 않는다.
-- 한 workspace의 active access account는 최대 `20`개다. 활성 account의 revoke되지 않은 access만 계산하고 grant transaction에서 검사한다.
-- `owner` role은 user account에만 부여할 수 있다. agent account에는 `viewer` 또는 `editor`만 부여할 수 있다.
-- 마지막 owner 보호 규칙도 활성 user account의 revoke되지 않은 owner access만 live owner로 계산한다.
+- 한 workspace의 active access account는 최대 `20`개다. implicit owner는 `workspace_access` row가 아니므로 이 제한에 포함하지 않는다.
 - `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
 
 Caller의 live workspace 조회 보조 index:

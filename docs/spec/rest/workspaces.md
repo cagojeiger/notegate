@@ -8,7 +8,7 @@
 GET /api/v1/workspaces?limit=50&cursor=...
 ```
 
-호출자가 live access를 가진 workspace 목록을 반환한다. Default limit은 `50`, max limit은 `100`이다.
+호출자가 접근 가능한 live workspace 목록을 반환한다. Default limit은 `50`, max limit은 `100`이다.
 
 ### Create workspace
 
@@ -22,7 +22,7 @@ POST /api/v1/workspaces
 }
 ```
 
-User caller만 workspace를 생성할 수 있다. 생성된 workspace는 caller user account가 소유하고, 생성자에게 `owner` access를 부여하며, canonical root node `/`를 만든다. Agent caller의 생성 요청은 `403 forbidden`으로 거부한다. 단일/default workspace 제한은 없다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다. User owner account는 최대 `20`개의 active workspace를 소유할 수 있다.
+User caller만 workspace를 생성할 수 있다. 생성된 workspace의 `created_by` user가 영구 lifecycle owner이며, 별도 `workspace_access` owner row는 만들지 않는다. Agent caller의 생성 요청은 `403 forbidden`으로 거부한다. 단일/default workspace 제한은 없다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다. User creator account는 최대 `20`개의 live workspace를 소유할 수 있다.
 
 ### Get workspace
 
@@ -44,7 +44,7 @@ PATCH /api/v1/workspaces/{workspace_id}
 }
 ```
 
-`owner` 권한이 필요하다.
+Lifecycle owner 권한이 필요하다.
 
 ### Delete workspace
 
@@ -52,4 +52,4 @@ PATCH /api/v1/workspaces/{workspace_id}
 DELETE /api/v1/workspaces/{workspace_id}
 ```
 
-`owner` 권한이 필요하다. Workspace 삭제는 정상 지원되는 작업이며 workspace boundary, access row, node, document를 DB cascade로 삭제한다.
+Lifecycle owner 권한이 필요하다. Workspace 삭제는 soft delete이며 `deleted_at`, `deleted_by`, `purge_after`를 설정한다. 내부 access/node/document row는 즉시 갱신하지 않고, `purge_after` 이후 background purge가 hard delete할 때 DB cascade로 제거한다.

@@ -89,9 +89,12 @@ client-supplied caller id         -> ignored; caller comes from auth
 Contract:
 
 ```text
-viewer = list/stat/read/find/grep
-editor = viewer + write/patch/mkdir/touch/move/delete
-owner  = editor + workspace access management
+viewer = read
+editor = read + write
+owner  = derived lifecycle owner + full file access + workspace access management
+
+read  = list/stat/read/find/grep
+write = mkdir/touch/write/patch/move/delete
 ```
 
 Branching:

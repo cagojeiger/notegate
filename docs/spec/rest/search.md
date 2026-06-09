@@ -1,8 +1,8 @@
 # REST Search
 
-Search는 workspace-scoped다. Authorization은 요청 시작 시 live access 기준으로 한 번 검증하고, 검색 쿼리는 이후 `workspace_id`로 필터링하며 삭제된 node를 제외한다.
+Search는 workspace 범위 API다. Authorization은 요청 시작 시 live workspace와 effective role 기준으로 한 번 검증하고, 검색 쿼리는 이후 `workspace_id`로 필터링하며 삭제된 node를 제외한다.
 
-The `path` request field is a scope path, not a path substring query. A folder scope searches that folder subtree. A document scope searches that document only. An unresolved scope path returns `404 not_found`.
+`path` request field는 path substring query가 아니라 검색 scope path다. Folder scope는 해당 folder subtree를 검색하고, document scope는 해당 document만 검색한다. Resolve되지 않는 scope path는 `404 not_found`를 반환한다.
 
 ## Find nodes
 

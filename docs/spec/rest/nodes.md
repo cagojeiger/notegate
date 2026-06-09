@@ -28,7 +28,7 @@ Returns node metadata. Useful for refresh after optimistic UI updates. The `path
 GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}/children?limit=100&cursor=...
 ```
 
-Rules:
+규칙:
 
 - `{node_id}` must be a folder.
 - Only direct children are returned.
@@ -58,7 +58,7 @@ POST /api/v1/workspaces/{workspace_id}/nodes
 }
 ```
 
-Rules:
+규칙:
 
 - `kind='folder'` ignores `content_md`.
 - Node name must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; `/`, `:`, spaces, control characters, `.`, and `..` are rejected.
@@ -105,7 +105,7 @@ POST /api/v1/workspaces/{workspace_id}/nodes/{node_id}/move
 }
 ```
 
-Rules:
+규칙:
 
 - Root move is rejected.
 - Moving a folder into itself or descendants is rejected.
@@ -123,11 +123,11 @@ Response is a `Node output`.
 DELETE /api/v1/workspaces/{workspace_id}/nodes/{node_id}?recursive=true
 ```
 
-Rules:
+규칙:
 
-- Root delete is rejected.
-- Document delete does not require `recursive=true`.
-- Folder delete requires `recursive=true`.
-- Delete is soft delete on `nodes`; deleted nodes disappear from normal list/search/resolve.
-- Deleted nodes are not recoverable through the current REST contract.
-- Deleted nodes are retained until `purge_after`; after that an internal purge job may hard-delete them.
+- Root 삭제는 거부한다.
+- Document 삭제는 `recursive=true`를 요구하지 않는다.
+- Folder 삭제는 `recursive=true`가 필요하다.
+- Delete는 `nodes` soft delete다. 삭제된 node는 일반 list/search/resolve 결과에서 사라진다.
+- 삭제된 node는 현재 REST 계약으로 복구할 수 없다.
+- 삭제된 node는 `purge_after`까지 보관된다. 이후 내부 purge job이 hard delete할 수 있다.
