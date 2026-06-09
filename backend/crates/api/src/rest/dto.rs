@@ -171,10 +171,7 @@ pub fn parse_kind(value: &str) -> Result<NodeKind, crate::error::ApiError> {
 
 /// Parse a `role` body string into a [`Role`], rejecting unknowns.
 pub fn parse_role(value: &str) -> Result<Role, crate::error::ApiError> {
-    match Role::parse(value) {
-        Some(role @ (Role::Viewer | Role::Editor)) => Ok(role),
-        Some(Role::Owner) | None => Err(crate::error::ApiError::invalid_field(
-            "role must be 'viewer' or 'editor'",
-        )),
-    }
+    Role::parse(value).ok_or_else(|| {
+        crate::error::ApiError::invalid_field("role must be 'owner', 'editor', or 'viewer'")
+    })
 }

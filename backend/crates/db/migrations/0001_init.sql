@@ -115,7 +115,7 @@ CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
 CREATE TABLE workspace_access (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('viewer', 'editor')),
+    role TEXT NOT NULL CHECK (role IN ('owner', 'viewer', 'editor')),
     granted_by UUID REFERENCES accounts(id),
     granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at TIMESTAMPTZ,
@@ -123,6 +123,9 @@ CREATE TABLE workspace_access (
     PRIMARY KEY (workspace_id, account_id)
 );
 CREATE INDEX workspace_access_account_idx ON workspace_access(account_id) WHERE revoked_at IS NULL;
+CREATE INDEX workspace_access_owner_active_idx
+    ON workspace_access(workspace_id, account_id)
+    WHERE revoked_at IS NULL AND role = 'owner';
 
 -- nodes: the canonical tree (parent_id + name). NO stored path.
 CREATE TABLE nodes (

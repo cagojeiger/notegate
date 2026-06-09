@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// A workspace: a named tree whose lifecycle owner is `created_by`.
+/// A workspace: a named tree whose permissions live in `workspace_access`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Workspace {
     pub id: Uuid,
@@ -25,7 +25,7 @@ pub enum Role {
     Viewer,
     /// Read-write: viewer plus mutations.
     Editor,
-    /// Effective full control derived from `workspaces.created_by`; never stored in `workspace_access`.
+    /// Full control stored as an explicit `workspace_access` row.
     Owner,
 }
 
