@@ -16,7 +16,7 @@ notegate/
 │  ├─ model/               # shared domain data types
 │  └─ core/                # config, limits, validation, shared error type
 ├─ backend/Dockerfile      # cargo-chef multi-stage, non-root Debian runtime
-└─ docker-compose.yml      # postgres + api
+└─ docker-compose.yml      # postgres + scaled api + proxy
 ```
 
 ## Local development
@@ -65,9 +65,9 @@ cargo test
 docker compose up --build
 ```
 
-Brings up Postgres + two API instances against the same database:
+Brings up Postgres + one scaled API service behind a local nginx proxy:
 
-- `api-1` -> `http://localhost:9191`
-- `api-2` -> `http://localhost:9192`
+- `proxy` -> `http://localhost:9191`
+- `api` -> `scale: 2`, exposed only inside the compose network
 
-Both instances run the purge worker, but Postgres advisory locking guarantees only one active purge transaction per database. Browser OAuth uses the canonical `http://localhost:9191` public URL; `9192` is mainly for horizontal-scaling/readiness checks.
+Both API replicas use the same `notegate-api` image and run the purge worker. Postgres advisory locking guarantees only one active purge transaction per database. Browser OAuth and MCP use the canonical `http://localhost:9191` public URL through the proxy.
