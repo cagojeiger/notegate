@@ -1,3 +1,43 @@
+x-api-environment: &api-environment
+  NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+  NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
+  NOTEGATE_DB_MAX_CONNECTIONS: 10
+  LOG_FORMAT: json
+  NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
+  NOTEGATE_PUBLIC_URL: http://localhost:9191
+  NOTEGATE_OAUTH_CLIENT_ID: notegate-web
+  NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
+  NOTEGATE_OAUTH_REDIRECT_URL: http://localhost:9191/auth/callback
+  NOTEGATE_RESOURCE_URL: http://localhost:9191/mcp
+  NOTEGATE_JWKS_CACHE_TTL_SECS: 300
+  NOTEGATE_BROWSER_SESSION_SECRET: dev-notegate-browser-session-secret-32b
+  NOTEGATE_PII_MASTER_KEY: dev-notegate-pii-master-key-32-bytes
+  NOTEGATE_PII_HASH_PEPPER: dev-notegate-pii-hash-pepper-32-bytes
+  NOTEGATE_BROWSER_SESSION_TTL_SECS: 3600
+  NOTEGATE_OPENAPI_ENABLED: "false"
+  # Capacity caps default to spec values. Uncomment small values for cheap
+  # local/E2E boundary tests.
+  # NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN: "3"
+  # NOTEGATE_LIMITS__WORKSPACE_MAX_NODES: "5"
+  # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS: "2"
+  # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES: "1024"
+
+x-api-service: &api-service
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  environment:
+    <<: *api-environment
+  depends_on:
+    postgres:
+      condition: service_healthy
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -16,41 +56,15 @@ services:
       retries: 5
     restart: unless-stopped
 
-  api:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    environment:
-      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
-      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
-      NOTEGATE_DB_MAX_CONNECTIONS: 10
-      LOG_FORMAT: json
-      NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
-      NOTEGATE_PUBLIC_URL: http://localhost:9191
-      NOTEGATE_OAUTH_CLIENT_ID: notegate-web
-      NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
-      NOTEGATE_OAUTH_REDIRECT_URL: http://localhost:9191/callback
-      NOTEGATE_RESOURCE_URL: http://localhost:9191/mcp
-      NOTEGATE_JWKS_CACHE_TTL_SECS: 300
-      NOTEGATE_BROWSER_SESSION_SECRET: dev-notegate-browser-session-secret-32b
-      NOTEGATE_BROWSER_SESSION_TTL_SECS: 3600
-      # Capacity caps default to spec values. Uncomment small values for cheap
-      # local/E2E boundary tests.
-      # NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN: "3"
-      # NOTEGATE_LIMITS__WORKSPACE_MAX_NODES: "5"
-      # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS: "2"
-      # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES: "1024"
+  api-1:
+    <<: *api-service
     ports:
       - "9191:9191"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
+
+  api-2:
+    <<: *api-service
+    ports:
+      - "9192:9191"
 
 volumes:
   pgdata:

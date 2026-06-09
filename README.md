@@ -65,5 +65,9 @@ cargo test
 docker compose up --build
 ```
 
-Brings up Postgres + the API. The API listens on `http://localhost:9191`
-(`/health`, `/ready`, `/auth/login`, `/api/*`, `/mcp`).
+Brings up Postgres + two API instances against the same database:
+
+- `api-1` -> `http://localhost:9191`
+- `api-2` -> `http://localhost:9192`
+
+Both instances run the purge worker, but Postgres advisory locking guarantees only one active purge transaction per database. Browser OAuth uses the canonical `http://localhost:9191` public URL; `9192` is mainly for horizontal-scaling/readiness checks.
