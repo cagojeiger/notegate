@@ -1,10 +1,9 @@
 //! Agent lifecycle: create / delete agents and their keys.
 //!
 //! POLICY: only `kind='user'` callers may manage agents or keys; an agent caller
-//! is forbidden. Active-agent and live-key counts are enforced against
-//! `core::limits` before each insert; the database repo repeats these caps
-//! inside transactions for real persistence. The plaintext key token is
-//! generated here, hashed with SHA-256, and only the hash is persisted.
+//! is forbidden. Active-agent and live-key counts are enforced before insert.
+//! Plaintext API key tokens are HMAC-hashed with the LOOKUP root subkey; only
+//! the hash is persisted.
 
 use chrono::Utc;
 use notegate_core::{limits, security::PiiCrypto};

@@ -63,10 +63,3 @@ pub struct AgentPage {
     pub has_more: bool,
     pub next_cursor: Option<String>,
 }
-
-/// A freshly minted agent key, including the one-time plaintext token.
-#[derive(Debug, Clone)]
-pub struct MintedAgentKey {
-    pub key: AgentKey,
-    pub token: String,
-}

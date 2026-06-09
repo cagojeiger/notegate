@@ -17,12 +17,10 @@ use common::{TestDb, insert_user_account};
 use notegate_core::{Error, limits};
 use notegate_db::AgentRepo;
 use notegate_model::{CreateAgent, CreateAgentKey};
-use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
-fn hash_token(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    format!("{digest:x}")
+fn fake_token_hash(token: &str) -> String {
+    format!("hash-{token}")
 }
 
 async fn make_agent(repo: &AgentRepo, creator: Uuid, name: &str) -> Uuid {
@@ -119,7 +117,7 @@ async fn create_key_stores_hash_only() -> Result<(), Box<dyn std::error::Error>>
     let agent_id = make_agent(&repo, creator, "bot").await;
 
     let plaintext = "super-secret-token";
-    let token_hash = hash_token(plaintext);
+    let token_hash = fake_token_hash(plaintext);
     let key = repo
         .insert_agent_key(
             &CreateAgentKey {
@@ -163,7 +161,7 @@ async fn create_key_rejects_non_empty_scopes() -> Result<(), Box<dyn std::error:
                 scopes: vec!["files:read".to_owned()],
                 expires_at: None,
             },
-            &hash_token("scoped-token"),
+            &fake_token_hash("scoped-token"),
             creator,
         )
         .await
@@ -194,7 +192,7 @@ async fn create_key_requires_owned_active_agent() -> Result<(), Box<dyn std::err
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token("wrong-owner-token"),
+            &fake_token_hash("wrong-owner-token"),
             other,
         )
         .await
@@ -210,7 +208,7 @@ async fn create_key_requires_owned_active_agent() -> Result<(), Box<dyn std::err
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token("inactive-token"),
+            &fake_token_hash("inactive-token"),
             creator,
         )
         .await
@@ -238,13 +236,13 @@ async fn auth_accepts_valid_key() -> Result<(), Box<dyn std::error::Error>> {
             scopes: Vec::new(),
             expires_at: None,
         },
-        &hash_token(plaintext),
+        &fake_token_hash(plaintext),
         creator,
     )
     .await?;
 
     let (account, agent) = repo
-        .find_agent_by_key_hash(&hash_token(plaintext))
+        .find_agent_by_key_hash(&fake_token_hash(plaintext))
         .await?
         .ok_or("valid key authenticates")?;
     assert_eq!(account.id, agent_id);
@@ -254,7 +252,7 @@ async fn auth_accepts_valid_key() -> Result<(), Box<dyn std::error::Error>> {
     // last_used_at is recorded on successful auth.
     let last_used: Option<chrono::DateTime<chrono::Utc>> =
         sqlx::query_scalar("SELECT last_used_at FROM api_keys WHERE token_hash = $1")
-            .bind(hash_token(plaintext))
+            .bind(fake_token_hash(plaintext))
             .fetch_one(&db.pool)
             .await?;
     assert!(last_used.is_some());
@@ -281,13 +279,15 @@ async fn auth_rejects_revoked_key() -> Result<(), Box<dyn std::error::Error>> {
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token(plaintext),
+            &fake_token_hash(plaintext),
             creator,
         )
         .await?;
     repo.revoke_key(agent_id, key.id, creator).await?;
 
-    let resolved = repo.find_agent_by_key_hash(&hash_token(plaintext)).await?;
+    let resolved = repo
+        .find_agent_by_key_hash(&fake_token_hash(plaintext))
+        .await?;
     assert!(resolved.is_none(), "revoked key must not authenticate");
 
     db.cleanup().await;
@@ -312,12 +312,14 @@ async fn auth_rejects_expired_key() -> Result<(), Box<dyn std::error::Error>> {
             scopes: Vec::new(),
             expires_at: Some(past),
         },
-        &hash_token(plaintext),
+        &fake_token_hash(plaintext),
         creator,
     )
     .await?;
 
-    let resolved = repo.find_agent_by_key_hash(&hash_token(plaintext)).await?;
+    let resolved = repo
+        .find_agent_by_key_hash(&fake_token_hash(plaintext))
+        .await?;
     assert!(resolved.is_none(), "expired key must not authenticate");
 
     db.cleanup().await;
@@ -341,7 +343,7 @@ async fn auth_rejects_inactive_agent_account() -> Result<(), Box<dyn std::error:
             scopes: Vec::new(),
             expires_at: None,
         },
-        &hash_token(plaintext),
+        &fake_token_hash(plaintext),
         creator,
     )
     .await?;
@@ -349,7 +351,9 @@ async fn auth_rejects_inactive_agent_account() -> Result<(), Box<dyn std::error:
     // Deactivate the agent account; the (still non-revoked) key must stop working.
     repo.delete_agent(agent_id, creator).await?;
 
-    let resolved = repo.find_agent_by_key_hash(&hash_token(plaintext)).await?;
+    let resolved = repo
+        .find_agent_by_key_hash(&fake_token_hash(plaintext))
+        .await?;
     assert!(resolved.is_none(), "inactive agent must not authenticate");
 
     db.cleanup().await;
@@ -399,7 +403,7 @@ async fn count_live_keys_excludes_revoked_and_expired() -> Result<(), Box<dyn st
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token("t1"),
+            &fake_token_hash("t1"),
             creator,
         )
         .await?;
@@ -410,7 +414,7 @@ async fn count_live_keys_excludes_revoked_and_expired() -> Result<(), Box<dyn st
             scopes: Vec::new(),
             expires_at: None,
         },
-        &hash_token("t2"),
+        &fake_token_hash("t2"),
         creator,
     )
     .await?;
@@ -421,7 +425,7 @@ async fn count_live_keys_excludes_revoked_and_expired() -> Result<(), Box<dyn st
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)),
         },
-        &hash_token("expired"),
+        &fake_token_hash("expired"),
         creator,
     )
     .await?;
@@ -451,7 +455,7 @@ async fn create_key_enforces_live_key_cap_in_repo() -> Result<(), Box<dyn std::e
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token(&format!("token-{index}")),
+            &fake_token_hash(&format!("token-{index}")),
             creator,
         )
         .await?;
@@ -465,7 +469,7 @@ async fn create_key_enforces_live_key_cap_in_repo() -> Result<(), Box<dyn std::e
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token("overflow-token"),
+            &fake_token_hash("overflow-token"),
             creator,
         )
         .await
@@ -493,7 +497,7 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token("delete-token"),
+            &fake_token_hash("delete-token"),
             owner,
         )
         .await?;
@@ -560,7 +564,7 @@ async fn revoke_key_is_scoped_to_agent_id() -> Result<(), Box<dyn std::error::Er
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            &hash_token("b-token"),
+            &fake_token_hash("b-token"),
             creator,
         )
         .await?;

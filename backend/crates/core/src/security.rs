@@ -10,8 +10,6 @@ use aes_gcm::aead::{Aead, AeadCore as _, KeyInit, OsRng as AeadOsRng, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use rand::RngCore as _;
-use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -216,42 +214,6 @@ impl PiiCrypto {
         String::from_utf8(bytes).map_err(|_error| Error::internal("invalid encrypted utf8"))
     }
 
-    /// Temporary compatibility for the current DB layer until the DEK schema is removed.
-    pub fn generate_dek(&self) -> [u8; KEY_LEN] {
-        let mut dek = [0_u8; KEY_LEN];
-        OsRng.fill_bytes(&mut dek);
-        dek
-    }
-
-    /// Temporary compatibility for the current DB layer until the DEK schema is removed.
-    pub fn wrap_dek(&self, dek: &[u8; KEY_LEN]) -> Result<Vec<u8>> {
-        let encrypted = encrypt_with_key(&self.pii_field_key, dek)?;
-        Ok(join_nonce_ciphertext(encrypted))
-    }
-
-    /// Temporary compatibility for the current DB layer until the DEK schema is removed.
-    pub fn unwrap_dek(&self, wrapped: &[u8]) -> Result<[u8; KEY_LEN]> {
-        let encrypted = split_nonce_ciphertext(wrapped)?;
-        let bytes = decrypt_with_key(&self.pii_field_key, &encrypted)?;
-        if bytes.len() != KEY_LEN {
-            return Err(Error::internal("invalid wrapped DEK length"));
-        }
-        let mut dek = [0_u8; KEY_LEN];
-        dek.copy_from_slice(&bytes);
-        Ok(dek)
-    }
-
-    /// Temporary compatibility for the current DB layer until PII AAD is wired through.
-    pub fn encrypt_string(&self, dek: &[u8; KEY_LEN], plaintext: &str) -> Result<EncryptedField> {
-        encrypt_with_key(dek, plaintext.as_bytes())
-    }
-
-    /// Temporary compatibility for the current DB layer until PII AAD is wired through.
-    pub fn decrypt_string(&self, dek: &[u8; KEY_LEN], field: &EncryptedField) -> Result<String> {
-        let bytes = decrypt_with_key(dek, field)?;
-        String::from_utf8(bytes).map_err(|_error| Error::internal("invalid encrypted utf8"))
-    }
-
     pub fn provider_sub_hash(&self, provider: &str, subject: &str) -> Result<String> {
         hmac_hex(
             &self.provider_sub_hmac_key,
@@ -287,10 +249,6 @@ fn hkdf_key(root: &[u8], label: &[u8]) -> [u8; KEY_LEN] {
     out
 }
 
-fn encrypt_with_key(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<EncryptedField> {
-    encrypt_with_key_and_aad(key, plaintext, &[])
-}
-
 fn encrypt_with_key_and_aad(
     key: &[u8; KEY_LEN],
     plaintext: &[u8],
@@ -314,10 +272,6 @@ fn encrypt_with_key_and_aad(
     })
 }
 
-fn decrypt_with_key(key: &[u8; KEY_LEN], field: &EncryptedField) -> Result<Vec<u8>> {
-    decrypt_with_key_and_aad(key, field, &[])
-}
-
 fn decrypt_with_key_and_aad(
     key: &[u8; KEY_LEN],
     field: &EncryptedField,
@@ -337,24 +291,6 @@ fn decrypt_with_key_and_aad(
             },
         )
         .map_err(|_error| Error::internal("PII decryption failed"))
-}
-
-fn join_nonce_ciphertext(field: EncryptedField) -> Vec<u8> {
-    let mut out = Vec::with_capacity(NONCE_LEN + field.ciphertext.len());
-    out.extend_from_slice(&field.nonce);
-    out.extend_from_slice(&field.ciphertext);
-    out
-}
-
-fn split_nonce_ciphertext(value: &[u8]) -> Result<EncryptedField> {
-    if value.len() <= NONCE_LEN {
-        return Err(Error::internal("invalid wrapped DEK"));
-    }
-    let (nonce, ciphertext) = value.split_at(NONCE_LEN);
-    Ok(EncryptedField {
-        nonce: nonce.to_vec(),
-        ciphertext: ciphertext.to_vec(),
-    })
 }
 
 fn hmac_hex(key: &[u8; KEY_LEN], value: &str) -> Result<String> {
@@ -402,15 +338,6 @@ mod tests {
         let wrong_aad = PiiAad::new(PiiFieldKind::UserEmail, "account-1", crypto.enc_key_id());
         let encrypted = crypto.encrypt_pii_string(&aad, "Kang").unwrap();
         assert!(crypto.decrypt_pii_string(&wrong_aad, &encrypted).is_err());
-    }
-
-    #[test]
-    fn wrapped_dek_round_trips_during_schema_transition() {
-        let crypto = PiiCrypto::test();
-        let dek = crypto.generate_dek();
-        let wrapped = crypto.wrap_dek(&dek).unwrap();
-        assert_ne!(wrapped, dek);
-        assert_eq!(crypto.unwrap_dek(&wrapped).unwrap(), dek);
     }
 
     #[test]
