@@ -23,6 +23,7 @@ DB layer
 Background job / admin repair
   - purge_after가 지난 soft-deleted row를 hard delete할 수 있다.
   - 깨진 invariant를 감지하고, 명확히 복구 가능한 경우만 별도 repair 경로로 복구한다.
+  - crypto_key_epochs bootstrap/rotation은 `docs/spec/security.md`의 maintenance key 정책을 따른다.
 ```
 
 ## 생성 lifecycle
@@ -34,7 +35,6 @@ Browser login/onboarding flow로 처음 확인된 local user는 하나의 transa
 ```text
 accounts(kind='user')
 users
-account_encryption_keys
 ```
 
 규칙:
@@ -106,7 +106,7 @@ api_keys(token_hash only)
 - key 생성은 workspace 권한을 변경하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
 - account당 live API key 한도는 `10`이다.
-- token hash는 `NOTEGATE_ROOT_SECRET`에서 파생한 API key HMAC subkey로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
+- token hash는 active LOOKUP root에서 파생한 API key HMAC subkey로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
 
 ### Workspace access grant/change
 
@@ -163,8 +163,7 @@ User 탈퇴는 hard delete가 아니라 deactivate/anonymize다.
 ```text
 accounts.is_active = false
 accounts.deleted_at/deleted_by 설정
-users PII ciphertext/hash 제거
-account_encryption_keys.wrapped_dek 제거 및 destroyed_at 설정
+accounts/users PII ciphertext/hash 제거
 owned active agents deactivate
 owned live API keys revoke
 owned agents live API keys revoke
@@ -199,7 +198,7 @@ api_keys.revoked_by = caller
 api_keys.revoked_reason = reason
 ```
 
-revoke된 key는 인증에 사용할 수 없고 live key 한도 계산에서 제외한다. User API key는 해당 user만 revoke할 수 있고, agent API key는 agent creator user만 revoke할 수 있다. Agent caller는 key를 만들거나 revoke할 수 없다.
+revoke된 key는 인증에 사용할 수 없고 live key 한도 계산에서 제외한다. User/API 요청으로 수행하는 revoke는 `revoked_by`를 기록한다. LOOKUP root rotation 같은 maintenance/system bulk revoke는 `revoked_by` 없이 `revoked_reason`만으로 처리할 수 있다. User API key는 해당 user만 revoke할 수 있고, agent API key는 agent creator user만 revoke할 수 있다. Agent caller는 key를 만들거나 revoke할 수 없다.
 
 ### API key rotation
 
@@ -212,7 +211,7 @@ old api_keys.revoked_by = caller
 old api_keys.revoked_reason = 'rotated'
 ```
 
-생성된 새 token은 rotation 응답에서 정확히 한 번만 반환한다. 정상적인 API key hash secret rotation은 `docs/spec/security.md`의 opportunistic rehash 정책을 따른다.
+생성된 새 token은 rotation 응답에서 정확히 한 번만 반환한다. API key hash secret rotation은 기존 token 원문을 복구하거나 보존한 채 재해시하지 않는다. LOOKUP root secret 유출 또는 hash key 폐기가 필요하면 영향받는 `hash_key_id`의 live key를 revoke하고 사용자 또는 agent creator가 새 key를 생성하도록 요구한다.
 
 ### Workspace access revoke
 
@@ -262,7 +261,8 @@ live sibling name unique
 role enum 제한
 soft delete timestamp/deleted_by/purge_after 조합
 api key token_hash unique
-api key hash key status enum
+api key scopes empty CHECK
+api key revoke/expiry state
 ```
 
 ### Coordinate

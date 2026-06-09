@@ -150,10 +150,12 @@ matching if_none_match hash -> unchanged response without content
 ```text
 paths                    -> normalized canonical absolute paths; duplicate slash and trailing slash collapse, `.`/`..` reject
 internal errors           -> redacted
-bearer/API key plaintext  -> never returned except newly-created API key plaintext once
+bearer/API key plaintext  -> never returned by MCP tools
 OAuth code/PKCE verifier  -> never returned
 raw Authorization header  -> never returned
 ```
+
+API key creation/rotation plaintext is a REST-only one-time response, not an MCP tool response.
 
 Error mapping:
 

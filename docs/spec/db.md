@@ -8,11 +8,11 @@ REST와 MCP는 모두 이 구조 위에서 동작한다.
 정본 테이블:
 
 ```text
+crypto_key_epochs 암호화/비교 root key epoch registry
 accounts          user/agent 공통 행위자 identity
 users             authgate OAuth 사용자 상세
 agents            AI agent 상세
 api_keys          user/agent 공용 API key credential hash
-account_encryption_keys account별 PII DEK wrapping metadata
 workspaces        개인 노트 workspace 경계
 workspace_access  workspace membership과 owner/editor/viewer 권한
 nodes             folder/document 공통 tree node
@@ -23,6 +23,48 @@ Markdown 원본은 `documents.content_md`에 저장한다. grep은 `documents.co
 후보 검색하고 application code에서 line-split한다. 권한은 workspace 단위로만 적용하고,
 file/folder/node 단위 ACL은 제공하지 않는다.
 
+## crypto_key_epochs
+
+`crypto_key_epochs`는 DB 밖에서 주입되는 root secret의 epoch를 관리한다. Root secret 원문이나 파생 subkey는 저장하지 않고, env에 등록된 secret이 선언된 `key_id`와 맞는지 검증하기 위한 tag와 rotation 상태만 저장한다.
+
+```sql
+CREATE TABLE crypto_key_epochs (
+    key_id       TEXT PRIMARY KEY,
+    domain       TEXT NOT NULL CHECK (domain IN ('enc', 'lookup')),
+    status       TEXT NOT NULL CHECK (status IN ('active', 'verify_only', 'revoked')),
+    verify_tag   TEXT NOT NULL,
+    version      INTEGER NOT NULL DEFAULT 1,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    activated_at TIMESTAMPTZ,
+    retired_at   TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ,
+
+    CHECK (key_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
+    CHECK (
+        (status = 'active' AND activated_at IS NOT NULL AND retired_at IS NULL AND revoked_at IS NULL)
+        OR
+        (status = 'verify_only' AND activated_at IS NOT NULL AND retired_at IS NOT NULL AND revoked_at IS NULL)
+        OR
+        (status = 'revoked' AND revoked_at IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX crypto_key_epochs_one_active_per_domain
+    ON crypto_key_epochs(domain)
+    WHERE status = 'active';
+```
+
+규칙:
+
+- `key_id`는 과거 epoch까지 포함해 영구적으로 unique하다. 한 번 사용한 `key_id`는 `verify_only`나 `revoked`가 되어도 다른 root secret에 재사용할 수 없다.
+- `version`은 root key epoch 식별자가 아니라 HKDF label/crypto material format version이다. Epoch 식별은 `key_id`가 담당한다.
+- `domain='enc'` root는 복호화 가능한 PII ciphertext 암호화/복호화에 사용한다.
+- `domain='lookup'` root는 provider/email lookup HMAC, API key HMAC, session signing처럼 비교/검증 계열 작업에 사용한다.
+- 일반 runtime은 각 domain의 active root를 하나씩 사용한다. Rotation/maintenance 경로는 필요한 old root를 별도 입력으로 받아 `verify_only` epoch를 검증/조회할 수 있다.
+- `verify_tag`는 root secret에서 파생한 key epoch verify subkey로 계산한다. 같은 `key_id`에 잘못된 secret이 주입되면 startup 또는 maintenance command가 실패해야 한다.
+- `active` epoch는 새 encrypt/hash/sign에 사용할 수 있다. `verify_only` epoch는 기존 데이터 decrypt/verify 또는 migration에만 사용할 수 있고 새 write에는 사용할 수 없다. `revoked` epoch는 사용할 수 없다. 각 row의 FK는 key 존재만 보장하며, `enc`/`lookup` domain 적합성은 service 정책으로 검증한다.
+- 최초 `crypto_key_epochs` row는 일반 application startup이 자동 생성하지 않는다. 운영 bootstrap/admin command가 active `enc`/`lookup` epoch를 먼저 등록해야 하며, application startup은 필수 epoch가 없으면 실패한다.
+
 ## accounts
 
 `accounts`는 notegate에서 행동할 수 있는 공통 주체다. 사람 사용자와 AI agent 모두
@@ -31,10 +73,12 @@ file/folder/node 단위 ACL은 제공하지 않는다.
 ```sql
 CREATE TABLE accounts (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind                    TEXT NOT NULL CHECK (kind IN ('user', 'agent')),
-    display_name_ciphertext BYTEA,
-    display_name_nonce      BYTEA,
-    is_active               BOOLEAN NOT NULL DEFAULT true,
+    kind                     TEXT NOT NULL CHECK (kind IN ('user', 'agent')),
+    display_name_ciphertext  BYTEA,
+    display_name_nonce       BYTEA,
+    display_name_enc_key_id  TEXT REFERENCES crypto_key_epochs(key_id),
+    display_name_enc_version INTEGER,
+    is_active                BOOLEAN NOT NULL DEFAULT true,
     deleted_at              TIMESTAMPTZ,
     deleted_by              UUID REFERENCES accounts(id),
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -44,6 +88,11 @@ CREATE TABLE accounts (
         (deleted_at IS NULL AND deleted_by IS NULL)
         OR
         (deleted_at IS NOT NULL AND deleted_by IS NOT NULL)
+    ),
+    CHECK (
+        (display_name_ciphertext IS NULL AND display_name_nonce IS NULL AND display_name_enc_key_id IS NULL AND display_name_enc_version IS NULL)
+        OR
+        (display_name_ciphertext IS NOT NULL AND display_name_nonce IS NOT NULL AND display_name_enc_key_id IS NOT NULL AND display_name_enc_version IS NOT NULL)
     )
 );
 ```
@@ -54,7 +103,7 @@ CREATE TABLE accounts (
 - API key는 `api_keys.account_id`에 연결된 account로 인증된다. 연결 account가 `kind='user'`이면 user caller, `kind='agent'`이면 agent caller다.
 - 일반 product action에서 account hard delete는 하지 않는다.
 - user 탈퇴나 agent 삭제는 `accounts.is_active=false`, `deleted_at`, `deleted_by`로 deactivate/soft delete한다.
-- PII 원문은 평문으로 저장하지 않는다. 표시 이름과 사용자 상세 암호화 정책은 `docs/spec/security.md`를 따른다.
+- PII 원문은 평문으로 저장하지 않는다. 표시 이름 ciphertext는 `enc` domain root에서 파생한 PII encryption subkey로 암호화하고 사용한 key id/version을 함께 저장한다.
 - `created_by`, `updated_by`, `deleted_by` 계열 컬럼은 모두 `accounts.id`를 참조한다.
 
 ## users
@@ -66,11 +115,31 @@ CREATE TABLE accounts (
 CREATE TABLE users (
     id                        UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     provider_sub_hash          TEXT UNIQUE,
-    provider_sub_hash_version  INTEGER NOT NULL DEFAULT 1,
+    provider_sub_hash_key_id   TEXT REFERENCES crypto_key_epochs(key_id),
+    provider_sub_hash_version  INTEGER,
     email_ciphertext           BYTEA,
     email_nonce                BYTEA,
+    email_enc_key_id           TEXT REFERENCES crypto_key_epochs(key_id),
+    email_enc_version          INTEGER,
     email_hash                 TEXT,
+    email_hash_key_id          TEXT REFERENCES crypto_key_epochs(key_id),
     email_hash_version         INTEGER,
+
+    CHECK (
+        (provider_sub_hash IS NULL AND provider_sub_hash_key_id IS NULL AND provider_sub_hash_version IS NULL)
+        OR
+        (provider_sub_hash IS NOT NULL AND provider_sub_hash_key_id IS NOT NULL AND provider_sub_hash_version IS NOT NULL)
+    ),
+    CHECK (
+        (email_ciphertext IS NULL AND email_nonce IS NULL AND email_enc_key_id IS NULL AND email_enc_version IS NULL)
+        OR
+        (email_ciphertext IS NOT NULL AND email_nonce IS NOT NULL AND email_enc_key_id IS NOT NULL AND email_enc_version IS NOT NULL)
+    ),
+    CHECK (
+        (email_hash IS NULL AND email_hash_key_id IS NULL AND email_hash_version IS NULL)
+        OR
+        (email_hash IS NOT NULL AND email_hash_key_id IS NOT NULL AND email_hash_version IS NOT NULL)
+    ),
     anonymized_at              TIMESTAMPTZ
 );
 ```
@@ -79,40 +148,10 @@ CREATE TABLE users (
 
 - user 최초 생성과 탈퇴의 lifecycle side effect는 `docs/spec/lifecycle.md`를 따른다.
 - user 탈퇴의 PII redaction/anonymization 상세 보안 정책은 `docs/spec/security.md`를 따른다.
-- OAuth provider subject 원문은 저장하지 않고 provider/sub 기반 HMAC hash로 로그인 매칭한다.
-- email 원문은 ciphertext로 저장하고, login/unique lookup이 필요하면 normalized email HMAC hash를 별도로 사용한다.
+- OAuth provider subject 원문은 저장하지 않고 provider/sub 기반 HMAC hash로 로그인 매칭한다. Hash row에는 사용한 `lookup` domain key id/version을 함께 저장한다.
+- email 원문은 ciphertext로 저장하고 사용한 `enc` domain key id/version을 함께 저장한다. Login/unique lookup이 필요하면 normalized email HMAC hash와 사용한 `lookup` domain key id/version을 별도로 저장한다.
 - `created_by`, `updated_by`, `deleted_by` 참조 보존을 위해 일반 product action으로 user row를 물리 삭제하지 않는다.
 
-## account_encryption_keys
-
-`account_encryption_keys`는 account별 PII data encryption key(DEK)를 key encryption key(KEK)로 wrap한 metadata를 저장한다. 구체적인 PII 분류, 암호화 방식,
-rotation, crypto shredding 정책은 `docs/spec/security.md`를 따른다.
-
-```sql
-CREATE TABLE account_encryption_keys (
-    account_id    UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-    wrapped_dek   BYTEA,
-    kek_id        TEXT NOT NULL,
-    kek_version   TEXT,
-    algorithm     TEXT NOT NULL DEFAULT 'AES-256-GCM',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    rewrapped_at  TIMESTAMPTZ,
-    destroyed_at  TIMESTAMPTZ,
-
-    CHECK (
-        (destroyed_at IS NULL AND wrapped_dek IS NOT NULL)
-        OR
-        (destroyed_at IS NOT NULL AND wrapped_dek IS NULL)
-    )
-);
-```
-
-규칙:
-
-- PII 원문 암호화와 HMAC lookup 정책은 `docs/spec/security.md`를 따른다.
-- `destroyed_at`이 설정된 account encryption key는 PII 복호화에 사용할 수 없다.
-- `wrapped_dek`, `kek_id`, `kek_version`은 plaintext PII가 아니지만 보안 민감 정보로 취급한다.
 
 ## agents
 
@@ -136,7 +175,7 @@ CREATE TABLE agents (
 
 ## api_keys
 
-`api_keys`는 user와 agent 공용 API key credential hash를 저장한다. Token 원문은 저장하지 않고, 생성/rotation 응답에서 정확히 한 번만 반환한다. API key는 DEK로 암호화해 복호화 가능하게 저장하지 않는다.
+`api_keys`는 user와 agent 공용 API key credential hash를 저장한다. Token 원문은 저장하지 않고, 생성/rotation 응답에서 정확히 한 번만 반환한다. API key는 암호화해 복호화 가능하게 저장하지 않는다.
 
 ```sql
 CREATE TABLE api_keys (
@@ -145,7 +184,7 @@ CREATE TABLE api_keys (
     name                TEXT NOT NULL,
     token_prefix        TEXT NOT NULL,
     token_hash          TEXT NOT NULL UNIQUE,
-    hash_key_id         TEXT NOT NULL,
+    hash_key_id         TEXT NOT NULL REFERENCES crypto_key_epochs(key_id),
     hash_version        INTEGER NOT NULL DEFAULT 1,
     scopes              TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
     created_by          UUID REFERENCES accounts(id),
@@ -158,10 +197,10 @@ CREATE TABLE api_keys (
     rotated_from_key_id UUID REFERENCES api_keys(id),
 
     CHECK (
-        (revoked_at IS NULL AND revoked_by IS NULL)
-        OR (revoked_at IS NOT NULL AND revoked_by IS NOT NULL)
-    ),
-    CHECK (revoked_reason IS NULL OR revoked_at IS NOT NULL)
+        (revoked_at IS NULL AND revoked_by IS NULL AND revoked_reason IS NULL)
+        OR
+        (revoked_at IS NOT NULL AND (revoked_by IS NOT NULL OR revoked_reason IS NOT NULL))
+    )
 );
 
 CREATE INDEX api_keys_account_live_idx
@@ -186,10 +225,10 @@ CREATE INDEX api_keys_rotated_from_idx
 - API key 인증은 `api_keys.account_id`의 account kind로 caller를 결정한다.
 - `accounts.kind='user'`에 연결된 key는 user API key이며 user caller로 동작한다.
 - `accounts.kind='agent'`에 연결된 key는 agent API key이며 agent caller로 동작한다.
-- token format은 `ngk_v1_<key_id>_<secret>` 계열의 opaque value다. `key_id`는 lookup용 공개 식별자이고, `secret`은 DB에 저장하지 않는다.
-- `token_hash`는 `HMAC(api_key_hmac_subkey, key_id + ':' + secret)` 결과다.
-- `hash_key_id`/`hash_version`은 어떤 root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
-- `revoked_at`이 있는 key는 인증에 사용할 수 없다.
+- token format은 `ngk_v1_<api_key_id>_<secret>` 계열의 opaque value다. `api_key_id`는 lookup용 공개 식별자이고, `secret`은 DB에 저장하지 않는다.
+- `token_hash`는 `HMAC(api_key_hmac_subkey, api_key_id + ':' + secret)` 결과다.
+- `hash_key_id`/`hash_version`은 어떤 `lookup` domain root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
+- `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
 - `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
 - 한 account가 동시에 가질 수 있는 live API key는 최대 `10`개다.

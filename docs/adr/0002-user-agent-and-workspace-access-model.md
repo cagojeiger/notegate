@@ -49,7 +49,7 @@ write = 생성/수정/패치/이동/삭제
 
 workspace는 단일 제약 없이 자유롭게 생성/삭제할 수 있는 1급 리소스다. workspace 생성은 user만 가능하다. Agent는 workspace에 별도로 연결되며 `viewer` 또는 `editor` 역할만 받을 수 있다. Agent는 `owner`가 될 수 없다.
 
-생성/삭제 side effect, owner row 보호, purge 흐름은 `docs/spec/lifecycle.md`가 정본이다. 사용자 PII 암호화와 탈퇴 시 redaction/anonymization 또는 crypto shredding은 `docs/spec/security.md`가 정본이다.
+생성/삭제 side effect, owner row 보호, purge 흐름은 `docs/spec/lifecycle.md`가 정본이다. 사용자 PII 암호화, root key domain, key rotation, 탈퇴 시 redaction/anonymization은 `docs/spec/security.md`가 정본이다.
 
 ## 근거
 
@@ -79,5 +79,5 @@ owner를 `workspace_access` row로 표현하면 access list에서 owner/viewer/e
 - 파일/폴더 단위 공유는 제공하지 않는다.
 - attribution 보존을 위해 user/agent는 일반 product action으로 hard delete하지 않는다.
 - workspace와 node/document 삭제는 soft delete 후 purge job이 hard delete할 수 있다.
-- 사용자 PII 암호화와 키 관리는 `docs/spec/security.md`를 따른다.
+- 사용자 PII 암호화, root key domain, key rotation은 `docs/spec/security.md`를 따른다.
 - audit log/event history는 별도 ADR에서 정의한다.
