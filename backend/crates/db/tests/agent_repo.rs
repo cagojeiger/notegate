@@ -135,7 +135,7 @@ async fn create_key_stores_hash_only() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(key.token_hash, token_hash);
 
     // The plaintext is never persisted; only the hash is stored.
-    let stored: String = sqlx::query_scalar("SELECT token_hash FROM agent_keys WHERE id = $1")
+    let stored: String = sqlx::query_scalar("SELECT token_hash FROM api_keys WHERE id = $1")
         .bind(key.id)
         .fetch_one(&db.pool)
         .await?;
@@ -253,7 +253,7 @@ async fn auth_accepts_valid_key() -> Result<(), Box<dyn std::error::Error>> {
 
     // last_used_at is recorded on successful auth.
     let last_used: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT last_used_at FROM agent_keys WHERE token_hash = $1")
+        sqlx::query_scalar("SELECT last_used_at FROM api_keys WHERE token_hash = $1")
             .bind(hash_token(plaintext))
             .fetch_one(&db.pool)
             .await?;
@@ -523,7 +523,7 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
     assert!(!is_active);
 
     let key_revoked: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT revoked_at FROM agent_keys WHERE id = $1")
+        sqlx::query_scalar("SELECT revoked_at FROM api_keys WHERE id = $1")
             .bind(key.id)
             .fetch_one(&db.pool)
             .await?;
@@ -572,7 +572,7 @@ async fn revoke_key_is_scoped_to_agent_id() -> Result<(), Box<dyn std::error::Er
     );
 
     let revoked_at: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT revoked_at FROM agent_keys WHERE id = $1")
+        sqlx::query_scalar("SELECT revoked_at FROM api_keys WHERE id = $1")
             .bind(key_b.id)
             .fetch_one(&db.pool)
             .await?;

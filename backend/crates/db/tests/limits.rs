@@ -225,13 +225,15 @@ async fn agent_key_token_hash_is_unique() -> TestResult {
         .execute(&db.pool)
         .await?;
     sqlx::query(
-        "INSERT INTO agent_keys (agent_id, token_hash, name) VALUES ($1, 'dup-hash', 'k1')",
+        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name) \
+         VALUES ($1, 'dup-hash-1', 'dup-hash', 'test-lookup', 'k1')",
     )
     .bind(agent_account)
     .execute(&db.pool)
     .await?;
     let dup = sqlx::query(
-        "INSERT INTO agent_keys (agent_id, token_hash, name) VALUES ($1, 'dup-hash', 'k2')",
+        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name) \
+         VALUES ($1, 'dup-hash-2', 'dup-hash', 'test-lookup', 'k2')",
     )
     .bind(agent_account)
     .execute(&db.pool)

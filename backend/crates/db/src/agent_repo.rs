@@ -1,4 +1,4 @@
-//! Agents + agent_keys persistence.
+//! Agents + unified api_keys persistence.
 //!
 //! All queries use runtime-checked `query_as::<_, Row>()` / `query()` — never
 //! the `query!` macro. Agent creation inserts `accounts(kind='agent')` then the
@@ -19,11 +19,25 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct AgentRepo {
     pool: PgPool,
+    lookup_key_id: String,
+    hash_version: i32,
 }
 
 impl AgentRepo {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self::with_lookup_key(pool, "test-lookup", 1)
+    }
+
+    pub fn with_lookup_key(
+        pool: PgPool,
+        lookup_key_id: impl Into<String>,
+        hash_version: i32,
+    ) -> Self {
+        Self {
+            pool,
+            lookup_key_id: lookup_key_id.into(),
+            hash_version,
+        }
     }
 }
 
@@ -74,7 +88,7 @@ impl From<AgentRow> for Agent {
     }
 }
 
-/// A row from `agent_keys`.
+/// A row from `api_keys` projected for agent-key responses.
 #[derive(Debug, FromRow)]
 struct AgentKeyRow {
     id: Uuid,
@@ -110,7 +124,7 @@ impl From<AgentKeyRow> for AgentKey {
 
 const ACCOUNT_COLUMNS: &str = "id, kind, is_active, deleted_at, deleted_by, created_at, updated_at";
 const AGENT_COLUMNS: &str = "id, name, created_by";
-const AGENT_KEY_COLUMNS: &str = "id, agent_id, token_hash, name, scopes, created_by, \
+const AGENT_KEY_COLUMNS: &str = "id, account_id AS agent_id, token_hash, name, scopes, created_by, \
      created_at, last_used_at, expires_at, revoked_at, revoked_by";
 
 impl AgentRepo {
@@ -119,9 +133,9 @@ impl AgentRepo {
     /// revoke a key from another agent by guessing its id.
     pub async fn revoke_key(&self, agent_id: Uuid, key_id: Uuid, revoked_by: Uuid) -> Result<()> {
         let result = sqlx::query(
-            "UPDATE agent_keys \
+            "UPDATE api_keys \
              SET revoked_at = now(), revoked_by = $2 \
-             WHERE id = $1 AND agent_id = $3 AND revoked_at IS NULL",
+             WHERE id = $1 AND account_id = $3 AND revoked_at IS NULL",
         )
         .bind(key_id)
         .bind(revoked_by)
@@ -155,8 +169,8 @@ impl AgentRepo {
         }
 
         sqlx::query(
-            "UPDATE agent_keys SET revoked_at = now(), revoked_by = $2 \
-             WHERE agent_id = $1 AND revoked_at IS NULL",
+            "UPDATE api_keys SET revoked_at = now(), revoked_by = $2 \
+             WHERE account_id = $1 AND revoked_at IS NULL",
         )
         .bind(agent_id)
         .bind(deleted_by)
@@ -315,8 +329,8 @@ impl AgentRepo {
         }
 
         let live: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM agent_keys \
-             WHERE agent_id = $1 AND revoked_at IS NULL \
+            "SELECT count(*) FROM api_keys \
+             WHERE account_id = $1 AND revoked_at IS NULL \
                AND (expires_at IS NULL OR expires_at > now())",
         )
         .bind(command.agent_id)
@@ -332,11 +346,15 @@ impl AgentRepo {
         }
 
         let row = sqlx::query_as::<_, AgentKeyRow>(&format!(
-            "INSERT INTO agent_keys (agent_id, token_hash, name, scopes, created_by, expires_at) \
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING {AGENT_KEY_COLUMNS}"
+            "INSERT INTO api_keys \
+             (account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {AGENT_KEY_COLUMNS}"
         ))
         .bind(command.agent_id)
+        .bind(token_prefix(token_hash))
         .bind(token_hash)
+        .bind(&self.lookup_key_id)
+        .bind(self.hash_version)
         .bind(&command.name)
         .bind(&command.scopes)
         .bind(created_by)
@@ -350,8 +368,8 @@ impl AgentRepo {
 
     pub async fn count_live_keys(&self, agent_id: Uuid) -> Result<usize> {
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM agent_keys \
-             WHERE agent_id = $1 AND revoked_at IS NULL \
+            "SELECT count(*) FROM api_keys \
+             WHERE account_id = $1 AND revoked_at IS NULL \
                AND (expires_at IS NULL OR expires_at > now())",
         )
         .bind(agent_id)
@@ -362,6 +380,10 @@ impl AgentRepo {
     }
 }
 
+fn token_prefix(token_hash: &str) -> String {
+    token_hash.chars().take(12).collect()
+}
+
 impl AgentRepo {
     pub async fn find_agent_by_key_hash(
         &self,
@@ -370,8 +392,8 @@ impl AgentRepo {
         // Reject revoked, expired, and inactive credentials at the SQL layer so
         // a stale key never resolves to a caller.
         let agent_id: Option<Uuid> = sqlx::query(
-            "SELECT k.agent_id FROM agent_keys k \
-             JOIN accounts acc ON acc.id = k.agent_id \
+            "SELECT k.account_id FROM api_keys k \
+             JOIN accounts acc ON acc.id = k.account_id \
              WHERE k.token_hash = $1 \
                AND k.revoked_at IS NULL \
                AND (k.expires_at IS NULL OR k.expires_at > now()) \
@@ -382,7 +404,7 @@ impl AgentRepo {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?
-        .map(|row| row.get::<Uuid, _>("agent_id"));
+        .map(|row| row.get::<Uuid, _>("account_id"));
 
         let Some(agent_id) = agent_id else {
             return Ok(None);
@@ -390,7 +412,7 @@ impl AgentRepo {
 
         // Record last use; failure here must not block authentication.
         if let Err(error) =
-            sqlx::query("UPDATE agent_keys SET last_used_at = now() WHERE token_hash = $1")
+            sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE token_hash = $1")
                 .bind(token_hash)
                 .execute(&self.pool)
                 .await

@@ -62,7 +62,11 @@ async fn main() -> anyhow::Result<()> {
     );
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
     let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto.clone());
-    let agent_repo = notegate_db::AgentRepo::new(pool.clone());
+    let agent_repo = notegate_db::AgentRepo::with_lookup_key(
+        pool.clone(),
+        pii_crypto.lookup_key_id(),
+        pii_crypto.version(),
+    );
     let resolver = notegate_service::identity::Resolver::new(account_repo, agent_repo);
     let config = std::sync::Arc::new(config);
     let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));

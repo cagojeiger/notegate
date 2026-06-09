@@ -64,7 +64,11 @@ impl AppState {
         let account_lifecycle =
             AccountService::new(AccountRepo::with_crypto(db.clone(), pii_crypto.clone()));
         let access = AccessService::new(AccessRepo::new(db.clone()));
-        let agent_repo = AgentRepo::new(db.clone());
+        let agent_repo = AgentRepo::with_lookup_key(
+            db.clone(),
+            pii_crypto.lookup_key_id(),
+            pii_crypto.version(),
+        );
         let agents = AgentService::new(agent_repo.clone());
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
         let files = FilesService::with_limits(files_repo.clone(), config.limits);

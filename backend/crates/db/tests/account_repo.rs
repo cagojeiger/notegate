@@ -314,7 +314,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
     assert!(!agent_active);
 
     let key_revoked_by: Option<uuid::Uuid> =
-        sqlx::query_scalar("SELECT revoked_by FROM agent_keys WHERE id = $1")
+        sqlx::query_scalar("SELECT revoked_by FROM api_keys WHERE id = $1")
             .bind(key.id)
             .fetch_one(&db.pool)
             .await?;
@@ -327,14 +327,6 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(live_access, 0);
-
-    let key_destroyed: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
-        "SELECT destroyed_at FROM account_encryption_keys WHERE account_id = $1",
-    )
-    .bind(owner.id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert!(key_destroyed.is_some());
 
     db.cleanup().await;
     Ok(())

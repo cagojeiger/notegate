@@ -1,15 +1,15 @@
 //! Accounts + users persistence.
 //!
 //! User PII is never stored as plaintext. Display names and email addresses are
-//! encrypted with a per-account DEK; provider subjects and email lookup keys are
-//! HMAC hashes. Agent display names are product metadata and are derived from
-//! `agents.name`.
+//! encrypted directly with the active ENC root-derived PII field key; provider
+//! subjects and email lookup keys are HMAC hashes. Agent display names are
+//! product metadata and are derived from `agents.name`.
 
 use std::collections::HashMap;
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
-use notegate_core::security::{EncryptedField, PiiCrypto};
+use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
 use notegate_core::{Error, Result, limits};
 use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
@@ -41,35 +41,35 @@ struct AccountRow {
     kind: String,
     display_name_ciphertext: Option<Vec<u8>>,
     display_name_nonce: Option<Vec<u8>>,
+    display_name_enc_key_id: Option<String>,
+    display_name_enc_version: Option<i32>,
     is_active: bool,
     deleted_at: Option<DateTime<Utc>>,
     deleted_by: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     agent_name: Option<String>,
-    wrapped_dek: Option<Vec<u8>>,
 }
 
 impl AccountRow {
-    fn user_dek(&self, crypto: &PiiCrypto) -> Result<Option<[u8; 32]>> {
-        self.wrapped_dek
-            .as_deref()
-            .map(|wrapped| crypto.unwrap_dek(wrapped))
-            .transpose()
-    }
-
     fn display_name(&self, crypto: &PiiCrypto) -> Result<String> {
         let kind = AccountKind::parse(&self.kind)
             .ok_or_else(|| Error::internal(format!("unknown account kind: {}", self.kind)))?;
         match kind {
             AccountKind::Agent => Ok(self.agent_name.clone().unwrap_or_default()),
             AccountKind::User => {
-                let Some(dek) = self.user_dek(crypto)? else {
+                let _version = self.display_name_enc_version;
+                let Some(key_id) = self.display_name_enc_key_id.as_ref() else {
                     return Ok(String::new());
                 };
+                let aad = PiiAad::new(
+                    PiiFieldKind::AccountDisplayName,
+                    self.id.to_string(),
+                    key_id,
+                );
                 decrypt_optional_string(
                     crypto,
-                    &dek,
+                    &aad,
                     self.display_name_ciphertext.as_ref(),
                     self.display_name_nonce.as_ref(),
                 )
@@ -100,18 +100,24 @@ struct UserRow {
     id: Uuid,
     email_ciphertext: Option<Vec<u8>>,
     email_nonce: Option<Vec<u8>>,
+    email_enc_key_id: Option<String>,
+    email_enc_version: Option<i32>,
     anonymized_at: Option<DateTime<Utc>>,
 }
 
 impl UserRow {
-    fn into_user(self, crypto: &PiiCrypto, dek: Option<&[u8; 32]>) -> Result<User> {
-        let email = match dek {
-            Some(dek) => decrypt_optional_string(
-                crypto,
-                dek,
-                self.email_ciphertext.as_ref(),
-                self.email_nonce.as_ref(),
-            )?,
+    fn into_user(self, crypto: &PiiCrypto) -> Result<User> {
+        let _version = self.email_enc_version;
+        let email = match self.email_enc_key_id.as_ref() {
+            Some(key_id) => {
+                let aad = PiiAad::new(PiiFieldKind::UserEmail, self.id.to_string(), key_id);
+                decrypt_optional_string(
+                    crypto,
+                    &aad,
+                    self.email_ciphertext.as_ref(),
+                    self.email_nonce.as_ref(),
+                )?
+            }
             None => None,
         };
         Ok(User {
@@ -123,9 +129,11 @@ impl UserRow {
 }
 
 const ACCOUNT_COLUMNS: &str = "a.id, a.kind, a.display_name_ciphertext, a.display_name_nonce, \
+     a.display_name_enc_key_id, a.display_name_enc_version, \
      a.is_active, a.deleted_at, a.deleted_by, a.created_at, a.updated_at, \
-     ag.name AS agent_name, k.wrapped_dek";
-const USER_COLUMNS: &str = "id, email_ciphertext, email_nonce, anonymized_at";
+     ag.name AS agent_name";
+const USER_COLUMNS: &str = "id, email_ciphertext, email_nonce, email_enc_key_id, \
+     email_enc_version, anonymized_at";
 
 impl AccountRepo {
     pub async fn find_caller_by_account_id(
@@ -136,7 +144,6 @@ impl AccountRepo {
         let Some(account_row) = account_row else {
             return Ok(None);
         };
-        let dek = account_row.user_dek(&self.crypto)?;
         let account = account_row.into_account(&self.crypto)?;
 
         let user_row = sqlx::query_as::<_, UserRow>(&format!(
@@ -148,10 +155,7 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         match user_row {
-            Some(user_row) => Ok(Some((
-                account,
-                user_row.into_user(&self.crypto, dek.as_ref())?,
-            ))),
+            Some(user_row) => Ok(Some((account, user_row.into_user(&self.crypto)?))),
             None => Ok(None),
         }
     }
@@ -164,7 +168,6 @@ impl AccountRepo {
             "SELECT {ACCOUNT_COLUMNS} \
              FROM accounts a \
              LEFT JOIN agents ag ON ag.id = a.id \
-             LEFT JOIN account_encryption_keys k ON k.account_id = a.id \
              WHERE a.id = ANY($1)"
         ))
         .bind(ids)
@@ -255,9 +258,9 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         sqlx::query(
-            "UPDATE agent_keys \
+            "UPDATE api_keys \
              SET revoked_at = now(), revoked_by = $2 \
-             WHERE agent_id = ANY($1) AND revoked_at IS NULL",
+             WHERE account_id = ANY($1) AND revoked_at IS NULL",
         )
         .bind(&owned_agents)
         .bind(deleted_by)
@@ -282,6 +285,7 @@ impl AccountRepo {
         sqlx::query(
             "UPDATE accounts \
              SET display_name_ciphertext = NULL, display_name_nonce = NULL, \
+                 display_name_enc_key_id = NULL, display_name_enc_version = NULL, \
                  is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
              WHERE id = $1 AND kind = 'user'",
         )
@@ -293,19 +297,10 @@ impl AccountRepo {
 
         sqlx::query(
             "UPDATE users \
-             SET provider_sub_hash = NULL, email_ciphertext = NULL, email_nonce = NULL, \
-                email_hash = NULL, anonymized_at = now() \
+             SET provider_sub_hash = NULL, provider_sub_hash_key_id = NULL, provider_sub_hash_version = NULL, \
+                email_ciphertext = NULL, email_nonce = NULL, email_enc_key_id = NULL, email_enc_version = NULL, \
+                email_hash = NULL, email_hash_key_id = NULL, email_hash_version = NULL, anonymized_at = now() \
              WHERE id = $1",
-        )
-        .bind(account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        sqlx::query(
-            "UPDATE account_encryption_keys \
-             SET wrapped_dek = NULL, updated_at = now(), destroyed_at = now() \
-             WHERE account_id = $1 AND destroyed_at IS NULL",
         )
         .bind(account_id)
         .execute(&mut *tx)
@@ -348,81 +343,109 @@ impl AccountRepo {
         let account_id = match existing {
             Some((id, false)) => id,
             Some((id, true)) => {
-                let dek = self.fetch_dek_for_update(&mut tx, id).await?;
-                let display_name = self.crypto.encrypt_string(&dek, &attrs.name)?;
-                let email = self.crypto.encrypt_string(&dek, &attrs.email)?;
+                let display_aad = PiiAad::new(
+                    PiiFieldKind::AccountDisplayName,
+                    id.to_string(),
+                    self.crypto.enc_key_id(),
+                );
+                let email_aad = PiiAad::new(
+                    PiiFieldKind::UserEmail,
+                    id.to_string(),
+                    self.crypto.enc_key_id(),
+                );
+                let display_name = self.crypto.encrypt_pii_string(&display_aad, &attrs.name)?;
+                let email = self.crypto.encrypt_pii_string(&email_aad, &attrs.email)?;
 
                 sqlx::query(
                     "UPDATE accounts \
                      SET display_name_ciphertext = $2, display_name_nonce = $3, \
+                         display_name_enc_key_id = $4, display_name_enc_version = $5, \
                          is_active = true, deleted_at = NULL, deleted_by = NULL, updated_at = now() \
                      WHERE id = $1",
                 )
                 .bind(id)
                 .bind(display_name.ciphertext)
                 .bind(display_name.nonce)
+                .bind(self.crypto.enc_key_id())
+                .bind(self.crypto.version())
                 .execute(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
 
                 sqlx::query(
                     "UPDATE users \
-                     SET email_ciphertext = $2, email_nonce = $3, email_hash = $4, \
-                         email_hash_version = $5, anonymized_at = NULL \
+                     SET email_ciphertext = $2, email_nonce = $3, email_enc_key_id = $4, \
+                         email_enc_version = $5, email_hash = $6, email_hash_key_id = $7, \
+                         email_hash_version = $8, anonymized_at = NULL \
                      WHERE id = $1",
                 )
                 .bind(id)
                 .bind(email.ciphertext)
                 .bind(email.nonce)
+                .bind(self.crypto.enc_key_id())
+                .bind(self.crypto.version())
                 .bind(&email_hash)
-                .bind(self.crypto.hash_version())
+                .bind(self.crypto.lookup_key_id())
+                .bind(self.crypto.version())
                 .execute(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
                 id
             }
             None => {
-                let dek = self.crypto.generate_dek();
-                let wrapped_dek = self.crypto.wrap_dek(&dek)?;
-                let display_name = self.crypto.encrypt_string(&dek, &attrs.name)?;
-                let email = self.crypto.encrypt_string(&dek, &attrs.email)?;
+                let id: Uuid =
+                    sqlx::query("INSERT INTO accounts (kind) VALUES ('user') RETURNING id")
+                        .fetch_one(&mut *tx)
+                        .await
+                        .map_err(map_sqlx_error)?
+                        .get::<Uuid, _>("id");
 
-                let id: Uuid = sqlx::query(
-                    "INSERT INTO accounts (kind, display_name_ciphertext, display_name_nonce) \
-                     VALUES ('user', $1, $2) RETURNING id",
-                )
-                .bind(display_name.ciphertext)
-                .bind(display_name.nonce)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?
-                .get::<Uuid, _>("id");
+                let display_aad = PiiAad::new(
+                    PiiFieldKind::AccountDisplayName,
+                    id.to_string(),
+                    self.crypto.enc_key_id(),
+                );
+                let email_aad = PiiAad::new(
+                    PiiFieldKind::UserEmail,
+                    id.to_string(),
+                    self.crypto.enc_key_id(),
+                );
+                let display_name = self.crypto.encrypt_pii_string(&display_aad, &attrs.name)?;
+                let email = self.crypto.encrypt_pii_string(&email_aad, &attrs.email)?;
 
                 sqlx::query(
-                    "INSERT INTO account_encryption_keys \
-                     (account_id, kek_id, kek_version, wrapped_dek) \
-                     VALUES ($1, $2, $3, $4)",
+                    "UPDATE accounts \
+                     SET display_name_ciphertext = $2, display_name_nonce = $3, \
+                         display_name_enc_key_id = $4, display_name_enc_version = $5, updated_at = now() \
+                     WHERE id = $1",
                 )
                 .bind(id)
-                .bind(self.crypto.kek_id())
-                .bind(self.crypto.kek_version())
-                .bind(wrapped_dek)
+                .bind(display_name.ciphertext)
+                .bind(display_name.nonce)
+                .bind(self.crypto.enc_key_id())
+                .bind(self.crypto.version())
                 .execute(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
 
                 sqlx::query(
                     "INSERT INTO users \
-                     (id, provider_sub_hash, provider_sub_hash_version, email_ciphertext, email_nonce, email_hash, email_hash_version) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                     (id, provider_sub_hash, provider_sub_hash_key_id, provider_sub_hash_version, \
+                      email_ciphertext, email_nonce, email_enc_key_id, email_enc_version, \
+                      email_hash, email_hash_key_id, email_hash_version) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 )
                 .bind(id)
                 .bind(&provider_sub_hash)
-                .bind(self.crypto.hash_version())
+                .bind(self.crypto.lookup_key_id())
+                .bind(self.crypto.version())
                 .bind(email.ciphertext)
                 .bind(email.nonce)
+                .bind(self.crypto.enc_key_id())
+                .bind(self.crypto.version())
                 .bind(&email_hash)
-                .bind(self.crypto.hash_version())
+                .bind(self.crypto.lookup_key_id())
+                .bind(self.crypto.version())
                 .execute(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
@@ -435,14 +458,12 @@ impl AccountRepo {
             "SELECT {ACCOUNT_COLUMNS} \
              FROM accounts a \
              LEFT JOIN agents ag ON ag.id = a.id \
-             LEFT JOIN account_encryption_keys k ON k.account_id = a.id \
              WHERE a.id = $1"
         ))
         .bind(account_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let dek = account_row.user_dek(&self.crypto)?;
         let account = account_row.into_account(&self.crypto)?;
         let user_row = sqlx::query_as::<_, UserRow>(&format!(
             "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
@@ -453,7 +474,7 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok((account, user_row.into_user(&self.crypto, dek.as_ref())?))
+        Ok((account, user_row.into_user(&self.crypto)?))
     }
 
     pub async fn find_user_by_sub(&self, sub: &str) -> Result<Option<(Account, User)>> {
@@ -463,7 +484,6 @@ impl AccountRepo {
              FROM accounts a \
              JOIN users u ON u.id = a.id \
              LEFT JOIN agents ag ON ag.id = a.id \
-             LEFT JOIN account_encryption_keys k ON k.account_id = a.id \
              WHERE u.provider_sub_hash = $1"
         ))
         .bind(&provider_sub_hash)
@@ -474,7 +494,6 @@ impl AccountRepo {
         let Some(account_row) = account_row else {
             return Ok(None);
         };
-        let dek = account_row.user_dek(&self.crypto)?;
         let account = account_row.into_account(&self.crypto)?;
         let user_row = sqlx::query_as::<_, UserRow>(&format!(
             "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
@@ -484,10 +503,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(Some((
-            account,
-            user_row.into_user(&self.crypto, dek.as_ref())?,
-        )))
+        Ok(Some((account, user_row.into_user(&self.crypto)?)))
     }
 
     async fn fetch_account_row(&self, account_id: Uuid) -> Result<Option<AccountRow>> {
@@ -495,7 +511,6 @@ impl AccountRepo {
             "SELECT {ACCOUNT_COLUMNS} \
              FROM accounts a \
              LEFT JOIN agents ag ON ag.id = a.id \
-             LEFT JOIN account_encryption_keys k ON k.account_id = a.id \
              WHERE a.id = $1"
         ))
         .bind(account_id)
@@ -503,36 +518,18 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)
     }
-
-    async fn fetch_dek_for_update(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        account_id: Uuid,
-    ) -> Result<[u8; 32]> {
-        let wrapped: Option<Vec<u8>> = sqlx::query_scalar(
-            "SELECT wrapped_dek FROM account_encryption_keys \
-             WHERE account_id = $1 AND destroyed_at IS NULL \
-             FOR UPDATE",
-        )
-        .bind(account_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        let wrapped = wrapped.ok_or_else(|| Error::internal("account DEK not found"))?;
-        self.crypto.unwrap_dek(&wrapped)
-    }
 }
 
 fn decrypt_optional_string(
     crypto: &PiiCrypto,
-    dek: &[u8; 32],
+    aad: &PiiAad,
     ciphertext: Option<&Vec<u8>>,
     nonce: Option<&Vec<u8>>,
 ) -> Result<Option<String>> {
     match (ciphertext, nonce) {
         (Some(ciphertext), Some(nonce)) => crypto
-            .decrypt_string(
-                dek,
+            .decrypt_pii_string(
+                aad,
                 &EncryptedField {
                     ciphertext: ciphertext.clone(),
                     nonce: nonce.clone(),
