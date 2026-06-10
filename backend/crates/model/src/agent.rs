@@ -22,7 +22,7 @@ pub struct CreateAgent {
 
 /// Input to create an agent key.
 #[derive(Debug, Clone)]
-pub struct CreateAgentKey {
+pub struct CreateAgentApiKey {
     pub agent_id: Uuid,
     pub name: String,
     pub scopes: Vec<String>,

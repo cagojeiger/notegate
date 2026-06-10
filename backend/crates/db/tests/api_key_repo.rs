@@ -159,7 +159,7 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
     let repo = ApiKeyRepo::new(db.pool.clone());
     let user_id = insert_user_account(&db.pool, "list-user", "list-user@example.test").await?;
 
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: Uuid::new_v4(),
         account_id: user_id,
         command: &CreateApiKey {
@@ -173,7 +173,7 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
         rotated_from_key_id: None,
     })
     .await?;
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: Uuid::new_v4(),
         account_id: user_id,
         command: &CreateApiKey {
@@ -187,7 +187,7 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
         rotated_from_key_id: None,
     })
     .await?;
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: Uuid::new_v4(),
         account_id: user_id,
         command: &CreateApiKey {
@@ -249,7 +249,7 @@ async fn live_user_api_key_resolves_account_and_marks_last_used()
     let user_id = insert_user_account(&db.pool, "api-key-user", "user@example.test").await?;
     let key_id = Uuid::new_v4();
 
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id,
         account_id: user_id,
         command: &CreateApiKey {
@@ -297,7 +297,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
             Uuid::new_v4()
         };
         let token_hash = format!("hash-{index}");
-        repo.insert_key(InsertApiKey {
+        repo.insert_key_unchecked_for_test(InsertApiKey {
             key_id,
             account_id: user_id,
             command: &CreateApiKey {
@@ -368,7 +368,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     let agent_id = insert_agent_account(&db.pool, creator, "api-agent").await?;
     let key_id = Uuid::new_v4();
 
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id,
         account_id: agent_id,
         command: &CreateApiKey {
@@ -414,7 +414,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
     let live_id = Uuid::new_v4();
     let revoked_id = Uuid::new_v4();
 
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: live_id,
         account_id: user_id,
         command: &CreateApiKey {
@@ -428,7 +428,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         rotated_from_key_id: None,
     })
     .await?;
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: revoked_id,
         account_id: user_id,
         command: &CreateApiKey {
@@ -444,7 +444,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
     .await?;
     repo.revoke_key(user_id, revoked_id, user_id, Some("test"))
         .await?;
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: Uuid::new_v4(),
         account_id: user_id,
         command: &CreateApiKey {
@@ -489,7 +489,7 @@ async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::
     let other = insert_user_account(&db.pool, "other", "other@example.test").await?;
     let key_id = Uuid::new_v4();
 
-    repo.insert_key(InsertApiKey {
+    repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id,
         account_id: other,
         command: &CreateApiKey {

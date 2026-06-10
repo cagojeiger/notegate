@@ -90,7 +90,7 @@ impl Resolver {
         token: &str,
         channel: Channel,
     ) -> Result<Caller, IdentityError> {
-        let Some((key_id, secret)) = crate::keys::parse_token(token) else {
+        let Some((key_id, secret)) = crate::api_keys::parse_token(token) else {
             return Err(IdentityError::NotRegistered);
         };
         let token_hash = self.crypto.api_key_hash(&key_id.to_string(), secret)?;

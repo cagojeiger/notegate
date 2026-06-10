@@ -6,7 +6,9 @@ use notegate_model::account::AccountKind;
 use notegate_model::{ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 use uuid::Uuid;
 
-use crate::keys::{KeyPolicy, create_key_for_account, list_key_page, rotate_key_for_account};
+use crate::api_keys::{
+    ApiKeyPolicy, create_key_for_account, list_key_page, rotate_key_for_account,
+};
 use crate::{ServiceError, ServiceResult};
 
 #[derive(Debug, Clone)]
@@ -68,7 +70,7 @@ impl AccountService {
             caller_account_id,
             command,
             None,
-            user_key_policy(),
+            user_api_key_policy(),
         )
         .await
     }
@@ -109,14 +111,14 @@ impl AccountService {
                 scopes: Vec::new(),
                 expires_at: Some(old.expires_at),
             },
-            user_key_policy(),
+            user_api_key_policy(),
         )
         .await
     }
 }
 
-fn user_key_policy() -> KeyPolicy {
-    KeyPolicy {
+fn user_api_key_policy() -> ApiKeyPolicy {
+    ApiKeyPolicy {
         max_live_keys: limits::USER_API_KEYS_PER_ACCOUNT_MAX,
         max_ttl_days: limits::USER_API_KEY_MAX_TTL_DAYS,
     }

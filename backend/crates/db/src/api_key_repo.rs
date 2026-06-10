@@ -128,7 +128,12 @@ impl ApiKeyRepo {
         usize::try_from(count).map_err(|_error| Error::internal("negative key count"))
     }
 
-    pub async fn insert_key(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
+    /// Insert a key without enforcing the per-account live-key cap.
+    ///
+    /// Production code must use [`insert_key_with_cap`] or [`rotate_key`]. This
+    /// helper exists for repository tests that need to seed exact key states.
+    #[doc(hidden)]
+    pub async fn insert_key_unchecked_for_test(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
         validate_command(args.command)?;
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "INSERT INTO api_keys \

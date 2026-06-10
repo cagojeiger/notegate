@@ -307,7 +307,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
         .await?;
     let key_id = uuid::Uuid::new_v4();
     api_keys
-        .insert_key(InsertApiKey {
+        .insert_key_unchecked_for_test(InsertApiKey {
             key_id,
             account_id: agent.id,
             command: &CreateApiKey {
@@ -323,7 +323,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
         .await?;
     let user_key_id = uuid::Uuid::new_v4();
     api_keys
-        .insert_key(InsertApiKey {
+        .insert_key_unchecked_for_test(InsertApiKey {
             key_id: user_key_id,
             account_id: owner.id,
             command: &CreateApiKey {

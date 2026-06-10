@@ -11,7 +11,7 @@ use crate::pagination::clamp_limit;
 use crate::{ServiceError, ServiceResult, cursor};
 
 #[derive(Debug, Clone, Copy)]
-pub struct KeyPolicy {
+pub struct ApiKeyPolicy {
     pub max_live_keys: usize,
     pub max_ttl_days: i64,
 }
@@ -68,7 +68,7 @@ pub async fn create_key_for_account(
     created_by: Uuid,
     command: CreateApiKey,
     rotated_from_key_id: Option<Uuid>,
-    policy: KeyPolicy,
+    policy: ApiKeyPolicy,
 ) -> ServiceResult<MintedApiKey> {
     validate_key_command(&command, policy.max_ttl_days)?;
     let key_id = Uuid::new_v4();
@@ -99,7 +99,7 @@ pub async fn rotate_key_for_account(
     created_by: Uuid,
     old_key_id: Uuid,
     command: CreateApiKey,
-    policy: KeyPolicy,
+    policy: ApiKeyPolicy,
 ) -> ServiceResult<MintedApiKey> {
     validate_key_command(&command, policy.max_ttl_days)?;
 

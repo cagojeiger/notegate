@@ -7,11 +7,11 @@
 pub mod access;
 pub mod accounts;
 pub mod agents;
+pub mod api_keys;
 pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod identity;
-pub mod keys;
 mod pagination;
 pub mod search;
 pub mod workspaces;

@@ -21,10 +21,10 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::{ApiKeyOut, ApiKeysListResponse, CreateApiKeyBody};
+use crate::rest::dto::{ApiKeyMetadataListResponse, ApiKeyMetadataOut, CreateApiKeyBody};
 use crate::state::AppState;
 
-use notegate_service::agents::{CreateAgent, CreateAgentKey, ListAgents};
+use notegate_service::agents::{CreateAgent, CreateAgentApiKey, ListAgents};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -77,7 +77,7 @@ pub(crate) struct CreateAgentBody {
 /// The one-time key creation response: metadata plus the plaintext token, which
 /// is returned exactly once and never stored.
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct CreatedKeyOut {
+pub(crate) struct CreatedAgentApiKeyOut {
     id: Uuid,
     agent_id: Uuid,
     name: String,
@@ -180,7 +180,7 @@ pub(crate) async fn delete_agent(
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
-    responses((status = 200, description = "List agent keys", body = ApiKeysListResponse)),
+    responses((status = 200, description = "List agent keys", body = ApiKeyMetadataListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list_keys(
@@ -188,7 +188,7 @@ pub(crate) async fn list_keys(
     Extension(caller): Extension<Caller>,
     Path(agent_id): Path<Uuid>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<ApiKeysListResponse>, ApiError> {
+) -> Result<Json<ApiKeyMetadataListResponse>, ApiError> {
     let page = state
         .agents
         .list_keys(
@@ -201,8 +201,8 @@ pub(crate) async fn list_keys(
             },
         )
         .await?;
-    let keys = page.items.iter().map(ApiKeyOut::from).collect();
-    Ok(Json(ApiKeysListResponse {
+    let keys = page.items.iter().map(ApiKeyMetadataOut::from).collect();
+    Ok(Json(ApiKeyMetadataListResponse {
         keys,
         page: Page::new(
             page.limit,
@@ -219,7 +219,7 @@ pub(crate) async fn list_keys(
     tag = "agents",
     params(("agent_id" = Uuid, Path)),
     request_body = CreateApiKeyBody,
-    responses((status = 201, description = "Create agent key", body = CreatedKeyOut)),
+    responses((status = 201, description = "Create agent key", body = CreatedAgentApiKeyOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn create_key(
@@ -227,13 +227,13 @@ pub(crate) async fn create_key(
     Extension(caller): Extension<Caller>,
     Path(agent_id): Path<Uuid>,
     Json(body): Json<CreateApiKeyBody>,
-) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+) -> Result<(StatusCode, Json<CreatedAgentApiKeyOut>), ApiError> {
     let minted = state
         .agents
         .create_key(
             caller.account.kind,
             caller.account_id(),
-            CreateAgentKey {
+            CreateAgentApiKey {
                 agent_id,
                 name: body.name,
                 scopes: body.scopes,
@@ -244,7 +244,7 @@ pub(crate) async fn create_key(
     let key = minted.key;
     Ok((
         StatusCode::CREATED,
-        Json(CreatedKeyOut {
+        Json(CreatedAgentApiKeyOut {
             id: key.id,
             agent_id: key.account_id,
             name: key.name,
@@ -261,14 +261,14 @@ pub(crate) async fn create_key(
     path = "/api/v1/agents/{agent_id}/keys/{key_id}",
     tag = "agents",
     params(("agent_id" = Uuid, Path), ("key_id" = Uuid, Path)),
-    responses((status = 201, description = "Rotate agent key", body = CreatedKeyOut)),
+    responses((status = 201, description = "Rotate agent key", body = CreatedAgentApiKeyOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn rotate_key(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((agent_id, key_id)): Path<(Uuid, Uuid)>,
-) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+) -> Result<(StatusCode, Json<CreatedAgentApiKeyOut>), ApiError> {
     let minted = state
         .agents
         .rotate_key(caller.account.kind, caller.account_id(), agent_id, key_id)
@@ -276,7 +276,7 @@ pub(crate) async fn rotate_key(
     let key = minted.key;
     Ok((
         StatusCode::CREATED,
-        Json(CreatedKeyOut {
+        Json(CreatedAgentApiKeyOut {
             id: key.id,
             agent_id: key.account_id,
             name: key.name,

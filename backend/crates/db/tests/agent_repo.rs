@@ -140,7 +140,7 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
     let agent_id = make_agent(&repo, owner, "bot").await;
     let key_id = Uuid::new_v4();
     api_keys
-        .insert_key(InsertApiKey {
+        .insert_key_unchecked_for_test(InsertApiKey {
             key_id,
             account_id: agent_id,
             command: &CreateApiKey {

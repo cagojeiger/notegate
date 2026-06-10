@@ -68,7 +68,7 @@ pub(crate) struct CreateApiKeyBody {
 /// API-key metadata returned by key list endpoints. The plaintext token is never
 /// included here.
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct ApiKeyOut {
+pub(crate) struct ApiKeyMetadataOut {
     pub id: Uuid,
     pub account_id: Uuid,
     pub name: String,
@@ -78,7 +78,7 @@ pub(crate) struct ApiKeyOut {
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
-impl From<&ApiKey> for ApiKeyOut {
+impl From<&ApiKey> for ApiKeyMetadataOut {
     fn from(key: &ApiKey) -> Self {
         Self {
             id: key.id,
@@ -93,8 +93,8 @@ impl From<&ApiKey> for ApiKeyOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct ApiKeysListResponse {
-    pub keys: Vec<ApiKeyOut>,
+pub(crate) struct ApiKeyMetadataListResponse {
+    pub keys: Vec<ApiKeyMetadataOut>,
     pub page: crate::page::Page,
 }
 

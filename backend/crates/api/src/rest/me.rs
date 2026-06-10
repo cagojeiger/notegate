@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
-use crate::rest::dto::{ApiKeyOut, ApiKeysListResponse, CreateApiKeyBody};
+use crate::rest::dto::{ApiKeyMetadataListResponse, ApiKeyMetadataOut, CreateApiKeyBody};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -38,7 +38,7 @@ pub(crate) struct ListKeysQuery {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct CreatedKeyOut {
+pub(crate) struct CreatedUserApiKeyOut {
     id: Uuid,
     account_id: Uuid,
     name: String,
@@ -67,14 +67,14 @@ pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutpu
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
-    responses((status = 200, description = "List current user API keys", body = ApiKeysListResponse)),
+    responses((status = 200, description = "List current user API keys", body = ApiKeyMetadataListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list_keys(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListKeysQuery>,
-) -> Result<Json<ApiKeysListResponse>, ApiError> {
+) -> Result<Json<ApiKeyMetadataListResponse>, ApiError> {
     let page = state
         .account_lifecycle
         .list_keys(
@@ -86,8 +86,8 @@ pub(crate) async fn list_keys(
             },
         )
         .await?;
-    let keys = page.items.iter().map(ApiKeyOut::from).collect();
-    Ok(Json(ApiKeysListResponse {
+    let keys = page.items.iter().map(ApiKeyMetadataOut::from).collect();
+    Ok(Json(ApiKeyMetadataListResponse {
         keys,
         page: Page::new(
             page.limit,
@@ -103,14 +103,14 @@ pub(crate) async fn list_keys(
     path = "/api/v1/me/keys",
     tag = "identity",
     request_body = CreateApiKeyBody,
-    responses((status = 201, description = "Create current user API key", body = CreatedKeyOut)),
+    responses((status = 201, description = "Create current user API key", body = CreatedUserApiKeyOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn create_key(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Json(body): Json<CreateApiKeyBody>,
-) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+) -> Result<(StatusCode, Json<CreatedUserApiKeyOut>), ApiError> {
     let minted = state
         .account_lifecycle
         .create_key(
@@ -126,7 +126,7 @@ pub(crate) async fn create_key(
     let key = minted.key;
     Ok((
         StatusCode::CREATED,
-        Json(CreatedKeyOut {
+        Json(CreatedUserApiKeyOut {
             id: key.id,
             account_id: key.account_id,
             name: key.name,
@@ -143,14 +143,14 @@ pub(crate) async fn create_key(
     path = "/api/v1/me/keys/{key_id}",
     tag = "identity",
     params(("key_id" = Uuid, Path)),
-    responses((status = 201, description = "Rotate current user API key", body = CreatedKeyOut)),
+    responses((status = 201, description = "Rotate current user API key", body = CreatedUserApiKeyOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn rotate_key(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(key_id): Path<Uuid>,
-) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
+) -> Result<(StatusCode, Json<CreatedUserApiKeyOut>), ApiError> {
     let minted = state
         .account_lifecycle
         .rotate_key(caller.account.kind, caller.account_id(), key_id)
@@ -158,7 +158,7 @@ pub(crate) async fn rotate_key(
     let key = minted.key;
     Ok((
         StatusCode::CREATED,
-        Json(CreatedKeyOut {
+        Json(CreatedUserApiKeyOut {
             id: key.id,
             account_id: key.account_id,
             name: key.name,

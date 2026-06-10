@@ -10,13 +10,13 @@ use notegate_db::{AgentRepo, ApiKeyRepo};
 use notegate_model::Agent;
 use notegate_model::account::AccountKind;
 pub use notegate_model::{
-    AgentPage, ApiKeyPage, CreateAgent, CreateAgentKey, CreateApiKey, ListAgents, ListApiKeys,
+    AgentPage, ApiKeyPage, CreateAgent, CreateAgentApiKey, CreateApiKey, ListAgents, ListApiKeys,
     MintedApiKey,
 };
 use uuid::Uuid;
 
+use crate::api_keys::ApiKeyPolicy;
 use crate::error::{ServiceError, ServiceResult};
-use crate::keys::KeyPolicy;
 use crate::pagination::{clamp_limit, paginate_by_id};
 
 /// Agent lifecycle service.
@@ -92,13 +92,13 @@ impl AgentService {
         &self,
         caller_kind: AccountKind,
         caller_account_id: Uuid,
-        command: CreateAgentKey,
+        command: CreateAgentApiKey,
     ) -> ServiceResult<MintedApiKey> {
         require_user_caller(caller_kind)?;
         self.require_owned_active_agent(command.agent_id, caller_account_id)
             .await?;
 
-        crate::keys::create_key_for_account(
+        crate::api_keys::create_key_for_account(
             &self.api_keys,
             &self.crypto,
             command.agent_id,
@@ -109,7 +109,7 @@ impl AgentService {
                 expires_at: command.expires_at,
             },
             None,
-            agent_key_policy(),
+            agent_api_key_policy(),
         )
         .await
     }
@@ -155,7 +155,7 @@ impl AgentService {
         require_user_caller(caller_kind)?;
         self.require_owned_active_agent(agent_id, caller_account_id)
             .await?;
-        crate::keys::list_key_page(&self.api_keys, agent_id, request).await
+        crate::api_keys::list_key_page(&self.api_keys, agent_id, request).await
     }
 
     pub async fn rotate_key(
@@ -173,7 +173,7 @@ impl AgentService {
             .find_live_key(agent_id, key_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("api key not found".to_owned()))?;
-        crate::keys::rotate_key_for_account(
+        crate::api_keys::rotate_key_for_account(
             &self.api_keys,
             &self.crypto,
             agent_id,
@@ -184,7 +184,7 @@ impl AgentService {
                 scopes: Vec::new(),
                 expires_at: Some(old.expires_at),
             },
-            agent_key_policy(),
+            agent_api_key_policy(),
         )
         .await
     }
@@ -201,8 +201,8 @@ impl AgentService {
     }
 }
 
-fn agent_key_policy() -> KeyPolicy {
-    KeyPolicy {
+fn agent_api_key_policy() -> ApiKeyPolicy {
+    ApiKeyPolicy {
         max_live_keys: limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
         max_ttl_days: limits::AGENT_API_KEY_MAX_TTL_DAYS,
     }
