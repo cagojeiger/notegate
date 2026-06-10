@@ -154,7 +154,7 @@ JOIN nodes n
 WHERE d.workspace_id = $workspace_id
   AND n.deleted_at IS NULL
   AND d.content_md ILIKE $query
-ORDER BY d.updated_at DESC
+ORDER BY d.updated_at DESC, d.node_id ASC
 LIMIT $limit;
 ```
 
