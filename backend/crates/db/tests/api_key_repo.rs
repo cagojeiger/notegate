@@ -429,10 +429,13 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
         Some(agent_id)
     );
 
-    sqlx::query("UPDATE accounts SET is_active = false, deleted_at = now() WHERE id = $1")
-        .bind(agent_id)
-        .execute(&db.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE accounts SET is_active = false, deleted_at = now(), deleted_by = $2 WHERE id = $1",
+    )
+    .bind(agent_id)
+    .bind(creator)
+    .execute(&db.pool)
+    .await?;
     assert_eq!(
         repo.find_live_account_id_by_key(key_id, "hash-agent-key")
             .await?,
@@ -491,7 +494,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         command: &CreateApiKey {
             name: "expired".to_owned(),
             scopes: Vec::new(),
-            expires_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)),
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_expired",
         token_hash: "hash-expired",
@@ -499,6 +502,12 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         rotated_from_key_id: None,
     })
     .await?;
+    // Create with a valid future expiry, then expire it directly. The create-time
+    // guard rejects past expiries, but a validly-created key can later expire.
+    sqlx::query("UPDATE api_keys SET expires_at = now() - interval '1 hour' WHERE id = $1")
+        .bind(expired_id)
+        .execute(&db.pool)
+        .await?;
 
     assert_eq!(
         repo.find_live_account_id_by_key(live_id, "hash-live")
