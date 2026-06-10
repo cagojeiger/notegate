@@ -164,16 +164,10 @@ impl ApiKeyRepo {
         Ok(ApiKey::from(row))
     }
 
-    /// Insert a new API key while enforcing the per-account live-key cap inside one
-    /// transaction. Locks the account row (`SELECT id FROM accounts WHERE id=$1 FOR
-    /// UPDATE`) so concurrent creates serialize on it, re-counts live keys inside the
-    /// tx using the same predicate as [`count_live_keys`], and rejects with
-    /// `Conflict` when the account is at the cap.
-    ///
-    /// Lock-order invariant: every transaction in this codebase that locks an
-    /// `accounts` row AND writes `api_keys` takes the `accounts` row lock FIRST.
-    /// `accounts[id]` is therefore the single serialization point for per-account
-    /// key mutation, so no `accounts`<->`api_keys` lock cycle is constructible.
+    /// Insert a new API key, enforcing the per-account live-key cap atomically: locks
+    /// the account row so concurrent creates serialize, re-counts live keys in-tx, and
+    /// rejects with `Conflict` at the cap. The account row is always locked before
+    /// writing `api_keys`, so no lock cycle is possible.
     pub async fn insert_key_with_cap(
         &self,
         args: InsertApiKey<'_>,
@@ -345,10 +339,8 @@ impl ApiKeyRepo {
 }
 
 /// The single definition of a live API key: not revoked and not yet expired.
-/// `prefix` qualifies the columns (`"k."` inside a join, `""` otherwise) so every
-/// live-key query — listing, the per-account cap count, lookups, rotation — shares
-/// one predicate and cannot drift. Account activeness is a separate concern the
-/// authentication path adds on top; it is intentionally not folded in here.
+/// `prefix` qualifies the columns (`"k."` inside a join, `""` otherwise). Account
+/// activeness is separate — only the authentication path adds it.
 fn live_key_predicate(prefix: &str) -> String {
     format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
 }

@@ -260,7 +260,9 @@ folder move/rename                        -> update moved node only
 folder delete                             -> soft-delete every live descendant in the bounded subtree
 soft-deleted nodes                        -> excluded from list/search/live counts
 deleted node/workspace retention          -> 30 days before purge eligibility
+soft-deleted account retention            -> 15 days before PII anonymized and sub-hash freed
+dead API key retention                    -> 30 days (revoked/expired) before hard delete
 purge job                                 -> may hard-delete rows whose purge_after has passed
 purge worker concurrency                  -> PostgreSQL advisory transaction lock; one active purge per DB
-purge batch                               -> workspaces <= 100, selected nodes <= 1000 per run
+purge batch                               -> workspaces <= 100, nodes <= 1000, accounts <= 100, API keys <= 1000 per run
 ```

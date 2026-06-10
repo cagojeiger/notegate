@@ -20,10 +20,8 @@ use uuid::Uuid;
 const AUTH_PROVIDER: &str = "authgate";
 
 /// FROM/WHERE selecting the live workspaces an account is the SOLE active-user owner
-/// of — no other active user owner exists. `$1` binds the account id. Shared by the
-/// deletion gate ([`AccountRepo::count_sole_owned_workspaces`]) and the soft-delete
-/// teardown so the "can delete?" check and the "what gets torn down" set are defined
-/// once and can never drift apart (a drift would orphan or wrongly delete workspaces).
+/// of (no other active user owner exists). `$1` binds the account id. Shared by the
+/// deletion gate and the soft-delete teardown so both operate on the same set.
 const SOLE_OWNED_WORKSPACES_FROM_WHERE: &str = "\
     FROM workspace_access wa \
     JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
@@ -83,10 +81,8 @@ impl AccountRow {
                 let Some(key_id) = self.display_name_enc_key_id.as_ref() else {
                     return Ok(String::new());
                 };
-                // Encrypted PII is present: the stored enc version must match the
-                // active crypto version BEFORE we attempt decryption, so a mismatch
-                // surfaces as a clear error instead of an opaque AEAD failure
-                // (PiiAad folds the version into the AAD).
+                // Stored enc version must match the active crypto version before
+                // decryption, so a mismatch is a clear error, not an opaque AEAD failure.
                 let stored = self.display_name_enc_version;
                 if stored != Some(crypto.version()) {
                     return Err(Error::internal(format!(
@@ -141,9 +137,8 @@ impl UserRow {
     fn into_user(self, crypto: &PiiCrypto) -> Result<User> {
         let email = match self.email_enc_key_id.as_ref() {
             Some(key_id) => {
-                // Encrypted PII is present: assert the stored enc version matches the
-                // active crypto version BEFORE decrypting, so a mismatch surfaces as a
-                // clear error rather than an opaque AEAD failure (version is in the AAD).
+                // Stored enc version must match the active crypto version before
+                // decryption, so a mismatch is a clear error, not an opaque AEAD failure.
                 let stored = self.email_enc_version;
                 if stored != Some(crypto.version()) {
                     return Err(Error::internal(format!(

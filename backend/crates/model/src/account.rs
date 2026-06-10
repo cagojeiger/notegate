@@ -48,11 +48,9 @@ pub struct Account {
 }
 
 impl Account {
-    /// Whether this account is live: active and not soft-deleted. `is_active` and
-    /// `deleted_at` are two signals for the same "alive" state; treat the account as
-    /// dead if either says so, so a future divergence between the columns can never
-    /// authenticate or be granted access. This is the single Rust-side definition of
-    /// account liveness; the equivalent SQL predicate is `db::active_account_predicate`.
+    /// Whether the account is live: active and not soft-deleted (dead if either
+    /// signal says so). The single Rust-side definition of account liveness; the SQL
+    /// equivalent is `db::active_account_predicate`.
     pub fn is_live(&self) -> bool {
         self.is_active && self.deleted_at.is_none()
     }

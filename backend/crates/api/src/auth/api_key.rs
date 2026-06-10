@@ -26,11 +26,8 @@ pub async fn verify_api_key(
 
 fn map_identity_error(error: IdentityError) -> AuthError {
     match error {
-        // For API-key auth, both an unrecognized key and an inactive account map to
-        // an invalid token (401), never revealing whether the credential exists or
-        // was deactivated. (docs/spec/rest/errors.md, docs/spec/mcp/auth.md). The
-        // live-key lookup already pre-filters inactive accounts, so `Inactive` is not
-        // normally reachable here; this keeps the mapping spec-correct regardless.
+        // Both an unknown key and an inactive account map to 401, never revealing
+        // whether the credential exists or was deactivated.
         IdentityError::NotRegistered | IdentityError::Inactive => AuthError::InvalidToken,
         IdentityError::InvalidInput => AuthError::InvalidToken,
         IdentityError::Internal(_message) => AuthError::Internal,
