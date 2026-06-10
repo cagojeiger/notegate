@@ -40,19 +40,21 @@ unknown limit key   -> configuration error
 
 ```text
 http_request_body_max_bytes = 1048576 bytes  # 1 MiB
-http_request_timeout_secs = 30
-http_rate_limit_requests_per_minute = 600 per API process
+http_request_timeout_secs = 30 for data-plane routes
+http_control_plane_timeout_secs = 5 for /health and /ready
+http_rate_limit_requests_per_minute = 1800 per API process for data-plane routes
 ```
 
 Branching:
 
 ```text
 request body > max -> 413 payload too large
-request timeout    -> 408 request timeout
-rate limit exceed  -> 429 too many requests
+data-plane request timeout -> 408 request timeout
+control-plane timeout     -> 408 request timeout
+rate limit exceed         -> 429 too many requests
 ```
 
-현재 rate limit은 process-local global limit이다. Edge/proxy/API-key/IP 기반 fine-grained limit은 별도 정책으로 확장한다.
+현재 rate limit은 process-local data-plane global limit이다. `/health`와 `/ready`는 Kubernetes/control-plane signal이므로 rate limit 대상에서 제외한다. Edge/proxy/API-key/IP 기반 fine-grained limit은 별도 정책으로 확장한다.
 
 ## Account, workspace, and credential limits
 

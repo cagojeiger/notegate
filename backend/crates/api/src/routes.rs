@@ -33,39 +33,34 @@ use crate::state::AppState;
 pub fn app(state: AppState) -> Router {
     let x_request_id = HeaderName::from_static("x-request-id");
 
-    let router = Router::new()
-        .merge(system_routes())
-        .merge(auth_routes())
-        .merge(metadata_routes(&state))
-        .merge(crate::openapi::routes(&state.config))
-        .nest("/api", rest_api_routes(state.clone()))
-        .route("/mcp", any(mcp_handler))
-        .with_state(state);
-
-    apply_ingress_limits(router, HttpIngressLimits::default()).layer(
-        ServiceBuilder::new()
-            .layer(SetRequestIdLayer::new(
-                x_request_id.clone(),
-                MakeRequestUuid,
-            ))
-            .layer(
-                TraceLayer::new_for_http()
-                    .make_span_with(make_request_span)
-                    .on_response(log_request_end),
-            )
-            .layer(from_fn(add_json_charset))
-            .layer(PropagateRequestIdLayer::new(x_request_id)),
-    )
+    Router::new()
+        .merge(control_plane_routes())
+        .merge(data_plane_routes(state.clone()))
+        .with_state(state)
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetRequestIdLayer::new(
+                    x_request_id.clone(),
+                    MakeRequestUuid,
+                ))
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(make_request_span)
+                        .on_response(log_request_end),
+                )
+                .layer(from_fn(add_json_charset))
+                .layer(PropagateRequestIdLayer::new(x_request_id)),
+        )
 }
 
 #[derive(Debug, Clone, Copy)]
-struct HttpIngressLimits {
+struct DataPlaneLimits {
     request_body_max_bytes: usize,
     request_timeout: Duration,
     rate_limit_requests_per_minute: u32,
 }
 
-impl Default for HttpIngressLimits {
+impl Default for DataPlaneLimits {
     fn default() -> Self {
         Self {
             request_body_max_bytes: limits::HTTP_REQUEST_BODY_MAX_BYTES,
@@ -75,7 +70,31 @@ impl Default for HttpIngressLimits {
     }
 }
 
-fn apply_ingress_limits<S>(router: Router<S>, limits: HttpIngressLimits) -> Router<S>
+fn control_plane_routes() -> Router<AppState> {
+    apply_control_plane_limits(system_routes())
+}
+
+fn data_plane_routes(state: AppState) -> Router<AppState> {
+    let router = Router::new()
+        .merge(auth_routes())
+        .merge(metadata_routes(&state))
+        .merge(crate::openapi::routes(&state.config))
+        .nest("/api", rest_api_routes(state))
+        .route("/mcp", any(mcp_handler));
+    apply_data_plane_limits(router, DataPlaneLimits::default())
+}
+
+fn apply_control_plane_limits<S>(router: Router<S>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(TimeoutLayer::with_status_code(
+        StatusCode::REQUEST_TIMEOUT,
+        Duration::from_secs(limits::HTTP_CONTROL_PLANE_TIMEOUT_SECS),
+    ))
+}
+
+fn apply_data_plane_limits<S>(router: Router<S>, limits: DataPlaneLimits) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
@@ -91,7 +110,7 @@ where
 }
 
 #[allow(clippy::expect_used)]
-fn rate_limit_config(limits: HttpIngressLimits) -> axum_governor::GovernorConfig<()> {
+fn rate_limit_config(limits: DataPlaneLimits) -> axum_governor::GovernorConfig<()> {
     let requests = std::num::NonZeroU32::new(limits.rate_limit_requests_per_minute)
         .expect("HTTP rate limit must be greater than zero");
     GovernorConfigBuilder::default()
@@ -237,10 +256,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn ingress_limits_reject_oversized_request_body() {
-        let app = apply_ingress_limits(
+    async fn data_plane_limits_reject_oversized_request_body() {
+        let app = apply_data_plane_limits(
             Router::new().route("/", post(|body: String| async move { body })),
-            HttpIngressLimits {
+            DataPlaneLimits {
                 request_body_max_bytes: 4,
                 request_timeout: Duration::from_secs(30),
                 rate_limit_requests_per_minute: 100,
@@ -262,10 +281,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingress_limits_return_429_when_rate_limited() {
-        let app = apply_ingress_limits(
+    async fn data_plane_limits_return_429_when_rate_limited() {
+        let app = apply_data_plane_limits(
             Router::new().route("/", get(|| async { "ok" })),
-            HttpIngressLimits {
+            DataPlaneLimits {
                 request_body_max_bytes: 1024,
                 request_timeout: Duration::from_secs(30),
                 rate_limit_requests_per_minute: 1,
@@ -284,6 +303,20 @@ mod tests {
 
         assert_eq!(first.status(), StatusCode::OK);
         assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn control_plane_timeout_does_not_rate_limit() {
+        let app = apply_control_plane_limits(Router::new().route("/", get(|| async { "ok" })));
+
+        for _ in 0..3 {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
     }
 }
 

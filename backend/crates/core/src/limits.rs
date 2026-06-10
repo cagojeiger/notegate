@@ -15,8 +15,10 @@
 pub const HTTP_REQUEST_BODY_MAX_BYTES: usize = 1_048_576;
 /// Maximum wall-clock time for one HTTP request before a 408 response.
 pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
+/// Maximum wall-clock time for control-plane probes before a 408 response.
+pub const HTTP_CONTROL_PLANE_TIMEOUT_SECS: u64 = 5;
 /// Maximum HTTP requests accepted per API process per minute.
-pub const HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE: u32 = 600;
+pub const HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE: u32 = 1_800;
 
 // --- Account, workspace, and credential limits ---
 
