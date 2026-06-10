@@ -5,7 +5,6 @@
 //! Plaintext API key tokens are HMAC-hashed with the LOOKUP root subkey; only
 //! the hash is persisted.
 
-use chrono::Utc;
 use notegate_core::{limits, security::PiiCrypto};
 use notegate_db::{AgentRepo, ApiKeyRepo};
 use notegate_model::Agent;
@@ -95,23 +94,10 @@ impl AgentService {
         command: CreateAgentKey,
     ) -> ServiceResult<MintedApiKey> {
         require_user_caller(caller_kind)?;
-        if !command.scopes.is_empty() {
-            return Err(ServiceError::InvalidInput(
-                "api key scopes must be empty".to_owned(),
-            ));
-        }
-        if command
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= Utc::now())
-        {
-            return Err(ServiceError::InvalidInput(
-                "api key expires_at must be in the future".to_owned(),
-            ));
-        }
         self.require_owned_active_agent(command.agent_id, caller_account_id)
             .await?;
 
-        crate::accounts::create_key_for_account(
+        crate::keys::create_key_for_account(
             &self.api_keys,
             &self.crypto,
             command.agent_id,
@@ -167,7 +153,7 @@ impl AgentService {
         require_user_caller(caller_kind)?;
         self.require_owned_active_agent(agent_id, caller_account_id)
             .await?;
-        crate::accounts::list_key_page(&self.api_keys, agent_id, request).await
+        crate::keys::list_key_page(&self.api_keys, agent_id, request).await
     }
 
     pub async fn rotate_key(
@@ -185,7 +171,7 @@ impl AgentService {
             .find_live_key(agent_id, key_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("api key not found".to_owned()))?;
-        crate::accounts::rotate_key_for_account(
+        crate::keys::rotate_key_for_account(
             &self.api_keys,
             &self.crypto,
             agent_id,
@@ -229,45 +215,4 @@ fn validate_agent_name(name: &str) -> ServiceResult<()> {
         ));
     }
     Ok(())
-}
-
-pub fn format_token(key_id: Uuid, secret: &str) -> String {
-    format!("ngk_v1_{key_id}_{secret}")
-}
-
-pub fn token_prefix(key_id: Uuid) -> String {
-    format!("ngk_v1_{key_id}")
-}
-
-pub fn parse_token(token: &str) -> Option<(Uuid, &str)> {
-    let rest = token.strip_prefix("ngk_v1_")?;
-    let (key_id, secret) = rest.split_once('_')?;
-    let key_id = Uuid::parse_str(key_id).ok()?;
-    if secret.is_empty() {
-        return None;
-    }
-    Some((key_id, secret))
-}
-
-#[cfg(test)]
-mod api_key_token_tests {
-    #![allow(clippy::unwrap_used)]
-    use super::*;
-
-    #[test]
-    fn api_key_token_round_trips_key_id_and_secret() {
-        let key_id = Uuid::new_v4();
-        let token = format_token(key_id, "secret-value");
-        let parsed = parse_token(&token).unwrap();
-        assert_eq!(parsed.0, key_id);
-        assert_eq!(parsed.1, "secret-value");
-        assert_eq!(token_prefix(key_id), format!("ngk_v1_{key_id}"));
-    }
-
-    #[test]
-    fn api_key_token_rejects_old_opaque_tokens() {
-        assert!(parse_token("old-token").is_none());
-        assert!(parse_token("ngk_v1_not-a-uuid_secret").is_none());
-        assert!(parse_token("ngk_v1_00000000-0000-0000-0000-000000000000_").is_none());
-    }
 }

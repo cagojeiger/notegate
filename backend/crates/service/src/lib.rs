@@ -11,6 +11,7 @@ pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod identity;
+pub mod keys;
 mod pagination;
 pub mod search;
 pub mod workspaces;
