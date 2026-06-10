@@ -17,9 +17,7 @@ use common::TestDb;
 use notegate_core::Error;
 use notegate_db::api_key_repo::InsertApiKey;
 use notegate_db::{AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, WorkspaceRepo};
-use notegate_model::{
-    CreateAgent, CreateAgentKey, CreateApiKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role,
-};
+use notegate_model::{CreateAgent, CreateApiKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role};
 use sqlx::Row as _;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
@@ -307,17 +305,21 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
             owner.id,
         )
         .await?;
-    let key = agents
-        .insert_agent_key(
-            &CreateAgentKey {
-                agent_id: agent.id,
+    let key_id = uuid::Uuid::new_v4();
+    api_keys
+        .insert_key(InsertApiKey {
+            key_id,
+            account_id: agent.id,
+            command: &CreateApiKey {
                 name: "key".to_owned(),
                 scopes: Vec::new(),
                 expires_at: None,
             },
-            "hashed-token",
-            owner.id,
-        )
+            token_prefix: "ngk_v1_agent",
+            token_hash: "hashed-token",
+            created_by: owner.id,
+            rotated_from_key_id: None,
+        })
         .await?;
     let user_key_id = uuid::Uuid::new_v4();
     api_keys
@@ -387,7 +389,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
 
     let key_revoked_by: Option<uuid::Uuid> =
         sqlx::query_scalar("SELECT revoked_by FROM api_keys WHERE id = $1")
-            .bind(key.id)
+            .bind(key_id)
             .fetch_one(&db.pool)
             .await?;
     assert_eq!(key_revoked_by, Some(owner.id));

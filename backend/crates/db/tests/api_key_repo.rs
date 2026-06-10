@@ -299,3 +299,167 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = ApiKeyRepo::new(db.pool.clone());
+    let creator = insert_user_account(&db.pool, "agent-owner", "agent-owner@example.test").await?;
+    let agent_id = insert_agent_account(&db.pool, creator, "api-agent").await?;
+    let key_id = Uuid::new_v4();
+
+    repo.insert_key(InsertApiKey {
+        key_id,
+        account_id: agent_id,
+        command: &CreateApiKey {
+            name: "agent-key".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_agent",
+        token_hash: "hash-agent-key",
+        created_by: creator,
+        rotated_from_key_id: None,
+    })
+    .await?;
+
+    assert_eq!(
+        repo.find_live_account_id_by_token_hash("hash-agent-key")
+            .await?,
+        Some(agent_id)
+    );
+
+    sqlx::query("UPDATE accounts SET is_active = false, deleted_at = now() WHERE id = $1")
+        .bind(agent_id)
+        .execute(&db.pool)
+        .await?;
+    assert_eq!(
+        repo.find_live_account_id_by_token_hash("hash-agent-key")
+            .await?,
+        None
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = ApiKeyRepo::new(db.pool.clone());
+    let user_id = insert_user_account(&db.pool, "lookup-user", "lookup@example.test").await?;
+    let live_id = Uuid::new_v4();
+    let revoked_id = Uuid::new_v4();
+
+    repo.insert_key(InsertApiKey {
+        key_id: live_id,
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "live".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_live",
+        token_hash: "hash-live",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
+    repo.insert_key(InsertApiKey {
+        key_id: revoked_id,
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "revoked".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_revoked",
+        token_hash: "hash-revoked",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
+    repo.revoke_key(user_id, revoked_id, user_id, Some("test"))
+        .await?;
+    repo.insert_key(InsertApiKey {
+        key_id: Uuid::new_v4(),
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "expired".to_owned(),
+            scopes: Vec::new(),
+            expires_at: Some(chrono::Utc::now() - chrono::Duration::hours(1)),
+        },
+        token_prefix: "ngk_v1_expired",
+        token_hash: "hash-expired",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
+
+    assert_eq!(
+        repo.find_live_account_id_by_token_hash("hash-live").await?,
+        Some(user_id)
+    );
+    assert_eq!(
+        repo.find_live_account_id_by_token_hash("hash-revoked")
+            .await?,
+        None
+    );
+    assert_eq!(
+        repo.find_live_account_id_by_token_hash("hash-expired")
+            .await?,
+        None
+    );
+    assert_eq!(repo.count_live_keys(user_id).await?, 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = ApiKeyRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "owner@example.test").await?;
+    let other = insert_user_account(&db.pool, "other", "other@example.test").await?;
+    let key_id = Uuid::new_v4();
+
+    repo.insert_key(InsertApiKey {
+        key_id,
+        account_id: other,
+        command: &CreateApiKey {
+            name: "other-key".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_other",
+        token_hash: "hash-other",
+        created_by: other,
+        rotated_from_key_id: None,
+    })
+    .await?;
+
+    let result = repo.revoke_key(owner, key_id, owner, Some("test")).await;
+    assert!(result.is_err(), "wrong account id cannot revoke the key");
+
+    let revoked_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT revoked_at FROM api_keys WHERE id = $1")
+            .bind(key_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(revoked_at.is_none());
+
+    repo.revoke_key(other, key_id, owner, Some("test")).await?;
+    assert_eq!(repo.count_live_keys(other).await?, 0);
+
+    db.cleanup().await;
+    Ok(())
+}

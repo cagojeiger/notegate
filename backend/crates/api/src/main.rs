@@ -66,11 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // resolves key ownership, and agent_repo resolves agent callers.
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
     let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto.clone());
-    let agent_repo = notegate_db::AgentRepo::with_lookup_key(
-        pool.clone(),
-        pii_crypto.lookup_key_id(),
-        pii_crypto.version(),
-    );
+    let agent_repo = notegate_db::AgentRepo::new(pool.clone());
     let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
         pool.clone(),
         pii_crypto.lookup_key_id(),

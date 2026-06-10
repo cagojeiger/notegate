@@ -14,25 +14,6 @@ pub struct Agent {
     pub created_by: Uuid,
 }
 
-/// A bearer key that authenticates as a given agent. The plaintext token is
-/// never stored — only its hash.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentKey {
-    pub id: Uuid,
-    pub agent_id: Uuid,
-    /// Hash of the key's plaintext token. Never the plaintext.
-    pub token_hash: String,
-    pub name: String,
-    /// Current contract requires this to be empty.
-    pub scopes: Vec<String>,
-    pub created_by: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
-    pub last_used_at: Option<DateTime<Utc>>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub revoked_at: Option<DateTime<Utc>>,
-    pub revoked_by: Option<Uuid>,
-}
-
 /// Input to create an agent.
 #[derive(Debug, Clone)]
 pub struct CreateAgent {

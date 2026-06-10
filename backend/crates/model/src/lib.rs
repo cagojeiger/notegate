@@ -16,7 +16,7 @@ pub mod user;
 pub mod workspace;
 
 pub use account::{Account, AccountKind, AccountRef};
-pub use agent::{Agent, AgentKey, AgentPage, CreateAgent, CreateAgentKey, ListAgents};
+pub use agent::{Agent, AgentPage, CreateAgent, CreateAgentKey, ListAgents};
 pub use api_key::{ApiKey, ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 pub use document::Document;
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
