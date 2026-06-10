@@ -590,9 +590,11 @@ CREATE INDEX documents_workspace_updated_idx
 - query는 반드시 `accounts.is_active`, `revoked_at`, `nodes.deleted_at IS NULL`을 고려한다.
 - `workspaces.purge_after <= now()`인 deleted workspace는 내부 purge job으로 hard delete될 수 있다. 이때 `workspace_access`, `nodes`, `documents`는 FK cascade로 제거된다.
 - `nodes.purge_after <= now()`인 deleted node/document는 내부 purge job으로 hard delete될 수 있다.
+- soft-delete된 user account는 retention 경과 시 같은 purge job이 PII(`display_name`/email ciphertext·hash)를 익명화하고 `provider_sub_hash` tombstone을 해제한다. 식별 불가능한 attribution 껍데기 row는 보존한다. (ADR 0004)
+- revoked/expired API key row는 dead 상태로 retention 경과 시 같은 purge job이 hard delete한다. live-key 목록·per-account cap은 그 전에 이미 dead key를 제외한다.
 - purge job은 모든 서버 인스턴스에서 시작될 수 있지만, Postgres advisory transaction lock을 사용해 같은 DB에서 한 번에 하나의 purge transaction만 실행한다. Lock을 얻지 못한 worker tick은 즉시 skip한다.
-- purge job은 bounded batch로 실행한다. 현재 batch는 workspace 최대 100개, node 최대 1000개다.
-- 기본 node/workspace retention은 30일이다.
+- purge job은 bounded batch로 실행한다. 현재 batch는 workspace 최대 100개, node 최대 1000개, account 최대 100개, API key 최대 1000개다.
+- 기본 retention은 node/workspace 30일, soft-delete된 account 15일(`ACCOUNT_DELETION_RETENTION_DAYS`), dead API key 30일(`DEAD_API_KEY_RETENTION_DAYS`)이다.
 
 ## Reset policy
 

@@ -19,6 +19,27 @@ use uuid::Uuid;
 
 const AUTH_PROVIDER: &str = "authgate";
 
+/// FROM/WHERE selecting the live workspaces an account is the SOLE active-user owner
+/// of — no other active user owner exists. `$1` binds the account id. Shared by the
+/// deletion gate ([`AccountRepo::count_sole_owned_workspaces`]) and the soft-delete
+/// teardown so the "can delete?" check and the "what gets torn down" set are defined
+/// once and can never drift apart (a drift would orphan or wrongly delete workspaces).
+const SOLE_OWNED_WORKSPACES_FROM_WHERE: &str = "\
+    FROM workspace_access wa \
+    JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
+    WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
+      AND NOT EXISTS ( \
+          SELECT 1 FROM workspace_access other \
+          JOIN accounts other_acc ON other_acc.id = other.account_id \
+          WHERE other.workspace_id = w.id \
+            AND other.account_id <> $1 \
+            AND other.role = 'owner' \
+            AND other.revoked_at IS NULL \
+            AND other_acc.kind = 'user' \
+            AND other_acc.is_active = true \
+            AND other_acc.deleted_at IS NULL \
+      )";
+
 #[derive(Debug, Clone)]
 pub struct AccountRepo {
     pool: PgPool,
@@ -236,24 +257,9 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        let owned_workspaces: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT w.id \
-             FROM workspace_access wa \
-             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
-             WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
-               AND NOT EXISTS ( \
-                   SELECT 1 FROM workspace_access other \
-                   JOIN accounts other_acc ON other_acc.id = other.account_id \
-                   WHERE other.workspace_id = w.id \
-                     AND other.account_id <> $1 \
-                     AND other.role = 'owner' \
-                     AND other.revoked_at IS NULL \
-                     AND other_acc.kind = 'user' \
-                     AND other_acc.is_active = true \
-                     AND other_acc.deleted_at IS NULL \
-               ) \
-             ",
-        )
+        let owned_workspaces: Vec<Uuid> = sqlx::query_scalar(&format!(
+            "SELECT w.id {SOLE_OWNED_WORKSPACES_FROM_WHERE}"
+        ))
         .bind(account_id)
         .fetch_all(&mut *tx)
         .await
@@ -342,23 +348,9 @@ impl AccountRepo {
     /// the account cannot be deleted until these are deleted or their ownership is
     /// transferred. Co-owned workspaces (another active user owner exists) do not count.
     pub async fn count_sole_owned_workspaces(&self, account_id: Uuid) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) \
-             FROM workspace_access wa \
-             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
-             WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
-               AND NOT EXISTS ( \
-                   SELECT 1 FROM workspace_access other \
-                   JOIN accounts other_acc ON other_acc.id = other.account_id \
-                   WHERE other.workspace_id = w.id \
-                     AND other.account_id <> $1 \
-                     AND other.role = 'owner' \
-                     AND other.revoked_at IS NULL \
-                     AND other_acc.kind = 'user' \
-                     AND other_acc.is_active = true \
-                     AND other_acc.deleted_at IS NULL \
-               )",
-        )
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) {SOLE_OWNED_WORKSPACES_FROM_WHERE}"
+        ))
         .bind(account_id)
         .fetch_one(&self.pool)
         .await

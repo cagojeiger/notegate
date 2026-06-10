@@ -38,12 +38,12 @@ impl ApiKeyRepo {
         limit: i64,
         cursor: Option<&ApiKeyCursor>,
     ) -> Result<Vec<ApiKey>> {
+        let live = live_key_predicate("");
         let rows = match cursor {
             None => {
                 sqlx::query_as::<_, ApiKeyRow>(&format!(
                     "SELECT {API_KEY_COLUMNS} FROM api_keys \
-                     WHERE account_id = $1 AND revoked_at IS NULL \
-                       AND expires_at > now() \
+                     WHERE account_id = $1 AND {live} \
                      ORDER BY created_at DESC, id DESC LIMIT $2"
                 ))
                 .bind(account_id)
@@ -54,8 +54,7 @@ impl ApiKeyRepo {
             Some(cursor) => {
                 sqlx::query_as::<_, ApiKeyRow>(&format!(
                     "SELECT {API_KEY_COLUMNS} FROM api_keys \
-                     WHERE account_id = $1 AND revoked_at IS NULL \
-                       AND expires_at > now() \
+                     WHERE account_id = $1 AND {live} \
                        AND (created_at, id) < ($2, $3) \
                      ORDER BY created_at DESC, id DESC LIMIT $4"
                 ))
@@ -72,10 +71,10 @@ impl ApiKeyRepo {
     }
 
     pub async fn find_live_key(&self, account_id: Uuid, key_id: Uuid) -> Result<Option<ApiKey>> {
+        let live = live_key_predicate("");
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "SELECT {API_KEY_COLUMNS} FROM api_keys \
-             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL \
-               AND expires_at > now()"
+             WHERE id = $1 AND account_id = $2 AND {live}"
         ))
         .bind(key_id)
         .bind(account_id)
@@ -90,15 +89,15 @@ impl ApiKeyRepo {
         key_id: Uuid,
         token_hash: &str,
     ) -> Result<Option<Uuid>> {
-        let account_id: Option<Uuid> = sqlx::query(
+        let live = live_key_predicate("k.");
+        let account_id: Option<Uuid> = sqlx::query(&format!(
             "SELECT k.account_id FROM api_keys k \
              JOIN accounts acc ON acc.id = k.account_id \
              WHERE k.id = $1 AND k.token_hash = $2 \
-               AND k.revoked_at IS NULL \
-               AND k.expires_at > now() \
+               AND {live} \
                AND acc.is_active = true \
-               AND acc.deleted_at IS NULL",
-        )
+               AND acc.deleted_at IS NULL"
+        ))
         .bind(key_id)
         .bind(token_hash)
         .fetch_optional(&self.pool)
@@ -123,11 +122,11 @@ impl ApiKeyRepo {
     }
 
     pub async fn count_live_keys(&self, account_id: Uuid) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
+        let live = live_key_predicate("");
+        let count: i64 = sqlx::query_scalar(&format!(
             "SELECT count(*) FROM api_keys \
-             WHERE account_id = $1 AND revoked_at IS NULL \
-               AND expires_at > now()",
-        )
+             WHERE account_id = $1 AND {live}"
+        ))
         .bind(account_id)
         .fetch_one(&self.pool)
         .await
@@ -196,16 +195,17 @@ impl ApiKeyRepo {
         }
 
         // Re-count live keys INSIDE the tx using the same predicate as count_live_keys.
-        let live: i64 = sqlx::query_scalar(
+        let live_count: i64 = sqlx::query_scalar(&format!(
             "SELECT count(*) FROM api_keys \
-             WHERE account_id = $1 AND revoked_at IS NULL \
-               AND expires_at > now()",
-        )
+             WHERE account_id = $1 AND {}",
+            live_key_predicate("")
+        ))
         .bind(args.account_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let live = usize::try_from(live).map_err(|_error| Error::internal("negative key count"))?;
+        let live =
+            usize::try_from(live_count).map_err(|_error| Error::internal("negative key count"))?;
         if live >= max_live_keys {
             return Err(Error::conflict(format!(
                 "account already has the maximum of {max_live_keys} live API keys"
@@ -248,12 +248,12 @@ impl ApiKeyRepo {
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        let old_exists: Option<Uuid> = sqlx::query_scalar(
+        let old_exists: Option<Uuid> = sqlx::query_scalar(&format!(
             "SELECT id FROM api_keys \
-             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL \
-               AND expires_at > now() \
+             WHERE id = $1 AND account_id = $2 AND {} \
              FOR UPDATE",
-        )
+            live_key_predicate("")
+        ))
         .bind(old_key_id)
         .bind(args.account_id)
         .fetch_optional(&mut *tx)
@@ -263,11 +263,11 @@ impl ApiKeyRepo {
             return Err(Error::not_found("api key not found"));
         }
 
-        let live_without_old: i64 = sqlx::query_scalar(
+        let live_without_old: i64 = sqlx::query_scalar(&format!(
             "SELECT count(*) FROM api_keys \
-             WHERE account_id = $1 AND id <> $2 AND revoked_at IS NULL \
-               AND expires_at > now()",
-        )
+             WHERE account_id = $1 AND id <> $2 AND {}",
+            live_key_predicate("")
+        ))
         .bind(args.account_id)
         .bind(old_key_id)
         .fetch_one(&mut *tx)
@@ -342,6 +342,15 @@ impl ApiKeyRepo {
         }
         Ok(())
     }
+}
+
+/// The single definition of a live API key: not revoked and not yet expired.
+/// `prefix` qualifies the columns (`"k."` inside a join, `""` otherwise) so every
+/// live-key query — listing, the per-account cap count, lookups, rotation — shares
+/// one predicate and cannot drift. Account activeness is a separate concern the
+/// authentication path adds on top; it is intentionally not folded in here.
+fn live_key_predicate(prefix: &str) -> String {
+    format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
 }
 
 fn validate_command(command: &CreateApiKey) -> Result<()> {
