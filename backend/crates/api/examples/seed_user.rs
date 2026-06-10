@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             CreateApiKey {
                 name: "fe-test-key".to_owned(),
                 scopes: Vec::new(),
-                expires_at: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(30)),
             },
         )
         .await?;

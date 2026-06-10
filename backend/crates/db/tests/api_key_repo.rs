@@ -29,7 +29,7 @@ async fn insert_capped(
             command: &CreateApiKey {
                 name: label.to_owned(),
                 scopes: Vec::new(),
-                expires_at: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
             token_prefix: "ngk_v1_test",
             token_hash: &format!("hash-{label}-{}", Uuid::new_v4()),
@@ -85,7 +85,7 @@ async fn concurrent_create_respects_cap(
                     command: &CreateApiKey {
                         name: format!("race-{index}"),
                         scopes: Vec::new(),
-                        expires_at: None,
+                        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                     },
                     token_prefix: "ngk_v1_test",
                     token_hash: &format!("hash-race-{index}-{}", Uuid::new_v4()),
@@ -165,7 +165,7 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
         command: &CreateApiKey {
             name: "live-a".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_test",
         token_hash: "hash-live-a",
@@ -179,7 +179,7 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
         command: &CreateApiKey {
             name: "to-revoke".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_test",
         token_hash: "hash-to-revoke",
@@ -193,7 +193,7 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
         command: &CreateApiKey {
             name: "live-b".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_test",
         token_hash: "hash-live-b",
@@ -255,7 +255,7 @@ async fn live_user_api_key_resolves_account_and_marks_last_used()
         command: &CreateApiKey {
             name: "user-key".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_test",
         token_hash: "hash-user-key",
@@ -303,7 +303,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
             command: &CreateApiKey {
                 name: format!("key-{index}"),
                 scopes: Vec::new(),
-                expires_at: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
             token_prefix: "ngk_v1_test",
             token_hash: &token_hash,
@@ -326,7 +326,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
                 command: &CreateApiKey {
                     name: "key-0".to_owned(),
                     scopes: Vec::new(),
-                    expires_at: None,
+                    expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
                 token_prefix: "ngk_v1_rotated",
                 token_hash: "hash-rotated",
@@ -374,7 +374,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
         command: &CreateApiKey {
             name: "agent-key".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_agent",
         token_hash: "hash-agent-key",
@@ -420,7 +420,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         command: &CreateApiKey {
             name: "live".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_live",
         token_hash: "hash-live",
@@ -434,7 +434,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         command: &CreateApiKey {
             name: "revoked".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_revoked",
         token_hash: "hash-revoked",
@@ -495,7 +495,7 @@ async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::
         command: &CreateApiKey {
             name: "other-key".to_owned(),
             scopes: Vec::new(),
-            expires_at: None,
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
         token_prefix: "ngk_v1_other",
         token_hash: "hash-other",

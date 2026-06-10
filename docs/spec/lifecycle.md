@@ -92,7 +92,7 @@ agents
 
 ### API key 생성
 
-API key는 user 또는 agent account에 연결되는 장기 credential이다. User caller만 key를 명시적으로 만들 수 있다.
+API key는 user 또는 agent account에 연결되는 만료 기한 필수 credential이다. User caller만 key를 명시적으로 만들 수 있다.
 
 ```text
 api_keys(token_hash only)
@@ -105,6 +105,7 @@ api_keys(token_hash only)
 - agent API key는 caller가 생성한 active agent account에만 만들 수 있다.
 - key 생성은 workspace 권한을 변경하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
+- `expires_at`은 필수이며 미래 시각이어야 한다. user API key는 최대 `30`일, agent API key는 최대 `365`일까지 허용한다.
 - user account당 live API key 한도는 `2`개, agent account당 live API key 한도는 `5`개다.
 - API key metadata list는 live/revoked/expired row가 누적될 수 있으므로 pagination을 제공한다.
 - token hash는 active LOOKUP root에서 파생한 API key HMAC subkey로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.

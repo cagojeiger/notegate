@@ -106,7 +106,7 @@ CREATE TABLE api_keys (
     created_by UUID REFERENCES accounts(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ,
     revoked_by UUID REFERENCES accounts(id),
     revoked_reason TEXT,
@@ -118,7 +118,7 @@ CREATE TABLE api_keys (
 );
 CREATE INDEX api_keys_account_live_idx ON api_keys(account_id) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_hash_key_live_idx ON api_keys(hash_key_id) WHERE revoked_at IS NULL;
-CREATE INDEX api_keys_expiring_live_idx ON api_keys(expires_at) WHERE revoked_at IS NULL AND expires_at IS NOT NULL;
+CREATE INDEX api_keys_expiring_live_idx ON api_keys(expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_rotated_from_idx ON api_keys(rotated_from_key_id) WHERE rotated_from_key_id IS NOT NULL;
 
 -- workspaces: a named tree whose lifecycle owner is the creator user.

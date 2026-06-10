@@ -313,7 +313,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
             command: &CreateApiKey {
                 name: "key".to_owned(),
                 scopes: Vec::new(),
-                expires_at: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
             token_prefix: "ngk_v1_agent",
             token_hash: "hashed-token",
@@ -329,7 +329,7 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
             command: &CreateApiKey {
                 name: "owner-key".to_owned(),
                 scopes: Vec::new(),
-                expires_at: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
             token_prefix: "ngk_v1_owner",
             token_hash: "hashed-owner-token",

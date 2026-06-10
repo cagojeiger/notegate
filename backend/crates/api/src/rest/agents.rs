@@ -82,7 +82,7 @@ pub(crate) struct CreatedKeyOut {
     agent_id: Uuid,
     name: String,
     scopes: Vec<String>,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: DateTime<Utc>,
     created_at: DateTime<Utc>,
     /// The plaintext key. Shown once; store it now.
     token: String,

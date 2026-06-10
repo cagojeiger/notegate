@@ -16,6 +16,7 @@ pub use notegate_model::{
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::keys::KeyPolicy;
 use crate::pagination::{clamp_limit, paginate_by_id};
 
 /// Agent lifecycle service.
@@ -108,7 +109,7 @@ impl AgentService {
                 expires_at: command.expires_at,
             },
             None,
-            limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
+            agent_key_policy(),
         )
         .await
     }
@@ -181,9 +182,9 @@ impl AgentService {
             CreateApiKey {
                 name: old.name,
                 scopes: Vec::new(),
-                expires_at: old.expires_at,
+                expires_at: Some(old.expires_at),
             },
-            limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
+            agent_key_policy(),
         )
         .await
     }
@@ -197,6 +198,13 @@ impl AgentService {
             .find_active_agent_by_creator(agent_id, creator_account_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("agent not found".to_owned()))
+    }
+}
+
+fn agent_key_policy() -> KeyPolicy {
+    KeyPolicy {
+        max_live_keys: limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
+        max_ttl_days: limits::AGENT_API_KEY_MAX_TTL_DAYS,
     }
 }
 

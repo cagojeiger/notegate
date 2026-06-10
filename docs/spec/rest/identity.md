@@ -67,17 +67,18 @@ POST /api/v1/me/keys
 }
 ```
 
-현재 user account로 인증되는 API key를 만든다. User account는 동시에 최대 2개의 live API key를 가질 수 있다. 생성 응답에서 평문 token을 정확히 한 번만 반환한다. DB에는 `token_hash`, `token_prefix`, `hash_key_id`, `hash_version`만 저장한다.
+현재 user account로 인증되는 API key를 만든다. User account는 동시에 최대 2개의 live API key를 가질 수 있고, `expires_at`은 필수이며 생성 시점 기준 최대 30일까지 허용된다. 생성 응답에서 평문 token을 정확히 한 번만 반환한다. DB에는 `token_hash`, `token_prefix`, `hash_key_id`, `hash_version`만 저장한다.
 
 Branching 규칙:
 
 ```text
-live keys < 10             -> key 생성
-live keys >= 10            -> 409 conflict
+live keys < 2              -> key 생성
+live keys >= 2             -> 409 conflict
 scopes omitted or []       -> 허용
 scopes non-empty           -> 400 invalid input
-expires_at omitted/future  -> 허용
-expires_at past or now     -> 400 invalid input
+expires_at future <= 30d   -> 허용
+expires_at omitted         -> 400 invalid input
+expires_at past/now or >30d -> 400 invalid input
 ```
 
 ### Rotate current user API key

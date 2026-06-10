@@ -73,7 +73,7 @@ impl ApiKeyRepo {
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "SELECT {API_KEY_COLUMNS} FROM api_keys \
              WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR expires_at > now())"
+               AND expires_at > now()"
         ))
         .bind(key_id)
         .bind(account_id)
@@ -92,7 +92,7 @@ impl ApiKeyRepo {
              JOIN accounts acc ON acc.id = k.account_id \
              WHERE k.token_hash = $1 \
                AND k.revoked_at IS NULL \
-               AND (k.expires_at IS NULL OR k.expires_at > now()) \
+               AND k.expires_at > now() \
                AND acc.is_active = true \
                AND acc.deleted_at IS NULL",
         )
@@ -119,7 +119,7 @@ impl ApiKeyRepo {
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM api_keys \
              WHERE account_id = $1 AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR expires_at > now())",
+               AND expires_at > now()",
         )
         .bind(account_id)
         .fetch_one(&self.pool)
@@ -129,9 +129,7 @@ impl ApiKeyRepo {
     }
 
     pub async fn insert_key(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
-        if !args.command.scopes.is_empty() {
-            return Err(Error::validation("api key scopes must be empty"));
-        }
+        validate_command(args.command)?;
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "INSERT INTO api_keys \
              (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at, rotated_from_key_id) \
@@ -170,9 +168,7 @@ impl ApiKeyRepo {
         args: InsertApiKey<'_>,
         max_live_keys: usize,
     ) -> Result<ApiKey> {
-        if !args.command.scopes.is_empty() {
-            return Err(Error::validation("api key scopes must be empty"));
-        }
+        validate_command(args.command)?;
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -191,7 +187,7 @@ impl ApiKeyRepo {
         let live: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM api_keys \
              WHERE account_id = $1 AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR expires_at > now())",
+               AND expires_at > now()",
         )
         .bind(args.account_id)
         .fetch_one(&mut *tx)
@@ -236,16 +232,14 @@ impl ApiKeyRepo {
         revoked_by: Uuid,
         max_live_keys: usize,
     ) -> Result<ApiKey> {
-        if !args.command.scopes.is_empty() {
-            return Err(Error::validation("api key scopes must be empty"));
-        }
+        validate_command(args.command)?;
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         let old_exists: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM api_keys \
              WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR expires_at > now()) \
+               AND expires_at > now() \
              FOR UPDATE",
         )
         .bind(old_key_id)
@@ -260,7 +254,7 @@ impl ApiKeyRepo {
         let live_without_old: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM api_keys \
              WHERE account_id = $1 AND id <> $2 AND revoked_at IS NULL \
-               AND (expires_at IS NULL OR expires_at > now())",
+               AND expires_at > now()",
         )
         .bind(args.account_id)
         .bind(old_key_id)
@@ -338,6 +332,21 @@ impl ApiKeyRepo {
     }
 }
 
+fn validate_command(command: &CreateApiKey) -> Result<()> {
+    if !command.scopes.is_empty() {
+        return Err(Error::validation("api key scopes must be empty"));
+    }
+    let Some(expires_at) = command.expires_at else {
+        return Err(Error::validation("api key expires_at is required"));
+    };
+    if expires_at <= Utc::now() {
+        return Err(Error::validation(
+            "api key expires_at must be in the future",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct InsertApiKey<'a> {
     pub key_id: Uuid,
@@ -359,7 +368,7 @@ struct ApiKeyRow {
     created_by: Option<Uuid>,
     created_at: DateTime<Utc>,
     last_used_at: Option<DateTime<Utc>>,
-    expires_at: Option<DateTime<Utc>>,
+    expires_at: DateTime<Utc>,
     revoked_at: Option<DateTime<Utc>>,
     revoked_by: Option<Uuid>,
     revoked_reason: Option<String>,

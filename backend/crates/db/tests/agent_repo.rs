@@ -146,7 +146,7 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
             command: &CreateApiKey {
                 name: "local-mcp".to_owned(),
                 scopes: Vec::new(),
-                expires_at: None,
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
             token_prefix: "ngk_v1_agent",
             token_hash: "hash-delete-token",

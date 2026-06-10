@@ -31,6 +31,8 @@ workspace_access_max_accounts = 20 active access rows per workspace, owner row í
 agents_per_creator_max = 50 active agents per user creator account
 user_api_keys_per_account_max = 2 live API keys per user account
 agent_api_keys_per_account_max = 5 live API keys per agent account
+user_api_key_max_ttl_days = 30
+agent_api_key_max_ttl_days = 365
 ```
 
 Branching:

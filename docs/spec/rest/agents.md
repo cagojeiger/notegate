@@ -58,25 +58,26 @@ POST /api/v1/agents/{agent_id}/keys
 }
 ```
 
-Agent API key는 명시 호출로만 생성한다. Agent account는 동시에 최대 5개의 live API key를 가질 수 있다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. DB에는 통합 `api_keys` row로 저장하며, `account_id`는 대상 agent account다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
+Agent API key는 명시 호출로만 생성한다. Agent account는 동시에 최대 5개의 live API key를 가질 수 있고, `expires_at`은 필수이며 생성 시점 기준 최대 365일까지 허용된다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. DB에는 통합 `api_keys` row로 저장하며, `account_id`는 대상 agent account다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 
 Live key는 다음 조건을 모두 만족한다.
 
 ```text
 api_keys.account_id = agent_id
 api_keys.revoked_at IS NULL
-api_keys.expires_at IS NULL OR api_keys.expires_at > now()
+api_keys.expires_at > now()
 ```
 
 Branching 규칙:
 
 ```text
-live keys < 10             -> key 생성
-live keys >= 10            -> 409 conflict
+live keys < 5              -> key 생성
+live keys >= 5             -> 409 conflict
 scopes omitted or []       -> 허용
 scopes non-empty           -> 400 invalid input
-expires_at omitted/future  -> 허용
-expires_at past or now     -> 400 invalid input
+expires_at future <= 365d  -> 허용
+expires_at omitted         -> 400 invalid input
+expires_at past/now or >365d -> 400 invalid input
 ```
 
 ### Rotate agent API key

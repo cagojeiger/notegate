@@ -143,6 +143,7 @@ token_hash     = HMAC(api_key_hmac_subkey, "api-key:v1:" + api_key_id + ":" + se
 규칙:
 
 - 평문 token은 생성 또는 rotation 응답에서 정확히 한 번만 반환한다.
+- `expires_at`은 필수다. User API key는 최대 30일, agent API key는 최대 365일까지 허용한다.
 - DB에는 `token_prefix`, `token_hash`, `hash_key_id`, `hash_version`만 저장한다.
 - `hash_key_id`는 token_hash를 만든 LOOKUP root key id다.
 - API key 자체 rotation은 new token 발급 + old key revoke로 처리한다. Token 원문은 복구하거나 복호화하지 않는다.

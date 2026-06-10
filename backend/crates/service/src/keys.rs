@@ -1,6 +1,6 @@
 //! API-key service helpers shared by user and agent accounts.
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use notegate_core::limits;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{ApiKeyRepo, api_key_repo::InsertApiKey};
@@ -9,6 +9,12 @@ use uuid::Uuid;
 
 use crate::pagination::clamp_limit;
 use crate::{ServiceError, ServiceResult, cursor};
+
+#[derive(Debug, Clone, Copy)]
+pub struct KeyPolicy {
+    pub max_live_keys: usize,
+    pub max_ttl_days: i64,
+}
 
 pub async fn list_key_page(
     api_keys: &ApiKeyRepo,
@@ -62,9 +68,9 @@ pub async fn create_key_for_account(
     created_by: Uuid,
     command: CreateApiKey,
     rotated_from_key_id: Option<Uuid>,
-    max_live_keys: usize,
+    policy: KeyPolicy,
 ) -> ServiceResult<MintedApiKey> {
-    validate_key_command(&command)?;
+    validate_key_command(&command, policy.max_ttl_days)?;
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
     let token = format_token(key_id, &secret);
@@ -80,7 +86,7 @@ pub async fn create_key_for_account(
                 created_by,
                 rotated_from_key_id,
             },
-            max_live_keys,
+            policy.max_live_keys,
         )
         .await?;
     Ok(MintedApiKey { key, token })
@@ -93,9 +99,9 @@ pub async fn rotate_key_for_account(
     created_by: Uuid,
     old_key_id: Uuid,
     command: CreateApiKey,
-    max_live_keys: usize,
+    policy: KeyPolicy,
 ) -> ServiceResult<MintedApiKey> {
-    validate_key_command(&command)?;
+    validate_key_command(&command, policy.max_ttl_days)?;
 
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
@@ -114,25 +120,34 @@ pub async fn rotate_key_for_account(
             },
             old_key_id,
             created_by,
-            max_live_keys,
+            policy.max_live_keys,
         )
         .await?;
     Ok(MintedApiKey { key, token })
 }
 
-fn validate_key_command(command: &CreateApiKey) -> ServiceResult<()> {
+fn validate_key_command(command: &CreateApiKey, max_ttl_days: i64) -> ServiceResult<()> {
     if !command.scopes.is_empty() {
         return Err(ServiceError::InvalidInput(
             "api key scopes must be empty".to_owned(),
         ));
     }
-    if command
+
+    let now = Utc::now();
+    let expires_at = command
         .expires_at
-        .is_some_and(|expires_at| expires_at <= Utc::now())
-    {
+        .ok_or_else(|| ServiceError::InvalidInput("api key expires_at is required".to_owned()))?;
+    if expires_at <= now {
         return Err(ServiceError::InvalidInput(
             "api key expires_at must be in the future".to_owned(),
         ));
+    }
+
+    let max_expires_at = now + Duration::days(max_ttl_days);
+    if expires_at > max_expires_at {
+        return Err(ServiceError::InvalidInput(format!(
+            "api key expires_at must be within {max_ttl_days} days"
+        )));
     }
     Ok(())
 }
@@ -175,6 +190,36 @@ mod tests {
         assert_eq!(parsed.0, key_id);
         assert_eq!(parsed.1, "secret-value");
         assert_eq!(token_prefix(key_id), format!("ngk_v1_{key_id}"));
+    }
+
+    #[test]
+    fn api_key_expiry_is_required() {
+        let command = CreateApiKey {
+            name: "missing-expiry".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        };
+        assert!(validate_key_command(&command, 30).is_err());
+    }
+
+    #[test]
+    fn api_key_expiry_must_be_within_ttl() {
+        let command = CreateApiKey {
+            name: "too-long".to_owned(),
+            scopes: Vec::new(),
+            expires_at: Some(Utc::now() + Duration::days(31)),
+        };
+        assert!(validate_key_command(&command, 30).is_err());
+    }
+
+    #[test]
+    fn api_key_expiry_accepts_future_within_ttl() {
+        let command = CreateApiKey {
+            name: "ok".to_owned(),
+            scopes: Vec::new(),
+            expires_at: Some(Utc::now() + Duration::days(30) - Duration::seconds(1)),
+        };
+        assert!(validate_key_command(&command, 30).is_ok());
     }
 
     #[test]

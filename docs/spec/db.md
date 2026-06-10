@@ -190,7 +190,7 @@ CREATE TABLE api_keys (
     created_by          UUID REFERENCES accounts(id),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at        TIMESTAMPTZ,
-    expires_at          TIMESTAMPTZ,
+    expires_at          TIMESTAMPTZ NOT NULL,
     revoked_at          TIMESTAMPTZ,
     revoked_by          UUID REFERENCES accounts(id),
     revoked_reason      TEXT,
@@ -213,7 +213,7 @@ CREATE INDEX api_keys_hash_key_live_idx
 
 CREATE INDEX api_keys_expiring_live_idx
     ON api_keys(expires_at)
-    WHERE revoked_at IS NULL AND expires_at IS NOT NULL;
+    WHERE revoked_at IS NULL;
 
 CREATE INDEX api_keys_rotated_from_idx
     ON api_keys(rotated_from_key_id)
@@ -229,10 +229,10 @@ CREATE INDEX api_keys_rotated_from_idx
 - `token_hash` 계산식은 `docs/spec/security.md`의 API key 저장 정책을 따른다.
 - `hash_key_id`/`hash_version`은 어떤 `lookup` domain root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
-- `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
+- `expires_at`은 필수다. `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
-- 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개다.
-- 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개다.
+- 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개이고, 생성 시 만료 기한은 최대 `30`일이다.
+- 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개이고, 생성 시 만료 기한은 최대 `365`일이다.
 - API key 자체 rotation은 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
 
 ## workspaces
