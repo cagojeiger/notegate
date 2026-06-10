@@ -1,6 +1,6 @@
 //! Unified API-key persistence for user and agent accounts.
 
-use crate::map_sqlx_error;
+use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
@@ -90,13 +90,13 @@ impl ApiKeyRepo {
         token_hash: &str,
     ) -> Result<Option<Uuid>> {
         let live = live_key_predicate("k.");
+        let active = active_account_predicate("acc.");
         let account_id: Option<Uuid> = sqlx::query(&format!(
             "SELECT k.account_id FROM api_keys k \
              JOIN accounts acc ON acc.id = k.account_id \
              WHERE k.id = $1 AND k.token_hash = $2 \
                AND {live} \
-               AND acc.is_active = true \
-               AND acc.deleted_at IS NULL"
+               AND {active}"
         ))
         .bind(key_id)
         .bind(token_hash)

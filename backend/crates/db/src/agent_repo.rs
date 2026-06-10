@@ -5,7 +5,7 @@
 //! `agents` row in one transaction, attributing `created_by` to the caller. API
 //! keys are persisted by `ApiKeyRepo`, not this aggregate repository.
 
-use crate::map_sqlx_error;
+use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
@@ -246,8 +246,8 @@ impl AgentRepo {
     ) -> Result<Option<(Account, Agent)>> {
         let account_row = sqlx::query_as::<_, AccountRow>(&format!(
             "SELECT {ACCOUNT_COLUMNS} FROM accounts \
-             WHERE id = $1 AND kind = 'agent' \
-               AND is_active = true AND deleted_at IS NULL"
+             WHERE id = $1 AND kind = 'agent' AND {}",
+            active_account_predicate("")
         ))
         .bind(agent_id)
         .fetch_optional(&self.pool)

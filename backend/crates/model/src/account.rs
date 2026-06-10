@@ -47,6 +47,17 @@ pub struct Account {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Account {
+    /// Whether this account is live: active and not soft-deleted. `is_active` and
+    /// `deleted_at` are two signals for the same "alive" state; treat the account as
+    /// dead if either says so, so a future divergence between the columns can never
+    /// authenticate or be granted access. This is the single Rust-side definition of
+    /// account liveness; the equivalent SQL predicate is `db::active_account_predicate`.
+    pub fn is_live(&self) -> bool {
+        self.is_active && self.deleted_at.is_none()
+    }
+}
+
 /// A lightweight reference to an account, used in API output where only the
 /// identity and kind matter.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

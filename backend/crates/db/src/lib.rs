@@ -43,6 +43,14 @@ pub(crate) fn to_usize(value: i64, label: &str) -> Result<usize> {
     usize::try_from(value).map_err(|_error| Error::internal(format!("negative {label} count")))
 }
 
+/// The single SQL definition of a live account: active and not soft-deleted.
+/// `prefix` qualifies the columns (e.g. `"acc."` inside a join, `""` otherwise) so
+/// every account-liveness check across the repos shares one predicate and cannot
+/// drift. Mirrors the Rust-side `notegate_model::account::Account::is_live`.
+pub(crate) fn active_account_predicate(prefix: &str) -> String {
+    format!("{prefix}is_active = true AND {prefix}deleted_at IS NULL")
+}
+
 /// Embedded migrations from `migrations/`, run at startup via [`run_migrations`].
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
