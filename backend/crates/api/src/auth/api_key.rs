@@ -21,10 +21,10 @@ pub async fn verify_api_key(
         .resolver
         .resolve_api_key(token.to_owned(), channel)
         .await
-        .map_err(map_identity_error)
+        .map_err(map_api_key_identity_error)
 }
 
-fn map_identity_error(error: IdentityError) -> AuthError {
+fn map_api_key_identity_error(error: IdentityError) -> AuthError {
     match error {
         // Both an unknown key and an inactive account map to 401, never revealing
         // whether the credential exists or was deactivated.
