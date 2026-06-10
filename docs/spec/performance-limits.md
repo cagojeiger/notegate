@@ -2,6 +2,18 @@
 
 Every list, search, read, write, and subtree mutation is bounded.
 
+## Limit model
+
+현재 버전은 billing tier나 entitlement table을 구현하지 않는다. 모든 수치는
+`core::limits`에 정의된 시스템 hard limit이며, service와 DB는 이 값을 넘는 상태를
+만들지 않는다. 나중에 tier별 quota가 추가되더라도 effective quota는 이 hard limit
+이하이어야 한다.
+
+```text
+system hard limit -> notegate가 절대 넘지 않는 제품 상한
+request limit     -> list/read/search 호출 한 번의 반환/처리 상한
+```
+
 ## Runtime capacity config
 
 Product defaults live in `core::limits`. Runtime overrides are loaded only through `Config.limits`.
@@ -18,15 +30,35 @@ NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN
 Branching:
 
 ```text
-missing override -> product default
-override = 0     -> configuration error
-unknown limit key -> configuration error
+missing override    -> system hard limit 기본값
+override = 0        -> configuration error
+override > hard max -> configuration error
+unknown limit key   -> configuration error
 ```
+
+## HTTP ingress limits
+
+```text
+http_request_body_max_bytes = 1048576 bytes  # 1 MiB
+http_request_timeout_secs = 30
+http_rate_limit_requests_per_minute = 600 per API process
+```
+
+Branching:
+
+```text
+request body > max -> 413 payload too large
+request timeout    -> 408 request timeout
+rate limit exceed  -> 429 too many requests
+```
+
+현재 rate limit은 process-local global limit이다. Edge/proxy/API-key/IP 기반 fine-grained limit은 별도 정책으로 확장한다.
 
 ## Account, workspace, and credential limits
 
 ```text
 owned_workspaces_max = 20 live workspaces per user creator account
+accessible_workspaces_per_account_max = 100 live workspace grants per user/agent account
 workspace_access_max_accounts = 20 active access rows per workspace, owner row 포함
 agents_per_creator_max = 50 active agents per user creator account
 user_api_keys_per_account_max = 2 live API keys per user account
@@ -42,9 +74,14 @@ create/grant within cap -> allowed
 create/grant over cap   -> 409 conflict
 ```
 
-## Name and path limits
+## Identity, name, and path limits
 
 ```text
+oauth_provider_sub_max_chars = 255 chars
+user_display_name_max_chars = 128 chars
+user_email_max_chars = 254 chars
+agent_name_max_chars = 63 chars
+api_key_name_max_chars = 63 chars
 workspace_name_max_len = 63 chars
 folder_name_max_len = 128 chars
 document_file_name_max_len = 128 chars, including .md
@@ -65,11 +102,14 @@ Depth counts segments below workspace root:
 Branching:
 
 ```text
+identity field over max   -> 400 invalid input / invalid token by auth channel
+agent/key name empty       -> 400 invalid input
+agent/key name over max    -> 400 invalid input
 invalid workspace/name syntax -> 400 invalid input
-non-absolute path            -> 400 invalid input
-unresolved live path         -> 404 not found
-resulting depth > 5          -> 400 invalid input or 409 conflict by operation context
-resulting path length > 645  -> 400 invalid input
+non-absolute path          -> 400 invalid input
+unresolved live path       -> 404 not found
+resulting depth > 5        -> 400 invalid input or 409 conflict by operation context
+resulting path length > 645 -> 400 invalid input
 ```
 
 ## Workspace file-tree capacity limits
@@ -77,7 +117,7 @@ resulting path length > 645  -> 400 invalid input
 ```text
 workspace_max_nodes = 10000 live nodes
 workspace_max_documents = 5000 live documents
-workspace_max_document_bytes = 268435456 bytes  # 256 MiB
+workspace_max_document_bytes = 268435456 bytes  # 256 MiB total live document bytes per workspace
 folder_max_children = 200 live direct children per folder
 ```
 

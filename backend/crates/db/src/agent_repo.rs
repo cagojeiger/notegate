@@ -122,6 +122,7 @@ impl AgentRepo {
 
 impl AgentRepo {
     pub async fn insert_agent(&self, command: &CreateAgent, created_by: Uuid) -> Result<Agent> {
+        validate_agent_name(&command.name)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         let creator_exists: Option<Uuid> = sqlx::query_scalar(
@@ -223,6 +224,19 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
         Ok(row.map(Agent::from))
     }
+}
+
+fn validate_agent_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(Error::validation("agent name cannot be empty"));
+    }
+    if name.chars().count() > limits::AGENT_NAME_MAX_CHARS {
+        return Err(Error::validation(format!(
+            "agent name exceeds the maximum of {} characters",
+            limits::AGENT_NAME_MAX_CHARS
+        )));
+    }
+    Ok(())
 }
 
 impl AgentRepo {

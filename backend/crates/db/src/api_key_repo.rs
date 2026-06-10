@@ -2,7 +2,7 @@
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
-use notegate_core::{Error, Result};
+use notegate_core::{Error, Result, limits};
 use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
@@ -343,6 +343,15 @@ impl ApiKeyRepo {
 }
 
 fn validate_command(command: &CreateApiKey) -> Result<()> {
+    if command.name.trim().is_empty() {
+        return Err(Error::validation("api key name cannot be empty"));
+    }
+    if command.name.chars().count() > limits::API_KEY_NAME_MAX_CHARS {
+        return Err(Error::validation(format!(
+            "api key name exceeds the maximum of {} characters",
+            limits::API_KEY_NAME_MAX_CHARS
+        )));
+    }
     if !command.scopes.is_empty() {
         return Err(Error::validation("api key scopes must be empty"));
     }

@@ -27,6 +27,9 @@ pub enum IdentityError {
     /// The local account exists but is deactivated.
     #[error("caller account is inactive")]
     Inactive,
+    /// The verified identity attributes violate notegate input limits.
+    #[error("invalid identity attributes")]
+    InvalidInput,
     /// An internal/storage failure during resolution.
     #[error("identity resolution failed: {0}")]
     Internal(String),
@@ -34,7 +37,10 @@ pub enum IdentityError {
 
 impl From<notegate_core::Error> for IdentityError {
     fn from(error: notegate_core::Error) -> Self {
-        Self::Internal(error.to_string())
+        match error {
+            notegate_core::Error::Validation(_message) => Self::InvalidInput,
+            error => Self::Internal(error.to_string()),
+        }
     }
 }
 

@@ -14,7 +14,7 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_core::Error;
+use notegate_core::{Error, limits};
 use notegate_db::{AgentRepo, ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::{CreateAgent, CreateApiKey};
 use uuid::Uuid;
@@ -72,6 +72,29 @@ async fn create_agent_writes_account_and_attribution() -> Result<(), Box<dyn std
         .fetch_one(&db.pool)
         .await?;
     assert_eq!(kind, "agent");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_agent_rejects_blank_or_overlong_name() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AgentRepo::new(db.pool.clone());
+    let creator = insert_user_account(&db.pool, "creator", "c@example.test").await?;
+
+    for name in [
+        "   ".to_owned(),
+        "a".repeat(limits::AGENT_NAME_MAX_CHARS + 1),
+    ] {
+        let err = repo
+            .insert_agent(&CreateAgent { name }, creator)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+    }
 
     db.cleanup().await;
     Ok(())

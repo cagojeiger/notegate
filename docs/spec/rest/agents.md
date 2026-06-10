@@ -26,7 +26,7 @@ POST /api/v1/agents
 }
 ```
 
-`agent` account를 생성한다. Agent 생성은 key나 workspace access를 자동 생성하지 않는다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다. 하나의 user creator account는 최대 `50`개의 active agent를 가질 수 있다.
+`agent` account를 생성한다. Agent 생성은 key나 workspace access를 자동 생성하지 않는다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다. 하나의 user creator account는 최대 `50`개의 active agent를 가질 수 있다. Agent name은 공백만으로 만들 수 없고 최대 `63`자다.
 
 ### Delete agent
 
@@ -73,6 +73,7 @@ Branching 규칙:
 ```text
 live keys < 5              -> key 생성
 live keys >= 5             -> 409 conflict
+name empty or >63 chars    -> 400 invalid input
 scopes omitted or []       -> 허용
 scopes non-empty           -> 400 invalid input
 expires_at future <= 365d  -> 허용

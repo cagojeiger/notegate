@@ -30,6 +30,7 @@ fn map_identity_error(error: IdentityError) -> AuthError {
         // user without an account" — surface it as an invalid token.
         IdentityError::NotRegistered => AuthError::InvalidToken,
         IdentityError::Inactive => AuthError::Inactive,
+        IdentityError::InvalidInput => AuthError::InvalidToken,
         IdentityError::Internal(_message) => AuthError::Internal,
     }
 }

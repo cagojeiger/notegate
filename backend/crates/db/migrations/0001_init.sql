@@ -90,7 +90,8 @@ CREATE INDEX users_email_hash_idx ON users(email_hash) WHERE email_hash IS NOT N
 CREATE TABLE agents (
     id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
-    created_by UUID NOT NULL REFERENCES accounts(id)
+    created_by UUID NOT NULL REFERENCES accounts(id),
+    CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
 );
 
 -- api_keys: bearer credentials for either user or agent accounts (hash only, never plaintext).
@@ -114,7 +115,8 @@ CREATE TABLE api_keys (
     CHECK (
         (revoked_at IS NULL AND revoked_by IS NULL AND revoked_reason IS NULL)
         OR (revoked_at IS NOT NULL AND (revoked_by IS NOT NULL OR revoked_reason IS NOT NULL))
-    )
+    ),
+    CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
 );
 CREATE INDEX api_keys_account_live_idx ON api_keys(account_id) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_account_created_idx ON api_keys(account_id, created_at DESC, id DESC);

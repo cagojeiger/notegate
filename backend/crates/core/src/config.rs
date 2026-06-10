@@ -258,7 +258,16 @@ fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
     if limits.workspace_max_nodes == 0 {
         errors.add("limits.workspace_max_nodes", ValidationError::new("range"));
     }
+    if limits.workspace_max_nodes > crate::limits::WORKSPACE_MAX_NODES {
+        errors.add("limits.workspace_max_nodes", ValidationError::new("range"));
+    }
     if limits.workspace_max_documents == 0 {
+        errors.add(
+            "limits.workspace_max_documents",
+            ValidationError::new("range"),
+        );
+    }
+    if limits.workspace_max_documents > crate::limits::WORKSPACE_MAX_DOCUMENTS {
         errors.add(
             "limits.workspace_max_documents",
             ValidationError::new("range"),
@@ -270,7 +279,16 @@ fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
             ValidationError::new("range"),
         );
     }
+    if limits.workspace_max_document_bytes > crate::limits::WORKSPACE_MAX_DOCUMENT_BYTES {
+        errors.add(
+            "limits.workspace_max_document_bytes",
+            ValidationError::new("range"),
+        );
+    }
     if limits.folder_max_children == 0 {
+        errors.add("limits.folder_max_children", ValidationError::new("range"));
+    }
+    if limits.folder_max_children > crate::limits::FOLDER_MAX_CHILDREN {
         errors.add("limits.folder_max_children", ValidationError::new("range"));
     }
 }
@@ -501,6 +519,23 @@ mod tests {
 
         let mut config = valid_config();
         config.browser_session_ttl = Duration::from_secs(1);
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.workspace_max_nodes = crate::limits::WORKSPACE_MAX_NODES + 1;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.workspace_max_documents = crate::limits::WORKSPACE_MAX_DOCUMENTS + 1;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.workspace_max_document_bytes =
+            crate::limits::WORKSPACE_MAX_DOCUMENT_BYTES + 1;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.folder_max_children = crate::limits::FOLDER_MAX_CHILDREN + 1;
         assert!(config.validate().is_err());
     }
 

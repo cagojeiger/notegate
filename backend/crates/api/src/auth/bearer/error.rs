@@ -15,6 +15,7 @@ pub fn map_identity_error(error: IdentityError) -> AuthError {
     match error {
         IdentityError::NotRegistered => AuthError::NotRegistered,
         IdentityError::Inactive => AuthError::Inactive,
+        IdentityError::InvalidInput => AuthError::InvalidToken,
         IdentityError::Internal(_message) => AuthError::Internal,
     }
 }

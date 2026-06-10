@@ -120,6 +120,28 @@ impl AccessRepo {
             )));
         }
 
+        // Count live workspace grants for the target account other than this
+        // workspace, so updating/reviving the same workspace row does not trip
+        // the per-account accessible-workspace cap.
+        let accessible_others: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM workspace_access wa \
+             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
+             WHERE wa.account_id = $1 AND wa.workspace_id <> $2 AND wa.revoked_at IS NULL",
+        )
+        .bind(command.account_id)
+        .bind(command.workspace_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let accessible_others = usize::try_from(accessible_others)
+            .map_err(|_error| Error::internal("negative accessible workspace count"))?;
+        if accessible_others >= limits::ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX {
+            return Err(Error::conflict(format!(
+                "account already has the maximum of {} accessible workspaces",
+                limits::ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX
+            )));
+        }
+
         // PK is (workspace_id, account_id): re-granting (including reviving a
         // revoked row) updates in place and clears the revocation.
         let row = sqlx::query_as::<_, WorkspaceAccessRow>(&format!(

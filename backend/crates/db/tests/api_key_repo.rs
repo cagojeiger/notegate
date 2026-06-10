@@ -10,7 +10,7 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_core::Error;
+use notegate_core::{Error, limits};
 use notegate_db::{ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::CreateApiKey;
 use uuid::Uuid;
@@ -147,6 +147,46 @@ async fn concurrent_create_respects_cap_for_agent_account() -> Result<(), Box<dy
         notegate_core::limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
     )
     .await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn insert_key_rejects_blank_or_overlong_name() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = ApiKeyRepo::new(db.pool.clone());
+    let user_id = insert_user_account(&db.pool, "key-user", "key-user@example.test").await?;
+
+    for name in [
+        "   ".to_owned(),
+        "k".repeat(limits::API_KEY_NAME_MAX_CHARS + 1),
+    ] {
+        let command = CreateApiKey {
+            name,
+            scopes: Vec::new(),
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+        };
+        let token_hash = format!("hash-invalid-{}", Uuid::new_v4());
+        let err = repo
+            .insert_key_with_cap(
+                InsertApiKey {
+                    key_id: Uuid::new_v4(),
+                    account_id: user_id,
+                    command: &command,
+                    token_prefix: "ngk_v1_test",
+                    token_hash: &token_hash,
+                    created_by: user_id,
+                    rotated_from_key_id: None,
+                },
+                limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+    }
+
     db.cleanup().await;
     Ok(())
 }

@@ -74,6 +74,7 @@ Branching 규칙:
 ```text
 live keys < 2              -> key 생성
 live keys >= 2             -> 409 conflict
+name empty or >63 chars    -> 400 invalid input
 scopes omitted or []       -> 허용
 scopes non-empty           -> 400 invalid input
 expires_at future <= 30d   -> 허용

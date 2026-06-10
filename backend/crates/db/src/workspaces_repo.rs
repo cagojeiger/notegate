@@ -149,6 +149,24 @@ impl WorkspaceRepo {
             )));
         }
 
+        let accessible: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM workspace_access wa \
+             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
+             WHERE wa.account_id = $1 AND wa.revoked_at IS NULL",
+        )
+        .bind(creator_account_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let accessible = usize::try_from(accessible)
+            .map_err(|_error| Error::internal("negative accessible workspace count"))?;
+        if accessible >= limits::ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX {
+            return Err(Error::conflict(format!(
+                "account already has the maximum of {} accessible workspaces",
+                limits::ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX
+            )));
+        }
+
         // Insert the workspace; the AFTER INSERT trigger creates the root node
         // with created_by = updated_by = this workspace's created_by.
         let row = sqlx::query_as::<_, WorkspaceRow>(&format!(

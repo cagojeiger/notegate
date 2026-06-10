@@ -127,6 +127,17 @@ pub async fn rotate_key_for_account(
 }
 
 fn validate_key_command(command: &CreateApiKey, max_ttl_days: i64) -> ServiceResult<()> {
+    if command.name.trim().is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "api key name cannot be empty".to_owned(),
+        ));
+    }
+    if command.name.chars().count() > limits::API_KEY_NAME_MAX_CHARS {
+        return Err(ServiceError::InvalidInput(format!(
+            "api key name exceeds the maximum of {} characters",
+            limits::API_KEY_NAME_MAX_CHARS
+        )));
+    }
     if !command.scopes.is_empty() {
         return Err(ServiceError::InvalidInput(
             "api key scopes must be empty".to_owned(),
@@ -204,6 +215,24 @@ mod tests {
             expires_at: None,
         };
         assert!(validate_key_command(&command, 30).is_err());
+    }
+
+    #[test]
+    fn api_key_name_must_be_non_empty_and_bounded() {
+        let expires_at = Some(Utc::now() + Duration::days(1));
+        let empty = CreateApiKey {
+            name: "   ".to_owned(),
+            scopes: Vec::new(),
+            expires_at,
+        };
+        assert!(validate_key_command(&empty, 30).is_err());
+
+        let too_long = CreateApiKey {
+            name: "k".repeat(limits::API_KEY_NAME_MAX_CHARS + 1),
+            scopes: Vec::new(),
+            expires_at,
+        };
+        assert!(validate_key_command(&too_long, 30).is_err());
     }
 
     #[test]

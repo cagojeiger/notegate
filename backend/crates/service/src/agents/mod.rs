@@ -213,5 +213,11 @@ fn validate_agent_name(name: &str) -> ServiceResult<()> {
             "agent name cannot be empty".to_owned(),
         ));
     }
+    if name.chars().count() > limits::AGENT_NAME_MAX_CHARS {
+        return Err(ServiceError::InvalidInput(format!(
+            "agent name exceeds the maximum of {} characters",
+            limits::AGENT_NAME_MAX_CHARS
+        )));
+    }
     Ok(())
 }

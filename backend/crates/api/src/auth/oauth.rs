@@ -179,6 +179,15 @@ pub async fn callback(
             html_page(StatusCode::FORBIDDEN, "Login forbidden", "user is inactive"),
         )
             .into_response(),
+        Err(IdentityError::InvalidInput) => (
+            jar,
+            html_page(
+                StatusCode::BAD_REQUEST,
+                "Login error",
+                "identity attributes exceed notegate limits",
+            ),
+        )
+            .into_response(),
         Err(error) => {
             tracing::error!(event = "oauth.resolve_failed", %error);
             (

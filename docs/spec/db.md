@@ -162,7 +162,8 @@ CREATE TABLE users (
 CREATE TABLE agents (
     id         UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     name       TEXT NOT NULL,
-    created_by UUID NOT NULL REFERENCES accounts(id)
+    created_by UUID NOT NULL REFERENCES accounts(id),
+    CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
 );
 ```
 
@@ -171,6 +172,7 @@ CREATE TABLE agents (
 - agent 삭제 상태는 `agents`가 아니라 공통 parent인 `accounts`에서 관리한다.
 - agent 생성/삭제와 key 생성/revoke lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 - 한 user creator account가 만들 수 있는 active agent는 최대 `50`개다.
+- agent name은 공백만으로 만들 수 없고 최대 `63`자다.
 - `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
 
 ## api_keys
@@ -200,7 +202,8 @@ CREATE TABLE api_keys (
         (revoked_at IS NULL AND revoked_by IS NULL AND revoked_reason IS NULL)
         OR
         (revoked_at IS NOT NULL AND (revoked_by IS NOT NULL OR revoked_reason IS NOT NULL))
-    )
+    ),
+    CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
 );
 
 CREATE INDEX api_keys_account_live_idx
@@ -233,6 +236,7 @@ CREATE INDEX api_keys_rotated_from_idx
 - `hash_key_id`/`hash_version`은 어떤 `lookup` domain root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
 - `expires_at`은 필수다. `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
+- API key name은 공백만으로 만들 수 없고 최대 `63`자다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
 - 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개이고, 생성 시 만료 기한은 최대 `30`일이다.
 - 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개이고, 생성 시 만료 기한은 최대 `365`일이다.
@@ -279,6 +283,7 @@ CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
 - live workspace 이름은 `(created_by, name)` 기준으로 unique다. soft-deleted workspace 이름은 재사용할 수 있다.
 - agent는 여러 user creator의 workspace를 공유받을 수 있으므로 workspace name은 global unique가 아니다.
 - user creator account가 소유할 수 있는 live workspace는 최대 `20`개다.
+- user/agent account가 접근할 수 있는 live workspace는 최대 `100`개다.
 - workspace가 생성되면 DB trigger가 canonical root node `/`를 같은 workspace에 만든다.
 - 모든 workspace/list/file/search/access 조회는 live workspace만 대상으로 한다.
 
@@ -325,6 +330,7 @@ write = mkdir/touch/write/patch/mv/rm
 - `owner` role은 active user account에만 부여할 수 있다. Agent account는 `viewer` 또는 `editor`만 받을 수 있다.
 - owner row 생성, 마지막 owner 보호, creator owner row 보호는 `docs/spec/lifecycle.md`를 따른다.
 - 한 workspace의 active access row는 최대 `20`개다. 생성 시 자동 owner row도 이 제한에 포함한다.
+- 한 account의 active workspace access row는 최대 `100`개다.
 - `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
 
 Caller의 live workspace 조회 보조 index:

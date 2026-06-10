@@ -1,17 +1,29 @@
 //! Product limits for notegate.
 //!
 //! Every create/list/search/read/subtree operation must be bounded. Most limits
-//! are fixed product constants. Expensive workspace count caps can be overridden
-//! through [`crate::Config`] for E2E/dev testing while keeping these spec
-//! defaults.
+//! are fixed hard-max product constants. A later tier system may choose lower
+//! effective quotas per account, but it must not exceed these core maxima.
+//! Expensive file-tree capacity caps can be lowered through [`crate::Config`]
+//! for E2E/dev testing while keeping these spec maxima.
 //!
 //! These are product limits, not security boundaries; authorization still
 //! checks every request.
+
+// --- HTTP ingress limits ---
+
+/// Maximum HTTP request body size accepted by the API server (1 MiB).
+pub const HTTP_REQUEST_BODY_MAX_BYTES: usize = 1_048_576;
+/// Maximum wall-clock time for one HTTP request before a 408 response.
+pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
+/// Maximum HTTP requests accepted per API process per minute.
+pub const HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE: u32 = 600;
 
 // --- Account, workspace, and credential limits ---
 
 /// Maximum workspaces a single user owner account may own.
 pub const OWNED_WORKSPACES_MAX: usize = 20;
+/// Maximum live workspaces a single user or agent account may access.
+pub const ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX: usize = 100;
 /// Maximum active accounts that may have access to one workspace.
 pub const WORKSPACE_ACCESS_MAX_ACCOUNTS: usize = 20;
 /// Maximum active agents a single user creator account may create.
@@ -25,7 +37,18 @@ pub const USER_API_KEY_MAX_TTL_DAYS: i64 = 30;
 /// Maximum agent API-key lifetime in days.
 pub const AGENT_API_KEY_MAX_TTL_DAYS: i64 = 365;
 
-// --- Path and name limits ---
+// --- Identity, path, and name limits ---
+
+/// Maximum OAuth provider subject length, in characters.
+pub const OAUTH_PROVIDER_SUB_MAX_CHARS: usize = 255;
+/// Maximum user display name length, in characters.
+pub const USER_DISPLAY_NAME_MAX_CHARS: usize = 128;
+/// Maximum user email length, in characters.
+pub const USER_EMAIL_MAX_CHARS: usize = 254;
+/// Maximum agent name length, in characters.
+pub const AGENT_NAME_MAX_CHARS: usize = 63;
+/// Maximum API-key display name length, in characters.
+pub const API_KEY_NAME_MAX_CHARS: usize = 63;
 
 /// Maximum workspace name length, in characters.
 pub const WORKSPACE_NAME_MAX_LEN: usize = 63;

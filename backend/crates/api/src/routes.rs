@@ -5,14 +5,19 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::extract::{MatchedPath, State};
 use axum::http::header::{CONTENT_TYPE, HeaderName};
-use axum::http::{HeaderValue, Request};
+use axum::http::{HeaderValue, Request, StatusCode};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::Response;
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
+use axum_governor::extractor::Global;
+use axum_governor::{GovernorConfigBuilder, GovernorLayer, Quota};
+use notegate_core::limits;
 use serde::Serialize;
 use tower::ServiceBuilder;
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{Span, info, info_span};
 
@@ -28,28 +33,72 @@ use crate::state::AppState;
 pub fn app(state: AppState) -> Router {
     let x_request_id = HeaderName::from_static("x-request-id");
 
-    Router::new()
+    let router = Router::new()
         .merge(system_routes())
         .merge(auth_routes())
         .merge(metadata_routes(&state))
         .merge(crate::openapi::routes(&state.config))
         .nest("/api", rest_api_routes(state.clone()))
         .route("/mcp", any(mcp_handler))
-        .with_state(state)
-        .layer(
-            ServiceBuilder::new()
-                .layer(SetRequestIdLayer::new(
-                    x_request_id.clone(),
-                    MakeRequestUuid,
-                ))
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(make_request_span)
-                        .on_response(log_request_end),
-                )
-                .layer(from_fn(add_json_charset))
-                .layer(PropagateRequestIdLayer::new(x_request_id)),
-        )
+        .with_state(state);
+
+    apply_ingress_limits(router, HttpIngressLimits::default()).layer(
+        ServiceBuilder::new()
+            .layer(SetRequestIdLayer::new(
+                x_request_id.clone(),
+                MakeRequestUuid,
+            ))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(make_request_span)
+                    .on_response(log_request_end),
+            )
+            .layer(from_fn(add_json_charset))
+            .layer(PropagateRequestIdLayer::new(x_request_id)),
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HttpIngressLimits {
+    request_body_max_bytes: usize,
+    request_timeout: Duration,
+    rate_limit_requests_per_minute: u32,
+}
+
+impl Default for HttpIngressLimits {
+    fn default() -> Self {
+        Self {
+            request_body_max_bytes: limits::HTTP_REQUEST_BODY_MAX_BYTES,
+            request_timeout: Duration::from_secs(limits::HTTP_REQUEST_TIMEOUT_SECS),
+            rate_limit_requests_per_minute: limits::HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE,
+        }
+    }
+}
+
+fn apply_ingress_limits<S>(router: Router<S>, limits: HttpIngressLimits) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(
+        ServiceBuilder::new()
+            .layer(RequestBodyLimitLayer::new(limits.request_body_max_bytes))
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                limits.request_timeout,
+            ))
+            .layer(GovernorLayer::new(rate_limit_config(limits))),
+    )
+}
+
+#[allow(clippy::expect_used)]
+fn rate_limit_config(limits: HttpIngressLimits) -> axum_governor::GovernorConfig<()> {
+    let requests = std::num::NonZeroU32::new(limits.rate_limit_requests_per_minute)
+        .expect("HTTP rate limit must be greater than zero");
+    GovernorConfigBuilder::default()
+        .with_extractor(Global)
+        .quota_default(Quota::requests_per_minute(requests))
+        .finish()
+        .expect("global HTTP rate limit config is statically valid")
 }
 
 fn system_routes() -> Router<AppState> {
@@ -176,6 +225,66 @@ fn make_request_span<B>(req: &Request<B>) -> Span {
         route,
         request_id,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use axum::routing::{get, post};
+    use tower::ServiceExt as _;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn ingress_limits_reject_oversized_request_body() {
+        let app = apply_ingress_limits(
+            Router::new().route("/", post(|body: String| async move { body })),
+            HttpIngressLimits {
+                request_body_max_bytes: 4,
+                request_timeout: Duration::from_secs(30),
+                rate_limit_requests_per_minute: 100,
+            },
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/")
+                    .body(Body::from("12345"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn ingress_limits_return_429_when_rate_limited() {
+        let app = apply_ingress_limits(
+            Router::new().route("/", get(|| async { "ok" })),
+            HttpIngressLimits {
+                request_body_max_bytes: 1024,
+                request_timeout: Duration::from_secs(30),
+                rate_limit_requests_per_minute: 1,
+            },
+        );
+
+        let first = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let second = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
 }
 
 #[derive(Debug, Serialize)]

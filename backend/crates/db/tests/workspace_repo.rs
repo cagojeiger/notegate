@@ -14,7 +14,7 @@
 mod common;
 
 use common::{TestDb, deactivate_account, insert_user_account};
-use notegate_core::Error;
+use notegate_core::{Error, limits};
 use notegate_db::{AccessRepo, WorkspaceRepo};
 use notegate_model::Role;
 use notegate_model::{CreateWorkspace, GrantAccess};
@@ -891,6 +891,58 @@ async fn list_workspaces_for_filters_to_live_grants() -> Result<(), Box<dyn std:
             .len(),
         0,
         "revoked grant excludes the workspace from the listing"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_accessible_workspace_cap_is_enforced() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let member = insert_user_account(&db.pool, "member-cap", "member-cap@example.test").await?;
+
+    for index in 0..limits::ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX {
+        let owner = insert_user_account(
+            &db.pool,
+            &format!("owner-cap-{index}"),
+            &format!("owner-cap-{index}@example.test"),
+        )
+        .await?;
+        let workspace_id = make_workspace(&repo, owner, &format!("ws-{index}")).await;
+        access_repo
+            .upsert_access(
+                &GrantAccess {
+                    workspace_id,
+                    account_id: member,
+                    role: Role::Viewer,
+                },
+                owner,
+            )
+            .await?;
+    }
+
+    let owner =
+        insert_user_account(&db.pool, "owner-cap-over", "owner-cap-over@example.test").await?;
+    let overflow_workspace = make_workspace(&repo, owner, "overflow").await;
+    let result = access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id: overflow_workspace,
+                account_id: member,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await;
+
+    assert!(
+        matches!(result, Err(Error::Conflict(_))),
+        "grant over account accessible workspace cap must be rejected"
     );
 
     db.cleanup().await;

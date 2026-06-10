@@ -14,7 +14,7 @@
 mod common;
 
 use common::TestDb;
-use notegate_core::Error;
+use notegate_core::{Error, limits};
 use notegate_db::api_key_repo::InsertApiKey;
 use notegate_db::{AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, WorkspaceRepo};
 use notegate_model::{CreateAgent, CreateApiKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role};
@@ -71,6 +71,41 @@ async fn upsert_user_creates_account_and_user_rows() -> Result<(), Box<dyn std::
         .fetch_one(&db.pool)
         .await?;
     assert_eq!(access_count, 0, "new user does not auto-create access rows");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn upsert_user_rejects_identity_fields_over_system_limits()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AccountRepo::new(db.pool.clone());
+
+    let cases = [
+        attrs(
+            &"s".repeat(limits::OAUTH_PROVIDER_SUB_MAX_CHARS + 1),
+            "a@example.test",
+            "Kang",
+        ),
+        attrs(
+            "sub-ok",
+            "a@example.test",
+            &"n".repeat(limits::USER_DISPLAY_NAME_MAX_CHARS + 1),
+        ),
+        attrs(
+            "sub-ok",
+            &format!("{}@example.test", "e".repeat(limits::USER_EMAIL_MAX_CHARS)),
+            "Kang",
+        ),
+    ];
+
+    for input in cases {
+        let err = repo.upsert_user_by_sub(&input).await.unwrap_err();
+        assert!(matches!(err, Error::Validation(_)));
+    }
 
     db.cleanup().await;
     Ok(())

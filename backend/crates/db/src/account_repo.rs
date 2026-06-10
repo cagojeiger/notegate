@@ -353,6 +353,7 @@ impl AccountRepo {
     }
 
     pub async fn upsert_user_by_sub(&self, attrs: &ResolveAttrs) -> Result<(Account, User)> {
+        validate_resolve_attrs(attrs)?;
         let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, &attrs.sub)?;
         let email_hash = self.crypto.email_hash(&attrs.email)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
@@ -552,6 +553,37 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)
     }
+}
+
+fn validate_resolve_attrs(attrs: &ResolveAttrs) -> Result<()> {
+    if attrs.sub.trim().is_empty() {
+        return Err(Error::validation("provider subject cannot be empty"));
+    }
+    if attrs.sub.chars().count() > limits::OAUTH_PROVIDER_SUB_MAX_CHARS {
+        return Err(Error::validation(format!(
+            "provider subject exceeds the maximum of {} characters",
+            limits::OAUTH_PROVIDER_SUB_MAX_CHARS
+        )));
+    }
+    if attrs.name.trim().is_empty() {
+        return Err(Error::validation("user display name cannot be empty"));
+    }
+    if attrs.name.chars().count() > limits::USER_DISPLAY_NAME_MAX_CHARS {
+        return Err(Error::validation(format!(
+            "user display name exceeds the maximum of {} characters",
+            limits::USER_DISPLAY_NAME_MAX_CHARS
+        )));
+    }
+    if attrs.email.trim().is_empty() {
+        return Err(Error::validation("user email cannot be empty"));
+    }
+    if attrs.email.chars().count() > limits::USER_EMAIL_MAX_CHARS {
+        return Err(Error::validation(format!(
+            "user email exceeds the maximum of {} characters",
+            limits::USER_EMAIL_MAX_CHARS
+        )));
+    }
+    Ok(())
 }
 
 fn decrypt_optional_string(

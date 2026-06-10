@@ -72,6 +72,7 @@ workspace_access(role='owner') for creator user
 - 권한 source of truth는 `workspace_access`다.
 - creator의 owner access row는 생성 직후 active 상태여야 한다.
 - workspace 생성은 user creator account의 live workspace 한도 `20`을 넘을 수 없다.
+- workspace 생성은 creator account의 accessible live workspace 한도 `100`도 넘을 수 없다.
 - root node 생성은 DB trigger로 보장할 수 있지만, lifecycle 관점에서는 workspace 생성 transaction의 일부다.
 
 ### Agent 생성
@@ -124,6 +125,7 @@ workspace_access insert/update
 - agent account는 `viewer` 또는 `editor`만 받을 수 있다.
 - grant/change는 account, workspace, API key를 새로 만들지 않는다.
 - 한 workspace의 active access row 한도는 owner row를 포함해 `20`이다.
+- 한 account의 accessible live workspace 한도는 `100`이다.
 - owner 보호 규칙은 항상 적용한다.
 
 ### Folder/document 생성

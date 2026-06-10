@@ -29,7 +29,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # Web framework
 axum = { version = "0.8.9", features = ["macros"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["trace", "request-id", "cors"] }
+tower-http = { version = "0.6", features = ["trace", "request-id", "cors", "limit", "timeout"] }
 
 # Database
 sqlx = { version = "0.8", default-features = false, features = [
@@ -77,6 +77,7 @@ hkdf = "0.12"
 base64 = "0.22"
 url = "2"
 axum-extra = { version = "0.10", features = ["cookie"] }
+axum-governor = "2.0.2"
 secrecy = { version = "0.10", features = ["serde"] }
 subtle = "2"
 rmcp = { version = "1.7.0", features = ["transport-streamable-http-server"] }
