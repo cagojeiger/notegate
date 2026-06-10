@@ -514,10 +514,10 @@ async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
         .await
         .unwrap_err();
 
-    // P1-5: an owner grant to a non-user (agent) account is a 409 Conflict, not a
-    // 400 validation error.
+    // An owner grant to a valid-but-non-user (active agent) account is a 409
+    // Conflict (the account exists and is active; only the role/kind conflicts).
     assert!(
-        matches!(err, Error::Conflict(message) if message == "owner role requires an active user account")
+        matches!(err, Error::Conflict(message) if message == "owner role requires a user account")
     );
     assert_eq!(
         access_repo.role_for(workspace_id, agent).await?,
@@ -529,10 +529,11 @@ async fn agent_account_can_receive_editor_but_owner_grants_are_rejected()
     Ok(())
 }
 
-/// P1-5: an owner grant to an inactive account is a 409 Conflict; a valid owner
-/// grant to an active user still succeeds.
+/// #6: an unusable target account yields the SAME `404 not_found` regardless of
+/// the requested role. An inactive account granted `owner` is a 404 (the same as
+/// editor/viewer), not a role-dependent 409; a valid owner grant still succeeds.
 #[tokio::test]
-async fn owner_grant_to_inactive_account_is_conflict() -> Result<(), Box<dyn std::error::Error>> {
+async fn owner_grant_to_inactive_account_is_not_found() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -556,7 +557,8 @@ async fn owner_grant_to_inactive_account_is_conflict() -> Result<(), Box<dyn std
         .await
         .unwrap_err();
     assert!(
-        matches!(err, Error::Conflict(message) if message == "owner role requires an active user account")
+        matches!(err, Error::NotFound(message) if message == "account not found"),
+        "inactive target is 404 for owner too, matching editor/viewer (no role-dependent split)"
     );
 
     // A valid owner grant to an active user still succeeds.

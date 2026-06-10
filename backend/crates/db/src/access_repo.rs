@@ -205,29 +205,24 @@ async fn ensure_account_can_receive_role(
     account_id: Uuid,
     role: Role,
 ) -> Result<()> {
-    let required_kind = if role == Role::Owner {
-        Some("user")
-    } else {
-        None
-    };
-
-    let found: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM accounts \
-         WHERE id = $1 AND is_active = true AND deleted_at IS NULL \
-           AND ($2::text IS NULL OR kind = $2)",
+    // Check existence/activeness FIRST, independent of the requested role, so an
+    // unusable target account yields the same `404 not_found` for every role
+    // instead of leaking the difference as owner=409 vs editor/viewer=404.
+    let kind: Option<String> = sqlx::query_scalar(
+        "SELECT kind FROM accounts \
+         WHERE id = $1 AND is_active = true AND deleted_at IS NULL",
     )
     .bind(account_id)
-    .bind(required_kind)
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    if found.is_none() {
-        if role == Role::Owner {
-            return Err(Error::conflict(
-                "owner role requires an active user account",
-            ));
-        }
+    let Some(kind) = kind else {
         return Err(Error::not_found("account not found"));
+    };
+
+    // The account is valid; only now is an owner/kind mismatch a real conflict.
+    if role == Role::Owner && kind != "user" {
+        return Err(Error::conflict("owner role requires a user account"));
     }
     Ok(())
 }
