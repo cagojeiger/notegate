@@ -2,7 +2,7 @@
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
-use notegate_core::{Error, Result, limits};
+use notegate_core::{Error, Result};
 use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
@@ -165,7 +165,11 @@ impl ApiKeyRepo {
     /// `accounts` row AND writes `api_keys` takes the `accounts` row lock FIRST.
     /// `accounts[id]` is therefore the single serialization point for per-account
     /// key mutation, so no `accounts`<->`api_keys` lock cycle is constructible.
-    pub async fn insert_key_with_cap(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
+    pub async fn insert_key_with_cap(
+        &self,
+        args: InsertApiKey<'_>,
+        max_live_keys: usize,
+    ) -> Result<ApiKey> {
         if !args.command.scopes.is_empty() {
             return Err(Error::validation("api key scopes must be empty"));
         }
@@ -194,10 +198,9 @@ impl ApiKeyRepo {
         .await
         .map_err(map_sqlx_error)?;
         let live = usize::try_from(live).map_err(|_error| Error::internal("negative key count"))?;
-        if live >= limits::API_KEYS_PER_ACCOUNT_MAX {
+        if live >= max_live_keys {
             return Err(Error::conflict(format!(
-                "account already has the maximum of {} live API keys",
-                limits::API_KEYS_PER_ACCOUNT_MAX
+                "account already has the maximum of {max_live_keys} live API keys"
             )));
         }
 
@@ -231,6 +234,7 @@ impl ApiKeyRepo {
         args: InsertApiKey<'_>,
         old_key_id: Uuid,
         revoked_by: Uuid,
+        max_live_keys: usize,
     ) -> Result<ApiKey> {
         if !args.command.scopes.is_empty() {
             return Err(Error::validation("api key scopes must be empty"));
@@ -265,10 +269,9 @@ impl ApiKeyRepo {
         .map_err(map_sqlx_error)?;
         let live_without_old = usize::try_from(live_without_old)
             .map_err(|_error| Error::internal("negative key count"))?;
-        if live_without_old >= limits::API_KEYS_PER_ACCOUNT_MAX {
+        if live_without_old >= max_live_keys {
             return Err(Error::conflict(format!(
-                "account already has the maximum of {} live API keys",
-                limits::API_KEYS_PER_ACCOUNT_MAX
+                "account already has the maximum of {max_live_keys} live API keys"
             )));
         }
 

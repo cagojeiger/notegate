@@ -231,7 +231,8 @@ CREATE INDEX api_keys_rotated_from_idx
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
 - `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
-- 한 account가 동시에 가질 수 있는 live API key는 최대 `10`개다.
+- 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개다.
+- 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개다.
 - API key 자체 rotation은 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
 
 ## workspaces

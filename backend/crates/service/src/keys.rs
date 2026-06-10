@@ -62,6 +62,7 @@ pub async fn create_key_for_account(
     created_by: Uuid,
     command: CreateApiKey,
     rotated_from_key_id: Option<Uuid>,
+    max_live_keys: usize,
 ) -> ServiceResult<MintedApiKey> {
     validate_key_command(&command)?;
     let key_id = Uuid::new_v4();
@@ -69,15 +70,18 @@ pub async fn create_key_for_account(
     let token = format_token(key_id, &secret);
     let token_hash = crypto.api_key_hash(&key_id.to_string(), &secret)?;
     let key = api_keys
-        .insert_key_with_cap(InsertApiKey {
-            key_id,
-            account_id,
-            command: &command,
-            token_prefix: &token_prefix(key_id),
-            token_hash: &token_hash,
-            created_by,
-            rotated_from_key_id,
-        })
+        .insert_key_with_cap(
+            InsertApiKey {
+                key_id,
+                account_id,
+                command: &command,
+                token_prefix: &token_prefix(key_id),
+                token_hash: &token_hash,
+                created_by,
+                rotated_from_key_id,
+            },
+            max_live_keys,
+        )
         .await?;
     Ok(MintedApiKey { key, token })
 }
@@ -89,6 +93,7 @@ pub async fn rotate_key_for_account(
     created_by: Uuid,
     old_key_id: Uuid,
     command: CreateApiKey,
+    max_live_keys: usize,
 ) -> ServiceResult<MintedApiKey> {
     validate_key_command(&command)?;
 
@@ -109,6 +114,7 @@ pub async fn rotate_key_for_account(
             },
             old_key_id,
             created_by,
+            max_live_keys,
         )
         .await?;
     Ok(MintedApiKey { key, token })

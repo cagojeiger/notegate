@@ -86,7 +86,7 @@ impl AgentService {
     }
 
     /// Create an agent-bound API key. Only a `kind='user'` caller may create keys;
-    /// the agent account may have at most [`limits::API_KEYS_PER_ACCOUNT_MAX`] live keys.
+    /// the agent account may have at most [`limits::AGENT_API_KEYS_PER_ACCOUNT_MAX`] live keys.
     pub async fn create_key(
         &self,
         caller_kind: AccountKind,
@@ -108,6 +108,7 @@ impl AgentService {
                 expires_at: command.expires_at,
             },
             None,
+            limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await
     }
@@ -182,6 +183,7 @@ impl AgentService {
                 scopes: Vec::new(),
                 expires_at: old.expires_at,
             },
+            limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await
     }

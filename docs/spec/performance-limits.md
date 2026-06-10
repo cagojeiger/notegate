@@ -29,7 +29,8 @@ unknown limit key -> configuration error
 owned_workspaces_max = 20 live workspaces per user creator account
 workspace_access_max_accounts = 20 active access rows per workspace, owner row 포함
 agents_per_creator_max = 50 active agents per user creator account
-api_keys_per_account_max = 10 live API keys per account
+user_api_keys_per_account_max = 2 live API keys per user account
+agent_api_keys_per_account_max = 5 live API keys per agent account
 ```
 
 Branching:

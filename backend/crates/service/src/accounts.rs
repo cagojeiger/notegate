@@ -1,6 +1,6 @@
 //! Account lifecycle operations for the current caller.
 
-use notegate_core::security::PiiCrypto;
+use notegate_core::{limits, security::PiiCrypto};
 use notegate_db::{AccountRepo, ApiKeyRepo};
 use notegate_model::account::AccountKind;
 use notegate_model::{ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
@@ -68,6 +68,7 @@ impl AccountService {
             caller_account_id,
             command,
             None,
+            limits::USER_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await
     }
@@ -108,6 +109,7 @@ impl AccountService {
                 scopes: Vec::new(),
                 expires_at: old.expires_at,
             },
+            limits::USER_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await
     }

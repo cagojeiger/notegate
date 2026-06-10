@@ -58,7 +58,7 @@ POST /api/v1/agents/{agent_id}/keys
 }
 ```
 
-Agent API key는 명시 호출로만 생성한다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. DB에는 통합 `api_keys` row로 저장하며, `account_id`는 대상 agent account다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
+Agent API key는 명시 호출로만 생성한다. Agent account는 동시에 최대 5개의 live API key를 가질 수 있다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. DB에는 통합 `api_keys` row로 저장하며, `account_id`는 대상 agent account다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
 
 Live key는 다음 조건을 모두 만족한다.
 

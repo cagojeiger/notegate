@@ -20,20 +20,24 @@ async fn insert_capped(
     repo: &ApiKeyRepo,
     account_id: Uuid,
     label: &str,
+    max_live_keys: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    repo.insert_key_with_cap(InsertApiKey {
-        key_id: Uuid::new_v4(),
-        account_id,
-        command: &CreateApiKey {
-            name: label.to_owned(),
-            scopes: Vec::new(),
-            expires_at: None,
+    repo.insert_key_with_cap(
+        InsertApiKey {
+            key_id: Uuid::new_v4(),
+            account_id,
+            command: &CreateApiKey {
+                name: label.to_owned(),
+                scopes: Vec::new(),
+                expires_at: None,
+            },
+            token_prefix: "ngk_v1_test",
+            token_hash: &format!("hash-{label}-{}", Uuid::new_v4()),
+            created_by: account_id,
+            rotated_from_key_id: None,
         },
-        token_prefix: "ngk_v1_test",
-        token_hash: &format!("hash-{label}-{}", Uuid::new_v4()),
-        created_by: account_id,
-        rotated_from_key_id: None,
-    })
+        max_live_keys,
+    )
     .await?;
     Ok(())
 }
@@ -60,12 +64,12 @@ async fn insert_agent_account(
 async fn concurrent_create_respects_cap(
     pool: &sqlx::PgPool,
     account_id: Uuid,
+    max: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let repo = ApiKeyRepo::new(pool.clone());
     // Seed the account at cap-1 live keys.
-    let max = notegate_core::limits::API_KEYS_PER_ACCOUNT_MAX;
     for index in 0..(max - 1) {
-        insert_capped(&repo, account_id, &format!("seed-{index}")).await?;
+        insert_capped(&repo, account_id, &format!("seed-{index}"), max).await?;
     }
     assert_eq!(repo.count_live_keys(account_id).await?, max - 1);
 
@@ -74,19 +78,22 @@ async fn concurrent_create_respects_cap(
     for index in 0..8 {
         let repo = repo.clone();
         handles.push(tokio::spawn(async move {
-            repo.insert_key_with_cap(InsertApiKey {
-                key_id: Uuid::new_v4(),
-                account_id,
-                command: &CreateApiKey {
-                    name: format!("race-{index}"),
-                    scopes: Vec::new(),
-                    expires_at: None,
+            repo.insert_key_with_cap(
+                InsertApiKey {
+                    key_id: Uuid::new_v4(),
+                    account_id,
+                    command: &CreateApiKey {
+                        name: format!("race-{index}"),
+                        scopes: Vec::new(),
+                        expires_at: None,
+                    },
+                    token_prefix: "ngk_v1_test",
+                    token_hash: &format!("hash-race-{index}-{}", Uuid::new_v4()),
+                    created_by: account_id,
+                    rotated_from_key_id: None,
                 },
-                token_prefix: "ngk_v1_test",
-                token_hash: &format!("hash-race-{index}-{}", Uuid::new_v4()),
-                created_by: account_id,
-                rotated_from_key_id: None,
-            })
+                max,
+            )
             .await
         }));
     }
@@ -116,7 +123,12 @@ async fn concurrent_create_respects_cap_for_user_account() -> Result<(), Box<dyn
         return Ok(());
     };
     let user_id = insert_user_account(&db.pool, "race-user", "race-user@example.test").await?;
-    concurrent_create_respects_cap(&db.pool, user_id).await?;
+    concurrent_create_respects_cap(
+        &db.pool,
+        user_id,
+        notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+    )
+    .await?;
     db.cleanup().await;
     Ok(())
 }
@@ -129,7 +141,12 @@ async fn concurrent_create_respects_cap_for_agent_account() -> Result<(), Box<dy
     };
     let creator = insert_user_account(&db.pool, "race-owner", "race-owner@example.test").await?;
     let agent_id = insert_agent_account(&db.pool, creator, "race-agent").await?;
-    concurrent_create_respects_cap(&db.pool, agent_id).await?;
+    concurrent_create_respects_cap(
+        &db.pool,
+        agent_id,
+        notegate_core::limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
+    )
+    .await?;
     db.cleanup().await;
     Ok(())
 }
@@ -142,9 +159,48 @@ async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn s
     let repo = ApiKeyRepo::new(db.pool.clone());
     let user_id = insert_user_account(&db.pool, "list-user", "list-user@example.test").await?;
 
-    insert_capped(&repo, user_id, "live-a").await?;
-    insert_capped(&repo, user_id, "to-revoke").await?;
-    insert_capped(&repo, user_id, "live-b").await?;
+    repo.insert_key(InsertApiKey {
+        key_id: Uuid::new_v4(),
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "live-a".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_test",
+        token_hash: "hash-live-a",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
+    repo.insert_key(InsertApiKey {
+        key_id: Uuid::new_v4(),
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "to-revoke".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_test",
+        token_hash: "hash-to-revoke",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
+    repo.insert_key(InsertApiKey {
+        key_id: Uuid::new_v4(),
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "live-b".to_owned(),
+            scopes: Vec::new(),
+            expires_at: None,
+        },
+        token_prefix: "ngk_v1_test",
+        token_hash: "hash-live-b",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
 
     let before = repo.list_by_account(user_id, 10, None).await?;
     assert_eq!(before.len(), 3);
@@ -234,7 +290,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
     let user_id = insert_user_account(&db.pool, "rotate-user", "rotate@example.test").await?;
     let first_key_id = Uuid::new_v4();
 
-    for index in 0..notegate_core::limits::API_KEYS_PER_ACCOUNT_MAX {
+    for index in 0..notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX {
         let key_id = if index == 0 {
             first_key_id
         } else {
@@ -258,7 +314,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
     }
     assert_eq!(
         repo.count_live_keys(user_id).await?,
-        notegate_core::limits::API_KEYS_PER_ACCOUNT_MAX
+        notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX
     );
 
     let new_key_id = Uuid::new_v4();
@@ -279,13 +335,14 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
             },
             first_key_id,
             user_id,
+            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
 
     assert_eq!(rotated.rotated_from_key_id, Some(first_key_id));
     assert_eq!(
         repo.count_live_keys(user_id).await?,
-        notegate_core::limits::API_KEYS_PER_ACCOUNT_MAX
+        notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX
     );
 
     let old: (Option<chrono::DateTime<chrono::Utc>>, Option<String>) =

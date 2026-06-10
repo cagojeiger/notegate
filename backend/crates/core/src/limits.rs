@@ -16,8 +16,10 @@ pub const OWNED_WORKSPACES_MAX: usize = 20;
 pub const WORKSPACE_ACCESS_MAX_ACCOUNTS: usize = 20;
 /// Maximum active agents a single user creator account may create.
 pub const AGENTS_PER_CREATOR_MAX: usize = 50;
-/// Maximum live API keys per account.
-pub const API_KEYS_PER_ACCOUNT_MAX: usize = 10;
+/// Maximum live API keys for a user account.
+pub const USER_API_KEYS_PER_ACCOUNT_MAX: usize = 2;
+/// Maximum live API keys for an agent account.
+pub const AGENT_API_KEYS_PER_ACCOUNT_MAX: usize = 5;
 
 // --- Path and name limits ---
 

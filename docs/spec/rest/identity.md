@@ -67,7 +67,7 @@ POST /api/v1/me/keys
 }
 ```
 
-현재 user account로 인증되는 API key를 만든다. 생성 응답에서 평문 token을 정확히 한 번만 반환한다. DB에는 `token_hash`, `token_prefix`, `hash_key_id`, `hash_version`만 저장한다.
+현재 user account로 인증되는 API key를 만든다. User account는 동시에 최대 2개의 live API key를 가질 수 있다. 생성 응답에서 평문 token을 정확히 한 번만 반환한다. DB에는 `token_hash`, `token_prefix`, `hash_key_id`, `hash_version`만 저장한다.
 
 Branching 규칙:
 
