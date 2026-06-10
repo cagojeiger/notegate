@@ -154,9 +154,14 @@ token_hash     = HMAC(api_key_hmac_subkey, "api-key:v1:" + api_key_id + ":" + se
 ## 탈퇴와 익명화
 
 User 탈퇴나 agent 삭제는 account hard delete가 아니라 deactivate/soft delete로 처리한다.
-`created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 account row는 남긴다.
+`created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 익명화 후에도 account 껍데기는 남긴다.
 
-탈퇴 lifecycle side effect는 `docs/spec/lifecycle.md`의 User 탈퇴 정책을 따른다. 이 문서는 PII ciphertext/hash 제거와 key material 비노출 정책을 정본으로 둔다.
+User 탈퇴는 두 단계로 익명화한다(ADR 0004).
+
+- 소프트삭제 시점(t=0): account를 비활성화하되 PII ciphertext/hash와 `provider_sub_hash`는 tombstone으로 유지한다. tombstone의 `UNIQUE` 제약이 쿨다운 동안 같은 provider subject의 중복 가입을 막는다.
+- 소거 시점(purge, retention 경과): PII ciphertext/hash를 제거하고 `provider_sub_hash` tombstone을 해제한다. 식별 불가능한 익명 껍데기만 남는다.
+
+탈퇴 lifecycle side effect(게이트, 쿨다운, side effect 순서)는 `docs/spec/lifecycle.md`의 User 탈퇴 정책을 따른다. 이 문서는 PII ciphertext/hash 제거 시점과 key material 비노출 정책을 정본으로 둔다.
 
 ## 로그와 감사 payload
 

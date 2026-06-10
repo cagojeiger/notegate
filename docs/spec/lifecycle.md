@@ -52,7 +52,7 @@ accounts display name ciphertext
 users email ciphertext/hash
 ```
 
-재로그인은 workspace, owner access, agent, API key를 만들지 않는다. 탈퇴로 anonymize된 user는 provider subject lookup 대상이 아니므로 local user 최초 생성 흐름을 탄다. provider subject가 남아 있는 inactive account가 발견되어도 자동 재활성화하지 않는다.
+재로그인은 workspace, owner access, agent, API key를 만들지 않는다. 삭제 진행 중(pending-deletion) account는 `provider_sub_hash` tombstone이 남아 있으므로, 같은 provider subject 재로그인을 `409 conflict`(쿨다운)로 거부하며 재활성화하지도 중복 생성하지도 않는다. purge가 tombstone을 해제한 뒤에야 같은 provider subject가 local user 최초 생성 흐름을 타 새 account가 된다. ADR 0004 참고.
 
 ### Workspace 생성
 
@@ -162,24 +162,36 @@ workspaces.purge_after = now() + retention
 
 ### User 탈퇴
 
-User 탈퇴는 hard delete가 아니라 deactivate/anonymize다.
+User 탈퇴는 영구 삭제이며, hard delete가 아니라 지연 삭제다. 삭제는 되돌릴 수 없고, 재가입은 기존 데이터가 완전히 소거된 뒤에만 가능하다. 자세한 정책은 ADR 0004를 따른다.
+
+전제조건(게이트):
+
+- 탈퇴 caller가 단독 active user owner인 live workspace가 하나라도 있으면 탈퇴를 `409 conflict`로 거부한다. 해당 workspace를 먼저 삭제하거나 소유권을 이전해야 한다(수동 정리).
+
+소프트삭제 시점(t=0):
 
 ```text
 accounts.is_active = false
 accounts.deleted_at/deleted_by 설정
-accounts/users PII ciphertext/hash 제거
 owned active agents deactivate
 owned live API keys revoke
 owned agents live API keys revoke
-workspace_access revoke 또는 workspace soft delete
+다른 active user owner가 남는 workspace의 탈퇴 user access revoke (공동 workspace leave)
+탈퇴 user가 만든 agent의 live workspace access revoke
 ```
 
-Workspace 처리 규칙:
+- t=0에는 PII ciphertext/hash와 `provider_sub_hash`를 제거하지 않고 tombstone으로 유지한다. 이 동안 account는 인증/재가입에 사용할 수 없다(쿨다운).
 
-- 탈퇴 user가 유일한 active user owner인 live workspace는 soft delete한다.
-- 이 탈퇴 경로로 soft-delete되는 workspace는 일반 workspace delete와 달리 live `workspace_access`도 모두 revoke한다.
-- 다른 active user owner가 남는 workspace에서는 탈퇴 user의 access를 revoke한다.
-- 탈퇴 user가 만든 agent의 live workspace access도 revoke한다.
+소거 시점(purge, `deleted_at` + retention 경과):
+
+```text
+accounts/users PII ciphertext/hash 제거
+provider_sub_hash tombstone 해제 (NULL)
+attribution 보존용 익명 account/user 껍데기 유지
+```
+
+- purge가 tombstone을 해제하면 같은 provider subject로 새 account를 만들 수 있다.
+- retention 기본값은 `ACCOUNT_DELETION_RETENTION_DAYS`(15일)이며, background purge가 경과분을 처리한다.
 
 ### Agent 삭제
 
@@ -249,7 +261,7 @@ Document node가 soft delete되면 해당 document는 live file/search 결과에
 - Workspace creator의 owner row는 일반 access API로 revoke하거나 editor/viewer로 downgrade할 수 없다.
 - 마지막 active user owner는 revoke/downgrade할 수 없다.
 - Agent account는 owner role을 받을 수 없다.
-- Owner row를 제거해야 하는 예외는 workspace delete 또는 user account deletion lifecycle뿐이다.
+- Owner row를 제거하는 경로는 workspace delete다. User 탈퇴는 단독 owner workspace를 먼저 정리하도록 요구하므로(게이트), 탈퇴 시에는 다른 active user owner가 남은 workspace의 access만 revoke한다.
 - 위반 요청은 `409 conflict`로 거부한다.
 
 ## Invariant 방어 정책
