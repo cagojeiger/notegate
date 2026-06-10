@@ -96,10 +96,10 @@ service/files
 service/search
 service/access
 service/agents
-service/keys
+service/api_keys
 
 db/account_repo       -> service/identity account/user store, REST account ref lookup
-db/api_key_repo       -> service/keys API key lifecycle, service/identity API key owner lookup
+db/api_key_repo       -> service/api_keys API key lifecycle, service/identity API key owner lookup
 db/workspaces_repo    -> service/workspaces store
 db/access_repo        -> service/access store
 db/workspace_role     -> shared live workspace role resolver

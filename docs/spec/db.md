@@ -233,7 +233,7 @@ CREATE INDEX api_keys_rotated_from_idx
 - `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
 - 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개이고, 생성 시 만료 기한은 최대 `30`일이다.
 - 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개이고, 생성 시 만료 기한은 최대 `365`일이다.
-- API key 자체 rotation은 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
+- API key 자체 rotation은 old `expires_at`을 상속한 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
 
 ## workspaces
 

@@ -62,12 +62,12 @@ POST /api/v1/me/keys
 ```json
 {
   "name": "local-cli",
-  "expires_at": "2026-12-31T00:00:00Z",
+  "expires_at": "<created_at + 30d 이내 RFC3339>",
   "scopes": []
 }
 ```
 
-현재 user account로 인증되는 API key를 만든다. User account는 동시에 최대 2개의 live API key를 가질 수 있고, `expires_at`은 필수이며 생성 시점 기준 최대 30일까지 허용된다. 생성 응답에서 평문 token을 정확히 한 번만 반환한다. DB에는 `token_hash`, `token_prefix`, `hash_key_id`, `hash_version`만 저장한다.
+현재 user account로 인증되는 API key를 만든다. 평문 token은 생성 응답에서 한 번만 반환하고 저장하지 않는다. 한도와 만료 정책은 아래 branching을 따른다.
 
 Branching 규칙:
 
@@ -87,7 +87,7 @@ expires_at past/now or >30d -> 400 invalid input
 POST /api/v1/me/keys/{key_id}
 ```
 
-같은 user account에 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 정확히 한 번만 반환한다. Token 원문은 복구하거나 재암호화하지 않는다.
+같은 user account에 old key의 `expires_at`을 상속한 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 한 번만 반환한다.
 
 ### Revoke current user API key
 

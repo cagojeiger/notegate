@@ -15,7 +15,7 @@ DB 컬럼 구조는 `docs/spec/db.md`를 따르고, 이 문서는 그 컬럼을 
 ## PII 분류
 
 ```text
-암호화 저장: display_name, email, avatar_url 등 표시/연락용 원문
+암호화 저장: display_name, email
 HMAC 저장: OAuth provider subject, normalized email 등 lookup/unique 비교값
 평문 유지: account_id, workspace_id, role, kind, is_active, deleted_at 등 권한/조인 필드
 원문 저장 금지: bearer token, OAuth code, PKCE verifier, API key plaintext, provider subject 원문
@@ -146,7 +146,7 @@ token_hash     = HMAC(api_key_hmac_subkey, "api-key:v1:" + api_key_id + ":" + se
 - `expires_at`은 필수다. User API key는 최대 30일, agent API key는 최대 365일까지 허용한다.
 - DB에는 `token_prefix`, `token_hash`, `hash_key_id`, `hash_version`만 저장한다.
 - `hash_key_id`는 token_hash를 만든 LOOKUP root key id다.
-- API key 자체 rotation은 new token 발급 + old key revoke로 처리한다. Token 원문은 복구하거나 복호화하지 않는다.
+- API key 자체 rotation은 old `expires_at`을 상속한 new token 발급 + old key revoke로 처리한다. Token 원문은 복구하거나 복호화하지 않는다.
 - LOOKUP root key를 폐기해야 할 때 기존 API key는 원문이 없어 일괄 rehash할 수 없다. 영향받는 `hash_key_id`의 live API key는 revoke하고, 사용자 또는 agent creator가 새 key를 생성하도록 요구한다.
 
 ## 탈퇴와 익명화

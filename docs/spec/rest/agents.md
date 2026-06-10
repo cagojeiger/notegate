@@ -53,12 +53,12 @@ POST /api/v1/agents/{agent_id}/keys
 ```json
 {
   "name": "local-mcp",
-  "expires_at": "2026-12-31T00:00:00Z",
+  "expires_at": "<created_at + 365d 이내 RFC3339>",
   "scopes": []
 }
 ```
 
-Agent API key는 명시 호출로만 생성한다. Agent account는 동시에 최대 5개의 live API key를 가질 수 있고, `expires_at`은 필수이며 생성 시점 기준 최대 365일까지 허용된다. 평문 key는 생성 응답에서 정확히 한 번만 반환하고 저장하지 않는다. DB에는 통합 `api_keys` row로 저장하며, `account_id`는 대상 agent account다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
+Agent API key는 caller가 생성한 active agent account에 명시적으로 만든다. 평문 token은 생성 응답에서 한 번만 반환하고 저장하지 않는다. 한도와 만료 정책은 아래 branching을 따른다.
 
 Live key는 다음 조건을 모두 만족한다.
 
@@ -86,7 +86,7 @@ expires_at past/now or >365d -> 400 invalid input
 POST /api/v1/agents/{agent_id}/keys/{key_id}
 ```
 
-같은 agent account에 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 정확히 한 번만 반환한다.
+같은 agent account에 old key의 `expires_at`을 상속한 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 한 번만 반환한다.
 
 ### Revoke agent API key
 

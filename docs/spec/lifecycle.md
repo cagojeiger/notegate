@@ -204,16 +204,16 @@ revoke된 key는 인증에 사용할 수 없고 live key 한도 계산에서 제
 
 ### API key rotation
 
-API key 자체 rotation은 token을 복호화하거나 재암호화하지 않는다. 같은 account에 new key를 만들고 old key를 같은 transaction에서 revoke한다.
+API key 자체 rotation은 token을 복호화하거나 재암호화하지 않는다. 같은 account에 old key의 `expires_at`을 상속한 new key를 만들고 old key를 같은 transaction에서 revoke한다.
 
 ```text
-new api_keys(account_id = old.account_id, rotated_from_key_id = old.id)
+new api_keys(account_id = old.account_id, expires_at = old.expires_at, rotated_from_key_id = old.id)
 old api_keys.revoked_at = now()
 old api_keys.revoked_by = caller
 old api_keys.revoked_reason = 'rotated'
 ```
 
-생성된 새 token은 rotation 응답에서 정확히 한 번만 반환한다. API key hash secret rotation은 기존 token 원문을 복구하거나 보존한 채 재해시하지 않는다. LOOKUP root secret 유출 또는 hash key 폐기가 필요하면 영향받는 `hash_key_id`의 live key를 revoke하고 사용자 또는 agent creator가 새 key를 생성하도록 요구한다.
+생성된 새 token은 rotation 응답에서 한 번만 반환한다. API key hash secret rotation은 기존 token 원문을 복구하거나 보존한 채 재해시하지 않는다. LOOKUP root secret 유출 또는 hash key 폐기가 필요하면 영향받는 `hash_key_id`의 live key를 revoke하고 사용자 또는 agent creator가 새 key를 생성하도록 요구한다.
 
 ### Workspace access revoke
 
