@@ -24,6 +24,7 @@ pub struct AgentRepo {
 }
 
 impl AgentRepo {
+    #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
         Self::with_lookup_key(pool, "test-lookup", 1)
     }

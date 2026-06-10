@@ -28,6 +28,27 @@ pub struct CreateApiKey {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ListApiKeys {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// Keyset cursor for API key metadata list order `(created_at DESC, id DESC)`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ApiKeyCursor {
+    pub created_at: DateTime<Utc>,
+    pub id: Uuid,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApiKeyPage {
+    pub items: Vec<ApiKey>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct MintedApiKey {
     pub key: ApiKey,

@@ -166,9 +166,7 @@ async fn create_key_rejects_non_empty_scopes() -> Result<(), Box<dyn std::error:
         )
         .await
         .unwrap_err();
-    assert!(
-        matches!(err, Error::Validation(message) if message == "api key scopes must be empty")
-    );
+    assert!(matches!(err, Error::Validation(message) if message == "api key scopes must be empty"));
 
     db.cleanup().await;
     Ok(())

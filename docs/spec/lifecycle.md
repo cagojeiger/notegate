@@ -106,6 +106,7 @@ api_keys(token_hash only)
 - key 생성은 workspace 권한을 변경하지 않는다.
 - `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
 - account당 live API key 한도는 `10`이다.
+- API key metadata list는 live/revoked/expired row가 누적될 수 있으므로 pagination을 제공한다.
 - token hash는 active LOOKUP root에서 파생한 API key HMAC subkey로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
 
 ### Workspace access grant/change

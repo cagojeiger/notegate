@@ -515,7 +515,9 @@ mod tests {
         let mut config = valid_config();
         config.lookup_root_secret =
             SecretString::from("test-enc-root-secret-32-bytes-long".to_owned());
-        assert!(config.lookup_root_secret.expose_secret() == config.enc_root_secret.expose_secret());
+        assert!(
+            config.lookup_root_secret.expose_secret() == config.enc_root_secret.expose_secret()
+        );
         assert!(config.validate().is_err());
 
         // Distinct ids + secrets pass.

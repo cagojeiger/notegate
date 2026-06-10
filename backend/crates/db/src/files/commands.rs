@@ -18,12 +18,13 @@ pub mod checks {
     /// transactions both observe state below a cap, or one mutation updates a node
     /// while another concurrently moves/deletes it.
     pub async fn lock_workspace(tx: &mut PgConnection, workspace_id: Uuid) -> Result<()> {
-        let found: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
-                .bind(workspace_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?;
+        let found: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM workspaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+        )
+        .bind(workspace_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         if found.is_none() {
             return Err(Error::not_found("workspace not found"));
         }

@@ -11,7 +11,8 @@ use notegate_db::{AgentRepo, ApiKeyRepo};
 use notegate_model::Agent;
 use notegate_model::account::AccountKind;
 pub use notegate_model::{
-    AgentPage, ApiKey, CreateAgent, CreateAgentKey, CreateApiKey, ListAgents, MintedApiKey,
+    AgentPage, ApiKeyPage, CreateAgent, CreateAgentKey, CreateApiKey, ListAgents, ListApiKeys,
+    MintedApiKey,
 };
 use uuid::Uuid;
 
@@ -161,11 +162,12 @@ impl AgentService {
         caller_kind: AccountKind,
         caller_account_id: Uuid,
         agent_id: Uuid,
-    ) -> ServiceResult<Vec<ApiKey>> {
+        request: ListApiKeys,
+    ) -> ServiceResult<ApiKeyPage> {
         require_user_caller(caller_kind)?;
         self.require_owned_active_agent(agent_id, caller_account_id)
             .await?;
-        Ok(self.api_keys.list_by_account(agent_id).await?)
+        crate::accounts::list_key_page(&self.api_keys, agent_id, request).await
     }
 
     pub async fn rotate_key(

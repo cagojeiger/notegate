@@ -5,11 +5,12 @@ use notegate_core::limits;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{AccountRepo, ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::account::AccountKind;
-use notegate_model::{ApiKey, CreateApiKey, MintedApiKey};
+use notegate_model::{ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 use uuid::Uuid;
 
 use crate::agents::{format_token, parse_token, token_prefix};
-use crate::{ServiceError, ServiceResult};
+use crate::pagination::clamp_limit;
+use crate::{ServiceError, ServiceResult, cursor};
 
 #[derive(Debug, Clone)]
 pub struct AccountService {
@@ -50,9 +51,10 @@ impl AccountService {
         &self,
         caller_kind: AccountKind,
         caller_account_id: Uuid,
-    ) -> ServiceResult<Vec<ApiKey>> {
+        request: ListApiKeys,
+    ) -> ServiceResult<ApiKeyPage> {
         require_user(caller_kind)?;
-        Ok(self.api_keys.list_by_account(caller_account_id).await?)
+        list_key_page(&self.api_keys, caller_account_id, request).await
     }
 
     pub async fn create_key(
@@ -124,6 +126,51 @@ fn require_user(kind: AccountKind) -> ServiceResult<()> {
     }
 }
 
+pub async fn list_key_page(
+    api_keys: &ApiKeyRepo,
+    account_id: Uuid,
+    request: ListApiKeys,
+) -> ServiceResult<ApiKeyPage> {
+    let limit = clamp_limit(
+        request.limit,
+        limits::API_KEYS_DEFAULT_LIMIT,
+        limits::API_KEYS_MAX_LIMIT,
+    );
+    let cursor = match request.cursor.as_deref() {
+        None => None,
+        Some(raw) => Some(
+            cursor::decode::<ApiKeyCursor>(raw)
+                .map_err(|_error| ServiceError::InvalidInput("invalid cursor".to_owned()))?,
+        ),
+    };
+
+    let mut items = api_keys
+        .list_by_account(account_id, limit + 1, cursor.as_ref())
+        .await?;
+    let has_more = items.len() as i64 > limit;
+    items.truncate(limit as usize);
+    let next_cursor = if has_more {
+        items
+            .last()
+            .map(|key| ApiKeyCursor {
+                created_at: key.created_at,
+                id: key.id,
+            })
+            .map(|cursor| cursor::encode(&cursor))
+            .transpose()
+            .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
+    } else {
+        None
+    };
+
+    Ok(ApiKeyPage {
+        items,
+        limit,
+        has_more,
+        next_cursor,
+    })
+}
+
 pub async fn create_key_for_account(
     api_keys: &ApiKeyRepo,
     crypto: &PiiCrypto,
@@ -133,14 +180,6 @@ pub async fn create_key_for_account(
     rotated_from_key_id: Option<Uuid>,
 ) -> ServiceResult<MintedApiKey> {
     validate_key_command(&command)?;
-    let live = api_keys.count_live_keys(account_id).await?;
-    if live >= limits::API_KEYS_PER_ACCOUNT_MAX {
-        return Err(ServiceError::Conflict(format!(
-            "account already has the maximum of {} live API keys",
-            limits::API_KEYS_PER_ACCOUNT_MAX
-        )));
-    }
-
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
     let token = format_token(key_id, &secret);

@@ -206,6 +206,13 @@ mod tests {
 
         assert_query_params(&value, "/api/v1/workspaces", "get", &["limit", "cursor"]);
         assert_query_params(&value, "/api/v1/agents", "get", &["limit", "cursor"]);
+        assert_query_params(&value, "/api/v1/me/keys", "get", &["limit", "cursor"]);
+        assert_query_params(
+            &value,
+            "/api/v1/agents/{agent_id}/keys",
+            "get",
+            &["limit", "cursor"],
+        );
         assert_query_params(
             &value,
             "/api/v1/workspaces/{workspace_id}/access",

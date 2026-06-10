@@ -110,8 +110,8 @@ async fn concurrent_create_respects_cap(
 }
 
 #[tokio::test]
-async fn concurrent_create_respects_cap_for_user_account()
--> Result<(), Box<dyn std::error::Error>> {
+async fn concurrent_create_respects_cap_for_user_account() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -122,8 +122,8 @@ async fn concurrent_create_respects_cap_for_user_account()
 }
 
 #[tokio::test]
-async fn concurrent_create_respects_cap_for_agent_account()
--> Result<(), Box<dyn std::error::Error>> {
+async fn concurrent_create_respects_cap_for_agent_account() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -135,7 +135,7 @@ async fn concurrent_create_respects_cap_for_agent_account()
 }
 
 #[tokio::test]
-async fn list_by_account_excludes_revoked_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -146,7 +146,7 @@ async fn list_by_account_excludes_revoked_keys() -> Result<(), Box<dyn std::erro
     insert_capped(&repo, user_id, "to-revoke").await?;
     insert_capped(&repo, user_id, "live-b").await?;
 
-    let before = repo.list_by_account(user_id).await?;
+    let before = repo.list_by_account(user_id, 10, None).await?;
     assert_eq!(before.len(), 3);
     let revoke_id = before
         .iter()
@@ -157,14 +157,27 @@ async fn list_by_account_excludes_revoked_keys() -> Result<(), Box<dyn std::erro
     repo.revoke_key(user_id, revoke_id, user_id, Some("test"))
         .await?;
 
-    let after = repo.list_by_account(user_id).await?;
-    assert_eq!(after.len(), 2, "revoked key must be excluded");
+    let after = repo.list_by_account(user_id, 10, None).await?;
+    assert_eq!(after.len(), 3, "revoked key metadata remains listable");
     assert!(
-        after.iter().all(|k| k.name != "to-revoke"),
-        "revoked key must not appear"
+        after
+            .iter()
+            .any(|k| k.name == "to-revoke" && k.revoked_at.is_some()),
+        "revoked key metadata must remain visible"
     );
-    // Ordering unchanged: created_at DESC, id DESC -> newest ("live-b") first.
-    assert_eq!(after.first().map(|k| k.name.as_str()), Some("live-b"));
+
+    let first_page = repo.list_by_account(user_id, 2, None).await?;
+    assert_eq!(first_page.len(), 2);
+    let cursor = notegate_model::ApiKeyCursor {
+        created_at: first_page.last().expect("second item").created_at,
+        id: first_page.last().expect("second item").id,
+    };
+    let second_page = repo.list_by_account(user_id, 2, Some(&cursor)).await?;
+    assert_eq!(second_page.len(), 1);
+    assert!(
+        !first_page.iter().any(|key| key.id == second_page[0].id),
+        "keyset page must not duplicate rows"
+    );
 
     db.cleanup().await;
     Ok(())

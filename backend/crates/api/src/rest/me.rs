@@ -8,18 +8,19 @@
 //! `DELETE` is the user account teardown endpoint. It is intentionally REST-only:
 //! MCP remains a file/workspace tool surface and does not expose account deletion.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{ApiKey, Caller, CreateApiKey};
+use notegate_model::{ApiKey, Caller, CreateApiKey, ListApiKeys};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
+use crate::page::Page;
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -27,6 +28,12 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/me", get(get_me).delete(delete_me))
         .route("/v1/me/keys", get(list_keys).post(create_key))
         .route("/v1/me/keys/{key_id}", post(rotate_key).delete(revoke_key))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListKeysQuery {
+    limit: Option<i64>,
+    cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -66,6 +73,7 @@ impl From<&ApiKey> for KeyOut {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct KeysListResponse {
     keys: Vec<KeyOut>,
+    page: Page,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -94,19 +102,38 @@ pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutpu
     get,
     path = "/api/v1/me/keys",
     tag = "identity",
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
     responses((status = 200, description = "List current user API keys", body = KeysListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list_keys(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
+    Query(query): Query<ListKeysQuery>,
 ) -> Result<Json<KeysListResponse>, ApiError> {
-    let keys = state
+    let page = state
         .account_lifecycle
-        .list_keys(caller.account.kind, caller.account_id())
+        .list_keys(
+            caller.account.kind,
+            caller.account_id(),
+            ListApiKeys {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
         .await?;
+    let keys = page.items.iter().map(KeyOut::from).collect();
     Ok(Json(KeysListResponse {
-        keys: keys.iter().map(KeyOut::from).collect(),
+        keys,
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 

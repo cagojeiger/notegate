@@ -98,6 +98,8 @@ access_default_limit = 100
 access_max_limit = 100
 agents_default_limit = 100
 agents_max_limit = 100
+api_keys_default_limit = 50
+api_keys_max_limit = 100
 ```
 
 Branching:
@@ -117,6 +119,7 @@ children   -> sort_order ASC, name ASC, id ASC
 workspaces -> created_at ASC, id ASC
 access     -> account id over the service-materialized, stable access list
 agents     -> agent id over the service-materialized, stable agent list
+api_keys   -> created_at DESC, id DESC
 ```
 
 Cursor format은 opaque이며 service-owned다. REST/MCP surface는 cursor 문자열을 해석하지 않고 그대로 전달한다.

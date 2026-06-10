@@ -3,7 +3,7 @@
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
-use notegate_model::{ApiKey, CreateApiKey};
+use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -32,18 +32,39 @@ impl ApiKeyRepo {
         }
     }
 
-    pub async fn list_by_account(&self, account_id: Uuid) -> Result<Vec<ApiKey>> {
-        // `revoked_at IS NULL` here INTENTIONALLY diverges from `count_live_keys`,
-        // which also filters expired keys (`expires_at IS NULL OR expires_at > now()`).
-        // The spec defines list "live-only" as not-revoked only; do not "fix" this to
-        // match the cap predicate.
-        let rows = sqlx::query_as::<_, ApiKeyRow>(&format!(
-            "SELECT {API_KEY_COLUMNS} FROM api_keys \
-             WHERE account_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC, id DESC"
-        ))
-        .bind(account_id)
-        .fetch_all(&self.pool)
-        .await
+    pub async fn list_by_account(
+        &self,
+        account_id: Uuid,
+        limit: i64,
+        cursor: Option<&ApiKeyCursor>,
+    ) -> Result<Vec<ApiKey>> {
+        let rows = match cursor {
+            None => {
+                sqlx::query_as::<_, ApiKeyRow>(&format!(
+                    "SELECT {API_KEY_COLUMNS} FROM api_keys \
+                     WHERE account_id = $1 \
+                     ORDER BY created_at DESC, id DESC LIMIT $2"
+                ))
+                .bind(account_id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+            Some(cursor) => {
+                sqlx::query_as::<_, ApiKeyRow>(&format!(
+                    "SELECT {API_KEY_COLUMNS} FROM api_keys \
+                     WHERE account_id = $1 \
+                       AND (created_at, id) < ($2, $3) \
+                     ORDER BY created_at DESC, id DESC LIMIT $4"
+                ))
+                .bind(account_id)
+                .bind(cursor.created_at)
+                .bind(cursor.id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
         .map_err(map_sqlx_error)?;
         Ok(rows.into_iter().map(ApiKey::from).collect())
     }

@@ -131,3 +131,7 @@ pub const ACCESS_MAX_LIMIT: i64 = 100;
 pub const AGENTS_DEFAULT_LIMIT: i64 = 100;
 /// Maximum `GET /agents` page size.
 pub const AGENTS_MAX_LIMIT: i64 = 100;
+/// Default `GET /*/keys` page size.
+pub const API_KEYS_DEFAULT_LIMIT: i64 = 50;
+/// Maximum `GET /*/keys` page size.
+pub const API_KEYS_MAX_LIMIT: i64 = 100;

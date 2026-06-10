@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{Agent, ApiKey, Caller};
+use notegate_model::{Agent, ApiKey, Caller, ListApiKeys};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -124,6 +124,7 @@ impl From<&ApiKey> for KeyOut {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct KeysListResponse {
     keys: Vec<KeyOut>,
+    page: Page,
 }
 
 #[utoipa::path(
@@ -213,7 +214,11 @@ pub(crate) async fn delete_agent(
     get,
     path = "/api/v1/agents/{agent_id}/keys",
     tag = "agents",
-    params(("agent_id" = Uuid, Path)),
+    params(
+        ("agent_id" = Uuid, Path),
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
     responses((status = 200, description = "List agent keys", body = KeysListResponse)),
     security(("bearer_auth" = []))
 )]
@@ -221,13 +226,29 @@ pub(crate) async fn list_keys(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(agent_id): Path<Uuid>,
+    Query(query): Query<ListQuery>,
 ) -> Result<Json<KeysListResponse>, ApiError> {
-    let keys = state
+    let page = state
         .agents
-        .list_keys(caller.account.kind, caller.account_id(), agent_id)
+        .list_keys(
+            caller.account.kind,
+            caller.account_id(),
+            agent_id,
+            ListApiKeys {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
         .await?;
+    let keys = page.items.iter().map(KeyOut::from).collect();
     Ok(Json(KeysListResponse {
-        keys: keys.iter().map(KeyOut::from).collect(),
+        keys,
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
     }))
 }
 

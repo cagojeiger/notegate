@@ -25,6 +25,7 @@ OpenAPI에 포함한다:
 /api/v1/workspaces/{workspace_id}/search
 /api/v1/workspaces/{workspace_id}/access
 /api/v1/agents
+/api/v1/agents/{agent_id}/keys
 ```
 
 OpenAPI에서 제외한다:
