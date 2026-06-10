@@ -151,6 +151,10 @@ pub const DELETED_NODE_RETENTION_DAYS: i64 = 30;
 /// run anonymizes its PII and frees the provider-sub tombstone. Default value;
 /// the deletion SLA can be tuned here. See ADR 0004.
 pub const ACCOUNT_DELETION_RETENTION_DAYS: i64 = 15;
+/// Days a revoked or expired API key row is retained before the purge run hard
+/// deletes it. The live-key listing and the per-account cap already ignore dead
+/// keys immediately; this window only keeps a short audit trail of the dead row.
+pub const DEAD_API_KEY_RETENTION_DAYS: i64 = 30;
 
 // --- API pagination limits ---
 

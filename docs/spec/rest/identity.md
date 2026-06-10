@@ -51,7 +51,7 @@ Capability 의미:
 GET /api/v1/me/keys?limit=50&cursor=...
 ```
 
-현재 user account에 연결된 API key metadata를 keyset pagination으로 반환한다. Live/revoked/expired metadata는 조회 가능하지만 평문 token은 반환하지 않는다. Agent caller는 user key를 관리할 수 없고 `403 forbidden`을 반환한다. 응답은 `keys`와 공통 `page`를 포함한다.
+현재 user account에 연결된 live API key metadata(`revoked_at IS NULL AND expires_at > now()`)를 keyset pagination으로 반환한다. revoked/expired key는 list에 포함하지 않으며 평문 token도 반환하지 않는다. Agent caller는 user key를 관리할 수 없고 `403 forbidden`을 반환한다. 응답은 `keys`와 공통 `page`를 포함한다.
 
 ### Create current user API key
 

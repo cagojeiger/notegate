@@ -10,7 +10,8 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_db::PurgeRepo;
+use notegate_db::{ApiKeyRepo, PurgeRepo, api_key_repo::InsertApiKey};
+use notegate_model::CreateApiKey;
 use sqlx::Row as _;
 use uuid::Uuid;
 
@@ -130,6 +131,87 @@ async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::err
     assert_eq!(still_exists, due_workspace);
 
     tx.commit().await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+/// Seed one live key via the repo, returning its id.
+async fn seed_key(
+    repo: &ApiKeyRepo,
+    account_id: Uuid,
+    name: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let key = repo
+        .insert_key_unchecked_for_test(InsertApiKey {
+            key_id: Uuid::new_v4(),
+            account_id,
+            command: &CreateApiKey {
+                name: name.to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            },
+            token_prefix: "ngk_v1_test",
+            token_hash: &format!("hash-{name}-{}", Uuid::new_v4()),
+            created_by: account_id,
+            rotated_from_key_id: None,
+        })
+        .await?;
+    Ok(key.id)
+}
+
+#[tokio::test]
+async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "key-purger", "key-purger@example.test").await?;
+    let repo = ApiKeyRepo::new(db.pool.clone());
+
+    // A key dies at the earlier of its revoke time and expiry. Retention is 30 days.
+    let live = seed_key(&repo, user, "live").await?;
+    let old_revoked = seed_key(&repo, user, "old-revoked").await?;
+    let old_expired = seed_key(&repo, user, "old-expired").await?;
+    let recent_revoked = seed_key(&repo, user, "recent-revoked").await?;
+
+    sqlx::query(
+        "UPDATE api_keys SET revoked_at = now() - interval '40 days', revoked_by = $2, \
+         revoked_reason = 'test' WHERE id = $1",
+    )
+    .bind(old_revoked)
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query("UPDATE api_keys SET expires_at = now() - interval '40 days' WHERE id = $1")
+        .bind(old_expired)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query(
+        "UPDATE api_keys SET revoked_at = now() - interval '1 day', revoked_by = $2, \
+         revoked_reason = 'test' WHERE id = $1",
+    )
+    .bind(recent_revoked)
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+
+    let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert!(run.lock_acquired);
+    assert_eq!(run.api_keys_deleted, 2, "only the two long-dead keys purge");
+
+    let remaining: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM api_keys WHERE account_id = $1")
+        .bind(user)
+        .fetch_all(&db.pool)
+        .await?;
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.contains(&live), "live key is retained");
+    assert!(
+        remaining.contains(&recent_revoked),
+        "recently revoked key is within retention"
+    );
+    assert!(!remaining.contains(&old_revoked));
+    assert!(!remaining.contains(&old_expired));
+
     db.cleanup().await;
     Ok(())
 }

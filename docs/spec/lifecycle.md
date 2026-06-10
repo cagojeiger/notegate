@@ -22,6 +22,7 @@ DB layer
 
 Background job / admin repair
   - purge_after가 지난 soft-deleted row를 hard delete할 수 있다.
+  - retention이 지난 dead API key(revoked/expired) row를 hard delete할 수 있다.
   - 깨진 invariant를 감지하고, 명확히 복구 가능한 경우만 별도 repair 경로로 복구한다.
   - crypto_key_epochs startup ensure와 key epoch 검증은 `docs/spec/security.md`의 key 정책을 따른다.
 ```
@@ -108,7 +109,7 @@ api_keys(token_hash only)
 - `scopes`는 생략하거나 빈 배열이어야 하며, non-empty scopes는 service와 DB CHECK 양쪽에서 거부한다.
 - `expires_at`은 필수이며 미래 시각이어야 한다. user API key는 최대 `30`일, agent API key는 최대 `365`일까지 허용한다.
 - user account당 live API key 한도는 `2`개, agent account당 live API key 한도는 `5`개다.
-- API key metadata list는 live/revoked/expired row가 누적될 수 있으므로 pagination을 제공한다.
+- API key metadata list는 live key(`revoked_at IS NULL AND expires_at > now()`)만 반환한다. revoked/expired row는 list에 노출하지 않으며, retention(기본 `30`일) 경과 후 background purge가 hard delete한다. list는 그래도 pagination을 제공한다.
 - token hash는 active LOOKUP root에서 파생한 API key HMAC subkey로 계산하고 `hash_key_id`/`hash_version`을 함께 저장한다.
 
 ### Workspace access grant/change

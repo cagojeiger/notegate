@@ -192,74 +192,52 @@ async fn insert_key_rejects_blank_or_overlong_name() -> Result<(), Box<dyn std::
 }
 
 #[tokio::test]
-async fn list_by_account_pages_historical_key_metadata() -> Result<(), Box<dyn std::error::Error>> {
+async fn list_by_account_returns_live_keys_only_and_pages()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
     let user_id = insert_user_account(&db.pool, "list-user", "list-user@example.test").await?;
 
-    repo.insert_key_unchecked_for_test(InsertApiKey {
-        key_id: Uuid::new_v4(),
-        account_id: user_id,
-        command: &CreateApiKey {
-            name: "live-a".to_owned(),
-            scopes: Vec::new(),
-            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
-        },
-        token_prefix: "ngk_v1_test",
-        token_hash: "hash-live-a",
-        created_by: user_id,
-        rotated_from_key_id: None,
-    })
-    .await?;
-    repo.insert_key_unchecked_for_test(InsertApiKey {
-        key_id: Uuid::new_v4(),
-        account_id: user_id,
-        command: &CreateApiKey {
-            name: "to-revoke".to_owned(),
-            scopes: Vec::new(),
-            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
-        },
-        token_prefix: "ngk_v1_test",
-        token_hash: "hash-to-revoke",
-        created_by: user_id,
-        rotated_from_key_id: None,
-    })
-    .await?;
-    repo.insert_key_unchecked_for_test(InsertApiKey {
-        key_id: Uuid::new_v4(),
-        account_id: user_id,
-        command: &CreateApiKey {
-            name: "live-b".to_owned(),
-            scopes: Vec::new(),
-            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
-        },
-        token_prefix: "ngk_v1_test",
-        token_hash: "hash-live-b",
-        created_by: user_id,
-        rotated_from_key_id: None,
-    })
-    .await?;
+    // Seed three live keys plus one revoked and one expired key. The list must
+    // surface only the live keys; dead keys are excluded (they are purged later).
+    for name in ["live-a", "live-b", "live-c", "to-revoke", "to-expire"] {
+        repo.insert_key_unchecked_for_test(InsertApiKey {
+            key_id: Uuid::new_v4(),
+            account_id: user_id,
+            command: &CreateApiKey {
+                name: name.to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            },
+            token_prefix: "ngk_v1_test",
+            token_hash: &format!("hash-{name}"),
+            created_by: user_id,
+            rotated_from_key_id: None,
+        })
+        .await?;
+    }
 
-    let before = repo.list_by_account(user_id, 10, None).await?;
-    assert_eq!(before.len(), 3);
-    let revoke_id = before
+    let seeded = repo.list_by_account(user_id, 10, None).await?;
+    let revoke_id = seeded
         .iter()
         .find(|k| k.name == "to-revoke")
         .map(|k| k.id)
         .expect("revoke target present");
-
     repo.revoke_key(user_id, revoke_id, user_id, Some("test"))
         .await?;
+    sqlx::query("UPDATE api_keys SET expires_at = now() - interval '1 hour' WHERE name = 'to-expire' AND account_id = $1")
+        .bind(user_id)
+        .execute(&db.pool)
+        .await?;
 
-    let after = repo.list_by_account(user_id, 10, None).await?;
-    assert_eq!(after.len(), 3, "revoked key metadata remains listable");
+    let live = repo.list_by_account(user_id, 10, None).await?;
+    assert_eq!(live.len(), 3, "only the three live keys are listed");
     assert!(
-        after
-            .iter()
-            .any(|k| k.name == "to-revoke" && k.revoked_at.is_some()),
-        "revoked key metadata must remain visible"
+        live.iter()
+            .all(|k| k.revoked_at.is_none() && k.name != "to-expire"),
+        "revoked and expired keys must be excluded from the list"
     );
 
     let first_page = repo.list_by_account(user_id, 2, None).await?;

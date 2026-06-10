@@ -45,6 +45,7 @@ async fn run_once(pool: &PgPool) {
                 workspaces_deleted = run.workspaces_deleted,
                 nodes_deleted = run.nodes_deleted,
                 accounts_anonymized = run.accounts_anonymized,
+                api_keys_deleted = run.api_keys_deleted,
             );
         }
         Err(error) => {

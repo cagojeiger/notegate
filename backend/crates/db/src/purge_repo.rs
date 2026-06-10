@@ -16,6 +16,7 @@ const PURGE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5055_5247_4501;
 const WORKSPACE_PURGE_BATCH: i64 = 100;
 const NODE_PURGE_BATCH: i64 = 1_000;
 const ACCOUNT_PURGE_BATCH: i64 = 100;
+const API_KEY_PURGE_BATCH: i64 = 1_000;
 
 #[derive(Debug, Clone)]
 pub struct PurgeRepo {
@@ -47,6 +48,7 @@ impl PurgeRepo {
                 workspaces_deleted: 0,
                 nodes_deleted: 0,
                 accounts_anonymized: 0,
+                api_keys_deleted: 0,
             });
         }
 
@@ -132,12 +134,42 @@ impl PurgeRepo {
         .map_err(map_sqlx_error)?
         .get("anonymized_count");
 
+        // Hard delete API keys that have been dead (revoked or expired) for longer
+        // than the retention window. A key dies at the earlier of its revoke time and
+        // its expiry; never-revoked keys die at `expires_at`. The live-key listing and
+        // the per-account cap already ignore dead keys, so this only reclaims storage
+        // after a short audit window.
+        let api_keys_deleted: i64 = sqlx::query(
+            "WITH dead AS ( \
+                 SELECT id, LEAST(COALESCE(revoked_at, expires_at), expires_at) AS dead_at \
+                 FROM api_keys \
+                 WHERE revoked_at IS NOT NULL OR expires_at <= now() \
+             ), due AS ( \
+                 SELECT id FROM dead \
+                 WHERE dead_at + make_interval(days => $1::int) <= now() \
+                 ORDER BY dead_at, id \
+                 LIMIT $2 \
+             ), deleted AS ( \
+                 DELETE FROM api_keys k USING due \
+                 WHERE k.id = due.id \
+                 RETURNING k.id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(i32::try_from(limits::DEAD_API_KEY_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(API_KEY_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(PurgeRun {
             lock_acquired: true,
             workspaces_deleted: workspaces_deleted.max(0) as u64,
             nodes_deleted: nodes_deleted.max(0) as u64,
             accounts_anonymized: accounts_anonymized.max(0) as u64,
+            api_keys_deleted: api_keys_deleted.max(0) as u64,
         })
     }
 }
@@ -148,4 +180,5 @@ pub struct PurgeRun {
     pub workspaces_deleted: u64,
     pub nodes_deleted: u64,
     pub accounts_anonymized: u64,
+    pub api_keys_deleted: u64,
 }

@@ -42,7 +42,8 @@ impl ApiKeyRepo {
             None => {
                 sqlx::query_as::<_, ApiKeyRow>(&format!(
                     "SELECT {API_KEY_COLUMNS} FROM api_keys \
-                     WHERE account_id = $1 \
+                     WHERE account_id = $1 AND revoked_at IS NULL \
+                       AND expires_at > now() \
                      ORDER BY created_at DESC, id DESC LIMIT $2"
                 ))
                 .bind(account_id)
@@ -53,7 +54,8 @@ impl ApiKeyRepo {
             Some(cursor) => {
                 sqlx::query_as::<_, ApiKeyRow>(&format!(
                     "SELECT {API_KEY_COLUMNS} FROM api_keys \
-                     WHERE account_id = $1 \
+                     WHERE account_id = $1 AND revoked_at IS NULL \
+                       AND expires_at > now() \
                        AND (created_at, id) < ($2, $3) \
                      ORDER BY created_at DESC, id DESC LIMIT $4"
                 ))
