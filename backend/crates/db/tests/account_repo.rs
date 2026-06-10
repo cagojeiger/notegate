@@ -540,3 +540,57 @@ async fn reregister_blocked_until_purge_then_creates_fresh_account()
     db.cleanup().await;
     Ok(())
 }
+
+/// ADR 0004 gate: a sole owner of a live workspace blocks deletion; a co-owned
+/// workspace (another active user owner) does not.
+#[tokio::test]
+async fn count_sole_owned_workspaces_gates_deletion() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let accounts = AccountRepo::new(db.pool.clone());
+    let access = AccessRepo::new(db.pool.clone());
+    let workspaces = WorkspaceRepo::new(db.pool.clone());
+
+    let (owner, _) = accounts
+        .upsert_user_by_sub(&attrs("gate-owner", "gate-o@example.test", "GateOwner"))
+        .await?;
+    let (other, _) = accounts
+        .upsert_user_by_sub(&attrs("gate-other", "gate-x@example.test", "GateOther"))
+        .await?;
+
+    let workspace_id = workspaces
+        .create_workspace(
+            owner.id,
+            &CreateWorkspace {
+                name: "solo".to_owned(),
+            },
+        )
+        .await?
+        .id;
+    assert_eq!(
+        accounts.count_sole_owned_workspaces(owner.id).await?,
+        1,
+        "sole owner of a live workspace blocks deletion"
+    );
+
+    // A second active user owner means it is no longer solely owned.
+    access
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: other.id,
+                role: Role::Owner,
+            },
+            owner.id,
+        )
+        .await?;
+    assert_eq!(
+        accounts.count_sole_owned_workspaces(owner.id).await?,
+        0,
+        "co-owned workspace does not block deletion"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}

@@ -338,6 +338,34 @@ impl AccountRepo {
         Ok(())
     }
 
+    /// Count live workspaces this account is the SOLE active user owner of. ADR 0004:
+    /// the account cannot be deleted until these are deleted or their ownership is
+    /// transferred. Co-owned workspaces (another active user owner exists) do not count.
+    pub async fn count_sole_owned_workspaces(&self, account_id: Uuid) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) \
+             FROM workspace_access wa \
+             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
+             WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM workspace_access other \
+                   JOIN accounts other_acc ON other_acc.id = other.account_id \
+                   WHERE other.workspace_id = w.id \
+                     AND other.account_id <> $1 \
+                     AND other.role = 'owner' \
+                     AND other.revoked_at IS NULL \
+                     AND other_acc.kind = 'user' \
+                     AND other_acc.is_active = true \
+                     AND other_acc.deleted_at IS NULL \
+               )",
+        )
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(count)
+    }
+
     pub async fn find_account(&self, id: Uuid) -> Result<Option<Account>> {
         self.fetch_account_row(id)
             .await?
