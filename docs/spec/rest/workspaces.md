@@ -22,7 +22,7 @@ POST /api/v1/workspaces
 }
 ```
 
-User caller만 workspace를 생성할 수 있다. 생성 side effect는 `docs/spec/lifecycle.md`의 Workspace 생성 정책을 따른다. Agent caller의 생성 요청은 `403 forbidden`으로 거부한다. 단일 workspace 제한은 없다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다. User creator account는 최대 `20`개의 live workspace를 생성할 수 있다.
+User caller만 workspace를 생성할 수 있다. 생성 side effect는 `docs/spec/lifecycle.md`의 Workspace 생성 정책을 따른다. Agent caller의 생성 요청은 `403 forbidden`으로 거부한다. Workspace는 1개로 제한하지 않지만 user creator account당 live workspace 최대 `20`개로 제한한다. Workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이어야 한다.
 
 ### Get workspace
 

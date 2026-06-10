@@ -219,6 +219,18 @@ impl AccountRepo {
             return Err(Error::not_found("active user account not found"));
         }
 
+        let _locked_owner_workspaces: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT w.id \
+             FROM workspace_access wa \
+             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
+             WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
+             FOR UPDATE OF w",
+        )
+        .bind(account_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
         let owned_workspaces: Vec<Uuid> = sqlx::query_scalar(
             "SELECT w.id \
              FROM workspace_access wa \
@@ -235,7 +247,7 @@ impl AccountRepo {
                      AND other_acc.is_active = true \
                      AND other_acc.deleted_at IS NULL \
                ) \
-             FOR UPDATE OF w",
+             ",
         )
         .bind(account_id)
         .fetch_all(&mut *tx)

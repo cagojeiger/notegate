@@ -74,8 +74,8 @@ Contract:
 ```text
 browser login via authgate -> user account
 bearer OAuth token         -> user account
-user API key               -> user account
-agent API key              -> agent account
+ngk_v1_ user API key       -> user account
+ngk_v1_ agent API key      -> agent account
 ```
 
 Branching:
@@ -83,7 +83,8 @@ Branching:
 ```text
 missing/invalid auth              -> 401
 valid authgate token, no account  -> 403
-inactive account                  -> 403
+inactive OAuth/session account    -> 403
+inactive API key account          -> 401 invalid_token
 client-supplied caller id         -> ignored; caller comes from auth
 ```
 

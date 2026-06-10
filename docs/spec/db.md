@@ -207,6 +207,9 @@ CREATE INDEX api_keys_account_live_idx
     ON api_keys(account_id)
     WHERE revoked_at IS NULL;
 
+CREATE INDEX api_keys_account_created_idx
+    ON api_keys(account_id, created_at DESC, id DESC);
+
 CREATE INDEX api_keys_hash_key_live_idx
     ON api_keys(hash_key_id)
     WHERE revoked_at IS NULL;
@@ -225,7 +228,7 @@ CREATE INDEX api_keys_rotated_from_idx
 - API key 인증은 `api_keys.account_id`의 account kind로 caller를 결정한다.
 - `accounts.kind='user'`에 연결된 key는 user API key이며 user caller로 동작한다.
 - `accounts.kind='agent'`에 연결된 key는 agent API key이며 agent caller로 동작한다.
-- token format은 `ngk_v1_<api_key_id>_<secret>` 계열의 opaque value다. `api_key_id`는 lookup용 공개 식별자이고, `secret`은 DB에 저장하지 않는다.
+- token format은 `ngk_v1_<api_key_id>_<secret>` 계열의 opaque value다. `api_key_id`는 공개 key id이고, `secret`은 DB에 저장하지 않는다. 인증 조회는 `api_key_id`와 계산한 `token_hash`를 함께 사용한다.
 - `token_hash` 계산식은 `docs/spec/security.md`의 API key 저장 정책을 따른다.
 - `hash_key_id`/`hash_version`은 어떤 `lookup` domain root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
 - `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
@@ -234,10 +237,11 @@ CREATE INDEX api_keys_rotated_from_idx
 - 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개이고, 생성 시 만료 기한은 최대 `30`일이다.
 - 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개이고, 생성 시 만료 기한은 최대 `365`일이다.
 - API key 자체 rotation은 old `expires_at`을 상속한 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
+- `last_used_at`은 통계용 best-effort 값이며 hot-row write를 줄이기 위해 즉시성이 보장되지 않는다.
 
 ## workspaces
 
-workspace는 개인 노트 파일트리의 격리 경계다. workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. 단일 workspace 제약 없이 자유롭게 생성/삭제할 수 있다.
+workspace는 개인 노트 파일트리의 격리 경계다. workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. Workspace는 1개로 제한하지 않지만 user creator account당 live workspace 최대 `20`개로 제한한다.
 
 ```sql
 CREATE TABLE workspaces (

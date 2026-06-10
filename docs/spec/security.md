@@ -15,9 +15,9 @@ DB 컬럼 구조는 `docs/spec/db.md`를 따르고, 이 문서는 그 컬럼을 
 ## PII 분류
 
 ```text
-암호화 저장: display_name, email
+암호화 저장: user display_name, user email
 HMAC 저장: OAuth provider subject, normalized email 등 lookup/unique 비교값
-평문 유지: account_id, workspace_id, role, kind, is_active, deleted_at 등 권한/조인 필드
+평문 유지: account_id, workspace_id, role, kind, agent name, is_active, deleted_at 등 권한/조인/제품 메타데이터
 원문 저장 금지: bearer token, OAuth code, PKCE verifier, API key plaintext, provider subject 원문
 ```
 
@@ -92,11 +92,12 @@ verify_tag = HMAC(epoch_verify_subkey, "key-epoch:v1:" + domain + ":" + key_id)
 PII 원문 암호화는 application layer에서 수행한다.
 
 ```text
-display_name_ciphertext = AEAD_Encrypt(pii_field_subkey, display_name, display_name AAD)
+display_name_ciphertext = AEAD_Encrypt(pii_field_subkey, user display_name, display_name AAD)
 email_ciphertext        = AEAD_Encrypt(pii_field_subkey, email, email AAD)
 ```
 
 AAD는 encrypted field의 storage context다. AAD는 secret이 아니며, decrypt 시 재구성 가능한 안정 값만 사용한다.
+Agent name은 machine actor의 제품 메타데이터로 `agents.name`에 평문 저장하며, user PII 저장소로 사용하지 않는다.
 
 ```text
 display_name AAD = app=notegate;field=account.display_name;account_id=<accounts.id>;key_id=<enc_key_id>;version=<enc_version>
@@ -145,6 +146,7 @@ token_hash     = HMAC(api_key_hmac_subkey, "api-key:v1:" + api_key_id + ":" + se
 - 평문 token은 생성 또는 rotation 응답에서 정확히 한 번만 반환한다.
 - `expires_at`은 필수다. User API key는 최대 30일, agent API key는 최대 365일까지 허용한다.
 - DB에는 `token_prefix`, `token_hash`, `hash_key_id`, `hash_version`만 저장한다.
+- 인증 조회는 token의 `api_key_id`와 계산한 `token_hash`를 함께 사용한다.
 - `hash_key_id`는 token_hash를 만든 LOOKUP root key id다.
 - API key 자체 rotation은 old `expires_at`을 상속한 new token 발급 + old key revoke로 처리한다. Token 원문은 복구하거나 복호화하지 않는다.
 - LOOKUP root key를 폐기해야 할 때 기존 API key는 원문이 없어 일괄 rehash할 수 없다. 영향받는 `hash_key_id`의 live API key는 revoke하고, 사용자 또는 agent creator가 새 key를 생성하도록 요구한다.

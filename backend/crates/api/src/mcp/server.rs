@@ -273,16 +273,18 @@ pub async fn mcp_handler(State(state): State<AppState>, mut request: Request<Bod
     let Some(token) = extract_bearer(&parts.headers).map(str::to_owned) else {
         return mcp_auth_response(&state, AuthError::MissingToken);
     };
-    // MCP is bearer-only: try JWT → user, then the same bearer as a notegate API key.
-    let caller = match verify_bearer_mcp(&state, &token).await {
-        Ok(caller) => caller,
-        Err(AuthError::InvalidToken | AuthError::MissingToken) => {
-            match verify_api_key(&state, &token, Channel::Mcp).await {
-                Ok(caller) => caller,
-                Err(error) => return mcp_auth_response(&state, error),
-            }
+    // MCP is bearer-only: prefixed notegate API key → user/agent, otherwise
+    // OAuth bearer JWT → user.
+    let caller = if notegate_service::api_keys::looks_like_token(&token) {
+        match verify_api_key(&state, &token, Channel::Mcp).await {
+            Ok(caller) => caller,
+            Err(error) => return mcp_auth_response(&state, error),
         }
-        Err(error) => return mcp_auth_response(&state, error),
+    } else {
+        match verify_bearer_mcp(&state, &token).await {
+            Ok(caller) => caller,
+            Err(error) => return mcp_auth_response(&state, error),
+        }
     };
     parts.extensions.insert(caller);
     request = Request::from_parts(parts, body);

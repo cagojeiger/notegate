@@ -55,8 +55,8 @@ Protected resource metadata returns the configured MCP public client id:
 ```text
 browser/session cookie on /mcp -> 401
 OAuth bearer token             -> user account
-user API key bearer           -> user account
-agent API key bearer          -> agent account
+ngk_v1_ user API key bearer    -> user account
+ngk_v1_ agent API key bearer   -> agent account
 raw bearer/API key plaintext   -> never returned by auth errors
 LOOKUP root rotation revoked API key -> invalid bearer / HTTP 401
 ```

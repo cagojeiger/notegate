@@ -117,6 +117,7 @@ CREATE TABLE api_keys (
     )
 );
 CREATE INDEX api_keys_account_live_idx ON api_keys(account_id) WHERE revoked_at IS NULL;
+CREATE INDEX api_keys_account_created_idx ON api_keys(account_id, created_at DESC, id DESC);
 CREATE INDEX api_keys_hash_key_live_idx ON api_keys(hash_key_id) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_expiring_live_idx ON api_keys(expires_at) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_rotated_from_idx ON api_keys(rotated_from_key_id) WHERE rotated_from_key_id IS NOT NULL;

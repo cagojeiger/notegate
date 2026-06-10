@@ -3,7 +3,7 @@
 //! The [`Resolver`] is the single place where verified credentials become a
 //! [`Caller`]:
 //!
-//! - browser login (OAuth callback) upserts + activates a user account;
+//! - browser login (OAuth callback) creates or updates a user account;
 //! - browser session cookies resolve an already-registered user account on the
 //!   browser channel;
 //! - REST/MCP bearer tokens resolve an already-registered user account
@@ -62,8 +62,8 @@ impl Resolver {
         }
     }
 
-    /// Resolve a browser login: upsert + activate the user account, then return
-    /// the caller on the browser channel.
+    /// Resolve a browser login: create or update the user account, then return
+    /// the caller on the browser channel. Inactive accounts remain rejected.
     pub async fn resolve_browser(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
         let (account, user) = self.users.upsert_user_by_sub(&attrs).await?;
         user_caller(account, user, Channel::Browser)
@@ -96,7 +96,7 @@ impl Resolver {
         let token_hash = self.crypto.api_key_hash(&key_id.to_string(), secret)?;
         let account_id = self
             .api_keys
-            .find_live_account_id_by_token_hash(&token_hash)
+            .find_live_account_id_by_key(key_id, &token_hash)
             .await?
             .ok_or(IdentityError::NotRegistered)?;
 

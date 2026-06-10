@@ -1,7 +1,8 @@
 //! Agent lifecycle: create / delete agents and their keys.
 //!
 //! POLICY: only `kind='user'` callers may manage agents or keys; an agent caller
-//! is forbidden. Active-agent and live-key counts are enforced before insert.
+//! is forbidden. Active-agent and live-key counts are enforced transactionally
+//! by the repository.
 //! Plaintext API key tokens are HMAC-hashed with the LOOKUP root subkey; only
 //! the hash is persisted.
 
@@ -36,8 +37,7 @@ impl AgentService {
         }
     }
 
-    /// Create an agent. Only a `kind='user'` caller may create agents; the
-    /// user caller may create at most [`limits::AGENTS_PER_CREATOR_MAX`] active agents.
+    /// Create an agent. Only a `kind='user'` caller may create agents.
     pub async fn create_agent(
         &self,
         caller_kind: AccountKind,
@@ -46,17 +46,6 @@ impl AgentService {
     ) -> ServiceResult<Agent> {
         require_user_caller(caller_kind)?;
         validate_agent_name(&command.name)?;
-
-        let active = self
-            .store
-            .count_agents_by_creator(caller_account_id)
-            .await?;
-        if active >= limits::AGENTS_PER_CREATOR_MAX {
-            return Err(ServiceError::Conflict(format!(
-                "creator already has the maximum of {} active agents",
-                limits::AGENTS_PER_CREATOR_MAX
-            )));
-        }
 
         Ok(self.store.insert_agent(&command, caller_account_id).await?)
     }

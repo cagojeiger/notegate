@@ -167,6 +167,10 @@ pub fn token_prefix(key_id: Uuid) -> String {
     format!("ngk_v1_{key_id}")
 }
 
+pub fn looks_like_token(token: &str) -> bool {
+    token.starts_with("ngk_v1_")
+}
+
 pub fn parse_token(token: &str) -> Option<(Uuid, &str)> {
     let rest = token.strip_prefix("ngk_v1_")?;
     let (key_id, secret) = rest.split_once('_')?;
@@ -227,5 +231,13 @@ mod tests {
         assert!(parse_token("old-token").is_none());
         assert!(parse_token("ngk_v1_not-a-uuid_secret").is_none());
         assert!(parse_token("ngk_v1_00000000-0000-0000-0000-000000000000_").is_none());
+    }
+
+    #[test]
+    fn api_key_token_prefix_is_detected_without_parsing() {
+        assert!(looks_like_token(
+            "ngk_v1_00000000-0000-0000-0000-000000000000_secret"
+        ));
+        assert!(!looks_like_token("jwt-like-token"));
     }
 }

@@ -83,19 +83,21 @@ impl ApiKeyRepo {
         Ok(row.map(ApiKey::from))
     }
 
-    pub async fn find_live_account_id_by_token_hash(
+    pub async fn find_live_account_id_by_key(
         &self,
+        key_id: Uuid,
         token_hash: &str,
     ) -> Result<Option<Uuid>> {
         let account_id: Option<Uuid> = sqlx::query(
             "SELECT k.account_id FROM api_keys k \
              JOIN accounts acc ON acc.id = k.account_id \
-             WHERE k.token_hash = $1 \
+             WHERE k.id = $1 AND k.token_hash = $2 \
                AND k.revoked_at IS NULL \
                AND k.expires_at > now() \
                AND acc.is_active = true \
                AND acc.deleted_at IS NULL",
         )
+        .bind(key_id)
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
@@ -103,11 +105,14 @@ impl ApiKeyRepo {
         .map(|row| row.get::<Uuid, _>("account_id"));
 
         if account_id.is_some()
-            && let Err(error) =
-                sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE token_hash = $1")
-                    .bind(token_hash)
-                    .execute(&self.pool)
-                    .await
+            && let Err(error) = sqlx::query(
+                "UPDATE api_keys SET last_used_at = now() \
+                 WHERE id = $1 \
+                   AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')",
+            )
+            .bind(key_id)
+            .execute(&self.pool)
+            .await
         {
             tracing::warn!(event = "api_key.last_used_update_failed", %error);
         }

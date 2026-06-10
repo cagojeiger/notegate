@@ -14,8 +14,8 @@ Contract:
 
 ```text
 OAuth bearer token via authgate -> user account
-user API key bearer           -> user account
-agent API key bearer          -> agent account
+ngk_v1_ user API key bearer    -> user account
+ngk_v1_ agent API key bearer   -> agent account
 browser/session cookie         -> rejected
 ```
 
@@ -25,7 +25,8 @@ Branching:
 missing/malformed bearer -> 401 with WWW-Authenticate resource_metadata and openid offline_access scope hint
 invalid bearer           -> 401
 valid auth, no account   -> 403 not_registered with login_url and mcp_url
-inactive account         -> 403 inactive_account
+inactive OAuth account   -> 403 inactive_account
+inactive API key account -> 401 invalid bearer
 ```
 
 Discovery endpoints:

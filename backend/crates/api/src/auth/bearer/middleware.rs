@@ -42,23 +42,18 @@ pub async fn require_bearer(
     next.run(request).await
 }
 
-/// REST auth chain: bearer JWT → user, then the same bearer as a notegate API
-/// key → user/agent, then browser cookie → user.
+/// REST auth chain: prefixed notegate API key → user/agent, otherwise bearer
+/// JWT → user, then browser cookie → user.
 async fn verify_request_caller(
     state: &AppState,
     bearer_token: Option<String>,
     browser_session: Option<String>,
 ) -> Result<notegate_model::Caller, AuthError> {
     if let Some(token) = bearer_token {
-        return match verify_bearer(state, &token).await {
-            Ok(caller) => Ok(caller),
-            // A bearer that is not a valid JWT may still be a notegate API key.
-            Err(AuthError::InvalidToken | AuthError::MissingToken) => {
-                verify_api_key(state, &token, Channel::Api).await
-            }
-            // A valid JWT whose account is missing/inactive is terminal.
-            Err(error) => Err(error),
-        };
+        if notegate_service::api_keys::looks_like_token(&token) {
+            return verify_api_key(state, &token, Channel::Api).await;
+        }
+        return verify_bearer(state, &token).await;
     }
 
     if let Some(session) = browser_session {

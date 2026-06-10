@@ -58,8 +58,8 @@ MCP `401` responses include `WWW-Authenticate: Bearer resource_metadata="...", s
 
 - Browser UI는 `/auth/callback`이 발급한 browser session cookie를 사용한다.
 - Browser session cookie는 `Path=/`, `HttpOnly`, `SameSite=Lax`로 발급되며, 운영 HTTPS 환경에서는 `Secure`가 붙는다.
-- REST API는 non-browser client를 위해 `Authorization: Bearer ...`도 허용한다. Bearer JWT는 `user`, API key는 `api_keys.account_id`에 연결된 account kind로 resolve한다.
-- REST 인증 우선순위는 bearer credential, API key, browser session cookie 순서다. Bearer가 있으면 cookie fallback을 하지 않는다.
+- REST API는 non-browser client를 위해 `Authorization: Bearer ...`도 허용한다. Bearer JWT는 `user`, `ngk_v1_` prefix API key는 `api_keys.account_id`에 연결된 account kind로 resolve한다.
+- REST 인증 우선순위는 `ngk_v1_` API key, bearer JWT, browser session cookie 순서다. Bearer가 있으면 cookie fallback을 하지 않는다.
 - Cookie 기반 browser session으로 `POST`, `PUT`, `PATCH`, `DELETE`를 호출하려면 same-origin `Origin` 또는 `Referer`가 필요하다. 이 값이 notegate public/resource origin과 맞지 않거나 없으면 `403 forbidden`으로 거부한다.
 - Swagger UI는 같은 origin에서 열리므로 browser session cookie 샘플 호출이 가능하다. 별도 credential 테스트는 Swagger `Authorize`에 OAuth bearer JWT 또는 notegate API key credential을 넣어 수행한다.
 - MCP는 bearer credential만 허용한다. Browser session cookie는 `/mcp`에서 인증 수단으로 인정하지 않는다.

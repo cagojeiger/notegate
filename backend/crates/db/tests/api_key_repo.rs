@@ -265,7 +265,7 @@ async fn live_user_api_key_resolves_account_and_marks_last_used()
     .await?;
 
     let resolved = repo
-        .find_live_account_id_by_token_hash("hash-user-key")
+        .find_live_account_id_by_key(key_id, "hash-user-key")
         .await?;
     assert_eq!(resolved, Some(user_id));
 
@@ -384,7 +384,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     .await?;
 
     assert_eq!(
-        repo.find_live_account_id_by_token_hash("hash-agent-key")
+        repo.find_live_account_id_by_key(key_id, "hash-agent-key")
             .await?,
         Some(agent_id)
     );
@@ -394,7 +394,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
         .execute(&db.pool)
         .await?;
     assert_eq!(
-        repo.find_live_account_id_by_token_hash("hash-agent-key")
+        repo.find_live_account_id_by_key(key_id, "hash-agent-key")
             .await?,
         None
     );
@@ -413,6 +413,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
     let user_id = insert_user_account(&db.pool, "lookup-user", "lookup@example.test").await?;
     let live_id = Uuid::new_v4();
     let revoked_id = Uuid::new_v4();
+    let expired_id = Uuid::new_v4();
 
     repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: live_id,
@@ -445,7 +446,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
     repo.revoke_key(user_id, revoked_id, user_id, Some("test"))
         .await?;
     repo.insert_key_unchecked_for_test(InsertApiKey {
-        key_id: Uuid::new_v4(),
+        key_id: expired_id,
         account_id: user_id,
         command: &CreateApiKey {
             name: "expired".to_owned(),
@@ -460,16 +461,17 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
     .await?;
 
     assert_eq!(
-        repo.find_live_account_id_by_token_hash("hash-live").await?,
+        repo.find_live_account_id_by_key(live_id, "hash-live")
+            .await?,
         Some(user_id)
     );
     assert_eq!(
-        repo.find_live_account_id_by_token_hash("hash-revoked")
+        repo.find_live_account_id_by_key(revoked_id, "hash-revoked")
             .await?,
         None
     );
     assert_eq!(
-        repo.find_live_account_id_by_token_hash("hash-expired")
+        repo.find_live_account_id_by_key(expired_id, "hash-expired")
             .await?,
         None
     );
