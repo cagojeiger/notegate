@@ -36,7 +36,7 @@ mod common;
 use common::{TestDb, deactivate_account, insert_user_account};
 use notegate_db::{AccessRepo, FilesRepo, WorkspaceRepo};
 use notegate_model::Role;
-use notegate_service::access::{AccessService, GrantAccess};
+use notegate_service::access::{AccessService, GrantAccess, ListAccess};
 use notegate_service::error::ServiceError;
 use notegate_service::files::Edit;
 use notegate_service::files::{
@@ -458,7 +458,10 @@ async fn editor_can_mutate_but_not_manage_access() -> Result<(), Box<dyn std::er
         "editor grant",
     );
     assert_forbidden(f.access.revoke(e, ws, f.viewer).await, "editor revoke");
-    assert_forbidden(f.access.list(e, ws).await, "editor list-access");
+    assert_forbidden(
+        f.access.list_page(e, ws, ListAccess::default()).await,
+        "editor list-access",
+    );
 
     db.cleanup().await;
     Ok(())
@@ -475,8 +478,8 @@ async fn owner_can_manage_access() -> Result<(), Box<dyn std::error::Error>> {
     let ws = f.workspace_id;
 
     // owner lists access (owner + editor + viewer = 3 live grants).
-    let listed = f.access.list(o, ws).await?;
-    assert_eq!(listed.len(), 3, "owner sees all live grants");
+    let listed = f.access.list_page(o, ws, ListAccess::default()).await?;
+    assert_eq!(listed.items.len(), 3, "owner sees all live grants");
 
     // owner grants a new account, then revokes it.
     let newcomer = insert_user_account(&db.pool, "newcomer", "n@example.test").await?;
@@ -493,8 +496,12 @@ async fn owner_can_manage_access() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert_eq!(grant.role, Role::Viewer);
     f.access.revoke(o, ws, newcomer).await?;
-    let after = f.access.list(o, ws).await?;
-    assert_eq!(after.len(), 3, "revoked grant drops out of the live list");
+    let after = f.access.list_page(o, ws, ListAccess::default()).await?;
+    assert_eq!(
+        after.items.len(),
+        3,
+        "revoked grant drops out of the live list"
+    );
 
     db.cleanup().await;
     Ok(())

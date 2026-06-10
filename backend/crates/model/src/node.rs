@@ -14,14 +14,6 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
-    /// Parse the storage representation, defaulting unknown values to `Folder`.
-    pub fn from_storage(value: &str) -> Self {
-        match value {
-            "document" => Self::Document,
-            _ => Self::Folder,
-        }
-    }
-
     /// Parse the storage representation, returning `None` for unknown values.
     pub fn parse(value: &str) -> Option<Self> {
         match value {

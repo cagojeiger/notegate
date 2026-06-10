@@ -27,16 +27,6 @@ impl AccessService {
         Self { store }
     }
 
-    /// List all access grants for a workspace. Requires `owner`.
-    pub async fn list(
-        &self,
-        caller_account_id: Uuid,
-        workspace_id: Uuid,
-    ) -> ServiceResult<Vec<WorkspaceAccess>> {
-        self.require_owner(workspace_id, caller_account_id).await?;
-        Ok(self.store.list_access(workspace_id).await?)
-    }
-
     /// List access grants for a workspace, paginated with an opaque cursor.
     pub async fn list_page(
         &self,

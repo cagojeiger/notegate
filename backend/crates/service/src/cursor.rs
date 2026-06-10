@@ -8,14 +8,15 @@ use std::sync::OnceLock;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use hmac::{Hmac, Mac};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 const CURSOR_VERSION: u8 = 1;
 const HMAC_SHA256_LEN: usize = 32;
-const HMAC_BLOCK_LEN: usize = 64;
 const MIN_SIGNING_KEY_LEN: usize = 32;
+type HmacSha256 = Hmac<Sha256>;
 #[cfg(any(test, feature = "test-util"))]
 const DEFAULT_TEST_SIGNING_KEY: &[u8] = b"notegate-test-cursor-signing-key-32-bytes";
 
@@ -38,7 +39,7 @@ pub fn configure_signing_key(key: &[u8]) -> Result<(), CursorError> {
 /// Encode a keyset tuple into an opaque cursor string.
 pub fn encode<T: Serialize>(value: &T) -> Result<String, CursorError> {
     let payload = serde_json::to_vec(value).map_err(|_error| CursorError)?;
-    let signature = hmac_sha256(signing_key(), &payload);
+    let signature = hmac_sha256(signing_key(), &payload)?;
 
     let mut envelope = Vec::with_capacity(1 + HMAC_SHA256_LEN + payload.len());
     envelope.push(CURSOR_VERSION);
@@ -58,10 +59,7 @@ pub fn decode<T: DeserializeOwned>(cursor: &str) -> Result<T, CursorError> {
         return Err(CursorError);
     }
     let (signature, payload) = rest.split_at(HMAC_SHA256_LEN);
-    let expected = hmac_sha256(signing_key(), payload);
-    if !constant_time_eq(signature, &expected) {
-        return Err(CursorError);
-    }
+    verify_hmac_sha256(signing_key(), payload, signature)?;
     serde_json::from_slice(payload).map_err(|_error| CursorError)
 }
 
@@ -86,52 +84,16 @@ fn signing_key() -> &'static [u8] {
     }
 }
 
-fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; HMAC_SHA256_LEN] {
-    let mut key_block = [0_u8; HMAC_BLOCK_LEN];
-    if key.len() > HMAC_BLOCK_LEN {
-        let digest = Sha256::digest(key);
-        for (slot, byte) in key_block.iter_mut().zip(digest.iter().copied()) {
-            *slot = byte;
-        }
-    } else {
-        for (slot, byte) in key_block.iter_mut().zip(key.iter().copied()) {
-            *slot = byte;
-        }
-    }
-
-    let mut ipad = [0x36_u8; HMAC_BLOCK_LEN];
-    let mut opad = [0x5c_u8; HMAC_BLOCK_LEN];
-    for ((inner, outer), key_byte) in ipad.iter_mut().zip(opad.iter_mut()).zip(key_block) {
-        *inner ^= key_byte;
-        *outer ^= key_byte;
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(ipad);
-    inner.update(message);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(opad);
-    outer.update(inner_digest);
-    let digest = outer.finalize();
-
-    let mut out = [0_u8; HMAC_SHA256_LEN];
-    for (slot, byte) in out.iter_mut().zip(digest.iter().copied()) {
-        *slot = byte;
-    }
-    out
+fn hmac_sha256(key: &[u8], message: &[u8]) -> Result<[u8; HMAC_SHA256_LEN], CursorError> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).map_err(|_error| CursorError)?;
+    mac.update(message);
+    Ok(mac.finalize().into_bytes().into())
 }
 
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut diff = 0_u8;
-    for (a, b) in left.iter().zip(right) {
-        diff |= a ^ b;
-    }
-    diff == 0
+fn verify_hmac_sha256(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), CursorError> {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).map_err(|_error| CursorError)?;
+    mac.update(message);
+    mac.verify_slice(signature).map_err(|_error| CursorError)
 }
 
 #[cfg(test)]

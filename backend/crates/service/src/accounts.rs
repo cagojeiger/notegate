@@ -8,7 +8,7 @@ use notegate_model::account::AccountKind;
 use notegate_model::{ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 use uuid::Uuid;
 
-use crate::agents::{format_token, parse_token, token_prefix};
+use crate::agents::{format_token, token_prefix};
 use crate::pagination::clamp_limit;
 use crate::{ServiceError, ServiceResult, cursor};
 
@@ -252,9 +252,4 @@ fn generate_secret() -> String {
     let mut bytes = [0_u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-#[allow(dead_code)]
-fn _assert_parse_is_visible(token: &str) -> Option<(Uuid, &str)> {
-    parse_token(token)
 }
