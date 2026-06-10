@@ -147,6 +147,10 @@ pub const DOCUMENT_MAX_LINES: usize = 2_000;
 pub const SUBTREE_DELETE_MAX_NODES: usize = 1_000;
 /// Days a deleted node is retained before it is eligible for hard purge.
 pub const DELETED_NODE_RETENTION_DAYS: i64 = 30;
+/// Days a soft-deleted (pending-deletion) account is retained before the purge
+/// run anonymizes its PII and frees the provider-sub tombstone. Default value;
+/// the deletion SLA can be tuned here. See ADR 0004.
+pub const ACCOUNT_DELETION_RETENTION_DAYS: i64 = 15;
 
 // --- API pagination limits ---
 

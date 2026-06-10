@@ -16,7 +16,7 @@ mod common;
 use common::TestDb;
 use notegate_core::{Error, limits};
 use notegate_db::api_key_repo::InsertApiKey;
-use notegate_db::{AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, WorkspaceRepo};
+use notegate_db::{AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, PurgeRepo, WorkspaceRepo};
 use notegate_model::{CreateAgent, CreateApiKey, CreateWorkspace, GrantAccess, ResolveAttrs, Role};
 use sqlx::Row as _;
 
@@ -153,8 +153,23 @@ async fn mismatched_pii_version_returns_clear_error() -> Result<(), Box<dyn std:
         "expected version-mismatch error, got {err:?}"
     );
 
-    // A NULL-PII row (anonymized user) must read back without erroring.
-    repo.anonymize_user(account.id, account.id).await?;
+    // A NULL-PII row (the anonymized shell left by the purge run) must read back
+    // without erroring.
+    sqlx::query(
+        "UPDATE accounts SET display_name_ciphertext = NULL, display_name_nonce = NULL, \
+         display_name_enc_key_id = NULL, display_name_enc_version = NULL WHERE id = $1",
+    )
+    .bind(account.id)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE users SET email_ciphertext = NULL, email_nonce = NULL, \
+         email_enc_key_id = NULL, email_enc_version = NULL, email_hash = NULL, \
+         email_hash_key_id = NULL, email_hash_version = NULL WHERE id = $1",
+    )
+    .bind(account.id)
+    .execute(&db.pool)
+    .await?;
     let caller = repo.find_caller_by_account_id(account.id).await?;
     let (anon_account, anon_user) = caller.expect("anonymized account still resolves");
     assert_eq!(anon_account.display_name, "");
@@ -198,8 +213,10 @@ async fn duplicate_sub_updates_and_does_not_duplicate() -> Result<(), Box<dyn st
     Ok(())
 }
 
+/// ADR 0004: re-registering a sub whose account is in a soft-deleted (pending-deletion)
+/// state is rejected — the account is neither reactivated nor duplicated.
 #[tokio::test]
-async fn duplicate_sub_does_not_reactivate_inactive_account()
+async fn duplicate_sub_on_pending_deletion_is_rejected()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -218,17 +235,26 @@ async fn duplicate_sub_does_not_reactivate_inactive_account()
     .execute(&db.pool)
     .await?;
 
-    let (second, user) = repo
+    let err = repo
         .upsert_user_by_sub(&attrs("sub-inactive", "new@example.test", "New Name"))
-        .await?;
-
-    assert_eq!(first.id, second.id, "inactive account is not duplicated");
-    assert!(!second.is_active, "inactive account is not reactivated");
-    assert_eq!(
-        second.display_name, "Old Name",
-        "inactive account PII is not refreshed"
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Conflict(_)),
+        "pending-deletion sub must be rejected, got {err:?}"
     );
-    assert_eq!(user.email.as_deref(), Some("old@example.test"));
+
+    // No duplicate, PII not refreshed, still inactive.
+    let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM accounts")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(accounts, 1, "no duplicate account is created");
+    let still = repo
+        .find_account(first.id)
+        .await?
+        .ok_or("account remains")?;
+    assert!(!still.is_active);
+    assert_eq!(still.display_name, "Old Name", "PII not refreshed");
 
     db.cleanup().await;
     Ok(())
@@ -264,8 +290,11 @@ async fn find_user_by_sub_and_account_resolve_the_pair() -> Result<(), Box<dyn s
     Ok(())
 }
 
+/// ADR 0004: soft-delete marks the account deleted and tears down lifecycle, but KEEPS
+/// PII and the `provider_sub_hash` tombstone — anonymization happens later at purge.
 #[tokio::test]
-async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::error::Error>> {
+async fn soft_delete_user_marks_deleted_and_keeps_tombstone()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -275,7 +304,7 @@ async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::
         .upsert_user_by_sub(&attrs("sub-gone", "g@example.test", "Gone"))
         .await?;
 
-    repo.anonymize_user(account.id, account.id).await?;
+    repo.soft_delete_user(account.id, account.id).await?;
 
     let after = repo
         .find_account(account.id)
@@ -284,6 +313,7 @@ async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::
     assert!(!after.is_active);
     assert!(after.deleted_at.is_some());
     assert_eq!(after.deleted_by, Some(account.id));
+    assert_eq!(after.display_name, "Gone", "PII is retained until purge");
 
     let row = sqlx::query(
         "SELECT provider_sub_hash, email_hash, email_ciphertext, anonymized_at \
@@ -292,12 +322,16 @@ async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::
     .bind(account.id)
     .fetch_one(&db.pool)
     .await?;
-    assert!(row.get::<Option<String>, _>("provider_sub_hash").is_none());
-    assert!(row.get::<Option<String>, _>("email_hash").is_none());
-    assert!(row.get::<Option<Vec<u8>>, _>("email_ciphertext").is_none());
+    assert!(
+        row.get::<Option<String>, _>("provider_sub_hash").is_some(),
+        "sub-hash tombstone is retained until purge"
+    );
+    assert!(row.get::<Option<String>, _>("email_hash").is_some());
+    assert!(row.get::<Option<Vec<u8>>, _>("email_ciphertext").is_some());
     assert!(
         row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("anonymized_at")
-            .is_some()
+            .is_none(),
+        "not anonymized until the purge run"
     );
 
     db.cleanup().await;
@@ -305,7 +339,7 @@ async fn anonymize_user_clears_pii_and_deactivates() -> Result<(), Box<dyn std::
 }
 
 #[tokio::test]
-async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+async fn soft_delete_user_tears_down_owned_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -394,15 +428,18 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
         )
         .await?;
 
-    accounts.anonymize_user(owner.id, owner.id).await?;
+    accounts.soft_delete_user(owner.id, owner.id).await?;
 
     let account = accounts
         .find_account(owner.id)
         .await?
         .ok_or("owner account remains as attribution target")?;
     assert!(!account.is_active);
-    assert_eq!(account.display_name, "");
-    assert!(accounts.find_user_by_sub("owner-sub").await?.is_none());
+    assert_eq!(account.display_name, "Owner", "PII retained until purge");
+    assert!(
+        accounts.find_user_by_sub("owner-sub").await?.is_some(),
+        "sub-hash tombstone retained until purge"
+    );
 
     let workspace_deleted: (
         Option<chrono::DateTime<chrono::Utc>>,
@@ -443,6 +480,62 @@ async fn anonymize_user_soft_deletes_owned_lifecycle() -> Result<(), Box<dyn std
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(live_access, 0);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// ADR 0004: after soft-delete, re-login with the same OAuth sub is rejected (cooldown)
+/// until the purge run anonymizes the account; only then does the same sub register as a
+/// fresh, unrelated account. Pins the fix for the duplicate-account bug.
+#[tokio::test]
+async fn reregister_blocked_until_purge_then_creates_fresh_account()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AccountRepo::new(db.pool.clone());
+
+    let (first, _) = repo
+        .upsert_user_by_sub(&attrs("sub-rejoin", "rejoin@example.test", "Rejoin"))
+        .await?;
+    repo.soft_delete_user(first.id, first.id).await?;
+
+    // During the cooldown window the same sub cannot re-register.
+    let err = repo
+        .upsert_user_by_sub(&attrs("sub-rejoin", "rejoin@example.test", "Rejoin"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Conflict(_)),
+        "re-login during cooldown must be rejected, got {err:?}"
+    );
+
+    // Advance past the retention window and run the purge to free the tombstone.
+    sqlx::query("UPDATE accounts SET deleted_at = now() - interval '30 days' WHERE id = $1")
+        .bind(first.id)
+        .execute(&db.pool)
+        .await?;
+    let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(run.accounts_anonymized, 1);
+
+    // Now the same sub registers as a brand-new, unrelated account.
+    let (second, _) = repo
+        .upsert_user_by_sub(&attrs("sub-rejoin", "rejoin@example.test", "Rejoin"))
+        .await?;
+    assert_ne!(
+        first.id, second.id,
+        "post-purge re-registration is a fresh account"
+    );
+    assert!(second.is_active);
+
+    // The old identity survives only as an anonymized attribution shell.
+    let shell = repo
+        .find_account(first.id)
+        .await?
+        .ok_or("anonymized attribution shell is kept")?;
+    assert!(!shell.is_active);
+    assert_eq!(shell.display_name, "", "shell PII is anonymized at purge");
 
     db.cleanup().await;
     Ok(())

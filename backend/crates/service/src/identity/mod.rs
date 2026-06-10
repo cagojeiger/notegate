@@ -139,7 +139,9 @@ impl Resolver {
 
 /// Build a user caller, rejecting an inactive account.
 fn user_caller(account: Account, user: User, channel: Channel) -> Result<Caller, IdentityError> {
-    if !account.is_active {
+    // ADR 0004: a soft-deleted (pending-deletion) account must never authenticate — even
+    // if `is_active` and `deleted_at` ever diverge, reject on either signal.
+    if !account.is_active || account.deleted_at.is_some() {
         return Err(IdentityError::Inactive);
     }
     Ok(Caller {

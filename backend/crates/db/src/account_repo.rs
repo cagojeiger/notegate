@@ -203,7 +203,12 @@ impl AccountRepo {
         Ok(map)
     }
 
-    pub async fn anonymize_user(&self, account_id: Uuid, deleted_by: Uuid) -> Result<()> {
+    /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
+    /// lifecycle (workspaces, agents, keys, access), but KEEP `provider_sub_hash` and
+    /// PII as a tombstone. The purge run anonymizes PII and frees the sub-hash once the
+    /// retention window elapses; re-login during the window is rejected by
+    /// `upsert_user_by_sub`, so a returning sub never duplicates the account.
+    pub async fn soft_delete_user(&self, account_id: Uuid, deleted_by: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         let locked: Option<Uuid> = sqlx::query_scalar(
@@ -316,27 +321,15 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        // Soft-delete only: keep display_name and the users-row PII/`provider_sub_hash`
+        // as a tombstone. The purge run anonymizes PII and frees the sub-hash later.
         sqlx::query(
             "UPDATE accounts \
-             SET display_name_ciphertext = NULL, display_name_nonce = NULL, \
-                 display_name_enc_key_id = NULL, display_name_enc_version = NULL, \
-                 is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+             SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
              WHERE id = $1 AND kind = 'user'",
         )
         .bind(account_id)
         .bind(deleted_by)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        sqlx::query(
-            "UPDATE users \
-             SET provider_sub_hash = NULL, provider_sub_hash_key_id = NULL, provider_sub_hash_version = NULL, \
-                email_ciphertext = NULL, email_nonce = NULL, email_enc_key_id = NULL, email_enc_version = NULL, \
-                email_hash = NULL, email_hash_key_id = NULL, email_hash_version = NULL, anonymized_at = now() \
-             WHERE id = $1",
-        )
-        .bind(account_id)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -376,7 +369,15 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         let account_id = match existing {
-            Some((id, false)) => id,
+            // ADR 0004: a soft-deleted (pending-deletion) account still holds its
+            // `provider_sub_hash` tombstone. Reject re-registration until the purge run
+            // erases it — never resurrect or duplicate. After purge the tombstone is
+            // gone, so the sub no longer matches and falls through to a fresh account.
+            Some((_id, false)) => {
+                return Err(Error::conflict(
+                    "account is pending deletion; re-registration is available once it is fully erased",
+                ));
+            }
             Some((id, true)) => {
                 let display_aad = PiiAad::new(
                     PiiFieldKind::AccountDisplayName,

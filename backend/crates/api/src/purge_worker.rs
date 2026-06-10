@@ -44,6 +44,7 @@ async fn run_once(pool: &PgPool) {
                 event = "purge_worker.run",
                 workspaces_deleted = run.workspaces_deleted,
                 nodes_deleted = run.nodes_deleted,
+                accounts_anonymized = run.accounts_anonymized,
             );
         }
         Err(error) => {

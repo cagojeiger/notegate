@@ -27,7 +27,10 @@ impl AccountService {
         }
     }
 
-    /// Deactivate the current user account and anonymize its PII.
+    /// Soft-delete the current user account (ADR 0004). PII and the provider-sub
+    /// tombstone are retained until the purge run anonymizes them after the retention
+    /// window; re-login during that window is rejected, so a returning sub is never
+    /// duplicated.
     ///
     /// Agent callers cannot delete accounts through this user lifecycle endpoint.
     pub async fn delete_me(
@@ -42,7 +45,7 @@ impl AccountService {
         }
         Ok(self
             .store
-            .anonymize_user(caller_account_id, caller_account_id)
+            .soft_delete_user(caller_account_id, caller_account_id)
             .await?)
     }
 
