@@ -17,6 +17,7 @@ pub mod files_repo;
 pub mod key_epoch_repo;
 pub mod postgres_pool;
 pub mod purge_repo;
+mod workspace_role;
 pub mod workspaces_repo;
 
 pub use access_repo::AccessRepo;
