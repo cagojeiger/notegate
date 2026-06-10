@@ -14,13 +14,14 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{Agent, ApiKey, Caller, ListApiKeys};
+use notegate_model::{Agent, Caller, ListApiKeys};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
+use crate::rest::dto::{ApiKeyOut, ApiKeysListResponse, CreateApiKeyBody};
 use crate::state::AppState;
 
 use notegate_service::agents::{CreateAgent, CreateAgentKey, ListAgents};
@@ -73,15 +74,6 @@ pub(crate) struct CreateAgentBody {
     name: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-pub(crate) struct CreateKeyBody {
-    name: String,
-    #[serde(default)]
-    scopes: Vec<String>,
-    #[serde(default)]
-    expires_at: Option<DateTime<Utc>>,
-}
-
 /// The one-time key creation response: metadata plus the plaintext token, which
 /// is returned exactly once and never stored.
 #[derive(Debug, Serialize, ToSchema)]
@@ -94,37 +86,6 @@ pub(crate) struct CreatedKeyOut {
     created_at: DateTime<Utc>,
     /// The plaintext key. Shown once; store it now.
     token: String,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct KeyOut {
-    id: Uuid,
-    account_id: Uuid,
-    name: String,
-    scopes: Vec<String>,
-    expires_at: Option<DateTime<Utc>>,
-    created_at: DateTime<Utc>,
-    revoked_at: Option<DateTime<Utc>>,
-}
-
-impl From<&ApiKey> for KeyOut {
-    fn from(key: &ApiKey) -> Self {
-        Self {
-            id: key.id,
-            account_id: key.account_id,
-            name: key.name.clone(),
-            scopes: key.scopes.clone(),
-            expires_at: key.expires_at,
-            created_at: key.created_at,
-            revoked_at: key.revoked_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct KeysListResponse {
-    keys: Vec<KeyOut>,
-    page: Page,
 }
 
 #[utoipa::path(
@@ -219,7 +180,7 @@ pub(crate) async fn delete_agent(
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
-    responses((status = 200, description = "List agent keys", body = KeysListResponse)),
+    responses((status = 200, description = "List agent keys", body = ApiKeysListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list_keys(
@@ -227,7 +188,7 @@ pub(crate) async fn list_keys(
     Extension(caller): Extension<Caller>,
     Path(agent_id): Path<Uuid>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<KeysListResponse>, ApiError> {
+) -> Result<Json<ApiKeysListResponse>, ApiError> {
     let page = state
         .agents
         .list_keys(
@@ -240,8 +201,8 @@ pub(crate) async fn list_keys(
             },
         )
         .await?;
-    let keys = page.items.iter().map(KeyOut::from).collect();
-    Ok(Json(KeysListResponse {
+    let keys = page.items.iter().map(ApiKeyOut::from).collect();
+    Ok(Json(ApiKeysListResponse {
         keys,
         page: Page::new(
             page.limit,
@@ -257,7 +218,7 @@ pub(crate) async fn list_keys(
     path = "/api/v1/agents/{agent_id}/keys",
     tag = "agents",
     params(("agent_id" = Uuid, Path)),
-    request_body = CreateKeyBody,
+    request_body = CreateApiKeyBody,
     responses((status = 201, description = "Create agent key", body = CreatedKeyOut)),
     security(("bearer_auth" = []))
 )]
@@ -265,7 +226,7 @@ pub(crate) async fn create_key(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(agent_id): Path<Uuid>,
-    Json(body): Json<CreateKeyBody>,
+    Json(body): Json<CreateApiKeyBody>,
 ) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
     let minted = state
         .agents

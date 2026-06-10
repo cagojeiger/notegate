@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{ApiKey, Caller, CreateApiKey, ListApiKeys};
+use notegate_model::{Caller, CreateApiKey, ListApiKeys};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -21,6 +21,7 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
+use crate::rest::dto::{ApiKeyOut, ApiKeysListResponse, CreateApiKeyBody};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -34,46 +35,6 @@ pub fn routes() -> Router<AppState> {
 pub(crate) struct ListKeysQuery {
     limit: Option<i64>,
     cursor: Option<String>,
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-pub(crate) struct CreateKeyBody {
-    name: String,
-    #[serde(default)]
-    scopes: Vec<String>,
-    #[serde(default)]
-    expires_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct KeyOut {
-    id: Uuid,
-    account_id: Uuid,
-    name: String,
-    scopes: Vec<String>,
-    expires_at: Option<DateTime<Utc>>,
-    created_at: DateTime<Utc>,
-    revoked_at: Option<DateTime<Utc>>,
-}
-
-impl From<&ApiKey> for KeyOut {
-    fn from(key: &ApiKey) -> Self {
-        Self {
-            id: key.id,
-            account_id: key.account_id,
-            name: key.name.clone(),
-            scopes: key.scopes.clone(),
-            expires_at: key.expires_at,
-            created_at: key.created_at,
-            revoked_at: key.revoked_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct KeysListResponse {
-    keys: Vec<KeyOut>,
-    page: Page,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -106,14 +67,14 @@ pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutpu
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
-    responses((status = 200, description = "List current user API keys", body = KeysListResponse)),
+    responses((status = 200, description = "List current user API keys", body = ApiKeysListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list_keys(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListKeysQuery>,
-) -> Result<Json<KeysListResponse>, ApiError> {
+) -> Result<Json<ApiKeysListResponse>, ApiError> {
     let page = state
         .account_lifecycle
         .list_keys(
@@ -125,8 +86,8 @@ pub(crate) async fn list_keys(
             },
         )
         .await?;
-    let keys = page.items.iter().map(KeyOut::from).collect();
-    Ok(Json(KeysListResponse {
+    let keys = page.items.iter().map(ApiKeyOut::from).collect();
+    Ok(Json(ApiKeysListResponse {
         keys,
         page: Page::new(
             page.limit,
@@ -141,14 +102,14 @@ pub(crate) async fn list_keys(
     post,
     path = "/api/v1/me/keys",
     tag = "identity",
-    request_body = CreateKeyBody,
+    request_body = CreateApiKeyBody,
     responses((status = 201, description = "Create current user API key", body = CreatedKeyOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn create_key(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Json(body): Json<CreateKeyBody>,
+    Json(body): Json<CreateApiKeyBody>,
 ) -> Result<(StatusCode, Json<CreatedKeyOut>), ApiError> {
     let minted = state
         .account_lifecycle

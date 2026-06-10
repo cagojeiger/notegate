@@ -8,11 +8,11 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use notegate_model::{AccountRef as ModelAccountRef, NodeKind};
+use notegate_model::{AccountRef as ModelAccountRef, ApiKey, NodeKind};
 use notegate_service::files::NodeView;
 use notegate_service::workspaces::WorkspaceView;
 
@@ -53,6 +53,49 @@ impl AccountRef {
             .map(AccountRef::from)
             .unwrap_or_else(|| AccountRef::unknown(id))
     }
+}
+
+/// API-key creation request shared by user and agent key endpoints.
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct CreateApiKeyBody {
+    pub name: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// API-key metadata returned by key list endpoints. The plaintext token is never
+/// included here.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ApiKeyOut {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub name: String,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl From<&ApiKey> for ApiKeyOut {
+    fn from(key: &ApiKey) -> Self {
+        Self {
+            id: key.id,
+            account_id: key.account_id,
+            name: key.name.clone(),
+            scopes: key.scopes.clone(),
+            expires_at: key.expires_at,
+            created_at: key.created_at,
+            revoked_at: key.revoked_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ApiKeysListResponse {
+    pub keys: Vec<ApiKeyOut>,
+    pub page: crate::page::Page,
 }
 
 /// Workspace output: metadata, caller role, and derived `root_node_id`.
