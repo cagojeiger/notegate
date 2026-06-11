@@ -5,7 +5,6 @@
 -- parent_id + name; full paths are derived, never stored.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;   -- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE crypto_key_epochs (
     key_id TEXT PRIMARY KEY,
@@ -208,9 +207,6 @@ CREATE INDEX nodes_children_idx
 CREATE INDEX nodes_kind_idx
     ON nodes(space_id, kind)
     WHERE deleted_at IS NULL;
-CREATE INDEX nodes_name_trgm_idx
-    ON nodes USING gin (name gin_trgm_ops)
-    WHERE deleted_at IS NULL;
 
 CREATE OR REPLACE FUNCTION create_space_root_node()
 RETURNS trigger
@@ -258,9 +254,6 @@ CREATE TABLE text_objects (
 );
 CREATE INDEX text_objects_space_idx ON text_objects(space_id);
 CREATE INDEX text_objects_space_updated_idx ON text_objects(space_id, updated_at DESC, node_id);
-CREATE INDEX text_objects_content_trgm_idx
-    ON text_objects USING gin (content_text gin_trgm_ops)
-    WHERE storage_format = 'plain';
 
 CREATE TABLE file_objects (
     node_id UUID PRIMARY KEY,
