@@ -1,6 +1,6 @@
 # MCP Files
 
-MCP files tools는 Space tree를 path-first로 다룬다.
+MCP files tools는 Space tree를 path-first로 다룬다. `files_ls`는 `NodeTreeItem` 목록을 반환하고, `files_stat`은 `NodeDetail`을 반환한다. `NodeTreeItem`/`NodeDetail` 필드는 `../rest/nodes.md`를 따른다.
 
 ## Common
 
@@ -46,4 +46,4 @@ files_patch
 
 ## File
 
-MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_stat`/`files_find`에서 node metadata와 file stats만 확인한다. File은 `files_read`/`files_patch`/`files_grep` 대상이 아니다.
+MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_find`에서 node summary를 확인하고 `files_stat`에서 metadata와 file stats를 확인한다. File은 `files_read`/`files_patch`/`files_grep` 대상이 아니다.

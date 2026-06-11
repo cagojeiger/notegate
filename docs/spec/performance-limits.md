@@ -72,11 +72,36 @@ children_max_limit = 200
 find_default_limit = 50
 grep_default_limit = 20
 search_max_limit = 100
+search_children_page_max = 200
+grep_scan_budget_bytes = 8388608       # 8 MiB content bytes per request
+search_response_target_bytes = 262144  # 256 KiB response target
 api_keys_default_limit = 50
 api_keys_max_limit = 100
 ```
 
 목록 API는 여러 row를 반환하면 opaque cursor pagination을 제공한다. 내부 구현은 resource hard limit에 따라 DB keyset 또는 bounded in-memory pagination을 사용할 수 있다.
+
+## Search memory model
+
+Search는 MCP/CLI command이며 REST resource API에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다.
+
+최악의 논리 scan 범위:
+
+```text
+node scan upper bound       = 10000 live nodes per space
+plain text scan upper bound = 256 MiB live text bytes per space
+```
+
+최악의 경우 전체 subtree를 탐색해야 하지만 한 요청에서 전체를 읽지 않는다. `limit`은 반환할 result 수이고 scan budget은 검사할 candidate 양이다. Scan budget에 먼저 도달하면 result가 없어도 `has_more=true`와 `next_cursor`를 반환할 수 있다.
+
+```text
+children page        <= 200 node summaries
+grep scan budget     <= 8 MiB content bytes
+result limit         <= 100 node summaries
+response target      <= 256 KiB
+```
+
+`grep`은 match line이 아니라 query를 포함하는 Text node 후보를 반환한다. 본문은 별도 read command로 조회한다.
 
 ## Purge limits
 

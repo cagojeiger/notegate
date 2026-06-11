@@ -129,7 +129,7 @@ text_objects
 - plain Text content는 UTF-8이다.
 - plain Text는 `byte_len`, `line_count`, `content_sha256`, `media_type`을 plaintext 기준으로 저장한다.
 - encrypted Text는 client-side encrypted payload를 저장하고 `line_count=0`을 사용한다.
-- REST read/write는 plain Text와 encrypted payload를 모두 다룬다. REST patch와 grep은 plain Text만 대상으로 한다. MCP/CLI content command는 plain Text만 대상으로 한다.
+- REST read/write는 plain Text와 encrypted payload를 모두 다룬다. REST patch는 plain Text만 대상으로 한다. MCP/CLI content command와 grep은 plain Text만 대상으로 한다.
 
 ### File
 

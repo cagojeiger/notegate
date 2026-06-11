@@ -13,7 +13,6 @@ REST는 브라우저/UI용 resource API다. UI가 선택한 `space_id`, `node_id
 | Nodes | space | `/api/v1/spaces/{space_id}/nodes` | `nodes.md` |
 | Text | space | `/api/v1/spaces/{space_id}/text` | `text.md` |
 | Files | space | `/api/v1/spaces/{space_id}/files` | `files.md` |
-| Search | space | `/api/v1/spaces/{space_id}/search` | `search.md` |
 
 ## Auth mapping
 
@@ -27,6 +26,6 @@ ngk_v1_ agent key      -> agent account
 
 ```text
 user owns space       -> read/write/manage
-agent connection read -> read/search/stat
+agent connection read -> read/list/stat
 agent connection write -> read + create/update/move/delete
 ```

@@ -4,10 +4,10 @@ notegate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. 
 
 ```text
 REST API = UI가 안정적으로 선택한 id 기반 resource API
-MCP tools = agent가 쓰기 쉬운 space name + path 기반 command API
+MCP tools = agent가 쓰기 쉬운 space name + path 기반 command/search API
 ```
 
-두 surface는 같은 service invariant를 사용한다.
+두 surface는 같은 service invariant를 사용한다. Search는 MCP/CLI command로 제공하고 REST resource API에는 노출하지 않는다.
 
 ## API categories
 
@@ -18,7 +18,6 @@ Spaces      /api/v1/spaces
 Nodes       /api/v1/spaces/{space_id}/nodes
 Text        /api/v1/spaces/{space_id}/text
 Files       /api/v1/spaces/{space_id}/files
-Search      /api/v1/spaces/{space_id}/search
 Agents      /api/v1/agents
 Connections /api/v1/spaces/{space_id}/agents
 System      /health, /ready

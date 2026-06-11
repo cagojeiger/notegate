@@ -194,7 +194,7 @@ file_objects
   uploaded_at timestamptz
 
 file_inline_contents
-  node_id uuid pk
+  node_id uuid pk references file_objects(node_id)
   space_id uuid not null
   bytes bytea not null
 ```
@@ -204,6 +204,15 @@ file_inline_contents
 ```text
 storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL
 storage_kind='object'    -> 262144 bytes 초과 file 저장 방식으로 예약됨
+```
+
+File content invariant:
+
+```text
+file_inline_contents row -> matching file_objects.storage_kind='inline_pg'
+file_inline_contents.space_id = file_objects.space_id
+storage_kind='inline_pg' requires one file_inline_contents row
+storage_kind='object' requires no file_inline_contents row
 ```
 
 File content encryption은 client-side only다.
@@ -227,7 +236,7 @@ Text 암호화 정책:
 - REST는 encrypted payload 저장/조회가 가능하다.
 - MCP read/write/patch/grep surface는 plain Text만 대상으로 한다.
 - plain Text의 `content_sha256`, `byte_len`, `line_count`는 plaintext 기준이다.
-- encrypted Text의 `content_sha256`, `byte_len`은 encrypted payload 직렬화 기준이고 `line_count=0`이다.
+- encrypted Text의 `content_sha256`, `byte_len`은 서버 canonical JSON serialization 기준이고 `line_count=0`이다.
 
 Node-content invariant:
 

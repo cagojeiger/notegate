@@ -15,6 +15,33 @@ POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
 DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```
 
+## Response shapes
+
+`children`과 MCP search 후보 목록은 `NodeTreeItem`을 반환한다. `GET /nodes/{node_id}`와 `files_stat` 성격의 조회는 `NodeDetail`을 반환한다.
+
+```text
+NodeTreeItem
+  id
+  parent_id
+  name
+  kind
+  path
+  sort_order
+  has_children
+  byte_len        # folder는 null, text/file은 저장 bytes 기준
+  updated_at
+
+NodeDetail = NodeTreeItem +
+  metadata
+  created_at
+  created_by_account_id
+  updated_by_account_id
+  text_summary    # kind=text일 때만
+  file_summary    # kind=file일 때만
+```
+
+`NodeTreeItem`은 tree 화면과 후보 목록용이므로 content body와 전체 metadata를 포함하지 않는다.
+
 Node kind:
 
 ```text
@@ -27,7 +54,8 @@ Create rules:
 
 - Folder create는 `nodes(kind='folder')`만 만든다.
 - Text create는 `nodes(kind='text')`와 `text_objects`를 함께 만든다.
-- Text create 요청에 `content`가 있으면 content를 같은 요청에서 쓴다.
+- Text create 요청에 `content`가 있으면 plain Text content를 같은 요청에서 쓴다.
+- Text create 요청에서는 encrypted payload를 받지 않는다. Encrypted Text는 Text API `PUT /text/{node_id}`로 저장한다.
 - File node create는 REST node create에서 허용하지 않는다.
 - 같은 parent 안 live name은 unique다.
 
@@ -47,7 +75,6 @@ Rules:
 
 - `metadata`는 folder/text/file 공통 속성이다.
 - `metadata`는 content가 아니며 Text/File 본문 암호화 대상이 아니다.
-- `metadata`는 서버가 읽고 검색에 사용할 수 있다.
 - 민감한 값은 `metadata`에 넣지 않는다.
 - `metadata`는 JSON object만 허용한다.
 

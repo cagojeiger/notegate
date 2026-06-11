@@ -23,6 +23,7 @@ touch   empty text 생성
 mv      node rename/move
 rm      node soft delete
 find    node name/kind/scope 검색
+grep    plain Text 후보 검색
 ```
 
 공통 권한:
@@ -40,7 +41,7 @@ User caller는 자신이 소유한 space에서 read/write/manage 가능하다. A
 read   text content 읽기
 write  text content 전체 쓰기
 patch  exact-match patch 적용
-grep   text content 검색
+grep   query를 포함하는 text node 후보 검색
 ```
 
 - Text command는 plain UTF-8 content를 대상으로 한다.
@@ -59,9 +60,11 @@ File은 binary/object content node다. MCP/CLI command surface는 file upload/do
 
 ## Search semantics
 
+Search는 MCP/CLI용 command semantics다. REST resource API는 search endpoint를 제공하지 않는다. 세부 traversal, cursor, memory budget은 `search.md`를 따른다.
+
 ```text
-find      folder/text/file node name/kind/scope 검색
-grep     text_objects content 검색
+find        folder/text/file node name/kind/scope 검색
+grep        plain Text content가 query를 포함하는 text node 후보 검색
 ```
 
-Encrypted Text는 grep 대상이 아니다.
+`grep`은 line number나 context를 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Encrypted Text와 File은 grep 대상이 아니다.
