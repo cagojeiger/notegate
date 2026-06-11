@@ -99,7 +99,7 @@ type RestNode = {
 
 ## McpNodeSummary
 
-MCP `files_ls`, `files_stat`, `files_find`, `files_grep`가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
+MCP `files_ls`, `files_stat`, `files_find`가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
 
 ```ts
 type McpNodeSummary = {
@@ -125,6 +125,16 @@ type McpNodeSummary = {
   original_filename?: string
   encryption_mode?: "none" | "client"
   encryption_metadata?: object
+}
+```
+
+## McpGrepSummary
+
+`files_grep` item은 `McpNodeSummary`에 선택적 line match 정보를 더한다. `match_lines`는 `lines="first"` 또는 `lines="all"`일 때만 존재한다.
+
+```ts
+type McpGrepSummary = McpNodeSummary & {
+  match_lines?: number[] // 1-based line numbers
 }
 ```
 

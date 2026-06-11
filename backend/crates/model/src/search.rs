@@ -38,6 +38,7 @@ pub struct GrepRequest {
     pub q: String,
     pub path: Option<String>,
     pub match_mode: GrepMatchMode,
+    pub line_mode: GrepLineMode,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub limit: Option<i64>,
@@ -55,6 +56,23 @@ impl GrepMatchMode {
         match self {
             Self::Literal => "literal",
             Self::Regex => "regex",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrepLineMode {
+    None,
+    First,
+    All,
+}
+
+impl GrepLineMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::First => "first",
+            Self::All => "all",
         }
     }
 }
@@ -83,8 +101,14 @@ pub struct FindPage {
 
 #[derive(Debug, Clone)]
 pub struct GrepPage {
-    pub items: Vec<NodeView>,
+    pub items: Vec<GrepHit>,
     pub limit: i64,
     pub has_more: bool,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GrepHit {
+    pub node: NodeView,
+    pub match_lines: Vec<i32>,
 }

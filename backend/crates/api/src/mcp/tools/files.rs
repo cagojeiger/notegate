@@ -2,7 +2,7 @@
 
 use axum::http::request::Parts;
 use notegate_core::validation::normalize_path;
-use notegate_model::TextStorageFormat;
+use notegate_model::{NodeKind, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
     ChildrenRequest, CreateFolder, CreateText, DeleteNode, Edit as ServiceEdit, MoveNode,
@@ -64,6 +64,9 @@ pub struct MkdirInput {
     /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
+    /// Create missing parent folders, like `mkdir -p`.
+    #[serde(default)]
+    pub parents: bool,
 }
 
 /// `files_touch` input: a space selector plus the text `path` (or `target`).
@@ -280,6 +283,10 @@ pub async fn mkdir(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
+    if input.parents {
+        return mkdir_parents(state, account_id, space_id, resolved.name(), &path).await;
+    }
+
     let (parent_path, name) = split_parent_name(&path)?;
     let parent = state
         .files
@@ -303,6 +310,70 @@ pub async fn mkdir(
     Ok(Json(json!({
         "space": resolved.name(),
         "node": node_summary(&view),
+    })))
+}
+
+async fn mkdir_parents(
+    state: &AppState,
+    account_id: uuid::Uuid,
+    space_id: uuid::Uuid,
+    space_name: &str,
+    path: &str,
+) -> Result<Json<Value>, ErrorData> {
+    let mut current = state
+        .files
+        .resolve_path(account_id, space_id, "/")
+        .await
+        .map_err(service_error)?;
+    let mut current_path = "/".to_owned();
+    let mut created_paths = Vec::new();
+
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        let next_path = if current_path == "/" {
+            format!("/{segment}")
+        } else {
+            format!("{current_path}/{segment}")
+        };
+
+        match state
+            .files
+            .resolve_path(account_id, space_id, &next_path)
+            .await
+        {
+            Ok(existing) if existing.node.kind == NodeKind::Folder => {
+                current = existing;
+                current_path = next_path;
+            }
+            Ok(_existing) => {
+                return Err(service_error(ServiceError::Conflict(format!(
+                    "path component '{next_path}' exists and is not a folder"
+                ))));
+            }
+            Err(ServiceError::NotFound(_)) => {
+                let created = state
+                    .files
+                    .create_folder(
+                        account_id,
+                        space_id,
+                        CreateFolder {
+                            parent_node_id: current.node.id,
+                            name: segment.to_owned(),
+                        },
+                    )
+                    .await
+                    .map_err(service_error)?;
+                created_paths.push(created.path.clone());
+                current = created;
+                current_path = next_path;
+            }
+            Err(error) => return Err(service_error(error)),
+        }
+    }
+
+    Ok(Json(json!({
+        "space": space_name,
+        "node": node_summary(&current),
+        "created_paths": created_paths,
     })))
 }
 

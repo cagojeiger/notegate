@@ -66,4 +66,4 @@ find        folder/text/file node name/kind/scope 검색
 grep        plain Text content가 query를 포함하는 text node 후보 검색
 ```
 
-`grep`은 line number나 context를 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Encrypted Text와 File은 grep 대상이 아니다.
+`grep`은 기본적으로 Text node 후보만 반환한다. 요청 옵션으로 첫 matching line 또는 모든 matching line number를 받을 수 있다. Context와 snippet은 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Encrypted Text와 File은 grep 대상이 아니다.

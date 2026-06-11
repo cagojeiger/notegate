@@ -27,7 +27,7 @@ use notegate_service::files::{
     PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
-    FindMatchMode, FindRequest, GrepMatchMode, GrepRequest, SearchService,
+    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
 };
 use notegate_service::spaces::CreateSpace;
 use serde_json::json;
@@ -376,6 +376,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 q: "alpha delta".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
                 include: Vec::new(),
                 exclude: Vec::new(),
                 limit: Some(20),
@@ -386,11 +387,14 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let hit = candidates
         .items
         .iter()
-        .find(|item| item.node.id == note_id)
+        .find(|item| item.node.node.id == note_id)
         .expect("grep candidate present");
-    assert_eq!(hit.path, "/projects/note.md", "grep returns derived path");
     assert_eq!(
-        hit.text.as_ref().expect("text stats").byte_len,
+        hit.node.path, "/projects/note.md",
+        "grep returns derived path"
+    );
+    assert_eq!(
+        hit.node.text.as_ref().expect("text stats").byte_len,
         doc_now.byte_len
     );
 

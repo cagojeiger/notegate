@@ -38,6 +38,7 @@ Query를 포함하는 plain Text node 후보를 검색한다.
 type FilesGrepInput = TargetSelector & {
   q: string
   match?: "literal" | "regex"
+  lines?: "none" | "first" | "all"
   include?: string[]
   exclude?: string[]
   limit?: number
@@ -46,12 +47,12 @@ type FilesGrepInput = TargetSelector & {
 
 type FilesGrepOutput = {
   space: string
-  items: McpNodeSummary[]
+  items: McpGrepSummary[]
   page: Page
 }
 ```
 
-기본 `match`는 `literal`이다. `include`/`exclude`는 path glob list이며 각 list는 최대 32개 pattern, pattern 하나는 최대 256자다. 응답은 match line이 아니라 Text node 후보 목록이다. File, encrypted Text, metadata는 대상이 아니다. Match된 Text의 내용은 `files_read`로 조회한다.
+기본 `match`는 `literal`이고 기본 `lines`는 `none`이다. `include`/`exclude`는 path glob list이며 각 list는 최대 32개 pattern, pattern 하나는 최대 256자다. 응답은 Text node 후보 목록이며, `lines`를 켠 경우 line number만 추가한다. File, encrypted Text, metadata는 대상이 아니다. Match된 Text의 내용은 `files_read`로 조회한다.
 
 예:
 

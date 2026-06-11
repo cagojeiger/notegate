@@ -109,7 +109,7 @@ result limit         <= 100 node summaries
 response target      <= 256 KiB
 ```
 
-`grep`은 match line이 아니라 query를 포함하는 Text node 후보를 반환한다. 본문은 별도 read command로 조회한다.
+`grep`은 기본적으로 query를 포함하는 Text node 후보를 반환한다. 요청 옵션으로 matching line number를 반환할 수 있지만 본문과 snippet은 별도 read command로 조회한다.
 
 ## Purge limits
 

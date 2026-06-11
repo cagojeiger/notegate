@@ -38,6 +38,7 @@ impl SearchService {
             "grep".to_owned(),
             q.clone(),
             request.match_mode.as_str().to_owned(),
+            request.line_mode.as_str().to_owned(),
             request.include.join(","),
             request.exclude.join(","),
             scope_node_id.to_string(),
@@ -117,12 +118,20 @@ impl SearchService {
                             break;
                         }
                         scanned_text_bytes += byte_len;
-                        if text
-                            .content
-                            .as_deref()
-                            .is_some_and(|content| matcher.is_match(content))
-                        {
-                            items.push(self.text_node_view(child.clone(), path, text));
+                        if let Some(content) = text.content.as_deref() {
+                            let match_lines = matcher.match_lines(content, request.line_mode);
+                            if !match_lines.is_empty() {
+                                items.push(notegate_model::search::GrepHit {
+                                    node: self.text_node_view(child.clone(), path, text),
+                                    match_lines: match request.line_mode {
+                                        notegate_model::search::GrepLineMode::None => Vec::new(),
+                                        notegate_model::search::GrepLineMode::First => {
+                                            match_lines.first().copied().into_iter().collect()
+                                        }
+                                        notegate_model::search::GrepLineMode::All => match_lines,
+                                    },
+                                });
+                            }
                         }
                     }
                 }

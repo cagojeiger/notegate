@@ -2,7 +2,9 @@
 
 use axum::http::request::Parts;
 use notegate_model::NodeKind;
-use notegate_service::search::{FindMatchMode, FindRequest, GrepMatchMode, GrepRequest};
+use notegate_service::search::{
+    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest,
+};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
@@ -61,6 +63,9 @@ pub struct GrepInput {
     /// Match mode: `literal` or `regex`.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
+    /// Line-number detail: `none`, `first`, or `all`.
+    #[serde(default)]
+    pub lines: Option<String>,
     /// Optional include path globs.
     #[serde(default)]
     pub include: Option<Vec<String>>,
@@ -150,6 +155,7 @@ pub async fn grep(
     };
     let space = resolved.name().to_owned();
     let match_mode = parse_grep_match_mode(input.match_mode.as_deref())?;
+    let line_mode = parse_grep_line_mode(input.lines.as_deref())?;
 
     let page = state
         .search
@@ -160,6 +166,7 @@ pub async fn grep(
                 q: input.q,
                 path: scope_path,
                 match_mode,
+                line_mode,
                 include: input.include.unwrap_or_default(),
                 exclude: input.exclude.unwrap_or_default(),
                 limit: input.limit,
@@ -169,7 +176,19 @@ pub async fn grep(
         .await
         .map_err(service_error)?;
 
-    let items: Vec<Value> = page.items.iter().map(node_summary).collect();
+    let items: Vec<Value> = page
+        .items
+        .iter()
+        .map(|hit| {
+            let mut value = node_summary(&hit.node);
+            if !hit.match_lines.is_empty()
+                && let Some(object) = value.as_object_mut()
+            {
+                object.insert("match_lines".to_owned(), json!(hit.match_lines));
+            }
+            value
+        })
+        .collect();
     let returned = items.len();
 
     Ok(Json(json!({
@@ -205,5 +224,16 @@ fn parse_grep_match_mode(value: Option<&str>) -> Result<GrepMatchMode, ErrorData
         "literal" => Ok(GrepMatchMode::Literal),
         "regex" => Ok(GrepMatchMode::Regex),
         _ => Err(invalid_input_error("match must be 'literal' or 'regex'")),
+    }
+}
+
+fn parse_grep_line_mode(value: Option<&str>) -> Result<GrepLineMode, ErrorData> {
+    match value.unwrap_or("none") {
+        "none" => Ok(GrepLineMode::None),
+        "first" => Ok(GrepLineMode::First),
+        "all" => Ok(GrepLineMode::All),
+        _ => Err(invalid_input_error(
+            "lines must be 'none', 'first', or 'all'",
+        )),
     }
 }

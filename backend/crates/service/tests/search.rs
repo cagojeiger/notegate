@@ -23,7 +23,7 @@ use notegate_service::files::{
     CreateFolder, CreateText, FilesService, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
-    FindMatchMode, FindRequest, GrepMatchMode, GrepRequest, SearchService,
+    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
 };
 use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
@@ -298,6 +298,7 @@ needle
                 q: "needle".to_owned(),
                 path: Some("/note.md".to_owned()),
                 match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
                 include: Vec::new(),
                 exclude: Vec::new(),
                 limit: None,
@@ -353,7 +354,7 @@ l2
 l3
 needle here
 l5
-l6
+needle again
 l7
 ";
     let node = write_doc(&files, owner, ws, root, "note.md", content).await;
@@ -366,6 +367,7 @@ l7
                 q: "  needle  ".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
                 include: Vec::new(),
                 exclude: Vec::new(),
                 limit: None,
@@ -375,14 +377,55 @@ l7
         .await?;
     assert_eq!(page.items.len(), 1, "exactly one matching text node");
     let item = &page.items[0];
-    assert_eq!(item.node.id, node);
-    assert_eq!(item.path, "/note.md", "grep returns the derived path");
+    assert_eq!(item.node.node.id, node);
+    assert_eq!(item.node.path, "/note.md", "grep returns the derived path");
+    assert!(
+        item.match_lines.is_empty(),
+        "default grep returns file candidates only"
+    );
     let stats = item
+        .node
         .text
         .as_ref()
         .expect("grep text candidate has text stats");
     assert_eq!(stats.line_count, 7);
     assert_eq!(stats.byte_len, content.len() as i64);
+
+    let first_line = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::First,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(first_line.items[0].match_lines, vec![4]);
+
+    let all_lines = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::All,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(all_lines.items[0].match_lines, vec![4, 6]);
 
     db.cleanup().await;
     Ok(())
@@ -465,6 +508,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
                 include: Vec::new(),
                 exclude: Vec::new(),
                 limit: Some(1),
@@ -473,7 +517,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
         )
         .await?;
     assert_eq!(first.items.len(), 1);
-    assert_eq!(first.items[0].node.id, nested);
+    assert_eq!(first.items[0].node.node.id, nested);
     assert!(first.has_more);
 
     let second = search
@@ -484,6 +528,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
                 q: "needle".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
                 include: Vec::new(),
                 exclude: Vec::new(),
                 limit: Some(1),
@@ -492,7 +537,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
         )
         .await?;
     assert_eq!(second.items.len(), 1);
-    assert_eq!(second.items[0].node.id, sibling);
+    assert_eq!(second.items[0].node.node.id, sibling);
 
     db.cleanup().await;
     Ok(())
@@ -626,6 +671,7 @@ hit-{index}
                     q: "hit-".to_owned(),
                     path: None,
                     match_mode: GrepMatchMode::Literal,
+                    line_mode: GrepLineMode::None,
                     include: Vec::new(),
                     exclude: Vec::new(),
                     limit: Some(limit),
@@ -639,7 +685,7 @@ hit-{index}
             "page never exceeds the limit"
         );
         for item in &page.items {
-            seen.push(item.node.id);
+            seen.push(item.node.node.id);
         }
         match page.next_cursor {
             Some(c) => {
@@ -707,6 +753,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
                 q: "x".to_owned(),
                 path: None,
                 match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
                 include: Vec::new(),
                 exclude: Vec::new(),
                 limit: None,

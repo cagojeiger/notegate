@@ -8,8 +8,8 @@ use notegate_core::limits;
 use notegate_db::FilesRepo;
 use notegate_model::files::{ChildrenCursor, NodeView, TextStats};
 pub use notegate_model::search::{
-    DfsFrame, FindMatchMode, FindPage, FindRequest, GrepMatchMode, GrepPage, GrepRequest,
-    SearchCursor,
+    DfsFrame, FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage,
+    GrepRequest, SearchCursor,
 };
 use notegate_model::{Node, NodeKind, Permission, TextObject};
 use regex::{Regex, RegexBuilder};
@@ -244,12 +244,35 @@ impl ContentMatcher {
         }
     }
 
-    fn is_match(&self, value: &str) -> bool {
-        match self {
-            Self::Literal(needle) => value.to_lowercase().contains(needle),
-            Self::Regex(regex) => regex.is_match(value),
+    fn match_lines(&self, content: &str, mode: GrepLineMode) -> Vec<i32> {
+        if content.is_empty() {
+            return Vec::new();
         }
+
+        let mut lines = Vec::new();
+        for (index, line) in logical_lines(content).enumerate() {
+            let matched = match self {
+                Self::Literal(needle) => line.to_lowercase().contains(needle),
+                Self::Regex(regex) => regex.is_match(line),
+            };
+            if !matched {
+                continue;
+            }
+
+            let line_number = index as i32 + 1;
+            match mode {
+                GrepLineMode::None => return vec![line_number],
+                GrepLineMode::First => return vec![line_number],
+                GrepLineMode::All => lines.push(line_number),
+            }
+        }
+        lines
     }
+}
+
+fn logical_lines(content: &str) -> impl Iterator<Item = &str> {
+    let content = content.strip_suffix('\n').unwrap_or(content);
+    content.split('\n')
 }
 
 struct PathFilters {

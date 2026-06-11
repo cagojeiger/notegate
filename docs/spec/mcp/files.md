@@ -43,14 +43,18 @@ Folder를 생성한다.
 
 ```ts
 type FilesMkdirInput = TargetSelector
+  & {
+    parents?: boolean
+  }
 
 type FilesMkdirOutput = {
   space: string
   node: McpNodeSummary
+  created_paths?: string[]
 }
 ```
 
-`path` 또는 `target`은 생성할 folder 경로다. Parent folder는 이미 존재해야 한다.
+`path` 또는 `target`은 생성할 folder 경로다. `parents=false` 또는 생략이면 parent folder는 이미 존재해야 한다. `parents=true`이면 missing parent folder를 순서대로 생성한다. 이미 존재하는 folder는 통과하고, 중간 경로에 Text/File이 있으면 conflict다.
 
 ## `files_touch`
 
