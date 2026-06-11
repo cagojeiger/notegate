@@ -19,6 +19,7 @@ use uuid::Uuid;
 async fn insert_capped(
     repo: &ApiKeyRepo,
     account_id: Uuid,
+    created_by: Uuid,
     label: &str,
     max_live_keys: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -33,7 +34,7 @@ async fn insert_capped(
             },
             token_prefix: "ngk_v1_test",
             token_hash: &format!("hash-{label}-{}", Uuid::new_v4()),
-            created_by: account_id,
+            created_by,
             rotated_from_key_id: None,
         },
         max_live_keys,
@@ -64,12 +65,13 @@ async fn insert_agent_account(
 async fn concurrent_create_respects_cap(
     pool: &sqlx::PgPool,
     account_id: Uuid,
+    created_by: Uuid,
     max: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let repo = ApiKeyRepo::new(pool.clone());
     // Seed the account at cap-1 live keys.
     for index in 0..(max - 1) {
-        insert_capped(&repo, account_id, &format!("seed-{index}"), max).await?;
+        insert_capped(&repo, account_id, created_by, &format!("seed-{index}"), max).await?;
     }
     assert_eq!(repo.count_live_keys(account_id).await?, max - 1);
 
@@ -89,7 +91,7 @@ async fn concurrent_create_respects_cap(
                     },
                     token_prefix: "ngk_v1_test",
                     token_hash: &format!("hash-race-{index}-{}", Uuid::new_v4()),
-                    created_by: account_id,
+                    created_by,
                     rotated_from_key_id: None,
                 },
                 max,
@@ -126,6 +128,7 @@ async fn concurrent_create_respects_cap_for_user_account() -> Result<(), Box<dyn
     concurrent_create_respects_cap(
         &db.pool,
         user_id,
+        user_id,
         notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
     )
     .await?;
@@ -144,6 +147,7 @@ async fn concurrent_create_respects_cap_for_agent_account() -> Result<(), Box<dy
     concurrent_create_respects_cap(
         &db.pool,
         agent_id,
+        creator,
         notegate_core::limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
     )
     .await?;

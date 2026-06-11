@@ -138,7 +138,7 @@ async fn connected_agent_write_can_mutate_files() -> Result<(), Box<dyn std::err
             space.id,
             DeleteNode {
                 node_id: folder.node.id,
-                recursive: false,
+                recursive: true,
             },
         )
         .await

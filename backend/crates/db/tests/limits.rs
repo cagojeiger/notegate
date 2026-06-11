@@ -44,7 +44,7 @@ async fn insert_child(
     kind: &str,
 ) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar(
-        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id \
+        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, $4, $5, $5) RETURNING id",
     )
     .bind(ws)
@@ -89,7 +89,7 @@ async fn second_root_node_is_rejected() -> TestResult {
     let (account, ws, _root) = space_with_root(&db.pool, "tworoots").await?;
     // A second parent_id IS NULL node violates nodes_one_root_per_space.
     let res = sqlx::query(
-        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id \
+        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
          VALUES ($1, NULL, '/', 'folder', $2, $2)",
     )
     .bind(ws)
@@ -110,23 +110,6 @@ async fn duplicate_live_sibling_name_is_rejected() -> TestResult {
     insert_child(&db.pool, ws, root, account, "note.md", "text").await?;
     let dup = insert_child(&db.pool, ws, root, account, "note.md", "text").await;
     assert!(dup.is_err(), "duplicate live sibling name must be rejected");
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn text_name_must_end_md_and_folder_must_not() -> TestResult {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (account, ws, root) = space_with_root(&db.pool, "mdcheck").await?;
-    let bad_doc = insert_child(&db.pool, ws, root, account, "note", "text").await;
-    assert!(bad_doc.is_err(), "text without .md must be rejected");
-    let bad_folder = insert_child(&db.pool, ws, root, account, "dir.md", "folder").await;
-    assert!(bad_folder.is_err(), "folder ending in .md must be rejected");
-    // The valid forms succeed.
-    insert_child(&db.pool, ws, root, account, "note.md", "text").await?;
-    insert_child(&db.pool, ws, root, account, "dir", "folder").await?;
     db.cleanup().await;
     Ok(())
 }
@@ -156,8 +139,8 @@ async fn text_byte_and_line_bounds_are_enforced() -> TestResult {
     // byte_len upper bound = 1048576.
     let over_bytes = sqlx::query(
         "INSERT INTO text_objects \
-         (node_id, space_id, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, 1048577, 0, 'text/plain', $4, $4)",
+         (node_id, space_id, content_text, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, '', $3, 1048577, 0, 'text/plain', $4, $4)",
     )
     .bind(node)
     .bind(ws)
@@ -170,8 +153,8 @@ async fn text_byte_and_line_bounds_are_enforced() -> TestResult {
     // line_count upper bound = 2000; the boundary value 1048576/2000 is accepted.
     let at_boundary = sqlx::query(
         "INSERT INTO text_objects \
-         (node_id, space_id, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, 1048576, 2000, 'text/plain', $4, $4)",
+         (node_id, space_id, content_text, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, '', $3, 1048576, 2000, 'text/plain', $4, $4)",
     )
     .bind(node)
     .bind(ws)

@@ -323,7 +323,7 @@ async fn keyset_pagination_is_stable() -> Result<(), Box<dyn std::error::Error>>
     // via raw SQL to exercise paging beyond a single page without the cap).
     for index in 0..250 {
         sqlx::query(
-            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id \
+            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
              VALUES ($1, $2, $3, 'text', $4, $4)",
         )
         .bind(ws)
