@@ -1,98 +1,53 @@
 # REST Agents
 
-## Agents
+Agent는 user가 관리하는 worker account다. Agent caller는 agent management API를 호출할 수 없다.
 
-Agent API는 agent account와 agent-bound API key를 관리하는 user-only endpoint다. Agent의 workspace별 권한은 Access category에서 따로 부여한다. Agent-bound API key는 인증 시 해당 `agent` account로 처리한다. Key lifecycle은 workspace role이 아니라 agent 생성자/소유자 규칙으로 관리한다. Workspace owner는 agent account에 viewer/editor workspace access를 grant/revoke할 수 있을 뿐, agent-bound API key를 관리하지 않는다. Agent account는 owner role을 받을 수 없다.
-
-Agent caller는 이 category를 호출할 수 없다. Agent는 `/api/v1/me`로 자기 identity를 확인하고, workspace owner는 Access category로 workspace별 agent access를 확인한다.
-
-### List agents
+## List agents
 
 ```http
 GET /api/v1/agents?limit=100&cursor=...
 ```
 
-User caller가 생성한 active agent 목록을 반환한다. Default/max limit은 `100`이다.
+User caller가 소유한 active agent 목록을 반환한다.
 
-### Create agent
+## Create agent
 
 ```http
 POST /api/v1/agents
 ```
 
 ```json
-{
-  "name": "research-agent"
-}
+{"name":"research-agent"}
 ```
 
-`agent` account를 생성한다. Agent 생성은 key나 workspace access를 자동 생성하지 않는다. 상세 lifecycle은 `docs/spec/lifecycle.md`를 따른다. 하나의 user creator account는 최대 `50`개의 active agent를 가질 수 있다. Agent name은 공백만으로 만들 수 없고 최대 `63`자다.
+Side effect:
 
-### Delete agent
+```text
+accounts(kind='agent')
+agents(owner_user_id=caller)
+```
+
+API key와 space connection은 자동 생성하지 않는다.
+
+## Delete agent
 
 ```http
 DELETE /api/v1/agents/{agent_id}
 ```
 
-Agent 삭제 side effect는 `docs/spec/lifecycle.md`의 Agent 삭제 정책을 따른다.
+Owner user만 가능하다. Agent account는 deactivate되고 live key/connection은 revoke/disconnect된다.
 
-### List agent API keys
-
-```http
-GET /api/v1/agents/{agent_id}/keys?limit=50&cursor=...
-```
-
-Caller가 생성한 active agent의 live API key metadata(`revoked_at IS NULL AND expires_at > now()`)를 keyset pagination으로 반환한다. revoked/expired key는 list에 포함하지 않으며 평문 token도 반환하지 않는다. 응답은 `keys`와 공통 `page`를 포함한다.
-
-### Create agent API key
+## Agent API keys
 
 ```http
-POST /api/v1/agents/{agent_id}/keys
-```
-
-```json
-{
-  "name": "local-mcp",
-  "expires_at": "<created_at + 365d 이내 RFC3339>",
-  "scopes": []
-}
-```
-
-Agent API key는 caller가 생성한 active agent account에 명시적으로 만든다. 평문 token은 생성 응답에서 한 번만 반환하고 저장하지 않는다. 한도와 만료 정책은 아래 branching을 따른다.
-
-Live key는 다음 조건을 모두 만족한다.
-
-```text
-api_keys.account_id = agent_id
-api_keys.revoked_at IS NULL
-api_keys.expires_at > now()
-```
-
-Branching 규칙:
-
-```text
-live keys < 5              -> key 생성
-live keys >= 5             -> 409 conflict
-name empty or >63 chars    -> 400 invalid input
-scopes omitted or []       -> 허용
-scopes non-empty           -> 400 invalid input
-expires_at future <= 365d  -> 허용
-expires_at omitted         -> 400 invalid input
-expires_at past/now or >365d -> 400 invalid input
-```
-
-### Rotate agent API key
-
-```http
-POST /api/v1/agents/{agent_id}/keys/{key_id}
-```
-
-같은 agent account에 old key의 `expires_at`을 상속한 new key를 만들고 old key를 revoke한다. New plaintext token은 응답에서 한 번만 반환한다.
-
-### Revoke agent API key
-
-```http
+GET    /api/v1/agents/{agent_id}/keys?limit=50&cursor=...
+POST   /api/v1/agents/{agent_id}/keys
+POST   /api/v1/agents/{agent_id}/keys/{key_id}
 DELETE /api/v1/agents/{agent_id}/keys/{key_id}
 ```
 
-대상 key에 `revoked_at`/`revoked_by`를 설정한다. `revoked_reason`은 rotation/system revoke처럼 사유가 있는 경우에만 설정한다.
+- Caller는 agent owner user여야 한다.
+- Plaintext token은 create/rotation 응답에서 한 번만 반환한다.
+- Agent account당 live key 최대 5개.
+- `expires_at` 필수, 최대 365일.
+- `scopes`는 빈 배열만 허용한다.

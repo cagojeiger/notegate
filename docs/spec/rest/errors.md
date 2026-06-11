@@ -17,7 +17,7 @@ REST 오류 응답은 항상 같은 기본 shape을 사용한다.
 ```text
 invalid_input  -> 400 invalid field/name/path, malformed limit, malformed/tampered cursor
 forbidden      -> 403 authenticated but not allowed
-not_found      -> 404 not found or cross-workspace hidden resource
+not_found      -> 404 not found or cross-space hidden resource
 conflict       -> 409 state conflict, quota conflict, stale hash, duplicate destination, subtree too large
 internal_error -> 500 redacted internal error
 ```

@@ -1,173 +1,64 @@
-# 보안 정책
-
-이 문서는 notegate의 개인정보(PII) 저장, 암호화, root key 관리, rotation 원칙을 정의한다.
-DB 컬럼 구조는 `docs/spec/db.md`를 따르고, 이 문서는 그 컬럼을 어떻게 사용해야 하는지에 대한 정책을 정의한다.
+# Security spec
 
 ## 기본 원칙
 
-- 사용자 PII 원문은 DB에 평문으로 저장하지 않는다.
-- 권한, 조인, 감사에 필요한 식별자는 UUID로 유지한다.
-- 사람이 직접 식별될 수 있는 원문은 encrypted ciphertext 또는 HMAC hash로 분리한다.
-- API 응답은 권한이 있는 surface에서 필요한 최소 정보만 복호화해 반환한다.
-- root secret, 파생 subkey, plaintext PII, API key plaintext는 application log, error message, audit payload에 기록하지 않는다.
-- notegate runtime은 active root key의 startup ensure/검증과 사용만 담당한다. 무중단 root key rotation은 현재 runtime 목표가 아니다.
+- Secret, bearer token, OAuth code, PKCE verifier, API key plaintext는 log/error/audit payload에 기록하지 않는다.
+- User PII는 평문 저장하지 않는다.
+- API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
+- Content(Text/File)는 제품 설정이나 space 정책에 따라 server-side encryption으로 저장할 수 있다.
 
-## PII 분류
+## Root key domains
 
 ```text
-암호화 저장: user display_name, user email
-HMAC 저장: OAuth provider subject, normalized email 등 lookup/unique 비교값
-평문 유지: account_id, workspace_id, role, kind, agent name, is_active, deleted_at 등 권한/조인/제품 메타데이터
-원문 저장 금지: bearer token, OAuth code, PKCE verifier, API key plaintext, provider subject 원문
+ENC_ROOT     PII와 content 암호화용
+LOOKUP_ROOT  provider/email/API key lookup HMAC와 session signing용
 ```
 
-`email_hash`, `provider_sub_hash`는 암호문이 아니더라도 개인정보 보호 대상이다. 접근 권한,
-로그 출력, 운영자 조회 범위를 encrypted field와 같은 수준으로 제한한다.
+각 root key는 `crypto_key_epochs`에 `key_id`, `domain`, `status`, `verify_tag`, `version`으로 등록한다. 프로세스 시작 시 환경 변수의 active root key와 DB registry가 맞지 않으면 서버는 시작하지 않는다.
 
-## Root key domain
-
-notegate는 복호화 가능한 데이터와 단순 비교/검증 데이터를 서로 다른 root secret domain으로 분리한다.
-Root secret은 DB에 저장하지 않는다.
+## PII storage
 
 ```text
-ENC root
-  - PII ciphertext 암호화/복호화용
-  - env: NOTEGATE_ENC_ROOT_KEY_ID, NOTEGATE_ENC_ROOT_SECRET
-
-LOOKUP root
-  - provider/email lookup HMAC, API key HMAC, session signing용
-  - env: NOTEGATE_LOOKUP_ROOT_KEY_ID, NOTEGATE_LOOKUP_ROOT_SECRET
+users.provider_sub_hash = HMAC(LOOKUP_SUBKEY, provider || ':' || sub)
+users.email_hash        = HMAC(LOOKUP_SUBKEY, normalized_email)
+users.email_ciphertext  = AEAD_ENCRYPT(ENC_SUBKEY, email, aad)
+accounts.display_name_ciphertext = AEAD_ENCRYPT(ENC_SUBKEY, display_name, aad)
 ```
 
-일반 runtime은 각 domain의 active root를 하나씩 사용한다.
+Agent name은 제품 메타데이터로 평문 저장한다. Agent name에 사람 PII를 넣지 않는 것은 제품 입력 정책으로 다룬다.
 
-## 목적별 subkey
-
-Application은 startup 시 root secret을 읽고 HKDF로 목적별 subkey를 파생한다. Purpose label은 secret이 아닌 코드 상수다.
+## API key storage
 
 ```text
-enc_epoch_verify_subkey    = HKDF(enc_root_secret, "notegate/enc/epoch-verify/v1")
-pii_field_subkey           = HKDF(enc_root_secret, "notegate/enc/pii-field/v1")
-
-lookup_epoch_verify_subkey = HKDF(lookup_root_secret, "notegate/lookup/epoch-verify/v1")
-provider_sub_hmac_subkey   = HKDF(lookup_root_secret, "notegate/lookup/provider-sub-hmac/v1")
-email_hmac_subkey          = HKDF(lookup_root_secret, "notegate/lookup/email-hmac/v1")
-api_key_hmac_subkey        = HKDF(lookup_root_secret, "notegate/lookup/api-key-hmac/v1")
-session_sign_subkey        = HKDF(lookup_root_secret, "notegate/lookup/session-signing/v1")
+token plaintext = ngk_v1_{key_id}_{secret}
+token_hash      = HMAC(API_KEY_SUBKEY, key_id || ':' || secret)
 ```
 
-규칙:
+- Plaintext token은 생성/rotation 응답에서 한 번만 반환한다.
+- DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
+- LOOKUP root key 폐기가 필요하면 영향받는 live key를 revoke하고 재발급한다.
 
-- root secret은 32 bytes 이상의 random secret이어야 한다.
-- 같은 raw root secret bytes를 서로 다른 domain에 재사용하지 않는다.
-- 같은 raw root secret bytes를 암호화/HMAC/session signing에 직접 사용하지 않는다.
-- root secret은 `SecretString`으로 다루고 log/error/audit payload에 노출하지 않는다.
-- crypto 연산에는 raw root secret을 직접 쓰지 않고 목적별 subkey만 사용한다.
-- DB row에는 key material이 아니라 `crypto_key_epochs.key_id`와 version만 저장한다. `key_id`는 root key epoch를 식별하고, version은 HKDF label/crypto material format version을 뜻한다.
-- HKDF label은 코드의 중앙 registry에만 정의한다.
-- DB 테이블명, 컬럼명, repository 이름, endpoint 이름을 HKDF label로 자동 변환하지 않는다.
-- Table rename, column split/merge 같은 저장소 리팩토링은 기존 ciphertext/hash 호환성을 깨면 안 된다.
-- HKDF label을 바꿔야 하면 `/v2`처럼 version을 올리고, 해당 key material로 생성된 row의 version과 migration 절차를 함께 정의한다.
-- Label은 secret이 아니다. 목적은 같은 root secret에서 파생된 subkey 간 domain separation이다.
+## Content encryption
 
-## Key epoch 검증
-
-`crypto_key_epochs`는 env로 주입된 root secret이 선언된 `key_id`와 맞는지 검증한다. Startup은 active `enc`/`lookup` row가 없으면 생성하지만, 이미 다른 active `key_id`가 있으면 실패하며 rotation하지 않는다.
+Text/File content는 두 저장 방식을 가진다.
 
 ```text
-verify_tag = HMAC(epoch_verify_subkey, "key-epoch:v1:" + domain + ":" + key_id)
+plain      = DB 또는 object storage에 평문 content 저장
+encrypted  = ENC root에서 파생한 content subkey로 AEAD 암호화 저장
 ```
 
-규칙:
-
-- startup 시 active ENC root와 active LOOKUP root의 `verify_tag`를 DB와 비교한다.
-- Startup ensure 후 active row의 `key_id`나 `verify_tag`가 configured root와 다르면 startup은 실패한다.
-- `key_id`는 영구 식별자다. 한 번 등록한 `key_id`는 상태가 바뀌어도 다른 root secret에 재사용하지 않는다.
-- `status='active'` root만 새 encrypt/hash/sign에 사용할 수 있다.
-- `status='verify_only'` root는 runtime write에는 사용할 수 없다.
-- `status='revoked'` root는 사용할 수 없다.
-
-## 암호화 저장 값
-
-PII 원문 암호화는 application layer에서 수행한다.
+Text metadata는 plaintext 기준으로 계산한다.
 
 ```text
-display_name_ciphertext = AEAD_Encrypt(pii_field_subkey, user display_name, display_name AAD)
-email_ciphertext        = AEAD_Encrypt(pii_field_subkey, email, email AAD)
+content_sha256 = SHA256(plaintext bytes)
+byte_len       = plaintext byte length
+line_count     = plaintext line count for Text
 ```
 
-AAD는 encrypted field의 storage context다. AAD는 secret이 아니며, decrypt 시 재구성 가능한 안정 값만 사용한다.
-Agent name은 machine actor의 제품 메타데이터로 `agents.name`에 평문 저장하며, user PII 저장소로 사용하지 않는다.
+암호화 저장 시 DB에는 ciphertext, nonce, enc_key_id, enc_version을 저장한다. 서버가 복호화 가능한 key를 가진 경우 read/write/patch는 가능하다. SQL `LIKE/ILIKE` 기반 grep은 encrypted content에 직접 적용할 수 없으므로, 필요한 경우 별도 검색 index/extract 정책을 둔다.
 
-```text
-display_name AAD = app=notegate;field=account.display_name;account_id=<accounts.id>;key_id=<enc_key_id>;version=<enc_version>
-email AAD        = app=notegate;field=user.email;account_id=<users.id>;key_id=<enc_key_id>;version=<enc_version>
-```
+## Deletion and anonymization
 
-규칙:
+User 탈퇴는 account row를 즉시 hard delete하지 않는다. Attribution 보존을 위해 account shell은 남기고, retention 이후 PII ciphertext/hash와 provider tombstone을 제거한다.
 
-- 암호화 알고리즘은 인증 암호화(AEAD)를 사용한다.
-- 기본 알고리즘은 `AES-256-GCM`이다.
-- 각 encrypted field는 고유 nonce를 사용한다.
-- 같은 key와 nonce 조합을 재사용하지 않는다.
-- Encrypted row에는 사용한 ENC root `key_id`/version을 함께 저장한다.
-- Account별 DEK/envelope table은 현재 두지 않는다.
-- AAD에는 plaintext PII, token, OAuth code, PKCE verifier를 넣지 않는다.
-- AAD의 `field`는 안정적인 crypto field id다. 물리 table/column 이름을 바꿔도 같은 의미의 데이터면 기존 field id를 유지한다.
-- AAD 구성이 달라지면 복호화가 실패하므로 AAD 변경은 version migration으로만 수행한다.
-
-## HMAC 조회 값
-
-OAuth provider subject와 email lookup 값은 원문 대신 HMAC hash로 저장한다.
-
-```text
-provider_sub_hash = HMAC(provider_sub_hmac_subkey, "provider-sub:v1:" + provider + ":" + provider_subject)
-email_hash        = HMAC(email_hmac_subkey, "email:v1:" + normalize(email))
-```
-
-규칙:
-
-- HMAC key material은 LOOKUP root secret에서 파생한다.
-- Hash row에는 사용한 LOOKUP root `key_id`/version을 함께 저장한다.
-- `email_hash`는 email ciphertext를 복호화할 수 있으므로 admin 작업에서 재계산할 수 있다.
-- `provider_sub_hash`는 provider subject 원문을 저장하지 않으므로 일괄 재계산할 수 없다.
-
-## API key 저장과 rotation
-
-API key는 비밀번호와 같은 credential로 취급한다. API key plaintext는 DB에 저장하지 않고, 암호화해 복호화 가능하게 저장하지도 않는다.
-
-```text
-plaintext token = ngk_v1_<api_key_id>_<secret>
-token_hash     = HMAC(api_key_hmac_subkey, "api-key:v1:" + api_key_id + ":" + secret)
-```
-
-규칙:
-
-- 평문 token은 생성 또는 rotation 응답에서 정확히 한 번만 반환한다.
-- `expires_at`은 필수다. User API key는 최대 30일, agent API key는 최대 365일까지 허용한다.
-- DB에는 `token_prefix`, `token_hash`, `hash_key_id`, `hash_version`만 저장한다.
-- 인증 조회는 token의 `api_key_id`와 계산한 `token_hash`를 함께 사용한다.
-- `hash_key_id`는 token_hash를 만든 LOOKUP root key id다.
-- API key 자체 rotation은 old `expires_at`을 상속한 new token 발급 + old key revoke로 처리한다. Token 원문은 복구하거나 복호화하지 않는다.
-- LOOKUP root key를 폐기해야 할 때 기존 API key는 원문이 없어 일괄 rehash할 수 없다. 영향받는 `hash_key_id`의 live API key는 revoke하고, 사용자 또는 agent creator가 새 key를 생성하도록 요구한다.
-
-## 탈퇴와 익명화
-
-User 탈퇴나 agent 삭제는 account hard delete가 아니라 deactivate/soft delete로 처리한다.
-`created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 익명화 후에도 account 껍데기는 남긴다.
-
-User 탈퇴는 두 단계로 익명화한다(ADR 0004).
-
-- 소프트삭제 시점(t=0): account를 비활성화하되 PII ciphertext/hash와 `provider_sub_hash`는 tombstone으로 유지한다. tombstone의 `UNIQUE` 제약이 쿨다운 동안 같은 provider subject의 중복 가입을 막는다.
-- 소거 시점(purge, retention 경과): PII ciphertext/hash를 제거하고 `provider_sub_hash` tombstone을 해제한다. 식별 불가능한 익명 껍데기만 남는다.
-
-탈퇴 lifecycle side effect(게이트, 쿨다운, side effect 순서)는 `docs/spec/lifecycle.md`의 User 탈퇴 정책을 따른다. 이 문서는 PII ciphertext/hash 제거 시점과 key material 비노출 정책을 정본으로 둔다.
-
-## 로그와 감사 payload
-
-감사로그 상세 스키마는 별도 spec에서 정의한다. 다만 모든 로그와 감사 payload는 다음 원칙을 지켜야 한다.
-
-- plaintext PII를 기록하지 않는다.
-- bearer token, OAuth code, PKCE verifier, API key plaintext를 기록하지 않는다.
-- root secret, subkey, key material을 기록하지 않는다.
-- 필요한 경우 account_id, workspace_id, event kind, result, timestamp 중심으로 기록한다.
+Agent 삭제도 account deactivate로 처리한다. Agent row는 attribution 보존을 위해 일반 product action에서 hard delete하지 않는다.

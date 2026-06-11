@@ -1,133 +1,28 @@
 # REST Nodes
 
-## Nodes
-
-All node APIs require the `{workspace_id}` URL segment and validate that the node belongs to that
-workspace. Node ids are stable across rename and move.
-
-### Resolve path
+Node API는 tree metadata를 다룬다. Content는 Text/File category에서 다룬다.
 
 ```http
-GET /api/v1/workspaces/{workspace_id}/paths/resolve?path=/projects/note.md
+GET    /api/v1/spaces/{space_id}/paths/resolve?path=/notes/state.json
+GET    /api/v1/spaces/{space_id}/nodes/{node_id}
+GET    /api/v1/spaces/{space_id}/nodes/{node_id}/children?limit=100&cursor=...
+POST   /api/v1/spaces/{space_id}/nodes
+PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
+POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
+DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```
 
-Used by command palette, deep links, breadcrumbs, and search-result navigation. The response is a
-`Node output`. Deleted nodes are not resolved.
+Node kind:
 
-### Get node
-
-```http
-GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}
+```text
+folder
+text
+file
 ```
 
-Returns node metadata. Useful for refresh after optimistic UI updates. The `path` field is derived from the parent chain, not stored as canonical full path. Document nodes include `content_sha256`, `byte_len`, and `line_count`; folder nodes omit them.
+Create rules:
 
-### List children
-
-```http
-GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}/children?limit=100&cursor=...
-```
-
-규칙:
-
-- `{node_id}` must be a folder.
-- Only direct children are returned.
-- Pagination is required.
-- Default ordering is `(sort_order, name, id)`.
-
-```json
-{
-  "parent": {"id": "folder-id", "path": "/projects", "kind": "folder"},
-  "children": [],
-  "page": {"limit": 100, "returned": 0, "has_more": false, "next_cursor": null}
-}
-```
-
-### Create node
-
-```http
-POST /api/v1/workspaces/{workspace_id}/nodes
-```
-
-```json
-{
-  "parent_id": "folder-id",
-  "kind": "document",
-  "name": "note.md",
-  "content_md": "# optional initial content\n"
-}
-```
-
-규칙:
-
-- `kind='folder'` ignores `content_md`.
-- Node name must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; `/`, `:`, spaces, control characters, `.`, and `..` are rejected.
-- Folder name length must be `<= 128` chars.
-- Document filename length must be `<= 128` chars including `.md`; title stem length must be `<= 125` chars excluding `.md`.
-- Resulting depth must be `<= 5`.
-- Parent folder must have fewer than `200` live direct children before create.
-- Workspace must have fewer than `10000` live nodes before create.
-- `kind='document'` requires `.md` name and creates a `documents` row.
-- Document create additionally requires fewer than `5000` live documents in the workspace.
-- `kind='folder'` name must not end with `.md`.
-- Same parent folder cannot contain duplicate live names.
-
-Response is a `Node output`.
-
-### Update node metadata
-
-```http
-PATCH /api/v1/workspaces/{workspace_id}/nodes/{node_id}
-```
-
-```json
-{
-  "name": "renamed.md",
-  "sort_order": 10
-}
-```
-
-Use this for rename or custom ordering. Root rename is rejected.
-
-Response is a `Node output`.
-
-### Move node
-
-```http
-POST /api/v1/workspaces/{workspace_id}/nodes/{node_id}/move
-```
-
-```json
-{
-  "new_parent_id": "folder-id",
-  "new_name": "optional-renamed.md",
-  "expected_parent_id": "old-parent-id"
-}
-```
-
-규칙:
-
-- Root move is rejected.
-- Moving a folder into itself or descendants is rejected.
-- Resulting subtree depth must be `<= 5`.
-- Destination parent must have fewer than `200` live direct children unless the move stays within the same parent.
-- Move/rename updates only the moved node parent/name metadata; descendant paths are derived and must not be rewritten.
-- The destination sibling name must be unique.
-- `expected_parent_id` is optional but recommended for optimistic UI safety.
-
-Response is a `Node output`.
-
-### Delete node
-
-```http
-DELETE /api/v1/workspaces/{workspace_id}/nodes/{node_id}?recursive=true
-```
-
-규칙:
-
-- Root 삭제는 거부한다.
-- Document 삭제는 `recursive=true`를 요구하지 않는다.
-- Folder 삭제는 `recursive=true`가 필요하다.
-- Delete는 `nodes` soft delete다. 삭제된 node는 일반 list/search/resolve 결과에서 사라진다.
-- 삭제된 node는 현재 REST 계약으로 복구할 수 없다.
-- 삭제된 node는 `purge_after`까지 보관된다. 이후 내부 purge job이 hard delete할 수 있다.
+- Folder create는 `nodes(kind='folder')`만 만든다.
+- Text create는 `nodes(kind='text')`와 `text_objects`를 함께 만든다.
+- File create/upload는 `nodes(kind='file')`와 `file_objects`를 함께 만든다.
+- 같은 parent 안 live name은 unique다.

@@ -1,0 +1,57 @@
+# Domain model
+
+이 문서는 notegate의 제품 용어 정본이다.
+
+## Core concepts
+
+```text
+Account    인증 가능한 실행 주체. kind는 user 또는 agent다.
+User       사람 계정. Space와 Agent를 소유하고 관리한다.
+Agent      User가 만든 worker 계정. API key로 인증되고 연결된 Space에서 작업한다.
+Space      User가 소유한 중앙 저장 범위.
+Node       Space 안 tree item. folder/text/file 중 하나다.
+Folder     하위 node를 담는 container.
+Text       UTF-8 content object. read/write/patch/grep 가능.
+File       binary/object content. upload/download/stat 가능. 직접 read/patch/grep 불가.
+Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
+API key    User 또는 Agent account로 인증되는 bearer credential.
+```
+
+## Ownership and control
+
+```text
+User owns Spaces
+User owns Agents
+User creates API keys
+User connects Agents to Spaces
+Agent acts only inside connected Spaces
+```
+
+`accounts`는 attribution과 authentication을 위한 공통 actor다. `users`와 `agents`는 account subtype이다.
+
+## Permission model
+
+```text
+User caller:
+  owned space read/write/manage
+  owned agent manage
+  own user API key manage
+
+Agent caller:
+  connected space read/write according to permission
+  no space management
+  no agent/key management
+```
+
+Permission:
+
+```text
+read  = list/stat/read text/search text/download file metadata
+write = read + create/update/patch/delete/move/upload
+```
+
+## Naming rules
+
+- 외부 제품 용어는 `space`, `agent connection`, `permission`, `text`, `file`을 사용한다.
+- 일반 authorization 설명에는 `access`라는 보안 용어를 쓸 수 있지만, 제품 리소스 이름으로는 `connection`을 사용한다.
+- `document`, `workspace`, `owner/editor/viewer`는 새 제품 정본 용어가 아니다.

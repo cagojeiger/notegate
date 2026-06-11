@@ -1,226 +1,64 @@
-# notegate API architecture
+# API architecture
 
-이 문서는 notegate API의 상위 architecture와 surface 경계를 정의한다. 개별 endpoint/tool의 request/response 계약은 `rest/`와 `mcp/` 디렉토리에서 정의한다.
-
-```text
-Browser/UI REST API  = 화면과 tree state를 위한 node_id 중심 API
-MCP tools            = LLM/터미널 사용성을 위한 path 중심 command API
-```
-
-REST와 MCP는 서로 다른 입력 방식을 쓰지만, 같은 workspace/account/access 규칙과 같은 DB를
-사용한다.
-
-Surface별 입력 변환은 API layer가 맡고, command invariant는 service layer가 맡는다.
+notegate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. REST는 브라우저/UI용 resource API이고, MCP는 agent/CLI용 path-first command API다.
 
 ```text
-REST node/document/search handler -> workspace_id/node_id/body를 service command로 변환
-MCP path tool                     -> workspace selector/path/target을 resolve한 뒤 service command로 변환
-service command                   -> 권한, limit, cursor, 파일 불변식, lifecycle semantics 검증
+REST API = UI가 안정적으로 선택한 id 기반 resource API
+MCP tools = agent가 쓰기 쉬운 space name + path 기반 command API
 ```
 
-
-## Document boundary
-
-`api.md`, `rest/`, `mcp/`는 역할이 다르다.
-
-```text
-api.md       = API architecture / category / layer / cross-surface invariant
-rest/        = HTTP REST endpoint contract / URL / request / response / status code
-mcp/         = MCP tool contract / path-oriented command API
-```
-
-`api.md`에는 개별 endpoint body를 자세히 쓰지 않는다. 대신 REST, MCP, Auth, System이
-어떤 책임을 갖고 어떤 category/layer로 나뉘는지 정의한다.
-
-`rest/`에는 실제 HTTP 계약을 쓴다. frontend/BFF/API handler 구현자는 이 문서들을
-기준으로 route, DTO, status code, pagination을 맞춘다.
-
-## 설계 원칙
-
-1. DB는 workspace/account/file tree의 source of truth다.
-2. REST는 브라우저 UI가 쓰기 쉬운 resource API를 제공한다.
-3. MCP는 LLM이 터미널 명령처럼 쓰기 쉬운 path command API를 제공한다.
-4. REST와 MCP는 DB를 직접 다루지 않고 공통 service 계층을 호출한다.
-5. 목록, 검색, 읽기, subtree 변경은 모두 limit/pagination/truncation 정책을 가진다.
-6. 현재 검색은 Postgres `LIKE`/`ILIKE` 기반으로 단순하게 유지한다.
-7. API는 기능 단위 category를 명확히 나눈다. `files` 하나에 identity/access/agent를 섞지 않는다.
-
+두 surface는 같은 service invariant를 사용한다.
 
 ## API categories
 
-REST API는 다음 category로 나눈다. category는 URL, handler module, service의
-경계를 정하는 기준이다.
-
 ```text
-Auth       /auth/*, /.well-known/oauth-authorization-server, /.well-known/oauth-protected-resource*
-Identity   /api/v1/me
-Workspace  /api/v1/workspaces
-Nodes      /api/v1/workspaces/{workspace_id}/nodes
-Documents  /api/v1/workspaces/{workspace_id}/documents
-Search     /api/v1/workspaces/{workspace_id}/search
-Access     /api/v1/workspaces/{workspace_id}/access
-Agents     /api/v1/agents
-System     /health, /ready
-API Docs   /openapi.json, /swagger-ui
-MCP        /mcp
+Auth        /auth/*, /.well-known/*
+Identity    /api/v1/me, /api/v1/me/keys
+Spaces      /api/v1/spaces
+Nodes       /api/v1/spaces/{space_id}/nodes
+Text        /api/v1/spaces/{space_id}/text
+Files       /api/v1/spaces/{space_id}/files
+Search      /api/v1/spaces/{space_id}/search
+Agents      /api/v1/agents
+Connections /api/v1/spaces/{space_id}/agents
+System      /health, /ready
+API Docs    /openapi.json, /swagger-ui
+MCP         /mcp
 ```
 
-분류 기준:
-
-- auth/session resource: login, callback, logout, OAuth protected-resource metadata.
-- identity resource: `/me`는 caller identity와 workspace 밖 전역 capability만 반환한다.
-- workspace 밖 global resource: `workspaces`, `agents`.
-- system probe endpoint: `/health`, `/ready`.
-- API documentation endpoint: `/openapi.json`, `/swagger-ui`.
-- workspace 안 resource: `nodes`, `documents`, `search`, `access`.
-- LLM/CLI command surface: REST category에 억지로 맞추지 않고 `/mcp` tool로 분리한다.
-- `files`는 product concept이지 top-level REST category가 아니다. REST에서는
-  `nodes`/`documents`/`search`로 나눈다.
-
-## Implementation layers
-
-구현은 아래 방향의 의존성으로 나눈다. 핵심 규칙은 `api`가 업무 규칙을 직접 구현하지
-않고 `service`를 호출하며, `service`는 concrete `db` repo를 사용한다는 점이다.
+## Layering
 
 ```text
-api/auth
-api/rest/me
-api/rest/workspaces
-api/rest/nodes
-api/rest/documents
-api/rest/search
-api/rest/access
-api/rest/agents
-api/mcp
-
-service/identity
-service/workspaces
-service/files
-service/search
-service/access
-service/agents
-service/api_keys
-
-db/account_repo       -> service/identity account/user store, REST account ref lookup
-db/api_key_repo       -> service/api_keys API key lifecycle, service/identity API key owner lookup
-db/workspaces_repo    -> service/workspaces store
-db/access_repo        -> service/access store
-db/workspace_role     -> shared live workspace role resolver
-db/files_repo         -> service/files + service/search store
-db/agent_repo         -> service/agents store, service/identity agent detail lookup
-db/postgres_pool      -> connection primitive
-db/lib                -> migration/readiness primitive
-
-model/account
-model/user
-model/agent
-model/workspace
-model/node
-model/document
+api/rest/*     request/response, auth extraction, DTO mapping
+api/mcp/*      tool schema, space/path resolve, DTO mapping
+service/*      authorization, limits, lifecycle invariant
+repo/db        transaction, SQL, DB constraint mapping
+model          shared domain types
 ```
 
-의존성 방향:
-
-```text
-api  ──calls──> service ──uses──> model/core
- │                ▲
- │                │ concrete repo methods
- └──constructs──> db ─────uses──> model/core
-```
-
-레이어 규칙:
-
-- Auth layer는 OAuth redirect/callback/session 발급과 bearer challenge metadata를 담당한다.
-- API layer는 HTTP/MCP DTO, auth extraction, service 호출, error mapping을 담당한다.
-- API layer는 파일/권한/workspace 업무 규칙을 직접 구현하지 않는다.
-- REST 응답에 표시할 account ref처럼 화면 출력용 enrichment는 API layer에서 조회할 수 있다.
-  단, 권한 판단이나 lifecycle 변경은 service layer를 거친다.
-- System endpoint(`/ready`)는 dependency readiness 확인을 위해 DB connectivity와 embedded migration 적용 상태를 확인한다.
-- Model layer는 persistence/API에 독립적인 데이터 타입을 담당한다.
-- Service layer는 권한 체크, 파일 invariant, command semantics를 담당한다.
-- Service layer는 opaque pagination cursor 인코딩/디코딩과 command pagination 정책을 담당한다.
-- DB layer는 query/transaction/keyset tuple 조회와 concrete repo method를 담당한다.
-
-## 문서 구성
-
-- [`db.md`](db.md): 현재 사용하는 canonical 테이블 설계.
-- [`files-commands.md`](files-commands.md): `ls`, `read`, `mv` 같은 공통 파일 명령의 의미.
-- [`rest/`](rest/README.md): HTTP REST endpoint 계약.
-- [`mcp/`](mcp/README.md): LLM/CLI 친화 MCP tool 계약.
-- [`search.md`](search.md): `find`, `grep`의 현재 단순 검색 방식.
-- [`performance-limits.md`](performance-limits.md): pagination, max size, subtree 제한 정책.
-
-## Surface responsibilities
-
-### REST
-
-REST는 화면을 위한 API다. UI는 파일트리 node를 펼치고 선택 상태를 유지해야 하므로
-`workspace_id + node_id` 중심 계약을 사용한다. `workspace_id`는 secret이 아니며
-서버가 매 요청마다 live workspace와 effective role 기준으로 workspace 권한을 검증한다.
-
-```text
-me(identity/capabilities) -> workspaces(role/root_node_id) -> children(workspace_id, root_node_id) -> document(workspace_id, node_id)
-```
-
-`me`는 workspace 목록을 싣지 않는다. 초기 workspace 선택은 `workspaces` category가 담당한다.
-
-`/api/v1/files/root` 같은 전역 root endpoint는 두지 않는다. root node id는 workspace
-응답에 포함한다.
-
-### MCP
-
-MCP는 LLM과 CLI 감각을 위한 API다. 사용자는 보통 node UUID나 workspace UUID가 아니라
-workspace 이름과 path를 말하므로 MCP file tool은 `workspace` name selector + path 중심 계약을 사용한다.
-
-```text
-workspaces_list()
-files_ls(workspace, path)
-files_read(workspace, path)
-files_write(workspace, path, content_md)
-files_patch(workspace, path, edits)
-files_mv(workspace, source_path, destination_path)
-```
-
-MCP 내부 구현은 먼저 workspace name을 caller가 접근 가능한 workspace로 resolve하고, 선택된 workspace 안에서 path를 resolve한 뒤 기존 node/document primitive를 조합한다. 같은 이름의 접근 가능 workspace가 여러 개면 ambiguity error를 반환한다. `workspace_id`는 모호성 해소용 fallback으로만 허용한다.
+API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는다.
 
 ## Identity mapping
 
-인증 방식은 account kind를 결정한다.
-
 ```text
-browser login via authgate       -> user account
-MCP OAuth 2.1 via authgate        -> user account
-device flow via authgate          -> user account
-ngk_v1_ user API key              -> user account
-ngk_v1_ agent API key             -> agent account
+browser login via authgate  -> user account
+MCP OAuth via authgate       -> user account
+device flow via authgate     -> user account
+ngk_v1_ user API key         -> user account
+ngk_v1_ agent API key        -> agent account
 ```
 
-OAuth 계열 인증은 사람 사용자를 증명하므로 항상 `user`로 처리한다. `ngk_v1_` API key는 `api_keys.account_id`에 연결된 account kind로 caller를 결정한다.
+OAuth 계열 인증은 user로 처리한다. API key는 `api_keys.account_id`가 가리키는 account kind로 caller를 결정한다.
 
-## 공통 불변식
+## Common invariants
 
-- 모든 작업은 인증된 account가 접근 권한을 가진 workspace 안에서만 실행한다.
-- 클라이언트는 호출자 `user_id`나 `account_id`를 직접 보내지 않는다.
-- 사용자 PII 원문은 DB에 평문 저장하지 않는다. 저장 시 encrypted ciphertext 또는 HMAC hash로 분리하고, 응답에는 권한이 있는 surface에서 필요한 최소 정보만 복호화해 반환한다.
-- REST 클라이언트는 URL에 `workspace_id`를 명시하고, 서버는 live workspace와 effective role 기준으로 workspace 권한을 검증한다.
-- MCP는 path 중심으로 호출하되 내부에서 workspace context와 path를 resolve한다.
-- root는 workspace마다 정확히 하나이며, workspace 생성 시 canonical root node `/`가 자동 생성된다. `parent_id = NULL`은 root에만 허용한다.
-- workspace name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이다.
-- root 외 node name은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` 형식이며 `/`, `:`, 공백, control character, `.`, `..`를 허용하지 않는다.
-- folder name은 최대 `128` chars, document filename은 `.md` 포함 최대 `128` chars다.
-- document title stem은 `.md` 제외 최대 `125` chars이며, 현재 제목은 filename stem으로 본다.
-- 같은 parent folder 안에서 살아있는 node 이름은 unique하다.
-- 다른 folder에서는 같은 이름을 사용할 수 있다.
-- path는 `parent_id + name` tree에서 derive하며, path uniqueness는 sibling unique invariant로 보장한다.
-- user/workspace/agent/key/access 생성·삭제 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
-- workspace 생성은 user만 가능하다. workspace rename/delete/access 관리는 `workspace_access.role=owner`인 active user만 가능하다. agent account는 workspace 내부 `viewer/editor` 작업자로만 접근한다.
-- user creator account당 live workspace는 최대 `20`개다.
-- user/agent account당 accessible live workspace는 최대 `100`개다.
-- workspace active access row는 owner row를 포함해 최대 `20`개다.
-- user creator account당 active agent는 최대 `50`개다. user account당 live API key는 최대 `2`개이며 만료 기한은 최대 `30`일이다. agent account당 live API key는 최대 `5`개이며 만료 기한은 최대 `365`일이다.
-- 파일트리 최대 depth는 `5`, folder당 live direct children은 최대 `200`, workspace live nodes는 최대 `10000`개다.
-- workspace live documents는 최대 `5000`개이고, live document 원문 총량은 최대 `268435456` bytes다.
-- Markdown document 하나는 최대 `524288` bytes, `2000` lines다.
-- document node 이름은 `.md`로 끝난다.
-- folder node 이름은 `.md`로 끝날 수 없다.
-- 삭제된 node는 `ls`, `find`, `grep`, `stat`, `read` 결과에서 보이지 않는다.
+- 클라이언트는 caller `user_id`/`account_id`를 직접 보내지 않는다.
+- User는 자신이 소유한 space를 관리한다.
+- Agent는 연결된 space에서만 permission에 따라 작업한다.
+- Space 안 tree source of truth는 `parent_id + name`이다. Full path는 저장하지 않고 derive한다.
+- Space마다 root node `/`가 하나 있다.
+- Node kind는 `folder`, `text`, `file` 중 하나다.
+- Text는 UTF-8 content이며 read/write/patch/grep 가능하다.
+- File은 object/binary content이며 직접 text read/patch/grep 대상이 아니다.
+- Agent connection permission은 `read` 또는 `write`다. `write`는 `read`를 포함한다.
+- User/agent action attribution은 account id로 기록한다.

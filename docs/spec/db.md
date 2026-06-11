@@ -1,603 +1,202 @@
-# 파일 DB 스키마
+# Database schema
 
-notegate는 개인 Markdown 파일시스템을 Postgres에 저장한다. DB는 정본 저장소이며,
-REST와 MCP는 모두 이 구조 위에서 동작한다.
+이 문서는 새 도메인 모델의 DB 정본이다. 배포 전 리팩토링에서는 기존 migration을 보존하지 않고 단일 초기 migration으로 정리할 수 있다.
 
-## 테이블 개요
-
-정본 테이블:
+## Entity overview
 
 ```text
-crypto_key_epochs 암호화/비교 root key epoch registry
-accounts          user/agent 공통 행위자 identity
-users             authgate OAuth 사용자 상세
-agents            AI agent 상세
-api_keys          user/agent 공용 API key credential hash
-workspaces        개인 노트 workspace 경계
-workspace_access  workspace membership과 owner/editor/viewer 권한
-nodes             folder/document 공통 tree node
-documents         markdown document 본문
+crypto_key_epochs
+accounts
+users
+agents
+api_keys
+spaces
+space_agent_connections
+nodes
+text_objects
+file_objects
 ```
 
-Markdown 원본은 `documents.content_md`에 저장한다. grep은 `documents.content_md`를 `ILIKE`로
-후보 검색하고 application code에서 line-split한다. 권한은 workspace 단위로만 적용하고,
-file/folder/node 단위 ACL은 제공하지 않는다.
-
-## crypto_key_epochs
-
-`crypto_key_epochs`는 DB 밖에서 주입되는 root secret의 epoch를 관리한다. Root secret 원문이나 파생 subkey는 저장하지 않고, env에 등록된 secret이 선언된 `key_id`와 맞는지 검증하기 위한 tag와 rotation 상태만 저장한다.
-
-```sql
-CREATE TABLE crypto_key_epochs (
-    key_id       TEXT PRIMARY KEY,
-    domain       TEXT NOT NULL CHECK (domain IN ('enc', 'lookup')),
-    status       TEXT NOT NULL CHECK (status IN ('active', 'verify_only', 'revoked')),
-    verify_tag   TEXT NOT NULL,
-    version      INTEGER NOT NULL DEFAULT 1,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    activated_at TIMESTAMPTZ,
-    retired_at   TIMESTAMPTZ,
-    revoked_at   TIMESTAMPTZ,
-
-    CHECK (key_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
-    CHECK (
-        (status = 'active' AND activated_at IS NOT NULL AND retired_at IS NULL AND revoked_at IS NULL)
-        OR
-        (status = 'verify_only' AND activated_at IS NOT NULL AND retired_at IS NOT NULL AND revoked_at IS NULL)
-        OR
-        (status = 'revoked' AND revoked_at IS NOT NULL)
-    )
-);
-
-CREATE UNIQUE INDEX crypto_key_epochs_one_active_per_domain
-    ON crypto_key_epochs(domain)
-    WHERE status = 'active';
-```
-
-규칙:
-
-- `key_id`는 과거 epoch까지 포함해 영구적으로 unique하다. 한 번 사용한 `key_id`는 `verify_only`나 `revoked`가 되어도 다른 root secret에 재사용할 수 없다.
-- `version`은 root key epoch 식별자가 아니라 HKDF label/crypto material format version이다. Epoch 식별은 `key_id`가 담당한다.
-- `domain='enc'` root는 복호화 가능한 PII ciphertext 암호화/복호화에 사용한다.
-- `domain='lookup'` root는 provider/email lookup HMAC, API key HMAC, session signing처럼 비교/검증 계열 작업에 사용한다.
-- 일반 runtime은 각 domain의 active root를 하나씩 사용한다. Rotation/maintenance 경로는 필요한 old root를 별도 입력으로 받아 `verify_only` epoch를 검증/조회할 수 있다.
-- `verify_tag`는 root secret에서 파생한 key epoch verify subkey로 계산한다. 같은 `key_id`에 잘못된 secret이 주입되면 startup 또는 maintenance command가 실패해야 한다.
-- `active` epoch는 새 encrypt/hash/sign에 사용할 수 있다. `verify_only` epoch는 기존 데이터 decrypt/verify 또는 migration에만 사용할 수 있고 새 write에는 사용할 수 없다. `revoked` epoch는 사용할 수 없다. 각 row의 FK는 key 존재만 보장하며, `enc`/`lookup` domain 적합성은 service 정책으로 검증한다.
-- application startup은 configured root key ID/secret으로 active `enc`/`lookup` epoch row가 없을 때만 idempotent하게 생성한 뒤 검증한다. 이미 다른 `key_id`의 active epoch가 있으면 startup은 실패한다. Startup은 rotation을 수행하지 않는다.
-
-## accounts
-
-`accounts`는 notegate에서 행동할 수 있는 공통 주체다. 사람 사용자와 AI agent 모두
-하나의 `accounts.id`를 가진다.
-
-```sql
-CREATE TABLE accounts (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    kind                     TEXT NOT NULL CHECK (kind IN ('user', 'agent')),
-    display_name_ciphertext  BYTEA,
-    display_name_nonce       BYTEA,
-    display_name_enc_key_id  TEXT REFERENCES crypto_key_epochs(key_id),
-    display_name_enc_version INTEGER,
-    is_active                BOOLEAN NOT NULL DEFAULT true,
-    deleted_at              TIMESTAMPTZ,
-    deleted_by              UUID REFERENCES accounts(id),
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CHECK (
-        (deleted_at IS NULL AND deleted_by IS NULL)
-        OR
-        (deleted_at IS NOT NULL AND deleted_by IS NOT NULL)
-    ),
-    CHECK (
-        (display_name_ciphertext IS NULL AND display_name_nonce IS NULL AND display_name_enc_key_id IS NULL AND display_name_enc_version IS NULL)
-        OR
-        (display_name_ciphertext IS NOT NULL AND display_name_nonce IS NOT NULL AND display_name_enc_key_id IS NOT NULL AND display_name_enc_version IS NOT NULL)
-    )
-);
-```
-
-규칙:
-
-- browser login, MCP OAuth 2.1, device flow via authgate는 `kind='user'` account다.
-- API key는 `api_keys.account_id`에 연결된 account로 인증된다. 연결 account가 `kind='user'`이면 user caller, `kind='agent'`이면 agent caller다.
-- 일반 product action에서 account hard delete는 하지 않는다.
-- user 탈퇴나 agent 삭제는 `accounts.is_active=false`, `deleted_at`, `deleted_by`로 deactivate/soft delete한다.
-- PII 원문은 평문으로 저장하지 않는다. 표시 이름 ciphertext는 `enc` domain root에서 파생한 PII encryption subkey로 암호화하고 사용한 key id/version을 함께 저장한다.
-- `created_by`, `updated_by`, `deleted_by` 계열 컬럼은 모두 `accounts.id`를 참조한다.
-
-## users
-
-`users`는 authgate OAuth 로그인으로 확보된 사람 사용자 상세 테이블이다. `users.id`는
-동시에 `accounts.id`다.
-
-```sql
-CREATE TABLE users (
-    id                        UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-    provider_sub_hash          TEXT UNIQUE,
-    provider_sub_hash_key_id   TEXT REFERENCES crypto_key_epochs(key_id),
-    provider_sub_hash_version  INTEGER,
-    email_ciphertext           BYTEA,
-    email_nonce                BYTEA,
-    email_enc_key_id           TEXT REFERENCES crypto_key_epochs(key_id),
-    email_enc_version          INTEGER,
-    email_hash                 TEXT,
-    email_hash_key_id          TEXT REFERENCES crypto_key_epochs(key_id),
-    email_hash_version         INTEGER,
-
-    CHECK (
-        (provider_sub_hash IS NULL AND provider_sub_hash_key_id IS NULL AND provider_sub_hash_version IS NULL)
-        OR
-        (provider_sub_hash IS NOT NULL AND provider_sub_hash_key_id IS NOT NULL AND provider_sub_hash_version IS NOT NULL)
-    ),
-    CHECK (
-        (email_ciphertext IS NULL AND email_nonce IS NULL AND email_enc_key_id IS NULL AND email_enc_version IS NULL)
-        OR
-        (email_ciphertext IS NOT NULL AND email_nonce IS NOT NULL AND email_enc_key_id IS NOT NULL AND email_enc_version IS NOT NULL)
-    ),
-    CHECK (
-        (email_hash IS NULL AND email_hash_key_id IS NULL AND email_hash_version IS NULL)
-        OR
-        (email_hash IS NOT NULL AND email_hash_key_id IS NOT NULL AND email_hash_version IS NOT NULL)
-    ),
-    anonymized_at              TIMESTAMPTZ
-);
-```
-
-규칙:
-
-- user 최초 생성과 탈퇴의 lifecycle side effect는 `docs/spec/lifecycle.md`를 따른다.
-- user 탈퇴의 PII redaction/anonymization 상세 보안 정책은 `docs/spec/security.md`를 따른다.
-- OAuth provider subject 원문은 저장하지 않고 provider/sub 기반 HMAC hash로 로그인 매칭한다. Hash row에는 사용한 `lookup` domain key id/version을 함께 저장한다.
-- email 원문은 ciphertext로 저장하고 사용한 `enc` domain key id/version을 함께 저장한다. Login/unique lookup이 필요하면 normalized email HMAC hash와 사용한 `lookup` domain key id/version을 별도로 저장한다.
-- `created_by`, `updated_by`, `deleted_by` 참조 보존을 위해 일반 product action으로 user row를 물리 삭제하지 않는다.
-
-
-## agents
-
-`agents`는 AI agent 상세 테이블이다. Agent-bound API key, CLI, MCP key는 `api_keys.account_id = agents.id`로 연결된다.
-`agents.id`는 동시에 `accounts.id`다.
-
-```sql
-CREATE TABLE agents (
-    id         UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-    name       TEXT NOT NULL,
-    created_by UUID NOT NULL REFERENCES accounts(id),
-    CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
-);
-```
-
-규칙:
-
-- agent 삭제 상태는 `agents`가 아니라 공통 parent인 `accounts`에서 관리한다.
-- agent 생성/삭제와 key 생성/revoke lifecycle은 `docs/spec/lifecycle.md`를 따른다.
-- 한 user creator account가 만들 수 있는 active agent는 최대 `50`개다.
-- agent name은 공백만으로 만들 수 없고 최대 `63`자다.
-- `created_by`, `updated_by`, `deleted_by` 참조를 보존하기 위해 일반 product action으로 agent row를 물리 삭제하지 않는다.
-
-## api_keys
-
-`api_keys`는 user와 agent 공용 API key credential hash를 저장한다. Token 원문은 저장하지 않고, 생성/rotation 응답에서 정확히 한 번만 반환한다. API key는 암호화해 복호화 가능하게 저장하지 않는다.
-
-```sql
-CREATE TABLE api_keys (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id          UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    name                TEXT NOT NULL,
-    token_prefix        TEXT NOT NULL,
-    token_hash          TEXT NOT NULL UNIQUE,
-    hash_key_id         TEXT NOT NULL REFERENCES crypto_key_epochs(key_id),
-    hash_version        INTEGER NOT NULL DEFAULT 1,
-    scopes              TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[] CHECK (cardinality(scopes) = 0),
-    created_by          UUID REFERENCES accounts(id),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at        TIMESTAMPTZ,
-    expires_at          TIMESTAMPTZ NOT NULL,
-    revoked_at          TIMESTAMPTZ,
-    revoked_by          UUID REFERENCES accounts(id),
-    revoked_reason      TEXT,
-    rotated_from_key_id UUID REFERENCES api_keys(id),
-
-    CHECK (
-        (revoked_at IS NULL AND revoked_by IS NULL AND revoked_reason IS NULL)
-        OR
-        (revoked_at IS NOT NULL AND (revoked_by IS NOT NULL OR revoked_reason IS NOT NULL))
-    ),
-    CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
-);
-
-CREATE INDEX api_keys_account_live_idx
-    ON api_keys(account_id)
-    WHERE revoked_at IS NULL;
-
-CREATE INDEX api_keys_account_created_idx
-    ON api_keys(account_id, created_at DESC, id DESC);
-
-CREATE INDEX api_keys_hash_key_live_idx
-    ON api_keys(hash_key_id)
-    WHERE revoked_at IS NULL;
-
-CREATE INDEX api_keys_expiring_live_idx
-    ON api_keys(expires_at)
-    WHERE revoked_at IS NULL;
-
-CREATE INDEX api_keys_rotated_from_idx
-    ON api_keys(rotated_from_key_id)
-    WHERE rotated_from_key_id IS NOT NULL;
-```
-
-규칙:
-
-- API key 인증은 `api_keys.account_id`의 account kind로 caller를 결정한다.
-- `accounts.kind='user'`에 연결된 key는 user API key이며 user caller로 동작한다.
-- `accounts.kind='agent'`에 연결된 key는 agent API key이며 agent caller로 동작한다.
-- token format은 `ngk_v1_<api_key_id>_<secret>` 계열의 opaque value다. `api_key_id`는 공개 key id이고, `secret`은 DB에 저장하지 않는다. 인증 조회는 `api_key_id`와 계산한 `token_hash`를 함께 사용한다.
-- `token_hash` 계산식은 `docs/spec/security.md`의 API key 저장 정책을 따른다.
-- `hash_key_id`/`hash_version`은 어떤 `lookup` domain root key epoch에서 파생한 API key HMAC subkey로 `token_hash`를 만들었는지 기록한다.
-- `revoked_at`이 있는 key는 인증에 사용할 수 없다. User/API 요청에 의한 revoke는 `revoked_by`를 기록하고, system/bulk revoke는 `revoked_reason`으로 사유를 기록한다.
-- `expires_at`은 필수다. `expires_at <= now()`인 key는 인증에 사용할 수 없고 live key로 계산하지 않는다.
-- API key name은 공백만으로 만들 수 없고 최대 `63`자다.
-- `scopes`는 생략하거나 빈 배열이어야 한다. non-empty scopes는 service와 DB CHECK 양쪽에서 받지 않는다.
-- 한 user account가 동시에 가질 수 있는 live API key는 최대 `2`개이고, 생성 시 만료 기한은 최대 `30`일이다.
-- 한 agent account가 동시에 가질 수 있는 live API key는 최대 `5`개이고, 생성 시 만료 기한은 최대 `365`일이다.
-- API key 자체 rotation은 old `expires_at`을 상속한 new key를 만들고 old key를 revoke하는 방식이다. Token 원문은 복호화하거나 재발급하지 않는다.
-- `last_used_at`은 통계용 best-effort 값이며 hot-row write를 줄이기 위해 즉시성이 보장되지 않는다.
-
-## workspaces
-
-workspace는 개인 노트 파일트리의 격리 경계다. workspace 권한은 `workspace_access` membership row가 source of truth이며, `workspaces.created_by`는 최초 생성자/audit attribution이다. 생성/삭제 side effect는 `docs/spec/lifecycle.md`를 따른다. Agent account는 공유받은 workspace에서 viewer/editor 작업자로만 동작하고 owner가 될 수 없다. Workspace는 1개로 제한하지 않지만 user creator account당 live workspace 최대 `20`개로 제한한다.
-
-```sql
-CREATE TABLE workspaces (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        TEXT NOT NULL,
-    created_by  UUID NOT NULL REFERENCES accounts(id),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at  TIMESTAMPTZ,
-    deleted_by  UUID REFERENCES accounts(id),
-    purge_after TIMESTAMPTZ,
-
-    CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'),
-    CHECK (
-        (deleted_at IS NULL AND deleted_by IS NULL AND purge_after IS NULL)
-        OR
-        (deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND purge_after IS NOT NULL)
-    )
-);
-
-CREATE UNIQUE INDEX workspaces_created_by_name_live_uidx
-    ON workspaces(created_by, name)
-    WHERE deleted_at IS NULL;
-```
-
-규칙:
-
-- REST 클라이언트는 `workspace_id`를 URL에 명시할 수 있다. `workspace_id`는 secret이 아니다.
-- `workspaces.created_by`는 최초 생성자/audit attribution이다. 권한 source는 `workspace_access`다.
-- workspace 생성/삭제와 owner row 생성은 `docs/spec/lifecycle.md`를 따른다.
-- workspace rename/delete/access 관리는 active `owner` role을 가진 user만 수행할 수 있다. agent는 grant를 받아도 lifecycle operation을 수행할 수 없다.
-- 서버는 live workspace(`deleted_at IS NULL`)와 인증된 account의 effective role로 workspace 접근 권한을 검증한다.
-- MCP/CLI path API는 요청 context에서 workspace를 resolve한 뒤 파일 path를 해석한다.
-- workspace `name`은 `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$` 형식이다. `/`, `:`, 공백은 허용하지 않는다.
-- live workspace 이름은 `(created_by, name)` 기준으로 unique다. soft-deleted workspace 이름은 재사용할 수 있다.
-- agent는 여러 user creator의 workspace를 공유받을 수 있으므로 workspace name은 global unique가 아니다.
-- user creator account가 소유할 수 있는 live workspace는 최대 `20`개다.
-- user/agent account가 접근할 수 있는 live workspace는 최대 `100`개다.
-- workspace가 생성되면 DB trigger가 canonical root node `/`를 같은 workspace에 만든다.
-- 모든 workspace/list/file/search/access 조회는 live workspace만 대상으로 한다.
-
-## workspace_access
-
-`workspace_access`는 workspace membership과 workspace 단위 권한 테이블이다. notegate는 개인용 서비스이므로
-초기에는 파일/폴더별 ACL을 두지 않는다.
-
-```sql
-CREATE TABLE workspace_access (
-    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    account_id   UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    role         TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
-    granted_by   UUID REFERENCES accounts(id),
-    granted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    revoked_at   TIMESTAMPTZ,
-    revoked_by   UUID REFERENCES accounts(id),
-
-    PRIMARY KEY (workspace_id, account_id)
-);
-```
-
-역할:
+## Actor tables
 
 ```text
-owner  = read + write + workspace lifecycle 관리 + access 관리
-editor = read + write
-viewer = read
-
-read  = ls/stat/read/find/grep
-write = mkdir/touch/write/patch/mv/rm
+accounts
+  id uuid pk
+  kind text check ('user','agent')
+  display_name_ciphertext bytea null
+  display_name_nonce bytea null
+  display_name_enc_key_id text null
+  display_name_enc_version int null
+  is_active bool
+  deleted_at timestamptz null
+  deleted_by_account_id uuid null references accounts(id)
+  created_at timestamptz
+  updated_at timestamptz
 ```
 
-`workspace_access.role='owner'`가 workspace owner의 source of truth다. `workspaces.created_by`는
-최초 생성자/audit attribution이며 권한 판정에 직접 쓰지 않는다.
-
-성능 규칙:
-
-- 요청 시작 시 live workspace(`workspaces.deleted_at IS NULL`)와 effective role을 확인한다.
-- caller의 effective role은 `workspace_access`의 live owner/editor/viewer row에서 계산한다.
-- 파일 목록/검색/읽기 쿼리는 권한 확인 이후 `workspace_id` 조건으로 실행한다.
-- `revoked_at`이 있는 access row는 권한으로 인정하지 않는다.
-- `accounts.is_active=false`이거나 `accounts.deleted_at IS NOT NULL`인 account는 live access로 인정하지 않는다.
-- `owner` role은 active user account에만 부여할 수 있다. Agent account는 `viewer` 또는 `editor`만 받을 수 있다.
-- owner row 생성, 마지막 owner 보호, creator owner row 보호는 `docs/spec/lifecycle.md`를 따른다.
-- 한 workspace의 active access row는 최대 `20`개다. 생성 시 자동 owner row도 이 제한에 포함한다.
-- 한 account의 active workspace access row는 최대 `100`개다.
-- `granted_by`/`granted_at`은 현재 live grant 상태를 마지막으로 부여하거나 재활성화한 actor와 시각이다.
-
-Caller의 live workspace 조회 보조 index:
-
-```sql
-CREATE INDEX workspace_access_account_idx
-    ON workspace_access(account_id)
-    WHERE revoked_at IS NULL;
-```
-
-Owner 존재 확인과 owner revoke/downgrade 보호를 위한 보조 index:
-
-```sql
-CREATE INDEX workspace_access_owner_active_idx
-    ON workspace_access(workspace_id, account_id)
-    WHERE revoked_at IS NULL AND role = 'owner';
-```
-
-Owner-row invariant는 단일 row CHECK만으로 표현할 수 없으므로 `docs/spec/lifecycle.md`의 owner 보호 규칙에 따라 service transaction에서 검증한다.
-
-## nodes
-
-`nodes`는 folder와 document의 공통 tree entry다. directory 위치의 source of truth는
-`parent_id + name`이다. 전체 path는 저장된 canonical 값이 아니라 parent chain에서 derive한다.
-
-```sql
-CREATE TABLE nodes (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    parent_id     UUID,
-    name          TEXT NOT NULL,
-    kind          TEXT NOT NULL CHECK (kind IN ('folder', 'document')),
-    sort_order    INTEGER NOT NULL DEFAULT 0,
-    created_by    UUID NOT NULL REFERENCES accounts(id),
-    updated_by    UUID NOT NULL REFERENCES accounts(id),
-    deleted_by    UUID REFERENCES accounts(id),
-    purge_after   TIMESTAMPTZ,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at    TIMESTAMPTZ,
-
-    UNIQUE (id, workspace_id),
-    FOREIGN KEY (parent_id, workspace_id)
-        REFERENCES nodes(id, workspace_id)
-        ON DELETE CASCADE,
-
-    CHECK (
-        (parent_id IS NULL AND name = '/' AND kind = 'folder' AND deleted_at IS NULL)
-        OR
-        (parent_id IS NOT NULL AND name <> '' AND name NOT LIKE '%/%')
-    ),
-    CHECK (parent_id IS NULL OR name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'),
-    CHECK (name NOT IN ('.', '..')),
-    CHECK (kind <> 'document' OR name LIKE '%.md'),
-    CHECK (kind <> 'folder' OR parent_id IS NULL OR name NOT LIKE '%.md'),
-    CHECK (
-        (deleted_at IS NULL AND deleted_by IS NULL AND purge_after IS NULL)
-        OR
-        (deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND purge_after IS NOT NULL)
-    )
-);
-```
-
-`nodes.created_by`는 node를 만든 account, `updated_by`는 마지막으로 node metadata를
-바꾼 account, `deleted_by`는 delete를 요청한 account다. `purge_after`는 내부 purge job이
-hard delete할 수 있는 가장 이른 시각이다. document content 변경자는 `documents.updated_by`에 기록한다.
-
-`sort_order`는 같은 parent folder 안에서 사용자 지정 정렬을 위한 optional ordering key다.
-기본값 `0`이면 이름순 fallback을 사용한다.
-
-### Root invariant
-
-각 workspace는 root folder node 하나를 가진다.
-
-```sql
-CREATE UNIQUE INDEX nodes_one_root_per_workspace
-    ON nodes(workspace_id)
-    WHERE parent_id IS NULL;
-```
-
-`parent_id IS NULL`은 root에만 허용한다. root는 soft delete 대상이 아니며,
-root 이동/삭제/rename은 conflict다. `workspaces.root_node_id`는 두지 않고
-`nodes(parent_id IS NULL)`로 root를 찾는다.
-
-삭제 예정 node를 찾기 위한 purge index:
-
-```sql
-CREATE INDEX nodes_purge_due_idx
-    ON nodes(purge_after, workspace_id, id)
-    WHERE deleted_at IS NOT NULL;
-```
-
-Workspace 생성 시 root 자동 생성:
-
-```sql
-CREATE TRIGGER workspaces_create_root_node
-AFTER INSERT ON workspaces
-FOR EACH ROW
-EXECUTE FUNCTION create_workspace_root_node();
-```
-
-### Path derivation and lookup
-
-Canonical location은 `(workspace_id, parent_id, name)`이다. full-path cache를 canonical로
-저장하지 않는다. 따라서 folder move/rename 시 descendant row의 path를 대량 update하지
-않는다. descendants의 path는 parent chain 변화로 논리적으로 바뀐다.
-
-규칙:
-
-- root path는 `/`다.
-- root 아래 path는 ancestor name을 `/`로 join해서 만든다.
-- path resolve는 path segment를 나눈 뒤 root부터 `(workspace_id, parent_id, name)` lookup을 반복한다.
-- 최대 depth가 `5`이므로 path resolve는 최대 5번의 indexed lookup으로 제한된다.
-- 응답의 `path` 필드는 항상 derive한 display 값이다.
-- path uniqueness는 별도 full-path unique index가 아니라 sibling unique invariant와 tree invariant로 보장한다.
-
-### Depth, fanout, and workspace size limits
+`accounts`는 인증과 attribution의 공통 actor다.
 
 ```text
-workspace_max_nodes = 10000
-workspace_max_documents = 5000
-workspace_max_document_bytes = 268435456 bytes
-max_path_depth = 5
-max_path_len = 645 bytes
-folder_max_children = 200
+users
+  id uuid pk references accounts(id)
+  provider_sub_hash text unique null
+  provider_sub_hash_key_id text null
+  provider_sub_hash_version int null
+  email_ciphertext bytea null
+  email_nonce bytea null
+  email_enc_key_id text null
+  email_enc_version int null
+  email_hash text null
+  email_hash_key_id text null
+  email_hash_version int null
+  anonymized_at timestamptz null
 ```
-
-규칙:
-
-- depth는 저장하지 않고 parent chain에서 계산한다. root는 `0`, root의 직접 자식은 `1`이다.
-- create/touch/write(create=true)는 resulting depth가 `5` 또는 resulting path 길이 `645` bytes를 넘으면 거부한다.
-- move는 이동되는 subtree 전체의 resulting max depth가 `5` 이하인지 transaction 안에서 검증한다.
-- move/rename은 moved node의 `parent_id`/`name`만 바꾸며 descendant path rewrite를 하지 않는다.
-- 같은 parent folder의 live direct children은 최대 `200`개다.
-- workspace 안 live nodes는 최대 `10000`개다.
-- workspace 안 live documents는 최대 `5000`개다. document create transaction에서 검사한다.
-- workspace 안 live document 원문 총량은 최대 `268435456` bytes다. write/patch transaction에서 검사한다.
-- child 수와 workspace node 수 제한은 partial unique/check constraint로 표현하기 어렵기 때문에 create/move transaction에서 count 후 검증한다.
-- `max_path_len=645`는 ASCII node name 최대 `128` chars와 depth `5`에서 도출되는 최대 absolute path 길이다.
-
-### Name constraints
-
-Root를 제외한 node name은 CLI/MCP path가 안전하게 파싱되도록 제한한다.
 
 ```text
-workspace name max length      = 63 chars
-folder name max length         = 128 chars
-document file name max length  = 128 chars, including .md
-document title stem max length = 125 chars, excluding .md
-node name regex                = ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+agents
+  id uuid pk references accounts(id)
+  owner_user_id uuid not null references users(id)
+  name text not null
+  created_at timestamptz
 ```
 
-규칙:
+Agent는 user가 관리한다. Agent name은 제품 메타데이터이며 PII 저장소로 사용하지 않는다.
 
-- `/`, `:`, 공백, control character는 허용하지 않는다.
-- `.`와 `..`는 허용하지 않는다.
-- document name은 추가로 `.md`로 끝나야 한다.
-- document 제목은 현재 별도 `title` 컬럼이 아니라 filename stem으로 본다. 예: `meeting-note.md`의 제목 stem은 `meeting-note`다.
-- document filename 전체 길이는 `.md` 포함 최대 `128` chars, stem은 최대 `125` chars다.
-- folder name은 최대 `128` chars이고 `.md`로 끝날 수 없다.
-- Unicode 파일명은 초기 설계에서 제외한다. 필요하면 normalization/collation 정책을 별도 결정한다.
-
-### Sibling name uniqueness
-
-일반 파일시스템처럼 같은 folder 안에서만 이름 중복을 금지한다. 다른 folder에서는
-같은 이름을 사용할 수 있다.
-
-```sql
-CREATE UNIQUE INDEX nodes_live_sibling_name_key
-    ON nodes(workspace_id, parent_id, name)
-    WHERE deleted_at IS NULL AND parent_id IS NOT NULL;
-```
-
-의미:
+## Credential table
 
 ```text
-/projects/readme.md   허용
-/archive/readme.md    허용
-/projects/readme.md   같은 parent 안 중복이면 거부
+api_keys
+  id uuid pk
+  account_id uuid not null references accounts(id)        -- 이 key로 인증되는 account
+  created_by_user_id uuid not null references users(id)   -- 이 key를 만든 user
+  name text not null
+  token_prefix text not null
+  token_hash text not null unique
+  hash_key_id text not null references crypto_key_epochs(key_id)
+  hash_version int not null
+  scopes text[] not null default '{}'
+  created_at timestamptz
+  last_used_at timestamptz null
+  expires_at timestamptz not null
+  revoked_at timestamptz null
+  revoked_by_user_id uuid null references users(id)
+  revoked_reason text null
+  rotated_from_key_id uuid null references api_keys(id)
 ```
 
-`kind`는 unique key에 넣지 않는다. 같은 folder 안 namespace는 folder와 document가
-공유한다.
+평문 token은 저장하지 않는다. `scopes`는 현재 빈 배열만 허용한다.
 
-### Listing indexes
+## Space and connection tables
 
-폴더 직접 자식 조회는 keyset pagination을 전제로 한다.
-
-```sql
-CREATE INDEX nodes_children_idx
-    ON nodes(workspace_id, parent_id, sort_order, name, id)
-    WHERE deleted_at IS NULL;
+```text
+spaces
+  id uuid pk
+  owner_user_id uuid not null references users(id)
+  name text not null
+  created_at timestamptz
+  updated_at timestamptz
+  deleted_at timestamptz null
+  deleted_by_user_id uuid null references users(id)
+  purge_after timestamptz null
 ```
 
-검색 보조 index:
+Live space name은 `(owner_user_id, name)` 기준 unique다.
 
-```sql
-CREATE INDEX nodes_kind_idx
-    ON nodes(workspace_id, kind)
-    WHERE deleted_at IS NULL;
-
-CREATE INDEX nodes_name_trgm_idx
-    ON nodes USING gin (name gin_trgm_ops)
-    WHERE deleted_at IS NULL;
+```text
+space_agent_connections
+  space_id uuid not null references spaces(id)
+  agent_id uuid not null references agents(id)
+  permission text not null check ('read','write')
+  connected_by_user_id uuid not null references users(id)
+  connected_at timestamptz
+  disconnected_at timestamptz null
+  disconnected_by_user_id uuid null references users(id)
+  primary key (space_id, agent_id)
 ```
 
-## documents
+Connection은 agent 전용이다. User-to-user membership은 초기 제품에 없다.
 
-`documents`는 document node의 Markdown 원문을 저장한다.
+## Tree and content tables
 
-```sql
-CREATE TABLE documents (
-    node_id        UUID PRIMARY KEY,
-    workspace_id   UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    content_md     TEXT NOT NULL DEFAULT '',
-    content_sha256 TEXT NOT NULL DEFAULT '',
-    byte_len       INTEGER NOT NULL DEFAULT 0,
-    line_count     INTEGER NOT NULL DEFAULT 0,
-    created_by     UUID NOT NULL REFERENCES accounts(id),
-    updated_by     UUID NOT NULL REFERENCES accounts(id),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    UNIQUE (node_id, workspace_id),
-    FOREIGN KEY (node_id, workspace_id)
-        REFERENCES nodes(id, workspace_id)
-        ON DELETE CASCADE,
-    CHECK (byte_len >= 0 AND byte_len <= 524288),
-    CHECK (line_count >= 0 AND line_count <= 2000)
-);
+```text
+nodes
+  id uuid pk
+  space_id uuid not null references spaces(id)
+  parent_id uuid null references nodes(id)
+  name text not null
+  kind text not null check ('folder','text','file')
+  sort_order int not null default 0
+  created_by_account_id uuid not null references accounts(id)
+  updated_by_account_id uuid not null references accounts(id)
+  deleted_by_account_id uuid null references accounts(id)
+  created_at timestamptz
+  updated_at timestamptz
+  deleted_at timestamptz null
+  purge_after timestamptz null
 ```
 
-규칙:
+- Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`인 node다.
+- 같은 parent 안 live node name은 unique다.
+- Full path는 저장하지 않는다.
 
-- document node만 document row를 가진다.
-- folder node는 document row를 가지지 않는다.
-- 저장 시 `documents.updated_at`, `documents.updated_by`, 연결된 `nodes.updated_at`, `nodes.updated_by`를 함께 갱신한다.
-- `byte_len`과 `line_count`는 read limit, pagination, write guard에 사용한다.
-- document create는 `workspace_max_nodes=10000`과 `workspace_max_documents=5000`을 모두 만족해야 한다.
-- 문서는 개별 최대 `524288` bytes, `2000` lines까지만 저장한다.
-- workspace의 live document 원문 총량은 최대 `268435456` bytes다. 초과 시 문서를 나누거나 workspace를 분리하도록 유도한다.
-
-검색/정렬 보조 index:
-
-```sql
-CREATE INDEX documents_content_trgm_idx
-    ON documents USING gin (content_md gin_trgm_ops);
-
-CREATE INDEX documents_workspace_updated_idx
-    ON documents(workspace_id, updated_at DESC, node_id);
+```text
+text_objects
+  node_id uuid pk references nodes(id)
+  storage_format text not null check ('plain','encrypted')
+  content_text text null
+  content_ciphertext bytea null
+  nonce bytea null
+  enc_key_id text null references crypto_key_epochs(key_id)
+  enc_version int null
+  content_sha256 text not null
+  byte_len bigint not null
+  line_count int not null
+  media_type text not null
+  encoding text not null default 'utf-8'
 ```
 
-## Soft delete and purge
+```text
+file_objects
+  node_id uuid pk references nodes(id)
+  storage_kind text not null check ('inline_pg','object')
+  inline_bytes bytea null
+  object_key text null
+  media_type text not null
+  byte_len bigint not null
+  content_sha256 text not null
+  original_filename text null
+  uploaded_at timestamptz
+  enc_key_id text null references crypto_key_epochs(key_id)
+  enc_version int null
+  nonce bytea null
+```
 
-- account/user/workspace/agent/node 삭제 lifecycle은 `docs/spec/lifecycle.md`를 따른다.
-- node delete는 사용자-facing 복구 기능을 제공하지 않는다. soft delete는 비동기 hard delete를 위한 내부 상태다.
-- query는 반드시 `accounts.is_active`, `revoked_at`, `nodes.deleted_at IS NULL`을 고려한다.
-- `workspaces.purge_after <= now()`인 deleted workspace는 내부 purge job으로 hard delete될 수 있다. 이때 `workspace_access`, `nodes`, `documents`는 FK cascade로 제거된다.
-- `nodes.purge_after <= now()`인 deleted node/document는 내부 purge job으로 hard delete될 수 있다.
-- soft-delete된 user account는 retention 경과 시 같은 purge job이 PII(`display_name`/email ciphertext·hash)를 익명화하고 `provider_sub_hash` tombstone을 해제한다. 식별 불가능한 attribution 껍데기 row는 보존한다. (ADR 0004)
-- revoked/expired API key row는 dead 상태로 retention 경과 시 같은 purge job이 hard delete한다. live-key 목록·per-account cap은 그 전에 이미 dead key를 제외한다.
-- purge job은 모든 서버 인스턴스에서 시작될 수 있지만, Postgres advisory transaction lock을 사용해 같은 DB에서 한 번에 하나의 purge transaction만 실행한다. Lock을 얻지 못한 worker tick은 즉시 skip한다.
-- purge job은 bounded batch로 실행한다. 현재 batch는 workspace 최대 100개, node 최대 1000개, account 최대 100개, API key 최대 1000개다.
-- 기본 retention은 node/workspace 30일, soft-delete된 account 15일(`ACCOUNT_DELETION_RETENTION_DAYS`), dead API key 30일(`DEAD_API_KEY_RETENTION_DAYS`)이다.
+`File`은 작은 content를 PostgreSQL `bytea`에 저장할 수 있다. `byte_len <= 262144`이면 `storage_kind='inline_pg'`를 사용할 수 있고, 그보다 큰 파일은 object storage 구현 시 `storage_kind='object'`로 저장한다.
 
-## Reset policy
+```text
+storage_kind='inline_pg' -> inline_bytes IS NOT NULL AND object_key IS NULL
+storage_kind='object'    -> inline_bytes IS NULL AND object_key IS NOT NULL
+```
 
-프로덕션 데이터가 없는 환경은 migration을 누적 보정하지 않고, 정본 스키마로
-squash/reset하는 것을 허용한다. 프로덕션 데이터가 생기면 이후부터는 forward-only
-migration만 허용한다.
+Text 저장 invariant:
+
+```text
+storage_format='plain'     -> content_text IS NOT NULL, content_ciphertext/nonce/enc_key_id/enc_version IS NULL
+storage_format='encrypted' -> content_text IS NULL, content_ciphertext/nonce/enc_key_id/enc_version IS NOT NULL
+```
+
+File/Text 공통 암호화 정책:
+
+- Content 암호화가 필요한 space나 파일은 server-side encryption으로 저장할 수 있다.
+- `content_sha256`, `byte_len`, `line_count`는 plaintext 기준 metadata다.
+- 암호화된 Text를 SQL `LIKE/ILIKE`로 직접 grep할 수는 없다. 검색 가능 암호화는 별도 index/extract 설계가 필요하다.
+
+Node-content invariant:
+
+```text
+nodes.kind='folder' -> text_objects/file_objects row 없음
+nodes.kind='text'   -> text_objects row 1개
+nodes.kind='file'   -> file_objects row 1개
+```
+
+이 invariant는 service transaction에서 보장하고, 필요하면 trigger로 보강한다.

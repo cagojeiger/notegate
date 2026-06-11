@@ -1,268 +1,85 @@
-# notegate performance and resource limits
+# Performance and hard limits
 
-Every list, search, read, write, and subtree mutation is bounded.
+모든 limit은 시스템 hard limit이다. 나중에 tier 정책을 추가하더라도 이 값을 넘지 않는다.
 
-## Limit model
-
-현재 버전은 billing tier나 entitlement table을 구현하지 않는다. 모든 수치는
-`core::limits`에 정의된 시스템 hard limit이며, service와 DB는 이 값을 넘는 상태를
-만들지 않는다. 나중에 tier별 quota가 추가되더라도 effective quota는 이 hard limit
-이하이어야 한다.
+## HTTP safety limits
 
 ```text
-system hard limit -> notegate가 절대 넘지 않는 제품 상한
-request limit     -> list/read/search 호출 한 번의 반환/처리 상한
+request_body_max_bytes = 2097152      # 2 MiB JSON/body 기본 상한
+server_timeout_seconds = 30
+rate_limit_global_per_process = 600/minute
 ```
 
-## Runtime capacity config
+`/health`, `/ready`는 rate limit 대상에서 제외한다.
 
-Product defaults live in `core::limits`. Runtime overrides are loaded only through `Config.limits`.
-
-Overridable capacity caps:
+## Account and credential limits
 
 ```text
-NOTEGATE_LIMITS__WORKSPACE_MAX_NODES
-NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS
-NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES
-NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN
-```
-
-Branching:
-
-```text
-missing override    -> system hard limit 기본값
-override = 0        -> configuration error
-override > hard max -> configuration error
-unknown limit key   -> configuration error
-```
-
-## HTTP ingress limits
-
-```text
-http_request_body_max_bytes = 1048576 bytes  # 1 MiB
-http_request_timeout_secs = 30 for data-plane routes
-http_control_plane_timeout_secs = 5 for /health and /ready
-http_rate_limit_requests_per_minute = 1800 per API process for data-plane routes
-```
-
-Branching:
-
-```text
-request body > max -> 413 payload too large
-data-plane request timeout -> 408 request timeout
-control-plane timeout     -> 408 request timeout
-rate limit exceed         -> 429 too many requests
-```
-
-현재 rate limit은 process-local data-plane global limit이다. `/health`와 `/ready`는 Kubernetes/control-plane signal이므로 rate limit 대상에서 제외한다. Edge/proxy/API-key/IP 기반 fine-grained limit은 별도 정책으로 확장한다.
-
-## Account, workspace, and credential limits
-
-```text
-owned_workspaces_max = 20 live workspaces per user creator account
-accessible_workspaces_per_account_max = 100 live workspace grants per user/agent account
-workspace_access_max_accounts = 20 active access rows per workspace, owner row 포함
-agents_per_creator_max = 50 active agents per user creator account
-user_api_keys_per_account_max = 2 live API keys per user account
-agent_api_keys_per_account_max = 5 live API keys per agent account
+spaces_per_user_max = 20 live spaces per user
+agents_per_user_max = 50 active agents per user
+connections_per_space_max = 50 active agent connections per space
+connected_spaces_per_agent_max = 100 live spaces per agent
+user_api_keys_per_account_max = 2 live user keys
+agent_api_keys_per_account_max = 5 live agent keys
 user_api_key_max_ttl_days = 30
 agent_api_key_max_ttl_days = 365
+api_key_name_max_chars = 63
+agent_name_max_chars = 63
+space_name_max_chars = 63
 ```
 
-Branching:
+## Tree and content limits
 
 ```text
-create/grant within cap -> allowed
-create/grant over cap   -> 409 conflict
+node_name_max_chars = 128
+text_title_stem_max_chars = 125
+max_tree_depth = 5
+folder_max_children = 200
+space_max_nodes = 10000 live nodes
+space_max_texts = 5000 live text nodes
+space_max_files = 5000 live file nodes
+space_max_text_bytes = 268435456       # 256 MiB live text total per space
+text_max_bytes = 1048576               # 1 MiB per text object
+file_inline_pg_max_bytes = 262144       # 256 KiB 이하 file은 PG inline 저장 가능
+file_max_bytes = 104857600             # 100 MiB per uploaded file
 ```
 
-## Identity, name, and path limits
+Depth는 root 아래 segment 수로 계산한다.
 
 ```text
-oauth_provider_sub_max_chars = 255 chars
-user_display_name_max_chars = 128 chars
-user_email_max_chars = 254 chars
-agent_name_max_chars = 63 chars
-api_key_name_max_chars = 63 chars
-workspace_name_max_len = 63 chars
-folder_name_max_len = 128 chars
-document_file_name_max_len = 128 chars, including .md
-document_title_stem_max_len = 125 chars, excluding .md
-max_path_len = 645 bytes
-max_path_depth = 5 segments
+/                 depth 0
+/notes            depth 1
+/notes/today.md   depth 2
 ```
 
-Depth counts segments below workspace root:
+## Pagination defaults
 
 ```text
-/                     depth 0
-/notes                depth 1
-/notes/daily          depth 2
-/notes/daily/today.md depth 3
-```
-
-Branching:
-
-```text
-identity field over max   -> 400 invalid input / invalid token by auth channel
-agent/key name empty       -> 400 invalid input
-agent/key name over max    -> 400 invalid input
-invalid workspace/name syntax -> 400 invalid input
-non-absolute path          -> 400 invalid input
-unresolved live path       -> 404 not found
-resulting depth > 5        -> 400 invalid input or 409 conflict by operation context
-resulting path length > 645 -> 400 invalid input
-```
-
-## Workspace file-tree capacity limits
-
-```text
-workspace_max_nodes = 10000 live nodes
-workspace_max_documents = 5000 live documents
-workspace_max_document_bytes = 268435456 bytes  # 256 MiB total live document bytes per workspace
-folder_max_children = 200 live direct children per folder
-```
-
-Branching:
-
-```text
-create node over workspace_max_nodes                    -> 409 conflict
-create document over workspace_max_documents            -> 409 conflict
-write/patch/create over workspace_max_document_bytes    -> 409 conflict
-create/move over folder_max_children                    -> 409 conflict
-```
-
-## List pagination limits
-
-```text
-children_default_limit = 100
-children_max_limit = 200
-workspaces_default_limit = 50
-workspaces_max_limit = 100
-access_default_limit = 100
-access_max_limit = 100
+spaces_default_limit = 50
+spaces_max_limit = 100
 agents_default_limit = 100
 agents_max_limit = 100
+connections_default_limit = 100
+connections_max_limit = 100
+children_default_limit = 100
+children_max_limit = 200
+search_default_limit = 50
+search_max_limit = 100
 api_keys_default_limit = 50
 api_keys_max_limit = 100
 ```
 
-Branching:
+목록 API는 여러 row를 반환하면 pagination을 제공한다.
+
+## Purge limits
 
 ```text
-missing limit   -> endpoint default
-limit < 1       -> 1
-limit > max     -> max
-malformed limit -> 400 invalid input
-malformed cursor -> 400 invalid input
-```
-
-Cursor tuples:
-
-```text
-children   -> sort_order ASC, name ASC, id ASC
-workspaces -> created_at ASC, id ASC
-access     -> account id over the service-materialized, stable access list
-agents     -> agent id over the service-materialized, stable agent list
-api_keys   -> created_at DESC, id DESC
-```
-
-Cursor format은 opaque이며 service-owned다. REST/MCP surface는 cursor 문자열을 해석하지 않고 그대로 전달한다.
-
-## Search limits
-
-```text
-find_default_limit = 50
-find_max_limit = 100
-grep_default_limit = 20
-grep_max_limit = 100
-grep_default_context = 2
-grep_max_context = 5
-search_query_max_chars = 256
-```
-
-Branching:
-
-```text
-missing limit      -> endpoint default
-limit < 1          -> 1
-limit > max        -> max
-missing context    -> grep_default_context
-context < 0        -> 0
-context > max      -> grep_max_context
-empty query        -> 400 invalid input
-multiline query    -> 400 invalid input
-query > 256 chars  -> 400 invalid input
-malformed cursor   -> 400 invalid input
-tampered cursor    -> 400 invalid input
-missing scope path -> 404 not found / MCP invalid params kind=not_found
-```
-
-Cursor tuples:
-
-```text
-find -> name ASC, id ASC
-grep -> updated_at DESC, node_id ASC, match_offset
-```
-
-`match_offset`은 한 document 안의 match 수가 page limit보다 많을 때 같은 document 내부에서 이어 읽기 위한 값이다.
-
-## Read limits
-
-```text
-read_default_max_lines = 200
-read_max_lines = 1000
-read_default_max_bytes = 65536   # 64 KiB
-read_max_bytes = 262144          # 256 KiB
-```
-
-Branching:
-
-```text
-missing max_lines -> read_default_max_lines
-max_lines < 1     -> 1
-max_lines > max   -> read_max_lines
-missing max_bytes -> read_default_max_bytes
-max_bytes = 0     -> 400 invalid input
-max_bytes > max   -> read_max_bytes
-truncated read    -> truncated=true and next_start_line
-unchanged hash    -> metadata without content
-```
-
-## Document write limits
-
-```text
-document_max_bytes = 524288  # 512 KiB per document
-document_max_lines = 2000    # per document
-```
-
-Branching:
-
-```text
-document bytes > document_max_bytes -> 400 invalid input
-document lines > document_max_lines -> 400 invalid input
-workspace live document bytes > max  -> 409 conflict
-hash mismatch on guarded write/patch -> 409 conflict
-```
-
-## Subtree mutation limits
-
-```text
-subtree_delete_max_nodes = 1000
-```
-
-Branching:
-
-```text
-folder delete with recursive=false        -> 409 conflict
-recursive delete subtree > max            -> 409 conflict
-folder move/rename                        -> update moved node only
-folder delete                             -> soft-delete every live descendant in the bounded subtree
-soft-deleted nodes                        -> excluded from list/search/live counts
-deleted node/workspace retention          -> 30 days before purge eligibility
-soft-deleted account retention            -> 15 days before PII anonymized and sub-hash freed
-dead API key retention                    -> 30 days (revoked/expired) before hard delete
-purge job                                 -> may hard-delete rows whose purge_after has passed
-purge worker concurrency                  -> PostgreSQL advisory transaction lock; one active purge per DB
-purge batch                               -> workspaces <= 100, nodes <= 1000, accounts <= 100, API keys <= 1000 per run
+deleted_space_retention_days = 30
+deleted_node_retention_days = 30
+account_deletion_retention_days = 15
+api_key_retention_days = 30
+purge_batch_spaces = 100
+purge_batch_nodes = 1000
+purge_batch_accounts = 100
+purge_batch_api_keys = 1000
 ```
