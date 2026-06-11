@@ -12,14 +12,14 @@ use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-/// Create an owner account + workspace; return (account_id, workspace_id, root_node_id).
-async fn workspace_with_root(
+/// Create an owner account + space; return (account_id, space_id, root_node_id).
+async fn space_with_root(
     pool: &PgPool,
     sub: &str,
 ) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
     let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
-    let workspace: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name) \
+    let space: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (created_by, name) \
          VALUES ($1, $2) RETURNING id",
     )
     .bind(account)
@@ -28,11 +28,11 @@ async fn workspace_with_root(
     .await?;
     // The AFTER INSERT trigger creates the canonical root node.
     let root: Uuid =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL")
-            .bind(workspace)
+        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
+            .bind(space)
             .fetch_one(pool)
             .await?;
-    Ok((account, workspace, root))
+    Ok((account, space, root))
 }
 
 async fn insert_child(
@@ -44,7 +44,7 @@ async fn insert_child(
     kind: &str,
 ) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar(
-        "INSERT INTO nodes (workspace_id, parent_id, name, kind, created_by, updated_by) \
+        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
          VALUES ($1, $2, $3, $4, $5, $5) RETURNING id",
     )
     .bind(ws)
@@ -57,11 +57,11 @@ async fn insert_child(
 }
 
 #[tokio::test]
-async fn root_trigger_attributes_root_to_workspace_creator() -> TestResult {
+async fn root_trigger_attributes_root_to_space_creator() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, root) = workspace_with_root(&db.pool, "rootattr").await?;
+    let (account, ws, root) = space_with_root(&db.pool, "rootattr").await?;
     let (created_by, updated_by): (Uuid, Uuid) =
         sqlx::query_as("SELECT created_by, updated_by FROM nodes WHERE id = $1")
             .bind(root)
@@ -79,10 +79,10 @@ async fn second_root_node_is_rejected() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, _root) = workspace_with_root(&db.pool, "tworoots").await?;
-    // A second parent_id IS NULL node violates nodes_one_root_per_workspace.
+    let (account, ws, _root) = space_with_root(&db.pool, "tworoots").await?;
+    // A second parent_id IS NULL node violates nodes_one_root_per_space.
     let res = sqlx::query(
-        "INSERT INTO nodes (workspace_id, parent_id, name, kind, created_by, updated_by) \
+        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
          VALUES ($1, NULL, '/', 'folder', $2, $2)",
     )
     .bind(ws)
@@ -99,26 +99,26 @@ async fn duplicate_live_sibling_name_is_rejected() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, root) = workspace_with_root(&db.pool, "dupsib").await?;
-    insert_child(&db.pool, ws, root, account, "note.md", "document").await?;
-    let dup = insert_child(&db.pool, ws, root, account, "note.md", "document").await;
+    let (account, ws, root) = space_with_root(&db.pool, "dupsib").await?;
+    insert_child(&db.pool, ws, root, account, "note.md", "text").await?;
+    let dup = insert_child(&db.pool, ws, root, account, "note.md", "text").await;
     assert!(dup.is_err(), "duplicate live sibling name must be rejected");
     db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
-async fn document_name_must_end_md_and_folder_must_not() -> TestResult {
+async fn text_name_must_end_md_and_folder_must_not() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, root) = workspace_with_root(&db.pool, "mdcheck").await?;
-    let bad_doc = insert_child(&db.pool, ws, root, account, "note", "document").await;
-    assert!(bad_doc.is_err(), "document without .md must be rejected");
+    let (account, ws, root) = space_with_root(&db.pool, "mdcheck").await?;
+    let bad_doc = insert_child(&db.pool, ws, root, account, "note", "text").await;
+    assert!(bad_doc.is_err(), "text without .md must be rejected");
     let bad_folder = insert_child(&db.pool, ws, root, account, "dir.md", "folder").await;
     assert!(bad_folder.is_err(), "folder ending in .md must be rejected");
     // The valid forms succeed.
-    insert_child(&db.pool, ws, root, account, "note.md", "document").await?;
+    insert_child(&db.pool, ws, root, account, "note.md", "text").await?;
     insert_child(&db.pool, ws, root, account, "dir", "folder").await?;
     db.cleanup().await;
     Ok(())
@@ -129,9 +129,9 @@ async fn invalid_node_names_are_rejected_by_check() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, root) = workspace_with_root(&db.pool, "namecheck").await?;
+    let (account, ws, root) = space_with_root(&db.pool, "namecheck").await?;
     for bad in ["has space.md", "..", ".", "a/b.md"] {
-        let res = insert_child(&db.pool, ws, root, account, bad, "document").await;
+        let res = insert_child(&db.pool, ws, root, account, bad, "text").await;
         assert!(res.is_err(), "node name {bad:?} must be rejected by CHECK");
     }
     db.cleanup().await;
@@ -139,16 +139,16 @@ async fn invalid_node_names_are_rejected_by_check() -> TestResult {
 }
 
 #[tokio::test]
-async fn document_byte_and_line_bounds_are_enforced() -> TestResult {
+async fn text_byte_and_line_bounds_are_enforced() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, root) = workspace_with_root(&db.pool, "docbounds").await?;
-    let node = insert_child(&db.pool, ws, root, account, "big.md", "document").await?;
+    let (account, ws, root) = space_with_root(&db.pool, "docbounds").await?;
+    let node = insert_child(&db.pool, ws, root, account, "big.md", "text").await?;
 
     // byte_len upper bound = 524288.
     let over_bytes = sqlx::query(
-        "INSERT INTO documents (node_id, workspace_id, byte_len, line_count, created_by, updated_by) \
+        "INSERT INTO texts (node_id, space_id, byte_len, line_count, created_by, updated_by) \
          VALUES ($1, $2, 524289, 0, $3, $3)",
     )
     .bind(node)
@@ -160,7 +160,7 @@ async fn document_byte_and_line_bounds_are_enforced() -> TestResult {
 
     // line_count upper bound = 2000; the boundary value 524288/2000 is accepted.
     let at_boundary = sqlx::query(
-        "INSERT INTO documents (node_id, workspace_id, byte_len, line_count, created_by, updated_by) \
+        "INSERT INTO texts (node_id, space_id, byte_len, line_count, created_by, updated_by) \
          VALUES ($1, $2, 524288, 2000, $3, $3)",
     )
     .bind(node)
@@ -173,7 +173,7 @@ async fn document_byte_and_line_bounds_are_enforced() -> TestResult {
         "byte_len 524288 / line_count 2000 must be accepted"
     );
 
-    let over_lines = sqlx::query("UPDATE documents SET line_count = 2001 WHERE node_id = $1")
+    let over_lines = sqlx::query("UPDATE texts SET line_count = 2001 WHERE node_id = $1")
         .bind(node)
         .execute(&db.pool)
         .await;
@@ -183,24 +183,24 @@ async fn document_byte_and_line_bounds_are_enforced() -> TestResult {
 }
 
 #[tokio::test]
-async fn workspace_name_check_and_owner_unique() -> TestResult {
+async fn space_name_check_and_owner_unique() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let account = insert_user_account(&db.pool, "wsname", "wsname@example.com").await?;
-    // Invalid workspace name (space) violates the CHECK.
-    let bad = sqlx::query("INSERT INTO workspaces (created_by, name) VALUES ($1, 'bad name')")
+    // Invalid space name (space) violates the CHECK.
+    let bad = sqlx::query("INSERT INTO spaces (created_by, name) VALUES ($1, 'bad name')")
         .bind(account)
         .execute(&db.pool)
         .await;
-    assert!(bad.is_err(), "workspace name with space must be rejected");
+    assert!(bad.is_err(), "space name with space must be rejected");
 
     // Duplicate (owner, name) violates the UNIQUE constraint.
-    sqlx::query("INSERT INTO workspaces (created_by, name) VALUES ($1, 'personal')")
+    sqlx::query("INSERT INTO spaces (created_by, name) VALUES ($1, 'personal')")
         .bind(account)
         .execute(&db.pool)
         .await?;
-    let dup = sqlx::query("INSERT INTO workspaces (created_by, name) VALUES ($1, 'personal')")
+    let dup = sqlx::query("INSERT INTO spaces (created_by, name) VALUES ($1, 'personal')")
         .bind(account)
         .execute(&db.pool)
         .await;

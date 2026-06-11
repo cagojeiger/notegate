@@ -1,20 +1,18 @@
-//! Workspace MCP tools (`docs/spec/mcp/workspaces.md`).
+//! Space MCP tools (`docs/spec/mcp/spaces.md`).
 
 use axum::http::request::Parts;
-use notegate_service::workspaces::{CreateWorkspace, ListWorkspaces};
+use notegate_service::spaces::{CreateSpace, ListSpaces};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{
-    WorkspaceSelector, caller, resolve_workspace, service_error, workspace_summary,
-};
+use super::resolve::{SpaceSelector, caller, resolve_space, service_error, space_summary};
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `workspaces_list` input.
+/// `spaces_list` input.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListInput {
     /// Page size; clamped to `1..=100`, default `50`.
@@ -25,15 +23,15 @@ pub struct ListInput {
     pub cursor: Option<String>,
 }
 
-/// `workspaces_create` input.
+/// `spaces_create` input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct CreateInput {
-    /// Human-friendly workspace name.
+    /// Human-friendly space name.
     pub name: String,
 }
 
-/// `workspaces_get` input: the workspace selector.
-pub type GetInput = WorkspaceSelector;
+/// `spaces_get` input: the space selector.
+pub type GetInput = SpaceSelector;
 
 pub async fn list(
     state: &AppState,
@@ -42,10 +40,10 @@ pub async fn list(
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let page = state
-        .workspaces
+        .spaces
         .list(
             caller.account_id(),
-            ListWorkspaces {
+            ListSpaces {
                 limit: input.limit,
                 cursor: input.cursor,
             },
@@ -53,11 +51,11 @@ pub async fn list(
         .await
         .map_err(service_error)?;
 
-    let workspaces: Vec<Value> = page.items.iter().map(workspace_summary).collect();
-    let returned = workspaces.len();
+    let spaces: Vec<Value> = page.items.iter().map(space_summary).collect();
+    let returned = spaces.len();
 
     Ok(Json(json!({
-        "workspaces": workspaces,
+        "spaces": spaces,
         "page": page_json(
             page.limit,
             returned,
@@ -74,15 +72,15 @@ pub async fn create(
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let view = state
-        .workspaces
+        .spaces
         .create(
             caller.account.kind,
             caller.account_id(),
-            CreateWorkspace { name: input.name },
+            CreateSpace { name: input.name },
         )
         .await
         .map_err(service_error)?;
-    Ok(Json(workspace_summary(&view)))
+    Ok(Json(space_summary(&view)))
 }
 
 pub async fn get(
@@ -91,6 +89,6 @@ pub async fn get(
     Parameters(input): Parameters<GetInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let resolved = resolve_workspace(state, caller, &input).await?;
-    Ok(Json(workspace_summary(&resolved.view)))
+    let resolved = resolve_space(state, caller, &input).await?;
+    Ok(Json(space_summary(&resolved.view)))
 }

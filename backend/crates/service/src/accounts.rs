@@ -43,15 +43,15 @@ impl AccountService {
                 "only user accounts may delete themselves".to_owned(),
             ));
         }
-        // ADR 0004: workspaces are cleaned up manually. Block deletion while the caller
-        // is the sole owner of any live workspace — they must delete or transfer it first.
+        // ADR 0004: spaces are cleaned up manually. Block deletion while the caller
+        // is the sole owner of any live space — they must delete or transfer it first.
         let sole_owned = self
             .store
-            .count_sole_owned_workspaces(caller_account_id)
+            .count_sole_owned_spaces(caller_account_id)
             .await?;
         if sole_owned > 0 {
             return Err(ServiceError::Conflict(format!(
-                "delete or transfer your {sole_owned} owned workspace(s) before deleting your account"
+                "delete or transfer your {sole_owned} owned space(s) before deleting your account"
             )));
         }
         Ok(self

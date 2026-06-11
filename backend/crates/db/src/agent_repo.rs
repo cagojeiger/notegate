@@ -2,7 +2,7 @@
 //!
 //! All queries use runtime-checked `query_as::<_, Row>()` / `query()` — never
 //! the `query!` macro. Agent creation inserts `accounts(kind='agent')` then the
-//! `agents` row in one transaction, attributing `created_by` to the caller. API
+//! `agents` row in one transaction, attributing `owner_user_id` to the caller. API
 //! keys are persisted by `ApiKeyRepo`, not this aggregate repository.
 
 use crate::{active_account_predicate, map_sqlx_error};
@@ -60,7 +60,7 @@ impl AccountRow {
 struct AgentRow {
     id: Uuid,
     name: String,
-    created_by: Uuid,
+    owner_user_id: Uuid,
 }
 
 impl From<AgentRow> for Agent {
@@ -68,13 +68,14 @@ impl From<AgentRow> for Agent {
         Self {
             id: row.id,
             name: row.name,
-            created_by: row.created_by,
+            owner_user_id: row.owner_user_id,
         }
     }
 }
 
-const ACCOUNT_COLUMNS: &str = "id, kind, is_active, deleted_at, deleted_by, created_at, updated_at";
-const AGENT_COLUMNS: &str = "id, name, created_by";
+const ACCOUNT_COLUMNS: &str =
+    "id, kind, is_active, deleted_at, deleted_by_account_id AS deleted_by, created_at, updated_at";
+const AGENT_COLUMNS: &str = "id, name, owner_user_id";
 impl AgentRepo {
     /// Soft-deactivate an agent account and revoke its non-revoked keys and
     /// access in one transaction.
@@ -83,7 +84,7 @@ impl AgentRepo {
 
         let result = sqlx::query(
             "UPDATE accounts \
-             SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+             SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
              WHERE id = $1 AND kind = 'agent' AND deleted_at IS NULL",
         )
         .bind(agent_id)
@@ -96,7 +97,7 @@ impl AgentRepo {
         }
 
         sqlx::query(
-            "UPDATE api_keys SET revoked_at = now(), revoked_by = $2 \
+            "UPDATE api_keys SET revoked_at = now(), revoked_by_user_id = $2 \
              WHERE account_id = $1 AND revoked_at IS NULL",
         )
         .bind(agent_id)
@@ -106,8 +107,8 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
 
         sqlx::query(
-            "UPDATE workspace_access SET revoked_at = now(), revoked_by = $2 \
-             WHERE account_id = $1 AND revoked_at IS NULL",
+            "UPDATE space_agent_connections SET disconnected_at = now(), disconnected_by_user_id = $2 \
+             WHERE agent_id = $1 AND disconnected_at IS NULL",
         )
         .bind(agent_id)
         .bind(deleted_by)
@@ -121,7 +122,7 @@ impl AgentRepo {
 }
 
 impl AgentRepo {
-    pub async fn insert_agent(&self, command: &CreateAgent, created_by: Uuid) -> Result<Agent> {
+    pub async fn insert_agent(&self, command: &CreateAgent, owner_user_id: Uuid) -> Result<Agent> {
         validate_agent_name(&command.name)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -130,7 +131,7 @@ impl AgentRepo {
              WHERE id = $1 AND kind = 'user' AND is_active = true AND deleted_at IS NULL \
              FOR UPDATE",
         )
-        .bind(created_by)
+        .bind(owner_user_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -141,9 +142,9 @@ impl AgentRepo {
         let active: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
-             WHERE a.created_by = $1 AND acc.is_active = true AND acc.deleted_at IS NULL",
+             WHERE a.owner_user_id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL",
         )
-        .bind(created_by)
+        .bind(owner_user_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -163,12 +164,12 @@ impl AgentRepo {
             .get::<Uuid, _>("id");
 
         let row = sqlx::query_as::<_, AgentRow>(&format!(
-            "INSERT INTO agents (id, name, created_by) VALUES ($1, $2, $3) \
+            "INSERT INTO agents (id, name, owner_user_id) VALUES ($1, $2, $3) \
              RETURNING {AGENT_COLUMNS}"
         ))
         .bind(id)
         .bind(&command.name)
-        .bind(created_by)
+        .bind(owner_user_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -181,9 +182,9 @@ impl AgentRepo {
         let rows = sqlx::query_as::<_, AgentRow>(&format!(
             "SELECT a.{cols} FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
-             WHERE a.created_by = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
+             WHERE a.owner_user_id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
              ORDER BY acc.created_at, a.id",
-            cols = "id, name, created_by"
+            cols = "id, name, owner_user_id"
         ))
         .bind(creator_account_id)
         .fetch_all(&self.pool)
@@ -196,7 +197,7 @@ impl AgentRepo {
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
-             WHERE a.created_by = $1 AND acc.is_active = true AND acc.deleted_at IS NULL",
+             WHERE a.owner_user_id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL",
         )
         .bind(creator_account_id)
         .fetch_one(&self.pool)
@@ -213,9 +214,9 @@ impl AgentRepo {
         let row = sqlx::query_as::<_, AgentRow>(&format!(
             "SELECT a.{cols} FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
-             WHERE a.id = $1 AND a.created_by = $2 \
+             WHERE a.id = $1 AND a.owner_user_id = $2 \
                AND acc.is_active = true AND acc.deleted_at IS NULL",
-            cols = "id, name, created_by"
+            cols = "id, name, owner_user_id"
         ))
         .bind(agent_id)
         .bind(creator_account_id)

@@ -22,18 +22,18 @@ pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use types::{
-    ChildrenCursor, ChildrenPage, DeleteResult, DocumentStats, DocumentView, NodeView, PatchResult,
-    ReadContent, ReadResult, StoredContent,
+    ChildrenCursor, ChildrenPage, DeleteResult, NodeView, PatchResult, ReadContent, ReadResult,
+    StoredContent, TextStats, TextView,
 };
 pub use types::{
-    ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, Edit, MoveNode, PatchDocument,
-    ReadDocument, WriteDocument, WriteTarget,
+    ChildrenRequest, CreateFolder, CreateText, DeleteNode, Edit, MoveNode, PatchText, ReadText,
+    WriteTarget, WriteText,
 };
 pub use validation::FilesValidationError;
 
 use notegate_core::limits::Limits;
 use notegate_db::FilesRepo;
-use notegate_model::{Document, Node, NodeKind, Role};
+use notegate_model::{Node, NodeKind, Permission, TextObject};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -41,14 +41,14 @@ use crate::error::{ServiceError, ServiceResult};
 /// File-tree command service: `ls` / `stat` / `mkdir` / `touch` / `read` /
 /// `write` / `patch` / `mv` / `rm`.
 ///
-/// Every command takes `(caller_account_id, workspace_id, ...)`. The service:
+/// Every command takes `(caller_account_id, space_id, ...)`. The service:
 ///
-/// 1. Resolves the caller's live [`Role`] through the repository role lookup FIRST. No
-///    live role ⇒ not-found (`404`, hides the workspace); an insufficient role ⇒
+/// 1. Resolves the caller's live [`Permission`] through the repository permission lookup FIRST. No
+///    live permission ⇒ not-found (`404`, hides the space); an insufficient role ⇒
 ///    forbidden (`403`, via [`policy::require`]).
-/// 2. Validates input format (name, `.md`, depth, path length, document size)
+/// 2. Validates input format (name, `.md`, depth, path length, text size)
 ///    with the pure [`validation`] functions.
-/// 3. Pre-checks capacity limits (fanout, node/document counts, total bytes,
+/// 3. Pre-checks capacity limits (fanout, node/text counts, total bytes,
 ///    subtree-delete size) using counts read from the store, returning a typed
 ///    conflict. The DB layer re-enforces these in-transaction for race safety;
 ///    the service pre-check keeps the logic testable and the errors precise.
@@ -79,67 +79,67 @@ impl FilesService {
     /// role ⇒ 403).
     pub(super) async fn authorize(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         account_id: Uuid,
         command: FileCommand,
-    ) -> ServiceResult<Role> {
-        let role = self
+    ) -> ServiceResult<Permission> {
+        let permission = self
             .store
-            .role_for(workspace_id, account_id)
+            .permission_for(space_id, account_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("workspace not found".to_owned()))?;
-        policy::require(role, command)?;
-        Ok(role)
+            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        policy::require(permission, command)?;
+        Ok(permission)
     }
 
     /// Load a live node or 404.
-    pub(super) async fn load_node(&self, workspace_id: Uuid, node_id: Uuid) -> ServiceResult<Node> {
+    pub(super) async fn load_node(&self, space_id: Uuid, node_id: Uuid) -> ServiceResult<Node> {
         self.store
-            .find_node(workspace_id, node_id)
+            .find_node(space_id, node_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))
     }
 
-    /// Load a live document, distinguishing a folder from a missing document.
-    pub(super) async fn load_document(
+    /// Load a live text, distinguishing a folder from a missing text.
+    pub(super) async fn load_text(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
-    ) -> ServiceResult<(Node, Document)> {
-        if let Some(document) = self.store.find_document(workspace_id, node_id).await? {
-            return Ok(document);
+    ) -> ServiceResult<(Node, TextObject)> {
+        if let Some(text) = self.store.find_text(space_id, node_id).await? {
+            return Ok(text);
         }
 
-        if let Some(node) = self.store.find_node(workspace_id, node_id).await?
+        if let Some(node) = self.store.find_node(space_id, node_id).await?
             && node.kind == NodeKind::Folder
         {
             return Err(ServiceError::InvalidInput(
-                "target is a folder, not a document".to_owned(),
+                "target is a folder, not a text".to_owned(),
             ));
         }
 
-        Err(ServiceError::NotFound("document not found".to_owned()))
+        Err(ServiceError::NotFound("text not found".to_owned()))
     }
 
     /// The derived path of a node or 404.
-    pub(super) async fn path_of(&self, workspace_id: Uuid, node_id: Uuid) -> ServiceResult<String> {
+    pub(super) async fn path_of(&self, space_id: Uuid, node_id: Uuid) -> ServiceResult<String> {
         self.store
-            .node_path(workspace_id, node_id)
+            .node_path(space_id, node_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))
     }
 
     /// Shared create pre-checks for mkdir/touch/write-create: parent is a live
     /// folder, no sibling-name conflict, resulting depth + path length within
-    /// limits, parent fanout and workspace node count within limits. Returns the
+    /// limits, parent fanout and space node count within limits. Returns the
     /// parent's derived path.
     pub(super) async fn prepare_create(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
     ) -> ServiceResult<String> {
-        let parent = self.load_node(workspace_id, parent_node_id).await?;
+        let parent = self.load_node(space_id, parent_node_id).await?;
         if parent.kind != NodeKind::Folder {
             return Err(ServiceError::InvalidInput(
                 "parent must be a folder".to_owned(),
@@ -149,7 +149,7 @@ impl FilesService {
         // Name conflict against live siblings.
         if self
             .store
-            .find_live_child_by_name(workspace_id, parent_node_id, name)
+            .find_live_child_by_name(space_id, parent_node_id, name)
             .await?
             .is_some()
         {
@@ -158,7 +158,7 @@ impl FilesService {
             )));
         }
 
-        let parent_path = self.path_of(workspace_id, parent_node_id).await?;
+        let parent_path = self.path_of(space_id, parent_node_id).await?;
         let parent_depth = path_depth(&parent_path);
         let new_path = join_path(&parent_path, name);
         validation::validate_depth(parent_depth + 1)?;
@@ -166,12 +166,12 @@ impl FilesService {
 
         let children = self
             .store
-            .count_live_children(workspace_id, parent_node_id)
+            .count_live_children(space_id, parent_node_id)
             .await?;
         validation::validate_fanout(children, self.limits)?;
 
-        let nodes = self.store.count_live_nodes(workspace_id).await?;
-        validation::validate_workspace_node_count(nodes, self.limits)?;
+        let nodes = self.store.count_live_nodes(space_id).await?;
+        validation::validate_space_node_count(nodes, self.limits)?;
 
         Ok(parent_path)
     }

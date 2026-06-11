@@ -1,9 +1,9 @@
 //! The shared `me` identity builder used by both REST `GET /api/v1/me` and the
 //! MCP `me` tool, so the two surfaces stay aligned (`docs/spec/mcp/identity.md`).
 //!
-//! The shape is `{ account, user?, agent?, capabilities }`. Workspace-specific
+//! The shape is `{ account, user?, agent?, capabilities }`. Space-specific
 //! roles are intentionally excluded; callers enumerate them through the
-//! Workspaces category (`GET /api/v1/workspaces` / `workspaces_list`).
+//! Spaces category (`GET /api/v1/spaces` / `spaces_list`).
 
 use notegate_model::account::AccountKind;
 use notegate_model::{Caller, CallerIdentity};
@@ -32,11 +32,11 @@ pub struct AgentDetailOutput {
     pub name: String,
 }
 
-/// Global, non-workspace capabilities for the authenticated caller.
+/// Global, non-space capabilities for the authenticated caller.
 #[derive(Debug, Clone, Serialize, JsonSchema, ToSchema, PartialEq, Eq)]
 pub struct CapabilitiesOutput {
-    /// The caller may create workspaces as the workspace owner.
-    pub can_create_workspace: bool,
+    /// The caller may create spaces as the space owner.
+    pub can_create_space: bool,
     /// The caller may create/delete agents and mint/revoke agent keys.
     pub can_manage_agents: bool,
 }
@@ -73,7 +73,7 @@ pub fn build_me(caller: &Caller) -> MeOutput {
         ),
     };
     let capabilities = CapabilitiesOutput {
-        can_create_workspace: caller.account.kind == AccountKind::User,
+        can_create_space: caller.account.kind == AccountKind::User,
         can_manage_agents: caller.account.kind == AccountKind::User,
     };
     MeOutput {
@@ -131,7 +131,7 @@ mod tests {
         let user = out.user.expect("user detail present");
         assert_eq!(user.email.as_deref(), Some("user@example.test"));
         assert!(out.agent.is_none());
-        assert!(out.capabilities.can_create_workspace);
+        assert!(out.capabilities.can_create_space);
         assert!(out.capabilities.can_manage_agents);
     }
 
@@ -151,7 +151,7 @@ mod tests {
         let agent = Agent {
             id: Uuid::nil(),
             name: "research-agent".to_owned(),
-            created_by: Uuid::nil(),
+            owner_user_id: Uuid::nil(),
         };
         let caller = Caller {
             account,
@@ -165,7 +165,7 @@ mod tests {
             out.agent.expect("agent detail present").name,
             "research-agent"
         );
-        assert!(!out.capabilities.can_create_workspace);
+        assert!(!out.capabilities.can_create_space);
         assert!(!out.capabilities.can_manage_agents);
     }
 }

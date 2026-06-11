@@ -15,18 +15,18 @@ impl SearchService {
     /// Find nodes by name, optionally filtered by `kind` and scoped to a path's
     /// subtree. Keyset-paginated by `(name, id)`.
     ///
-    /// Authorization mirrors file reads: the caller's live workspace role is
-    /// resolved first (no role ⇒ `404`, which hides the workspace); `find`
+    /// Authorization mirrors file reads: the caller's live space role is
+    /// resolved first (no role ⇒ `404`, which hides the space); `find`
     /// requires `viewer`. The limit is clamped to `1..=FIND_MAX_LIMIT` (default
     /// `FIND_DEFAULT_LIMIT`); a malformed cursor is a clean `400`-class
     /// [`ServiceError::InvalidInput`].
     pub async fn find(
         &self,
         caller_account_id: uuid::Uuid,
-        workspace_id: uuid::Uuid,
+        space_id: uuid::Uuid,
         request: FindRequest,
     ) -> ServiceResult<FindPage> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Find)
+        self.authorize(space_id, caller_account_id, FileCommand::Find)
             .await?;
         let q = validate_query(&request.q)?;
         let limit = clamp_limit(
@@ -51,7 +51,7 @@ impl SearchService {
         let rows = self
             .store
             .find_nodes(
-                workspace_id,
+                space_id,
                 q,
                 scope_path.as_deref(),
                 request.kind,
@@ -84,7 +84,7 @@ impl SearchService {
                 node,
                 path,
                 has_children,
-                document: None,
+                text: None,
             })
             .collect();
 

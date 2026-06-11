@@ -19,65 +19,64 @@ const PURGE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5055_5247_4501;
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
-async fn purge_deletes_due_workspaces_and_nodes() -> Result<(), Box<dyn std::error::Error>> {
+async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let user = insert_user_account(&db.pool, "purger", "purger@example.test").await?;
 
-    let due_workspace: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name, deleted_at, deleted_by, purge_after) \
-         VALUES ($1, 'due-workspace', now() - interval '40 days', $1, now() - interval '1 day') \
+    let due_space: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (created_by, name, deleted_at, deleted_by, purge_after) \
+         VALUES ($1, 'due-space', now() - interval '40 days', $1, now() - interval '1 day') \
          RETURNING id",
     )
     .bind(user)
     .fetch_one(&db.pool)
     .await?;
 
-    let live_workspace: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name) VALUES ($1, 'live-workspace') RETURNING id",
+    let live_space: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (created_by, name) VALUES ($1, 'live-space') RETURNING id",
     )
     .bind(user)
     .fetch_one(&db.pool)
     .await?;
     let root: Uuid =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL")
-            .bind(live_workspace)
+        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
+            .bind(live_space)
             .fetch_one(&db.pool)
             .await?;
     let due_node: Uuid = sqlx::query_scalar(
         "INSERT INTO nodes \
-         (workspace_id, parent_id, name, kind, created_by, updated_by, deleted_by, deleted_at, purge_after) \
-         VALUES ($1, $2, 'old.md', 'document', $3, $3, $3, now() - interval '40 days', now() - interval '1 day') \
+         (space_id, parent_id, name, kind, created_by, updated_by, deleted_by, deleted_at, purge_after) \
+         VALUES ($1, $2, 'old.md', 'text', $3, $3, $3, now() - interval '40 days', now() - interval '1 day') \
          RETURNING id",
     )
-    .bind(live_workspace)
+    .bind(live_space)
     .bind(root)
     .bind(user)
     .fetch_one(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO documents (node_id, workspace_id, content_md, created_by, updated_by) \
+        "INSERT INTO texts (node_id, space_id, content, created_by, updated_by) \
          VALUES ($1, $2, 'old', $3, $3)",
     )
     .bind(due_node)
-    .bind(live_workspace)
+    .bind(live_space)
     .bind(user)
     .execute(&db.pool)
     .await?;
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert!(run.lock_acquired);
-    assert_eq!(run.workspaces_deleted, 1);
+    assert_eq!(run.spaces_deleted, 1);
     assert_eq!(run.nodes_deleted, 1);
 
-    let workspace_exists: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1")
-            .bind(due_workspace)
-            .fetch_optional(&db.pool)
-            .await?;
-    assert!(workspace_exists.is_none());
+    let space_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1")
+        .bind(due_space)
+        .fetch_optional(&db.pool)
+        .await?;
+    assert!(space_exists.is_none());
 
     let node_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM nodes WHERE id = $1")
         .bind(due_node)
@@ -85,12 +84,12 @@ async fn purge_deletes_due_workspaces_and_nodes() -> Result<(), Box<dyn std::err
         .await?;
     assert!(node_exists.is_none());
 
-    let document_exists: Option<Uuid> =
-        sqlx::query_scalar("SELECT node_id FROM documents WHERE node_id = $1")
+    let text_exists: Option<Uuid> =
+        sqlx::query_scalar("SELECT node_id FROM texts WHERE node_id = $1")
             .bind(due_node)
             .fetch_optional(&db.pool)
             .await?;
-    assert!(document_exists.is_none());
+    assert!(text_exists.is_none());
 
     db.cleanup().await;
     Ok(())
@@ -103,9 +102,9 @@ async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::err
         return Ok(());
     };
     let user = insert_user_account(&db.pool, "locked", "locked@example.test").await?;
-    let due_workspace: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name, deleted_at, deleted_by, purge_after) \
-         VALUES ($1, 'locked-workspace', now() - interval '40 days', $1, now() - interval '1 day') \
+    let due_space: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (created_by, name, deleted_at, deleted_by, purge_after) \
+         VALUES ($1, 'locked-space', now() - interval '40 days', $1, now() - interval '1 day') \
          RETURNING id",
     )
     .bind(user)
@@ -120,15 +119,15 @@ async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::err
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert!(!run.lock_acquired);
-    assert_eq!(run.workspaces_deleted, 0);
+    assert_eq!(run.spaces_deleted, 0);
     assert_eq!(run.nodes_deleted, 0);
 
-    let still_exists = sqlx::query("SELECT id FROM workspaces WHERE id = $1")
-        .bind(due_workspace)
+    let still_exists = sqlx::query("SELECT id FROM spaces WHERE id = $1")
+        .bind(due_space)
         .fetch_one(&db.pool)
         .await?
         .get::<Uuid, _>("id");
-    assert_eq!(still_exists, due_workspace);
+    assert_eq!(still_exists, due_space);
 
     tx.commit().await?;
     db.cleanup().await;

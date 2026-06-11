@@ -1,4 +1,4 @@
-//! `grep`: document-content search. Candidate documents are fetched keyset by
+//! `grep`: text-content search. Candidate texts are fetched keyset by
 //! `(updated_at DESC, node_id)`; line-splitting and context assembly happen here
 //! in the service so a match carries its 1-based `line_no` and context lines.
 
@@ -15,12 +15,12 @@ use super::{
 };
 
 impl SearchService {
-    /// Grep document content: fetch candidate documents (content match + scope),
+    /// Grep text content: fetch candidate texts (content match + scope),
     /// then split each candidate's content into lines here in the service so a
     /// match carries its 1-based `line_no` and `context` lines before/after.
     ///
-    /// Keyset-paginated by `(updated_at DESC, node_id)` plus an intra-document
-    /// `match_offset`, so a single document with more matches than the page limit
+    /// Keyset-paginated by `(updated_at DESC, node_id)` plus an intra-text
+    /// `match_offset`, so a single text with more matches than the page limit
     /// resumes exactly where the previous page stopped. Authorization mirrors file
     /// reads (`grep` requires `viewer`; no role ⇒ `404`). The limit is clamped to
     /// `1..=GREP_MAX_LIMIT` (default `GREP_DEFAULT_LIMIT`); context is clamped to
@@ -29,10 +29,10 @@ impl SearchService {
     pub async fn grep(
         &self,
         caller_account_id: uuid::Uuid,
-        workspace_id: uuid::Uuid,
+        space_id: uuid::Uuid,
         request: GrepRequest,
     ) -> ServiceResult<GrepPage> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Grep)
+        self.authorize(space_id, caller_account_id, FileCommand::Grep)
             .await?;
         let q = validate_query(&request.q)?;
         let limit = clamp_limit(
@@ -53,28 +53,22 @@ impl SearchService {
             .transpose()?;
 
         // Accumulate up to `limit + 1` matches to detect a next page. Iterate
-        // candidate documents in keyset order, line-splitting each; a document
+        // candidate texts in keyset order, line-splitting each; a text
         // may contribute many matches (and a previous page may have stopped mid
-        // document, encoded as the cursor's `match_offset`).
+        // text, encoded as the cursor's `match_offset`).
         let mut matches: Vec<GrepMatch> = Vec::with_capacity(limit as usize + 1);
         let want = limit + 1;
 
-        // Page through candidate documents until we have enough matches or the
-        // candidates are exhausted. Each document is bounded (≤2000 lines) and a
-        // workspace is bounded (≤5000 documents), so this loop is bounded. The
-        // document keyset is INCLUSIVE of `cursor.node_id`, so each batch re-reads
-        // the cursor's document first and skips its already-emitted matches via
+        // Page through candidate texts until we have enough matches or the
+        // candidates are exhausted. Each text is bounded (≤2000 lines) and a
+        // space is bounded (≤5000 texts), so this loop is bounded. The
+        // text keyset is INCLUSIVE of `cursor.node_id`, so each batch re-reads
+        // the cursor's text first and skips its already-emitted matches via
         // `cursor.match_offset`.
         'outer: loop {
             let candidates = self
                 .store
-                .grep_candidates(
-                    workspace_id,
-                    q,
-                    scope_path.as_deref(),
-                    want,
-                    cursor.as_ref(),
-                )
+                .grep_candidates(space_id, q, scope_path.as_deref(), want, cursor.as_ref())
                 .await?;
 
             if candidates.is_empty() {
@@ -82,12 +76,12 @@ impl SearchService {
             }
             let batch_len = candidates.len();
 
-            // Skip the matches already emitted from the batch's first document
-            // (the cursor's document); later documents in the batch start at 0.
+            // Skip the matches already emitted from the batch's first text
+            // (the cursor's text); later texts in the batch start at 0.
             let mut skip_in_first = cursor.as_ref().map(|c| c.match_offset).unwrap_or(0);
 
             for candidate in candidates {
-                let doc_matches = grep_document(&candidate, q, context);
+                let doc_matches = grep_text(&candidate, q, context);
 
                 let start = std::mem::take(&mut skip_in_first).max(0) as usize;
                 let mut emitted_in_doc = start;
@@ -108,7 +102,7 @@ impl SearchService {
                     }
                 }
 
-                // Document fully consumed. Record the cursor at this document with
+                // Text fully consumed. Record the cursor at this text with
                 // its total emitted count; because the next batch's keyset is
                 // inclusive of this node_id, the following batch will re-read it
                 // and skip exactly `emitted_in_doc` matches (i.e. skip it whole).
@@ -119,7 +113,7 @@ impl SearchService {
                 });
             }
 
-            // Fetched fewer documents than requested ⇒ candidates exhausted.
+            // Fetched fewer texts than requested ⇒ candidates exhausted.
             if (batch_len as i64) < want {
                 break;
             }
@@ -158,11 +152,11 @@ fn clamp_context(context: Option<i64>) -> i64 {
     }
 }
 
-/// Split a candidate document into logical lines and emit one [`GrepMatch`] per
+/// Split a candidate text into logical lines and emit one [`GrepMatch`] per
 /// line that contains `q` (case-insensitive substring, matching the SQL ILIKE),
 /// each carrying up to `context` lines before and after. Lines are 1-based.
-fn grep_document(candidate: &GrepCandidate, q: &str, context: i64) -> Vec<GrepMatch> {
-    let lines = split_lines(&candidate.content_md);
+fn grep_text(candidate: &GrepCandidate, q: &str, context: i64) -> Vec<GrepMatch> {
+    let lines = split_lines(&candidate.content);
     let needle = q.to_lowercase();
     let context = context.max(0) as usize;
 
@@ -198,7 +192,7 @@ fn grep_document(candidate: &GrepCandidate, q: &str, context: i64) -> Vec<GrepMa
 }
 
 /// Split content into logical lines, dropping a single trailing newline so a
-/// document ending in `\n` is not counted as a trailing empty line. Mirrors the
+/// text ending in `\n` is not counted as a trailing empty line. Mirrors the
 /// line-count semantics used by the files service.
 fn split_lines(content: &str) -> Vec<&str> {
     if content.is_empty() {
@@ -241,15 +235,15 @@ mod tests {
         GrepCandidate {
             node_id: Uuid::new_v4(),
             path: "/note.md".to_owned(),
-            content_md: content.to_owned(),
+            content: content.to_owned(),
             updated_at: Utc::now(),
         }
     }
 
     #[test]
-    fn grep_document_reports_line_no_and_context() {
+    fn grep_text_reports_line_no_and_context() {
         let doc = candidate("l1\nl2\nhit\nl4\nl5\n");
-        let matches = grep_document(&doc, "hit", 1);
+        let matches = grep_text(&doc, "hit", 1);
         assert_eq!(matches.len(), 1);
         let m = &matches[0];
         assert_eq!(m.line_no, 3, "1-based line number");
@@ -259,10 +253,10 @@ mod tests {
     }
 
     #[test]
-    fn grep_document_context_is_bounded_at_document_edges() {
+    fn grep_text_context_is_bounded_at_text_edges() {
         // Match on the first line: no `before`, `after` bounded by available lines.
         let doc = candidate("hit\nl2\n");
-        let matches = grep_document(&doc, "hit", 5);
+        let matches = grep_text(&doc, "hit", 5);
         assert_eq!(matches.len(), 1);
         assert!(
             matches[0].before.is_empty(),
@@ -272,13 +266,13 @@ mod tests {
     }
 
     #[test]
-    fn grep_document_matches_case_insensitively() {
+    fn grep_text_matches_case_insensitively() {
         let doc = candidate("Alpha BETA\n");
         assert_eq!(
-            grep_document(&doc, "beta", 0).len(),
+            grep_text(&doc, "beta", 0).len(),
             1,
             "ILIKE-style case folding"
         );
-        assert_eq!(grep_document(&doc, "ALPHA", 0).len(), 1);
+        assert_eq!(grep_text(&doc, "ALPHA", 0).len(), 1);
     }
 }

@@ -42,7 +42,7 @@ async fn run_once(pool: &PgPool) {
         Ok(run) => {
             tracing::info!(
                 event = "purge_worker.run",
-                workspaces_deleted = run.workspaces_deleted,
+                spaces_deleted = run.spaces_deleted,
                 nodes_deleted = run.nodes_deleted,
                 accounts_anonymized = run.accounts_anonymized,
                 api_keys_deleted = run.api_keys_deleted,

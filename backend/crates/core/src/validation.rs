@@ -1,6 +1,6 @@
 //! Shared name and path validation.
 //!
-//! The regex patterns here are the single source of truth for workspace and
+//! The regex patterns here are the single source of truth for space and
 //! node names and must stay aligned with the database `CHECK` constraints in
 //! `backend/crates/db/migrations/0001_init.sql`.
 
@@ -10,14 +10,14 @@ use regex::Regex;
 
 use crate::limits;
 
-/// Workspace name pattern: 1..=63 chars, leading alphanumeric.
-pub const WORKSPACE_NAME_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$";
-/// Node (folder/document) name pattern: 1..=128 chars, leading alphanumeric.
+/// Space name pattern: 1..=63 chars, leading alphanumeric.
+pub const SPACE_NAME_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$";
+/// Node name pattern: 1..=128 chars, leading alphanumeric.
 pub const NODE_NAME_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
 
-static WORKSPACE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
+static SPACE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
-    Regex::new(WORKSPACE_NAME_PATTERN).expect("workspace name pattern is valid")
+    Regex::new(SPACE_NAME_PATTERN).expect("space name pattern is valid")
 });
 
 static NODE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -36,10 +36,6 @@ pub enum ValidationError {
     ContainsSlash,
     /// The name does not match the required pattern (charset / length).
     Pattern,
-    /// A folder name must not end with `.md`.
-    FolderMdSuffix,
-    /// A document name must end with `.md`.
-    DocumentMdSuffix,
     /// The path does not start with `/`.
     PathNotAbsolute,
     /// The path exceeds the maximum length.
@@ -57,8 +53,6 @@ impl std::fmt::Display for ValidationError {
             Self::Pattern => {
                 "name must start with a letter or digit and use only letters, digits, '.', '_' or '-'"
             }
-            Self::FolderMdSuffix => "folder name cannot end with .md",
-            Self::DocumentMdSuffix => "document name must end with .md",
             Self::PathNotAbsolute => "path must start with /",
             Self::PathTooLong => "path is too long",
             Self::PathTooDeep => "path is too deep",
@@ -69,36 +63,33 @@ impl std::fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-/// Validate a workspace name against the shared pattern.
-pub fn validate_workspace_name(name: &str) -> Result<(), ValidationError> {
+/// Validate a space name against the shared pattern.
+pub fn validate_space_name(name: &str) -> Result<(), ValidationError> {
     if name.is_empty() {
         return Err(ValidationError::Empty);
     }
-    if !WORKSPACE_NAME_RE.is_match(name) {
+    if !SPACE_NAME_RE.is_match(name) {
         return Err(ValidationError::Pattern);
     }
     Ok(())
 }
 
-/// Validate a folder name: shared node pattern, not `.`/`..`, no `.md` suffix.
+/// Validate a folder name: shared node pattern, not `.`/`..`.
 pub fn validate_folder_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)?;
-    if name.ends_with(".md") {
-        return Err(ValidationError::FolderMdSuffix);
-    }
-    Ok(())
+    validate_node_name(name)
 }
 
-/// Validate a document name: shared node pattern, not `.`/`..`, `.md` suffix.
-pub fn validate_document_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)?;
-    if !name.ends_with(".md") {
-        return Err(ValidationError::DocumentMdSuffix);
-    }
-    Ok(())
+/// Validate a text name: shared node pattern, not `.`/`..`.
+pub fn validate_text_name(name: &str) -> Result<(), ValidationError> {
+    validate_node_name(name)
 }
 
-/// Validate a bare node name (folder or document) against the shared pattern.
+/// Validate a file name: shared node pattern, not `.`/`..`.
+pub fn validate_file_name(name: &str) -> Result<(), ValidationError> {
+    validate_node_name(name)
+}
+
+/// Validate a bare node name against the shared pattern.
 pub fn validate_node_name(name: &str) -> Result<(), ValidationError> {
     if name.is_empty() {
         return Err(ValidationError::Empty);
@@ -162,36 +153,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn workspace_name_accepts_valid_and_rejects_invalid() {
-        assert!(validate_workspace_name("notes").is_ok());
-        assert!(validate_workspace_name("a.b-c_1").is_ok());
-        assert_eq!(validate_workspace_name(""), Err(ValidationError::Empty));
+    fn space_name_accepts_valid_and_rejects_invalid() {
+        assert!(validate_space_name("notes").is_ok());
+        assert!(validate_space_name("a.b-c_1").is_ok());
+        assert_eq!(validate_space_name(""), Err(ValidationError::Empty));
         assert_eq!(
-            validate_workspace_name(".hidden"),
+            validate_space_name(".hidden"),
             Err(ValidationError::Pattern)
         );
         assert_eq!(
-            validate_workspace_name(&"a".repeat(64)),
+            validate_space_name(&"a".repeat(64)),
             Err(ValidationError::Pattern)
         );
     }
 
     #[test]
-    fn folder_name_rejects_md_suffix() {
+    fn folder_text_and_file_names_share_node_rules() {
         assert!(validate_folder_name("notes").is_ok());
-        assert_eq!(
-            validate_folder_name("notes.md"),
-            Err(ValidationError::FolderMdSuffix)
-        );
-    }
-
-    #[test]
-    fn document_name_requires_md_suffix() {
-        assert!(validate_document_name("today.md").is_ok());
-        assert_eq!(
-            validate_document_name("today"),
-            Err(ValidationError::DocumentMdSuffix)
-        );
+        assert!(validate_text_name("state.json").is_ok());
+        assert!(validate_file_name("image.png").is_ok());
     }
 
     #[test]

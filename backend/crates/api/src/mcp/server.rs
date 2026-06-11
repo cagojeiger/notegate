@@ -34,7 +34,7 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Path-first workspace, file, and search tools for notegate.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Path-first space, file, and search tools for notegate.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -74,42 +74,42 @@ impl McpServer {
     }
 
     #[tool(
-        name = "workspaces_list",
-        description = "List workspaces accessible to the authenticated caller.",
+        name = "spaces_list",
+        description = "List spaces accessible to the authenticated caller.",
         output_schema = object_output_schema()
     )]
-    pub async fn workspaces_list_tool(
+    pub async fn spaces_list_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::workspaces::ListInput>,
+        params: Parameters<tools::spaces::ListInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::workspaces::list(&self.state, &parts, params).await
+        tools::spaces::list(&self.state, &parts, params).await
     }
 
     #[tool(
-        name = "workspaces_create",
-        description = "Create a workspace owned by the authenticated user caller.",
+        name = "spaces_create",
+        description = "Create a space owned by the authenticated user caller.",
         output_schema = object_output_schema()
     )]
-    pub async fn workspaces_create_tool(
+    pub async fn spaces_create_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::workspaces::CreateInput>,
+        params: Parameters<tools::spaces::CreateInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::workspaces::create(&self.state, &parts, params).await
+        tools::spaces::create(&self.state, &parts, params).await
     }
 
     #[tool(
-        name = "workspaces_get",
-        description = "Return one accessible workspace by name, id, or single-workspace fallback.",
+        name = "spaces_get",
+        description = "Return one accessible space by name, id, or single-space fallback.",
         output_schema = object_output_schema()
     )]
-    pub async fn workspaces_get_tool(
+    pub async fn spaces_get_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::workspaces::GetInput>,
+        params: Parameters<tools::spaces::GetInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::workspaces::get(&self.state, &parts, params).await
+        tools::spaces::get(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -153,7 +153,7 @@ impl McpServer {
 
     #[tool(
         name = "files_touch",
-        description = "Create an empty Markdown document.",
+        description = "Create an empty Markdown text.",
         output_schema = object_output_schema()
     )]
     pub async fn files_touch_tool(
@@ -166,7 +166,7 @@ impl McpServer {
 
     #[tool(
         name = "files_read",
-        description = "Read a Markdown document with range limits.",
+        description = "Read a Markdown text with range limits.",
         output_schema = object_output_schema()
     )]
     pub async fn files_read_tool(
@@ -179,7 +179,7 @@ impl McpServer {
 
     #[tool(
         name = "files_write",
-        description = "Replace a Markdown document.",
+        description = "Replace a Markdown text.",
         output_schema = object_output_schema()
     )]
     pub async fn files_write_tool(
@@ -192,7 +192,7 @@ impl McpServer {
 
     #[tool(
         name = "files_patch",
-        description = "Apply exact targeted replacements to one Markdown document.",
+        description = "Apply exact targeted replacements to one Markdown text.",
         output_schema = object_output_schema()
     )]
     pub async fn files_patch_tool(
@@ -397,50 +397,42 @@ mod tests {
 
         for (tool_name, properties, required) in [
             ("me", "", ""),
-            ("workspaces_list", "limit cursor", ""),
-            ("workspaces_create", "name", "name"),
-            ("workspaces_get", "workspace workspace_id", ""),
-            (
-                "files_ls",
-                "workspace workspace_id path target limit cursor",
-                "",
-            ),
-            ("files_stat", "workspace workspace_id path target", ""),
-            ("files_mkdir", "workspace workspace_id path target", ""),
-            ("files_touch", "workspace workspace_id path target", ""),
+            ("spaces_list", "limit cursor", ""),
+            ("spaces_create", "name", "name"),
+            ("spaces_get", "space space_id", ""),
+            ("files_ls", "space space_id path target limit cursor", ""),
+            ("files_stat", "space space_id path target", ""),
+            ("files_mkdir", "space space_id path target", ""),
+            ("files_touch", "space space_id path target", ""),
             (
                 "files_read",
-                "workspace workspace_id path target start_line max_lines max_bytes if_none_match_sha256",
+                "space space_id path target start_line max_lines max_bytes if_none_match_sha256",
                 "",
             ),
             (
                 "files_write",
-                "workspace workspace_id path target content_md create expected_sha256",
-                "content_md",
+                "space space_id path target content create expected_sha256",
+                "content",
             ),
             (
                 "files_patch",
-                "workspace workspace_id path target edits expected_sha256",
+                "space space_id path target edits expected_sha256",
                 "edits",
             ),
             (
                 "files_mv",
-                "workspace workspace_id source_path destination_path",
+                "space space_id source_path destination_path",
                 "source_path destination_path",
             ),
-            (
-                "files_rm",
-                "workspace workspace_id path target recursive",
-                "",
-            ),
+            ("files_rm", "space space_id path target recursive", ""),
             (
                 "files_find",
-                "workspace workspace_id q path target kind limit cursor",
+                "space space_id q path target kind limit cursor",
                 "q",
             ),
             (
                 "files_grep",
-                "workspace workspace_id q path target context limit cursor",
+                "space space_id q path target context limit cursor",
                 "q",
             ),
         ] {
@@ -451,7 +443,7 @@ mod tests {
 
     #[test]
     fn server_instructions_describe_all_mcp_categories() {
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("workspace"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("file"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
     }
@@ -459,9 +451,9 @@ mod tests {
     fn expected_tool_names() -> BTreeSet<&'static str> {
         BTreeSet::from([
             "me",
-            "workspaces_list",
-            "workspaces_create",
-            "workspaces_get",
+            "spaces_list",
+            "spaces_create",
+            "spaces_get",
             "files_ls",
             "files_stat",
             "files_mkdir",

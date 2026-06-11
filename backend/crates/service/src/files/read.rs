@@ -6,8 +6,8 @@ use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
-    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, NodeView, ReadContent,
-    ReadDocument, ReadResult,
+    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, NodeView, ReadContent, ReadResult,
+    ReadText,
 };
 
 use super::{FilesService, join_path};
@@ -17,13 +17,13 @@ impl FilesService {
     pub async fn stat(
         &self,
         caller_account_id: Uuid,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
     ) -> ServiceResult<NodeView> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Stat)
+        self.authorize(space_id, caller_account_id, FileCommand::Stat)
             .await?;
-        let node = self.load_node(workspace_id, node_id).await?;
-        self.node_view(workspace_id, node).await
+        let node = self.load_node(space_id, node_id).await?;
+        self.node_view(space_id, node).await
     }
 
     /// Resolve an absolute path to a live node and return its view. Requires
@@ -32,43 +32,40 @@ impl FilesService {
     pub async fn resolve_path(
         &self,
         caller_account_id: Uuid,
-        workspace_id: Uuid,
+        space_id: Uuid,
         path: &str,
     ) -> ServiceResult<NodeView> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Stat)
+        self.authorize(space_id, caller_account_id, FileCommand::Stat)
             .await?;
         let path = validation::normalize_path(path)?;
         let node_id = self
             .store
-            .resolve_path(workspace_id, &path)
+            .resolve_path(space_id, &path)
             .await?
             .ok_or_else(|| ServiceError::NotFound("path does not resolve to a node".to_owned()))?;
-        let node = self.load_node(workspace_id, node_id).await?;
-        self.node_view(workspace_id, node).await
+        let node = self.load_node(space_id, node_id).await?;
+        self.node_view(space_id, node).await
     }
 
     /// List a folder's direct children (`ls`), keyset-paginated. Requires `viewer`.
     pub async fn children(
         &self,
         caller_account_id: Uuid,
-        workspace_id: Uuid,
+        space_id: Uuid,
         parent_node_id: Uuid,
         request: ChildrenRequest,
     ) -> ServiceResult<ChildrenPage> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Ls)
+        self.authorize(space_id, caller_account_id, FileCommand::Ls)
             .await?;
 
-        let parent = self.load_node(workspace_id, parent_node_id).await?;
+        let parent = self.load_node(space_id, parent_node_id).await?;
         if parent.kind != NodeKind::Folder {
             return Err(ServiceError::InvalidInput(
-                "cannot list children of a document".to_owned(),
+                "cannot list children of a text".to_owned(),
             ));
         }
-        let parent_path = self.path_of(workspace_id, parent_node_id).await?;
-        let parent_has_children = self
-            .store
-            .has_children(workspace_id, parent_node_id)
-            .await?;
+        let parent_path = self.path_of(space_id, parent_node_id).await?;
+        let parent_has_children = self.store.has_children(space_id, parent_node_id).await?;
 
         let limit = clamp_children_limit(request.limit);
         let cursor = match request.cursor.as_deref() {
@@ -77,7 +74,7 @@ impl FilesService {
         };
         let (rows, has_more) = self
             .store
-            .paged_children(workspace_id, parent_node_id, limit, cursor.as_ref())
+            .paged_children(space_id, parent_node_id, limit, cursor.as_ref())
             .await?;
 
         let next_cursor = if has_more {
@@ -97,12 +94,12 @@ impl FilesService {
         let mut items = Vec::with_capacity(rows.len());
         for node in rows {
             let path = join_path(&parent_path, &node.name);
-            let has_children = self.store.has_children(workspace_id, node.id).await?;
+            let has_children = self.store.has_children(space_id, node.id).await?;
             items.push(NodeView {
                 node,
                 path,
                 has_children,
-                document: None,
+                text: None,
             });
         }
 
@@ -111,7 +108,7 @@ impl FilesService {
                 node: parent,
                 path: parent_path,
                 has_children: parent_has_children,
-                document: None,
+                text: None,
             },
             items,
             limit,
@@ -120,35 +117,37 @@ impl FilesService {
         })
     }
 
-    /// Read a document with range limits (`read`/`open`). Requires `viewer`.
-    pub async fn read_document(
+    /// Read a text with range limits (`read`/`open`). Requires `viewer`.
+    pub async fn read_text(
         &self,
         caller_account_id: Uuid,
-        workspace_id: Uuid,
-        command: ReadDocument,
+        space_id: Uuid,
+        command: ReadText,
     ) -> ServiceResult<ReadResult> {
-        self.authorize(workspace_id, caller_account_id, FileCommand::Read)
+        self.authorize(space_id, caller_account_id, FileCommand::Read)
             .await?;
-        let (node, document) = self.load_document(workspace_id, command.node_id).await?;
-        let view = self
-            .document_node_view(workspace_id, node, &document)
-            .await?;
+        let (node, text) = self.load_text(space_id, command.node_id).await?;
+        let view = self.text_node_view(space_id, node, &text).await?;
 
         // Conditional read: unchanged when the caller's hash matches.
         if let Some(ref hash) = command.if_none_match_sha256
-            && hash == &document.content_sha256
+            && hash == &text.content_sha256
         {
             return Ok(ReadResult {
                 node: view,
                 content: None,
-                content_sha256: document.content_sha256,
-                byte_len: document.byte_len,
-                line_count: document.line_count,
+                content_sha256: text.content_sha256,
+                byte_len: text.byte_len,
+                line_count: text.line_count,
             });
         }
 
-        let content = slice_document(
-            &document.content_md,
+        let plain_content = text.content.as_deref().ok_or_else(|| {
+            ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
+        })?;
+
+        let content = slice_text(
+            plain_content,
             command.start_line,
             command.max_lines,
             command.max_bytes,
@@ -157,9 +156,9 @@ impl FilesService {
         Ok(ReadResult {
             node: view,
             content: Some(content),
-            content_sha256: document.content_sha256,
-            byte_len: document.byte_len,
-            line_count: document.line_count,
+            content_sha256: text.content_sha256,
+            byte_len: text.byte_len,
+            line_count: text.line_count,
         })
     }
 }
@@ -174,9 +173,9 @@ fn clamp_children_limit(limit: Option<i64>) -> i64 {
     }
 }
 
-/// Slice a document by a 1-based line range and a byte budget, reporting whether
+/// Slice a text by a 1-based line range and a byte budget, reporting whether
 /// the result was truncated and the next start line.
-pub(super) fn slice_document(
+pub(super) fn slice_text(
     content: &str,
     start_line: Option<i64>,
     max_lines: Option<i64>,
@@ -204,7 +203,7 @@ pub(super) fn slice_document(
 
     if total_lines == 0 || start_line > total_lines {
         return Ok(ReadContent {
-            content_md: String::new(),
+            content: String::new(),
             start_line,
             end_line: start_line.saturating_sub(1),
             returned_lines: 0,
@@ -220,7 +219,7 @@ pub(super) fn slice_document(
     for range in lines.iter().skip(start_index).take(max_lines as usize) {
         let Some(line) = content.get(range.clone()) else {
             return Err(ServiceError::Internal(
-                "failed to slice document at line boundary".to_owned(),
+                "failed to slice text at line boundary".to_owned(),
             ));
         };
         let candidate_len = line.len();
@@ -244,7 +243,7 @@ pub(super) fn slice_document(
     let next_start_line = if truncated { Some(end_line + 1) } else { None };
 
     Ok(ReadContent {
-        content_md: out,
+        content: out,
         start_line,
         end_line,
         returned_lines: returned,
@@ -291,16 +290,16 @@ mod tests {
     #[test]
     fn slice_preserves_stored_line_endings() {
         let content =
-            slice_document("a\r\nb\nc", Some(1), Some(3), None).expect("slice should succeed");
+            slice_text("a\r\nb\nc", Some(1), Some(3), None).expect("slice should succeed");
 
-        assert_eq!(content.content_md, "a\r\nb\nc");
+        assert_eq!(content.content, "a\r\nb\nc");
         assert_eq!(content.returned_lines, 3);
         assert!(!content.truncated);
     }
 
     #[test]
     fn slice_rejects_zero_max_bytes() {
-        let err = slice_document("a\n", None, None, Some(0)).unwrap_err();
+        let err = slice_text("a\n", None, None, Some(0)).unwrap_err();
 
         assert!(
             matches!(err, ServiceError::InvalidInput(message) if message == "max_bytes must be at least 1")
@@ -309,10 +308,9 @@ mod tests {
 
     #[test]
     fn slice_returns_at_least_one_full_line_for_forward_progress() {
-        let content =
-            slice_document("long-line\nnext\n", Some(1), Some(10), Some(4)).expect("slice");
+        let content = slice_text("long-line\nnext\n", Some(1), Some(10), Some(4)).expect("slice");
 
-        assert_eq!(content.content_md, "long-line\n");
+        assert_eq!(content.content, "long-line\n");
         assert_eq!(content.returned_lines, 1);
         assert!(content.truncated);
         assert_eq!(content.next_start_line, Some(2));

@@ -5,46 +5,46 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Whether a node is a folder or a document.
+/// Whether a node is a folder, text object, or binary/object file.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
     Folder,
-    Document,
+    Text,
+    File,
 }
 
 impl NodeKind {
-    /// Parse the storage representation, returning `None` for unknown values.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "folder" => Some(Self::Folder),
-            "document" => Some(Self::Document),
+            "text" => Some(Self::Text),
+            "file" => Some(Self::File),
             _ => None,
         }
     }
 
-    /// The storage representation.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Folder => "folder",
-            Self::Document => "document",
+            Self::Text => "text",
+            Self::File => "file",
         }
     }
 }
 
-/// A tree node. `path` is intentionally absent — it is derived in the DTO layer
-/// from the parent chain.
+/// A tree node. `path` is intentionally absent — it is derived in the DTO layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    pub space_id: Uuid,
     pub parent_id: Option<Uuid>,
     pub name: String,
     pub kind: NodeKind,
     pub sort_order: i32,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
-    pub deleted_by: Option<Uuid>,
+    pub created_by_account_id: Uuid,
+    pub updated_by_account_id: Uuid,
+    pub deleted_by_account_id: Option<Uuid>,
     pub purge_after: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

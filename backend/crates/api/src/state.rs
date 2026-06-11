@@ -5,26 +5,26 @@ use std::sync::Arc;
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
-    AccessRepo, AccountRepo, AgentRepo, ApiKeyRepo, FilesRepo, PgPool, WorkspaceRepo,
+    AccountRepo, AgentRepo, ApiKeyRepo, ConnectionRepo, FilesRepo, PgPool, SpaceRepo,
 };
-use notegate_service::access::AccessService;
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
+use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
 use notegate_service::search::SearchService;
-use notegate_service::workspaces::WorkspaceService;
+use notegate_service::spaces::SpaceService;
 
 use crate::identity::CallerResolver;
 
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 
-/// Workspace lifecycle service over the db-backed [`WorkspaceRepo`].
-pub type Workspaces = WorkspaceService;
+/// Space lifecycle service over the db-backed [`SpaceRepo`].
+pub type Spaces = SpaceService;
 /// Current-account lifecycle service over the db-backed [`AccountRepo`].
 pub type Accounts = AccountService;
-/// Access-management service over the db-backed [`AccessRepo`].
-pub type Access = AccessService;
+/// Agent-connection service over the db-backed [`ConnectionRepo`].
+pub type Connections = ConnectionService;
 /// Agent lifecycle service over the db-backed [`AgentRepo`].
 pub type Agents = AgentService;
 /// File-tree command service over the db-backed [`FilesRepo`].
@@ -41,9 +41,9 @@ pub struct AppState {
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
     pub security: PiiCrypto,
-    pub workspaces: Workspaces,
+    pub spaces: Spaces,
     pub account_lifecycle: Accounts,
-    pub access: Access,
+    pub connections: Connections,
     pub agents: Agents,
     pub files: Files,
     pub search: Search,
@@ -62,7 +62,7 @@ impl AppState {
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
     ) -> Self {
-        let workspaces = WorkspaceService::new(WorkspaceRepo::new(db.clone()));
+        let spaces = SpaceService::new(SpaceRepo::new(db.clone()));
         let api_key_repo = ApiKeyRepo::with_lookup_key(
             db.clone(),
             pii_crypto.lookup_key_id(),
@@ -73,7 +73,7 @@ impl AppState {
             api_key_repo.clone(),
             pii_crypto.clone(),
         );
-        let access = AccessService::new(AccessRepo::new(db.clone()));
+        let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents =
             AgentService::with_crypto(agent_repo.clone(), api_key_repo, pii_crypto.clone());
@@ -89,9 +89,9 @@ impl AppState {
             resolver,
             http,
             security: pii_crypto,
-            workspaces,
+            spaces,
             account_lifecycle,
-            access,
+            connections,
             agents,
             files,
             search,

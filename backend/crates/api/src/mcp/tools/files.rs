@@ -4,8 +4,8 @@ use axum::http::request::Parts;
 use notegate_core::validation::normalize_path;
 use notegate_service::ServiceError;
 use notegate_service::files::{
-    ChildrenRequest, CreateDocument, CreateFolder, DeleteNode, Edit as ServiceEdit, MoveNode,
-    PatchDocument, ReadDocument, WriteDocument, WriteTarget,
+    ChildrenRequest, CreateFolder, CreateText, DeleteNode, Edit as ServiceEdit, MoveNode,
+    PatchText, ReadText, WriteTarget, WriteText,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
@@ -14,21 +14,21 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::resolve::{
-    WorkspaceSelector, caller, invalid_input_error, node_summary, resolve_target,
-    resolve_workspace, service_error, split_parent_name,
+    SpaceSelector, caller, invalid_input_error, node_summary, resolve_space, resolve_target,
+    service_error, split_parent_name,
 };
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `files_ls` input: a workspace selector plus the folder `path` (or `target`).
+/// `files_ls` input: a space selector plus the folder `path` (or `target`).
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct LsInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
-    /// Absolute folder path inside the selected workspace.
+    pub selector: SpaceSelector,
+    /// Absolute folder path inside the selected space.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
     /// Page size; clamped to `1..=200`, default `100`.
@@ -39,55 +39,55 @@ pub struct LsInput {
     pub cursor: Option<String>,
 }
 
-/// `files_stat` input: a workspace selector plus a `path` or a `target` string.
+/// `files_stat` input: a space selector plus a `path` or a `target` string.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct StatInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
-    /// Absolute path inside the selected workspace.
+    pub selector: SpaceSelector,
+    /// Absolute path inside the selected space.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
 }
 
-/// `files_mkdir` input: a workspace selector plus the folder `path` (or `target`).
+/// `files_mkdir` input: a space selector plus the folder `path` (or `target`).
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct MkdirInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
+    pub selector: SpaceSelector,
     /// Absolute path of the folder to create.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
 }
 
-/// `files_touch` input: a workspace selector plus the document `path` (or `target`).
+/// `files_touch` input: a space selector plus the text `path` (or `target`).
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct TouchInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
-    /// Absolute path of the `.md` document to create.
+    pub selector: SpaceSelector,
+    /// Absolute path of the `.md` text to create.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
 }
 
-/// `files_read` input: a workspace selector, the document `path` (or `target`),
+/// `files_read` input: a space selector, the text `path` (or `target`),
 /// and optional range/conditional-read fields.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ReadInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
-    /// Absolute path of the document to read.
+    pub selector: SpaceSelector,
+    /// Absolute path of the text to read.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
     /// 1-based first line to return; defaults to `1`.
@@ -104,21 +104,21 @@ pub struct ReadInput {
     pub if_none_match_sha256: Option<String>,
 }
 
-/// `files_write` input: a workspace selector, the document `path` (or `target`),
+/// `files_write` input: a space selector, the text `path` (or `target`),
 /// the new content, and create/optimistic-guard flags.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct WriteInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
-    /// Absolute path of the document to write.
+    pub selector: SpaceSelector,
+    /// Absolute path of the text to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
     /// The full replacement Markdown content.
-    pub content_md: String,
-    /// When true, a missing document is created; when false, it must exist.
+    pub content: String,
+    /// When true, a missing text is created; when false, it must exist.
     #[serde(default)]
     pub create: bool,
     /// Optimistic guard; conflict if it does not match the current content hash.
@@ -135,16 +135,16 @@ pub struct PatchEdit {
     pub new_text: String,
 }
 
-/// `files_patch` input: a workspace selector, the document `path` (or `target`),
+/// `files_patch` input: a space selector, the text `path` (or `target`),
 /// the edits, and an optional optimistic guard.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct PatchInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
-    /// Absolute path of the document to patch.
+    pub selector: SpaceSelector,
+    /// Absolute path of the text to patch.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
     /// Non-empty list of exact replacements applied against the original content.
@@ -154,27 +154,27 @@ pub struct PatchInput {
     pub expected_sha256: Option<String>,
 }
 
-/// `files_mv` input: a workspace selector plus source and destination paths.
+/// `files_mv` input: a space selector plus source and destination paths.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct MvInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
+    pub selector: SpaceSelector,
     /// Absolute path of the node to move.
     pub source_path: String,
     /// Absolute destination path (its dirname must be an existing folder).
     pub destination_path: String,
 }
 
-/// `files_rm` input: a workspace selector, the `path` (or `target`), and the
+/// `files_rm` input: a space selector, the `path` (or `target`), and the
 /// recursive flag.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct RmInput {
     #[serde(flatten)]
-    pub selector: WorkspaceSelector,
+    pub selector: SpaceSelector,
     /// Absolute path of the node to delete.
     #[serde(default)]
     pub path: Option<String>,
-    /// Compact `<workspace>:/<path>` target (alternative to workspace+path).
+    /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
     /// Required to delete a folder (and its subtree).
@@ -197,11 +197,11 @@ pub async fn ls(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let folder = state
         .files
-        .resolve_path(account_id, workspace_id, &path)
+        .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -209,7 +209,7 @@ pub async fn ls(
         .files
         .children(
             account_id,
-            workspace_id,
+            space_id,
             folder.node.id,
             ChildrenRequest {
                 limit: input.limit,
@@ -223,7 +223,7 @@ pub async fn ls(
     let returned = children.len();
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "path": page.parent.path,
         "children": children,
         "page": page_json(
@@ -252,12 +252,12 @@ pub async fn stat(
 
     let view = state
         .files
-        .resolve_path(caller.account_id(), resolved.workspace_id(), &path)
+        .resolve_path(caller.account_id(), resolved.space_id(), &path)
         .await
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "node": node_summary(&view),
     })))
 }
@@ -277,12 +277,12 @@ pub async fn mkdir(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let (parent_path, name) = split_parent_name(&path)?;
     let parent = state
         .files
-        .resolve_path(account_id, workspace_id, &parent_path)
+        .resolve_path(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
@@ -290,7 +290,7 @@ pub async fn mkdir(
         .files
         .create_folder(
             account_id,
-            workspace_id,
+            space_id,
             CreateFolder {
                 parent_node_id: parent.node.id,
                 name,
@@ -300,7 +300,7 @@ pub async fn mkdir(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "node": node_summary(&view),
     })))
 }
@@ -320,21 +320,21 @@ pub async fn touch(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let (parent_path, name) = split_parent_name(&path)?;
     let parent = state
         .files
-        .resolve_path(account_id, workspace_id, &parent_path)
+        .resolve_path(account_id, space_id, &parent_path)
         .await
         .map_err(service_error)?;
 
     let view = state
         .files
-        .create_document(
+        .create_text(
             account_id,
-            workspace_id,
-            CreateDocument {
+            space_id,
+            CreateText {
                 parent_node_id: parent.node.id,
                 name,
             },
@@ -343,11 +343,11 @@ pub async fn touch(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "node": node_summary(&view.node),
-        "content_sha256": view.document.content_sha256,
-        "byte_len": view.document.byte_len,
-        "line_count": view.document.line_count,
+        "content_sha256": view.text.content_sha256,
+        "byte_len": view.text.byte_len,
+        "line_count": view.text.line_count,
     })))
 }
 
@@ -366,20 +366,20 @@ pub async fn read(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let node = state
         .files
-        .resolve_path(account_id, workspace_id, &path)
+        .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
     let result = state
         .files
-        .read_document(
+        .read_text(
             account_id,
-            workspace_id,
-            ReadDocument {
+            space_id,
+            ReadText {
                 node_id: node.node.id,
                 start_line: input.start_line,
                 max_lines: input.max_lines,
@@ -390,19 +390,19 @@ pub async fn read(
         .await
         .map_err(service_error)?;
 
-    let workspace = resolved.name();
+    let space = resolved.name();
     let body = match &result.content {
         None => json!({
-            "workspace": workspace,
+            "space": space,
             "path": result.node.path,
             "unchanged": true,
             "content_returned": false,
             "content_sha256": result.content_sha256,
         }),
         Some(content) => json!({
-            "workspace": workspace,
+            "space": space,
             "path": result.node.path,
-            "content_md": content.content_md,
+            "content": content.content,
             "content_sha256": result.content_sha256,
             "byte_len": result.byte_len,
             "line_count": result.line_count,
@@ -431,13 +431,9 @@ pub async fn write(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
-    let existing = match state
-        .files
-        .resolve_path(account_id, workspace_id, &path)
-        .await
-    {
+    let existing = match state.files.resolve_path(account_id, space_id, &path).await {
         Ok(view) => Some(view),
         Err(ServiceError::NotFound(_)) => None,
         Err(error) => return Err(service_error(error)),
@@ -450,13 +446,13 @@ pub async fn write(
         None => {
             if !input.create {
                 return Err(service_error(ServiceError::NotFound(
-                    "document does not exist; pass create=true to create it".to_owned(),
+                    "text does not exist; pass create=true to create it".to_owned(),
                 )));
             }
             let (parent_path, name) = split_parent_name(&path)?;
             let parent = state
                 .files
-                .resolve_path(account_id, workspace_id, &parent_path)
+                .resolve_path(account_id, space_id, &parent_path)
                 .await
                 .map_err(service_error)?;
             WriteTarget::Create {
@@ -468,12 +464,12 @@ pub async fn write(
 
     let view = state
         .files
-        .write_document(
+        .write_text(
             account_id,
-            workspace_id,
-            WriteDocument {
+            space_id,
+            WriteText {
                 target,
-                content_md: input.content_md,
+                content: input.content,
                 expected_sha256: input.expected_sha256,
             },
         )
@@ -481,11 +477,11 @@ pub async fn write(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "node": node_summary(&view.node),
-        "content_sha256": view.document.content_sha256,
-        "byte_len": view.document.byte_len,
-        "line_count": view.document.line_count,
+        "content_sha256": view.text.content_sha256,
+        "byte_len": view.text.byte_len,
+        "line_count": view.text.line_count,
     })))
 }
 
@@ -504,11 +500,11 @@ pub async fn patch(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let node = state
         .files
-        .resolve_path(account_id, workspace_id, &path)
+        .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -523,10 +519,10 @@ pub async fn patch(
 
     let result = state
         .files
-        .patch_document(
+        .patch_text(
             account_id,
-            workspace_id,
-            PatchDocument {
+            space_id,
+            PatchText {
                 node_id: node.node.id,
                 edits,
                 expected_sha256: input.expected_sha256,
@@ -536,14 +532,14 @@ pub async fn patch(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "path": result.node.path,
         "patched": true,
         "edits_applied": result.edits_applied,
-        "content_sha256": result.document.content_sha256,
+        "content_sha256": result.text.content_sha256,
         "previous_sha256": result.previous_sha256,
-        "byte_len": result.document.byte_len,
-        "line_count": result.document.line_count,
+        "byte_len": result.text.byte_len,
+        "line_count": result.text.line_count,
         "diff": result.diff,
     })))
 }
@@ -554,9 +550,9 @@ pub async fn mv(
     Parameters(input): Parameters<MvInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let resolved = resolve_workspace(state, caller, &input.selector).await?;
+    let resolved = resolve_space(state, caller, &input.selector).await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let source_path = normalize_path(&input.source_path)
         .map_err(|error| invalid_input_error(error.to_string()))?;
@@ -565,14 +561,14 @@ pub async fn mv(
 
     let source = state
         .files
-        .resolve_path(account_id, workspace_id, &source_path)
+        .resolve_path(account_id, space_id, &source_path)
         .await
         .map_err(service_error)?;
 
     let (dest_parent_path, new_name) = split_parent_name(&destination_path)?;
     let dest_parent = state
         .files
-        .resolve_path(account_id, workspace_id, &dest_parent_path)
+        .resolve_path(account_id, space_id, &dest_parent_path)
         .await
         .map_err(service_error)?;
 
@@ -580,7 +576,7 @@ pub async fn mv(
         .files
         .move_node(
             account_id,
-            workspace_id,
+            space_id,
             MoveNode {
                 node_id: source.node.id,
                 new_parent_node_id: dest_parent.node.id,
@@ -592,7 +588,7 @@ pub async fn mv(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "node": node_summary(&view),
     })))
 }
@@ -612,11 +608,11 @@ pub async fn rm(
     )
     .await?;
     let account_id = caller.account_id();
-    let workspace_id = resolved.workspace_id();
+    let space_id = resolved.space_id();
 
     let node = state
         .files
-        .resolve_path(account_id, workspace_id, &path)
+        .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
 
@@ -624,7 +620,7 @@ pub async fn rm(
         .files
         .delete_node(
             account_id,
-            workspace_id,
+            space_id,
             DeleteNode {
                 node_id: node.node.id,
                 recursive: input.recursive,
@@ -634,7 +630,7 @@ pub async fn rm(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "workspace": resolved.name(),
+        "space": resolved.name(),
         "path": result.path,
         "node_id": result.node_id,
         "deleted": true,

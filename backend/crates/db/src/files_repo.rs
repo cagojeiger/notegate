@@ -1,4 +1,4 @@
-//! Nodes + documents persistence (the file tree) and search.
+//! Nodes + text-object persistence (the file tree) and search.
 //!
 //! Exposes concrete persistence methods consumed by `notegate-service`.
 //! All queries use runtime-checked `query_as::<_, Row>()` / `query()` — never the
@@ -7,17 +7,17 @@
 //! deleted_by) from the caller.
 //!
 //! Nodes have NO stored path column. Display paths and scoped search paths are
-//! derived by workspace-bounded recursive CTEs (see `files::queries`);
+//! derived by space-bounded recursive CTEs (see `files::queries`);
 //! move/rename updates only the moved node's row (O(1), no descendant rewrite).
 
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
-use notegate_model::{Document, Node, NodeKind, Role};
+use notegate_model::{Node, NodeKind, Permission, TextObject};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use notegate_model::files::{ChildrenCursor, CreateFolder, DocumentStats, MoveNode, StoredContent};
+use notegate_model::files::{ChildrenCursor, CreateFolder, MoveNode, StoredContent, TextStats};
 use notegate_model::search::{FindCursor, GrepCandidate, GrepCursor};
 
 use crate::files::{commands, queries};
@@ -39,104 +39,96 @@ impl FilesRepo {
 }
 
 impl FilesRepo {
-    pub async fn find_node(&self, workspace_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
-        queries::node::find_node(&self.pool, workspace_id, node_id).await
+    pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
+        queries::node::find_node(&self.pool, space_id, node_id).await
     }
 
-    pub async fn node_path(&self, workspace_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
-        queries::node::node_path(&self.pool, workspace_id, node_id).await
+    pub async fn node_path(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
+        queries::node::node_path(&self.pool, space_id, node_id).await
     }
 
-    pub async fn resolve_path(&self, workspace_id: Uuid, path: &str) -> Result<Option<Uuid>> {
-        queries::search::resolve_scope_node(&self.pool, workspace_id, path).await
+    pub async fn resolve_path(&self, space_id: Uuid, path: &str) -> Result<Option<Uuid>> {
+        queries::search::resolve_scope_node(&self.pool, space_id, path).await
     }
 
-    pub async fn has_children(&self, workspace_id: Uuid, node_id: Uuid) -> Result<bool> {
-        queries::node::has_children(&self.pool, workspace_id, node_id).await
+    pub async fn has_children(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
+        queries::node::has_children(&self.pool, space_id, node_id).await
     }
 
-    pub async fn count_live_children(
-        &self,
-        workspace_id: Uuid,
-        parent_node_id: Uuid,
-    ) -> Result<usize> {
-        queries::node::count_live_children(&self.pool, workspace_id, parent_node_id).await
+    pub async fn count_live_children(&self, space_id: Uuid, parent_node_id: Uuid) -> Result<usize> {
+        queries::node::count_live_children(&self.pool, space_id, parent_node_id).await
     }
 
     pub async fn find_live_child_by_name(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
     ) -> Result<Option<Node>> {
-        queries::node::find_live_child_by_name(&self.pool, workspace_id, parent_node_id, name).await
+        queries::node::find_live_child_by_name(&self.pool, space_id, parent_node_id, name).await
     }
 
-    pub async fn count_live_nodes(&self, workspace_id: Uuid) -> Result<usize> {
-        queries::node::count_live_nodes(&self.pool, workspace_id).await
+    pub async fn count_live_nodes(&self, space_id: Uuid) -> Result<usize> {
+        queries::node::count_live_nodes(&self.pool, space_id).await
     }
 
-    pub async fn count_live_documents(&self, workspace_id: Uuid) -> Result<usize> {
-        queries::document::count_live_documents(&self.pool, workspace_id).await
+    pub async fn count_live_texts(&self, space_id: Uuid) -> Result<usize> {
+        queries::text::count_live_texts(&self.pool, space_id).await
     }
 
-    pub async fn sum_live_document_bytes(&self, workspace_id: Uuid) -> Result<usize> {
-        queries::document::sum_live_document_bytes(&self.pool, workspace_id).await
+    pub async fn sum_live_text_bytes(&self, space_id: Uuid) -> Result<usize> {
+        queries::text::sum_live_text_bytes(&self.pool, space_id).await
     }
 
-    pub async fn document_stats(
+    pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
+        queries::text::text_stats(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn find_text(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
-    ) -> Result<Option<DocumentStats>> {
-        queries::document::document_stats(&self.pool, workspace_id, node_id).await
-    }
-
-    pub async fn find_document(
-        &self,
-        workspace_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, Document)>> {
-        queries::document::find_document(&self.pool, workspace_id, node_id).await
+    ) -> Result<Option<(Node, TextObject)>> {
+        queries::text::find_text(&self.pool, space_id, node_id).await
     }
 
     pub async fn paged_children(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         parent_node_id: Uuid,
         limit: i64,
         cursor: Option<&ChildrenCursor>,
     ) -> Result<(Vec<Node>, bool)> {
         let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
-        queries::node::paged_children(&self.pool, workspace_id, parent_node_id, limit, cursor).await
+        queries::node::paged_children(&self.pool, space_id, parent_node_id, limit, cursor).await
     }
 
-    pub async fn subtree_relative_depth(&self, workspace_id: Uuid, node_id: Uuid) -> Result<usize> {
-        queries::node::subtree_relative_depth(&self.pool, workspace_id, node_id).await
+    pub async fn subtree_relative_depth(&self, space_id: Uuid, node_id: Uuid) -> Result<usize> {
+        queries::node::subtree_relative_depth(&self.pool, space_id, node_id).await
     }
 
-    pub async fn subtree_live_count(&self, workspace_id: Uuid, node_id: Uuid) -> Result<usize> {
-        queries::node::subtree_live_count(&self.pool, workspace_id, node_id).await
+    pub async fn subtree_live_count(&self, space_id: Uuid, node_id: Uuid) -> Result<usize> {
+        queries::node::subtree_live_count(&self.pool, space_id, node_id).await
     }
 
     pub async fn is_self_or_descendant(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
         candidate_id: Uuid,
     ) -> Result<bool> {
-        queries::node::is_self_or_descendant(&self.pool, workspace_id, node_id, candidate_id).await
+        queries::node::is_self_or_descendant(&self.pool, space_id, node_id, candidate_id).await
     }
 
     pub async fn insert_folder(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         command: &CreateFolder,
         created_by: Uuid,
     ) -> Result<Node> {
         commands::create::insert_folder(
             &self.pool,
-            workspace_id,
+            space_id,
             command.parent_node_id,
             &command.name,
             created_by,
@@ -145,17 +137,17 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn insert_document(
+    pub async fn insert_text(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         parent_node_id: Uuid,
         name: &str,
         content: &StoredContent,
         created_by: Uuid,
-    ) -> Result<(Node, Document)> {
-        commands::create::insert_document(
+    ) -> Result<(Node, TextObject)> {
+        commands::create::insert_text(
             &self.pool,
-            workspace_id,
+            space_id,
             parent_node_id,
             name,
             content,
@@ -165,17 +157,17 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn save_document_content(
+    pub async fn save_text_content(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
         content: &StoredContent,
         expected_sha256: Option<&str>,
         updated_by: Uuid,
-    ) -> Result<(Node, Document)> {
-        commands::save::save_document_content(
+    ) -> Result<(Node, TextObject)> {
+        commands::save::save_text_content(
             &self.pool,
-            workspace_id,
+            space_id,
             node_id,
             content,
             expected_sha256,
@@ -187,13 +179,13 @@ impl FilesRepo {
 
     pub async fn move_node(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         command: &MoveNode,
         updated_by: Uuid,
     ) -> Result<Node> {
         commands::move_node::move_node(commands::move_node::MoveNodeArgs {
             pool: &self.pool,
-            workspace_id,
+            space_id,
             node_id: command.node_id,
             new_parent_id: command.new_parent_node_id,
             new_name: command.new_name.as_deref(),
@@ -206,7 +198,7 @@ impl FilesRepo {
 
     pub async fn update_node_metadata(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
         new_name: Option<&str>,
         new_sort_order: Option<i32>,
@@ -214,7 +206,7 @@ impl FilesRepo {
     ) -> Result<Node> {
         commands::update::update_node_metadata(
             &self.pool,
-            workspace_id,
+            space_id,
             node_id,
             new_name,
             new_sort_order,
@@ -225,64 +217,62 @@ impl FilesRepo {
 
     pub async fn soft_delete_node(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node_id: Uuid,
         deleted_by: Uuid,
     ) -> Result<DateTime<Utc>> {
-        commands::delete::soft_delete_node(&self.pool, workspace_id, node_id, deleted_by).await
+        commands::delete::soft_delete_node(&self.pool, space_id, node_id, deleted_by).await
     }
 }
 
 impl FilesRepo {
-    pub async fn role_for(&self, workspace_id: Uuid, account_id: Uuid) -> Result<Option<Role>> {
-        queries::node::role_for(&self.pool, workspace_id, account_id).await
+    pub async fn permission_for(
+        &self,
+        space_id: Uuid,
+        account_id: Uuid,
+    ) -> Result<Option<Permission>> {
+        queries::node::permission_for(&self.pool, space_id, account_id).await
     }
 
     pub async fn find_nodes(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         q: &str,
         scope: Option<&str>,
         kind: Option<NodeKind>,
         limit: i64,
         cursor: Option<&FindCursor>,
     ) -> Result<Vec<(Node, String, bool)>> {
-        let scope_node = self.resolve_scope(workspace_id, scope).await?;
+        let scope_node = self.resolve_scope(space_id, scope).await?;
         if scope.is_some() && scope_node.is_none() {
             return Err(notegate_core::Error::not_found("scope path not found"));
         }
-        queries::search::find_nodes(&self.pool, workspace_id, q, scope_node, kind, limit, cursor)
-            .await
+        queries::search::find_nodes(&self.pool, space_id, q, scope_node, kind, limit, cursor).await
     }
 
     pub async fn grep_candidates(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         q: &str,
         scope: Option<&str>,
         limit: i64,
         cursor: Option<&GrepCursor>,
     ) -> Result<Vec<GrepCandidate>> {
-        let scope_node = self.resolve_scope(workspace_id, scope).await?;
+        let scope_node = self.resolve_scope(space_id, scope).await?;
         if scope.is_some() && scope_node.is_none() {
             return Err(notegate_core::Error::not_found("scope path not found"));
         }
-        queries::search::grep_candidates(&self.pool, workspace_id, q, scope_node, limit, cursor)
-            .await
+        queries::search::grep_candidates(&self.pool, space_id, q, scope_node, limit, cursor).await
     }
 }
 
 impl FilesRepo {
-    /// Resolve an optional scope path to a live node id within the workspace.
-    /// `None` scope means "whole workspace" (no subtree restriction).
-    pub async fn resolve_scope(
-        &self,
-        workspace_id: Uuid,
-        scope: Option<&str>,
-    ) -> Result<Option<Uuid>> {
+    /// Resolve an optional scope path to a live node id within the space.
+    /// `None` scope means "whole space" (no subtree restriction).
+    pub async fn resolve_scope(&self, space_id: Uuid, scope: Option<&str>) -> Result<Option<Uuid>> {
         match scope {
             None => Ok(None),
-            Some(path) => queries::search::resolve_scope_node(&self.pool, workspace_id, path).await,
+            Some(path) => queries::search::resolve_scope_node(&self.pool, space_id, path).await,
         }
     }
 }

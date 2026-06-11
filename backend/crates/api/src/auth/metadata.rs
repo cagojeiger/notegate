@@ -61,7 +61,7 @@ pub struct AuthorizationServerMetadata {
     token_endpoint_auth_methods_supported: Vec<&'static str>,
     code_challenge_methods_supported: Vec<&'static str>,
     scopes_supported: Vec<&'static str>,
-    client_id_metadata_document_supported: bool,
+    client_id_metadata_text_supported: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -102,7 +102,7 @@ pub fn authorization_server_metadata_for_config(config: &Config) -> Authorizatio
         ],
         code_challenge_methods_supported: vec!["S256"],
         scopes_supported: vec!["openid", "profile", "email", "offline_access"],
-        client_id_metadata_document_supported: true,
+        client_id_metadata_text_supported: true,
     }
 }
 
@@ -222,7 +222,7 @@ mod tests {
             vec!["none", "client_secret_basic", "client_secret_post"]
         );
         assert_eq!(metadata.code_challenge_methods_supported, vec!["S256"]);
-        assert!(metadata.client_id_metadata_document_supported);
+        assert!(metadata.client_id_metadata_text_supported);
     }
 
     #[test]

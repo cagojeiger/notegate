@@ -1,6 +1,6 @@
 //! Search category: `POST /search/find` and `POST /search/grep`.
 //!
-//! Workspace-scoped search. Authorization is checked once by the search service.
+//! Space-scoped search. Authorization is checked once by the search service.
 //! Surface-specific parsing happens here; limit/cursor policy stays in the service.
 
 use axum::extract::{Extension, Path, State};
@@ -20,8 +20,8 @@ use notegate_service::search::{FindRequest, GrepRequest};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/workspaces/{workspace_id}/search/find", post(find))
-        .route("/v1/workspaces/{workspace_id}/search/grep", post(grep))
+        .route("/v1/spaces/{space_id}/search/find", post(find))
+        .route("/v1/spaces/{space_id}/search/grep", post(grep))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -45,9 +45,9 @@ pub(crate) struct FindResponse {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/workspaces/{workspace_id}/search/find",
+    path = "/api/v1/spaces/{space_id}/search/find",
     tag = "search",
-    params(("workspace_id" = Uuid, Path)),
+    params(("space_id" = Uuid, Path)),
     request_body = FindBody,
     responses((status = 200, description = "Find nodes", body = FindResponse)),
     security(("bearer_auth" = []))
@@ -55,7 +55,7 @@ pub(crate) struct FindResponse {
 pub(crate) async fn find(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path(workspace_id): Path<Uuid>,
+    Path(space_id): Path<Uuid>,
     Json(body): Json<FindBody>,
 ) -> Result<Json<FindResponse>, ApiError> {
     let kind = match body.kind.as_deref() {
@@ -66,7 +66,7 @@ pub(crate) async fn find(
         .search
         .find(
             caller.account_id(),
-            workspace_id,
+            space_id,
             FindRequest {
                 q: body.q,
                 path: body.path,
@@ -129,9 +129,9 @@ pub(crate) struct GrepResponse {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/workspaces/{workspace_id}/search/grep",
+    path = "/api/v1/spaces/{space_id}/search/grep",
     tag = "search",
-    params(("workspace_id" = Uuid, Path)),
+    params(("space_id" = Uuid, Path)),
     request_body = GrepBody,
     responses((status = 200, description = "Grep content", body = GrepResponse)),
     security(("bearer_auth" = []))
@@ -139,14 +139,14 @@ pub(crate) struct GrepResponse {
 pub(crate) async fn grep(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path(workspace_id): Path<Uuid>,
+    Path(space_id): Path<Uuid>,
     Json(body): Json<GrepBody>,
 ) -> Result<Json<GrepResponse>, ApiError> {
     let page = state
         .search
         .grep(
             caller.account_id(),
-            workspace_id,
+            space_id,
             GrepRequest {
                 q: body.q,
                 path: body.path,

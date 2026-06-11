@@ -1,22 +1,18 @@
-use notegate_model::{Document, Node, NodeKind};
+use notegate_model::{Node, NodeKind, TextObject};
 use uuid::Uuid;
 
 use crate::error::ServiceResult;
-use crate::files::{DocumentStats, DocumentView, NodeView};
+use crate::files::{NodeView, TextStats, TextView};
 
 use super::FilesService;
 
 impl FilesService {
     /// Build a [`NodeView`] for an existing node (derives path + has_children).
-    pub(super) async fn node_view(
-        &self,
-        workspace_id: Uuid,
-        node: Node,
-    ) -> ServiceResult<NodeView> {
-        let path = self.path_of(workspace_id, node.id).await?;
-        let has_children = self.store.has_children(workspace_id, node.id).await?;
-        let document = if node.kind == NodeKind::Document {
-            self.store.document_stats(workspace_id, node.id).await?
+    pub(super) async fn node_view(&self, space_id: Uuid, node: Node) -> ServiceResult<NodeView> {
+        let path = self.path_of(space_id, node.id).await?;
+        let has_children = self.store.has_children(space_id, node.id).await?;
+        let text = if node.kind == NodeKind::Text {
+            self.store.text_stats(space_id, node.id).await?
         } else {
             None
         };
@@ -24,58 +20,56 @@ impl FilesService {
             node,
             path,
             has_children,
-            document,
+            text,
         })
     }
 
-    /// Build a [`DocumentView`] for an existing document node.
-    pub(super) async fn document_view(
+    /// Build a [`TextView`] for an existing text node.
+    pub(super) async fn text_view(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node: Node,
-        document: Document,
-    ) -> ServiceResult<DocumentView> {
-        let node = self
-            .document_node_view(workspace_id, node, &document)
-            .await?;
-        Ok(DocumentView { node, document })
+        text: TextObject,
+    ) -> ServiceResult<TextView> {
+        let node = self.text_node_view(space_id, node, &text).await?;
+        Ok(TextView { node, text })
     }
 
-    /// Build a document node view from an already-loaded document, avoiding an
-    /// extra metrics lookup through `document_stats`.
-    pub(super) async fn document_node_view(
+    /// Build a text node view from an already-loaded text, avoiding an
+    /// extra metrics lookup through `text_stats`.
+    pub(super) async fn text_node_view(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         node: Node,
-        document: &Document,
+        text: &TextObject,
     ) -> ServiceResult<NodeView> {
-        let path = self.path_of(workspace_id, node.id).await?;
+        let path = self.path_of(space_id, node.id).await?;
         Ok(NodeView {
             node,
             path,
             has_children: false,
-            document: Some(stats_from_document(document)),
+            text: Some(stats_from_text(text)),
         })
     }
 }
 
-pub(super) fn document_view_at_path(node: Node, path: String, document: Document) -> DocumentView {
-    let stats = stats_from_document(&document);
-    DocumentView {
+pub(super) fn text_view_at_path(node: Node, path: String, text: TextObject) -> TextView {
+    let stats = stats_from_text(&text);
+    TextView {
         node: NodeView {
             node,
             path,
             has_children: false,
-            document: Some(stats),
+            text: Some(stats),
         },
-        document,
+        text,
     }
 }
 
-fn stats_from_document(document: &Document) -> DocumentStats {
-    DocumentStats {
-        content_sha256: document.content_sha256.clone(),
-        byte_len: document.byte_len,
-        line_count: document.line_count,
+fn stats_from_text(text: &TextObject) -> TextStats {
+    TextStats {
+        content_sha256: text.content_sha256.clone(),
+        byte_len: text.byte_len,
+        line_count: text.line_count,
     }
 }

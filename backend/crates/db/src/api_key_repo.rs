@@ -143,7 +143,7 @@ impl ApiKeyRepo {
         validate_command(args.command)?;
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "INSERT INTO api_keys \
-             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at, rotated_from_key_id) \
+             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {API_KEY_COLUMNS}"
         ))
@@ -199,7 +199,7 @@ impl ApiKeyRepo {
 
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "INSERT INTO api_keys \
-             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at, rotated_from_key_id) \
+             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {API_KEY_COLUMNS}"
         ))
@@ -270,7 +270,7 @@ impl ApiKeyRepo {
 
         let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
             "INSERT INTO api_keys \
-             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by, expires_at, rotated_from_key_id) \
+             (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {API_KEY_COLUMNS}"
         ))
@@ -291,7 +291,7 @@ impl ApiKeyRepo {
 
         sqlx::query(
             "UPDATE api_keys \
-             SET revoked_at = now(), revoked_by = $3, revoked_reason = 'rotated' \
+             SET revoked_at = now(), revoked_by_user_id = $3, revoked_reason = 'rotated' \
              WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
         )
         .bind(old_key_id)
@@ -314,7 +314,7 @@ impl ApiKeyRepo {
     ) -> Result<()> {
         let result = sqlx::query(
             "UPDATE api_keys \
-             SET revoked_at = now(), revoked_by = $3, revoked_reason = $4 \
+             SET revoked_at = now(), revoked_by_user_id = $3, revoked_reason = $4 \
              WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
         )
         .bind(key_id)
@@ -425,5 +425,5 @@ impl From<ApiKeyRow> for ApiKey {
     }
 }
 
-const API_KEY_COLUMNS: &str = "id, account_id, token_hash, name, scopes, created_by, created_at, \
-     last_used_at, expires_at, revoked_at, revoked_by, revoked_reason, rotated_from_key_id";
+const API_KEY_COLUMNS: &str = "id, account_id, token_hash, name, scopes, created_by_user_id AS created_by, created_at, \
+     last_used_at, expires_at, revoked_at, revoked_by_user_id AS revoked_by, revoked_reason, rotated_from_key_id";

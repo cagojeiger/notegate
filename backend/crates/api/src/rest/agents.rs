@@ -50,7 +50,7 @@ pub(crate) struct ListQuery {
 pub(crate) struct AgentOut {
     id: Uuid,
     name: String,
-    created_by: Uuid,
+    owner_user_id: Uuid,
 }
 
 impl From<&Agent> for AgentOut {
@@ -58,7 +58,7 @@ impl From<&Agent> for AgentOut {
         Self {
             id: agent.id,
             name: agent.name.clone(),
-            created_by: agent.created_by,
+            owner_user_id: agent.owner_user_id,
         }
     }
 }

@@ -1,11 +1,11 @@
-//! Shared MCP tool plumbing: workspace-name resolution, target parsing, the
+//! Shared MCP tool plumbing: space-name resolution, target parsing, the
 //! request-scoped [`Caller`] lookup, and the service-error → [`ErrorData`] map.
 //!
-//! MCP/CLI callers select a workspace by its human-friendly **name** (the
+//! MCP/CLI callers select a space by its human-friendly **name** (the
 //! canonical selector), or with a compact `target` string (`<ws>:/<path>`), or
-//! — as an explicit fallback — by `workspace_id`. Resolution is stateless: every
-//! tool call resolves the selector against the caller's accessible workspaces
-//! (`docs/spec/mcp/README.md`). Paths are resolved inside the selected workspace
+//! — as an explicit fallback — by `space_id`. Resolution is stateless: every
+//! tool call resolves the selector against the caller's accessible spaces
+//! (`docs/spec/mcp/README.md`). Paths are resolved inside the selected space
 //! only.
 
 use std::borrow::Cow;
@@ -17,29 +17,29 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use notegate_core::validation::{normalize_path, validate_workspace_name};
+use notegate_core::validation::{normalize_path, validate_space_name};
 use notegate_model::Caller;
 use notegate_service::ServiceError;
 use notegate_service::files::parse_target;
-use notegate_service::workspaces::{ListWorkspaces, WorkspaceView};
+use notegate_service::spaces::{ListSpaces, SpaceView};
 
 use crate::state::AppState;
 
-/// The workspace-selector fields every file tool accepts.
+/// The space-selector fields every file tool accepts.
 ///
 /// Exactly one selection path is taken, in priority order: a `target` string
-/// (which also carries the path), then an explicit `workspace_id`, then a
-/// `workspace` name. When none is given and the caller has exactly one
-/// accessible workspace, that workspace is used.
+/// (which also carries the path), then an explicit `space_id`, then a
+/// `space` name. When none is given and the caller has exactly one
+/// accessible space, that space is used.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-pub struct WorkspaceSelector {
-    /// Human-friendly workspace name (the canonical selector).
+pub struct SpaceSelector {
+    /// Human-friendly space name (the canonical selector).
     #[serde(default)]
-    pub workspace: Option<String>,
-    /// Explicit workspace id (UUID string), accepted as a fallback for name
+    pub space: Option<String>,
+    /// Explicit space id (UUID string), accepted as a fallback for name
     /// ambiguity or debugging.
     #[serde(default)]
-    pub workspace_id: Option<String>,
+    pub space_id: Option<String>,
 }
 
 /// The request-scoped authenticated caller, inserted by the MCP auth wrapper.
@@ -50,108 +50,108 @@ pub fn caller(parts: &Parts) -> Result<&Caller, ErrorData> {
         .ok_or_else(|| invalid_input_error("authenticated caller extension missing"))
 }
 
-/// A resolved workspace selection: the chosen workspace view. The path (when a
+/// A resolved space selection: the chosen space view. The path (when a
 /// `target` string carried one) is returned alongside by [`resolve_target`].
 #[derive(Debug, Clone)]
-pub struct ResolvedWorkspace {
-    pub view: WorkspaceView,
+pub struct ResolvedSpace {
+    pub view: SpaceView,
 }
 
-impl ResolvedWorkspace {
-    /// The selected workspace id.
-    pub fn workspace_id(&self) -> Uuid {
-        self.view.workspace.id
+impl ResolvedSpace {
+    /// The selected space id.
+    pub fn space_id(&self) -> Uuid {
+        self.view.space.id
     }
 
-    /// The selected workspace name.
+    /// The selected space name.
     pub fn name(&self) -> &str {
-        &self.view.workspace.name
+        &self.view.space.name
     }
 }
 
-/// Resolve a workspace from the structured selector (`workspace` / `workspace_id`).
+/// Resolve a space from the structured selector (`space` / `space_id`).
 ///
-/// Resolution order: an explicit `workspace_id` (must be accessible), then a
-/// `workspace` name. With neither, exactly one accessible workspace is used and
+/// Resolution order: an explicit `space_id` (must be accessible), then a
+/// `space` name. With neither, exactly one accessible space is used and
 /// any other count is an error. A name matching more than one accessible
-/// workspace (an agent with access across owners) returns an ambiguity error
-/// listing the matches and a `workspaces_list` hint.
-pub async fn resolve_workspace(
+/// space (an agent with access across owners) returns an ambiguity error
+/// listing the matches and a `spaces_list` hint.
+pub async fn resolve_space(
     state: &AppState,
     caller: &Caller,
-    selector: &WorkspaceSelector,
-) -> Result<ResolvedWorkspace, ErrorData> {
-    let workspace_id = parse_workspace_id(selector.workspace_id.as_deref())?;
-    let view = select_workspace(state, caller, selector.workspace.as_deref(), workspace_id).await?;
-    Ok(ResolvedWorkspace { view })
+    selector: &SpaceSelector,
+) -> Result<ResolvedSpace, ErrorData> {
+    let space_id = parse_space_id(selector.space_id.as_deref())?;
+    let view = select_space(state, caller, selector.space.as_deref(), space_id).await?;
+    Ok(ResolvedSpace { view })
 }
 
-/// Parse the optional `workspace_id` selector string into a [`Uuid`].
-fn parse_workspace_id(raw: Option<&str>) -> Result<Option<Uuid>, ErrorData> {
+/// Parse the optional `space_id` selector string into a [`Uuid`].
+fn parse_space_id(raw: Option<&str>) -> Result<Option<Uuid>, ErrorData> {
     match raw {
         None => Ok(None),
         Some(value) => Uuid::parse_str(value)
             .map(Some)
-            .map_err(|_error| invalid_input_error("workspace_id must be a UUID")),
+            .map_err(|_error| invalid_input_error("space_id must be a UUID")),
     }
 }
 
-/// Resolve a workspace and an absolute path from either a `target` string or the
-/// structured `workspace`/`workspace_id` + an explicit `path`.
+/// Resolve a space and an absolute path from either a `target` string or the
+/// structured `space`/`space_id` + an explicit `path`.
 ///
-/// `target` (`<ws>:/<path>`) takes precedence; it supplies both the workspace
-/// name and the path. Otherwise the workspace is resolved from the selector and
+/// `target` (`<ws>:/<path>`) takes precedence; it supplies both the space
+/// name and the path. Otherwise the space is resolved from the selector and
 /// the path is taken from `path`.
 pub async fn resolve_target(
     state: &AppState,
     caller: &Caller,
-    selector: &WorkspaceSelector,
+    selector: &SpaceSelector,
     target: Option<&str>,
     path: Option<&str>,
-) -> Result<(ResolvedWorkspace, String), ErrorData> {
+) -> Result<(ResolvedSpace, String), ErrorData> {
     if let Some(target) = target {
         let parsed = parse_target(target).map_err(service_error)?;
-        let view = select_workspace(state, caller, Some(&parsed.workspace), None).await?;
-        return Ok((ResolvedWorkspace { view }, parsed.path));
+        let view = select_space(state, caller, Some(&parsed.space), None).await?;
+        return Ok((ResolvedSpace { view }, parsed.path));
     }
 
     let path = path.ok_or_else(|| invalid_input_error("provide a 'path' or a 'target' string"))?;
     let path = normalize_path(path).map_err(|error| invalid_input_error(error.to_string()))?;
-    let resolved = resolve_workspace(state, caller, selector).await?;
+    let resolved = resolve_space(state, caller, selector).await?;
     Ok((resolved, path))
 }
 
-/// Core name/id resolution against the caller's accessible workspaces.
-async fn select_workspace(
+/// Core name/id resolution against the caller's accessible spaces.
+async fn select_space(
     state: &AppState,
     caller: &Caller,
     name: Option<&str>,
-    workspace_id: Option<Uuid>,
-) -> Result<WorkspaceView, ErrorData> {
-    if let Some(id) = workspace_id {
+    space_id: Option<Uuid>,
+) -> Result<SpaceView, ErrorData> {
+    if let Some(id) = space_id {
         return state
-            .workspaces
+            .spaces
             .find_visible_by_id(caller.account_id(), id)
             .await
             .map_err(service_error)?
             .ok_or_else(|| {
                 ErrorData::invalid_params(
-                    "workspace_id is not accessible to this caller",
+                    "space_id is not accessible to this caller",
                     error_meta("not_found"),
                 )
             });
     }
 
     if let Some(name) = name {
-        validate_workspace_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
+        validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
         let mut matches = state
-            .workspaces
+            .spaces
             .find_visible_by_name(caller.account_id(), name, 2)
             .await
             .map_err(service_error)?;
         return match matches.len() {
             0 => Err(ErrorData::invalid_params(
-                format!("no accessible workspace named '{name}'"),
+                format!("no accessible space named '{name}'"),
                 error_meta("not_found"),
             )),
             1 => Ok(matches.remove(0)),
@@ -160,10 +160,10 @@ async fn select_workspace(
     }
 
     let page = state
-        .workspaces
+        .spaces
         .list(
             caller.account_id(),
-            ListWorkspaces {
+            ListSpaces {
                 limit: Some(2),
                 cursor: None,
             },
@@ -172,52 +172,52 @@ async fn select_workspace(
         .map_err(service_error)?;
     match page.items.len() {
         0 => Err(invalid_input_error(
-            "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
+            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space grant",
         )),
         1 if !page.has_more => page.items.into_iter().next().ok_or_else(|| {
-            ErrorData::internal_error("failed to select workspace", error_meta("internal_error"))
+            ErrorData::internal_error("failed to select space", error_meta("internal_error"))
         }),
         _ => Err(invalid_input_error(
-            "multiple workspaces are accessible; pass 'workspace' (see workspaces_list)",
+            "multiple spaces are accessible; pass 'space' (see spaces_list)",
         )),
     }
 }
 
-/// Pure selection over an already-loaded accessible-workspace list (the testable
-/// core of [`select_workspace`]).
+/// Pure selection over an already-loaded accessible-space list (the testable
+/// core of [`select_space`]).
 ///
-/// Order: explicit `workspace_id` (must be accessible) → `name` (exactly one
-/// match; many ⇒ ambiguity) → the single accessible workspace when neither is
+/// Order: explicit `space_id` (must be accessible) → `name` (exactly one
+/// match; many ⇒ ambiguity) → the single accessible space when neither is
 /// given.
 #[cfg(test)]
-fn pick_workspace(
-    accessible: Vec<WorkspaceView>,
+fn pick_space(
+    accessible: Vec<SpaceView>,
     name: Option<&str>,
-    workspace_id: Option<Uuid>,
-) -> Result<WorkspaceView, ErrorData> {
+    space_id: Option<Uuid>,
+) -> Result<SpaceView, ErrorData> {
     // Explicit id fallback: must be one the caller can access.
-    if let Some(id) = workspace_id {
+    if let Some(id) = space_id {
         return accessible
             .into_iter()
-            .find(|view| view.workspace.id == id)
+            .find(|view| view.space.id == id)
             .ok_or_else(|| {
                 ErrorData::invalid_params(
-                    "workspace_id is not accessible to this caller",
+                    "space_id is not accessible to this caller",
                     error_meta("not_found"),
                 )
             });
     }
 
-    // Name selector: must match exactly one accessible workspace.
+    // Name selector: must match exactly one accessible space.
     if let Some(name) = name {
-        validate_workspace_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
-        let mut matches: Vec<WorkspaceView> = accessible
+        validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
+        let mut matches: Vec<SpaceView> = accessible
             .into_iter()
-            .filter(|view| view.workspace.name == name)
+            .filter(|view| view.space.name == name)
             .collect();
         return match matches.len() {
             0 => Err(ErrorData::invalid_params(
-                format!("no accessible workspace named '{name}'"),
+                format!("no accessible space named '{name}'"),
                 error_meta("not_found"),
             )),
             1 => Ok(matches.remove(0)),
@@ -225,41 +225,41 @@ fn pick_workspace(
         };
     }
 
-    // No selector: use the single accessible workspace, if exactly one.
+    // No selector: use the single accessible space, if exactly one.
     let count = accessible.len();
     let mut iter = accessible.into_iter();
     match (count, iter.next()) {
         (1, Some(view)) => Ok(view),
         (0, _) => Err(invalid_input_error(
-            "this caller has no accessible workspaces; user callers may call workspaces_create, agent callers need a workspace grant",
+            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space grant",
         )),
         _ => Err(invalid_input_error(
-            "multiple workspaces are accessible; pass 'workspace' (see workspaces_list)",
+            "multiple spaces are accessible; pass 'space' (see spaces_list)",
         )),
     }
 }
 
 /// Build the ambiguity error for a name that resolves to multiple accessible
-/// workspaces, embedding the matches and a `workspaces_list` hint in `data`.
-fn ambiguity_error(name: &str, matches: &[WorkspaceView]) -> ErrorData {
-    let workspaces: Vec<_> = matches
+/// spaces, embedding the matches and a `spaces_list` hint in `data`.
+fn ambiguity_error(name: &str, matches: &[SpaceView]) -> ErrorData {
+    let spaces: Vec<_> = matches
         .iter()
         .map(|view| {
             json!({
-                "id": view.workspace.id,
-                "name": view.workspace.name,
-                "role": view.role.as_str(),
+                "id": view.space.id,
+                "name": view.space.name,
+                "permission": view.permission.as_str(),
             })
         })
         .collect();
     ErrorData::invalid_params(
-        format!("workspace name '{name}' is ambiguous; pass 'workspace_id'"),
+        format!("space name '{name}' is ambiguous; pass 'space_id'"),
         Some(json!({
             "kind": "invalid_input",
-            "code": "workspace_ambiguous",
-            "workspace": name,
-            "matches": workspaces,
-            "hint": "call workspaces_list and select a workspace_id",
+            "code": "space_ambiguous",
+            "space": name,
+            "matches": spaces,
+            "hint": "call spaces_list and select a space_id",
         })),
     )
 }
@@ -312,7 +312,7 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
     };
     if name.is_empty() {
         return Err(invalid_input_error(
-            "path must name a node, not the workspace root",
+            "path must name a node, not the space root",
         ));
     }
     let parent = if parent.is_empty() {
@@ -323,13 +323,13 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
     Ok((parent, name.to_owned()))
 }
 
-/// The canonical `{id, name, role, root_node_id}` workspace summary used by
-/// `workspaces_list` and `workspaces_get`.
-pub fn workspace_summary(view: &WorkspaceView) -> serde_json::Value {
+/// The canonical `{id, name, role, root_node_id}` space summary used by
+/// `spaces_list` and `spaces_get`.
+pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     json!({
-        "id": view.workspace.id,
-        "name": view.workspace.name,
-        "role": view.role.as_str(),
+        "id": view.space.id,
+        "name": view.space.name,
+        "permission": view.permission.as_str(),
         "root_node_id": view.root_node_id,
     })
 }
@@ -348,12 +348,12 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         "created_at": view.node.created_at,
         "updated_at": view.node.updated_at,
     });
-    if let Some(document) = &view.document
+    if let Some(text) = &view.text
         && let Some(object) = value.as_object_mut()
     {
-        object.insert("content_sha256".to_owned(), json!(document.content_sha256));
-        object.insert("byte_len".to_owned(), json!(document.byte_len));
-        object.insert("line_count".to_owned(), json!(document.line_count));
+        object.insert("content_sha256".to_owned(), json!(text.content_sha256));
+        object.insert("byte_len".to_owned(), json!(text.byte_len));
+        object.insert("line_count".to_owned(), json!(text.line_count));
     }
     value
 }
@@ -369,31 +369,31 @@ mod tests {
     )]
     use super::*;
     use chrono::Utc;
-    use notegate_model::{Role, Workspace};
+    use notegate_model::{Permission, Space};
     use notegate_service::files::parse_target;
     use rmcp::model::ErrorCode;
 
-    fn view(name: &str, owner: Uuid) -> WorkspaceView {
-        WorkspaceView {
-            workspace: Workspace {
+    fn view(name: &str, owner: Uuid) -> SpaceView {
+        SpaceView {
+            space: Space {
                 id: Uuid::new_v4(),
                 name: name.to_owned(),
-                created_by: owner,
+                owner_user_id: owner,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 deleted_at: None,
-                deleted_by: None,
+                deleted_by_user_id: None,
                 purge_after: None,
             },
-            role: Role::Viewer,
+            permission: Permission::Read,
             root_node_id: Uuid::new_v4(),
         }
     }
 
     #[test]
-    fn target_parses_workspace_and_absolute_path() {
+    fn target_parses_space_and_absolute_path() {
         let parsed = parse_target("personal:/notes/test.md").unwrap();
-        assert_eq!(parsed.workspace, "personal");
+        assert_eq!(parsed.space, "personal");
         assert_eq!(parsed.path, "/notes/test.md");
     }
 
@@ -403,7 +403,7 @@ mod tests {
         assert!(parse_target("personal/notes.md").is_err());
         // Non-absolute path after the separator.
         assert!(parse_target("personal:notes.md").is_err());
-        // Invalid workspace-name segment.
+        // Invalid space-name segment.
         assert!(parse_target(".secret:/notes.md").is_err());
     }
 
@@ -416,9 +416,9 @@ mod tests {
         let error = ambiguity_error("shared", &matches);
         let data = error.data.expect("ambiguity carries data");
         assert_eq!(data["kind"], "invalid_input");
-        assert_eq!(data["code"], "workspace_ambiguous");
+        assert_eq!(data["code"], "space_ambiguous");
         assert_eq!(data["matches"].as_array().unwrap().len(), 2);
-        assert!(data["hint"].as_str().unwrap().contains("workspaces_list"));
+        assert!(data["hint"].as_str().unwrap().contains("spaces_list"));
     }
 
     #[test]
@@ -456,76 +456,76 @@ mod tests {
     }
 
     #[test]
-    fn name_matching_two_accessible_workspaces_is_ambiguous() {
+    fn name_matching_two_accessible_spaces_is_ambiguous() {
         let accessible = vec![
             view("shared", Uuid::new_v4()),
             view("shared", Uuid::new_v4()),
         ];
-        let error = pick_workspace(accessible, Some("shared"), None).unwrap_err();
+        let error = pick_space(accessible, Some("shared"), None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("ambiguity carries data");
         assert_eq!(data["kind"], "invalid_input");
-        assert_eq!(data["code"], "workspace_ambiguous");
+        assert_eq!(data["code"], "space_ambiguous");
         assert_eq!(data["matches"].as_array().unwrap().len(), 2);
     }
 
     #[test]
-    fn single_accessible_workspace_used_when_selector_omitted() {
+    fn single_accessible_space_used_when_selector_omitted() {
         let only = view("personal", Uuid::new_v4());
-        let expected = only.workspace.id;
-        let chosen = pick_workspace(vec![only], None, None).unwrap();
-        assert_eq!(chosen.workspace.id, expected);
+        let expected = only.space.id;
+        let chosen = pick_space(vec![only], None, None).unwrap();
+        assert_eq!(chosen.space.id, expected);
     }
 
     #[test]
-    fn name_matching_one_accessible_workspace_resolves() {
+    fn name_matching_one_accessible_space_resolves() {
         let accessible = vec![
             view("personal", Uuid::new_v4()),
             view("research", Uuid::new_v4()),
         ];
-        let chosen = pick_workspace(accessible, Some("research"), None).unwrap();
-        assert_eq!(chosen.workspace.name, "research");
+        let chosen = pick_space(accessible, Some("research"), None).unwrap();
+        assert_eq!(chosen.space.name, "research");
     }
 
     #[test]
     fn omitted_selector_with_many_accessible_requires_a_choice() {
         let accessible = vec![view("a", Uuid::new_v4()), view("b", Uuid::new_v4())];
-        let error = pick_workspace(accessible, None, None).unwrap_err();
+        let error = pick_space(accessible, None, None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("invalid selection carries data");
         assert_eq!(data["kind"], "invalid_input");
     }
 
     #[test]
-    fn explicit_workspace_id_must_be_accessible() {
+    fn explicit_space_id_must_be_accessible() {
         let accessible = vec![view("a", Uuid::new_v4())];
-        let error = pick_workspace(accessible, None, Some(Uuid::new_v4())).unwrap_err();
+        let error = pick_space(accessible, None, Some(Uuid::new_v4())).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("inaccessible id carries not_found data");
         assert_eq!(data["kind"], "not_found");
     }
 
     #[test]
-    fn name_matching_no_accessible_workspace_is_not_found() {
+    fn name_matching_no_accessible_space_is_not_found() {
         let accessible = vec![view("a", Uuid::new_v4())];
-        let error = pick_workspace(accessible, Some("missing"), None).unwrap_err();
+        let error = pick_space(accessible, Some("missing"), None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("missing name carries not_found data");
         assert_eq!(data["kind"], "not_found");
     }
 
     #[test]
-    fn explicit_workspace_id_selects_the_match() {
+    fn explicit_space_id_selects_the_match() {
         let target = view("a", Uuid::new_v4());
-        let id = target.workspace.id;
+        let id = target.space.id;
         let accessible = vec![target, view("b", Uuid::new_v4())];
-        let chosen = pick_workspace(accessible, None, Some(id)).unwrap();
-        assert_eq!(chosen.workspace.id, id);
+        let chosen = pick_space(accessible, None, Some(id)).unwrap();
+        assert_eq!(chosen.space.id, id);
     }
 
     #[test]
-    fn bad_workspace_name_grammar_is_rejected() {
-        let error = pick_workspace(Vec::new(), Some(".secret"), None).unwrap_err();
+    fn bad_space_name_grammar_is_rejected() {
+        let error = pick_space(Vec::new(), Some(".secret"), None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("invalid name carries data");
         assert_eq!(data["kind"], "invalid_input");

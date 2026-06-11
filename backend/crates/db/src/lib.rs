@@ -8,28 +8,28 @@
 
 use notegate_core::{Error, Result};
 
-pub mod access_repo;
 pub mod account_repo;
 pub mod agent_repo;
 pub mod api_key_repo;
+pub mod connection_repo;
 pub mod files;
 pub mod files_repo;
 pub mod key_epoch_repo;
 pub mod postgres_pool;
 pub mod purge_repo;
-mod workspace_role;
-pub mod workspaces_repo;
+mod space_permission;
+pub mod spaces_repo;
 
-pub use access_repo::AccessRepo;
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
 pub use api_key_repo::ApiKeyRepo;
+pub use connection_repo::ConnectionRepo;
 pub use files_repo::FilesRepo;
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use postgres_pool::connect;
 pub use purge_repo::{PurgeRepo, PurgeRun};
+pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;
-pub use workspaces_repo::WorkspaceRepo;
 
 /// Generic internal mapping for any repository query failure. Shared by every
 /// repo so the mapping never drifts; detail is logged, not surfaced.

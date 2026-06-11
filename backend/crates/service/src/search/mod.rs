@@ -1,4 +1,4 @@
-//! Workspace search: `find` (node name metadata) and `grep` (content).
+//! Space search: `find` (node name metadata) and `grep` (content).
 //!
 //! The service owns authorization, limit clamping, opaque cursors, and
 //! service-side grep line splitting. The two query implementations live in the
@@ -6,7 +6,7 @@
 
 use notegate_core::limits;
 use notegate_db::FilesRepo;
-use notegate_model::Role;
+use notegate_model::Permission;
 pub use notegate_model::search::{
     FindCursor, FindPage, FindRequest, GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest,
 };
@@ -34,17 +34,17 @@ impl SearchService {
     /// (lesser role ⇒ `403`). Mirrors the file service's authorization.
     async fn authorize(
         &self,
-        workspace_id: Uuid,
+        space_id: Uuid,
         account_id: Uuid,
         command: FileCommand,
-    ) -> ServiceResult<Role> {
-        let role = self
+    ) -> ServiceResult<Permission> {
+        let permission = self
             .store
-            .role_for(workspace_id, account_id)
+            .permission_for(space_id, account_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound("workspace not found".to_owned()))?;
-        policy::require(role, command)?;
-        Ok(role)
+            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        policy::require(permission, command)?;
+        Ok(permission)
     }
 }
 
@@ -98,7 +98,7 @@ mod tests {
     }
 
     /// The `grep` cursor round-trips, preserving `(updated_at, node_id,
-    /// match_offset)` exactly — including the intra-document offset.
+    /// match_offset)` exactly — including the intra-text offset.
     #[test]
     fn grep_cursor_round_trips() {
         let value = GrepCursor {

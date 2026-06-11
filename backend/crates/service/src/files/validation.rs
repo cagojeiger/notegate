@@ -9,19 +9,17 @@
 //!
 //! Status mapping (see [`FilesValidationError::into_service_error`]):
 //! - Format-of-input failures (bad name, non-absolute/too-long/too-deep path,
-//!   per-document content over the byte/line cap) are `400` (`InvalidInput`).
-//! - Capacity failures against current workspace state (folder fanout, live node
-//!   count, live document count, total live document bytes) are `409`
+//!   per-text content over the byte/line cap) are `400` (`InvalidInput`).
+//! - Capacity failures against current space state (folder fanout, live node
+//!   count, live text count, total live text bytes) are `409`
 //!   (`Conflict`), carrying an actionable hint.
 //!
 //! Everything here is pure: no IO, no store access. The service supplies the
-//! current counts (children/nodes/documents/bytes) it read for pre-checks; the
+//! current counts (children/nodes/texts/bytes) it read for pre-checks; the
 //! DB repository re-checks capacity inside each mutating transaction.
 
 use notegate_core::limits::{self, Limits};
-use notegate_core::validation::{
-    self, ValidationError, validate_document_name, validate_folder_name,
-};
+use notegate_core::validation::{self, ValidationError, validate_folder_name, validate_text_name};
 use notegate_model::NodeKind;
 
 use crate::error::ServiceError;
@@ -36,28 +34,28 @@ pub enum FilesValidationError {
         /// The configured maximum.
         max: usize,
     },
-    /// The workspace already holds the maximum live nodes.
-    WorkspaceNodesExceeded {
+    /// The space already holds the maximum live nodes.
+    SpaceNodesExceeded {
         /// The configured maximum.
         max: usize,
     },
-    /// The workspace already holds the maximum live documents.
-    WorkspaceDocumentsExceeded {
+    /// The space already holds the maximum live texts.
+    SpaceTextsExceeded {
         /// The configured maximum.
         max: usize,
     },
-    /// The document content exceeds the per-document byte cap.
-    DocumentBytesExceeded {
-        /// The configured maximum ([`limits::DOCUMENT_MAX_BYTES`]).
+    /// The text content exceeds the per-text byte cap.
+    TextBytesExceeded {
+        /// The configured maximum ([`limits::TEXT_MAX_BYTES`]).
         max: usize,
     },
-    /// The document content exceeds the per-document line cap.
-    DocumentLinesExceeded {
-        /// The configured maximum ([`limits::DOCUMENT_MAX_LINES`]).
+    /// The text content exceeds the per-text line cap.
+    TextLinesExceeded {
+        /// The configured maximum ([`limits::TEXT_MAX_LINES`]).
         max: usize,
     },
-    /// Storing the document would exceed the workspace's total live byte budget.
-    WorkspaceDocumentBytesExceeded {
+    /// Storing the text would exceed the space's total live byte budget.
+    SpaceTextBytesExceeded {
         /// The configured maximum.
         max: usize,
     },
@@ -73,20 +71,20 @@ impl FilesValidationError {
             Self::FanoutExceeded { max } => ServiceError::Conflict(format!(
                 "folder already has the maximum of {max} live children; split into subfolders"
             )),
-            Self::WorkspaceNodesExceeded { max } => ServiceError::Conflict(format!(
-                "workspace already has the maximum of {max} live nodes"
+            Self::SpaceNodesExceeded { max } => {
+                ServiceError::Conflict(format!("space already has the maximum of {max} live nodes"))
+            }
+            Self::SpaceTextsExceeded { max } => {
+                ServiceError::Conflict(format!("space already has the maximum of {max} live texts"))
+            }
+            Self::TextBytesExceeded { max } => ServiceError::InvalidInput(format!(
+                "text exceeds the maximum of {max} bytes; split the text into smaller notes"
             )),
-            Self::WorkspaceDocumentsExceeded { max } => ServiceError::Conflict(format!(
-                "workspace already has the maximum of {max} live documents"
+            Self::TextLinesExceeded { max } => ServiceError::InvalidInput(format!(
+                "text exceeds the maximum of {max} lines; split the text into smaller notes"
             )),
-            Self::DocumentBytesExceeded { max } => ServiceError::InvalidInput(format!(
-                "document exceeds the maximum of {max} bytes; split the document into smaller notes"
-            )),
-            Self::DocumentLinesExceeded { max } => ServiceError::InvalidInput(format!(
-                "document exceeds the maximum of {max} lines; split the document into smaller notes"
-            )),
-            Self::WorkspaceDocumentBytesExceeded { max } => ServiceError::Conflict(format!(
-                "workspace live document content would exceed the maximum of {max} bytes; split or move content"
+            Self::SpaceTextBytesExceeded { max } => ServiceError::Conflict(format!(
+                "space live text content would exceed the maximum of {max} bytes; split or move content"
             )),
         }
     }
@@ -105,11 +103,12 @@ impl From<FilesValidationError> for ServiceError {
 }
 
 /// Validate a basename for the given kind: shared node format plus the `.md`
-/// suffix rule (documents must end with `.md`, folders must not).
+/// shared node-name rule for folders, text nodes, and file nodes.
 pub fn validate_basename(name: &str, kind: NodeKind) -> Result<(), FilesValidationError> {
     match kind {
         NodeKind::Folder => validate_folder_name(name)?,
-        NodeKind::Document => validate_document_name(name)?,
+        NodeKind::Text => validate_text_name(name)?,
+        NodeKind::File => notegate_core::validation::validate_file_name(name)?,
     }
     Ok(())
 }
@@ -122,7 +121,7 @@ pub fn normalize_path(path: &str) -> Result<String, FilesValidationError> {
 
 /// Reject when the resulting depth of a node would exceed [`limits::MAX_PATH_DEPTH`].
 ///
-/// `depth` is the segment count below the workspace root (root = 0, a direct
+/// `depth` is the segment count below the space root (root = 0, a direct
 /// child of root = 1). The created/moved node's own depth is what is checked.
 pub fn validate_depth(depth: usize) -> Result<(), FilesValidationError> {
     if depth > limits::MAX_PATH_DEPTH {
@@ -150,61 +149,61 @@ pub fn validate_fanout(live_children: usize, limits: Limits) -> Result<(), Files
     Ok(())
 }
 
-/// Reject creating a node when the workspace already holds the maximum live
+/// Reject creating a node when the space already holds the maximum live
 /// nodes.
-pub fn validate_workspace_node_count(
+pub fn validate_space_node_count(
     live_nodes: usize,
     limits: Limits,
 ) -> Result<(), FilesValidationError> {
-    if live_nodes >= limits.workspace_max_nodes {
-        return Err(FilesValidationError::WorkspaceNodesExceeded {
-            max: limits.workspace_max_nodes,
+    if live_nodes >= limits.space_max_nodes {
+        return Err(FilesValidationError::SpaceNodesExceeded {
+            max: limits.space_max_nodes,
         });
     }
     Ok(())
 }
 
-/// Reject creating a document when the workspace already holds the maximum live
-/// documents.
-pub fn validate_workspace_document_count(
-    live_documents: usize,
+/// Reject creating a text when the space already holds the maximum live
+/// texts.
+pub fn validate_space_text_count(
+    live_texts: usize,
     limits: Limits,
 ) -> Result<(), FilesValidationError> {
-    if live_documents >= limits.workspace_max_documents {
-        return Err(FilesValidationError::WorkspaceDocumentsExceeded {
-            max: limits.workspace_max_documents,
+    if live_texts >= limits.space_max_texts {
+        return Err(FilesValidationError::SpaceTextsExceeded {
+            max: limits.space_max_texts,
         });
     }
     Ok(())
 }
 
-/// Reject document content over the per-document byte ([`limits::DOCUMENT_MAX_BYTES`])
-/// or line ([`limits::DOCUMENT_MAX_LINES`]) caps. `line_count` is the value
+/// Reject text content over the per-text byte ([`limits::TEXT_MAX_BYTES`])
+/// or line ([`limits::TEXT_MAX_LINES`]) caps. `line_count` is the value
 /// computed by [`crate::files::content::compute`].
-pub fn validate_document_content(
+pub fn validate_text_content(
     byte_len: usize,
     line_count: usize,
 ) -> Result<(), FilesValidationError> {
-    if byte_len > limits::DOCUMENT_MAX_BYTES {
-        return Err(FilesValidationError::DocumentBytesExceeded {
-            max: limits::DOCUMENT_MAX_BYTES,
+    if byte_len > limits::TEXT_MAX_BYTES {
+        return Err(FilesValidationError::TextBytesExceeded {
+            max: limits::TEXT_MAX_BYTES,
         });
     }
-    if line_count > limits::DOCUMENT_MAX_LINES {
-        return Err(FilesValidationError::DocumentLinesExceeded {
-            max: limits::DOCUMENT_MAX_LINES,
+    if line_count > limits::TEXT_MAX_LINES {
+        return Err(FilesValidationError::TextLinesExceeded {
+            max: limits::TEXT_MAX_LINES,
         });
     }
     Ok(())
 }
 
-/// Reject a write/patch that would push the workspace's total live document
-/// bytes over the configured workspace byte budget.
+/// Reject a write/patch that would push the space's total live text
+/// bytes over the configured space byte budget.
 ///
-/// `current_total_bytes` is the workspace's current live document byte sum,
-/// `previous_byte_len` is the byte length of the document being replaced (0 for
-/// a new document), and `new_byte_len` is the byte length about to be stored.
-pub fn validate_workspace_document_bytes(
+/// `current_total_bytes` is the space's current live text byte sum,
+/// `previous_byte_len` is the byte length of the text being replaced (0 for
+/// a new text), and `new_byte_len` is the byte length about to be stored.
+pub fn validate_space_text_bytes(
     current_total_bytes: usize,
     previous_byte_len: usize,
     new_byte_len: usize,
@@ -213,9 +212,9 @@ pub fn validate_workspace_document_bytes(
     let projected = current_total_bytes
         .saturating_sub(previous_byte_len)
         .saturating_add(new_byte_len);
-    if projected > limits.workspace_max_document_bytes {
-        return Err(FilesValidationError::WorkspaceDocumentBytesExceeded {
-            max: limits.workspace_max_document_bytes,
+    if projected > limits.space_max_text_bytes {
+        return Err(FilesValidationError::SpaceTextBytesExceeded {
+            max: limits.space_max_text_bytes,
         });
     }
     Ok(())
@@ -233,19 +232,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basename_enforces_md_rules_per_kind() {
+    fn basename_allows_common_file_tree_names_per_kind() {
         assert!(validate_basename("notes", NodeKind::Folder).is_ok());
-        assert!(validate_basename("today.md", NodeKind::Document).is_ok());
-        assert_eq!(
-            validate_basename("notes.md", NodeKind::Folder),
-            Err(FilesValidationError::Name(ValidationError::FolderMdSuffix))
-        );
-        assert_eq!(
-            validate_basename("today", NodeKind::Document),
-            Err(FilesValidationError::Name(
-                ValidationError::DocumentMdSuffix
-            ))
-        );
+        assert!(validate_basename("today.md", NodeKind::Text).is_ok());
+        assert!(validate_basename("today", NodeKind::Text).is_ok());
+        assert!(validate_basename("data.json", NodeKind::File).is_ok());
     }
 
     #[test]
@@ -259,7 +250,7 @@ mod tests {
             Err(FilesValidationError::Name(ValidationError::ContainsSlash))
         );
         assert_eq!(
-            validate_basename("", NodeKind::Document),
+            validate_basename("", NodeKind::Text),
             Err(FilesValidationError::Name(ValidationError::Empty))
         );
         // 128-char folder name is the max; 129 is rejected by the pattern.
@@ -302,51 +293,46 @@ mod tests {
     }
 
     #[test]
-    fn workspace_node_and_document_count_boundaries() {
+    fn space_node_and_text_count_boundaries() {
         let caps = Limits::default();
-        assert!(validate_workspace_node_count(limits::WORKSPACE_MAX_NODES - 1, caps).is_ok());
+        assert!(validate_space_node_count(limits::SPACE_MAX_NODES - 1, caps).is_ok());
         assert!(matches!(
-            validate_workspace_node_count(limits::WORKSPACE_MAX_NODES, caps),
-            Err(FilesValidationError::WorkspaceNodesExceeded { .. })
+            validate_space_node_count(limits::SPACE_MAX_NODES, caps),
+            Err(FilesValidationError::SpaceNodesExceeded { .. })
         ));
-        assert!(
-            validate_workspace_document_count(limits::WORKSPACE_MAX_DOCUMENTS - 1, caps).is_ok()
-        );
+        assert!(validate_space_text_count(limits::SPACE_MAX_TEXTS - 1, caps).is_ok());
         assert!(matches!(
-            validate_workspace_document_count(limits::WORKSPACE_MAX_DOCUMENTS, caps),
-            Err(FilesValidationError::WorkspaceDocumentsExceeded { .. })
+            validate_space_text_count(limits::SPACE_MAX_TEXTS, caps),
+            Err(FilesValidationError::SpaceTextsExceeded { .. })
         ));
     }
 
     #[test]
-    fn document_content_boundaries() {
-        assert!(
-            validate_document_content(limits::DOCUMENT_MAX_BYTES, limits::DOCUMENT_MAX_LINES)
-                .is_ok()
-        );
+    fn text_content_boundaries() {
+        assert!(validate_text_content(limits::TEXT_MAX_BYTES, limits::TEXT_MAX_LINES).is_ok());
         assert!(matches!(
-            validate_document_content(limits::DOCUMENT_MAX_BYTES + 1, 0),
-            Err(FilesValidationError::DocumentBytesExceeded { .. })
+            validate_text_content(limits::TEXT_MAX_BYTES + 1, 0),
+            Err(FilesValidationError::TextBytesExceeded { .. })
         ));
         assert!(matches!(
-            validate_document_content(0, limits::DOCUMENT_MAX_LINES + 1),
-            Err(FilesValidationError::DocumentLinesExceeded { .. })
+            validate_text_content(0, limits::TEXT_MAX_LINES + 1),
+            Err(FilesValidationError::TextLinesExceeded { .. })
         ));
     }
 
     #[test]
-    fn workspace_document_bytes_accounts_for_replacement() {
-        let max = limits::WORKSPACE_MAX_DOCUMENT_BYTES;
+    fn space_text_bytes_accounts_for_replacement() {
+        let max = limits::SPACE_MAX_TEXT_BYTES;
         let caps = Limits::default();
         // Replacing a doc of equal size at the cap stays at the cap (ok).
-        assert!(validate_workspace_document_bytes(max, 10, 10, caps).is_ok());
+        assert!(validate_space_text_bytes(max, 10, 10, caps).is_ok());
         // Growing past the cap is rejected.
         assert!(matches!(
-            validate_workspace_document_bytes(max, 0, 1, caps),
-            Err(FilesValidationError::WorkspaceDocumentBytesExceeded { .. })
+            validate_space_text_bytes(max, 0, 1, caps),
+            Err(FilesValidationError::SpaceTextBytesExceeded { .. })
         ));
         // Shrinking is always fine.
-        assert!(validate_workspace_document_bytes(max, 100, 1, caps).is_ok());
+        assert!(validate_space_text_bytes(max, 100, 1, caps).is_ok());
     }
 
     #[test]
@@ -362,19 +348,19 @@ mod tests {
             ServiceError::Conflict(_)
         ));
         assert!(matches!(
-            FilesValidationError::WorkspaceDocumentBytesExceeded { max: 1 }.into_service_error(),
+            FilesValidationError::SpaceTextBytesExceeded { max: 1 }.into_service_error(),
             ServiceError::Conflict(_)
         ));
     }
 
     #[test]
-    fn per_document_size_errors_map_to_invalid_input() {
+    fn per_text_size_errors_map_to_invalid_input() {
         assert!(matches!(
-            FilesValidationError::DocumentBytesExceeded { max: 1 }.into_service_error(),
+            FilesValidationError::TextBytesExceeded { max: 1 }.into_service_error(),
             ServiceError::InvalidInput(_)
         ));
         assert!(matches!(
-            FilesValidationError::DocumentLinesExceeded { max: 1 }.into_service_error(),
+            FilesValidationError::TextLinesExceeded { max: 1 }.into_service_error(),
             ServiceError::InvalidInput(_)
         ));
     }

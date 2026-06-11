@@ -19,26 +19,26 @@ mod common;
 
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, WorkspaceRepo};
+use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_service::files::Edit;
 use notegate_service::files::{
-    ChildrenCursor, CreateDocument, CreateFolder, DeleteNode, FilesService, MoveNode,
-    PatchDocument, ReadDocument, WriteDocument, WriteTarget,
+    ChildrenCursor, CreateFolder, CreateText, DeleteNode, FilesService, MoveNode, PatchText,
+    ReadText, WriteTarget, WriteText,
 };
-use notegate_service::workspaces::CreateWorkspace;
+use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
 
-/// Create a workspace owned by `owner` and return `(workspace_id, root_id)`.
-async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
+/// Create a space owned by `owner` and return `(space_id, root_id)`.
+async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
     let ws = ws_repo
-        .create_workspace(
+        .create_space(
             owner,
-            &CreateWorkspace {
+            &CreateSpace {
                 name: name.to_owned(),
             },
         )
         .await
-        .expect("create workspace");
+        .expect("create space");
     let root = ws_repo
         .root_node_id(ws.id)
         .await
@@ -55,12 +55,12 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let ws_repo = WorkspaceRepo::new(db.pool.clone());
+    let ws_repo = SpaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
     let repo = FilesRepo::new(db.pool.clone());
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "personal").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
     // --- mkdir: /projects ---
     let projects = files
@@ -74,54 +74,60 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
     assert_eq!(projects.path, "/projects");
-    assert_eq!(projects.node.created_by, owner, "mkdir sets created_by");
-    assert_eq!(projects.node.updated_by, owner, "mkdir sets updated_by");
+    assert_eq!(
+        projects.node.created_by_account_id, owner,
+        "mkdir sets created_by"
+    );
+    assert_eq!(
+        projects.node.updated_by_account_id, owner,
+        "mkdir sets updated_by"
+    );
     let projects_id = projects.node.id;
 
     // --- touch: /projects/note.md ---
     let touched = files
-        .create_document(
+        .create_text(
             owner,
             ws,
-            CreateDocument {
+            CreateText {
                 parent_node_id: projects_id,
                 name: "note.md".to_owned(),
             },
         )
         .await?;
     assert_eq!(touched.node.path, "/projects/note.md");
-    assert_eq!(touched.document.byte_len, 0);
+    assert_eq!(touched.text.byte_len, 0);
     assert_eq!(
-        touched.document.created_by, owner,
+        touched.text.created_by_account_id, owner,
         "touch sets doc created_by"
     );
     let note_id = touched.node.node.id;
 
-    // --- write: replace content of the existing document ---
+    // --- write: replace content of the existing text ---
     let written = files
-        .write_document(
+        .write_text(
             owner,
             ws,
-            WriteDocument {
+            WriteText {
                 target: WriteTarget::Existing { node_id: note_id },
-                content_md: "# Title\nalpha beta gamma\n".to_owned(),
+                content: "# Title\nalpha beta gamma\n".to_owned(),
                 expected_sha256: None,
             },
         )
         .await?;
-    assert_eq!(written.document.line_count, 2);
+    assert_eq!(written.text.line_count, 2);
     assert_eq!(
-        written.document.updated_by, owner,
+        written.text.updated_by_account_id, owner,
         "write sets doc updated_by"
     );
-    let after_write_sha = written.document.content_sha256.clone();
+    let after_write_sha = written.text.content_sha256.clone();
 
     // --- read: range slice returns the content + metrics ---
     let read = files
-        .read_document(
+        .read_text(
             owner,
             ws,
-            ReadDocument {
+            ReadText {
                 node_id: note_id,
                 start_line: Some(1),
                 max_lines: Some(10),
@@ -132,15 +138,15 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let content = read.content.expect("content present");
     assert_eq!(content.returned_lines, 2);
-    assert!(content.content_md.contains("alpha beta gamma"));
+    assert!(content.content.contains("alpha beta gamma"));
     assert_eq!(read.content_sha256, after_write_sha);
 
     // --- patch: exact-match replacement ---
     let patched = files
-        .patch_document(
+        .patch_text(
             owner,
             ws,
-            PatchDocument {
+            PatchText {
                 node_id: note_id,
                 edits: vec![Edit {
                     old_text: "beta".to_owned(),
@@ -152,15 +158,24 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert_eq!(patched.previous_sha256, after_write_sha);
     assert_eq!(patched.edits_applied, 1);
-    let (_, doc_now) = repo_find_document(&repo, ws, note_id).await;
-    assert!(doc_now.content_md.contains("alpha delta gamma"));
-    assert_eq!(doc_now.updated_by, owner, "patch sets doc updated_by");
+    let (_, doc_now) = repo_find_text(&repo, ws, note_id).await;
+    assert!(
+        doc_now
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("alpha delta gamma")
+    );
+    assert_eq!(
+        doc_now.updated_by_account_id, owner,
+        "patch sets doc updated_by"
+    );
 
-    // --- find by NAME: q='note' matches the document by name ---
+    // --- find by NAME: q='note' matches the text by name ---
     let by_name = repo.find_nodes(ws, "note", None, None, 50, None).await?;
     assert!(
         by_name.iter().any(|(n, _, _)| n.id == note_id),
-        "find by name must match the document"
+        "find by name must match the text"
     );
 
     // --- find remains name-only: q='projects' matches the folder, not the doc via path ---
@@ -169,7 +184,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert!(
         by_path.iter().all(|(n, _, _)| n.id != note_id),
-        "find must not match the document by path substring"
+        "find must not match the text by path substring"
     );
 
     // --- grep: content candidate by body substring, with derived path ---
@@ -181,7 +196,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .find(|c| c.node_id == note_id)
         .expect("grep candidate present");
     assert_eq!(hit.path, "/projects/note.md", "grep returns derived path");
-    assert!(hit.content_md.contains("alpha delta gamma"));
+    assert!(hit.content.contains("alpha delta gamma"));
 
     // --- mv: move /projects/note.md → /archive/note.md (rename parent) ---
     let archive = files
@@ -208,20 +223,23 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
     assert_eq!(moved.path, "/archive/note.md", "move derives the new path");
-    assert_eq!(moved.node.updated_by, owner, "move sets updated_by");
+    assert_eq!(
+        moved.node.updated_by_account_id, owner,
+        "move sets updated_by"
+    );
 
-    // find is name-only; the moved document keeps its name, and its derived
+    // find is name-only; the moved text keeps its name, and its derived
     // path (for display) reflects the move even though the match is on name.
     let by_name = repo.find_nodes(ws, "note", None, None, 50, None).await?;
     let hit = by_name.iter().find(|(n, _, _)| n.id == note_id);
-    assert!(hit.is_some(), "find by name must hit the moved document");
+    assert!(hit.is_some(), "find by name must hit the moved text");
     assert_eq!(
         hit.map(|(_, p, _)| p.as_str()),
         Some("/archive/note.md"),
         "derived path reflects the move",
     );
 
-    // --- rm: hide the moved document and mark it purge-eligible later ---
+    // --- rm: hide the moved text and mark it purge-eligible later ---
     let deleted = files
         .delete_node(
             owner,
@@ -240,7 +258,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     );
     let (deleted_by, purge_after): (Option<Uuid>, Option<chrono::DateTime<chrono::Utc>>) =
         sqlx::query_as(
-            "SELECT deleted_by, purge_after FROM nodes WHERE workspace_id = $1 AND id = $2",
+            "SELECT deleted_by_account_id, purge_after FROM nodes WHERE space_id = $1 AND id = $2",
         )
         .bind(ws)
         .bind(note_id)
@@ -260,11 +278,11 @@ async fn repo_soft_delete_root_is_conflict() -> Result<(), Box<dyn std::error::E
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let ws_repo = WorkspaceRepo::new(db.pool.clone());
+    let ws_repo = SpaceRepo::new(db.pool.clone());
     let repo = FilesRepo::new(db.pool.clone());
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "rootguard").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "rootguard").await;
 
     let err = repo
         .soft_delete_node(ws, root, owner)
@@ -276,7 +294,7 @@ async fn repo_soft_delete_root_is_conflict() -> Result<(), Box<dyn std::error::E
     );
 
     let root_deleted_at: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT deleted_at FROM nodes WHERE workspace_id = $1 AND id = $2")
+        sqlx::query_scalar("SELECT deleted_at FROM nodes WHERE space_id = $1 AND id = $2")
             .bind(ws)
             .bind(root)
             .fetch_one(&db.pool)
@@ -295,18 +313,18 @@ async fn keyset_pagination_is_stable() -> Result<(), Box<dyn std::error::Error>>
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let ws_repo = WorkspaceRepo::new(db.pool.clone());
+    let ws_repo = SpaceRepo::new(db.pool.clone());
     let repo = FilesRepo::new(db.pool.clone());
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "wide").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "wide").await;
 
-    // 250 documents directly under root (the folder fanout cap is 200, so insert
+    // 250 texts directly under root (the folder fanout cap is 200, so insert
     // via raw SQL to exercise paging beyond a single page without the cap).
     for index in 0..250 {
         sqlx::query(
-            "INSERT INTO nodes (workspace_id, parent_id, name, kind, created_by, updated_by) \
-             VALUES ($1, $2, $3, 'document', $4, $4)",
+            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
+             VALUES ($1, $2, $3, 'text', $4, $4)",
         )
         .bind(ws)
         .bind(root)
@@ -363,12 +381,12 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let ws_repo = WorkspaceRepo::new(db.pool.clone());
+    let ws_repo = SpaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
     let repo = FilesRepo::new(db.pool.clone());
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "scoped").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "scoped").await;
 
     // /inside/target.md and /outside/target.md
     let inside = files
@@ -396,10 +414,10 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
         .node
         .id;
     let inside_doc = files
-        .create_document(
+        .create_text(
             owner,
             ws,
-            CreateDocument {
+            CreateText {
                 parent_node_id: inside,
                 name: "target.md".to_owned(),
             },
@@ -409,10 +427,10 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
         .node
         .id;
     let outside_doc = files
-        .create_document(
+        .create_text(
             owner,
             ws,
-            CreateDocument {
+            CreateText {
                 parent_node_id: outside,
                 name: "target.md".to_owned(),
             },
@@ -422,12 +440,12 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
         .node
         .id;
 
-    // Unscoped find matches both target.md documents.
+    // Unscoped find matches both target.md texts.
     let all = repo.find_nodes(ws, "target", None, None, 50, None).await?;
     assert!(all.iter().any(|(n, _, _)| n.id == inside_doc));
     assert!(all.iter().any(|(n, _, _)| n.id == outside_doc));
 
-    // Scoped to /inside matches only the inside document.
+    // Scoped to /inside matches only the inside text.
     let scoped = repo
         .find_nodes(ws, "target", Some("/inside"), None, 50, None)
         .await?;
@@ -441,14 +459,14 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-/// Load a document through the repo, panicking if missing (test helper).
-async fn repo_find_document(
+/// Load a text through the repo, panicking if missing (test helper).
+async fn repo_find_text(
     repo: &FilesRepo,
-    workspace_id: Uuid,
+    space_id: Uuid,
     node_id: Uuid,
-) -> (notegate_model::Node, notegate_model::Document) {
-    repo.find_document(workspace_id, node_id)
+) -> (notegate_model::Node, notegate_model::TextObject) {
+    repo.find_text(space_id, node_id)
         .await
-        .expect("find_document query")
-        .expect("document present")
+        .expect("find_text query")
+        .expect("text present")
 }

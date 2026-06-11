@@ -10,8 +10,8 @@ pub struct Agent {
     /// Equal to the owning `accounts.id`.
     pub id: Uuid,
     pub name: String,
-    /// The account that created this agent.
-    pub created_by: Uuid,
+    /// The user account that owns and manages this agent.
+    pub owner_user_id: Uuid,
 }
 
 /// Input to create an agent.

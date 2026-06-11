@@ -1,12 +1,12 @@
 //! Identity category: `GET /api/v1/me` and `DELETE /api/v1/me`.
 //!
 //! `GET` returns the authenticated account, optional user/agent detail, and
-//! global non-workspace capabilities via the shared [`build_me`] builder, kept
-//! aligned with the MCP `me` tool (`docs/spec/mcp/identity.md`). Workspace-specific
-//! roles live in the Workspaces category, not in `/me`.
+//! global non-space capabilities via the shared [`build_me`] builder, kept
+//! aligned with the MCP `me` tool (`docs/spec/mcp/identity.md`). Space-specific
+//! roles live in the Spaces category, not in `/me`.
 //!
 //! `DELETE` is the user account teardown endpoint. It is intentionally REST-only:
-//! MCP remains a file/workspace tool surface and does not expose account deletion.
+//! MCP remains a file/space tool surface and does not expose account deletion.
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;

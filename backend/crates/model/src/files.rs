@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Document, Node};
+use crate::{Node, TextObject};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
@@ -19,13 +19,13 @@ pub struct CreateFolder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateDocument {
+pub struct CreateText {
     pub parent_node_id: Uuid,
     pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReadDocument {
+pub struct ReadText {
     pub node_id: Uuid,
     pub start_line: Option<i64>,
     pub max_lines: Option<i64>,
@@ -40,9 +40,9 @@ pub enum WriteTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WriteDocument {
+pub struct WriteText {
     pub target: WriteTarget,
-    pub content_md: String,
+    pub content: String,
     pub expected_sha256: Option<String>,
 }
 
@@ -53,7 +53,7 @@ pub struct Edit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PatchDocument {
+pub struct PatchText {
     pub node_id: Uuid,
     pub edits: Vec<Edit>,
     pub expected_sha256: Option<String>,
@@ -75,16 +75,16 @@ pub struct DeleteNode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredContent {
-    pub content_md: String,
+    pub content: String,
     pub content_sha256: String,
-    pub byte_len: i32,
+    pub byte_len: i64,
     pub line_count: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentStats {
+pub struct TextStats {
     pub content_sha256: String,
-    pub byte_len: i32,
+    pub byte_len: i64,
     pub line_count: i32,
 }
 
@@ -93,13 +93,13 @@ pub struct NodeView {
     pub node: Node,
     pub path: String,
     pub has_children: bool,
-    pub document: Option<DocumentStats>,
+    pub text: Option<TextStats>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentView {
+pub struct TextView {
     pub node: NodeView,
-    pub document: Document,
+    pub text: TextObject,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,13 +130,13 @@ pub struct ReadResult {
     pub node: NodeView,
     pub content: Option<ReadContent>,
     pub content_sha256: String,
-    pub byte_len: i32,
+    pub byte_len: i64,
     pub line_count: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadContent {
-    pub content_md: String,
+    pub content: String,
     pub start_line: i64,
     pub end_line: i64,
     pub returned_lines: i64,
@@ -147,7 +147,7 @@ pub struct ReadContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchResult {
     pub node: NodeView,
-    pub document: Document,
+    pub text: TextObject,
     pub previous_sha256: String,
     pub edits_applied: usize,
     pub diff: String,

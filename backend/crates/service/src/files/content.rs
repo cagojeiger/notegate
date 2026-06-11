@@ -1,12 +1,12 @@
-//! Pure document content metrics: SHA-256, byte length, and line count.
+//! Pure text content metrics: SHA-256, byte length, and line count.
 //!
-//! These are the values persisted on `documents` and validated against the
-//! per-document and workspace caps. `write` and `patch` compute them once here so
+//! These are the values persisted on `text_objects` and validated against the
+//! per-text and space caps. `write` and `patch` compute them once here so
 //! the validated values are exactly what the store writes.
 
 use super::types::StoredContent;
 
-/// The derived metrics of a document's content.
+/// The derived metrics of a text's content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Metrics {
     /// Hex-encoded SHA-256 of the UTF-8 content.
@@ -22,17 +22,17 @@ impl Metrics {
     /// Bundle these metrics with their content for the store, converting the
     /// counts to the `i32` columns. Values are validated against the caps before
     /// this is called, so they fit `i32`.
-    pub fn into_stored(self, content_md: String) -> StoredContent {
+    pub fn into_stored(self, content: String) -> StoredContent {
         StoredContent {
-            content_md,
+            content,
             content_sha256: self.content_sha256,
-            byte_len: self.byte_len as i32,
+            byte_len: self.byte_len as i64,
             line_count: self.line_count as i32,
         }
     }
 }
 
-/// Compute the metrics of document content.
+/// Compute the metrics of text content.
 pub fn compute(content: &str) -> Metrics {
     Metrics {
         content_sha256: sha256_hex(content),

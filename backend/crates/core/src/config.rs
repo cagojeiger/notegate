@@ -255,35 +255,23 @@ fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), Val
 }
 
 fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
-    if limits.workspace_max_nodes == 0 {
-        errors.add("limits.workspace_max_nodes", ValidationError::new("range"));
+    if limits.space_max_nodes == 0 {
+        errors.add("limits.space_max_nodes", ValidationError::new("range"));
     }
-    if limits.workspace_max_nodes > crate::limits::WORKSPACE_MAX_NODES {
-        errors.add("limits.workspace_max_nodes", ValidationError::new("range"));
+    if limits.space_max_nodes > crate::limits::SPACE_MAX_NODES {
+        errors.add("limits.space_max_nodes", ValidationError::new("range"));
     }
-    if limits.workspace_max_documents == 0 {
-        errors.add(
-            "limits.workspace_max_documents",
-            ValidationError::new("range"),
-        );
+    if limits.space_max_texts == 0 {
+        errors.add("limits.space_max_texts", ValidationError::new("range"));
     }
-    if limits.workspace_max_documents > crate::limits::WORKSPACE_MAX_DOCUMENTS {
-        errors.add(
-            "limits.workspace_max_documents",
-            ValidationError::new("range"),
-        );
+    if limits.space_max_texts > crate::limits::SPACE_MAX_TEXTS {
+        errors.add("limits.space_max_texts", ValidationError::new("range"));
     }
-    if limits.workspace_max_document_bytes == 0 {
-        errors.add(
-            "limits.workspace_max_document_bytes",
-            ValidationError::new("range"),
-        );
+    if limits.space_max_text_bytes == 0 {
+        errors.add("limits.space_max_text_bytes", ValidationError::new("range"));
     }
-    if limits.workspace_max_document_bytes > crate::limits::WORKSPACE_MAX_DOCUMENT_BYTES {
-        errors.add(
-            "limits.workspace_max_document_bytes",
-            ValidationError::new("range"),
-        );
+    if limits.space_max_text_bytes > crate::limits::SPACE_MAX_TEXT_BYTES {
+        errors.add("limits.space_max_text_bytes", ValidationError::new("range"));
     }
     if limits.folder_max_children == 0 {
         errors.add("limits.folder_max_children", ValidationError::new("range"));
@@ -472,16 +460,16 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN", "3"),
-                ("NOTEGATE_LIMITS__WORKSPACE_MAX_NODES", "5"),
-                ("NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS", "2"),
-                ("NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES", "1024"),
+                ("NOTEGATE_LIMITS__SPACE_MAX_NODES", "5"),
+                ("NOTEGATE_LIMITS__SPACE_MAX_TEXTS", "2"),
+                ("NOTEGATE_LIMITS__SPACE_MAX_TEXT_BYTES", "1024"),
             ]),
         )?;
 
         assert_eq!(config.limits.folder_max_children, 3);
-        assert_eq!(config.limits.workspace_max_nodes, 5);
-        assert_eq!(config.limits.workspace_max_documents, 2);
-        assert_eq!(config.limits.workspace_max_document_bytes, 1024);
+        assert_eq!(config.limits.space_max_nodes, 5);
+        assert_eq!(config.limits.space_max_texts, 2);
+        assert_eq!(config.limits.space_max_text_bytes, 1024);
         Ok(())
     }
 
@@ -522,16 +510,15 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.limits.workspace_max_nodes = crate::limits::WORKSPACE_MAX_NODES + 1;
+        config.limits.space_max_nodes = crate::limits::SPACE_MAX_NODES + 1;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.limits.workspace_max_documents = crate::limits::WORKSPACE_MAX_DOCUMENTS + 1;
+        config.limits.space_max_texts = crate::limits::SPACE_MAX_TEXTS + 1;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.limits.workspace_max_document_bytes =
-            crate::limits::WORKSPACE_MAX_DOCUMENT_BYTES + 1;
+        config.limits.space_max_text_bytes = crate::limits::SPACE_MAX_TEXT_BYTES + 1;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

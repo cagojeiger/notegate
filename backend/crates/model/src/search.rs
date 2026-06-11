@@ -68,6 +68,6 @@ pub struct GrepPage {
 pub struct GrepCandidate {
     pub node_id: Uuid,
     pub path: String,
-    pub content_md: String,
+    pub content: String,
     pub updated_at: DateTime<Utc>,
 }

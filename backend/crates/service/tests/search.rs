@@ -18,25 +18,23 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_db::{FilesRepo, WorkspaceRepo};
-use notegate_service::files::{
-    CreateDocument, CreateFolder, FilesService, WriteDocument, WriteTarget,
-};
+use notegate_db::{FilesRepo, SpaceRepo};
+use notegate_service::files::{CreateFolder, CreateText, FilesService, WriteTarget, WriteText};
 use notegate_service::search::{FindRequest, GrepRequest, SearchService};
-use notegate_service::workspaces::CreateWorkspace;
+use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
 
-/// Create a workspace owned by `owner` and return `(workspace_id, root_id)`.
-async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
+/// Create a space owned by `owner` and return `(space_id, root_id)`.
+async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
     let ws = ws_repo
-        .create_workspace(
+        .create_space(
             owner,
-            &CreateWorkspace {
+            &CreateSpace {
                 name: name.to_owned(),
             },
         )
         .await
-        .expect("create workspace");
+        .expect("create space");
     let root = ws_repo
         .root_node_id(ws.id)
         .await
@@ -46,8 +44,8 @@ async fn setup_workspace(ws_repo: &WorkspaceRepo, owner: Uuid, name: &str) -> (U
 }
 
 /// Build the trio of services/repos used by every test.
-fn services(db: &TestDb) -> (WorkspaceRepo, FilesService, SearchService) {
-    let ws_repo = WorkspaceRepo::new(db.pool.clone());
+fn services(db: &TestDb) -> (SpaceRepo, FilesService, SearchService) {
+    let ws_repo = SpaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
     let search = SearchService::new(FilesRepo::new(db.pool.clone()));
     (ws_repo, files, search)
@@ -79,10 +77,10 @@ async fn write_doc(
 ) -> Uuid {
     // touch then write so create-on-existing path is exercised.
     let node = files
-        .create_document(
+        .create_text(
             owner,
             ws,
-            CreateDocument {
+            CreateText {
                 parent_node_id: parent,
                 name: name.to_owned(),
             },
@@ -93,12 +91,12 @@ async fn write_doc(
         .node
         .id;
     files
-        .write_document(
+        .write_text(
             owner,
             ws,
-            WriteDocument {
+            WriteText {
                 target: WriteTarget::Existing { node_id: node },
-                content_md: content.to_owned(),
+                content: content.to_owned(),
                 expected_sha256: None,
             },
         )
@@ -116,7 +114,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
     };
     let (ws_repo, files, search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "personal").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
     // /projects (folder), /projects/note.md (doc), /other/note.md (doc)
     let projects = mkdir(&files, owner, ws, root, "projects").await;
@@ -124,7 +122,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
     let proj_note = write_doc(&files, owner, ws, projects, "note.md", "# Project note\n").await;
     let other_note = write_doc(&files, owner, ws, other, "note.md", "# Other note\n").await;
 
-    // by NAME: q='note' hits both documents (and not the folders).
+    // by NAME: q='note' hits both texts (and not the folders).
     let by_name = search
         .find(
             owner,
@@ -180,14 +178,14 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
     );
     assert!(
         !path_ids.contains(&proj_note),
-        "find does not match documents by path substring"
+        "find does not match texts by path substring"
     );
     assert!(
         !path_ids.contains(&other_note),
         "find excludes /other/note.md"
     );
 
-    // kind filter: q='note' kind=folder returns nothing (both notes are documents).
+    // kind filter: q='note' kind=folder returns nothing (both notes are texts).
     let folders_only = search
         .find(
             owner,
@@ -203,7 +201,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
         .await?;
     assert!(
         folders_only.items.is_empty(),
-        "kind=folder filters out documents"
+        "kind=folder filters out texts"
     );
 
     // kind filter: q='projects' kind=folder returns only the folder.
@@ -255,17 +253,17 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-/// Search scope paths are node scopes: a folder scopes to its subtree, a document
-/// scopes to that single document, and an unresolved scope is an actionable not-found.
+/// Search scope paths are node scopes: a folder scopes to its subtree, a text
+/// scopes to that single text, and an unresolved scope is an actionable not-found.
 #[tokio::test]
-async fn search_scope_accepts_document_and_rejects_missing_path()
+async fn search_scope_accepts_text_and_rejects_missing_path()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let (ws_repo, files, search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "personal").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
     let note = write_doc(&files, owner, ws, root, "note.md", "alpha\nneedle\n").await;
     let _other = write_doc(&files, owner, ws, root, "other.md", "needle\n").await;
@@ -286,7 +284,7 @@ async fn search_scope_accepts_document_and_rejects_missing_path()
     assert_eq!(
         single_doc.items.len(),
         1,
-        "document scope returns that document only"
+        "text scope returns that text only"
     );
     assert_eq!(single_doc.items[0].node_id, note);
 
@@ -322,9 +320,9 @@ async fn grep_line_no_context_and_clamp() -> Result<(), Box<dyn std::error::Erro
     };
     let (ws_repo, files, search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "personal").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
-    // A 7-line document; 'needle' is on line 4 only.
+    // A 7-line text; 'needle' is on line 4 only.
     let content = "l1\nl2\nl3\nneedle here\nl5\nl6\nl7\n";
     let node = write_doc(&files, owner, ws, root, "note.md", content).await;
 
@@ -397,15 +395,15 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
     };
     let (ws_repo, _files, search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "wide").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "wide").await;
 
-    // 25 documents named match-0000.md .. match-0024.md (seed > limit). Insert via
+    // 25 texts named match-0000.md .. match-0024.md (seed > limit). Insert via
     // raw SQL so the folder fanout cap (200) is irrelevant and names sort cleanly.
     let total = 25usize;
     for index in 0..total {
         sqlx::query(
-            "INSERT INTO nodes (workspace_id, parent_id, name, kind, created_by, updated_by) \
-             VALUES ($1, $2, $3, 'document', $4, $4)",
+            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
+             VALUES ($1, $2, $3, 'text', $4, $4)",
         )
         .bind(ws)
         .bind(root)
@@ -474,17 +472,17 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
 }
 
 /// grep keyset cursor resumes across a page boundary, including INSIDE a single
-/// document that has more matches than the page limit (intra-document offset).
+/// text that has more matches than the page limit (intra-text offset).
 #[tokio::test]
-async fn grep_cursor_resumes_within_a_document() -> Result<(), Box<dyn std::error::Error>> {
+async fn grep_cursor_resumes_within_a_text() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let (ws_repo, files, search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, root) = setup_workspace(&ws_repo, owner, "personal").await;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
-    // ONE document with 5 matching lines (hit-00 .. hit-04), interleaved with
+    // ONE text with 5 matching lines (hit-00 .. hit-04), interleaved with
     // non-matching lines so line numbers are distinct and meaningful.
     let mut body = String::new();
     let mut expected_line_nos = Vec::new();
@@ -498,7 +496,7 @@ async fn grep_cursor_resumes_within_a_document() -> Result<(), Box<dyn std::erro
     }
     let node = write_doc(&files, owner, ws, root, "many.md", &body).await;
 
-    // Page through with limit=2, so the single document spans 3 pages (2+2+1).
+    // Page through with limit=2, so the single text spans 3 pages (2+2+1).
     let limit = 2i64;
     let mut seen_line_nos: Vec<i64> = Vec::new();
     let mut cursor: Option<String> = None;
@@ -537,7 +535,7 @@ async fn grep_cursor_resumes_within_a_document() -> Result<(), Box<dyn std::erro
 
     assert_eq!(
         seen_line_nos, expected_line_nos,
-        "all 5 matches returned exactly once in order, resuming mid-document across pages"
+        "all 5 matches returned exactly once in order, resuming mid-text across pages"
     );
     // No duplicates.
     let mut distinct = seen_line_nos.clone();
@@ -558,7 +556,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
     };
     let (ws_repo, _files, search) = services(&db);
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
-    let (ws, _root) = setup_workspace(&ws_repo, owner, "personal").await;
+    let (ws, _root) = setup_space(&ws_repo, owner, "personal").await;
 
     let find_err = search
         .find(

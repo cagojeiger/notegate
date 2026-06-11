@@ -65,7 +65,7 @@ async fn create_agent_writes_account_and_attribution() -> Result<(), Box<dyn std
         )
         .await?;
     assert_eq!(agent.name, "research-agent");
-    assert_eq!(agent.created_by, creator);
+    assert_eq!(agent.owner_user_id, creator);
 
     let kind: String = sqlx::query_scalar("SELECT kind FROM accounts WHERE id = $1")
         .bind(agent.id)
@@ -177,18 +177,18 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
             rotated_from_key_id: None,
         })
         .await?;
-    let workspace_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name) \
+    let space_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (created_by, name) \
          VALUES ($1, 'personal') RETURNING id",
     )
     .bind(owner)
     .fetch_one(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
+        "INSERT INTO space_access (space_id, account_id, role, granted_by) \
          VALUES ($1, $2, 'editor', $3)",
     )
-    .bind(workspace_id)
+    .bind(space_id)
     .bind(agent_id)
     .bind(owner)
     .execute(&db.pool)
@@ -210,9 +210,9 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
     assert!(key_revoked.is_some());
 
     let access_revoked: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
-        "SELECT revoked_at FROM workspace_access WHERE workspace_id = $1 AND account_id = $2",
+        "SELECT revoked_at FROM space_access WHERE space_id = $1 AND account_id = $2",
     )
-    .bind(workspace_id)
+    .bind(space_id)
     .bind(agent_id)
     .fetch_one(&db.pool)
     .await?;

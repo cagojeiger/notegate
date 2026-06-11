@@ -4,16 +4,16 @@
 //! any transport (axum/rmcp). Services use concrete Postgres repositories from
 //! the `db` crate; transport mapping stays in `api`.
 
-pub mod access;
 pub mod accounts;
 pub mod agents;
 pub mod api_keys;
+pub mod connections;
 pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod identity;
 mod pagination;
 pub mod search;
-pub mod workspaces;
+pub mod spaces;
 
 pub use error::{ServiceError, ServiceResult};

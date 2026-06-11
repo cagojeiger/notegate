@@ -1,8 +1,8 @@
-pub mod access;
 pub mod agents;
-pub mod documents;
+pub mod connections;
 pub mod dto;
 pub mod me;
 pub mod nodes;
 pub mod search;
-pub mod workspaces;
+pub mod spaces;
+pub mod text;

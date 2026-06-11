@@ -11,23 +11,23 @@
 
 // --- HTTP ingress limits ---
 
-/// Maximum HTTP request body size accepted by the API server (1 MiB).
-pub const HTTP_REQUEST_BODY_MAX_BYTES: usize = 1_048_576;
+/// Maximum HTTP request body size accepted by the API server (2 MiB).
+pub const HTTP_REQUEST_BODY_MAX_BYTES: usize = 2_097_152;
 /// Maximum wall-clock time for one HTTP request before a 408 response.
 pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Maximum wall-clock time for control-plane probes before a 408 response.
 pub const HTTP_CONTROL_PLANE_TIMEOUT_SECS: u64 = 5;
 /// Maximum HTTP requests accepted per API process per minute.
-pub const HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE: u32 = 1_800;
+pub const HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE: u32 = 600;
 
-// --- Account, workspace, and credential limits ---
+// --- Account, space, and credential limits ---
 
-/// Maximum workspaces a single user owner account may own.
-pub const OWNED_WORKSPACES_MAX: usize = 20;
-/// Maximum live workspaces a single user or agent account may access.
-pub const ACCESSIBLE_WORKSPACES_PER_ACCOUNT_MAX: usize = 100;
-/// Maximum active accounts that may have access to one workspace.
-pub const WORKSPACE_ACCESS_MAX_ACCOUNTS: usize = 20;
+/// Maximum spaces a single user owner account may own.
+pub const OWNED_SPACES_MAX: usize = 20;
+/// Maximum active agent connections per space.
+pub const CONNECTIONS_PER_SPACE_MAX: usize = 50;
+/// Maximum live spaces a single agent may be connected to.
+pub const CONNECTED_SPACES_PER_AGENT_MAX: usize = 100;
 /// Maximum active agents a single user creator account may create.
 pub const AGENTS_PER_CREATOR_MAX: usize = 50;
 /// Maximum live API keys for a user account.
@@ -52,31 +52,37 @@ pub const AGENT_NAME_MAX_CHARS: usize = 63;
 /// Maximum API-key display name length, in characters.
 pub const API_KEY_NAME_MAX_CHARS: usize = 63;
 
-/// Maximum workspace name length, in characters.
-pub const WORKSPACE_NAME_MAX_LEN: usize = 63;
+/// Maximum space name length, in characters.
+pub const SPACE_NAME_MAX_LEN: usize = 63;
 /// Maximum folder name length, in characters.
 pub const FOLDER_NAME_MAX_LEN: usize = 128;
-/// Maximum document file name length (including `.md`), in characters.
-pub const DOCUMENT_FILE_NAME_MAX_LEN: usize = 128;
-/// Maximum document title stem length (excluding `.md`), in characters.
-pub const DOCUMENT_TITLE_STEM_MAX_LEN: usize = 125;
+/// Maximum text node name length, in characters.
+pub const TEXT_NAME_MAX_LEN: usize = 128;
+/// Maximum text stem length, in characters.
+pub const TEXT_STEM_MAX_LEN: usize = 125;
 /// Maximum derived path length, in bytes.
 pub const MAX_PATH_LEN: usize = 645;
-/// Maximum path depth, in segments below the workspace root.
+/// Maximum path depth, in segments below the space root.
 pub const MAX_PATH_DEPTH: usize = 5;
-/// Maximum live nodes per workspace.
-pub const WORKSPACE_MAX_NODES: usize = 10_000;
-/// Maximum live documents per workspace.
-pub const WORKSPACE_MAX_DOCUMENTS: usize = 5_000;
-/// Maximum total live document bytes per workspace (256 MiB).
-pub const WORKSPACE_MAX_DOCUMENT_BYTES: usize = 268_435_456;
+/// Maximum live nodes per space.
+pub const SPACE_MAX_NODES: usize = 10_000;
+/// Maximum live texts per space.
+pub const SPACE_MAX_TEXTS: usize = 5_000;
+/// Maximum live file nodes per space.
+pub const SPACE_MAX_FILES: usize = 5_000;
+/// Maximum total live text bytes per space (256 MiB).
+pub const SPACE_MAX_TEXT_BYTES: usize = 268_435_456;
+/// Maximum file bytes stored inline in PostgreSQL (256 KiB).
+pub const FILE_INLINE_PG_MAX_BYTES: usize = 262_144;
+/// Maximum bytes per uploaded file (100 MiB).
+pub const FILE_MAX_BYTES: usize = 104_857_600;
 
 // --- Listing and folder fanout limits ---
 
 /// Maximum live direct children per folder.
 pub const FOLDER_MAX_CHILDREN: usize = 200;
 
-/// Runtime-overridable workspace/file-tree capacity limits.
+/// Runtime-overridable space/file-tree capacity limits.
 ///
 /// These defaults are the product contract. Tests and local E2E runs may lower
 /// them through `Config.limits`; code should receive a [`Limits`] value instead
@@ -84,18 +90,20 @@ pub const FOLDER_MAX_CHILDREN: usize = 200;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
-    pub workspace_max_nodes: usize,
-    pub workspace_max_documents: usize,
-    pub workspace_max_document_bytes: usize,
+    pub space_max_nodes: usize,
+    pub space_max_texts: usize,
+    pub space_max_text_bytes: usize,
+    pub space_max_files: usize,
     pub folder_max_children: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            workspace_max_nodes: WORKSPACE_MAX_NODES,
-            workspace_max_documents: WORKSPACE_MAX_DOCUMENTS,
-            workspace_max_document_bytes: WORKSPACE_MAX_DOCUMENT_BYTES,
+            space_max_nodes: SPACE_MAX_NODES,
+            space_max_texts: SPACE_MAX_TEXTS,
+            space_max_text_bytes: SPACE_MAX_TEXT_BYTES,
+            space_max_files: SPACE_MAX_FILES,
             folder_max_children: FOLDER_MAX_CHILDREN,
         }
     }
@@ -134,12 +142,12 @@ pub const READ_DEFAULT_MAX_BYTES: usize = 65_536;
 /// Maximum bytes returned by `read`/`open` (256 KiB).
 pub const READ_MAX_BYTES: usize = 262_144;
 
-// --- Document creation and write limits ---
+// --- Text creation and write limits ---
 
-/// Maximum bytes per document (512 KiB).
-pub const DOCUMENT_MAX_BYTES: usize = 524_288;
-/// Maximum lines per document.
-pub const DOCUMENT_MAX_LINES: usize = 2_000;
+/// Maximum bytes per text (512 KiB).
+pub const TEXT_MAX_BYTES: usize = 524_288;
+/// Maximum lines per text.
+pub const TEXT_MAX_LINES: usize = 2_000;
 
 // --- Subtree mutation limits ---
 
@@ -155,14 +163,14 @@ pub const DEAD_API_KEY_RETENTION_DAYS: i64 = 30;
 
 // --- API pagination limits ---
 
-/// Default `GET /workspaces` page size.
-pub const WORKSPACES_DEFAULT_LIMIT: i64 = 50;
-/// Maximum `GET /workspaces` page size.
-pub const WORKSPACES_MAX_LIMIT: i64 = 100;
-/// Default `GET /workspaces/{id}/access` page size.
-pub const ACCESS_DEFAULT_LIMIT: i64 = 100;
-/// Maximum `GET /workspaces/{id}/access` page size.
-pub const ACCESS_MAX_LIMIT: i64 = 100;
+/// Default `GET /spaces` page size.
+pub const SPACES_DEFAULT_LIMIT: i64 = 50;
+/// Maximum `GET /spaces` page size.
+pub const SPACES_MAX_LIMIT: i64 = 100;
+/// Default `GET /spaces/{id}/agents` page size.
+pub const CONNECTIONS_DEFAULT_LIMIT: i64 = 100;
+/// Maximum `GET /spaces/{id}/agents` page size.
+pub const CONNECTIONS_MAX_LIMIT: i64 = 100;
 /// Default `GET /agents` page size.
 pub const AGENTS_DEFAULT_LIMIT: i64 = 100;
 /// Maximum `GET /agents` page size.

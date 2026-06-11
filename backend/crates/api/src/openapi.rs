@@ -11,12 +11,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::rest;
 use crate::state::AppState;
 
-/// The OpenAPI document is the machine-readable contract for the `/api/v1`
+/// The OpenAPI text is the machine-readable contract for the `/api/v1`
 /// JSON resource API only. Auth redirect/session endpoints, OAuth discovery
 /// metadata, MCP, and system health/readiness endpoints are intentionally kept
-/// outside this document; see `docs/spec/rest/README.md` for the scope decision.
+/// outside this text; see `docs/spec/rest/README.md` for the scope decision.
 ///
-/// The document is generated from `#[utoipa::path]` annotations on the actual
+/// The text is generated from `#[utoipa::path]` annotations on the actual
 /// REST resource handlers, so route/method drift is caught close to the code
 /// that serves each endpoint.
 #[derive(OpenApi)]
@@ -28,11 +28,11 @@ use crate::state::AppState;
         rest::me::rotate_key,
         rest::me::revoke_key,
         rest::me::delete_me,
-        rest::workspaces::list,
-        rest::workspaces::create,
-        rest::workspaces::get_one,
-        rest::workspaces::rename,
-        rest::workspaces::delete,
+        rest::spaces::list,
+        rest::spaces::create,
+        rest::spaces::get_one,
+        rest::spaces::rename,
+        rest::spaces::delete,
         rest::nodes::resolve_path,
         rest::nodes::create,
         rest::nodes::get_node,
@@ -40,14 +40,14 @@ use crate::state::AppState;
         rest::nodes::delete,
         rest::nodes::children,
         rest::nodes::move_node,
-        rest::documents::read,
-        rest::documents::replace,
-        rest::documents::patch,
+        rest::text::read,
+        rest::text::replace,
+        rest::text::patch,
         rest::search::find,
         rest::search::grep,
-        rest::access::list,
-        rest::access::grant,
-        rest::access::revoke,
+        rest::connections::list,
+        rest::connections::connect,
+        rest::connections::disconnect,
         rest::agents::list,
         rest::agents::create,
         rest::agents::delete_agent,
@@ -60,11 +60,11 @@ use crate::state::AppState;
     modifiers(&SecurityAddon),
     tags(
         (name = "identity", description = "Current caller identity"),
-        (name = "workspaces", description = "Workspace lifecycle"),
-        (name = "nodes", description = "Folder/document tree metadata"),
-        (name = "documents", description = "Markdown content read/write/patch"),
-        (name = "search", description = "find / grep within a workspace"),
-        (name = "access", description = "Workspace role grant/revoke"),
+        (name = "spaces", description = "Space lifecycle"),
+        (name = "nodes", description = "Folder/text tree metadata"),
+        (name = "text", description = "Text content read/write/patch"),
+        (name = "search", description = "find / grep within a space"),
+        (name = "connections", description = "Space agent connections"),
         (name = "agents", description = "Agent account and key lifecycle"),
     )
 )]
@@ -168,8 +168,8 @@ mod tests {
             .expect("schemas object");
 
         for schema in [
-            "WorkspacesListResponse",
-            "AccessListResponse",
+            "SpacesListResponse",
+            "ConnectionListResponse",
             "AgentsListResponse",
             "ErrorResponse",
         ] {
@@ -181,17 +181,12 @@ mod tests {
         );
 
         assert_eq!(
-            response_ref(&value, "/api/v1/workspaces", "get", "200"),
-            "#/components/schemas/WorkspacesListResponse"
+            response_ref(&value, "/api/v1/spaces", "get", "200"),
+            "#/components/schemas/SpacesListResponse"
         );
         assert_eq!(
-            response_ref(
-                &value,
-                "/api/v1/workspaces/{workspace_id}/access",
-                "get",
-                "200"
-            ),
-            "#/components/schemas/AccessListResponse"
+            response_ref(&value, "/api/v1/spaces/{space_id}/agents", "get", "200"),
+            "#/components/schemas/ConnectionListResponse"
         );
         assert_eq!(
             response_ref(&value, "/api/v1/agents", "get", "200"),
@@ -200,11 +195,11 @@ mod tests {
     }
 
     #[test]
-    fn openapi_documents_rest_query_parameters() {
+    fn openapi_texts_rest_query_parameters() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
 
-        assert_query_params(&value, "/api/v1/workspaces", "get", &["limit", "cursor"]);
+        assert_query_params(&value, "/api/v1/spaces", "get", &["limit", "cursor"]);
         assert_query_params(&value, "/api/v1/agents", "get", &["limit", "cursor"]);
         assert_query_params(&value, "/api/v1/me/keys", "get", &["limit", "cursor"]);
         assert_query_params(
@@ -215,25 +210,25 @@ mod tests {
         );
         assert_query_params(
             &value,
-            "/api/v1/workspaces/{workspace_id}/access",
+            "/api/v1/spaces/{space_id}/agents",
             "get",
             &["limit", "cursor"],
         );
         assert_query_params(
             &value,
-            "/api/v1/workspaces/{workspace_id}/paths/resolve",
+            "/api/v1/spaces/{space_id}/paths/resolve",
             "get",
             &["path"],
         );
         assert_query_params(
             &value,
-            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "get",
             &["limit", "cursor"],
         );
         assert_query_params(
             &value,
-            "/api/v1/workspaces/{workspace_id}/documents/{node_id}",
+            "/api/v1/spaces/{space_id}/text/{node_id}",
             "get",
             &[
                 "start_line",
@@ -244,24 +239,24 @@ mod tests {
         );
         assert_query_params(
             &value,
-            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}",
             "delete",
             &["recursive"],
         );
     }
 
     #[test]
-    fn openapi_documents_access_role_enum() {
+    fn openapi_texts_connection_permission_enum() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
 
         assert_eq!(
-            value["components"]["schemas"]["AccessRoleBody"]["enum"],
-            serde_json::json!(["owner", "editor", "viewer"])
+            value["components"]["schemas"]["PermissionBody"]["enum"],
+            serde_json::json!(["read", "write"])
         );
         assert_eq!(
-            value["components"]["schemas"]["GrantBody"]["properties"]["role"]["$ref"],
-            "#/components/schemas/AccessRoleBody"
+            value["components"]["schemas"]["ConnectBody"]["properties"]["permission"]["$ref"],
+            "#/components/schemas/PermissionBody"
         );
     }
 
@@ -345,18 +340,18 @@ mod tests {
             "/api/v1/me",
             "/api/v1/me/keys",
             "/api/v1/me/keys/{key_id}",
-            "/api/v1/workspaces",
-            "/api/v1/workspaces/{workspace_id}",
-            "/api/v1/workspaces/{workspace_id}/paths/resolve",
-            "/api/v1/workspaces/{workspace_id}/nodes",
-            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}",
-            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
-            "/api/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
-            "/api/v1/workspaces/{workspace_id}/documents/{node_id}",
-            "/api/v1/workspaces/{workspace_id}/search/find",
-            "/api/v1/workspaces/{workspace_id}/search/grep",
-            "/api/v1/workspaces/{workspace_id}/access",
-            "/api/v1/workspaces/{workspace_id}/access/{account_id}",
+            "/api/v1/spaces",
+            "/api/v1/spaces/{space_id}",
+            "/api/v1/spaces/{space_id}/paths/resolve",
+            "/api/v1/spaces/{space_id}/nodes",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/move",
+            "/api/v1/spaces/{space_id}/text/{node_id}",
+            "/api/v1/spaces/{space_id}/search/find",
+            "/api/v1/spaces/{space_id}/search/grep",
+            "/api/v1/spaces/{space_id}/agents",
+            "/api/v1/spaces/{space_id}/agents/{agent_id}",
             "/api/v1/agents",
             "/api/v1/agents/{agent_id}",
             "/api/v1/agents/{agent_id}/keys",
@@ -387,36 +382,36 @@ mod tests {
             "DELETE /api/v1/agents/{agent_id}",
             "DELETE /api/v1/agents/{agent_id}/keys/{key_id}",
             "DELETE /api/v1/me/keys/{key_id}",
-            "DELETE /api/v1/workspaces/{workspace_id}",
-            "DELETE /api/v1/workspaces/{workspace_id}/access/{account_id}",
-            "DELETE /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "DELETE /api/v1/spaces/{space_id}",
+            "DELETE /api/v1/spaces/{space_id}/agents/{agent_id}",
+            "DELETE /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/agents",
             "GET /api/v1/agents/{agent_id}/keys",
             "DELETE /api/v1/me",
             "GET /api/v1/me",
             "GET /api/v1/me/keys",
-            "GET /api/v1/workspaces",
-            "GET /api/v1/workspaces/{workspace_id}",
-            "GET /api/v1/workspaces/{workspace_id}/access",
-            "GET /api/v1/workspaces/{workspace_id}/documents/{node_id}",
-            "GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
-            "GET /api/v1/workspaces/{workspace_id}/nodes/{node_id}/children",
-            "GET /api/v1/workspaces/{workspace_id}/paths/resolve",
-            "PATCH /api/v1/workspaces/{workspace_id}",
-            "PATCH /api/v1/workspaces/{workspace_id}/documents/{node_id}",
-            "PATCH /api/v1/workspaces/{workspace_id}/nodes/{node_id}",
+            "GET /api/v1/spaces",
+            "GET /api/v1/spaces/{space_id}",
+            "GET /api/v1/spaces/{space_id}/agents",
+            "GET /api/v1/spaces/{space_id}/text/{node_id}",
+            "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
+            "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",
+            "GET /api/v1/spaces/{space_id}/paths/resolve",
+            "PATCH /api/v1/spaces/{space_id}",
+            "PATCH /api/v1/spaces/{space_id}/text/{node_id}",
+            "PATCH /api/v1/spaces/{space_id}/nodes/{node_id}",
             "POST /api/v1/agents",
             "POST /api/v1/agents/{agent_id}/keys",
             "POST /api/v1/agents/{agent_id}/keys/{key_id}",
             "POST /api/v1/me/keys",
             "POST /api/v1/me/keys/{key_id}",
-            "POST /api/v1/workspaces",
-            "POST /api/v1/workspaces/{workspace_id}/nodes",
-            "POST /api/v1/workspaces/{workspace_id}/nodes/{node_id}/move",
-            "POST /api/v1/workspaces/{workspace_id}/search/find",
-            "POST /api/v1/workspaces/{workspace_id}/search/grep",
-            "PUT /api/v1/workspaces/{workspace_id}/access/{account_id}",
-            "PUT /api/v1/workspaces/{workspace_id}/documents/{node_id}",
+            "POST /api/v1/spaces",
+            "POST /api/v1/spaces/{space_id}/nodes",
+            "POST /api/v1/spaces/{space_id}/nodes/{node_id}/move",
+            "POST /api/v1/spaces/{space_id}/search/find",
+            "POST /api/v1/spaces/{space_id}/search/grep",
+            "PUT /api/v1/spaces/{space_id}/agents/{agent_id}",
+            "PUT /api/v1/spaces/{space_id}/text/{node_id}",
         ];
         expected.sort();
 

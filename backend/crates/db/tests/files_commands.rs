@@ -1,4 +1,4 @@
-//! P0-2: file-tree mutations on a soft-deleted workspace must read as not_found.
+//! P0-2: file-tree mutations on a soft-deleted space must read as not_found.
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
@@ -15,7 +15,7 @@ mod common;
 
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, WorkspaceRepo};
+use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, MoveNode, StoredContent};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -27,29 +27,28 @@ fn assert_not_found<T: std::fmt::Debug>(result: Result<T, Error>) {
     }
 }
 
-async fn workspace_with_root(
+async fn space_with_root(
     pool: &PgPool,
     sub: &str,
 ) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
     let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
-    let workspace: Uuid = sqlx::query_scalar(
-        "INSERT INTO workspaces (created_by, name) VALUES ($1, $2) RETURNING id",
-    )
-    .bind(account)
-    .bind(format!("ws-{sub}"))
-    .fetch_one(pool)
-    .await?;
-    let root: Uuid =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE workspace_id = $1 AND parent_id IS NULL")
-            .bind(workspace)
+    let space: Uuid =
+        sqlx::query_scalar("INSERT INTO spaces (created_by, name) VALUES ($1, $2) RETURNING id")
+            .bind(account)
+            .bind(format!("ws-{sub}"))
             .fetch_one(pool)
             .await?;
-    Ok((account, workspace, root))
+    let root: Uuid =
+        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
+            .bind(space)
+            .fetch_one(pool)
+            .await?;
+    Ok((account, space, root))
 }
 
 fn content() -> StoredContent {
     StoredContent {
-        content_md: "hello".to_owned(),
+        content: "hello".to_owned(),
         content_sha256: "0".repeat(64),
         byte_len: 5,
         line_count: 1,
@@ -57,15 +56,15 @@ fn content() -> StoredContent {
 }
 
 #[tokio::test]
-async fn mutations_on_soft_deleted_workspace_return_not_found()
--> Result<(), Box<dyn std::error::Error>> {
+async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (account, ws, root) = workspace_with_root(&db.pool, "softdel").await?;
+    let (account, ws, root) = space_with_root(&db.pool, "softdel").await?;
     let repo = FilesRepo::new(db.pool.clone());
 
-    // Seed a folder + document while the workspace is live.
+    // Seed a folder + text while the space is live.
     let folder = repo
         .insert_folder(
             ws,
@@ -77,15 +76,15 @@ async fn mutations_on_soft_deleted_workspace_return_not_found()
         )
         .await?;
     let (doc_node, _) = repo
-        .insert_document(ws, root, "doc.md", &content(), account)
+        .insert_text(ws, root, "doc.md", &content(), account)
         .await?;
 
-    // Soft-delete the workspace through the production path.
-    WorkspaceRepo::new(db.pool.clone())
-        .delete_workspace(ws, account)
+    // Soft-delete the space through the production path.
+    SpaceRepo::new(db.pool.clone())
+        .delete_space(ws, account)
         .await?;
 
-    // Every file mutation must now see the workspace as gone (not_found via lock_workspace).
+    // Every file mutation must now see the space as gone (not_found via lock_space).
     assert_not_found(
         repo.insert_folder(
             ws,
@@ -98,11 +97,11 @@ async fn mutations_on_soft_deleted_workspace_return_not_found()
         .await,
     );
     assert_not_found(
-        repo.insert_document(ws, root, "new-doc.md", &content(), account)
+        repo.insert_text(ws, root, "new-doc.md", &content(), account)
             .await,
     );
     assert_not_found(
-        repo.save_document_content(ws, doc_node.id, &content(), None, account)
+        repo.save_text_content(ws, doc_node.id, &content(), None, account)
             .await,
     );
     assert_not_found(

@@ -1,7 +1,7 @@
 //! Shared REST data-transfer objects and the mappers from service/model types.
 //!
 //! These mirror the exact JSON shapes in `docs/spec/rest/README.md`
-//! (AccountRef, Workspace output, Node output, Document output). The api layer
+//! (AccountRef, Space output, Node output, Text output). The api layer
 //! owns these so the `model`/`service` types stay transport-free; mapping here is
 //! thin (no domain logic).
 
@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use notegate_model::{AccountRef as ModelAccountRef, ApiKey, NodeKind};
 use notegate_service::files::NodeView;
-use notegate_service::workspaces::WorkspaceView;
+use notegate_service::spaces::SpaceView;
 
 /// A lightweight account reference: `{id, kind, display_name}`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -98,26 +98,26 @@ pub(crate) struct ApiKeyMetadataListResponse {
     pub page: crate::page::Page,
 }
 
-/// Workspace output: metadata, caller role, and derived `root_node_id`.
+/// Space output: metadata, caller role, and derived `root_node_id`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct WorkspaceOut {
+pub struct SpaceOut {
     pub id: Uuid,
     pub name: String,
-    pub role: String,
+    pub permission: String,
     pub root_node_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<&WorkspaceView> for WorkspaceOut {
-    fn from(view: &WorkspaceView) -> Self {
+impl From<&SpaceView> for SpaceOut {
+    fn from(view: &SpaceView) -> Self {
         Self {
-            id: view.workspace.id,
-            name: view.workspace.name.clone(),
-            role: view.role.as_str().to_owned(),
+            id: view.space.id,
+            name: view.space.name.clone(),
+            permission: view.permission.as_str().to_owned(),
             root_node_id: view.root_node_id,
-            created_at: view.workspace.created_at,
-            updated_at: view.workspace.updated_at,
+            created_at: view.space.created_at,
+            updated_at: view.space.updated_at,
         }
     }
 }
@@ -126,7 +126,7 @@ impl From<&WorkspaceView> for WorkspaceOut {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct NodeOut {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    pub space_id: Uuid,
     pub parent_id: Option<Uuid>,
     pub name: String,
     pub kind: String,
@@ -136,7 +136,7 @@ pub struct NodeOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub byte_len: Option<i32>,
+    pub byte_len: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_count: Option<i32>,
     pub created_by: AccountRef,
@@ -152,28 +152,25 @@ impl NodeOut {
         let node = &view.node;
         Self {
             id: node.id,
-            workspace_id: node.workspace_id,
+            space_id: node.space_id,
             parent_id: node.parent_id,
             name: node.name.clone(),
             kind: node.kind.as_str().to_owned(),
             path: view.path.clone(),
             sort_order: node.sort_order,
             has_children: view.has_children,
-            content_sha256: view
-                .document
-                .as_ref()
-                .map(|document| document.content_sha256.clone()),
-            byte_len: view.document.as_ref().map(|document| document.byte_len),
-            line_count: view.document.as_ref().map(|document| document.line_count),
-            created_by: AccountRef::resolve(node.created_by, refs),
-            updated_by: AccountRef::resolve(node.updated_by, refs),
+            content_sha256: view.text.as_ref().map(|text| text.content_sha256.clone()),
+            byte_len: view.text.as_ref().map(|text| text.byte_len),
+            line_count: view.text.as_ref().map(|text| text.line_count),
+            created_by: AccountRef::resolve(node.created_by_account_id, refs),
+            updated_by: AccountRef::resolve(node.updated_by_account_id, refs),
             created_at: node.created_at,
             updated_at: node.updated_at,
         }
     }
 }
 
-/// The condensed node reference embedded in `children` and `document` responses
+/// The condensed node reference embedded in `children` and `text` responses
 /// (`{id, path}` plus kind where the spec shows it).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct NodeRef {
@@ -197,7 +194,10 @@ impl From<&NodeView> for NodeRef {
 pub fn attribution_ids<'a>(views: impl IntoIterator<Item = &'a NodeView>) -> Vec<Uuid> {
     let mut ids = Vec::new();
     for view in views {
-        for id in [view.node.created_by, view.node.updated_by] {
+        for id in [
+            view.node.created_by_account_id,
+            view.node.updated_by_account_id,
+        ] {
             if !ids.contains(&id) {
                 ids.push(id);
             }
@@ -208,6 +208,7 @@ pub fn attribution_ids<'a>(views: impl IntoIterator<Item = &'a NodeView>) -> Vec
 
 /// Parse a `kind` query/body string into a [`NodeKind`], rejecting unknowns.
 pub fn parse_kind(value: &str) -> Result<NodeKind, crate::error::ApiError> {
-    NodeKind::parse(value)
-        .ok_or_else(|| crate::error::ApiError::invalid_field("kind must be 'folder' or 'document'"))
+    NodeKind::parse(value).ok_or_else(|| {
+        crate::error::ApiError::invalid_field("kind must be 'folder', 'text', or 'file'")
+    })
 }

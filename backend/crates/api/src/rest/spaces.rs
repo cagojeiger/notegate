@@ -1,8 +1,8 @@
-//! Workspaces category: list / create / get / rename / delete.
+//! Spaces category: list / create / get / rename / delete.
 //!
-//! `GET /api/v1/workspaces` (paginated, default 50, max 100), `POST` to create,
-//! and `GET`/`PATCH`/`DELETE /{workspace_id}`. Each handler resolves the caller
-//! from the auth middleware and delegates to the workspace service, which owns
+//! `GET /api/v1/spaces` (paginated, default 50, max 100), `POST` to create,
+//! and `GET`/`PATCH`/`DELETE /{space_id}`. Each handler resolves the caller
+//! from the auth middleware and delegates to the space service, which owns
 //! authorization (no live role ⇒ 404, lesser role ⇒ 403).
 
 use axum::extract::{Extension, Path, Query, State};
@@ -16,16 +16,16 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::WorkspaceOut;
+use crate::rest::dto::SpaceOut;
 use crate::state::AppState;
 
-use notegate_service::workspaces::{CreateWorkspace, ListWorkspaces, RenameWorkspace};
+use notegate_service::spaces::{CreateSpace, ListSpaces, RenameSpace};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/workspaces", get(list).post(create))
+        .route("/v1/spaces", get(list).post(create))
         .route(
-            "/v1/workspaces/{workspace_id}",
+            "/v1/spaces/{space_id}",
             get(get_one).patch(rename).delete(delete),
         )
 }
@@ -37,8 +37,8 @@ pub(crate) struct ListQuery {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct WorkspacesListResponse {
-    workspaces: Vec<WorkspaceOut>,
+pub(crate) struct SpacesListResponse {
+    spaces: Vec<SpaceOut>,
     page: Page,
 }
 
@@ -54,33 +54,33 @@ pub(crate) struct RenameBody {
 
 #[utoipa::path(
     get,
-    path = "/api/v1/workspaces",
-    tag = "workspaces",
+    path = "/api/v1/spaces",
+    tag = "spaces",
     params(
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
-    responses((status = 200, description = "List workspaces", body = WorkspacesListResponse)),
+    responses((status = 200, description = "List spaces", body = SpacesListResponse)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<WorkspacesListResponse>, ApiError> {
+) -> Result<Json<SpacesListResponse>, ApiError> {
     let page = state
-        .workspaces
+        .spaces
         .list(
             caller.account_id(),
-            ListWorkspaces {
+            ListSpaces {
                 limit: query.limit,
                 cursor: query.cursor,
             },
         )
         .await?;
-    let workspaces = page.items.iter().map(WorkspaceOut::from).collect();
-    Ok(Json(WorkspacesListResponse {
-        workspaces,
+    let spaces = page.items.iter().map(SpaceOut::from).collect();
+    Ok(Json(SpacesListResponse {
+        spaces,
         page: Page::new(
             page.limit,
             page.items.len(),
@@ -92,92 +92,86 @@ pub(crate) async fn list(
 
 #[utoipa::path(
     post,
-    path = "/api/v1/workspaces",
-    tag = "workspaces",
+    path = "/api/v1/spaces",
+    tag = "spaces",
     request_body = CreateBody,
-    responses((status = 201, description = "Create workspace", body = WorkspaceOut)),
+    responses((status = 201, description = "Create space", body = SpaceOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn create(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Json(body): Json<CreateBody>,
-) -> Result<(StatusCode, Json<WorkspaceOut>), ApiError> {
+) -> Result<(StatusCode, Json<SpaceOut>), ApiError> {
     let view = state
-        .workspaces
+        .spaces
         .create(
             caller.account.kind,
             caller.account_id(),
-            CreateWorkspace { name: body.name },
+            CreateSpace { name: body.name },
         )
         .await?;
-    Ok((StatusCode::CREATED, Json(WorkspaceOut::from(&view))))
+    Ok((StatusCode::CREATED, Json(SpaceOut::from(&view))))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/v1/workspaces/{workspace_id}",
-    tag = "workspaces",
-    params(("workspace_id" = Uuid, Path, description = "Workspace id")),
-    responses((status = 200, description = "Get workspace", body = WorkspaceOut)),
+    path = "/api/v1/spaces/{space_id}",
+    tag = "spaces",
+    params(("space_id" = Uuid, Path, description = "Space id")),
+    responses((status = 200, description = "Get space", body = SpaceOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn get_one(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path(workspace_id): Path<Uuid>,
-) -> Result<Json<WorkspaceOut>, ApiError> {
-    let view = state
-        .workspaces
-        .get(caller.account_id(), workspace_id)
-        .await?;
-    Ok(Json(WorkspaceOut::from(&view)))
+    Path(space_id): Path<Uuid>,
+) -> Result<Json<SpaceOut>, ApiError> {
+    let view = state.spaces.get(caller.account_id(), space_id).await?;
+    Ok(Json(SpaceOut::from(&view)))
 }
 
 #[utoipa::path(
     patch,
-    path = "/api/v1/workspaces/{workspace_id}",
-    tag = "workspaces",
-    params(("workspace_id" = Uuid, Path, description = "Workspace id")),
+    path = "/api/v1/spaces/{space_id}",
+    tag = "spaces",
+    params(("space_id" = Uuid, Path, description = "Space id")),
     request_body = RenameBody,
-    responses((status = 200, description = "Rename workspace", body = WorkspaceOut)),
+    responses((status = 200, description = "Rename space", body = SpaceOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn rename(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path(workspace_id): Path<Uuid>,
+    Path(space_id): Path<Uuid>,
     Json(body): Json<RenameBody>,
-) -> Result<Json<WorkspaceOut>, ApiError> {
+) -> Result<Json<SpaceOut>, ApiError> {
     let view = state
-        .workspaces
+        .spaces
         .rename(
             caller.account_id(),
-            RenameWorkspace {
-                workspace_id,
+            RenameSpace {
+                space_id,
                 new_name: body.name,
             },
         )
         .await?;
-    Ok(Json(WorkspaceOut::from(&view)))
+    Ok(Json(SpaceOut::from(&view)))
 }
 
 #[utoipa::path(
     delete,
-    path = "/api/v1/workspaces/{workspace_id}",
-    tag = "workspaces",
-    params(("workspace_id" = Uuid, Path, description = "Workspace id")),
-    responses((status = 204, description = "Delete workspace")),
+    path = "/api/v1/spaces/{space_id}",
+    tag = "spaces",
+    params(("space_id" = Uuid, Path, description = "Space id")),
+    responses((status = 204, description = "Delete space")),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn delete(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
-    Path(workspace_id): Path<Uuid>,
+    Path(space_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state
-        .workspaces
-        .delete(caller.account_id(), workspace_id)
-        .await?;
+    state.spaces.delete(caller.account_id(), space_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1,62 +1,35 @@
-//! Role gate for file-tree commands.
+//! Permission gate for file-tree commands.
 //!
-//! Authorization is per workspace (`docs/spec/db.md`):
-//!
-//! ```text
-//! viewer = list/stat/read/find/grep
-//! editor = viewer + write/patch/mkdir/touch/move/delete
-//! owner  = editor
-//! ```
-//!
-//! Workspace access management is gated in `AccessService`, not in this file-tree
-//! policy. The file service resolves the caller's live [`Role`] first (no role ⇒
-//! `404`), then
-//! calls [`require`] before doing any work. A role below the command's minimum is
-//! reported as forbidden (`403`).
+//! `read` permission allows list/stat/read/find/grep. `write` permission also
+//! allows mutation commands.
 
-use notegate_model::Role;
+use notegate_model::Permission;
 
 use crate::error::{ServiceError, ServiceResult};
 
-/// A file-tree command, used to gate by role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileCommand {
-    /// List a folder's direct children.
     Ls,
-    /// Read node metadata.
     Stat,
-    /// Read document content.
     Read,
-    /// Search node metadata by name.
     Find,
-    /// Search document content.
     Grep,
-    /// Create a folder.
     Mkdir,
-    /// Create an empty document.
     Touch,
-    /// Replace document content.
     Write,
-    /// Apply exact targeted edits to a document.
     Patch,
-    /// Move or rename a node.
     Mv,
-    /// Delete a node.
     Rm,
 }
 
 impl FileCommand {
-    /// The minimum role required to run this command.
-    pub fn min_role(self) -> Role {
-        match self {
-            Self::Ls | Self::Stat | Self::Read | Self::Find | Self::Grep => Role::Viewer,
-            Self::Mkdir | Self::Touch | Self::Write | Self::Patch | Self::Mv | Self::Rm => {
-                Role::Editor
-            }
-        }
+    pub fn requires_write(self) -> bool {
+        matches!(
+            self,
+            Self::Mkdir | Self::Touch | Self::Write | Self::Patch | Self::Mv | Self::Rm
+        )
     }
 
-    /// A stable label for error messages.
     fn label(self) -> &'static str {
         match self {
             Self::Ls => "ls",
@@ -74,16 +47,11 @@ impl FileCommand {
     }
 }
 
-/// Require `role` to be sufficient for `command`, else forbidden (`403`).
-///
-/// The caller must already have mapped "no live role" to not-found (`404`); this
-/// only compares a present role against the command minimum.
-pub fn require(role: Role, command: FileCommand) -> ServiceResult<()> {
-    if role < command.min_role() {
+pub fn require(permission: Permission, command: FileCommand) -> ServiceResult<()> {
+    if command.requires_write() && !permission.allows_write() {
         return Err(ServiceError::Forbidden(format!(
-            "{} requires at least {} role",
-            command.label(),
-            command.min_role().as_str()
+            "{} requires write permission",
+            command.label()
         )));
     }
     Ok(())
@@ -91,97 +59,26 @@ pub fn require(role: Role, command: FileCommand) -> ServiceResult<()> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::indexing_slicing,
-        clippy::panic,
-        clippy::unwrap_in_result
-    )]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
-    /// The full policy table from the spec: which roles may run which commands.
-    fn allowed(role: Role, command: FileCommand) -> bool {
-        require(role, command).is_ok()
+    fn allowed(permission: Permission, command: FileCommand) -> bool {
+        require(permission, command).is_ok()
     }
 
     #[test]
-    fn viewer_can_only_read() {
-        let read = [
-            FileCommand::Ls,
-            FileCommand::Stat,
-            FileCommand::Read,
-            FileCommand::Find,
-            FileCommand::Grep,
-        ];
-        for command in read {
-            assert!(
-                allowed(Role::Viewer, command),
-                "viewer should allow {command:?}"
-            );
-        }
-        let mutate = [
-            FileCommand::Mkdir,
-            FileCommand::Touch,
-            FileCommand::Write,
-            FileCommand::Patch,
-            FileCommand::Mv,
-            FileCommand::Rm,
-        ];
-        for command in mutate {
-            assert!(
-                !allowed(Role::Viewer, command),
-                "viewer should deny {command:?}"
-            );
-        }
+    fn read_permission_cannot_mutate() {
+        assert!(allowed(Permission::Read, FileCommand::Ls));
+        assert!(allowed(Permission::Read, FileCommand::Read));
+        assert!(allowed(Permission::Read, FileCommand::Find));
+        assert!(!allowed(Permission::Read, FileCommand::Write));
+        assert!(!allowed(Permission::Read, FileCommand::Rm));
     }
 
     #[test]
-    fn editor_can_mutate() {
-        let mutate = [
-            FileCommand::Ls,
-            FileCommand::Read,
-            FileCommand::Mkdir,
-            FileCommand::Touch,
-            FileCommand::Write,
-            FileCommand::Patch,
-            FileCommand::Mv,
-            FileCommand::Rm,
-        ];
-        for command in mutate {
-            assert!(
-                allowed(Role::Editor, command),
-                "editor should allow {command:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn owner_can_do_everything() {
-        let all = [
-            FileCommand::Ls,
-            FileCommand::Stat,
-            FileCommand::Read,
-            FileCommand::Find,
-            FileCommand::Grep,
-            FileCommand::Mkdir,
-            FileCommand::Touch,
-            FileCommand::Write,
-            FileCommand::Patch,
-            FileCommand::Mv,
-            FileCommand::Rm,
-        ];
-        for command in all {
-            assert!(
-                allowed(Role::Owner, command),
-                "owner should allow {command:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn insufficient_role_is_forbidden() {
-        let err = require(Role::Viewer, FileCommand::Write).unwrap_err();
-        assert!(matches!(err, ServiceError::Forbidden(_)));
+    fn write_permission_can_mutate() {
+        assert!(allowed(Permission::Write, FileCommand::Ls));
+        assert!(allowed(Permission::Write, FileCommand::Write));
+        assert!(allowed(Permission::Write, FileCommand::Rm));
     }
 }

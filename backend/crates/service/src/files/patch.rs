@@ -1,8 +1,8 @@
 //! Exact-match patch engine for `files_patch`.
 //!
 //! The contract (`docs/spec/files-commands.md`, `docs/spec/mcp/files.md`, and
-//! `docs/spec/rest/documents.md`) is exact,
-//! not fuzzy: each `old_text` must match the ORIGINAL document exactly once, edits
+//! `docs/spec/rest/texts.md`) is exact,
+//! not fuzzy: each `old_text` must match the ORIGINAL text exactly once, edits
 //! must not be no-ops, ranges must not overlap or nest, and all edits apply
 //! atomically against the original (not incrementally). Line endings are preserved
 //! because matching and replacement are plain byte-substring operations — there is
@@ -43,8 +43,7 @@ impl PatchError {
                 "edit old_text and new_text are identical (no-op)".to_owned(),
             ),
             Self::NoMatch => ServiceError::Conflict(
-                "old_text did not match the current document; read it again before patching"
-                    .to_owned(),
+                "old_text did not match the current text; read it again before patching".to_owned(),
             ),
             Self::MultipleMatches => ServiceError::Conflict(
                 "old_text matched multiple times; include more surrounding context".to_owned(),

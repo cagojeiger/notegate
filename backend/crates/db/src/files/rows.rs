@@ -1,10 +1,10 @@
-//! Row types for the file tree (`nodes`) and document content (`documents`),
+//! Row types for the file tree (`nodes`) and text content (`text_objects`),
 //! plus the shared column lists. There is no stored `path` column — the display
 //! path is derived via a recursive CTE (see `queries`).
 
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
-use notegate_model::{Document, Node, NodeKind};
+use notegate_model::{Node, NodeKind, TextObject, TextStorageFormat};
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -12,14 +12,14 @@ use uuid::Uuid;
 #[derive(Debug, FromRow)]
 pub struct NodeRow {
     pub id: Uuid,
-    pub workspace_id: Uuid,
+    pub space_id: Uuid,
     pub parent_id: Option<Uuid>,
     pub name: String,
     pub kind: String,
     pub sort_order: i32,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
-    pub deleted_by: Option<Uuid>,
+    pub created_by_account_id: Uuid,
+    pub updated_by_account_id: Uuid,
+    pub deleted_by_account_id: Option<Uuid>,
     pub purge_after: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -33,14 +33,14 @@ impl NodeRow {
             .ok_or_else(|| Error::internal(format!("unknown node kind: {}", self.kind)))?;
         Ok(Node {
             id: self.id,
-            workspace_id: self.workspace_id,
+            space_id: self.space_id,
             parent_id: self.parent_id,
             name: self.name,
             kind,
             sort_order: self.sort_order,
-            created_by: self.created_by,
-            updated_by: self.updated_by,
-            deleted_by: self.deleted_by,
+            created_by_account_id: self.created_by_account_id,
+            updated_by_account_id: self.updated_by_account_id,
+            deleted_by_account_id: self.deleted_by_account_id,
             purge_after: self.purge_after,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -49,42 +49,58 @@ impl NodeRow {
     }
 }
 
-/// A row from `documents`.
+/// A row from `text_objects`.
 #[derive(Debug, FromRow)]
-pub struct DocumentRow {
+pub struct TextRow {
     pub node_id: Uuid,
-    pub workspace_id: Uuid,
-    pub content_md: String,
+    pub space_id: Uuid,
+    pub content: Option<String>,
     pub content_sha256: String,
-    pub byte_len: i32,
+    pub byte_len: i64,
     pub line_count: i32,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
+    pub media_type: String,
+    pub encoding: String,
+    pub storage_format: String,
+    pub created_by_account_id: Uuid,
+    pub updated_by_account_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<DocumentRow> for Document {
-    fn from(row: DocumentRow) -> Self {
-        Self {
-            node_id: row.node_id,
-            workspace_id: row.workspace_id,
-            content_md: row.content_md,
-            content_sha256: row.content_sha256,
-            byte_len: row.byte_len,
-            line_count: row.line_count,
-            created_by: row.created_by,
-            updated_by: row.updated_by,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-        }
+impl TextRow {
+    pub fn into_text(self) -> Result<TextObject> {
+        let storage_format = match self.storage_format.as_str() {
+            "plain" => TextStorageFormat::Plain,
+            "encrypted" => TextStorageFormat::Encrypted,
+            value => {
+                return Err(Error::internal(format!(
+                    "unknown text storage format: {value}"
+                )));
+            }
+        };
+        Ok(TextObject {
+            node_id: self.node_id,
+            space_id: self.space_id,
+            content: self.content,
+            content_sha256: self.content_sha256,
+            byte_len: self.byte_len,
+            line_count: self.line_count,
+            media_type: self.media_type,
+            encoding: self.encoding,
+            storage_format,
+            created_by_account_id: self.created_by_account_id,
+            updated_by_account_id: self.updated_by_account_id,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        })
     }
 }
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
-pub const NODE_COLUMNS: &str = "id, workspace_id, parent_id, name, kind, sort_order, \
-     created_by, updated_by, deleted_by, purge_after, created_at, updated_at, deleted_at";
+pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, \
+     created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
 
-/// Selectable columns of `documents`, in [`DocumentRow`] order.
-pub const DOCUMENT_COLUMNS: &str = "node_id, workspace_id, content_md, content_sha256, \
-     byte_len, line_count, created_by, updated_by, created_at, updated_at";
+/// Selectable columns of `text_objects`, in [`TextRow`] order.
+pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, content_sha256, \
+     byte_len, line_count, media_type, encoding, storage_format, \
+     created_by_account_id, updated_by_account_id, created_at, updated_at";

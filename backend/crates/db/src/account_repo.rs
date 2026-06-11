@@ -19,25 +19,13 @@ use uuid::Uuid;
 
 const AUTH_PROVIDER: &str = "authgate";
 
-/// FROM/WHERE selecting the live workspaces an account is the SOLE active-user owner
+/// FROM/WHERE selecting the live spaces an account is the SOLE active-user owner
 /// of (no other active user owner exists). `$1` binds the account id. Shared by the
 /// service deletion gate and the repository transaction invariant so both operate on
 /// the same set.
-const SOLE_OWNED_WORKSPACES_FROM_WHERE: &str = "\
-    FROM workspace_access wa \
-    JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
-    WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
-      AND NOT EXISTS ( \
-          SELECT 1 FROM workspace_access other \
-          JOIN accounts other_acc ON other_acc.id = other.account_id \
-          WHERE other.workspace_id = w.id \
-            AND other.account_id <> $1 \
-            AND other.role = 'owner' \
-            AND other.revoked_at IS NULL \
-            AND other_acc.kind = 'user' \
-            AND other_acc.is_active = true \
-            AND other_acc.deleted_at IS NULL \
-      )";
+const SOLE_OWNED_SPACES_FROM_WHERE: &str = "\
+    FROM spaces s \
+    WHERE s.owner_user_id = $1 AND s.deleted_at IS NULL";
 
 #[derive(Debug, Clone)]
 pub struct AccountRepo {
@@ -167,7 +155,7 @@ impl UserRow {
 
 const ACCOUNT_COLUMNS: &str = "a.id, a.kind, a.display_name_ciphertext, a.display_name_nonce, \
      a.display_name_enc_key_id, a.display_name_enc_version, \
-     a.is_active, a.deleted_at, a.deleted_by, a.created_at, a.updated_at, \
+     a.is_active, a.deleted_at, a.deleted_by_account_id AS deleted_by, a.created_at, a.updated_at, \
      ag.name AS agent_name";
 const USER_COLUMNS: &str = "id, email_ciphertext, email_nonce, email_enc_key_id, \
      email_enc_version, anonymized_at";
@@ -221,9 +209,9 @@ impl AccountRepo {
     }
 
     /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
-    /// agents, keys, and access, but do not delete workspaces. If the user is the
-    /// sole active owner of any live workspace, reject so the caller must delete or
-    /// transfer those workspaces first. KEEP `provider_sub_hash` and PII as a
+    /// agents, keys, and access, but do not delete spaces. If the user is the
+    /// sole active owner of any live space, reject so the caller must delete or
+    /// transfer those spaces first. KEEP `provider_sub_hash` and PII as a
     /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
     /// retention window elapses; re-login during the window is rejected by
     /// `upsert_user_by_sub`, so a returning sub never duplicates the account.
@@ -243,35 +231,32 @@ impl AccountRepo {
             return Err(Error::not_found("active user account not found"));
         }
 
-        let _locked_owner_workspaces: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT w.id \
-             FROM workspace_access wa \
-             JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
-             WHERE wa.account_id = $1 AND wa.role = 'owner' AND wa.revoked_at IS NULL \
-             FOR UPDATE OF w",
+        let _locked_owned_spaces: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM spaces \
+             WHERE owner_user_id = $1 AND deleted_at IS NULL \
+             FOR UPDATE",
         )
         .bind(account_id)
         .fetch_all(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
 
-        let sole_owned: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) {SOLE_OWNED_WORKSPACES_FROM_WHERE}"
-        ))
-        .bind(account_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
+        let sole_owned: i64 =
+            sqlx::query_scalar(&format!("SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"))
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
         if sole_owned > 0 {
             return Err(Error::conflict(format!(
-                "delete or transfer your {sole_owned} owned workspace(s) before deleting your account"
+                "delete or transfer your {sole_owned} owned space(s) before deleting your account"
             )));
         }
 
         let owned_agents: Vec<Uuid> = sqlx::query_scalar(
             "SELECT a.id FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
-             WHERE a.created_by = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
+             WHERE a.owner_user_id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
              FOR UPDATE OF acc",
         )
         .bind(account_id)
@@ -281,7 +266,7 @@ impl AccountRepo {
 
         sqlx::query(
             "UPDATE accounts \
-             SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+             SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
              WHERE id = ANY($1) AND kind = 'agent' AND deleted_at IS NULL",
         )
         .bind(&owned_agents)
@@ -292,7 +277,7 @@ impl AccountRepo {
 
         sqlx::query(
             "UPDATE api_keys \
-             SET revoked_at = now(), revoked_by = $2 \
+             SET revoked_at = now(), revoked_by_user_id = $2 \
              WHERE revoked_at IS NULL \
                AND (account_id = $1 OR account_id = ANY($3))",
         )
@@ -304,10 +289,10 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         sqlx::query(
-            "UPDATE workspace_access \
-             SET revoked_at = now(), revoked_by = $3 \
-             WHERE revoked_at IS NULL \
-               AND (account_id = $1 OR account_id = ANY($2))",
+            "UPDATE space_agent_connections \
+             SET disconnected_at = now(), disconnected_by_user_id = $3 \
+             WHERE disconnected_at IS NULL \
+               AND agent_id = ANY($2)",
         )
         .bind(account_id)
         .bind(&owned_agents)
@@ -320,7 +305,7 @@ impl AccountRepo {
         // as a tombstone. The purge run anonymizes PII and frees the sub-hash later.
         sqlx::query(
             "UPDATE accounts \
-             SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+             SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
              WHERE id = $1 AND kind = 'user'",
         )
         .bind(account_id)
@@ -333,17 +318,16 @@ impl AccountRepo {
         Ok(())
     }
 
-    /// Count live workspaces this account is the SOLE active user owner of. ADR 0004:
+    /// Count live spaces this account is the SOLE active user owner of. ADR 0004:
     /// the account cannot be deleted until these are deleted or their ownership is
-    /// transferred. Co-owned workspaces (another active user owner exists) do not count.
-    pub async fn count_sole_owned_workspaces(&self, account_id: Uuid) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) {SOLE_OWNED_WORKSPACES_FROM_WHERE}"
-        ))
-        .bind(account_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+    /// transferred. Co-owned spaces (another active user owner exists) do not count.
+    pub async fn count_sole_owned_spaces(&self, account_id: Uuid) -> Result<i64> {
+        let count: i64 =
+            sqlx::query_scalar(&format!("SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"))
+                .bind(account_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
         Ok(count)
     }
 
@@ -405,7 +389,7 @@ impl AccountRepo {
                     "UPDATE accounts \
                      SET display_name_ciphertext = $2, display_name_nonce = $3, \
                          display_name_enc_key_id = $4, display_name_enc_version = $5, \
-                         is_active = true, deleted_at = NULL, deleted_by = NULL, updated_at = now() \
+                         is_active = true, deleted_at = NULL, deleted_by_account_id = NULL, updated_at = now() \
                      WHERE id = $1",
                 )
                 .bind(id)
