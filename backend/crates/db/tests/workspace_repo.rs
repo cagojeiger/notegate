@@ -378,6 +378,81 @@ async fn grant_unknown_account_is_not_found() -> Result<(), Box<dyn std::error::
 }
 
 #[tokio::test]
+async fn access_cap_counts_effective_live_access_only() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = WorkspaceRepo::new(db.pool.clone());
+    let access_repo = AccessRepo::new(db.pool.clone());
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let workspace_id = make_workspace(&repo, owner, "shared").await;
+    let corrupted_agent_owner = insert_agent_account(&db.pool, owner, "corrupted-owner").await?;
+
+    sqlx::query(
+        "INSERT INTO workspace_access (workspace_id, account_id, role, granted_by) \
+         VALUES ($1, $2, 'owner', $3)",
+    )
+    .bind(workspace_id)
+    .bind(corrupted_agent_owner)
+    .bind(owner)
+    .execute(&db.pool)
+    .await?;
+    assert_eq!(
+        access_repo
+            .role_for(workspace_id, corrupted_agent_owner)
+            .await?,
+        None,
+        "agent owner rows are ignored by the effective access predicate"
+    );
+
+    // Effective grants: owner + 18 viewers = 19. Raw rows are already 20
+    // because of the corrupted agent owner row above.
+    for index in 0..18 {
+        let extra =
+            insert_user_account(&db.pool, &format!("effective-{index}"), "e@example.test").await?;
+        access_repo
+            .upsert_access(
+                &GrantAccess {
+                    workspace_id,
+                    account_id: extra,
+                    role: Role::Viewer,
+                },
+                owner,
+            )
+            .await?;
+    }
+    let raw_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM workspace_access WHERE workspace_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(workspace_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(raw_count, 20, "raw rows include the corrupted owner grant");
+
+    let final_user = insert_user_account(&db.pool, "final-effective", "final@example.test").await?;
+    access_repo
+        .upsert_access(
+            &GrantAccess {
+                workspace_id,
+                account_id: final_user,
+                role: Role::Viewer,
+            },
+            owner,
+        )
+        .await?;
+
+    let effective = access_repo.list_access(workspace_id).await?;
+    assert_eq!(
+        effective.len(),
+        limits::WORKSPACE_ACCESS_MAX_ACCOUNTS,
+        "cap applies to effective live access, not raw stale/corrupted rows"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn inactive_accounts_are_not_live_access() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());

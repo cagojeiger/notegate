@@ -177,16 +177,7 @@ impl ApiKeyRepo {
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        // Lock the account row so concurrent creates serialize on it.
-        let acct: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM accounts WHERE id = $1 FOR UPDATE")
-                .bind(args.account_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?;
-        if acct.is_none() {
-            return Err(Error::not_found("account not found"));
-        }
+        lock_active_account(&mut tx, args.account_id).await?;
 
         // Re-count live keys INSIDE the tx using the same predicate as count_live_keys.
         let live_count: i64 = sqlx::query_scalar(&format!(
@@ -241,6 +232,8 @@ impl ApiKeyRepo {
         validate_command(args.command)?;
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        lock_active_account(&mut tx, args.account_id).await?;
 
         let old_exists: Option<Uuid> = sqlx::query_scalar(&format!(
             "SELECT id FROM api_keys \
@@ -338,9 +331,24 @@ impl ApiKeyRepo {
     }
 }
 
+async fn lock_active_account(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
+    let active = active_account_predicate("");
+    let exists: Option<Uuid> = sqlx::query_scalar(&format!(
+        "SELECT id FROM accounts WHERE id = $1 AND {active} FOR UPDATE"
+    ))
+    .bind(account_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    exists
+        .map(|_| ())
+        .ok_or_else(|| Error::not_found("account not found"))
+}
+
 /// The single definition of a live API key: not revoked and not yet expired.
-/// `prefix` qualifies the columns (`"k."` inside a join, `""` otherwise). Account
-/// activeness is separate — only the authentication path adds it.
+/// `prefix` qualifies the columns (`"k."` inside a join, `""` otherwise).
+/// Account activeness is checked by callers that authenticate or mutate keys.
 fn live_key_predicate(prefix: &str) -> String {
     format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
 }

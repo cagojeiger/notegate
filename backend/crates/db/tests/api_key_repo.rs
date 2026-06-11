@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, deactivate_account, insert_user_account};
 use notegate_core::{Error, limits};
 use notegate_db::{ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::CreateApiKey;
@@ -192,8 +192,46 @@ async fn insert_key_rejects_blank_or_overlong_name() -> Result<(), Box<dyn std::
 }
 
 #[tokio::test]
-async fn list_by_account_returns_live_keys_only_and_pages()
--> Result<(), Box<dyn std::error::Error>> {
+async fn insert_key_with_cap_rejects_inactive_account() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = ApiKeyRepo::new(db.pool.clone());
+    let user_id =
+        insert_user_account(&db.pool, "inactive-key-user", "inactive-key@example.test").await?;
+    deactivate_account(&db.pool, user_id, user_id).await?;
+
+    let command = CreateApiKey {
+        name: "inactive-key".to_owned(),
+        scopes: Vec::new(),
+        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+    };
+    let err = repo
+        .insert_key_with_cap(
+            InsertApiKey {
+                key_id: Uuid::new_v4(),
+                account_id: user_id,
+                command: &command,
+                token_prefix: "ngk_v1_test",
+                token_hash: "hash-inactive-key",
+                created_by: user_id,
+                rotated_from_key_id: None,
+            },
+            limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
+    assert_eq!(repo.count_live_keys(user_id).await?, 0);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_by_account_returns_live_keys_only_and_pages() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -370,6 +408,66 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
             .await?;
     assert!(old.0.is_some());
     assert_eq!(old.1.as_deref(), Some("rotated"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rotate_key_rejects_inactive_account() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = ApiKeyRepo::new(db.pool.clone());
+    let user_id = insert_user_account(
+        &db.pool,
+        "inactive-rotate-user",
+        "inactive-rotate@example.test",
+    )
+    .await?;
+    let old_key_id = Uuid::new_v4();
+
+    repo.insert_key_unchecked_for_test(InsertApiKey {
+        key_id: old_key_id,
+        account_id: user_id,
+        command: &CreateApiKey {
+            name: "old-key".to_owned(),
+            scopes: Vec::new(),
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+        },
+        token_prefix: "ngk_v1_test",
+        token_hash: "hash-old-key",
+        created_by: user_id,
+        rotated_from_key_id: None,
+    })
+    .await?;
+    deactivate_account(&db.pool, user_id, user_id).await?;
+
+    let command = CreateApiKey {
+        name: "new-key".to_owned(),
+        scopes: Vec::new(),
+        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+    };
+    let err = repo
+        .rotate_key(
+            InsertApiKey {
+                key_id: Uuid::new_v4(),
+                account_id: user_id,
+                command: &command,
+                token_prefix: "ngk_v1_rotated",
+                token_hash: "hash-new-key",
+                created_by: user_id,
+                rotated_from_key_id: Some(old_key_id),
+            },
+            old_key_id,
+            user_id,
+            limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
+    assert_eq!(repo.count_live_keys(user_id).await?, 1);
 
     db.cleanup().await;
     Ok(())

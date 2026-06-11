@@ -60,7 +60,8 @@ Documents  /api/v1/workspaces/{workspace_id}/documents
 Search     /api/v1/workspaces/{workspace_id}/search
 Access     /api/v1/workspaces/{workspace_id}/access
 Agents     /api/v1/agents
-System     /health, /ready, /openapi.json, /swagger-ui
+System     /health, /ready
+API Docs   /openapi.json, /swagger-ui
 MCP        /mcp
 ```
 
@@ -68,7 +69,9 @@ MCP        /mcp
 
 - auth/session resource: login, callback, logout, OAuth protected-resource metadata.
 - identity resource: `/me`는 caller identity와 workspace 밖 전역 capability만 반환한다.
-- workspace 밖 global resource: `workspaces`, `agents`, system endpoints.
+- workspace 밖 global resource: `workspaces`, `agents`.
+- system probe endpoint: `/health`, `/ready`.
+- API documentation endpoint: `/openapi.json`, `/swagger-ui`.
 - workspace 안 resource: `nodes`, `documents`, `search`, `access`.
 - LLM/CLI command surface: REST category에 억지로 맞추지 않고 `/mcp` tool로 분리한다.
 - `files`는 product concept이지 top-level REST category가 아니다. REST에서는

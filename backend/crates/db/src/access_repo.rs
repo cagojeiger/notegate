@@ -98,13 +98,14 @@ impl AccessRepo {
 
         // Count live grants other than the target so re-granting an existing
         // account never trips the cap, but activating a new (or revoked) account
-        // respects [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`]. Owner rows are
-        // stored explicitly and count toward the cap.
+        // respects [`limits::WORKSPACE_ACCESS_MAX_ACCOUNTS`]. The count uses
+        // the same effective-live predicate as `list_access`/`role_for`.
         let active_others: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM workspace_access wa \
              JOIN accounts acc ON acc.id = wa.account_id \
              WHERE wa.workspace_id = $1 AND wa.account_id <> $2 AND wa.revoked_at IS NULL \
-               AND acc.is_active = true AND acc.deleted_at IS NULL",
+               AND acc.is_active = true AND acc.deleted_at IS NULL \
+               AND (wa.role <> 'owner' OR acc.kind = 'user')",
         )
         .bind(command.workspace_id)
         .bind(command.account_id)
@@ -126,7 +127,10 @@ impl AccessRepo {
         let accessible_others: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM workspace_access wa \
              JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
-             WHERE wa.account_id = $1 AND wa.workspace_id <> $2 AND wa.revoked_at IS NULL",
+             JOIN accounts acc ON acc.id = wa.account_id \
+             WHERE wa.account_id = $1 AND wa.workspace_id <> $2 AND wa.revoked_at IS NULL \
+               AND acc.is_active = true AND acc.deleted_at IS NULL \
+               AND (wa.role <> 'owner' OR acc.kind = 'user')",
         )
         .bind(command.account_id)
         .bind(command.workspace_id)
