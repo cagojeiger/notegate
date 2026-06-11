@@ -10,6 +10,14 @@ GET  /api/v1/spaces/{space_id}/files/{node_id}
 GET  /api/v1/spaces/{space_id}/files/{node_id}/content
 ```
 
+공통 schema는 `../schemas.md`를 따른다.
+
+```ts
+POST /files             -> { node: RestNode }
+GET  /files/{node_id}   -> { node: RestNode }
+GET  /files/{node_id}/content -> stored bytes
+```
+
 ## Upload
 
 Permission: `write`.

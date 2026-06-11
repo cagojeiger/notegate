@@ -18,22 +18,22 @@ type FilesLsInput = TargetSelector & {
 
 type FilesLsOutput = {
   space: string
-  parent: NodeDetail
-  items: NodeTreeItem[]
+  path: string
+  children: McpNodeSummary[]
   page: Page
 }
 ```
 
 ## `files_stat`
 
-Folder/Text/File 상태와 metadata를 조회한다.
+Folder/Text/File 상태를 조회한다. Node metadata는 MCP stat 응답에 포함하지 않는다.
 
 ```ts
 type FilesStatInput = TargetSelector
 
 type FilesStatOutput = {
   space: string
-  node: NodeDetail
+  node: McpNodeSummary
 }
 ```
 
@@ -46,7 +46,7 @@ type FilesMkdirInput = TargetSelector
 
 type FilesMkdirOutput = {
   space: string
-  node: NodeDetail
+  node: McpNodeSummary
 }
 ```
 
@@ -61,7 +61,10 @@ type FilesTouchInput = TargetSelector
 
 type FilesTouchOutput = {
   space: string
-  node: NodeDetail
+  node: McpNodeSummary
+  content_sha256: string
+  byte_len: number
+  line_count: number
 }
 ```
 
@@ -79,7 +82,7 @@ type FilesReadInput = TargetSelector & {
   if_none_match_sha256?: string
 }
 
-type FilesReadOutput = TextReadResult
+type FilesReadOutput = McpTextReadResult
 ```
 
 Encrypted Text와 File은 `files_read` 대상이 아니다.
@@ -97,7 +100,7 @@ type FilesWriteInput = TargetSelector & {
 
 type FilesWriteOutput = {
   space: string
-  node: NodeDetail
+  node: McpNodeSummary
   content_sha256: string
   byte_len: number
   line_count: number
@@ -118,10 +121,13 @@ type FilesPatchInput = TargetSelector & {
 
 type FilesPatchOutput = {
   space: string
-  node: NodeDetail
-  previous_sha256: string
-  content_sha256: string
+  path: string
+  patched: true
   edits_applied: number
+  content_sha256: string
+  previous_sha256: string
+  byte_len: number
+  line_count: number
   diff: string
 }
 ```
@@ -142,7 +148,7 @@ type FilesMvInput = {
 
 type FilesMvOutput = {
   space: string
-  node: NodeDetail
+  node: McpNodeSummary
 }
 ```
 
@@ -161,6 +167,7 @@ type FilesRmOutput = {
   space: string
   node_id: string
   path: string
+  deleted: true
   purge_after: string
 }
 ```
@@ -169,4 +176,4 @@ Folder 삭제는 `recursive=true`가 필요하다.
 
 ## File content
 
-MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_find`에서 `NodeTreeItem`으로 확인하고 `files_stat`에서 metadata와 file stats를 확인한다. File은 `files_read`/`files_write`/`files_patch`/`files_grep` 대상이 아니다.
+MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_find`에서 `McpNodeSummary`로 확인하고 `files_stat`에서 file stats를 확인한다. File은 `files_read`/`files_write`/`files_patch`/`files_grep` 대상이 아니다.

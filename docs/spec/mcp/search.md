@@ -17,7 +17,7 @@ type FilesFindInput = TargetSelector & {
 
 type FilesFindOutput = {
   space: string
-  items: NodeTreeItem[]
+  items: McpNodeSummary[]
   page: Page
 }
 ```
@@ -46,7 +46,7 @@ type FilesGrepInput = TargetSelector & {
 
 type FilesGrepOutput = {
   space: string
-  items: NodeTreeItem[]
+  items: McpNodeSummary[]
   page: Page
 }
 ```

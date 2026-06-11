@@ -32,6 +32,7 @@ impl SearchService {
             .resolve_scope_folder(space_id, request.path.as_deref())
             .await?;
         let fingerprint = search_fingerprint(&[
+            space_id.to_string(),
             "find".to_owned(),
             q.clone(),
             request
