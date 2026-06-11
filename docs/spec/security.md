@@ -62,6 +62,18 @@ encrypted line_count     = 0
 
 REST는 encrypted payload 저장/조회가 가능하다. MCP content surface와 grep/patch는 plain Text만 대상으로 한다.
 
+
+## File content encryption
+
+File content는 두 저장 방식을 가진다.
+
+```text
+none    = 서버가 저장 bytes를 그대로 반환
+client  = client-side encrypted bytes
+```
+
+`encryption_mode=client`에서 서버는 원본, 비밀번호, 복호화 키를 받거나 저장하지 않는다. `byte_len`과 `content_sha256`은 저장된 bytes 기준이다.
+
 ## Deletion and anonymization
 
 User 탈퇴는 account row를 즉시 hard delete하지 않는다. Attribution 보존을 위해 account shell은 남기고, retention 이후 PII ciphertext/hash와 provider tombstone을 제거한다.

@@ -12,7 +12,9 @@ GET  /api/v1/spaces/{space_id}/files/{node_id}/content
 
 ## Upload
 
-초기 구현은 small file만 허용한다.
+Permission: `write`.
+
+현재 REST File API는 inline small file만 허용한다.
 
 ```text
 multipart/form-data
@@ -33,13 +35,17 @@ stored bytes <= 262144  # 256 KiB
 
 `encryption_mode=client`이면 `file` part에는 클라이언트가 암호화한 bytes를 보낸다. 서버는 복호화하지 않는다. `byte_len`과 `content_sha256`은 저장된 bytes 기준이다.
 
-256 KiB 초과 file은 object storage가 도입되기 전까지 거부한다.
+256 KiB 초과 file은 `file_max_bytes` 안에 있어도 현재 API에서 거부한다.
 
 ## Metadata/stat
+
+Permission: `read`.
 
 `GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Node metadata는 공통 metadata API로 수정한다.
 
 ## Download
+
+Permission: `read`.
 
 `GET /files/{node_id}/content`는 저장된 bytes를 그대로 반환한다.
 

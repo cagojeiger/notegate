@@ -15,6 +15,7 @@ space_agent_connections
 nodes
 text_objects
 file_objects
+file_inline_contents
 ```
 
 ## Security tables
@@ -198,11 +199,11 @@ file_inline_contents
   bytes bytea not null
 ```
 
-`File`은 공통 metadata와 실제 bytes를 분리한다. 초기 구현은 `storage_kind='inline_pg'`만 생성하며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. object storage가 도입되기 전까지 더 큰 파일은 거부한다.
+`File`은 공통 metadata와 실제 bytes를 분리한다. 현재 content 저장 방식은 `storage_kind='inline_pg'`이며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. 262144 bytes 초과 file은 제품 상한 `file_max_bytes` 안에 있어도 아직 저장하지 않는다.
 
 ```text
 storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL
-storage_kind='object'    -> object_key IS NOT NULL, object storage 도입 후 사용
+storage_kind='object'    -> 262144 bytes 초과 file 저장 방식으로 예약됨
 ```
 
 File content encryption은 client-side only다.

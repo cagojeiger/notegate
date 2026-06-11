@@ -17,6 +17,7 @@ Identity    /api/v1/me, /api/v1/me/keys
 Spaces      /api/v1/spaces
 Nodes       /api/v1/spaces/{space_id}/nodes
 Text        /api/v1/spaces/{space_id}/text
+Files       /api/v1/spaces/{space_id}/files
 Search      /api/v1/spaces/{space_id}/search
 Agents      /api/v1/agents
 Connections /api/v1/spaces/{space_id}/agents

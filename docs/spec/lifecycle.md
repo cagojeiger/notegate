@@ -136,10 +136,13 @@ text_objects
 ```text
 nodes(kind='file')
 file_objects
+file_inline_contents
 ```
 
 - File은 binary/object content다.
-- REST는 small file upload/download를 제공한다. MCP는 file content upload/download를 제공하지 않고 file node metadata/stat만 노출한다.
+- REST는 262144 bytes 이하 file upload/download를 제공한다.
+- 262144 bytes 초과 file은 제품 상한 안에 있어도 아직 저장하지 않는다.
+- MCP는 file content upload/download를 제공하지 않고 file node metadata/stat만 노출한다.
 - File은 직접 text read/patch/grep 대상이 아니다.
 
 ### Node 삭제

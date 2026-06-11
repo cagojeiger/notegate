@@ -48,8 +48,8 @@ Agent caller:
 Permission:
 
 ```text
-read  = list/stat/read text/read metadata/find/grep
-write = read + create/update/patch/delete/move/write metadata
+read  = list/stat/read text/read file/read metadata/find/grep
+write = read + create folder/create text/upload file/update/patch/delete/move/write metadata
 ```
 
 ## Naming rules

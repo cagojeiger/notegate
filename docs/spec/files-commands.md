@@ -28,7 +28,7 @@ find    node name/kind/scope 검색
 공통 권한:
 
 ```text
-read  permission -> ls/stat/read/find/grep 가능
+read  permission -> ls/stat/read text/find/grep 가능
 write permission -> read + mkdir/touch/write/patch/mv/rm 가능
 ```
 

@@ -40,13 +40,15 @@ space_max_texts = 5000 live text nodes
 space_max_files = 5000 live file nodes
 space_max_text_bytes = 268435456       # 256 MiB live text total per space
 text_max_bytes = 1048576               # 1 MiB per text object
-file_inline_pg_max_bytes = 262144       # 256 KiB 이하 file은 PG inline 저장 가능
-file_max_bytes = 104857600             # 100 MiB per uploaded file
+file_inline_pg_max_bytes = 262144       # 현재 저장 가능한 file bytes 상한
+file_max_bytes = 104857600             # file product hard max
 node_metadata_max_bytes = 16384         # 16 KiB per node metadata object
 node_metadata_max_depth = 4
 node_metadata_key_max_chars = 64
 node_metadata_string_max_chars = 2048
 ```
+
+현재 File 저장 구현은 `file_inline_pg_max_bytes` 이하만 지원한다. `file_max_bytes`는 file 객체의 제품 hard max이며, 현재 지원 크기를 의미하지 않는다.
 
 Depth는 root 아래 segment 수로 계산한다.
 
