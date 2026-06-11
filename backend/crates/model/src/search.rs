@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::NodeKind;
 use crate::files::{ChildrenCursor, NodeView};
+use crate::{Node, NodeKind, TextObject};
 
 #[derive(Debug, Clone)]
 pub struct FindRequest {
@@ -90,13 +90,8 @@ pub struct SearchCursor {
     pub version: u8,
     pub command: String,
     pub fingerprint: String,
-    pub stack: Vec<DfsFrame>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DfsFrame {
-    pub folder_node_id: Uuid,
-    pub after: Option<ChildrenCursor>,
+    pub scope_node_id: Uuid,
+    pub after_sort_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +107,21 @@ pub struct TreeFrame {
     pub folder_node_id: Uuid,
     pub depth: i64,
     pub after: Option<ChildrenCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchNodeCandidate {
+    pub node: Node,
+    pub path: String,
+    pub sort_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchTextCandidate {
+    pub node: Node,
+    pub path: String,
+    pub sort_path: String,
+    pub text: TextObject,
 }
 
 #[derive(Debug, Clone)]

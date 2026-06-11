@@ -13,6 +13,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
+use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{FileObject, Node, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -159,6 +160,44 @@ impl FilesRepo {
     ) -> Result<(Vec<Node>, bool)> {
         let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
         queries::node::paged_children(&self.pool, space_id, parent_node_id, limit, cursor).await
+    }
+
+    pub async fn search_node_candidates(
+        &self,
+        space_id: Uuid,
+        scope_node_id: Uuid,
+        scope_path: &str,
+        after_sort_path: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<SearchNodeCandidate>> {
+        queries::search::node_candidates(
+            &self.pool,
+            space_id,
+            scope_node_id,
+            scope_path,
+            after_sort_path,
+            limit,
+        )
+        .await
+    }
+
+    pub async fn search_text_candidates(
+        &self,
+        space_id: Uuid,
+        scope_node_id: Uuid,
+        scope_path: &str,
+        after_sort_path: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<SearchTextCandidate>> {
+        queries::search::text_candidates(
+            &self.pool,
+            space_id,
+            scope_node_id,
+            scope_path,
+            after_sort_path,
+            limit,
+        )
+        .await
     }
 
     pub async fn subtree_relative_depth(&self, space_id: Uuid, node_id: Uuid) -> Result<usize> {

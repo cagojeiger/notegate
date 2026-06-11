@@ -23,8 +23,8 @@ use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::FileEncryptionMode;
 use notegate_service::files::Edit;
 use notegate_service::files::{
-    ChildrenCursor, CreateFile, CreateFolder, CreateText, DeleteNode, FilesService, MoveNode,
-    PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
+    AppendText, ChildrenCursor, CreateFile, CreateFolder, CreateText, DeleteNode, FilesService,
+    MoveNode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -155,7 +155,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             ws,
             WriteText {
                 target: WriteTarget::Existing { node_id: note_id },
-                body: WriteTextBody::Plain("# Title\nalpha beta gamma\n".to_owned()),
+                body: WriteTextBody::Plain("# Title\nalpha beta gamma".to_owned()),
                 expected_sha256: None,
             },
         )
@@ -165,7 +165,53 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         written.text.updated_by_account_id, owner,
         "write sets doc updated_by"
     );
-    let after_write_sha = written.text.content_sha256.clone();
+    let after_initial_write_sha = written.text.content_sha256.clone();
+
+    // --- append: exact EOF append, then newline-separated append ---
+    let appended = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing { node_id: note_id },
+                content: "delta".to_owned(),
+                expected_sha256: Some(after_initial_write_sha.clone()),
+                ensure_newline: false,
+            },
+        )
+        .await?;
+    assert_eq!(appended.text.line_count, 2);
+    let after_append_sha = appended.text.content_sha256.clone();
+
+    let newline_appended = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing { node_id: note_id },
+                content: "epsilon\n".to_owned(),
+                expected_sha256: Some(after_append_sha.clone()),
+                ensure_newline: true,
+            },
+        )
+        .await?;
+    assert_eq!(newline_appended.text.line_count, 3);
+    let after_write_sha = newline_appended.text.content_sha256.clone();
+
+    let stale_append = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing { node_id: note_id },
+                content: "stale".to_owned(),
+                expected_sha256: Some(after_initial_write_sha),
+                ensure_newline: false,
+            },
+        )
+        .await
+        .expect_err("append must reject stale expected_sha256");
+    assert!(stale_append.to_string().contains("expected_sha256"));
 
     // --- read: range slice returns the content + metrics ---
     let read = files
@@ -185,8 +231,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         notegate_service::files::ReadTextBody::Content(content) => content,
         other => panic!("expected content body, got {other:?}"),
     };
-    assert_eq!(content.returned_lines, 2);
-    assert!(content.content.contains("alpha beta gamma"));
+    assert_eq!(content.returned_lines, 3);
+    assert!(content.content.contains("alpha beta gammadelta\nepsilon"));
     assert_eq!(read.content_sha256, after_write_sha);
 
     // --- encrypted text: REST-visible opaque payload, not plaintext-patchable ---
@@ -479,6 +525,134 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     assert_eq!(deleted_by, Some(owner), "rm sets deleted_by");
     assert_eq!(purge_after, Some(deleted.purge_after));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// `append` branch coverage the lifecycle test does not exercise: create-on-append,
+/// the create + `expected_sha256` conflict, the empty-text `ensure_newline` guard,
+/// and the encrypted-text rejection.
+#[tokio::test]
+async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "appends").await;
+
+    // --- create-on-append: a missing text is created with the appended content ---
+    let created = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "log.md".to_owned(),
+                },
+                content: "first".to_owned(),
+                expected_sha256: None,
+                ensure_newline: true,
+            },
+        )
+        .await?;
+    assert_eq!(created.node.path, "/log.md");
+    assert_eq!(
+        created.text.line_count, 1,
+        "single line, no leading newline"
+    );
+    let log_id = created.node.node.id;
+
+    // --- create + expected_sha256 is a conflict: nothing exists to guard against ---
+    let create_guard_err = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "other.md".to_owned(),
+                },
+                content: "x".to_owned(),
+                expected_sha256: Some("deadbeef".to_owned()),
+                ensure_newline: false,
+            },
+        )
+        .await
+        .expect_err("create-on-append must reject expected_sha256");
+    assert!(create_guard_err.to_string().contains("expected_sha256"));
+
+    // --- ensure_newline guard: a non-empty body without a trailing newline gets one ---
+    let joined = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing { node_id: log_id },
+                content: "second".to_owned(),
+                expected_sha256: Some(created.text.content_sha256.clone()),
+                ensure_newline: true,
+            },
+        )
+        .await?;
+    assert_eq!(joined.text.line_count, 2, "ensure_newline split the lines");
+    let read = files
+        .read_text(
+            owner,
+            ws,
+            ReadText {
+                node_id: log_id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    match read.body {
+        ReadTextBody::Content(content) => assert_eq!(content.content, "first\nsecond"),
+        other => panic!("expected content body, got {other:?}"),
+    }
+
+    // --- encrypted text cannot be appended as plaintext ---
+    let encrypted = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "secret.md".to_owned(),
+                },
+                body: WriteTextBody::Encrypted(json!({
+                    "version": 1,
+                    "alg": "AES-256-GCM",
+                    "ciphertext_b64": "abc"
+                })),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let encrypted_err = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing {
+                    node_id: encrypted.node.node.id,
+                },
+                content: "plain".to_owned(),
+                expected_sha256: None,
+                ensure_newline: false,
+            },
+        )
+        .await
+        .expect_err("append to encrypted text must fail");
+    assert!(encrypted_err.to_string().contains("plaintext"));
 
     db.cleanup().await;
     Ok(())

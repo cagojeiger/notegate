@@ -94,7 +94,7 @@ type RestNode = {
 
 ## McpNodeSummary
 
-MCP `files_ls`, `files_tree`, `files_stat`, `files_find`가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
+MCP `files_list`, `files_stat`, `files_find`와 mutation 결과가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
 
 ```ts
 type McpNodeSummary = {

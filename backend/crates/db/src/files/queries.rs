@@ -666,13 +666,144 @@ pub mod node {
 }
 
 pub mod search {
-    //! Path scope resolution for file-tree commands.
+    //! Path scope resolution and subtree candidate scans for file-tree commands.
 
+    use chrono::{DateTime, Utc};
     use notegate_core::Result;
+    use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
+    use serde_json::Value;
+    use sqlx::FromRow;
     use sqlx::PgPool;
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
+    use super::super::rows::{NodeRow, TextRow};
+
+    #[derive(Debug, FromRow)]
+    struct NodeCandidateRow {
+        id: Uuid,
+        space_id: Uuid,
+        parent_id: Option<Uuid>,
+        name: String,
+        kind: String,
+        sort_order: i32,
+        metadata: Value,
+        created_by_account_id: Uuid,
+        updated_by_account_id: Uuid,
+        deleted_by_account_id: Option<Uuid>,
+        purge_after: Option<DateTime<Utc>>,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+        deleted_at: Option<DateTime<Utc>>,
+        path: String,
+        sort_path: String,
+    }
+
+    impl NodeCandidateRow {
+        fn node_row(&self) -> NodeRow {
+            NodeRow {
+                id: self.id,
+                space_id: self.space_id,
+                parent_id: self.parent_id,
+                name: self.name.clone(),
+                kind: self.kind.clone(),
+                sort_order: self.sort_order,
+                metadata: self.metadata.clone(),
+                created_by_account_id: self.created_by_account_id,
+                updated_by_account_id: self.updated_by_account_id,
+                deleted_by_account_id: self.deleted_by_account_id,
+                purge_after: self.purge_after,
+                created_at: self.created_at,
+                updated_at: self.updated_at,
+                deleted_at: self.deleted_at,
+            }
+        }
+
+        fn into_candidate(self) -> Result<SearchNodeCandidate> {
+            Ok(SearchNodeCandidate {
+                node: self.node_row().into_node()?,
+                path: self.path,
+                sort_path: self.sort_path,
+            })
+        }
+    }
+
+    #[derive(Debug, FromRow)]
+    struct TextCandidateRow {
+        id: Uuid,
+        space_id: Uuid,
+        parent_id: Option<Uuid>,
+        name: String,
+        kind: String,
+        sort_order: i32,
+        metadata: Value,
+        created_by_account_id: Uuid,
+        updated_by_account_id: Uuid,
+        deleted_by_account_id: Option<Uuid>,
+        purge_after: Option<DateTime<Utc>>,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+        deleted_at: Option<DateTime<Utc>>,
+        path: String,
+        sort_path: String,
+        text_content: Option<String>,
+        text_encrypted_payload: Option<Value>,
+        text_content_sha256: String,
+        text_byte_len: i64,
+        text_line_count: i32,
+        text_media_type: String,
+        text_encoding: String,
+        text_storage_format: String,
+        text_created_by_account_id: Uuid,
+        text_updated_by_account_id: Uuid,
+        text_created_at: DateTime<Utc>,
+        text_updated_at: DateTime<Utc>,
+    }
+
+    impl TextCandidateRow {
+        fn into_candidate(self) -> Result<SearchTextCandidate> {
+            let node = NodeRow {
+                id: self.id,
+                space_id: self.space_id,
+                parent_id: self.parent_id,
+                name: self.name,
+                kind: self.kind,
+                sort_order: self.sort_order,
+                metadata: self.metadata,
+                created_by_account_id: self.created_by_account_id,
+                updated_by_account_id: self.updated_by_account_id,
+                deleted_by_account_id: self.deleted_by_account_id,
+                purge_after: self.purge_after,
+                created_at: self.created_at,
+                updated_at: self.updated_at,
+                deleted_at: self.deleted_at,
+            }
+            .into_node()?;
+            let text = TextRow {
+                node_id: self.id,
+                space_id: self.space_id,
+                content: self.text_content,
+                encrypted_payload: self.text_encrypted_payload,
+                content_sha256: self.text_content_sha256,
+                byte_len: self.text_byte_len,
+                line_count: self.text_line_count,
+                media_type: self.text_media_type,
+                encoding: self.text_encoding,
+                storage_format: self.text_storage_format,
+                created_by_account_id: self.text_created_by_account_id,
+                updated_by_account_id: self.text_updated_by_account_id,
+                created_at: self.text_created_at,
+                updated_at: self.text_updated_at,
+            }
+            .into_text()?;
+            Ok(SearchTextCandidate {
+                node,
+                path: self.path,
+                sort_path: self.sort_path,
+                text,
+            })
+        }
+    }
 
     /// Resolve a scope path (e.g. `/projects/notes`) to a live node id within
     /// the space, or `None` if it does not resolve to a live node. The root path
@@ -722,5 +853,112 @@ pub mod search {
         }
 
         Ok(current)
+    }
+
+    pub async fn node_candidates(
+        pool: &PgPool,
+        space_id: Uuid,
+        scope_node_id: Uuid,
+        scope_path: &str,
+        after_sort_path: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<SearchNodeCandidate>> {
+        let rows: Vec<NodeCandidateRow> = sqlx::query_as(&candidate_cte(
+            "SELECT id, space_id, parent_id, name, kind, sort_order, metadata, \
+                        created_by_account_id, updated_by_account_id, deleted_by_account_id, \
+                        purge_after, created_at, updated_at, deleted_at, path, sort_path \
+                 FROM subtree \
+                 WHERE id <> $2 AND ($4::text IS NULL OR sort_path > $4) \
+                 ORDER BY sort_path \
+                 LIMIT $5",
+        ))
+        .bind(space_id)
+        .bind(scope_node_id)
+        .bind(scope_path)
+        .bind(after_sort_path)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter()
+            .map(NodeCandidateRow::into_candidate)
+            .collect()
+    }
+
+    pub async fn text_candidates(
+        pool: &PgPool,
+        space_id: Uuid,
+        scope_node_id: Uuid,
+        scope_path: &str,
+        after_sort_path: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<SearchTextCandidate>> {
+        let rows: Vec<TextCandidateRow> = sqlx::query_as(
+            &candidate_cte(
+                "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, \
+                        s.created_by_account_id, s.updated_by_account_id, s.deleted_by_account_id, \
+                        s.purge_after, s.created_at, s.updated_at, s.deleted_at, s.path, s.sort_path, \
+                        t.content_text AS text_content, \
+                        t.encrypted_payload AS text_encrypted_payload, \
+                        t.content_sha256 AS text_content_sha256, \
+                        t.byte_len AS text_byte_len, \
+                        t.line_count AS text_line_count, \
+                        t.media_type AS text_media_type, \
+                        t.encoding AS text_encoding, \
+                        t.storage_format AS text_storage_format, \
+                        t.created_by_account_id AS text_created_by_account_id, \
+                        t.updated_by_account_id AS text_updated_by_account_id, \
+                        t.created_at AS text_created_at, \
+                        t.updated_at AS text_updated_at \
+                 FROM subtree s \
+                 JOIN text_objects t ON t.space_id = s.space_id AND t.node_id = s.id \
+                 WHERE s.id <> $2 \
+                   AND s.kind = 'text' \
+                   AND t.storage_format = 'plain' \
+                   AND ($4::text IS NULL OR s.sort_path > $4) \
+                 ORDER BY s.sort_path \
+                 LIMIT $5",
+            ),
+        )
+        .bind(space_id)
+        .bind(scope_node_id)
+        .bind(scope_path)
+        .bind(after_sort_path)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter()
+            .map(TextCandidateRow::into_candidate)
+            .collect()
+    }
+
+    fn candidate_cte(select_sql: &str) -> String {
+        format!(
+            "WITH RECURSIVE subtree AS ( \
+                SELECT id, space_id, parent_id, name, kind, sort_order, metadata, \
+                       created_by_account_id, updated_by_account_id, deleted_by_account_id, \
+                       purge_after, created_at, updated_at, deleted_at, \
+                       $3::text AS path, \
+                       ''::text AS sort_path \
+                FROM nodes \
+                WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+                UNION ALL \
+                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
+                       n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                       n.purge_after, n.created_at, n.updated_at, n.deleted_at, \
+                       CASE WHEN s.path = '/' THEN '/' || n.name ELSE s.path || '/' || n.name END, \
+                       CASE WHEN s.sort_path = '' \
+                            THEN concat(lpad((n.sort_order::bigint + 2147483648)::text, 10, '0'), E'\\x1f', n.name, E'\\x1f', n.id::text) \
+                            ELSE s.sort_path || E'\\x1e' || concat(lpad((n.sort_order::bigint + 2147483648)::text, 10, '0'), E'\\x1f', n.name, E'\\x1f', n.id::text) \
+                       END \
+                FROM nodes n \
+                JOIN subtree s ON n.parent_id = s.id \
+                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+            ) \
+            {select_sql}"
+        )
     }
 }

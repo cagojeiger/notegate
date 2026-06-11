@@ -18,14 +18,14 @@ use crate::state::AppState;
 /// `files_find` input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct FindInput {
-    /// Compact `<space>:/<folder-path>` search scope.
+    /// Folder scope in `<space>:/folder-path` form.
     pub target: String,
-    /// The node-name substring, regex, or glob to match.
+    /// Node name query. Interpreted by `match`: contains, regex, or glob.
     pub q: String,
-    /// Optional kind filter: `folder`, `text`, or `file`.
+    /// Optional node kind filter: `folder`, `text`, or `file`.
     #[serde(default)]
     pub kind: Option<String>,
-    /// Match mode: `contains`, `regex`, or `glob`.
+    /// Name match mode. Defaults to `contains`; use `glob` for patterns like `*.md`.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
     /// Page size; clamped to the find limit, default `50`.
@@ -39,20 +39,20 @@ pub struct FindInput {
 /// `files_grep` input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct GrepInput {
-    /// Compact `<space>:/<folder-path>` search scope.
+    /// Folder scope in `<space>:/folder-path` form.
     pub target: String,
-    /// The content query to match.
+    /// Content query for plain text nodes.
     pub q: String,
-    /// Match mode: `literal` or `regex`.
+    /// Content match mode. Defaults to `literal`; use `regex` for Rust-regex patterns.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
-    /// Line-number detail: `none`, `first`, or `all`.
+    /// Line-number detail: `none`, `first`, or `all`. Content snippets are not returned.
     #[serde(default)]
     pub lines: Option<String>,
-    /// Optional include path globs.
+    /// Optional path globs to include, for example `/notes/*`.
     #[serde(default)]
     pub include: Option<Vec<String>>,
-    /// Optional exclude path globs.
+    /// Optional path globs to exclude, for example `/archive/*`.
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
     /// Page size; clamped to the grep limit, default `20`.

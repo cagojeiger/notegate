@@ -7,8 +7,8 @@ use crate::error::{ServiceError, ServiceResult};
 use crate::files::patch::{apply_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
-    CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, FileCommand, MoveNode,
-    NodeView, PatchResult, PatchText, StoredContent, TextView, WriteTarget, WriteText,
+    AppendText, CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, FileCommand,
+    MoveNode, NodeView, PatchResult, PatchText, StoredContent, TextView, WriteTarget, WriteText,
     WriteTextBody, content,
 };
 
@@ -196,6 +196,81 @@ impl FilesService {
                     .insert_text(space_id, parent_node_id, &name, &stored, caller_account_id)
                     .await?;
                 self.text_view(space_id, node, text).await
+            }
+        }
+    }
+
+    /// Append plain content to a text (`>>`). Requires write permission.
+    pub async fn append_text(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: AppendText,
+    ) -> ServiceResult<TextView> {
+        self.authorize(space_id, caller_account_id, FileCommand::Append)
+            .await?;
+
+        match command.target {
+            WriteTarget::Existing { node_id } => {
+                let (node, text) = self.load_text(space_id, node_id).await?;
+                let previous_sha256 = text.content_sha256.clone();
+                check_expected_sha(command.expected_sha256.as_deref(), &previous_sha256)?;
+
+                let existing = text.content.as_deref().ok_or_else(|| {
+                    ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
+                })?;
+                let mut content = existing.to_owned();
+                if command.ensure_newline && !content.is_empty() && !content.ends_with('\n') {
+                    content.push('\n');
+                }
+                content.push_str(&command.content);
+
+                let metrics = content::compute(&content);
+                validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
+
+                let total = self.store.sum_live_text_bytes(space_id).await?;
+                validation::validate_space_text_bytes(
+                    total,
+                    text.byte_len.max(0) as usize,
+                    metrics.byte_len,
+                    self.limits,
+                )?;
+
+                let stored = metrics.into_stored_plain(content);
+                let (node, text) = self
+                    .store
+                    .save_text_content(
+                        space_id,
+                        node.id,
+                        &stored,
+                        Some(&previous_sha256),
+                        caller_account_id,
+                    )
+                    .await?;
+                self.text_view(space_id, node, text).await
+            }
+            WriteTarget::Create {
+                parent_node_id,
+                name,
+            } => {
+                if command.expected_sha256.is_some() {
+                    return Err(ServiceError::Conflict(
+                        "expected_sha256 was supplied but the text does not exist".to_owned(),
+                    ));
+                }
+                self.write_text(
+                    caller_account_id,
+                    space_id,
+                    WriteText {
+                        target: WriteTarget::Create {
+                            parent_node_id,
+                            name,
+                        },
+                        body: WriteTextBody::Plain(command.content),
+                        expected_sha256: None,
+                    },
+                )
+                .await
             }
         }
     }

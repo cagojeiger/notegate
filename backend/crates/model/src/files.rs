@@ -65,6 +65,14 @@ pub struct WriteText {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppendText {
+    pub target: WriteTarget,
+    pub content: String,
+    pub expected_sha256: Option<String>,
+    pub ensure_newline: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edit {
     pub old_text: String,
     pub new_text: String,

@@ -16,11 +16,9 @@ target = space:/path/to/item
 ## Common commands
 
 ```text
-ls      folder children 목록
-tree    folder subtree 구조 조회
+list    folder children 또는 subtree 목록
 stat    folder/text/file 상태 조회
 mkdir   folder 생성
-touch   empty text 생성
 mv      node rename/move
 rm      node soft delete
 find    node name/kind/scope 검색
@@ -30,8 +28,8 @@ grep    plain Text 후보 검색
 공통 권한:
 
 ```text
-read  permission -> ls/stat/read text/find/grep 가능
-write permission -> read + mkdir/touch/write/patch/mv/rm 가능
+read  permission -> list/stat/read text/find/grep 가능
+write permission -> read + mkdir/write/append/patch/mv/rm 가능
 ```
 
 User caller는 자신이 소유한 space에서 read/write/manage 가능하다. Agent caller는 connection permission에 따른다.
@@ -40,13 +38,17 @@ User caller는 자신이 소유한 space에서 read/write/manage 가능하다. A
 
 ```text
 read   text content 읽기
-write  text content 전체 쓰기
+write  text content 전체 교체 (`>`)
+append text content 끝에 추가 (`>>`)
 patch  exact-match patch 적용
 ```
 
 - Text command는 plain UTF-8 content를 대상으로 한다.
-- `read`, `write`, `patch`는 `nodes.kind='text'`에만 적용한다.
-- Encrypted Text content는 MCP/CLI read/write/patch 대상이 아니다.
+- `read`, `write`, `append`, `patch`는 `nodes.kind='text'`에만 적용한다.
+- Encrypted Text content는 MCP/CLI read/write/append/patch 대상이 아니다.
+- `write`는 전체 content replacement다.
+- 빈 Text 생성은 `write`에 `create=true`, `content=""`를 사용한다.
+- `append`는 기본적으로 정확한 EOF append다. 줄 구분이 필요하면 호출자가 newline을 포함하거나 `ensure_newline` 옵션을 사용한다.
 - `patch`는 각 edit의 `old_text` 문자열이 원문에서 정확히 한 번만 매칭되어야 한다.
 - 여러 edit은 원본 기준으로 검증한 뒤 적용한다.
 - `expected_sha256`이 주어지면 저장된 content hash와 일치해야 한다.
@@ -70,6 +72,6 @@ grep        plain Text content가 query를 포함하는 text node 후보 검색
 `grep`은 기본적으로 Text node 후보만 반환한다. 요청 옵션으로 첫 matching line 또는 모든 matching line number를 받을 수 있다. Context와 snippet은 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Encrypted Text와 File은 grep 대상이 아니다.
 
 
-## tree
+## list
 
-`tree`는 선택 folder 아래 subtree를 DFS pre-order로 반환한다. MCP/CLI 전용 path-first 구조 조회이며, REST의 node children API와 1:1 대응하지 않는다. 기본 depth는 2, 최소 1, 최대 Space path depth다.
+`list`는 선택 folder 아래 목록을 반환한다. 기본 `depth=1`은 direct children만 반환하고, `depth>1`은 subtree를 DFS pre-order로 반환한다. MCP/CLI 전용 path-first 구조 조회이며, REST의 node children API와 1:1 대응하지 않는다. 최소 depth는 1, 최대 Space path depth다.

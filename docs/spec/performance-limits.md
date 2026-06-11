@@ -72,7 +72,7 @@ children_max_limit = 200
 find_default_limit = 50
 grep_default_limit = 20
 search_max_limit = 100
-search_children_page_max = 200
+search_candidate_page_max = 1000
 search_node_scan_max = 1000            # node summaries inspected per request
 grep_scan_budget_bytes = 8388608       # 8 MiB content bytes per request
 search_glob_patterns_max = 32          # include/exclude list length per request
@@ -86,7 +86,7 @@ api_keys_max_limit = 100
 
 ## Search memory model
 
-Search는 MCP/CLI command이며 REST resource API에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다.
+Search는 MCP/CLI command이며 REST resource API에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다. 내부 구조는 DB candidate scan과 application matcher의 2단계다.
 
 최악의 논리 scan 범위:
 
@@ -98,16 +98,17 @@ plain text scan upper bound = 256 MiB live text bytes per space
 최악의 경우 전체 subtree를 탐색해야 하지만 한 요청에서 전체를 읽지 않는다. `limit`은 반환할 result 수이고 scan budget은 검사할 candidate 양이다. Scan budget에 먼저 도달하면 result가 없어도 `has_more=true`와 `next_cursor`를 반환할 수 있다.
 
 ```text
-children page        <= 200 node summaries
-node scan budget     <= 1000 node summaries
-grep scan budget     <= 8 MiB content bytes
-grep text read batch <= grep_scan_budget_bytes / text_max_bytes
-                      현재 hard limit 기준 최대 8 text objects
-include glob list    <= 32 patterns × 256 chars
-exclude glob list    <= 32 patterns × 256 chars
-result limit         <= 100 node summaries
-response target      <= 256 KiB
+DB candidate inspect <= 1000 node summaries per request
+node scan budget    <= 1000 node summaries per request
+grep scan budget    <= 8 MiB content bytes per request
+grep text read      <= 8 MiB total content bytes per request
+include glob list   <= 32 patterns × 256 chars
+exclude glob list   <= 32 patterns × 256 chars
+result limit        <= 100 node summaries
+response target     <= 256 KiB
 ```
+
+DB candidate scan은 DFS order를 `sort_order, name, id`와 내부 `sort_path`로 안정화한다. Cursor는 마지막으로 소비한 candidate의 위치를 기억하고, 다음 page는 그 이후 candidate부터 검사한다. Regex matching은 DB regex가 아니라 application Rust regex로 수행한다.
 
 `grep`은 기본적으로 query를 포함하는 Text node 후보를 반환한다. 요청 옵션으로 matching line number를 반환할 수 있지만 본문과 snippet은 별도 read command로 조회한다.
 

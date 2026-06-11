@@ -1,17 +1,14 @@
 //! `grep`: deterministic DFS over plain text content.
 
 use notegate_core::limits;
-use notegate_model::{Node, NodeKind, TextStorageFormat};
-use std::collections::HashMap;
-use uuid::Uuid;
 
 use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
 use super::{
-    ContentMatcher, DfsFrame, GrepPage, GrepRequest, PathFilters, SearchService, child_cursor,
-    join_path, search_fingerprint, validate_query,
+    ContentMatcher, GrepPage, GrepRequest, PathFilters, SearchService, search_fingerprint,
+    validate_query,
 };
 
 impl SearchService {
@@ -33,6 +30,11 @@ impl SearchService {
         let scope_node_id = self
             .resolve_scope_folder(space_id, request.path.as_deref())
             .await?;
+        let scope_path = self
+            .store
+            .node_path(space_id, scope_node_id)
+            .await?
+            .unwrap_or_else(|| "/".to_owned());
         let fingerprint = search_fingerprint(&[
             space_id.to_string(),
             "grep".to_owned(),
@@ -45,130 +47,73 @@ impl SearchService {
             "case-insensitive".to_owned(),
             "dfs-sort_order-name-id".to_owned(),
         ]);
-        let mut stack = self.decode_search_cursor(
+        let after_sort_path = self.decode_search_cursor(
             request.cursor.as_deref(),
             "grep",
             &fingerprint,
             scope_node_id,
         )?;
 
-        let mut items = Vec::with_capacity(limit as usize);
-        let mut scanned_nodes = 0usize;
-        let mut scanned_text_bytes = 0usize;
         let matcher = ContentMatcher::new(&q, request.match_mode)?;
         let path_filters = PathFilters::new(&request.include, &request.exclude)?;
+        let candidates = self
+            .store
+            .search_text_candidates(
+                space_id,
+                scope_node_id,
+                &scope_path,
+                after_sort_path.as_deref(),
+                limits::SEARCH_CANDIDATE_PAGE_MAX + 1,
+            )
+            .await?;
 
-        while !stack.is_empty()
-            && items.len() < limit as usize
-            && scanned_nodes < limits::SEARCH_NODE_SCAN_MAX
-            && scanned_text_bytes < limits::GREP_SCAN_MAX_BYTES
-        {
-            let Some(frame) = stack.last().cloned() else {
-                break;
-            };
-            let parent_path = self
-                .store
-                .node_path(space_id, frame.folder_node_id)
-                .await?
-                .unwrap_or_else(|| "/".to_owned());
-            let (children, has_more_children) = self
-                .store
-                .paged_children(
-                    space_id,
-                    frame.folder_node_id,
-                    limits::SEARCH_CHILDREN_PAGE_MAX,
-                    frame.after.as_ref(),
-                )
-                .await?;
-
-            if children.is_empty() {
-                stack.pop();
+        let mut items = Vec::with_capacity(limit as usize);
+        let mut consumed = 0usize;
+        let mut scanned_text_bytes = 0usize;
+        let mut after = None;
+        for candidate in candidates.iter().take(limits::SEARCH_NODE_SCAN_MAX) {
+            if !path_filters.allows(&candidate.path) {
+                consumed += 1;
+                after = Some(candidate.sort_path.clone());
                 continue;
             }
 
-            let text_batch_size = grep_text_batch_size();
-            let mut texts = HashMap::new();
-            let mut stopped_early = false;
-            for (index, child) in children.iter().enumerate() {
-                scanned_nodes += 1;
-                let path = join_path(&parent_path, &child.name);
-                let is_folder = child.kind == NodeKind::Folder;
+            let byte_len = candidate.text.byte_len.max(0) as usize;
+            if scanned_text_bytes + byte_len > limits::GREP_SCAN_MAX_BYTES {
+                break;
+            }
+            scanned_text_bytes += byte_len;
+            consumed += 1;
+            after = Some(candidate.sort_path.clone());
 
-                if child.kind == NodeKind::Text && path_filters.allows(&path) {
-                    if !texts.contains_key(&child.id) {
-                        let ids = text_batch_ids(
-                            &children,
-                            index,
-                            &parent_path,
-                            &path_filters,
-                            text_batch_size,
-                        );
-                        texts = self.store.find_texts(space_id, &ids).await?;
-                    }
-                    let Some(text) = texts.get(&child.id) else {
-                        if let Some(top) = stack.last_mut() {
-                            top.after = Some(child_cursor(child));
-                        }
-                        continue;
-                    };
-                    if text.storage_format == TextStorageFormat::Plain {
-                        let byte_len = text.byte_len.max(0) as usize;
-                        if scanned_text_bytes + byte_len > limits::GREP_SCAN_MAX_BYTES {
-                            stopped_early = true;
-                            break;
-                        }
-                        scanned_text_bytes += byte_len;
-                        if let Some(content) = text.content.as_deref() {
-                            let match_lines = matcher.match_lines(content, request.line_mode);
-                            if !match_lines.is_empty() {
-                                items.push(notegate_model::search::GrepHit {
-                                    node: self.text_node_view(child.clone(), path, text),
-                                    match_lines: match request.line_mode {
-                                        notegate_model::search::GrepLineMode::None => Vec::new(),
-                                        notegate_model::search::GrepLineMode::First => {
-                                            match_lines.first().copied().into_iter().collect()
-                                        }
-                                        notegate_model::search::GrepLineMode::All => match_lines,
-                                    },
-                                });
+            if let Some(content) = candidate.text.content.as_deref() {
+                let match_lines = matcher.match_lines(content, request.line_mode);
+                if !match_lines.is_empty() {
+                    items.push(notegate_model::search::GrepHit {
+                        node: self.text_node_view(
+                            candidate.node.clone(),
+                            candidate.path.clone(),
+                            &candidate.text,
+                        ),
+                        match_lines: match request.line_mode {
+                            notegate_model::search::GrepLineMode::None => Vec::new(),
+                            notegate_model::search::GrepLineMode::First => {
+                                match_lines.first().copied().into_iter().collect()
                             }
-                        }
-                    }
-                }
-
-                if let Some(top) = stack.last_mut() {
-                    top.after = Some(child_cursor(child));
-                }
-                if is_folder {
-                    stack.push(DfsFrame {
-                        folder_node_id: child.id,
-                        after: None,
+                            notegate_model::search::GrepLineMode::All => match_lines,
+                        },
                     });
-                    stopped_early = true;
-                    break;
-                }
-                if items.len() >= limit as usize
-                    || scanned_nodes >= limits::SEARCH_NODE_SCAN_MAX
-                    || scanned_text_bytes >= limits::GREP_SCAN_MAX_BYTES
-                {
-                    stopped_early = true;
-                    break;
                 }
             }
 
-            if !stopped_early && !has_more_children {
-                let should_pop = stack
-                    .last()
-                    .is_some_and(|top| top.folder_node_id == frame.folder_node_id);
-                if should_pop {
-                    stack.pop();
-                }
+            if items.len() >= limit as usize {
+                break;
             }
         }
 
-        let has_more = !stack.is_empty();
+        let has_more = candidates.len() > consumed;
         let next_cursor = if has_more {
-            self.encode_search_cursor("grep", fingerprint, stack)?
+            self.encode_search_cursor("grep", fingerprint, scope_node_id, after)?
         } else {
             None
         };
@@ -180,33 +125,4 @@ impl SearchService {
             next_cursor,
         })
     }
-}
-
-fn grep_text_batch_size() -> usize {
-    (limits::GREP_SCAN_MAX_BYTES / limits::TEXT_MAX_BYTES).max(1)
-}
-
-fn text_batch_ids(
-    children: &[Node],
-    start_index: usize,
-    parent_path: &str,
-    path_filters: &PathFilters,
-    max_ids: usize,
-) -> Vec<Uuid> {
-    let mut ids = Vec::new();
-    for child in children.iter().skip(start_index) {
-        if child.kind == NodeKind::Folder {
-            break;
-        }
-        if child.kind == NodeKind::Text {
-            let path = join_path(parent_path, &child.name);
-            if path_filters.allows(&path) {
-                ids.push(child.id);
-                if ids.len() >= max_ids {
-                    break;
-                }
-            }
-        }
-    }
-    ids
 }

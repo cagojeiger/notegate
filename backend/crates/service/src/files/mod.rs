@@ -22,13 +22,13 @@ pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use types::{
+    AppendText, ChildrenRequest, CreateFile, CreateFolder, CreateText, DeleteNode, Edit, MoveNode,
+    PatchText, ReadText, WriteTarget, WriteText, WriteTextBody,
+};
+pub use types::{
     ChildrenCursor, ChildrenPage, DeleteResult, FileContent, FileStats, FileView, NodeView,
     PatchResult, ReadContent, ReadResult, ReadTextBody, StoredContent, StoredFile, TextStats,
     TextView,
-};
-pub use types::{
-    ChildrenRequest, CreateFile, CreateFolder, CreateText, DeleteNode, Edit, MoveNode, PatchText,
-    ReadText, WriteTarget, WriteText, WriteTextBody,
 };
 pub use validation::FilesValidationError;
 
@@ -40,7 +40,7 @@ use uuid::Uuid;
 use crate::error::{ServiceError, ServiceResult};
 
 /// File-tree command service: `ls` / `stat` / `mkdir` / `touch` / `read` /
-/// `write` / `patch` / `mv` / `rm`.
+/// `write` / `append` / `patch` / `mv` / `rm`.
 ///
 /// Every command takes `(caller_account_id, space_id, ...)`. The service:
 ///

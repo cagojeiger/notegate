@@ -34,7 +34,7 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Path-first space, file, and search tools for notegate.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use path-first targets like `space:/path`. file tools are Unix-like: list/stat/mkdir/read/write/append/patch/mv/rm. search tools are find/grep. `write` replaces the whole text, `append` adds at EOF, and `patch` performs exact targeted replacements.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -65,7 +65,10 @@ impl McpServer {
         Self { state }
     }
 
-    #[tool(name = "me", description = "Return the authenticated caller identity.")]
+    #[tool(
+        name = "me",
+        description = "Show who is calling notegate and what this caller can generally do."
+    )]
     pub async fn me_tool(
         &self,
         Extension(parts): Extension<Parts>,
@@ -75,7 +78,7 @@ impl McpServer {
 
     #[tool(
         name = "spaces_list",
-        description = "List spaces accessible to the authenticated caller.",
+        description = "List spaces this caller can access. Use this first when you do not know the space name.",
         output_schema = object_output_schema()
     )]
     pub async fn spaces_list_tool(
@@ -88,7 +91,7 @@ impl McpServer {
 
     #[tool(
         name = "spaces_create",
-        description = "Create a space owned by the authenticated user caller.",
+        description = "Create a new space. Only user callers can create spaces; agent callers cannot.",
         output_schema = object_output_schema()
     )]
     pub async fn spaces_create_tool(
@@ -100,47 +103,21 @@ impl McpServer {
     }
 
     #[tool(
-        name = "spaces_get",
-        description = "Return one accessible space by name.",
+        name = "files_list",
+        description = "List folder contents. Default `depth=1` is like `ls`; larger depth returns tree-style subtree items.",
         output_schema = object_output_schema()
     )]
-    pub async fn spaces_get_tool(
+    pub async fn files_list_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::spaces::GetInput>,
+        params: Parameters<tools::files::ListInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::spaces::get(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_ls",
-        description = "List direct children of a folder.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_ls_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::LsInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::ls(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_tree",
-        description = "List a folder subtree as path-first node summaries.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_tree_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::TreeInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::tree(&self.state, &parts, params).await
+        tools::files::list(&self.state, &parts, params).await
     }
 
     #[tool(
         name = "files_stat",
-        description = "Return node summary and text/file stats for a target path.",
+        description = "Show metadata and size/hash stats for a folder, text, or file path, like `stat`.",
         output_schema = object_output_schema()
     )]
     pub async fn files_stat_tool(
@@ -153,7 +130,7 @@ impl McpServer {
 
     #[tool(
         name = "files_mkdir",
-        description = "Create a folder at a path.",
+        description = "Create a folder, like `mkdir`. Set `parents=true` for `mkdir -p` behavior.",
         output_schema = object_output_schema()
     )]
     pub async fn files_mkdir_tool(
@@ -165,21 +142,8 @@ impl McpServer {
     }
 
     #[tool(
-        name = "files_touch",
-        description = "Create an empty text object.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_touch_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::TouchInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::touch(&self.state, &parts, params).await
-    }
-
-    #[tool(
         name = "files_read",
-        description = "Read a text object with range limits.",
+        description = "Read plain text content. Supports line/byte ranges; encrypted text and binary files are not readable here.",
         output_schema = object_output_schema()
     )]
     pub async fn files_read_tool(
@@ -192,7 +156,7 @@ impl McpServer {
 
     #[tool(
         name = "files_write",
-        description = "Replace a text object.",
+        description = "Replace the entire plain text content, like shell `>` redirection. Use files_append for EOF append.",
         output_schema = object_output_schema()
     )]
     pub async fn files_write_tool(
@@ -204,8 +168,21 @@ impl McpServer {
     }
 
     #[tool(
+        name = "files_append",
+        description = "Append plain text content at EOF, like shell `>>` redirection. Use `ensure_newline` when appending a new line item.",
+        output_schema = object_output_schema()
+    )]
+    pub async fn files_append_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::files::AppendInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::files::append(&self.state, &parts, params).await
+    }
+
+    #[tool(
         name = "files_patch",
-        description = "Apply exact targeted replacements to one text object.",
+        description = "Patch plain text by exact string replacement. Use for targeted edits; each old_text must match exactly once.",
         output_schema = object_output_schema()
     )]
     pub async fn files_patch_tool(
@@ -218,7 +195,7 @@ impl McpServer {
 
     #[tool(
         name = "files_mv",
-        description = "Move or rename a source target to a destination target.",
+        description = "Move or rename a node within the same space, like `mv`.",
         output_schema = object_output_schema()
     )]
     pub async fn files_mv_tool(
@@ -231,7 +208,7 @@ impl McpServer {
 
     #[tool(
         name = "files_rm",
-        description = "Soft delete a target path.",
+        description = "Soft delete a node, like `rm`. Folders require `recursive=true`.",
         output_schema = object_output_schema()
     )]
     pub async fn files_rm_tool(
@@ -244,7 +221,7 @@ impl McpServer {
 
     #[tool(
         name = "files_find",
-        description = "Find folders, text nodes, and file nodes by name under a target folder.",
+        description = "Find folders, text nodes, and file nodes by name under a folder, like `find -name`.",
         output_schema = object_output_schema()
     )]
     pub async fn files_find_tool(
@@ -257,7 +234,7 @@ impl McpServer {
 
     #[tool(
         name = "files_grep",
-        description = "Find plain text nodes whose content matches a query.",
+        description = "Find plain text nodes whose content matches a literal or regex, like `grep -rl`. Returns node candidates, not snippets.",
         output_schema = object_output_schema()
     )]
     pub async fn files_grep_tool(
@@ -410,14 +387,11 @@ mod tests {
 
         for (tool_name, properties, required) in [
             ("me", "", ""),
-            ("spaces_list", "limit cursor", ""),
+            ("spaces_list", "name limit cursor", ""),
             ("spaces_create", "name", "name"),
-            ("spaces_get", "name", "name"),
-            ("files_ls", "target limit cursor", "target"),
-            ("files_tree", "target depth limit cursor", "target"),
+            ("files_list", "target depth limit cursor", "target"),
             ("files_stat", "target", "target"),
             ("files_mkdir", "target parents", "target"),
-            ("files_touch", "target", "target"),
             (
                 "files_read",
                 "target start_line max_lines max_bytes if_none_match_sha256",
@@ -426,6 +400,11 @@ mod tests {
             (
                 "files_write",
                 "target content create expected_sha256",
+                "target content",
+            ),
+            (
+                "files_append",
+                "target content create ensure_newline expected_sha256",
                 "target content",
             ),
             (
@@ -459,14 +438,12 @@ mod tests {
             "me",
             "spaces_list",
             "spaces_create",
-            "spaces_get",
-            "files_ls",
-            "files_tree",
+            "files_list",
             "files_stat",
             "files_mkdir",
-            "files_touch",
             "files_read",
             "files_write",
+            "files_append",
             "files_patch",
             "files_mv",
             "files_rm",

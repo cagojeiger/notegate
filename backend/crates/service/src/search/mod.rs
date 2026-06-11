@@ -8,8 +8,8 @@ use notegate_core::limits;
 use notegate_db::FilesRepo;
 use notegate_model::files::{ChildrenCursor, NodeView, TextStats};
 pub use notegate_model::search::{
-    DfsFrame, FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage,
-    GrepRequest, SearchCursor, TreeCursor, TreeFrame, TreePage, TreeRequest,
+    FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage, GrepRequest,
+    SearchCursor, TreeCursor, TreeFrame, TreePage, TreeRequest,
 };
 use notegate_model::{Node, NodeKind, Permission, TextObject};
 use regex::{Regex, RegexBuilder};
@@ -107,23 +107,21 @@ impl SearchService {
         command: &str,
         fingerprint: &str,
         scope_node_id: Uuid,
-    ) -> ServiceResult<Vec<DfsFrame>> {
+    ) -> ServiceResult<Option<String>> {
         match raw {
-            None => Ok(vec![DfsFrame {
-                folder_node_id: scope_node_id,
-                after: None,
-            }]),
+            None => Ok(None),
             Some(raw) => {
                 let cursor: SearchCursor = cursor::decode(raw)?;
                 if cursor.version != 1
                     || cursor.command != command
                     || cursor.fingerprint != fingerprint
+                    || cursor.scope_node_id != scope_node_id
                 {
                     return Err(ServiceError::InvalidInput(
                         "search cursor does not match this query".to_owned(),
                     ));
                 }
-                Ok(cursor.stack)
+                Ok(cursor.after_sort_path)
             }
         }
     }
@@ -132,16 +130,18 @@ impl SearchService {
         &self,
         command: &str,
         fingerprint: String,
-        stack: Vec<DfsFrame>,
+        scope_node_id: Uuid,
+        after_sort_path: Option<String>,
     ) -> ServiceResult<Option<String>> {
-        if stack.is_empty() {
+        if after_sort_path.is_none() {
             return Ok(None);
         }
         let cursor = SearchCursor {
             version: 1,
             command: command.to_owned(),
             fingerprint,
-            stack,
+            scope_node_id,
+            after_sort_path,
         };
         cursor::encode(&cursor)
             .map(Some)
@@ -360,14 +360,8 @@ mod tests {
             version: 1,
             command: "find".to_owned(),
             fingerprint: "fingerprint".to_owned(),
-            stack: vec![DfsFrame {
-                folder_node_id: Uuid::new_v4(),
-                after: Some(ChildrenCursor {
-                    sort_order: 0,
-                    name: "note.md".to_owned(),
-                    id: Uuid::new_v4(),
-                }),
-            }],
+            scope_node_id: Uuid::new_v4(),
+            after_sort_path: Some("0000000000/note.md".to_owned()),
         };
         let encoded = cursor::encode(&value).unwrap();
         let decoded: SearchCursor = cursor::decode(&encoded).unwrap();

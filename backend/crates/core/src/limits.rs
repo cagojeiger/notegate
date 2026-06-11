@@ -137,6 +137,9 @@ pub const GREP_MAX_LIMIT: i64 = 100;
 pub const SEARCH_CHILDREN_PAGE_MAX: i64 = 200;
 /// Maximum node summaries inspected by one search request.
 pub const SEARCH_NODE_SCAN_MAX: usize = 1_000;
+/// Maximum search candidates inspected by one find/grep request.
+/// Implementations may fetch one extra sentinel row to detect `has_more`.
+pub const SEARCH_CANDIDATE_PAGE_MAX: i64 = 1_000;
 /// Maximum plain text bytes read by one grep request (8 MiB).
 pub const GREP_SCAN_MAX_BYTES: usize = 8_388_608;
 /// Maximum search query length in Unicode scalar values.

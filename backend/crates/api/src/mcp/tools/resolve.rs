@@ -195,7 +195,7 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
     Ok((parent, name.to_owned()))
 }
 
-/// The canonical space summary used by `spaces_list` and `spaces_get`.
+/// The canonical space summary used by `spaces_list`.
 pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     json!({
         "name": view.space.name,
@@ -204,7 +204,7 @@ pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     })
 }
 
-/// A path-first node summary for file tools (`ls`/`stat`/`find`/mutation
+/// A path-first node summary for file tools (`list`/`stat`/`find`/mutation
 /// results). Path is the canonical derived absolute path for MCP/CLI callers.
 pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Value {
     let mut value = json!({

@@ -17,6 +17,7 @@ pub enum FileCommand {
     Mkdir,
     Touch,
     Write,
+    Append,
     Patch,
     Mv,
     Rm,
@@ -26,7 +27,13 @@ impl FileCommand {
     pub fn requires_write(self) -> bool {
         matches!(
             self,
-            Self::Mkdir | Self::Touch | Self::Write | Self::Patch | Self::Mv | Self::Rm
+            Self::Mkdir
+                | Self::Touch
+                | Self::Write
+                | Self::Append
+                | Self::Patch
+                | Self::Mv
+                | Self::Rm
         )
     }
 
@@ -40,6 +47,7 @@ impl FileCommand {
             Self::Mkdir => "mkdir",
             Self::Touch => "touch",
             Self::Write => "write",
+            Self::Append => "append",
             Self::Patch => "patch",
             Self::Mv => "mv",
             Self::Rm => "rm",
@@ -72,6 +80,7 @@ mod tests {
         assert!(allowed(Permission::Read, FileCommand::Read));
         assert!(allowed(Permission::Read, FileCommand::Find));
         assert!(!allowed(Permission::Read, FileCommand::Write));
+        assert!(!allowed(Permission::Read, FileCommand::Append));
         assert!(!allowed(Permission::Read, FileCommand::Rm));
     }
 
@@ -79,6 +88,7 @@ mod tests {
     fn write_permission_can_mutate() {
         assert!(allowed(Permission::Write, FileCommand::Ls));
         assert!(allowed(Permission::Write, FileCommand::Write));
+        assert!(allowed(Permission::Write, FileCommand::Append));
         assert!(allowed(Permission::Write, FileCommand::Rm));
     }
 }
