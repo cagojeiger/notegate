@@ -19,10 +19,9 @@ use uuid::Uuid;
 
 const AUTH_PROVIDER: &str = "authgate";
 
-/// FROM/WHERE selecting the live spaces an account is the SOLE active-user owner
-/// of (no other active user owner exists). `$1` binds the account id. Shared by the
-/// service deletion gate and the repository transaction invariant so both operate on
-/// the same set.
+/// FROM/WHERE selecting the live spaces an account owns. `$1` binds the account id.
+/// Shared by the service deletion gate and the repository transaction invariant so
+/// both operate on the same set.
 const SOLE_OWNED_SPACES_FROM_WHERE: &str = "\
     FROM spaces s \
     WHERE s.owner_user_id = $1 AND s.deleted_at IS NULL";
@@ -209,9 +208,9 @@ impl AccountRepo {
     }
 
     /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
-    /// agents, keys, and access, but do not delete spaces. If the user is the
-    /// sole active owner of any live space, reject so the caller must delete or
-    /// transfer those spaces first. KEEP `provider_sub_hash` and PII as a
+    /// agents, keys, and access, but do not delete spaces. If the user still owns
+    /// any live space, reject so the caller must delete those spaces first. KEEP
+    /// `provider_sub_hash` and PII as a
     /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
     /// retention window elapses; re-login during the window is rejected by
     /// `upsert_user_by_sub`, so a returning sub never duplicates the account.
@@ -249,7 +248,7 @@ impl AccountRepo {
                 .map_err(map_sqlx_error)?;
         if sole_owned > 0 {
             return Err(Error::conflict(format!(
-                "delete or transfer your {sole_owned} owned space(s) before deleting your account"
+                "delete your {sole_owned} owned space(s) before deleting your account"
             )));
         }
 
@@ -318,9 +317,8 @@ impl AccountRepo {
         Ok(())
     }
 
-    /// Count live spaces this account is the SOLE active user owner of. ADR 0004:
-    /// the account cannot be deleted until these are deleted or their ownership is
-    /// transferred. Co-owned spaces (another active user owner exists) do not count.
+    /// Count live spaces this account owns. ADR 0004: the account cannot be deleted
+    /// until these are deleted.
     pub async fn count_sole_owned_spaces(&self, account_id: Uuid) -> Result<i64> {
         let count: i64 =
             sqlx::query_scalar(&format!("SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"))

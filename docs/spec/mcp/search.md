@@ -5,17 +5,19 @@
 Node name metadata를 검색한다.
 
 ```json
-{"target":"personal:/notes","q":"state","limit":50}
+{"target":"personal:/notes","q":"state","kind":"text","limit":50}
 ```
 
 Folder/Text/File 모두 대상이다. Root node는 결과에서 제외한다.
+입력 필드: `target`(또는 `selector`+`path`), `q`(필수), `kind`(선택 `folder|text|file` 필터), `limit`(기본 50), `cursor`. `kind=file`은 현재 file 생성 경로가 없어 실질적으로 결과가 없다.
 
 ## `files_grep`
 
 Plain Text content를 검색한다.
 
 ```json
-{"target":"personal:/memory","q":"todo","limit":50}
+{"target":"personal:/memory","q":"todo","context":2,"limit":20}
 ```
 
 File과 encrypted Text는 대상이 아니다.
+입력 필드: `target`(또는 `selector`+`path`), `q`(필수), `context`(선택, match 당 주변 줄 수), `limit`(기본 20), `cursor`.

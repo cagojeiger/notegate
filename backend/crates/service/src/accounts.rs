@@ -44,14 +44,14 @@ impl AccountService {
             ));
         }
         // ADR 0004: spaces are cleaned up manually. Block deletion while the caller
-        // is the sole owner of any live space — they must delete or transfer it first.
+        // still owns any live space — they must delete it first.
         let sole_owned = self
             .store
             .count_sole_owned_spaces(caller_account_id)
             .await?;
         if sole_owned > 0 {
             return Err(ServiceError::Conflict(format!(
-                "delete or transfer your {sole_owned} owned space(s) before deleting your account"
+                "delete your {sole_owned} owned space(s) before deleting your account"
             )));
         }
         Ok(self

@@ -26,10 +26,10 @@ crypto_key_epochs
   status text check ('active','verify_only','revoked')
   verify_tag text not null
   version int not null
-  activated_at timestamptz null
-  revoked_at timestamptz null
   created_at timestamptz
-  updated_at timestamptz
+  activated_at timestamptz null
+  retired_at timestamptz null
+  revoked_at timestamptz null
 ```
 
 Domain마다 active epoch는 하나다. `verify_tag`는 root key 원문 저장 없이 설정과 DB registry 일치를 검증한다.
@@ -139,7 +139,7 @@ Connection은 agent 전용이다. User-to-user membership은 초기 제품에 �
 nodes
   id uuid pk
   space_id uuid not null references spaces(id)
-  parent_id uuid null references nodes(id)
+  parent_id uuid null
   name text not null
   kind text not null check ('folder','text','file')
   sort_order int not null default 0
@@ -152,6 +152,7 @@ nodes
   purge_after timestamptz null
 ```
 
+- `(parent_id, space_id)`는 `nodes(id, space_id)`를 참조하는 composite FK다(`UNIQUE (id, space_id)`로 보장). parent는 항상 같은 space 안에 있다.
 - Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`인 node다.
 - 같은 parent 안 live node name은 unique다.
 - Full path는 저장하지 않는다.
