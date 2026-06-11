@@ -2,8 +2,8 @@
 //! request-scoped [`Caller`] lookup, and the service-error → [`ErrorData`] map.
 //!
 //! MCP/CLI callers select a space by its human-friendly **name** (the
-//! canonical selector), or with a compact `target` string (`<space>:/<path>`).
-//! Resolution is stateless: every tool call resolves the selector against the
+//! canonical name), or with a compact `target` string (`<space>:/<path>`).
+//! Resolution is stateless: every tool call resolves the target space name against the
 //! caller's accessible spaces (`docs/spec/mcp/README.md`). Paths are resolved
 //! inside the selected space only.
 
@@ -11,8 +11,6 @@ use std::borrow::Cow;
 
 use axum::http::request::Parts;
 use rmcp::ErrorData;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -20,21 +18,9 @@ use notegate_core::validation::{normalize_path, validate_space_name};
 use notegate_model::Caller;
 use notegate_service::ServiceError;
 use notegate_service::files::parse_target;
-use notegate_service::spaces::{ListSpaces, SpaceView};
+use notegate_service::spaces::SpaceView;
 
 use crate::state::AppState;
-
-/// The space-selector fields every file tool accepts.
-///
-/// Selection uses a `target` string (which also carries the path) or a `space`
-/// name. When none is given and the caller has exactly one accessible space,
-/// that space is used.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-pub struct SpaceSelector {
-    /// Human-friendly space name (the canonical selector).
-    #[serde(default)]
-    pub space: Option<String>,
-}
 
 /// The request-scoped authenticated caller, inserted by the MCP auth wrapper.
 pub fn caller(parts: &Parts) -> Result<&Caller, ErrorData> {
@@ -63,127 +49,66 @@ impl ResolvedSpace {
     }
 }
 
-/// Resolve a space from the structured selector (`space`).
-///
-/// With no selector, exactly one accessible space is used and any other count
-/// is an error. A name matching more than one accessible space returns an
-/// ambiguity error.
+/// Resolve a space by its MCP-visible name.
 pub async fn resolve_space(
     state: &AppState,
     caller: &Caller,
-    selector: &SpaceSelector,
+    name: &str,
 ) -> Result<ResolvedSpace, ErrorData> {
-    let view = select_space(state, caller, selector.space.as_deref()).await?;
+    let view = select_space(state, caller, name).await?;
     Ok(ResolvedSpace { view })
 }
 
-/// Resolve a space and an absolute path from either a `target` string or the
-/// structured `space` + an explicit `path`.
-///
-/// `target` (`<ws>:/<path>`) takes precedence; it supplies both the space
-/// name and the path. Otherwise the space is resolved from the selector and
-/// the path is taken from `path`.
+/// Resolve a compact MCP target string (`<space>:/<path>`) into a visible space
+/// and a normalized absolute path inside that space.
 pub async fn resolve_target(
     state: &AppState,
     caller: &Caller,
-    selector: &SpaceSelector,
-    target: Option<&str>,
-    path: Option<&str>,
+    target: &str,
 ) -> Result<(ResolvedSpace, String), ErrorData> {
-    if let Some(target) = target {
-        let parsed = parse_target(target).map_err(service_error)?;
-        let view = select_space(state, caller, Some(&parsed.space)).await?;
-        return Ok((ResolvedSpace { view }, parsed.path));
-    }
-
-    let path = path.ok_or_else(|| invalid_input_error("provide a 'path' or a 'target' string"))?;
-    let path = normalize_path(path).map_err(|error| invalid_input_error(error.to_string()))?;
-    let resolved = resolve_space(state, caller, selector).await?;
-    Ok((resolved, path))
+    let parsed = parse_target(target).map_err(service_error)?;
+    let view = select_space(state, caller, &parsed.space).await?;
+    Ok((ResolvedSpace { view }, parsed.path))
 }
 
 /// Core name resolution against the caller's accessible spaces.
 async fn select_space(
     state: &AppState,
     caller: &Caller,
-    name: Option<&str>,
+    name: &str,
 ) -> Result<SpaceView, ErrorData> {
-    if let Some(name) = name {
-        validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
-        let mut matches = state
-            .spaces
-            .find_visible_by_name(caller.account_id(), name, 2)
-            .await
-            .map_err(service_error)?;
-        return match matches.len() {
-            0 => Err(ErrorData::invalid_params(
-                format!("no accessible space named '{name}'"),
-                error_meta("not_found"),
-            )),
-            1 => Ok(matches.remove(0)),
-            _ => Err(ambiguity_error(name, &matches)),
-        };
-    }
-
-    let page = state
+    validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
+    let mut matches = state
         .spaces
-        .list(
-            caller.account_id(),
-            ListSpaces {
-                limit: Some(2),
-                cursor: None,
-            },
-        )
+        .find_visible_by_name(caller.account_id(), name, 2)
         .await
         .map_err(service_error)?;
-    match page.items.len() {
-        0 => Err(invalid_input_error(
-            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space connection",
+    match matches.len() {
+        0 => Err(ErrorData::invalid_params(
+            format!("no accessible space named '{name}'"),
+            error_meta("not_found"),
         )),
-        1 if !page.has_more => page.items.into_iter().next().ok_or_else(|| {
-            ErrorData::internal_error("failed to select space", error_meta("internal_error"))
-        }),
-        _ => Err(invalid_input_error(
-            "multiple spaces are accessible; pass 'space' (see spaces_list)",
-        )),
+        1 => Ok(matches.remove(0)),
+        _ => Err(ambiguity_error(name, &matches)),
     }
 }
 
-/// Pure selection over an already-loaded accessible-space list (the testable
+/// Pure name selection over an already-loaded accessible-space list (the testable
 /// core of [`select_space`]).
-///
-/// Order: `name` (exactly one match; many ⇒ ambiguity) → the single
-/// accessible space when neither is given.
 #[cfg(test)]
-fn pick_space(accessible: Vec<SpaceView>, name: Option<&str>) -> Result<SpaceView, ErrorData> {
-    // Name selector: must match exactly one accessible space.
-    if let Some(name) = name {
-        validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
-        let mut matches: Vec<SpaceView> = accessible
-            .into_iter()
-            .filter(|view| view.space.name == name)
-            .collect();
-        return match matches.len() {
-            0 => Err(ErrorData::invalid_params(
-                format!("no accessible space named '{name}'"),
-                error_meta("not_found"),
-            )),
-            1 => Ok(matches.remove(0)),
-            _ => Err(ambiguity_error(name, &matches)),
-        };
-    }
-
-    // No selector: use the single accessible space, if exactly one.
-    let count = accessible.len();
-    let mut iter = accessible.into_iter();
-    match (count, iter.next()) {
-        (1, Some(view)) => Ok(view),
-        (0, _) => Err(invalid_input_error(
-            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space connection",
+fn pick_space(accessible: Vec<SpaceView>, name: &str) -> Result<SpaceView, ErrorData> {
+    validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
+    let mut matches: Vec<SpaceView> = accessible
+        .into_iter()
+        .filter(|view| view.space.name == name)
+        .collect();
+    match matches.len() {
+        0 => Err(ErrorData::invalid_params(
+            format!("no accessible space named '{name}'"),
+            error_meta("not_found"),
         )),
-        _ => Err(invalid_input_error(
-            "multiple spaces are accessible; pass 'space' (see spaces_list)",
-        )),
+        1 => Ok(matches.remove(0)),
+        _ => Err(ambiguity_error(name, &matches)),
     }
 }
 
@@ -423,7 +348,7 @@ mod tests {
             view("shared", Uuid::new_v4()),
             view("shared", Uuid::new_v4()),
         ];
-        let error = pick_space(accessible, Some("shared")).unwrap_err();
+        let error = pick_space(accessible, "shared").unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("ambiguity carries data");
         assert_eq!(data["kind"], "invalid_input");
@@ -432,36 +357,19 @@ mod tests {
     }
 
     #[test]
-    fn single_accessible_space_used_when_selector_omitted() {
-        let only = view("personal", Uuid::new_v4());
-        let expected = only.space.id;
-        let chosen = pick_space(vec![only], None).unwrap();
-        assert_eq!(chosen.space.id, expected);
-    }
-
-    #[test]
     fn name_matching_one_accessible_space_resolves() {
         let accessible = vec![
             view("personal", Uuid::new_v4()),
             view("research", Uuid::new_v4()),
         ];
-        let chosen = pick_space(accessible, Some("research")).unwrap();
+        let chosen = pick_space(accessible, "research").unwrap();
         assert_eq!(chosen.space.name, "research");
-    }
-
-    #[test]
-    fn omitted_selector_with_many_accessible_requires_a_choice() {
-        let accessible = vec![view("a", Uuid::new_v4()), view("b", Uuid::new_v4())];
-        let error = pick_space(accessible, None).unwrap_err();
-        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
-        let data = error.data.expect("invalid selection carries data");
-        assert_eq!(data["kind"], "invalid_input");
     }
 
     #[test]
     fn name_matching_no_accessible_space_is_not_found() {
         let accessible = vec![view("a", Uuid::new_v4())];
-        let error = pick_space(accessible, Some("missing")).unwrap_err();
+        let error = pick_space(accessible, "missing").unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("missing name carries not_found data");
         assert_eq!(data["kind"], "not_found");
@@ -469,7 +377,7 @@ mod tests {
 
     #[test]
     fn bad_space_name_grammar_is_rejected() {
-        let error = pick_space(Vec::new(), Some(".secret")).unwrap_err();
+        let error = pick_space(Vec::new(), ".secret").unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("invalid name carries data");
         assert_eq!(data["kind"], "invalid_input");

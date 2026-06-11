@@ -101,7 +101,7 @@ impl McpServer {
 
     #[tool(
         name = "spaces_get",
-        description = "Return one accessible space by name or single-space fallback.",
+        description = "Return one accessible space by name.",
         output_schema = object_output_schema()
     )]
     pub async fn spaces_get_tool(
@@ -140,7 +140,7 @@ impl McpServer {
 
     #[tool(
         name = "files_stat",
-        description = "Return metadata for a path.",
+        description = "Return node summary and text/file stats for a target path.",
         output_schema = object_output_schema()
     )]
     pub async fn files_stat_tool(
@@ -218,7 +218,7 @@ impl McpServer {
 
     #[tool(
         name = "files_mv",
-        description = "Move or rename a path.",
+        description = "Move or rename a source target to a destination target.",
         output_schema = object_output_schema()
     )]
     pub async fn files_mv_tool(
@@ -231,7 +231,7 @@ impl McpServer {
 
     #[tool(
         name = "files_rm",
-        description = "Delete a path.",
+        description = "Soft delete a target path.",
         output_schema = object_output_schema()
     )]
     pub async fn files_rm_tool(
@@ -244,7 +244,7 @@ impl McpServer {
 
     #[tool(
         name = "files_find",
-        description = "Find nodes by name metadata under an optional scope path.",
+        description = "Find folders, text nodes, and file nodes by name under a target folder.",
         output_schema = object_output_schema()
     )]
     pub async fn files_find_tool(
@@ -257,7 +257,7 @@ impl McpServer {
 
     #[tool(
         name = "files_grep",
-        description = "Search text content lines.",
+        description = "Find plain text nodes whose content matches a query.",
         output_schema = object_output_schema()
     )]
     pub async fn files_grep_tool(
@@ -412,42 +412,34 @@ mod tests {
             ("me", "", ""),
             ("spaces_list", "limit cursor", ""),
             ("spaces_create", "name", "name"),
-            ("spaces_get", "space", ""),
-            ("files_ls", "space path target limit cursor", ""),
-            ("files_tree", "space path target depth limit cursor", ""),
-            ("files_stat", "space path target", ""),
-            ("files_mkdir", "space path target parents", ""),
-            ("files_touch", "space path target", ""),
+            ("spaces_get", "name", "name"),
+            ("files_ls", "target limit cursor", "target"),
+            ("files_tree", "target depth limit cursor", "target"),
+            ("files_stat", "target", "target"),
+            ("files_mkdir", "target parents", "target"),
+            ("files_touch", "target", "target"),
             (
                 "files_read",
-                "space path target start_line max_lines max_bytes if_none_match_sha256",
-                "",
+                "target start_line max_lines max_bytes if_none_match_sha256",
+                "target",
             ),
             (
                 "files_write",
-                "space path target content create expected_sha256",
-                "content",
+                "target content create expected_sha256",
+                "target content",
             ),
             (
                 "files_patch",
-                "space path target edits expected_sha256",
-                "edits",
+                "target edits expected_sha256",
+                "target edits",
             ),
-            (
-                "files_mv",
-                "space source_path destination_path",
-                "source_path destination_path",
-            ),
-            ("files_rm", "space path target recursive", ""),
-            (
-                "files_find",
-                "space q path target kind match limit cursor",
-                "q",
-            ),
+            ("files_mv", "source destination", "source destination"),
+            ("files_rm", "target recursive", "target"),
+            ("files_find", "target q kind match limit cursor", "target q"),
             (
                 "files_grep",
-                "space q path target match lines include exclude limit cursor",
-                "q",
+                "target q match lines include exclude limit cursor",
+                "target q",
             ),
         ] {
             assert_input_properties(&tools, tool_name, properties);

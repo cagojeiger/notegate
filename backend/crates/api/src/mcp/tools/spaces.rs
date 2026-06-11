@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{SpaceSelector, caller, resolve_space, service_error, space_summary};
+use super::resolve::{caller, resolve_space, service_error, space_summary};
 use super::support::page_json;
 use crate::state::AppState;
 
@@ -30,8 +30,12 @@ pub struct CreateInput {
     pub name: String,
 }
 
-/// `spaces_get` input: the space selector.
-pub type GetInput = SpaceSelector;
+/// `spaces_get` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct GetInput {
+    /// Human-friendly space name.
+    pub name: String,
+}
 
 pub async fn list(
     state: &AppState,
@@ -89,6 +93,6 @@ pub async fn get(
     Parameters(input): Parameters<GetInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let resolved = resolve_space(state, caller, &input).await?;
+    let resolved = resolve_space(state, caller, &input.name).await?;
     Ok(Json(space_summary(&resolved.view)))
 }

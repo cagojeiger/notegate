@@ -1,11 +1,11 @@
 # File tree commands
 
-이 문서는 Space 안 tree command의 공통 semantics다. MCP와 CLI는 이 모델을 path-first로 노출하고, REST는 id-first resource API로 노출한다.
+이 문서는 Space 안 tree command의 공통 semantics다. MCP와 CLI는 `target` 중심 path-first 모델로 노출하고, REST는 id-first resource API로 노출한다.
 
 ## Path model
 
 ```text
-space:/path/to/item
+target = space:/path/to/item
 ```
 
 - Root path는 `/`다.

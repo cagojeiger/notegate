@@ -15,19 +15,15 @@ type Page = {
 
 `next_cursor`는 opaque string이다. Client는 해석하지 않고 다음 요청에 그대로 전달한다.
 
-## TargetSelector
+## Target
 
-MCP path-first tool이 공통으로 사용하는 대상 지정자다.
+MCP file/search tool이 사용하는 대상 지정자다.
 
 ```ts
-type TargetSelector = {
-  target?: string      // "space:/path" 축약형
-  space?: string       // space name
-  path?: string        // absolute path, 기본 "/"
-}
+type Target = string // "space:/absolute/path"
 ```
 
-`target`이 있으면 `space`, `path`보다 우선한다.
+MCP/CLI는 `target` 하나로 Space와 path를 함께 지정한다. Root는 `"space:/"`다.
 
 ## NodeKind
 

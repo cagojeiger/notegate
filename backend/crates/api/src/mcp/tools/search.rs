@@ -11,27 +11,17 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{
-    SpaceSelector, caller, invalid_input_error, node_summary, resolve_space, resolve_target,
-    service_error,
-};
+use super::resolve::{caller, invalid_input_error, node_summary, resolve_target, service_error};
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `files_find` input: a space selector, the query, and optional target/
-/// scope/kind/paging fields.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_find` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct FindInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// The node-name substring to match.
+    /// Compact `<space>:/<folder-path>` search scope.
+    pub target: String,
+    /// The node-name substring, regex, or glob to match.
     pub q: String,
-    /// Optional absolute scope path to search within.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<scope-path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
     /// Optional kind filter: `folder`, `text`, or `file`.
     #[serde(default)]
     pub kind: Option<String>,
@@ -46,20 +36,13 @@ pub struct FindInput {
     pub cursor: Option<String>,
 }
 
-/// `files_grep` input: a space selector, the query, and optional target/
-/// scope/match/paging fields.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_grep` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct GrepInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
+    /// Compact `<space>:/<folder-path>` search scope.
+    pub target: String,
     /// The content query to match.
     pub q: String,
-    /// Optional absolute scope path to search within.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<scope-path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
     /// Match mode: `literal` or `regex`.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
@@ -86,17 +69,8 @@ pub async fn find(
     Parameters(input): Parameters<FindInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, scope_path) = match input.target.as_deref() {
-        Some(target) => {
-            let (resolved, path) =
-                resolve_target(state, caller, &input.selector, Some(target), None).await?;
-            (resolved, Some(path))
-        }
-        None => (
-            resolve_space(state, caller, &input.selector).await?,
-            input.path,
-        ),
-    };
+    let (resolved, scope_path) = resolve_target(state, caller, &input.target).await?;
+    let scope_path = Some(scope_path);
 
     let kind = match input.kind.as_deref() {
         None => None,
@@ -142,17 +116,8 @@ pub async fn grep(
     Parameters(input): Parameters<GrepInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, scope_path) = match input.target.as_deref() {
-        Some(target) => {
-            let (resolved, path) =
-                resolve_target(state, caller, &input.selector, Some(target), None).await?;
-            (resolved, Some(path))
-        }
-        None => (
-            resolve_space(state, caller, &input.selector).await?,
-            input.path,
-        ),
-    };
+    let (resolved, scope_path) = resolve_target(state, caller, &input.target).await?;
+    let scope_path = Some(scope_path);
     let space = resolved.name().to_owned();
     let match_mode = parse_grep_match_mode(input.match_mode.as_deref())?;
     let line_mode = parse_grep_line_mode(input.lines.as_deref())?;

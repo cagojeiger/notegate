@@ -1,9 +1,9 @@
 # MCP tools
 
-MCP는 agent/CLI용 path-first API다. Tool은 가능한 한 파일 시스템 명령처럼 동작한다.
+MCP는 agent/CLI용 target-first path API다. Tool은 가능한 한 파일 시스템 명령처럼 동작한다.
 
 ```text
-space:/path/to/item
+target = space:/path/to/item
 ```
 
 Tool categories:

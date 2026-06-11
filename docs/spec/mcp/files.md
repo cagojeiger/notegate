@@ -2,16 +2,17 @@
 
 MCP files tools는 Space tree를 path-first로 다룬다. 공통 schema는 `../schemas.md`를 따른다.
 
-## Target selector
+## Target
 
-`TargetSelector`는 `../schemas.md`를 따른다.
+MCP file tool은 `target: "space:/path"` 하나로 Space와 path를 함께 지정한다.
 
 ## `files_ls`
 
 Folder children을 조회한다.
 
 ```ts
-type FilesLsInput = TargetSelector & {
+type FilesLsInput = {
+  target: string
   limit?: number
   cursor?: string
 }
@@ -30,7 +31,8 @@ type FilesLsOutput = {
 Folder subtree를 DFS pre-order로 조회한다. `files_ls`는 direct children 전용이고, `files_tree`는 depth 기반 구조 조회다.
 
 ```ts
-type FilesTreeInput = TargetSelector & {
+type FilesTreeInput = {
+  target: string
   depth?: number
   limit?: number
   cursor?: string
@@ -52,7 +54,9 @@ type FilesTreeOutput = {
 Folder/Text/File 상태를 조회한다. Node metadata는 MCP stat 응답에 포함하지 않는다.
 
 ```ts
-type FilesStatInput = TargetSelector
+type FilesStatInput = {
+  target: string
+}
 
 type FilesStatOutput = {
   space: string
@@ -65,10 +69,10 @@ type FilesStatOutput = {
 Folder를 생성한다.
 
 ```ts
-type FilesMkdirInput = TargetSelector
-  & {
-    parents?: boolean
-  }
+type FilesMkdirInput = {
+  target: string
+  parents?: boolean
+}
 
 type FilesMkdirOutput = {
   space: string
@@ -77,14 +81,16 @@ type FilesMkdirOutput = {
 }
 ```
 
-`path` 또는 `target`은 생성할 folder 경로다. `parents=false` 또는 생략이면 parent folder는 이미 존재해야 한다. `parents=true`이면 missing parent folder를 순서대로 생성한다. 이미 존재하는 folder는 통과하고, 중간 경로에 Text/File이 있으면 conflict다.
+`target`은 생성할 folder 경로다. `parents=false` 또는 생략이면 parent folder는 이미 존재해야 한다. `parents=true`이면 missing parent folder를 순서대로 생성한다. 이미 존재하는 folder는 통과하고, 중간 경로에 Text/File이 있으면 conflict다.
 
 ## `files_touch`
 
 빈 plain Text node를 생성한다.
 
 ```ts
-type FilesTouchInput = TargetSelector
+type FilesTouchInput = {
+  target: string
+}
 
 type FilesTouchOutput = {
   space: string
@@ -95,14 +101,15 @@ type FilesTouchOutput = {
 }
 ```
 
-`path` 또는 `target`은 생성할 Text 경로다. Parent folder는 이미 존재해야 한다.
+`target`은 생성할 Text 경로다. Parent folder는 이미 존재해야 한다.
 
 ## `files_read`
 
 Plain Text content를 읽는다.
 
 ```ts
-type FilesReadInput = TargetSelector & {
+type FilesReadInput = {
+  target: string
   start_line?: number
   max_lines?: number
   max_bytes?: number
@@ -119,7 +126,8 @@ Encrypted Text와 File은 `files_read` 대상이 아니다.
 Plain Text content 전체를 쓴다.
 
 ```ts
-type FilesWriteInput = TargetSelector & {
+type FilesWriteInput = {
+  target: string
   content: string
   create?: boolean
   expected_sha256?: string
@@ -141,7 +149,8 @@ type FilesWriteOutput = {
 Plain Text exact-match patch를 적용한다.
 
 ```ts
-type FilesPatchInput = TargetSelector & {
+type FilesPatchInput = {
+  target: string
   edits: { old_text: string, new_text: string }[]
   expected_sha256?: string
 }
@@ -167,9 +176,8 @@ Node를 rename/move한다.
 
 ```ts
 type FilesMvInput = {
-  space?: string
-  source_path: string
-  destination_path: string
+  source: string
+  destination: string
 }
 
 type FilesMvOutput = {
@@ -178,14 +186,15 @@ type FilesMvOutput = {
 }
 ```
 
-Space 간 move는 지원하지 않는다.
+`source`와 `destination`은 같은 Space여야 한다. Space 간 move는 지원하지 않는다.
 
 ## `files_rm`
 
 Node를 soft delete한다.
 
 ```ts
-type FilesRmInput = TargetSelector & {
+type FilesRmInput = {
+  target: string
   recursive?: boolean
 }
 

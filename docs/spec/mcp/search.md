@@ -1,13 +1,14 @@
 # MCP Search
 
-MCP search는 Space path를 기준으로 folder subtree를 탐색한다. 공통 traversal, cursor, memory budget은 `../search.md`를 따른다. 공통 schema는 `../schemas.md`를 따른다.
+MCP search는 `target: "space:/folder"`를 기준으로 folder subtree를 탐색한다. 공통 traversal, cursor, memory budget은 `../search.md`를 따른다. 공통 schema는 `../schemas.md`를 따른다.
 
 ## `files_find`
 
 Node name을 검색한다.
 
 ```ts
-type FilesFindInput = TargetSelector & {
+type FilesFindInput = {
+  target: string
   q: string
   kind?: "folder" | "text" | "file"
   match?: "contains" | "regex" | "glob"
@@ -35,7 +36,8 @@ type FilesFindOutput = {
 Query를 포함하는 plain Text node 후보를 검색한다.
 
 ```ts
-type FilesGrepInput = TargetSelector & {
+type FilesGrepInput = {
+  target: string
   q: string
   match?: "literal" | "regex"
   lines?: "none" | "first" | "all"

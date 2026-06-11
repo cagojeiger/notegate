@@ -25,7 +25,7 @@ Agent caller는 space를 만들 수 없다.
 Space name으로 space 하나를 반환한다.
 
 ```json
-{"space":"personal"}
+{"name":"personal"}
 ```
 
-Selector 생략 시 visible space가 정확히 하나이면 그 space를 선택한다. 여러 개면 ambiguity error를 반환한다.
+MCP는 space UUID 입력을 받지 않는다. Space name이 중복되어 ambiguity가 나면 name을 정리해야 한다.

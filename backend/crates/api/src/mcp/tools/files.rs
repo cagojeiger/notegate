@@ -1,7 +1,6 @@
 //! File MCP tools (`docs/spec/mcp/files.md`).
 
 use axum::http::request::Parts;
-use notegate_core::validation::normalize_path;
 use notegate_model::{NodeKind, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
@@ -16,23 +15,16 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::resolve::{
-    SpaceSelector, caller, invalid_input_error, node_summary, resolve_space, resolve_target,
-    service_error, split_parent_name,
+    caller, invalid_input_error, node_summary, resolve_target, service_error, split_parent_name,
 };
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `files_ls` input: a space selector plus the folder `path` (or `target`).
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_ls` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct LsInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute folder path inside the selected space.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<folder-path>` target.
+    pub target: String,
     /// Page size; clamped to `1..=200`, default `100`.
     #[serde(default)]
     pub limit: Option<i64>,
@@ -41,17 +33,11 @@ pub struct LsInput {
     pub cursor: Option<String>,
 }
 
-/// `files_tree` input: a space selector plus the root folder `path` (or `target`).
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_tree` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct TreeInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute folder path inside the selected space.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<folder-path>` target.
+    pub target: String,
     /// Maximum depth below the selected folder. Defaults to 2, max path depth.
     #[serde(default)]
     pub depth: Option<i64>,
@@ -63,60 +49,35 @@ pub struct TreeInput {
     pub cursor: Option<String>,
 }
 
-/// `files_stat` input: a space selector plus a `path` or a `target` string.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_stat` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct StatInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path inside the selected space.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<path>` target.
+    pub target: String,
 }
 
-/// `files_mkdir` input: a space selector plus the folder `path` (or `target`).
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_mkdir` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct MkdirInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the folder to create.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<folder-path>` target.
+    pub target: String,
     /// Create missing parent folders, like `mkdir -p`.
     #[serde(default)]
     pub parents: bool,
 }
 
-/// `files_touch` input: a space selector plus the text `path` (or `target`).
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_touch` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct TouchInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the text node to create.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<text-path>` target.
+    pub target: String,
 }
 
-/// `files_read` input: a space selector, the text `path` (or `target`),
-/// and optional range/conditional-read fields.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_read` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ReadInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the text to read.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<text-path>` target.
+    pub target: String,
     /// 1-based first line to return; defaults to `1`.
     #[serde(default)]
     pub start_line: Option<i64>,
@@ -131,18 +92,11 @@ pub struct ReadInput {
     pub if_none_match_sha256: Option<String>,
 }
 
-/// `files_write` input: a space selector, the text `path` (or `target`),
-/// the new content, and create/optimistic-guard flags.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_write` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct WriteInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the text to write.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<text-path>` target.
+    pub target: String,
     /// The full replacement text content.
     pub content: String,
     /// When true, a missing text is created; when false, it must exist.
@@ -162,18 +116,11 @@ pub struct PatchEdit {
     pub new_text: String,
 }
 
-/// `files_patch` input: a space selector, the text `path` (or `target`),
-/// the edits, and an optional optimistic guard.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_patch` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PatchInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the text to patch.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<text-path>` target.
+    pub target: String,
     /// Non-empty list of exact replacements applied against the original content.
     pub edits: Vec<PatchEdit>,
     /// Optimistic guard; checked before matching.
@@ -181,29 +128,20 @@ pub struct PatchInput {
     pub expected_sha256: Option<String>,
 }
 
-/// `files_mv` input: a space selector plus source and destination paths.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_mv` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct MvInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the node to move.
-    pub source_path: String,
-    /// Absolute destination path (its dirname must be an existing folder).
-    pub destination_path: String,
+    /// Compact `<space>:/<source-path>` target.
+    pub source: String,
+    /// Compact `<space>:/<destination-path>` target. Must be in the same space as `source`.
+    pub destination: String,
 }
 
-/// `files_rm` input: a space selector, the `path` (or `target`), and the
-/// recursive flag.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+/// `files_rm` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RmInput {
-    #[serde(flatten)]
-    pub selector: SpaceSelector,
-    /// Absolute path of the node to delete.
-    #[serde(default)]
-    pub path: Option<String>,
-    /// Compact `<space>:/<path>` target (alternative to space+path).
-    #[serde(default)]
-    pub target: Option<String>,
+    /// Compact `<space>:/<path>` target.
+    pub target: String,
     /// Required to delete a folder (and its subtree).
     #[serde(default)]
     pub recursive: bool,
@@ -215,14 +153,7 @@ pub async fn ls(
     Parameters(input): Parameters<LsInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -268,14 +199,7 @@ pub async fn tree(
     Parameters(input): Parameters<TreeInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
 
     let page = state
         .search
@@ -315,14 +239,7 @@ pub async fn stat(
     Parameters(input): Parameters<StatInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
 
     let view = state
         .files
@@ -342,14 +259,7 @@ pub async fn mkdir(
     Parameters(input): Parameters<MkdirInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -453,14 +363,7 @@ pub async fn touch(
     Parameters(input): Parameters<TouchInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -499,14 +402,7 @@ pub async fn read(
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -575,14 +471,7 @@ pub async fn write(
     Parameters(input): Parameters<WriteInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -644,14 +533,7 @@ pub async fn patch(
     Parameters(input): Parameters<PatchInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -703,14 +585,17 @@ pub async fn mv(
     Parameters(input): Parameters<MvInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let resolved = resolve_space(state, caller, &input.selector).await?;
+    let (source_space, source_path) = resolve_target(state, caller, &input.source).await?;
+    let (destination_space, destination_path) =
+        resolve_target(state, caller, &input.destination).await?;
     let account_id = caller.account_id();
-    let space_id = resolved.space_id();
+    let space_id = source_space.space_id();
 
-    let source_path = normalize_path(&input.source_path)
-        .map_err(|error| invalid_input_error(error.to_string()))?;
-    let destination_path = normalize_path(&input.destination_path)
-        .map_err(|error| invalid_input_error(error.to_string()))?;
+    if destination_space.space_id() != space_id {
+        return Err(invalid_input_error(
+            "source and destination must be in the same space",
+        ));
+    }
 
     let source = state
         .files
@@ -741,7 +626,7 @@ pub async fn mv(
         .map_err(service_error)?;
 
     Ok(Json(json!({
-        "space": resolved.name(),
+        "space": source_space.name(),
         "node": node_summary(&view),
     })))
 }
@@ -752,14 +637,7 @@ pub async fn rm(
     Parameters(input): Parameters<RmInput>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(
-        state,
-        caller,
-        &input.selector,
-        input.target.as_deref(),
-        input.path.as_deref(),
-    )
-    .await?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
