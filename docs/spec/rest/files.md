@@ -29,7 +29,7 @@ multipart/form-data
 - parent_node_id: UUID
 - name: file node name
 - file: bytes
-- media_type: optional; 기본 application/octet-stream
+- media_type: optional; 없으면 multipart file part content-type 사용, 그것도 없으면 application/octet-stream
 - original_filename: optional; 없으면 multipart filename 사용
 - encryption_mode: optional none|client; 기본 none
 - encryption_metadata: encryption_mode=client일 때 JSON object

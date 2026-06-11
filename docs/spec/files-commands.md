@@ -17,7 +17,7 @@ space:/path/to/item
 
 ```text
 ls      folder children 목록
-stat    folder/text/file 상태와 metadata 조회
+stat    folder/text/file 상태 조회
 mkdir   folder 생성
 touch   empty text 생성
 mv      node rename/move
@@ -52,7 +52,7 @@ patch  exact-match patch 적용
 
 ## File commands
 
-File은 binary/object content node다. MCP/CLI command surface는 file upload/download를 포함하지 않고 file node metadata/stat만 노출한다.
+File은 binary/object content node다. MCP/CLI command surface는 file upload/download를 포함하지 않고 file node stat만 노출한다. Node metadata는 REST metadata API에서 다룬다.
 
 - File은 `nodes.kind='file'`이다.
 - File은 text read/patch/grep 대상이 아니다.
