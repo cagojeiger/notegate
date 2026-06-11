@@ -517,6 +517,7 @@ pub mod search {
     //! restricting to that node's subtree.
 
     use notegate_core::Result;
+    use notegate_model::files::TextStats;
     use notegate_model::{Node, NodeKind};
     use sqlx::PgPool;
     use uuid::Uuid;
@@ -671,11 +672,11 @@ pub mod search {
             .collect()
     }
 
-    /// Fetch grep candidate texts whose content matches `q` (ILIKE), optionally
+    /// Fetch text nodes whose plain content matches `q` (ILIKE), optionally
     /// restricted to the subtree of `scope_node_id`. Ordered by `(updated_at DESC,
     /// node_id)` to use `text_objects_space_updated_idx`. The caller passes the exact
-    /// fetch size, including any lookahead. Each row carries the derived path and
-    /// content for service-side line splitting.
+    /// fetch size, including any lookahead. The content body is not returned; grep
+    /// exposes matching nodes, and callers can read the node separately.
     pub async fn grep_candidates(
         pool: &PgPool,
         space_id: Uuid,
@@ -686,6 +687,7 @@ pub mod search {
     ) -> Result<Vec<GrepCandidate>> {
         let pattern = like_contains(q);
         let fetch = limit;
+        let node_columns = qualify(NODE_COLUMNS, "n");
 
         let base = format!(
             "{TREE_CTE}, scope AS ( \
@@ -696,7 +698,9 @@ pub mod search {
             JOIN scope s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
-         SELECT d.node_id, t.path AS derived_path, d.content_text AS content, d.updated_at \
+         SELECT {node_columns}, t.path AS derived_path, \
+                EXISTS(SELECT 1 FROM nodes c WHERE c.parent_id = n.id AND c.deleted_at IS NULL) AS has_children, \
+                d.content_sha256, d.byte_len, d.line_count, d.updated_at AS text_updated_at \
          FROM text_objects d \
          JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
          JOIN tree t ON t.id = d.node_id \
@@ -720,13 +724,8 @@ pub mod search {
                 .await
             }
             Some(cursor) => {
-                // Keyset over a DESC primary key. The cursor's own text is
-                // INCLUDED (`node_id >= …`) so grep can resume mid-text: the
-                // service skips `match_offset` already-emitted matches in it. When a
-                // text is fully consumed the cursor advances to the next text
-                // with `match_offset = 0`, so including it and skipping 0 is correct.
                 sqlx::query_as::<_, GrepRow>(&format!(
-                    "{base} AND (d.updated_at < $4 OR (d.updated_at = $4 AND d.node_id >= $5)) \
+                    "{base} AND (d.updated_at < $4 OR (d.updated_at = $4 AND d.node_id > $5)) \
                  ORDER BY d.updated_at DESC, d.node_id LIMIT $6"
                 ))
                 .bind(space_id)
@@ -741,15 +740,21 @@ pub mod search {
         }
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| GrepCandidate {
-                node_id: row.node_id,
-                path: row.derived_path,
-                content: row.content,
-                updated_at: row.updated_at,
+        rows.into_iter()
+            .map(|row| {
+                Ok(GrepCandidate {
+                    node: row.node.into_node()?,
+                    path: row.derived_path,
+                    has_children: row.has_children,
+                    text: TextStats {
+                        content_sha256: row.content_sha256,
+                        byte_len: row.byte_len,
+                        line_count: row.line_count,
+                    },
+                    updated_at: row.text_updated_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// A `find` result row: the node columns, its derived path, and whether it has
@@ -765,10 +770,14 @@ pub mod search {
     /// A `grep` candidate row.
     #[derive(Debug, sqlx::FromRow)]
     struct GrepRow {
-        node_id: Uuid,
+        #[sqlx(flatten)]
+        node: NodeRow,
         derived_path: String,
-        content: String,
-        updated_at: chrono::DateTime<chrono::Utc>,
+        has_children: bool,
+        content_sha256: String,
+        byte_len: i64,
+        line_count: i32,
+        text_updated_at: chrono::DateTime<chrono::Utc>,
     }
 
     /// Build an ILIKE `%…%` substring pattern, escaping the LIKE metacharacters in

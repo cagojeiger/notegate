@@ -427,12 +427,12 @@ mod tests {
             ("files_rm", "space space_id path target recursive", ""),
             (
                 "files_find",
-                "space space_id q path target kind limit cursor",
+                "space space_id q path target kind match limit cursor",
                 "q",
             ),
             (
                 "files_grep",
-                "space space_id q path target context limit cursor",
+                "space space_id q path target match include exclude limit cursor",
                 "q",
             ),
         ] {

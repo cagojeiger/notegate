@@ -1,8 +1,8 @@
 //! End-to-end search against a real Postgres schema.
 //!
 //! Drives the `SearchService` over the real `FilesRepo` so find (name + derived
-//! path, kind filter, scope) and grep (line-split, context, keyset + intra-doc
-//! offset cursor) run through SQL exactly as the REST/MCP surfaces call them.
+//! path, kind filter, scope) and grep (text-node candidates + keyset cursor) run
+//! through SQL exactly as the REST/MCP surfaces call them.
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
@@ -277,7 +277,6 @@ async fn search_scope_accepts_text_and_rejects_missing_path()
             GrepRequest {
                 q: "needle".to_owned(),
                 path: Some("/note.md".to_owned()),
-                context: Some(0),
                 limit: None,
                 cursor: None,
             },
@@ -288,7 +287,7 @@ async fn search_scope_accepts_text_and_rejects_missing_path()
         1,
         "text scope returns that text only"
     );
-    assert_eq!(single_doc.items[0].node_id, note);
+    assert_eq!(single_doc.items[0].node.id, note);
 
     let missing = search
         .find(
@@ -313,10 +312,9 @@ async fn search_scope_accepts_text_and_rejects_missing_path()
     Ok(())
 }
 
-/// grep returns the correct 1-based line number and before/after context, and the
-/// context count is clamped to GREP_MAX_CONTEXT.
+/// grep returns matching text node candidates with path and text stats.
 #[tokio::test]
-async fn grep_line_no_context_and_clamp() -> Result<(), Box<dyn std::error::Error>> {
+async fn grep_returns_text_node_candidates() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -324,11 +322,16 @@ async fn grep_line_no_context_and_clamp() -> Result<(), Box<dyn std::error::Erro
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
-    // A 7-line text; 'needle' is on line 4 only.
-    let content = "l1\nl2\nl3\nneedle here\nl5\nl6\nl7\n";
+    let content = "l1
+l2
+l3
+needle here
+l5
+l6
+l7
+";
     let node = write_doc(&files, owner, ws, root, "note.md", content).await;
 
-    // context=2: line_no=4, two lines before/after, derived path.
     let page = search
         .grep(
             owner,
@@ -336,53 +339,21 @@ async fn grep_line_no_context_and_clamp() -> Result<(), Box<dyn std::error::Erro
             GrepRequest {
                 q: "  needle  ".to_owned(),
                 path: None,
-                context: Some(2),
                 limit: None,
                 cursor: None,
             },
         )
         .await?;
-    assert_eq!(page.items.len(), 1, "exactly one matching line");
-    let m = &page.items[0];
-    assert_eq!(m.node_id, node);
-    assert_eq!(m.path, "/note.md", "grep returns the derived path");
-    assert_eq!(m.line_no, 4, "1-based line number");
-    assert_eq!(m.line, "needle here");
-    assert_eq!(m.before, vec!["l2".to_owned(), "l3".to_owned()]);
-    assert_eq!(m.after, vec!["l5".to_owned(), "l6".to_owned()]);
-
-    // context clamp: a request for 100 lines yields at most GREP_MAX_CONTEXT (5).
-    // The match is on line 4, so before is bounded by available lines (3), but
-    // after has 3 lines available (l5,l6,l7) — both well under the clamp; assert
-    // the clamp by checking we never exceed 5 and that all available context is
-    // returned (proving the request did not error and was bounded).
-    let wide = search
-        .grep(
-            owner,
-            ws,
-            GrepRequest {
-                q: "needle".to_owned(),
-                path: None,
-                context: Some(100),
-                limit: None,
-                cursor: None,
-            },
-        )
-        .await?;
-    let wm = &wide.items[0];
-    assert!(
-        wm.before.len() <= 5 && wm.after.len() <= 5,
-        "context never exceeds GREP_MAX_CONTEXT"
-    );
-    // Line 4 has exactly 3 lines before and 3 after; the clamp (5) does not cut them.
-    assert_eq!(
-        wm.before,
-        vec!["l1".to_owned(), "l2".to_owned(), "l3".to_owned()]
-    );
-    assert_eq!(
-        wm.after,
-        vec!["l5".to_owned(), "l6".to_owned(), "l7".to_owned()]
-    );
+    assert_eq!(page.items.len(), 1, "exactly one matching text node");
+    let item = &page.items[0];
+    assert_eq!(item.node.id, node);
+    assert_eq!(item.path, "/note.md", "grep returns the derived path");
+    let stats = item
+        .text
+        .as_ref()
+        .expect("grep text candidate has text stats");
+    assert_eq!(stats.line_count, 7);
+    assert_eq!(stats.byte_len, content.len() as i64);
 
     db.cleanup().await;
     Ok(())
@@ -473,10 +444,9 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-/// grep keyset cursor resumes across a page boundary, including INSIDE a single
-/// text that has more matches than the page limit (intra-text offset).
+/// grep keyset cursor pages across matching text-node candidates with no dup/loss.
 #[tokio::test]
-async fn grep_cursor_resumes_within_a_text() -> Result<(), Box<dyn std::error::Error>> {
+async fn grep_cursor_pages_across_text_nodes() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -484,23 +454,27 @@ async fn grep_cursor_resumes_within_a_text() -> Result<(), Box<dyn std::error::E
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
-    // ONE text with 5 matching lines (hit-00 .. hit-04), interleaved with
-    // non-matching lines so line numbers are distinct and meaningful.
-    let mut body = String::new();
-    let mut expected_line_nos = Vec::new();
-    let mut line_no = 0i64;
-    for index in 0..5 {
-        line_no += 1;
-        body.push_str(&format!("pad {index}\n"));
-        line_no += 1;
-        body.push_str(&format!("hit-{index:02}\n"));
-        expected_line_nos.push(line_no);
+    let total = 5usize;
+    let mut expected_ids = Vec::new();
+    for index in 0..total {
+        let node = write_doc(
+            &files,
+            owner,
+            ws,
+            root,
+            &format!("many-{index}.md"),
+            &format!(
+                "pad
+hit-{index}
+"
+            ),
+        )
+        .await;
+        expected_ids.push(node);
     }
-    let node = write_doc(&files, owner, ws, root, "many.md", &body).await;
 
-    // Page through with limit=2, so the single text spans 3 pages (2+2+1).
     let limit = 2i64;
-    let mut seen_line_nos: Vec<i64> = Vec::new();
+    let mut seen: Vec<Uuid> = Vec::new();
     let mut cursor: Option<String> = None;
     let mut pages = 0;
     loop {
@@ -511,7 +485,6 @@ async fn grep_cursor_resumes_within_a_text() -> Result<(), Box<dyn std::error::E
                 GrepRequest {
                     q: "hit-".to_owned(),
                     path: None,
-                    context: Some(0),
                     limit: Some(limit),
                     cursor: cursor.clone(),
                 },
@@ -522,28 +495,28 @@ async fn grep_cursor_resumes_within_a_text() -> Result<(), Box<dyn std::error::E
             page.items.len() as i64 <= limit,
             "page never exceeds the limit"
         );
-        for m in &page.items {
-            assert_eq!(m.node_id, node);
-            seen_line_nos.push(m.line_no);
+        for item in &page.items {
+            seen.push(item.node.id);
         }
         match page.next_cursor {
             Some(c) => {
+                assert!(page.has_more, "next_cursor implies has_more");
                 cursor = Some(c);
             }
-            None => break,
+            None => {
+                assert!(!page.has_more, "no next_cursor implies no more pages");
+                break;
+            }
         }
         assert!(pages <= 10, "paging must terminate");
     }
 
+    seen.sort();
+    expected_ids.sort();
     assert_eq!(
-        seen_line_nos, expected_line_nos,
-        "all 5 matches returned exactly once in order, resuming mid-text across pages"
+        seen, expected_ids,
+        "all matching texts returned exactly once"
     );
-    // No duplicates.
-    let mut distinct = seen_line_nos.clone();
-    distinct.sort();
-    distinct.dedup();
-    assert_eq!(distinct.len(), 5, "no duplicate matches across pages");
 
     db.cleanup().await;
     Ok(())
@@ -589,7 +562,6 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
             GrepRequest {
                 q: "x".to_owned(),
                 path: None,
-                context: None,
                 limit: None,
                 cursor: Some("!!!not-a-cursor!!!".to_owned()),
             },

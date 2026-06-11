@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::NodeKind;
-use crate::files::NodeView;
+use crate::files::{NodeView, TextStats};
+use crate::{Node, NodeKind};
 
 #[derive(Debug, Clone)]
 pub struct FindRequest {
@@ -26,7 +26,6 @@ pub struct FindCursor {
 pub struct GrepRequest {
     pub q: String,
     pub path: Option<String>,
-    pub context: Option<i64>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
@@ -35,17 +34,6 @@ pub struct GrepRequest {
 pub struct GrepCursor {
     pub updated_at: DateTime<Utc>,
     pub node_id: Uuid,
-    pub match_offset: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GrepMatch {
-    pub node_id: Uuid,
-    pub path: String,
-    pub line_no: i64,
-    pub line: String,
-    pub before: Vec<String>,
-    pub after: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +46,7 @@ pub struct FindPage {
 
 #[derive(Debug, Clone)]
 pub struct GrepPage {
-    pub items: Vec<GrepMatch>,
+    pub items: Vec<NodeView>,
     pub limit: i64,
     pub has_more: bool,
     pub next_cursor: Option<String>,
@@ -66,8 +54,9 @@ pub struct GrepPage {
 
 #[derive(Debug, Clone)]
 pub struct GrepCandidate {
-    pub node_id: Uuid,
+    pub node: Node,
     pub path: String,
-    pub content: String,
+    pub has_children: bool,
+    pub text: TextStats,
     pub updated_at: DateTime<Utc>,
 }

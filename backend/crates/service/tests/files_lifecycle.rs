@@ -345,10 +345,10 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let hit = candidates
         .iter()
-        .find(|c| c.node_id == note_id)
+        .find(|c| c.node.id == note_id)
         .expect("grep candidate present");
     assert_eq!(hit.path, "/projects/note.md", "grep returns derived path");
-    assert!(hit.content.contains("alpha delta gamma"));
+    assert_eq!(hit.text.byte_len, doc_now.byte_len);
 
     // --- mv: move /projects/note.md → /archive/note.md (rename parent) ---
     let archive = files

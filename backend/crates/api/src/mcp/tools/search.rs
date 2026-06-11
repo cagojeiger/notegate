@@ -33,6 +33,9 @@ pub struct FindInput {
     /// Optional kind filter: `folder`, `text`, or `file`.
     #[serde(default)]
     pub kind: Option<String>,
+    /// Match mode: `contains`, `regex`, or `glob`.
+    #[serde(default, rename = "match")]
+    pub match_mode: Option<String>,
     /// Page size; clamped to the find limit, default `50`.
     #[serde(default)]
     pub limit: Option<i64>,
@@ -42,12 +45,12 @@ pub struct FindInput {
 }
 
 /// `files_grep` input: a space selector, the query, and optional target/
-/// scope/context/paging fields.
+/// scope/match/paging fields.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct GrepInput {
     #[serde(flatten)]
     pub selector: SpaceSelector,
-    /// The line substring to match.
+    /// The content query to match.
     pub q: String,
     /// Optional absolute scope path to search within.
     #[serde(default)]
@@ -55,9 +58,15 @@ pub struct GrepInput {
     /// Compact `<space>:/<scope-path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
-    /// Lines of surrounding context to include per match.
+    /// Match mode: `literal` or `regex`.
+    #[serde(default, rename = "match")]
+    pub match_mode: Option<String>,
+    /// Optional include path globs.
     #[serde(default)]
-    pub context: Option<i64>,
+    pub include: Option<Vec<String>>,
+    /// Optional exclude path globs.
+    #[serde(default)]
+    pub exclude: Option<Vec<String>>,
     /// Page size; clamped to the grep limit, default `20`.
     #[serde(default)]
     pub limit: Option<i64>,
@@ -88,6 +97,7 @@ pub async fn find(
         None => None,
         Some(value) => Some(parse_kind(value)?),
     };
+    let _match_mode = input.match_mode;
 
     let page = state
         .search
@@ -138,6 +148,9 @@ pub async fn grep(
         ),
     };
     let space = resolved.name().to_owned();
+    let _match_mode = input.match_mode;
+    let _include = input.include;
+    let _exclude = input.exclude;
 
     let page = state
         .search
@@ -147,7 +160,6 @@ pub async fn grep(
             GrepRequest {
                 q: input.q,
                 path: scope_path,
-                context: input.context,
                 limit: input.limit,
                 cursor: input.cursor,
             },
@@ -155,25 +167,12 @@ pub async fn grep(
         .await
         .map_err(service_error)?;
 
-    let matches: Vec<Value> = page
-        .items
-        .iter()
-        .map(|m| {
-            json!({
-                "space": space,
-                "path": m.path,
-                "line_no": m.line_no,
-                "line": m.line,
-                "before": m.before,
-                "after": m.after,
-            })
-        })
-        .collect();
-    let returned = matches.len();
+    let items: Vec<Value> = page.items.iter().map(node_summary).collect();
+    let returned = items.len();
 
     Ok(Json(json!({
         "space": space,
-        "matches": matches,
+        "items": items,
         "page": page_json(
             page.limit,
             returned,

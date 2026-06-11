@@ -1,14 +1,14 @@
 //! Space search: `find` (node name metadata) and `grep` (content).
 //!
-//! The service owns authorization, limit clamping, opaque cursors, and
-//! service-side grep line splitting. The two query implementations live in the
-//! [`find`] and [`grep`] submodules; shared types, the permission gate, and query validation live here.
+//! The service owns authorization, limit clamping, opaque cursors, and search
+//! result shaping. The two query implementations live in the [`find`] and [`grep`]
+//! submodules; shared types, the permission gate, and query validation live here.
 
 use notegate_core::limits;
 use notegate_db::FilesRepo;
 use notegate_model::Permission;
 pub use notegate_model::search::{
-    FindCursor, FindPage, FindRequest, GrepCandidate, GrepCursor, GrepMatch, GrepPage, GrepRequest,
+    FindCursor, FindPage, FindRequest, GrepCandidate, GrepCursor, GrepPage, GrepRequest,
 };
 use uuid::Uuid;
 
@@ -97,14 +97,12 @@ mod tests {
         assert_eq!(decoded, value);
     }
 
-    /// The `grep` cursor round-trips, preserving `(updated_at, node_id,
-    /// match_offset)` exactly — including the intra-text offset.
+    /// The `grep` cursor round-trips, preserving its exact keyset tuple.
     #[test]
     fn grep_cursor_round_trips() {
         let value = GrepCursor {
             updated_at: Utc::now(),
             node_id: Uuid::new_v4(),
-            match_offset: 7,
         };
         let encoded = cursor::encode(&value).unwrap();
         let decoded: GrepCursor = cursor::decode(&encoded).unwrap();
