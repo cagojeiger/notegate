@@ -59,6 +59,8 @@ pub enum FilesValidationError {
         /// The configured maximum.
         max: usize,
     },
+    /// Node metadata is not a bounded JSON object.
+    MetadataInvalid(String),
 }
 
 impl FilesValidationError {
@@ -86,6 +88,7 @@ impl FilesValidationError {
             Self::SpaceTextBytesExceeded { max } => ServiceError::Conflict(format!(
                 "space live text content would exceed the maximum of {max} bytes; split or move content"
             )),
+            Self::MetadataInvalid(message) => ServiceError::InvalidInput(message),
         }
     }
 }
@@ -117,6 +120,68 @@ pub fn validate_basename(name: &str, kind: NodeKind) -> Result<(), FilesValidati
 /// byte-length limits). Returns the canonical form.
 pub fn normalize_path(path: &str) -> Result<String, FilesValidationError> {
     Ok(validation::normalize_path(path)?)
+}
+
+/// Reject node metadata that cannot be safely stored or searched.
+pub fn validate_metadata(metadata: &serde_json::Value) -> Result<(), FilesValidationError> {
+    if !metadata.is_object() {
+        return Err(FilesValidationError::MetadataInvalid(
+            "metadata must be a JSON object".to_owned(),
+        ));
+    }
+
+    let bytes = serde_json::to_vec(metadata)
+        .map_err(|error| FilesValidationError::MetadataInvalid(error.to_string()))?
+        .len();
+    if bytes > limits::NODE_METADATA_MAX_BYTES {
+        return Err(FilesValidationError::MetadataInvalid(format!(
+            "metadata exceeds the maximum of {} bytes",
+            limits::NODE_METADATA_MAX_BYTES
+        )));
+    }
+
+    validate_metadata_value(metadata, 1)
+}
+
+fn validate_metadata_value(
+    value: &serde_json::Value,
+    depth: usize,
+) -> Result<(), FilesValidationError> {
+    if depth > limits::NODE_METADATA_MAX_DEPTH {
+        return Err(FilesValidationError::MetadataInvalid(format!(
+            "metadata exceeds the maximum depth of {}",
+            limits::NODE_METADATA_MAX_DEPTH
+        )));
+    }
+
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                if key.chars().count() > limits::NODE_METADATA_KEY_MAX_CHARS {
+                    return Err(FilesValidationError::MetadataInvalid(format!(
+                        "metadata key exceeds the maximum of {} characters",
+                        limits::NODE_METADATA_KEY_MAX_CHARS
+                    )));
+                }
+                validate_metadata_value(value, depth + 1)?;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                validate_metadata_value(item, depth + 1)?;
+            }
+        }
+        serde_json::Value::String(value) => {
+            if value.chars().count() > limits::NODE_METADATA_STRING_MAX_CHARS {
+                return Err(FilesValidationError::MetadataInvalid(format!(
+                    "metadata string value exceeds the maximum of {} characters",
+                    limits::NODE_METADATA_STRING_MAX_CHARS
+                )));
+            }
+        }
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) | serde_json::Value::Null => {}
+    }
+    Ok(())
 }
 
 /// Reject when the resulting depth of a node would exceed [`limits::MAX_PATH_DEPTH`].

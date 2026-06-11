@@ -1801,6 +1801,7 @@ dependencies = [
  "notegate-db",
  "notegate-model",
  "secrecy",
+ "serde_json",
  "sha2",
  "sqlx",
  "tokio",
@@ -1815,6 +1816,7 @@ dependencies = [
  "chrono",
  "notegate-core",
  "serde",
+ "serde_json",
  "uuid",
 ]
 

@@ -26,6 +26,7 @@ use notegate_service::files::{
     ReadText, WriteTarget, WriteText,
 };
 use notegate_service::spaces::CreateSpace;
+use serde_json::json;
 use uuid::Uuid;
 
 /// Create a space owned by `owner` and return `(space_id, root_id)`.
@@ -83,6 +84,45 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         "mkdir sets updated_by"
     );
     let projects_id = projects.node.id;
+
+    // --- metadata: replace, read, and merge-patch a node metadata object ---
+    let metadata = json!({
+        "title": "Project notes",
+        "tags": ["project", "draft"],
+        "nested": {"keep": true, "remove": true}
+    });
+    let metadata_updated = files
+        .replace_metadata(owner, ws, projects_id, metadata.clone())
+        .await?;
+    assert_eq!(metadata_updated.node.metadata, metadata);
+
+    let read_metadata = files.read_metadata(owner, ws, projects_id).await?;
+    assert_eq!(read_metadata["title"], "Project notes");
+
+    let metadata_patched = files
+        .patch_metadata(
+            owner,
+            ws,
+            projects_id,
+            json!({
+                "status": "active",
+                "nested": {"remove": null},
+                "tags": ["project"]
+            }),
+        )
+        .await?;
+    assert_eq!(metadata_patched.node.metadata["status"], "active");
+    assert_eq!(metadata_patched.node.metadata["tags"], json!(["project"]));
+    assert!(
+        metadata_patched.node.metadata["nested"]
+            .get("keep")
+            .is_some()
+    );
+    assert!(
+        metadata_patched.node.metadata["nested"]
+            .get("remove")
+            .is_none()
+    );
 
     // --- touch: /projects/note.md ---
     let touched = files

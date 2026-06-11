@@ -167,6 +167,7 @@ CREATE TABLE nodes (
     name TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('folder', 'text', 'file')),
     sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_by_account_id UUID NOT NULL REFERENCES accounts(id),
     updated_by_account_id UUID NOT NULL REFERENCES accounts(id),
     deleted_by_account_id UUID REFERENCES accounts(id),
@@ -186,6 +187,7 @@ CREATE TABLE nodes (
     ),
     CHECK (parent_id IS NULL OR name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'),
     CHECK (name NOT IN ('.', '..')),
+    CHECK (jsonb_typeof(metadata) = 'object'),
     CHECK (
         (deleted_at IS NULL AND deleted_by_account_id IS NULL AND purge_after IS NULL)
         OR (deleted_at IS NOT NULL AND deleted_by_account_id IS NOT NULL AND purge_after IS NOT NULL)

@@ -1,6 +1,6 @@
 # REST Nodes
 
-Node API는 tree metadata를 다룬다. Content는 Text/File category에서 다룬다.
+Node API는 Space tree의 node 속성을 다룬다. Content는 Text/File category에서 다룬다.
 
 ```http
 GET    /api/v1/spaces/{space_id}/paths/resolve?path=/notes/state.json
@@ -8,6 +8,9 @@ GET    /api/v1/spaces/{space_id}/nodes/{node_id}
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/children?limit=100&cursor=...
 POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
+GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
+PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
+PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
 DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```
@@ -27,3 +30,30 @@ Create rules:
 - Text create 요청에 `content`가 있으면 content를 같은 요청에서 쓴다.
 - File node create는 REST node create에서 허용하지 않는다.
 - 같은 parent 안 live name은 unique다.
+
+## Node metadata
+
+모든 node는 `metadata` JSON object를 가진다.
+
+```json
+{
+  "title": "공급 계약 초안",
+  "tags": ["contract", "legal"],
+  "status": "draft"
+}
+```
+
+Rules:
+
+- `metadata`는 folder/text/file 공통 속성이다.
+- `metadata`는 content가 아니며 Text/File 본문 암호화 대상이 아니다.
+- `metadata`는 서버가 읽고 검색에 사용할 수 있다.
+- 민감한 값은 `metadata`에 넣지 않는다.
+- `metadata`는 JSON object만 허용한다.
+
+Update rules:
+
+- `GET /metadata`는 `{ "metadata": {...} }`를 반환한다.
+- `PUT /metadata`는 `{ "metadata": {...} }`로 metadata 전체를 교체한다.
+- `PATCH /metadata`는 `{ "patch": {...} }`로 JSON Merge Patch 방식 부분 수정을 수행한다.
+- PATCH에서 `null` 값은 해당 key 삭제를 의미한다.

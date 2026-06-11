@@ -6,6 +6,7 @@
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Content(Text/File)는 제품 설정이나 space 정책에 따라 server-side encryption으로 저장할 수 있다.
+- Node metadata는 content가 아니며 암호화 대상이 아니다.
 
 ## Root key domains
 

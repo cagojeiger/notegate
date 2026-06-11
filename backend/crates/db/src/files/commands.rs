@@ -705,6 +705,7 @@ pub mod update {
 
     use notegate_core::{Error, Result};
     use notegate_model::Node;
+    use serde_json::Value;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -750,6 +751,39 @@ pub mod update {
         .bind(node_id)
         .bind(new_name)
         .bind(new_sort_order)
+        .bind(updated_by)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_constraint_error)?
+        .ok_or_else(|| Error::not_found("node not found"))?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
+        row.into_node()
+    }
+
+    /// Replace `node_id`'s metadata object in place.
+    pub async fn replace_node_metadata(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_id: Uuid,
+        metadata: &Value,
+        updated_by: Uuid,
+    ) -> Result<Node> {
+        let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+        checks::lock_space(&mut tx, space_id).await?;
+        checks::live_node(&mut tx, space_id, node_id)
+            .await?
+            .ok_or_else(|| Error::not_found("node not found"))?;
+
+        let row = sqlx::query_as::<_, NodeRow>(&format!(
+            "UPDATE nodes \
+         SET metadata = $3, updated_by_account_id = $4, updated_at = now() \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .bind(metadata)
         .bind(updated_by)
         .fetch_optional(&mut *tx)
         .await

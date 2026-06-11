@@ -42,6 +42,10 @@ space_max_text_bytes = 268435456       # 256 MiB live text total per space
 text_max_bytes = 1048576               # 1 MiB per text object
 file_inline_pg_max_bytes = 262144       # 256 KiB 이하 file은 PG inline 저장 가능
 file_max_bytes = 104857600             # 100 MiB per uploaded file
+node_metadata_max_bytes = 16384         # 16 KiB per node metadata object
+node_metadata_max_depth = 4
+node_metadata_key_max_chars = 64
+node_metadata_string_max_chars = 2048
 ```
 
 Depth는 root 아래 segment 수로 계산한다.

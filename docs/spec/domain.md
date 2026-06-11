@@ -9,12 +9,13 @@ Account    인증 가능한 실행 주체. kind는 user 또는 agent다.
 User       사람 계정. Space와 Agent를 소유하고 관리한다.
 Agent      User가 만든 worker 계정. API key로 인증되고 연결된 Space에서 작업한다.
 Space      User가 소유한 중앙 저장 범위.
-Node       Space 안 tree item. folder/text/file 중 하나다.
+Node       Space 안 tree item. folder/text/file 중 하나이며 metadata를 가진다.
 Folder     하위 node를 담는 container.
 Text       UTF-8 content object. read/write/patch/grep 가능.
 File       binary/object content. 직접 text read/patch/grep 대상이 아니다.
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
 API key    User 또는 Agent account로 인증되는 bearer credential.
+Metadata   Node에 붙는 JSON object. content가 아니며 서버가 읽고 검색에 사용할 수 있다.
 ```
 
 ## Ownership and control
@@ -47,8 +48,8 @@ Agent caller:
 Permission:
 
 ```text
-read  = list/stat/read text/find/grep
-write = read + create/update/patch/delete/move
+read  = list/stat/read text/read metadata/find/grep
+write = read + create/update/patch/delete/move/write metadata
 ```
 
 ## Naming rules

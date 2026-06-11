@@ -75,6 +75,17 @@ pub const FILE_INLINE_PG_MAX_BYTES: usize = 262_144;
 /// Maximum bytes per uploaded file (100 MiB).
 pub const FILE_MAX_BYTES: usize = 104_857_600;
 
+// --- Node metadata limits ---
+
+/// Maximum serialized JSON bytes per node metadata object (16 KiB).
+pub const NODE_METADATA_MAX_BYTES: usize = 16_384;
+/// Maximum nesting depth for node metadata JSON. Root object depth is 1.
+pub const NODE_METADATA_MAX_DEPTH: usize = 4;
+/// Maximum node metadata object key length, in Unicode scalar values.
+pub const NODE_METADATA_KEY_MAX_CHARS: usize = 64;
+/// Maximum string value length inside node metadata, in Unicode scalar values.
+pub const NODE_METADATA_STRING_MAX_CHARS: usize = 2_048;
+
 // --- Listing and folder fanout limits ---
 
 /// Maximum live direct children per folder.

@@ -2,7 +2,8 @@
 //!
 //! `GET /paths/resolve?path=`, `GET /nodes/{id}`, `GET /nodes/{id}/children`
 //! (paginated), `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
-//! (rename / reorder), `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
+//! (rename / reorder), `GET`/`PUT`/`PATCH /nodes/{id}/metadata`,
+//! `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
 //! All handlers delegate to the files service,
 //! which owns authorization (no live permission ⇒ 404, insufficient permission ⇒ 403) and
 //! validation.
@@ -13,6 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::{Caller, NodeKind};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -36,6 +38,12 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/children",
             get(children),
+        )
+        .route(
+            "/v1/spaces/{space_id}/nodes/{node_id}/metadata",
+            get(get_metadata)
+                .put(replace_metadata)
+                .patch(patch_metadata),
         )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/move",
@@ -294,6 +302,88 @@ pub(crate) async fn update(
             body.name,
             body.sort_order,
         )
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub(crate) struct MetadataBody {
+    metadata: Value,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub(crate) struct MetadataPatchBody {
+    patch: Value,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
+    tag = "nodes",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses((status = 200, description = "Get node metadata", body = MetadataBody)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn get_metadata(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<MetadataBody>, ApiError> {
+    let metadata = state
+        .files
+        .read_metadata(caller.account_id(), space_id, node_id)
+        .await?;
+    Ok(Json(MetadataBody { metadata }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
+    tag = "nodes",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    request_body = MetadataBody,
+    responses((status = 200, description = "Replace node metadata", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn replace_metadata(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<MetadataBody>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .replace_metadata(caller.account_id(), space_id, node_id, body.metadata)
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
+    tag = "nodes",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    request_body = MetadataPatchBody,
+    responses((status = 200, description = "Patch node metadata", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn patch_metadata(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<MetadataPatchBody>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .patch_metadata(caller.account_id(), space_id, node_id, body.patch)
         .await?;
     let refs = state
         .accounts

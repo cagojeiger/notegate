@@ -1,5 +1,6 @@
 use notegate_core::limits;
 use notegate_model::NodeKind;
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -215,6 +216,64 @@ impl FilesService {
         })
     }
 
+    /// Read a node's metadata object. Requires read permission.
+    pub async fn read_metadata(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<Value> {
+        self.authorize(space_id, caller_account_id, FileCommand::Stat)
+            .await?;
+        Ok(self.load_node(space_id, node_id).await?.metadata)
+    }
+
+    /// Replace a node's metadata object. Requires write permission.
+    pub async fn replace_metadata(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+        metadata: Value,
+    ) -> ServiceResult<NodeView> {
+        self.authorize(space_id, caller_account_id, FileCommand::Write)
+            .await?;
+        validation::validate_metadata(&metadata)?;
+
+        let updated = self
+            .store
+            .replace_node_metadata(space_id, node_id, &metadata, caller_account_id)
+            .await?;
+        self.node_view(space_id, updated).await
+    }
+
+    /// Merge-patch a node's metadata object. Requires write permission.
+    pub async fn patch_metadata(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+        patch: Value,
+    ) -> ServiceResult<NodeView> {
+        self.authorize(space_id, caller_account_id, FileCommand::Patch)
+            .await?;
+        if !patch.is_object() {
+            return Err(ServiceError::InvalidInput(
+                "metadata patch must be a JSON object".to_owned(),
+            ));
+        }
+
+        let mut metadata = self.load_node(space_id, node_id).await?.metadata;
+        apply_json_merge_patch(&mut metadata, patch);
+        validation::validate_metadata(&metadata)?;
+
+        let updated = self
+            .store
+            .replace_node_metadata(space_id, node_id, &metadata, caller_account_id)
+            .await?;
+        self.node_view(space_id, updated).await
+    }
+
     /// Move or rename a node (`mv`). Requires write permission.
     pub async fn move_node(
         &self,
@@ -416,6 +475,21 @@ impl FilesService {
             path,
             purge_after,
         })
+    }
+}
+
+fn apply_json_merge_patch(target: &mut Value, patch: Value) {
+    match (target, patch) {
+        (Value::Object(target), Value::Object(patch)) => {
+            for (key, value) in patch {
+                if value.is_null() {
+                    target.remove(&key);
+                } else {
+                    apply_json_merge_patch(target.entry(key).or_insert(Value::Null), value);
+                }
+            }
+        }
+        (target, patch) => *target = patch,
     }
 }
 

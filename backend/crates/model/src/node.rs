@@ -3,6 +3,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 /// Whether a node is a folder, text object, or binary/object file.
@@ -42,6 +43,7 @@ pub struct Node {
     pub name: String,
     pub kind: NodeKind,
     pub sort_order: i32,
+    pub metadata: Value,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub deleted_by_account_id: Option<Uuid>,

@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{Node, NodeKind, TextObject, TextStorageFormat};
+use serde_json::Value;
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -17,6 +18,7 @@ pub struct NodeRow {
     pub name: String,
     pub kind: String,
     pub sort_order: i32,
+    pub metadata: Value,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub deleted_by_account_id: Option<Uuid>,
@@ -38,6 +40,7 @@ impl NodeRow {
             name: self.name,
             kind,
             sort_order: self.sort_order,
+            metadata: self.metadata,
             created_by_account_id: self.created_by_account_id,
             updated_by_account_id: self.updated_by_account_id,
             deleted_by_account_id: self.deleted_by_account_id,
@@ -97,7 +100,7 @@ impl TextRow {
 }
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
-pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, \
+pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, \
      created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
 
 /// Selectable columns of `text_objects`, in [`TextRow`] order.

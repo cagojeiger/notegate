@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -134,6 +135,7 @@ pub struct NodeOut {
     pub kind: String,
     pub path: String,
     pub sort_order: i32,
+    pub metadata: Value,
     pub has_children: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_sha256: Option<String>,
@@ -160,6 +162,7 @@ impl NodeOut {
             kind: node.kind.as_str().to_owned(),
             path: view.path.clone(),
             sort_order: node.sort_order,
+            metadata: node.metadata.clone(),
             has_children: view.has_children,
             content_sha256: view.text.as_ref().map(|text| text.content_sha256.clone()),
             byte_len: view.text.as_ref().map(|text| text.byte_len),

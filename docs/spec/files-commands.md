@@ -17,12 +17,12 @@ space:/path/to/item
 
 ```text
 ls      folder children 목록
-stat    folder/text/file metadata 조회
+stat    folder/text/file 상태와 metadata 조회
 mkdir   folder 생성
 touch   empty text 생성
 mv      node rename/move
 rm      node soft delete
-find    node name metadata 검색
+find    node name/kind/scope 검색
 ```
 
 공통 권한:
@@ -59,7 +59,7 @@ File은 binary/object content node다. MCP/CLI command surface는 file upload/do
 ## Search semantics
 
 ```text
-find      folder/text/file node name 검색
+find      folder/text/file node name/kind/scope 검색
 grep     text_objects content 검색
 ```
 

@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_model::{Node, NodeKind, Permission, TextObject};
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -213,6 +214,17 @@ impl FilesRepo {
             updated_by,
         )
         .await
+    }
+
+    pub async fn replace_node_metadata(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+        metadata: &Value,
+        updated_by: Uuid,
+    ) -> Result<Node> {
+        commands::update::replace_node_metadata(&self.pool, space_id, node_id, metadata, updated_by)
+            .await
     }
 
     pub async fn soft_delete_node(

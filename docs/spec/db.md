@@ -144,6 +144,7 @@ nodes
   name text not null
   kind text not null check ('folder','text','file')
   sort_order int not null default 0
+  metadata jsonb not null default '{}'
   created_by_account_id uuid not null references accounts(id)
   updated_by_account_id uuid not null references accounts(id)
   deleted_by_account_id uuid null references accounts(id)
@@ -157,6 +158,7 @@ nodes
 - Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`인 node다.
 - 같은 parent 안 live node name은 unique다.
 - Full path는 저장하지 않는다.
+- `metadata`는 folder/text/file 공통 JSON object다. content가 아니며 암호화 대상이 아니다.
 
 ```text
 text_objects

@@ -15,16 +15,18 @@ agent caller:
 
 ## find
 
-`find`는 node metadata 검색이다.
+`find`는 tree node 검색이다.
 
 대상:
 
 ```text
 nodes.kind IN ('folder','text','file')
 nodes.name
+node kind filter
+folder scope
 ```
 
-Root node `/`는 결과에서 제외한다.
+Root node `/`는 결과에서 제외한다. `find`는 `nodes.metadata` 내용을 검색하지 않는다.
 
 ## grep
 
@@ -39,6 +41,7 @@ text_objects.content_text
 
 - File은 grep 대상이 아니다.
 - Encrypted Text는 grep 대상이 아니다.
+- `grep`은 `nodes.metadata`를 검색하지 않는다.
 - 검색은 Postgres `ILIKE`/trigram 기반으로 수행한다.
 - 결과는 keyset pagination을 제공한다.
 
