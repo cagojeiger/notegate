@@ -101,6 +101,7 @@ plain text scan upper bound = 256 MiB live text bytes per space
 children page        <= 200 node summaries
 node scan budget     <= 1000 node summaries
 grep scan budget     <= 8 MiB content bytes
+grep text read batch <= 8 text objects by hard max size
 include glob list    <= 32 patterns × 256 chars
 exclude glob list    <= 32 patterns × 256 chars
 result limit         <= 100 node summaries

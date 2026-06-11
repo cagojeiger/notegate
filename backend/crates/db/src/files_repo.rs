@@ -16,6 +16,7 @@ use notegate_core::limits::Limits;
 use notegate_model::{FileObject, Node, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::files::{commands, queries};
@@ -91,6 +92,14 @@ impl FilesRepo {
         node_id: Uuid,
     ) -> Result<Option<(Node, TextObject)>> {
         queries::text::find_text(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn find_texts(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, TextObject>> {
+        queries::text::find_texts(&self.pool, space_id, node_ids).await
     }
 
     pub async fn count_live_files(&self, space_id: Uuid) -> Result<usize> {

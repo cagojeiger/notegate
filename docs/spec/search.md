@@ -172,10 +172,10 @@ Text 하나는 atomic scan unit이다. Text 하나의 `byte_len`은 `text_max_by
 for each text child in DFS order:
   if include/exclude path filter mismatches:
     continue
-  if remaining_grep_scan_budget < text.byte_len:
-    stop before reading content
+  read plain text object
+  if text.byte_len would exceed remaining_grep_scan_budget:
+    stop before matching content
     return cursor pointing to this text as next candidate
-  read plain content
   remaining_grep_scan_budget -= text.byte_len
   if content matches q with match mode:
     emit NodeTreeItem
@@ -201,6 +201,7 @@ children page           <= 200 node summaries
 node scan budget        <= 1000 node summaries
 grep scan budget        <= 8 MiB content bytes
 response result limit   <= 100 node summaries
+text read batch         <= 8 text objects by hard max size
 include glob patterns   <= 32 patterns × 256 chars
 exclude glob patterns   <= 32 patterns × 256 chars
 response body target    <= 256 KiB

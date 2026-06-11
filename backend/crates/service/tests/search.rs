@@ -1,8 +1,8 @@
 //! End-to-end search against a real Postgres schema.
 //!
-//! Drives the `SearchService` over the real `FilesRepo` so find (name + derived
-//! path, kind filter, scope) and grep (text-node candidates + keyset cursor) run
-//! through SQL exactly as the REST/MCP surfaces call them.
+//! Drives the `SearchService` over the real `FilesRepo` so find (name, kind
+//! filter, scope) and grep (text-node candidates + DFS cursor) run through the
+//! same service/repository path as the REST/MCP surfaces.
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
@@ -498,7 +498,7 @@ async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
     Ok(())
 }
 
-/// find keyset cursor round-trips across a page boundary with no dup/loss when the
+/// find DFS cursor round-trips across page boundaries with no dup/loss when the
 /// seed exceeds the page limit.
 #[tokio::test]
 async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::error::Error>> {
@@ -555,7 +555,7 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
             if let Some(prev) = &last_name {
                 assert!(
                     view.node.name.as_str() > prev.as_str(),
-                    "names strictly increase across the keyset"
+                    "names strictly increase across the traversal page"
                 );
             }
             last_name = Some(view.node.name.clone());
@@ -584,7 +584,7 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-/// grep keyset cursor pages across matching text-node candidates with no dup/loss.
+/// grep DFS cursor pages across matching text-node candidates with no dup/loss.
 #[tokio::test]
 async fn grep_cursor_pages_across_text_nodes() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

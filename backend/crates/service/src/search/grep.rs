@@ -1,7 +1,9 @@
 //! `grep`: deterministic DFS over plain text content.
 
 use notegate_core::limits;
-use notegate_model::{NodeKind, TextStorageFormat};
+use notegate_model::{Node, NodeKind, TextStorageFormat};
+use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
@@ -82,17 +84,28 @@ impl SearchService {
                 continue;
             }
 
+            let text_batch_size = grep_text_batch_size();
+            let mut texts = HashMap::new();
             let mut stopped_early = false;
-            for child in children {
+            for (index, child) in children.iter().enumerate() {
                 scanned_nodes += 1;
                 let path = join_path(&parent_path, &child.name);
                 let is_folder = child.kind == NodeKind::Folder;
 
                 if child.kind == NodeKind::Text && path_filters.allows(&path) {
-                    let Some((_node, text)) = self.store.find_text(space_id, child.id).await?
-                    else {
+                    if !texts.contains_key(&child.id) {
+                        let ids = text_batch_ids(
+                            &children,
+                            index,
+                            &parent_path,
+                            &path_filters,
+                            text_batch_size,
+                        );
+                        texts = self.store.find_texts(space_id, &ids).await?;
+                    }
+                    let Some(text) = texts.get(&child.id) else {
                         if let Some(top) = stack.last_mut() {
-                            top.after = Some(child_cursor(&child));
+                            top.after = Some(child_cursor(child));
                         }
                         continue;
                     };
@@ -108,13 +121,13 @@ impl SearchService {
                             .as_deref()
                             .is_some_and(|content| matcher.is_match(content))
                         {
-                            items.push(self.node_view(space_id, child.clone(), path).await?);
+                            items.push(self.text_node_view(child.clone(), path, text));
                         }
                     }
                 }
 
                 if let Some(top) = stack.last_mut() {
-                    top.after = Some(child_cursor(&child));
+                    top.after = Some(child_cursor(child));
                 }
                 if is_folder {
                     stack.push(DfsFrame {
@@ -157,4 +170,33 @@ impl SearchService {
             next_cursor,
         })
     }
+}
+
+fn grep_text_batch_size() -> usize {
+    (limits::GREP_SCAN_MAX_BYTES / limits::TEXT_MAX_BYTES).max(1)
+}
+
+fn text_batch_ids(
+    children: &[Node],
+    start_index: usize,
+    parent_path: &str,
+    path_filters: &PathFilters,
+    max_ids: usize,
+) -> Vec<Uuid> {
+    let mut ids = Vec::new();
+    for child in children.iter().skip(start_index) {
+        if child.kind == NodeKind::Folder {
+            break;
+        }
+        if child.kind == NodeKind::Text {
+            let path = join_path(parent_path, &child.name);
+            if path_filters.allows(&path) {
+                ids.push(child.id);
+                if ids.len() >= max_ids {
+                    break;
+                }
+            }
+        }
+    }
+    ids
 }

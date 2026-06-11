@@ -6,12 +6,12 @@
 
 use notegate_core::limits;
 use notegate_db::FilesRepo;
-use notegate_model::files::{ChildrenCursor, NodeView};
+use notegate_model::files::{ChildrenCursor, NodeView, TextStats};
 pub use notegate_model::search::{
     DfsFrame, FindMatchMode, FindPage, FindRequest, GrepMatchMode, GrepPage, GrepRequest,
     SearchCursor,
 };
-use notegate_model::{Node, NodeKind, Permission};
+use notegate_model::{Node, NodeKind, Permission, TextObject};
 use regex::{Regex, RegexBuilder};
 use uuid::Uuid;
 
@@ -84,6 +84,20 @@ impl SearchService {
             text,
             file,
         })
+    }
+
+    fn text_node_view(&self, node: Node, path: String, text: &TextObject) -> NodeView {
+        NodeView {
+            node,
+            path,
+            has_children: false,
+            text: Some(TextStats {
+                content_sha256: text.content_sha256.clone(),
+                byte_len: text.byte_len,
+                line_count: text.line_count,
+            }),
+            file: None,
+        }
     }
 
     fn decode_search_cursor(

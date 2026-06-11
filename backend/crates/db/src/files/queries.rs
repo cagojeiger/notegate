@@ -7,6 +7,7 @@ pub mod text {
     use notegate_model::files::TextStats;
     use notegate_model::{Node, TextObject};
     use sqlx::PgPool;
+    use std::collections::HashMap;
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
@@ -72,6 +73,41 @@ pub mod text {
             Some(doc_row) => Ok(Some((node_row.into_node()?, doc_row.into_text()?))),
             None => Ok(None),
         }
+    }
+
+    /// Load live text objects for a bounded set of node ids.
+    ///
+    /// The caller already has the live node summaries, so this returns only the
+    /// text objects keyed by node id. Missing rows are omitted.
+    pub async fn find_texts(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, TextObject>> {
+        if node_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(&format!(
+            "SELECT {TEXT_COLUMNS} FROM text_objects d \
+             JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
+             WHERE d.space_id = $1 \
+               AND d.node_id = ANY($2) \
+               AND n.deleted_at IS NULL \
+               AND n.kind = 'text'"
+        ))
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut texts = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let text = row.into_text()?;
+            texts.insert(text.node_id, text);
+        }
+        Ok(texts)
     }
 
     /// Count of live texts in a space (joins `text_objects` to live nodes).
