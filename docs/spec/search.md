@@ -201,7 +201,8 @@ children page           <= 200 node summaries
 node scan budget        <= 1000 node summaries
 grep scan budget        <= 8 MiB content bytes
 response result limit   <= 100 node summaries
-text read batch         <= 8 text objects by hard max size
+text read batch         <= grep_scan_budget_bytes / text_max_bytes
+                         현재 hard limit 기준 최대 8 text objects
 include glob patterns   <= 32 patterns × 256 chars
 exclude glob patterns   <= 32 patterns × 256 chars
 response body target    <= 256 KiB

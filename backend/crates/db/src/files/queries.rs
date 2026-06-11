@@ -88,8 +88,13 @@ pub mod text {
             return Ok(HashMap::new());
         }
 
+        let columns = TEXT_COLUMNS
+            .split(',')
+            .map(|c| format!("d.{}", c.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
         let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(&format!(
-            "SELECT {TEXT_COLUMNS} FROM text_objects d \
+            "SELECT {columns} FROM text_objects d \
              JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
              WHERE d.space_id = $1 \
                AND d.node_id = ANY($2) \
