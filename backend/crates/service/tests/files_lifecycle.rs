@@ -869,6 +869,253 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+/// Create a folder under `parent`, returning its node id (test helper).
+async fn mkdir(files: &FilesService, owner: Uuid, ws: Uuid, parent: Uuid, name: &str) -> Uuid {
+    files
+        .create_folder(
+            owner,
+            ws,
+            CreateFolder {
+                parent_node_id: parent,
+                name: name.to_owned(),
+            },
+        )
+        .await
+        .expect("create folder")
+        .node
+        .id
+}
+
+/// Create a plain text under `parent` with `body`, returning its node id (test helper).
+async fn mktext(
+    files: &FilesService,
+    owner: Uuid,
+    ws: Uuid,
+    parent: Uuid,
+    name: &str,
+    body: &str,
+) -> Uuid {
+    files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: parent,
+                    name: name.to_owned(),
+                },
+                body: WriteTextBody::Plain(body.to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await
+        .expect("write plain text")
+        .node
+        .node
+        .id
+}
+
+/// The DB-side candidate scan returns the whole subtree in DFS pre-order, and the
+/// `sort_path` keyset cursor pages through it exactly once with no repeats. The
+/// cursor is bound to its query, so reusing it under a different query is rejected.
+#[tokio::test]
+async fn find_pages_subtree_in_dfs_preorder() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let search = SearchService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "preorder").await;
+
+    // Build a known tree. All nodes default to sort_order 0, so siblings order by
+    // name: under /apps that is alpha.md < nested < zeta.md.
+    let apps = mkdir(&files, owner, ws, root, "apps").await;
+    mktext(&files, owner, ws, apps, "alpha.md", "a").await;
+    let nested = mkdir(&files, owner, ws, apps, "nested").await;
+    mktext(&files, owner, ws, nested, "deep.md", "d").await;
+    mktext(&files, owner, ws, apps, "zeta.md", "z").await;
+    let docs = mkdir(&files, owner, ws, root, "docs").await;
+    mktext(&files, owner, ws, docs, "intro.md", "i").await;
+    mktext(&files, owner, ws, root, "readme.md", "r").await;
+
+    // Page through find('*') at limit=2, collecting paths and ids in order.
+    let mut paths: Vec<String> = Vec::new();
+    let mut ids: Vec<Uuid> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = search
+            .find(
+                owner,
+                ws,
+                FindRequest {
+                    q: "*".to_owned(),
+                    path: None,
+                    kind: None,
+                    match_mode: FindMatchMode::Glob,
+                    limit: Some(2),
+                    cursor: cursor.clone(),
+                },
+            )
+            .await?;
+        assert!(page.items.len() <= 2, "page respects the limit");
+        for item in &page.items {
+            paths.push(item.path.clone());
+            ids.push(item.node.id);
+        }
+        if !page.has_more {
+            break;
+        }
+        cursor = page.next_cursor.clone();
+        assert!(cursor.is_some(), "has_more implies a next cursor");
+    }
+
+    assert_eq!(
+        paths,
+        vec![
+            "/apps",
+            "/apps/alpha.md",
+            "/apps/nested",
+            "/apps/nested/deep.md",
+            "/apps/zeta.md",
+            "/docs",
+            "/docs/intro.md",
+            "/readme.md",
+        ],
+        "subtree is returned in DFS pre-order across pages"
+    );
+    let mut distinct = ids.clone();
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!(distinct.len(), ids.len(), "no node repeats across pages");
+
+    // A cursor is bound to its query; reusing it under a different query is rejected.
+    let first = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "*".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Glob,
+                limit: Some(2),
+                cursor: None,
+            },
+        )
+        .await?;
+    let stale = first.next_cursor.expect("first page has more");
+    let err = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "zeta".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(2),
+                cursor: Some(stale),
+            },
+        )
+        .await
+        .expect_err("a cursor must not cross queries");
+    assert!(err.to_string().contains("does not match this query"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// grep filters to plain text at the SQL candidate layer: encrypted text never
+/// enters the scan even when its opaque payload textually contains the query, and
+/// the plain matches page through in `sort_path` order.
+#[tokio::test]
+async fn grep_excludes_encrypted_and_pages() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let search = SearchService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "grepenc").await;
+
+    let n1 = mktext(&files, owner, ws, root, "n1.md", "needle one").await;
+    let n2 = mktext(&files, owner, ws, root, "n2.md", "needle two").await;
+    let n3 = mktext(&files, owner, ws, root, "n3.md", "needle three").await;
+    // Encrypted text whose opaque payload literally contains "needle"; it must
+    // still be excluded because the candidate scan keeps only storage_format='plain'.
+    files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "sec.md".to_owned(),
+                },
+                body: WriteTextBody::Encrypted(json!({
+                    "version": 1,
+                    "alg": "AES-256-GCM",
+                    "ciphertext_b64": "needle"
+                })),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+
+    let mut ids: Vec<Uuid> = Vec::new();
+    let mut paths: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = search
+            .grep(
+                owner,
+                ws,
+                GrepRequest {
+                    q: "needle".to_owned(),
+                    path: None,
+                    match_mode: GrepMatchMode::Literal,
+                    line_mode: GrepLineMode::None,
+                    include: Vec::new(),
+                    exclude: Vec::new(),
+                    limit: Some(1),
+                    cursor: cursor.clone(),
+                },
+            )
+            .await?;
+        assert!(page.items.len() <= 1, "page respects the limit");
+        for hit in &page.items {
+            ids.push(hit.node.node.id);
+            paths.push(hit.node.path.clone());
+        }
+        if !page.has_more {
+            break;
+        }
+        cursor = page.next_cursor.clone();
+    }
+
+    assert_eq!(
+        paths,
+        vec!["/n1.md", "/n2.md", "/n3.md"],
+        "plain matches page through in sort_path order, exactly once"
+    );
+    assert!(
+        ids.contains(&n1) && ids.contains(&n2) && ids.contains(&n3),
+        "every plain needle is found"
+    );
+    assert!(
+        !paths.iter().any(|path| path == "/sec.md"),
+        "encrypted text is excluded from grep even with a matching payload"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// Load a text through the repo, panicking if missing (test helper).
 async fn repo_find_text(
     repo: &FilesRepo,
