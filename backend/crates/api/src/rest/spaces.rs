@@ -1,4 +1,4 @@
-//! Spaces category: list / create / get / rename / delete.
+//! Spaces category: list / create / get / update / delete.
 //!
 //! `GET /api/v1/spaces` (paginated, default 50, max 100), `POST` to create,
 //! and `GET`/`PATCH`/`DELETE /{space_id}`. Each handler resolves the caller
@@ -19,14 +19,14 @@ use crate::page::Page;
 use crate::rest::dto::SpaceOut;
 use crate::state::AppState;
 
-use notegate_service::spaces::{CreateSpace, ListSpaces, RenameSpace};
+use notegate_service::spaces::{CreateSpace, ListSpaces, UpdateSpace};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/spaces", get(list).post(create))
         .route(
             "/v1/spaces/{space_id}",
-            get(get_one).patch(rename).delete(delete),
+            get(get_one).patch(update).delete(delete),
         )
 }
 
@@ -48,8 +48,9 @@ pub(crate) struct CreateBody {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
-pub(crate) struct RenameBody {
-    name: String,
+pub(crate) struct UpdateBody {
+    name: Option<String>,
+    sort_order: Option<i32>,
 }
 
 #[utoipa::path(
@@ -136,24 +137,25 @@ pub(crate) async fn get_one(
     path = "/api/v1/spaces/{space_id}",
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
-    request_body = RenameBody,
-    responses((status = 200, description = "Rename space", body = SpaceOut)),
+    request_body = UpdateBody,
+    responses((status = 200, description = "Update space", body = SpaceOut)),
     security(("bearer_auth" = []))
 )]
-pub(crate) async fn rename(
+pub(crate) async fn update(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
-    Json(body): Json<RenameBody>,
+    Json(body): Json<UpdateBody>,
 ) -> Result<Json<SpaceOut>, ApiError> {
     let view = state
         .spaces
-        .rename(
+        .update(
             caller.account.kind,
             caller.account_id(),
-            RenameSpace {
+            UpdateSpace {
                 space_id,
-                new_name: body.name,
+                name: body.name,
+                sort_order: body.sort_order,
             },
         )
         .await?;

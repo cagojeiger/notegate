@@ -107,3 +107,50 @@ async fn agent_connection_grants_and_disconnects_permission()
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn list_spaces_uses_manual_order_name_id_cursor() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = create_user(&db, "owner-space-order@example.com").await?;
+    let repo = SpaceRepo::new(db.pool.clone());
+
+    let zeta = repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "zeta".to_owned(),
+            },
+        )
+        .await?;
+    repo.create_space(
+        owner,
+        &CreateSpace {
+            name: "alpha".to_owned(),
+        },
+    )
+    .await?;
+    repo.update_space(zeta.id, owner, None, Some(-10)).await?;
+
+    let first_page = repo.list_space_views_for(owner, 1, None).await?;
+    let first = first_page.first().ok_or("first page missing")?;
+    assert_eq!(first_page.len(), 1);
+    assert_eq!(first.space.name, "zeta");
+    assert_eq!(first.space.sort_order, -10);
+
+    let cursor = notegate_model::SpaceCursor {
+        sort_order: first.space.sort_order,
+        name: first.space.name.clone(),
+        id: first.space.id,
+    };
+    let second_page = repo.list_space_views_for(owner, 10, Some(&cursor)).await?;
+    let names: Vec<_> = second_page
+        .iter()
+        .map(|view| view.space.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["alpha"]);
+
+    db.cleanup().await;
+    Ok(())
+}

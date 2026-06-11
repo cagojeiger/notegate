@@ -103,6 +103,7 @@ pub(crate) struct ApiKeyMetadataListResponse {
 pub struct SpaceOut {
     pub id: Uuid,
     pub name: String,
+    pub sort_order: i32,
     pub permission: String,
     pub root_node_id: Uuid,
     pub created_at: DateTime<Utc>,
@@ -114,6 +115,7 @@ impl From<&SpaceView> for SpaceOut {
         Self {
             id: view.space.id,
             name: view.space.name.clone(),
+            sort_order: view.space.sort_order,
             permission: view.permission.as_str().to_owned(),
             root_node_id: view.root_node_id,
             created_at: view.space.created_at,

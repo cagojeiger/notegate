@@ -22,6 +22,7 @@ impl SpaceRepo {
 struct SpaceRow {
     id: Uuid,
     name: String,
+    sort_order: i32,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -35,6 +36,7 @@ impl From<SpaceRow> for Space {
         Self {
             id: row.id,
             name: row.name,
+            sort_order: row.sort_order,
             owner_user_id: row.owner_user_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -49,6 +51,7 @@ impl From<SpaceRow> for Space {
 struct SpaceViewRow {
     id: Uuid,
     name: String,
+    sort_order: i32,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -68,6 +71,7 @@ impl SpaceViewRow {
             space: Space {
                 id: self.id,
                 name: self.name,
+                sort_order: self.sort_order,
                 owner_user_id: self.owner_user_id,
                 created_at: self.created_at,
                 updated_at: self.updated_at,
@@ -81,9 +85,8 @@ impl SpaceViewRow {
     }
 }
 
-const SPACE_COLUMNS: &str =
-    "id, name, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
-const SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.owner_user_id, s.created_at, s.updated_at, \
+const SPACE_COLUMNS: &str = "id, name, sort_order, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
+const SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
                                   s.deleted_at, s.deleted_by_user_id, s.purge_after, \
                                   CASE \
                                     WHEN acc.kind = 'user' THEN 'write' \
@@ -196,7 +199,7 @@ impl SpaceRepo {
              WHERE acc.id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
                AND ((acc.kind = 'user' AND s.owner_user_id = acc.id) \
                     OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL)) \
-             ORDER BY s.created_at, s.id LIMIT $3"
+             ORDER BY s.sort_order, s.name, s.id LIMIT $3"
         ))
         .bind(account_id)
         .bind(name)
@@ -214,7 +217,7 @@ impl SpaceRepo {
         cursor: Option<&SpaceCursor>,
     ) -> Result<Vec<SpaceView>> {
         let cursor_clause = if cursor.is_some() {
-            "AND (s.created_at, s.id) > ($2, $3)"
+            "AND (s.sort_order, s.name, s.id) > ($2, $3, $4)"
         } else {
             ""
         };
@@ -229,14 +232,15 @@ impl SpaceRepo {
                AND ((acc.kind = 'user' AND s.owner_user_id = acc.id) \
                     OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL)) \
                {cursor_clause} \
-             ORDER BY s.created_at, s.id LIMIT {}",
-            if cursor.is_some() { "$4" } else { "$2" }
+             ORDER BY s.sort_order, s.name, s.id LIMIT {}",
+            if cursor.is_some() { "$5" } else { "$2" }
         );
         let rows = match cursor {
             Some(cursor) => {
                 sqlx::query_as::<_, SpaceViewRow>(&sql)
                     .bind(account_id)
-                    .bind(cursor.created_at)
+                    .bind(cursor.sort_order)
+                    .bind(&cursor.name)
                     .bind(cursor.id)
                     .bind(limit)
                     .fetch_all(&self.pool)
@@ -254,19 +258,22 @@ impl SpaceRepo {
         rows.into_iter().map(SpaceViewRow::into_view).collect()
     }
 
-    pub async fn rename_space(
+    pub async fn update_space(
         &self,
         space_id: Uuid,
         owner_user_id: Uuid,
-        new_name: &str,
+        name: Option<&str>,
+        sort_order: Option<i32>,
     ) -> Result<Space> {
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
-            "UPDATE spaces SET name = $3, updated_at = now() \
+            "UPDATE spaces \
+             SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
         ))
         .bind(space_id)
         .bind(owner_user_id)
-        .bind(new_name)
+        .bind(name)
+        .bind(sort_order)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_constraint_error)?

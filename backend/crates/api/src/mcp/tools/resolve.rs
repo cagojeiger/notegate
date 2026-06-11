@@ -323,12 +323,12 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
     Ok((parent, name.to_owned()))
 }
 
-/// The canonical `{id, name, permission, root_node_id}` space summary used by
-/// `spaces_list` and `spaces_get`.
+/// The canonical space summary used by `spaces_list` and `spaces_get`.
 pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     json!({
         "id": view.space.id,
         "name": view.space.name,
+        "sort_order": view.space.sort_order,
         "permission": view.permission.as_str(),
         "root_node_id": view.root_node_id,
     })
@@ -378,6 +378,7 @@ mod tests {
             space: Space {
                 id: Uuid::new_v4(),
                 name: name.to_owned(),
+                sort_order: 0,
                 owner_user_id: owner,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),

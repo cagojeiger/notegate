@@ -120,6 +120,7 @@ CREATE TABLE spaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_user_id UUID NOT NULL REFERENCES users(id),
     name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -135,7 +136,7 @@ CREATE UNIQUE INDEX spaces_owner_name_live_uidx
     ON spaces(owner_user_id, name)
     WHERE deleted_at IS NULL;
 CREATE INDEX spaces_owner_list_idx
-    ON spaces(owner_user_id, created_at, id)
+    ON spaces(owner_user_id, sort_order, name, id)
     WHERE deleted_at IS NULL;
 
 CREATE TABLE space_agent_connections (

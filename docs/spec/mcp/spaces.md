@@ -8,7 +8,7 @@
 {"limit":50,"cursor":"opaque"}
 ```
 
-User caller는 자신이 소유한 spaces를 본다. Agent caller는 연결된 spaces를 본다.
+User caller는 자신이 소유한 spaces를 본다. Agent caller는 연결된 spaces를 본다. 정렬은 `sort_order ASC, name ASC, id ASC`이며 `cursor`는 opaque 값이다.
 
 ## `spaces_create`
 

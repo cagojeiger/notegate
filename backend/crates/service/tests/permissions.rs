@@ -10,7 +10,7 @@ use common::TestDb;
 use notegate_db::{ConnectionRepo, FilesRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, DeleteNode};
 use notegate_model::{
-    AccountKind, ConnectAgent, CreateAgent, CreateSpace, Permission, RenameSpace,
+    AccountKind, ConnectAgent, CreateAgent, CreateSpace, Permission, UpdateSpace,
 };
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
@@ -181,12 +181,13 @@ async fn connected_agent_write_cannot_manage_space_or_connections()
 
     let spaces = SpaceService::new(SpaceRepo::new(db.pool.clone()));
     let rename = spaces
-        .rename(
+        .update(
             AccountKind::Agent,
             agent,
-            RenameSpace {
+            UpdateSpace {
                 space_id: space.id,
-                new_name: "renamed".to_owned(),
+                name: Some("renamed".to_owned()),
+                sort_order: None,
             },
         )
         .await;

@@ -72,7 +72,7 @@ space_agent_connections disconnect
 User caller만 space를 생성한다.
 
 ```text
-spaces(owner_user_id=user)
+spaces(owner_user_id=user, sort_order=0)
 root node '/'
 ```
 
@@ -80,9 +80,9 @@ root node '/'
 - Root node는 생성 transaction의 일부다.
 - Agent는 space를 생성할 수 없다.
 
-### Space rename/delete
+### Space update/delete
 
-Owner user만 space 이름 변경/삭제를 수행한다.
+Owner user만 space 이름과 sort_order 변경, 삭제를 수행한다.
 
 삭제는 soft delete다.
 

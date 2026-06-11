@@ -7,7 +7,7 @@ use notegate_core::limits;
 use notegate_core::validation::validate_space_name;
 use notegate_db::SpaceRepo;
 use notegate_model::{AccountKind, Permission};
-pub use notegate_model::{CreateSpace, ListSpaces, RenameSpace, SpaceCursor, SpacePage, SpaceView};
+pub use notegate_model::{CreateSpace, ListSpaces, SpaceCursor, SpacePage, SpaceView, UpdateSpace};
 use uuid::Uuid;
 
 use crate::cursor;
@@ -81,7 +81,8 @@ impl SpaceService {
             items
                 .last()
                 .map(|view| SpaceCursor {
-                    created_at: view.space.created_at,
+                    sort_order: view.space.sort_order,
+                    name: view.space.name.clone(),
                     id: view.space.id,
                 })
                 .map(|cursor| cursor::encode(&cursor))
@@ -124,20 +125,32 @@ impl SpaceService {
             .await?)
     }
 
-    pub async fn rename(
+    pub async fn update(
         &self,
         caller_kind: AccountKind,
         caller_account_id: Uuid,
-        command: RenameSpace,
+        command: UpdateSpace,
     ) -> ServiceResult<SpaceView> {
         require_user_caller(caller_kind)?;
-        validate_space_name(&command.new_name)?;
+        if command.name.is_none() && command.sort_order.is_none() {
+            return Err(ServiceError::InvalidInput(
+                "provide name and/or sort_order to update".to_owned(),
+            ));
+        }
+        if let Some(name) = command.name.as_deref() {
+            validate_space_name(name)?;
+        }
         self.require_write(command.space_id, caller_account_id)
             .await?;
 
         let space = self
             .store
-            .rename_space(command.space_id, caller_account_id, &command.new_name)
+            .update_space(
+                command.space_id,
+                caller_account_id,
+                command.name.as_deref(),
+                command.sort_order,
+            )
             .await?;
         let root_node_id = self
             .store

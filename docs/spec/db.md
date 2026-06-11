@@ -110,6 +110,7 @@ spaces
   id uuid pk
   owner_user_id uuid not null references users(id)
   name text not null
+  sort_order int not null default 0
   created_at timestamptz
   updated_at timestamptz
   deleted_at timestamptz null
@@ -117,7 +118,7 @@ spaces
   purge_after timestamptz null
 ```
 
-Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다.
+Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다. Space 목록 기본 정렬은 `(sort_order, name, id)`다.
 
 ```text
 space_agent_connections

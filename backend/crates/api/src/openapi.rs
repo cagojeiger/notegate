@@ -31,7 +31,7 @@ use crate::state::AppState;
         rest::spaces::list,
         rest::spaces::create,
         rest::spaces::get_one,
-        rest::spaces::rename,
+        rest::spaces::update,
         rest::spaces::delete,
         rest::nodes::resolve_path,
         rest::nodes::create,

@@ -17,8 +17,8 @@ pub use api_key::{ApiKey, ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, M
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use node::{Node, NodeKind};
 pub use space::{
-    ConnectAgent, ConnectionPage, CreateSpace, ListConnections, ListSpaces, Permission,
-    RenameSpace, Space, SpaceAgentConnection, SpaceCursor, SpacePage, SpaceView,
+    ConnectAgent, ConnectionPage, CreateSpace, ListConnections, ListSpaces, Permission, Space,
+    SpaceAgentConnection, SpaceCursor, SpacePage, SpaceView, UpdateSpace,
 };
 pub use text::{FileObject, FileStorageKind, TextObject, TextStorageFormat};
 pub use user::User;

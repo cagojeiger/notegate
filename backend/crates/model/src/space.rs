@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub struct Space {
     pub id: Uuid,
     pub name: String,
+    pub sort_order: i32,
     pub owner_user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -64,9 +65,10 @@ pub struct CreateSpace {
 }
 
 #[derive(Debug, Clone)]
-pub struct RenameSpace {
+pub struct UpdateSpace {
     pub space_id: Uuid,
-    pub new_name: String,
+    pub name: Option<String>,
+    pub sort_order: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -77,7 +79,8 @@ pub struct ListSpaces {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpaceCursor {
-    pub created_at: DateTime<Utc>,
+    pub sort_order: i32,
+    pub name: String,
     pub id: Uuid,
 }
 

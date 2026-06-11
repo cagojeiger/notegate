@@ -70,7 +70,7 @@ api_keys_default_limit = 50
 api_keys_max_limit = 100
 ```
 
-목록 API는 여러 row를 반환하면 pagination을 제공한다.
+목록 API는 여러 row를 반환하면 opaque cursor pagination을 제공한다. 내부 구현은 resource hard limit에 따라 DB keyset 또는 bounded in-memory pagination을 사용할 수 있다.
 
 ## Purge limits
 
