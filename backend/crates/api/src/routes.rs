@@ -163,7 +163,6 @@ fn rest_api_routes(state: AppState) -> Router<AppState> {
         .merge(crate::rest::nodes::routes())
         .merge(crate::rest::text::routes())
         .merge(crate::rest::files::routes())
-        .merge(crate::rest::search::routes())
         .merge(crate::rest::connections::routes())
         .merge(crate::rest::agents::routes())
         .fallback(api_not_found)
