@@ -22,13 +22,13 @@ pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use types::{
-    AppendText, ChildrenRequest, CreateFile, CreateFolder, CreateText, DeleteNode, Edit, MoveNode,
-    PatchText, ReadText, WriteTarget, WriteText, WriteTextBody,
+    AppendText, ChildrenRequest, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
+    MoveNode, PatchText, ReadText, WriteTarget, WriteText, WriteTextBody,
 };
 pub use types::{
-    ChildrenCursor, ChildrenPage, DeleteResult, FileContent, FileStats, FileView, NodeView,
-    PatchResult, ReadContent, ReadResult, ReadTextBody, StoredContent, StoredFile, TextStats,
-    TextView,
+    ChildrenCursor, ChildrenPage, CopyCounts, CopyResult, DeleteResult, FileContent, FileStats,
+    FileView, NodeView, PatchResult, ReadContent, ReadResult, ReadTextBody, StoredContent,
+    StoredFile, TextStats, TextView,
 };
 pub use validation::FilesValidationError;
 

@@ -28,6 +28,12 @@ pub struct FindInput {
     /// Name match mode. Defaults to `contains`; use `glob` for patterns like `*.md`.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
+    /// Optional path globs to include, for example `/notes/*`.
+    #[serde(default)]
+    pub include: Option<Vec<String>>,
+    /// Optional path globs to exclude, for example `/archive/*`.
+    #[serde(default)]
+    pub exclude: Option<Vec<String>>,
     /// Page size; clamped to the find limit, default `50`.
     #[serde(default)]
     pub limit: Option<i64>,
@@ -88,6 +94,8 @@ pub async fn find(
                 path: scope_path,
                 kind,
                 match_mode,
+                include: input.include.unwrap_or_default(),
+                exclude: input.exclude.unwrap_or_default(),
                 limit: input.limit,
                 cursor: input.cursor,
             },

@@ -7,9 +7,9 @@ use crate::error::{ServiceError, ServiceResult};
 use crate::files::patch::{apply_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
-    AppendText, CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, FileCommand,
-    MoveNode, NodeView, PatchResult, PatchText, StoredContent, TextView, WriteTarget, WriteText,
-    WriteTextBody, content,
+    AppendText, CopyNode, CopyResult, CreateFile, CreateFolder, CreateText, DeleteNode,
+    DeleteResult, FileCommand, MoveNode, NodeView, PatchResult, PatchText, StoredContent, TextView,
+    WriteTarget, WriteText, WriteTextBody, content,
 };
 
 use super::view::{file_view_at_path, text_view_at_path};
@@ -338,6 +338,32 @@ impl FilesService {
             edits_applied: command.edits.len(),
             diff,
         })
+    }
+
+    /// Copy a node within the same space (`cp`). Requires write permission.
+    pub async fn copy_node(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: CopyNode,
+    ) -> ServiceResult<CopyResult> {
+        self.authorize(space_id, caller_account_id, FileCommand::Copy)
+            .await?;
+
+        let source = self.load_node(space_id, command.node_id).await?;
+        if source.kind == NodeKind::Folder && !command.recursive {
+            return Err(ServiceError::Conflict(
+                "folder copy requires recursive=true".to_owned(),
+            ));
+        }
+        validation::validate_basename(&command.new_name, source.kind)?;
+
+        let (node, counts) = self
+            .store
+            .copy_node(space_id, &command, caller_account_id)
+            .await?;
+        let node = self.node_view(space_id, node).await?;
+        Ok(CopyResult { node, counts })
     }
 
     /// Read a node's metadata object. Requires read permission.

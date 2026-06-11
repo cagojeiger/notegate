@@ -4,7 +4,7 @@ use axum::http::request::Parts;
 use notegate_model::{NodeKind, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
-    AppendText, ChildrenRequest, CreateFolder, DeleteNode, Edit as ServiceEdit, MoveNode,
+    AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, MoveNode,
     PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::TreeRequest;
@@ -133,6 +133,18 @@ pub struct MvInput {
     pub source: String,
     /// Destination target in `<space>:/path` form. Must be in the same space as `source`.
     pub destination: String,
+}
+
+/// `files_copy` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CopyInput {
+    /// Source node target in `<space>:/path` form.
+    pub source: String,
+    /// Destination target in `<space>:/path` form. Must be in the same space as `source`.
+    pub destination: String,
+    /// Required when the source is a folder.
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 /// `files_rm` input.
@@ -651,6 +663,64 @@ pub async fn mv(
     Ok(Json(json!({
         "space": source_space.name(),
         "node": node_summary(&view),
+    })))
+}
+
+pub async fn copy(
+    state: &AppState,
+    parts: &Parts,
+    Parameters(input): Parameters<CopyInput>,
+) -> Result<Json<Value>, ErrorData> {
+    let caller = caller(parts)?;
+    let (source_space, source_path) = resolve_target(state, caller, &input.source).await?;
+    let (destination_space, destination_path) =
+        resolve_target(state, caller, &input.destination).await?;
+    let account_id = caller.account_id();
+    let space_id = source_space.space_id();
+
+    if destination_space.space_id() != space_id {
+        return Err(invalid_input_error(
+            "source and destination must be in the same space",
+        ));
+    }
+
+    let source = state
+        .files
+        .resolve_path(account_id, space_id, &source_path)
+        .await
+        .map_err(service_error)?;
+    let (parent_path, new_name) = split_parent_name(&destination_path)?;
+    let parent = state
+        .files
+        .resolve_path(account_id, space_id, &parent_path)
+        .await
+        .map_err(service_error)?;
+
+    let result = state
+        .files
+        .copy_node(
+            account_id,
+            space_id,
+            CopyNode {
+                node_id: source.node.id,
+                new_parent_node_id: parent.node.id,
+                new_name,
+                recursive: input.recursive,
+            },
+        )
+        .await
+        .map_err(service_error)?;
+
+    Ok(Json(json!({
+        "space": source_space.name(),
+        "source_path": source_path,
+        "node": node_summary(&result.node),
+        "copied": true,
+        "counts": {
+            "nodes": result.counts.nodes,
+            "texts": result.counts.texts,
+            "files": result.counts.files,
+        },
     })))
 }
 

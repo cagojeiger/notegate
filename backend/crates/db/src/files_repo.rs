@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 use crate::files::{commands, queries};
 use notegate_model::files::{
-    ChildrenCursor, CreateFolder, FileStats, MoveNode, StoredContent, StoredFile, TextStats,
+    ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, StoredContent,
+    StoredFile, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -308,6 +309,25 @@ impl FilesRepo {
             new_name: command.new_name.as_deref(),
             expected_parent_id: command.expected_parent_id,
             updated_by,
+            caps: self.limits,
+        })
+        .await
+    }
+
+    pub async fn copy_node(
+        &self,
+        space_id: Uuid,
+        command: &CopyNode,
+        created_by: Uuid,
+    ) -> Result<(Node, CopyCounts)> {
+        commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
+            pool: &self.pool,
+            space_id,
+            source_node_id: command.node_id,
+            new_parent_id: command.new_parent_node_id,
+            new_name: &command.new_name,
+            recursive: command.recursive,
+            created_by,
             caps: self.limits,
         })
         .await

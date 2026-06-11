@@ -207,6 +207,19 @@ impl McpServer {
     }
 
     #[tool(
+        name = "files_copy",
+        description = "Copy a node within the same space, like `cp`. Folders require `recursive=true`.",
+        output_schema = object_output_schema()
+    )]
+    pub async fn files_copy_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::files::CopyInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::files::copy(&self.state, &parts, params).await
+    }
+
+    #[tool(
         name = "files_rm",
         description = "Soft delete a node, like `rm`. Folders require `recursive=true`.",
         output_schema = object_output_schema()
@@ -413,8 +426,17 @@ mod tests {
                 "target edits",
             ),
             ("files_mv", "source destination", "source destination"),
+            (
+                "files_copy",
+                "source destination recursive",
+                "source destination",
+            ),
             ("files_rm", "target recursive", "target"),
-            ("files_find", "target q kind match limit cursor", "target q"),
+            (
+                "files_find",
+                "target q kind match include exclude limit cursor",
+                "target q",
+            ),
             (
                 "files_grep",
                 "target q match lines include exclude limit cursor",
@@ -446,6 +468,7 @@ mod tests {
             "files_append",
             "files_patch",
             "files_mv",
+            "files_copy",
             "files_rm",
             "files_find",
             "files_grep",

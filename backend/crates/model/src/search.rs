@@ -12,6 +12,8 @@ pub struct FindRequest {
     pub path: Option<String>,
     pub kind: Option<NodeKind>,
     pub match_mode: FindMatchMode,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }

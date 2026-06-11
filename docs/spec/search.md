@@ -132,6 +132,8 @@ for each node candidate in DFS order:
     skip result
   if kind filter mismatches:
     continue
+  if include/exclude path filter mismatches:
+    continue
   if name matches q with match mode:
     emit McpNodeSummary
 ```
@@ -147,6 +149,8 @@ glob     = node name glob match
 Match는 대소문자를 구분하지 않는다.
 
 Glob과 regex는 명시적으로 선택한다. 예를 들어 `*.md`는 glob mode에서만 glob pattern이다.
+
+`include`/`exclude` path filter는 glob pattern list다. `q`는 node name에만 적용하고, path filter는 derived path에만 적용한다.
 
 ### `grep` candidate scan
 

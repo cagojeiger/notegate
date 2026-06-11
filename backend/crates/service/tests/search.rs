@@ -137,6 +137,8 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -162,6 +164,45 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
         "find item carries derived path"
     );
 
+    let projects_only = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "note".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                include: vec!["/projects/*".to_owned()],
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    let projects_only_ids: Vec<Uuid> = projects_only.items.iter().map(|v| v.node.id).collect();
+    assert_eq!(projects_only_ids, vec![proj_note]);
+
+    let excluded_projects = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "note".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: vec!["/projects/*".to_owned()],
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    let excluded_projects_ids: Vec<Uuid> =
+        excluded_projects.items.iter().map(|v| v.node.id).collect();
+    assert_eq!(excluded_projects_ids, vec![other_note]);
+
     // name-only: q='projects' hits the folder itself, not the doc beneath it
     // merely because its derived path contains /projects.
     let by_path = search
@@ -173,6 +214,8 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -202,6 +245,8 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 path: None,
                 kind: Some(notegate_model::NodeKind::Folder),
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -222,6 +267,8 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 path: None,
                 kind: Some(notegate_model::NodeKind::Folder),
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -244,6 +291,8 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 path: Some("/projects".to_owned()),
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -325,6 +374,8 @@ needle
                 path: Some("/missing".to_owned()),
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -456,6 +507,8 @@ async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(1),
                 cursor: None,
             },
@@ -474,6 +527,8 @@ async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(1),
                 cursor: first.next_cursor,
             },
@@ -660,6 +715,8 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
                     path: None,
                     kind: None,
                     match_mode: FindMatchMode::Contains,
+                    include: Vec::new(),
+                    exclude: Vec::new(),
                     limit: Some(limit),
                     cursor: cursor.clone(),
                 },
@@ -805,6 +862,8 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: Some("!!!not-a-cursor!!!".to_owned()),
             },

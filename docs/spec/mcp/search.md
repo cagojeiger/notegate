@@ -12,6 +12,8 @@ type FilesFindInput = {
   q: string
   kind?: "folder" | "text" | "file"
   match?: "contains" | "regex" | "glob"
+  include?: string[]
+  exclude?: string[]
   limit?: number
   cursor?: string
 }
@@ -23,7 +25,7 @@ type FilesFindOutput = {
 }
 ```
 
-기본 `match`는 `contains`다. Folder/Text/File 모두 대상이다. Root node는 결과에서 제외한다. Content와 metadata는 검색하지 않는다.
+기본 `match`는 `contains`다. Folder/Text/File 모두 대상이다. Root node는 결과에서 제외한다. `q`는 node name에만 적용한다. `include`/`exclude`는 결과 path에 적용하는 glob list이며 각 list는 최대 32개 pattern, pattern 하나는 최대 256자다. Content와 metadata는 검색하지 않는다.
 
 예:
 

@@ -20,6 +20,7 @@ list    folder children 또는 subtree 목록
 stat    folder/text/file 상태 조회
 mkdir   folder 생성
 mv      node rename/move
+copy    node 복사
 rm      node soft delete
 find    node name/kind/scope 검색
 grep    plain Text 후보 검색
@@ -29,7 +30,7 @@ grep    plain Text 후보 검색
 
 ```text
 read  permission -> list/stat/read text/find/grep 가능
-write permission -> read + mkdir/write/append/patch/mv/rm 가능
+write permission -> read + mkdir/write/append/patch/mv/copy/rm 가능
 ```
 
 User caller는 자신이 소유한 space에서 read/write/manage 가능하다. Agent caller는 connection permission에 따른다.
@@ -59,6 +60,17 @@ File은 binary/object content node다. MCP/CLI command surface는 file upload/do
 
 - File은 `nodes.kind='file'`이다.
 - File은 text read/patch/grep 대상이 아니다.
+
+## Copy semantics
+
+`copy`는 같은 Space 안에서 source node를 destination path로 복사한다.
+
+- Destination은 새 path여야 하며 overwrite하지 않는다.
+- Folder 복사는 `recursive=true`가 필요하다.
+- 새 root node와 descendants는 새 id를 가진다.
+- Node metadata, plain/encrypted Text payload, inline File payload는 보존한다.
+- 새 row의 create/update attribution은 copy caller로 기록한다.
+- Space 간 copy는 지원하지 않는다.
 
 ## Search semantics
 

@@ -23,8 +23,9 @@ use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::FileEncryptionMode;
 use notegate_service::files::Edit;
 use notegate_service::files::{
-    AppendText, ChildrenCursor, CreateFile, CreateFolder, CreateText, DeleteNode, FilesService,
-    MoveNode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
+    AppendText, ChildrenCursor, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode,
+    FilesService, MoveNode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
+    WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -343,6 +344,71 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         "application/octet-stream"
     );
 
+    // --- copy: server-side semantic copy preserves metadata, encrypted text, and file stats ---
+    let copied = files
+        .copy_node(
+            owner,
+            ws,
+            CopyNode {
+                node_id: projects_id,
+                new_parent_node_id: root,
+                new_name: "projects-copy".to_owned(),
+                recursive: true,
+            },
+        )
+        .await?;
+    assert_eq!(copied.node.path, "/projects-copy");
+    assert_eq!(copied.counts.nodes, 4);
+    assert_eq!(copied.counts.texts, 2);
+    assert_eq!(copied.counts.files, 1);
+    assert_eq!(copied.node.node.metadata["title"], "Project notes");
+
+    let copied_secret = files
+        .resolve_path(owner, ws, "/projects-copy/secret.md")
+        .await?;
+    let copied_secret_read = files
+        .read_text(
+            owner,
+            ws,
+            ReadText {
+                node_id: copied_secret.node.id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    match copied_secret_read.body {
+        ReadTextBody::Encrypted(payload) => assert_eq!(payload["alg"], "AES-256-GCM"),
+        other => panic!("expected copied encrypted body, got {other:?}"),
+    }
+
+    let copied_file = files
+        .resolve_path(owner, ws, "/projects-copy/diagram.bin")
+        .await?;
+    let copied_downloaded = files.read_file(owner, ws, copied_file.node.id).await?;
+    assert_eq!(copied_downloaded.bytes, b"binary-data");
+    assert_eq!(
+        copied_downloaded.file.content_sha256,
+        uploaded.file.content_sha256
+    );
+
+    let non_recursive_copy = files
+        .copy_node(
+            owner,
+            ws,
+            CopyNode {
+                node_id: projects_id,
+                new_parent_node_id: root,
+                new_name: "projects-copy-2".to_owned(),
+                recursive: false,
+            },
+        )
+        .await
+        .expect_err("folder copy must require recursive=true");
+    assert!(non_recursive_copy.to_string().contains("recursive=true"));
+
     // --- patch: exact-match replacement ---
     let patched = files
         .patch_text(
@@ -383,6 +449,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(50),
                 cursor: None,
             },
@@ -403,6 +471,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(50),
                 cursor: None,
             },
@@ -485,6 +555,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(50),
                 cursor: None,
             },
@@ -836,6 +908,8 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(50),
                 cursor: None,
             },
@@ -854,6 +928,8 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
                 path: Some("/inside".to_owned()),
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(50),
                 cursor: None,
             },
@@ -955,6 +1031,8 @@ async fn find_pages_subtree_in_dfs_preorder() -> Result<(), Box<dyn std::error::
                     path: None,
                     kind: None,
                     match_mode: FindMatchMode::Glob,
+                    include: Vec::new(),
+                    exclude: Vec::new(),
                     limit: Some(2),
                     cursor: cursor.clone(),
                 },
@@ -1001,6 +1079,8 @@ async fn find_pages_subtree_in_dfs_preorder() -> Result<(), Box<dyn std::error::
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Glob,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(2),
                 cursor: None,
             },
@@ -1016,6 +1096,8 @@ async fn find_pages_subtree_in_dfs_preorder() -> Result<(), Box<dyn std::error::
                 path: None,
                 kind: None,
                 match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: Some(2),
                 cursor: Some(stale),
             },

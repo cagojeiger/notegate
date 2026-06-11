@@ -176,6 +176,32 @@ type FilesMvOutput = {
 
 `source`와 `destination`은 같은 Space여야 한다. Space 간 move는 지원하지 않는다.
 
+## `files_copy`
+
+Node를 같은 Space 안에서 복사한다.
+
+```ts
+type FilesCopyInput = {
+  source: string
+  destination: string
+  recursive?: boolean
+}
+
+type FilesCopyOutput = {
+  space: string
+  source_path: string
+  node: McpNodeSummary
+  copied: true
+  counts: {
+    nodes: number
+    texts: number
+    files: number
+  }
+}
+```
+
+`source`와 `destination`은 같은 Space여야 한다. Destination은 새 path이며 overwrite하지 않는다. Folder 복사는 `recursive=true`가 필요하다. 서버는 node metadata와 Text/inline File payload를 내부에서 복사하므로 encrypted Text와 File bytes를 MCP 응답으로 노출하지 않는다.
+
 ## `files_rm`
 
 Node를 soft delete한다.

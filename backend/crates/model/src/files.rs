@@ -94,6 +94,21 @@ pub struct MoveNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyNode {
+    pub node_id: Uuid,
+    pub new_parent_node_id: Uuid,
+    pub new_name: String,
+    pub recursive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopyCounts {
+    pub nodes: usize,
+    pub texts: usize,
+    pub files: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeleteNode {
     pub node_id: Uuid,
     pub recursive: bool,
@@ -221,4 +236,10 @@ pub struct PatchResult {
     pub previous_sha256: String,
     pub edits_applied: usize,
     pub diff: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyResult {
+    pub node: NodeView,
+    pub counts: CopyCounts,
 }
