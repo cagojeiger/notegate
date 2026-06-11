@@ -162,8 +162,13 @@ pub mod file {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<FileStats>> {
+        let columns = FILE_COLUMNS
+            .split(',')
+            .map(|c| format!("f.{}", c.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
         let row: Option<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
-            "SELECT {FILE_COLUMNS} FROM file_objects f \
+            "SELECT {columns} FROM file_objects f \
          JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
          WHERE f.space_id = $1 AND f.node_id = $2 AND n.deleted_at IS NULL"
         ))
