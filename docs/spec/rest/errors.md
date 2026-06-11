@@ -12,7 +12,7 @@ REST 오류 응답은 항상 같은 기본 shape을 사용한다.
 }
 ```
 
-`error`와 `kind`는 같은 값을 가진다. `error`는 기존 REST client를 위한 필드이고, `kind`는 MCP `data.kind`와 같은 의미의 공통 분류다.
+`error`와 `kind`는 같은 값을 가진다. `kind`는 MCP `data.kind`와 같은 의미의 공통 분류다.
 
 ```text
 invalid_input  -> 400 invalid field/name/path, malformed limit, malformed/tampered cursor

@@ -55,7 +55,7 @@ byte_len       = plaintext byte length
 line_count     = plaintext line count for Text
 ```
 
-암호화 저장 시 DB에는 ciphertext, nonce, enc_key_id, enc_version을 저장한다. 현재 REST/MCP content surface는 plain Text만 지원한다. SQL `LIKE/ILIKE` 기반 grep은 encrypted content에 직접 적용하지 않는다.
+암호화 저장 시 DB에는 ciphertext, nonce, enc_key_id, enc_version을 저장한다. REST/MCP content surface는 plain Text만 대상으로 한다. SQL `LIKE/ILIKE` 기반 grep은 encrypted content에 직접 적용하지 않는다.
 
 ## Deletion and anonymization
 

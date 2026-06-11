@@ -4,7 +4,7 @@
 //! (paginated), `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
 //! (rename / reorder), `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
 //! All handlers delegate to the files service,
-//! which owns authorization (no live role ⇒ 404, lesser role ⇒ 403) and
+//! which owns authorization (no live permission ⇒ 404, insufficient permission ⇒ 403) and
 //! validation.
 
 use axum::extract::{Extension, Path, Query, State};
@@ -250,7 +250,7 @@ pub(crate) async fn create(
         }
         NodeKind::File => {
             return Err(ApiError::invalid_field(
-                "file node creation is not implemented yet",
+                "file node creation is not supported by this endpoint",
             ));
         }
     };

@@ -15,9 +15,9 @@ impl SearchService {
     /// Find nodes by name, optionally filtered by `kind` and scoped to a path's
     /// subtree. Keyset-paginated by `(name, id)`.
     ///
-    /// Authorization mirrors file reads: the caller's live space role is
-    /// resolved first (no role ⇒ `404`, which hides the space); `find`
-    /// requires `viewer`. The limit is clamped to `1..=FIND_MAX_LIMIT` (default
+    /// Authorization mirrors file reads: the caller's live space permission is
+    /// resolved first (no permission ⇒ `404`, which hides the space); `find`
+    /// requires read permission. The limit is clamped to `1..=FIND_MAX_LIMIT` (default
     /// `FIND_DEFAULT_LIMIT`); a malformed cursor is a clean `400`-class
     /// [`ServiceError::InvalidInput`].
     pub async fn find(

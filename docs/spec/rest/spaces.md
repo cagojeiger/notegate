@@ -28,6 +28,8 @@ spaces(owner_user_id=caller)
 root node '/'
 ```
 
+Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다.
+
 ## Get space
 
 ```http

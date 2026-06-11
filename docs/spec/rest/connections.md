@@ -8,7 +8,7 @@ Connection은 owner user가 agent를 space에 연결하는 product resource다.
 GET /api/v1/spaces/{space_id}/agents?limit=100&cursor=...
 ```
 
-Owner user만 호출한다. 현재 연결된 agent와 permission을 반환한다.
+Owner user만 호출한다. 연결된 agent와 permission을 반환한다.
 
 ## Connect or update agent
 

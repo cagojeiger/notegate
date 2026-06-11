@@ -2,7 +2,7 @@
 //!
 //! The service owns authorization, limit clamping, opaque cursors, and
 //! service-side grep line splitting. The two query implementations live in the
-//! [`find`] and [`grep`] submodules; shared types, the role gate, and query validation live here.
+//! [`find`] and [`grep`] submodules; shared types, the permission gate, and query validation live here.
 
 use notegate_core::limits;
 use notegate_db::FilesRepo;
@@ -30,8 +30,8 @@ impl SearchService {
         Self { store }
     }
 
-    /// Resolve the caller's role (no role ⇒ `404`) and gate by command
-    /// (lesser role ⇒ `403`). Mirrors the file service's authorization.
+    /// Resolve the caller's permission (none ⇒ `404`) and gate by command
+    /// (insufficient permission ⇒ `403`). Mirrors the file service's authorization.
     async fn authorize(
         &self,
         space_id: Uuid,

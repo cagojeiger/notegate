@@ -22,7 +22,7 @@ impl SearchService {
     /// Keyset-paginated by `(updated_at DESC, node_id)` plus an intra-text
     /// `match_offset`, so a single text with more matches than the page limit
     /// resumes exactly where the previous page stopped. Authorization mirrors file
-    /// reads (`grep` requires `viewer`; no role ⇒ `404`). The limit is clamped to
+    /// reads (`grep` requires read permission; no permission ⇒ `404`). The limit is clamped to
     /// `1..=GREP_MAX_LIMIT` (default `GREP_DEFAULT_LIMIT`); context is clamped to
     /// `0..=GREP_MAX_CONTEXT` (default `GREP_DEFAULT_CONTEXT`). A malformed cursor
     /// is a clean `400`-class [`ServiceError::InvalidInput`].

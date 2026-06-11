@@ -28,8 +28,8 @@ find    node name metadata 검색
 공통 권한:
 
 ```text
-read  permission -> ls/stat/find 가능
-write permission -> mkdir/touch/mv/rm 가능
+read  permission -> ls/stat/read/find/grep 가능
+write permission -> read + mkdir/touch/write/patch/mv/rm 가능
 ```
 
 User caller는 자신이 소유한 space에서 read/write/manage 가능하다. Agent caller는 connection permission에 따른다.
@@ -47,11 +47,11 @@ grep   text content 검색
 - `read`, `write`, `patch`, `grep`는 `nodes.kind='text'`에만 적용한다.
 - `patch`는 각 edit의 `old_text` 문자열이 원문에서 정확히 한 번만 매칭되어야 한다.
 - 여러 edit은 원본 기준으로 검증한 뒤 적용한다.
-- `expected_sha256`이 주어지면 현재 content hash와 일치해야 한다.
+- `expected_sha256`이 주어지면 저장된 content hash와 일치해야 한다.
 
 ## File commands
 
-File command schema는 향후 binary/object content를 위해 예약되어 있다. 현재 MCP/CLI command surface에는 upload/download를 노출하지 않는다.
+File은 binary/object content node다. MCP/CLI command surface는 file upload/download를 포함하지 않는다.
 
 - File은 `nodes.kind='file'`이다.
 - File은 text read/patch/grep 대상이 아니다.
@@ -63,4 +63,4 @@ find      folder/text/file node name 검색
 grep     text_objects content 검색
 ```
 
-Encrypted Text는 현재 grep 대상이 아니다.
+Encrypted Text는 grep 대상이 아니다.

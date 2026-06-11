@@ -24,6 +24,6 @@ Create rules:
 
 - Folder create는 `nodes(kind='folder')`만 만든다.
 - Text create는 `nodes(kind='text')`와 `text_objects`를 함께 만든다.
-- Text create 요청에 `content`가 있으면 초기 content를 같은 요청에서 쓴다.
-- File node create는 현재 REST node create에서 허용하지 않는다.
+- Text create 요청에 `content`가 있으면 content를 같은 요청에서 쓴다.
+- File node create는 REST node create에서 허용하지 않는다.
 - 같은 parent 안 live name은 unique다.

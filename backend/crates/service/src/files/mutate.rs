@@ -14,7 +14,7 @@ use super::view::text_view_at_path;
 use super::{FilesService, join_path, path_depth};
 
 impl FilesService {
-    /// Create a folder (`mkdir`). Requires `editor`.
+    /// Create a folder (`mkdir`). Requires write permission.
     pub async fn create_folder(
         &self,
         caller_account_id: Uuid,
@@ -42,7 +42,7 @@ impl FilesService {
         })
     }
 
-    /// Create an empty text (`touch`). Requires `editor`.
+    /// Create an empty text (`touch`). Requires write permission.
     pub async fn create_text(
         &self,
         caller_account_id: Uuid,
@@ -76,7 +76,7 @@ impl FilesService {
         Ok(text_view_at_path(node, path, text))
     }
 
-    /// Replace a text's content (`write`/`save`). Requires `editor`.
+    /// Replace a text's content (`write`/`save`). Requires write permission.
     ///
     /// [`WriteTarget::Existing`] replaces an existing text (the `create=false`
     /// case, and the resolved `create=true` case). [`WriteTarget::Create`] makes a
@@ -150,7 +150,7 @@ impl FilesService {
         }
     }
 
-    /// Apply exact targeted edits to a text (`patch`). Requires `editor`.
+    /// Apply exact targeted edits to a text (`patch`). Requires write permission.
     pub async fn patch_text(
         &self,
         caller_account_id: Uuid,
@@ -215,7 +215,7 @@ impl FilesService {
         })
     }
 
-    /// Move or rename a node (`mv`). Requires `editor`.
+    /// Move or rename a node (`mv`). Requires write permission.
     pub async fn move_node(
         &self,
         caller_account_id: Uuid,
@@ -310,7 +310,7 @@ impl FilesService {
     }
 
     /// Update a node's in-place metadata: rename and/or reorder (`PATCH`).
-    /// Requires `editor`. The node keeps its parent. Renaming the root is
+    /// Requires write permission. The node keeps its parent. Renaming the root is
     /// rejected; a rename validates the new basename and sibling-name uniqueness.
     /// At least one of `new_name`/`new_sort_order` must be present.
     pub async fn update_node(
@@ -369,7 +369,7 @@ impl FilesService {
         self.node_view(space_id, updated).await
     }
 
-    /// Delete a node (`rm`). Requires `editor`.
+    /// Delete a node (`rm`). Requires write permission.
     ///
     /// The node is hidden immediately by soft-deleting the live subtree. Public
     /// recovery is intentionally not part of the product contract; the returned

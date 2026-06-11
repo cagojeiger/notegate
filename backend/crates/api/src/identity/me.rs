@@ -2,7 +2,7 @@
 //! MCP `me` tool, so the two surfaces stay aligned (`docs/spec/mcp/identity.md`).
 //!
 //! The shape is `{ account, user?, agent?, capabilities }`. Space-specific
-//! roles are intentionally excluded; callers enumerate them through the
+//! permissions are intentionally excluded; callers enumerate them through the
 //! Spaces category (`GET /api/v1/spaces` / `spaces_list`).
 
 use notegate_model::account::AccountKind;

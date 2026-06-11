@@ -172,7 +172,7 @@ async fn select_space(
         .map_err(service_error)?;
     match page.items.len() {
         0 => Err(invalid_input_error(
-            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space grant",
+            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space connection",
         )),
         1 if !page.has_more => page.items.into_iter().next().ok_or_else(|| {
             ErrorData::internal_error("failed to select space", error_meta("internal_error"))
@@ -231,7 +231,7 @@ fn pick_space(
     match (count, iter.next()) {
         (1, Some(view)) => Ok(view),
         (0, _) => Err(invalid_input_error(
-            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space grant",
+            "this caller has no accessible spaces; user callers may call spaces_create, agent callers need a space connection",
         )),
         _ => Err(invalid_input_error(
             "multiple spaces are accessible; pass 'space' (see spaces_list)",
@@ -323,7 +323,7 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
     Ok((parent, name.to_owned()))
 }
 
-/// The canonical `{id, name, role, root_node_id}` space summary used by
+/// The canonical `{id, name, permission, root_node_id}` space summary used by
 /// `spaces_list` and `spaces_get`.
 pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     json!({

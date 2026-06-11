@@ -1,6 +1,6 @@
 # Database schema
 
-이 문서는 새 도메인 모델의 DB 정본이다. 배포 전 리팩토링에서는 기존 migration을 보존하지 않고 단일 초기 migration으로 정리할 수 있다.
+이 문서는 Notegate DB schema의 정본이다.
 
 ## Entity overview
 
@@ -101,7 +101,7 @@ api_keys
   rotated_from_key_id uuid null references api_keys(id)
 ```
 
-평문 token은 저장하지 않는다. `scopes`는 현재 빈 배열만 허용한다.
+평문 token은 저장하지 않는다. `scopes`는 빈 배열만 허용한다.
 
 ## Space and connection tables
 
@@ -117,7 +117,7 @@ spaces
   purge_after timestamptz null
 ```
 
-Live space name은 `(owner_user_id, name)` 기준 unique다.
+Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다.
 
 ```text
 space_agent_connections
@@ -131,7 +131,7 @@ space_agent_connections
   primary key (space_id, agent_id)
 ```
 
-Connection은 agent 전용이다. User-to-user membership은 초기 제품에 없다.
+Connection은 agent 전용이다. User-to-user membership은 제공하지 않는다.
 
 ## Tree and content tables
 
@@ -211,16 +211,15 @@ storage_format='encrypted' -> content_text IS NULL, content_ciphertext/nonce/enc
 
 File/Text 공통 암호화 정책:
 
-- Content 암호화용 컬럼은 server-side encryption을 위해 예약되어 있다.
-- 현재 REST/MCP read/write/patch/grep surface는 plain Text만 지원한다.
+- Content 암호화용 컬럼은 server-side encrypted storage format에 사용한다.
+- REST/MCP read/write/patch/grep surface는 plain Text만 대상으로 한다.
 - `content_sha256`, `byte_len`, `line_count`는 plaintext 기준 metadata다.
 
 Node-content invariant:
 
 ```text
-nodes.kind='folder' -> text_objects/file_objects row 없음
-nodes.kind='text'   -> text_objects row 1개
-nodes.kind='file'   -> file_objects row 1개
+text_objects row -> matching nodes.kind='text'
+file_objects row -> matching nodes.kind='file'
 ```
 
-이 invariant는 service transaction에서 보장하고, 필요하면 trigger로 보강한다.
+DB trigger는 content row가 올바른 node kind에만 붙도록 보장한다. Folder는 content row를 만들지 않는다. Text 생성/쓰기는 service transaction에서 node와 text_objects row를 함께 만든다.

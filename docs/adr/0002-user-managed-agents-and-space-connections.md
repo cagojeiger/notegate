@@ -34,6 +34,6 @@ agent acts inside connected space
 
 ## Consequences
 
-- 팀 협업식 `owner/editor/viewer membership`을 제품 모델로 노출하지 않는다.
-- UI 용어는 `access grant`보다 `connect agent`, `disconnect agent`, `permission`을 사용한다.
+- 제품 모델은 개인 user가 관리하는 agent connection을 중심으로 한다.
+- UI 용어는 `connect agent`, `disconnect agent`, `permission`을 사용한다.
 - 내부 인증 주체는 user/agent 모두 account지만, lifecycle 관리 주체는 user다.

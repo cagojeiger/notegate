@@ -38,8 +38,8 @@ text_objects.content_text
 ```
 
 - File은 grep 대상이 아니다.
-- Encrypted Text는 현재 grep 대상이 아니다.
-- 초기 구현은 Postgres `ILIKE`/trigram 기반 단순 검색으로 유지한다.
+- Encrypted Text는 grep 대상이 아니다.
+- 검색은 Postgres `ILIKE`/trigram 기반으로 수행한다.
 - 결과는 keyset pagination을 제공한다.
 
 ## Folder scope

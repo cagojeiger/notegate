@@ -3,7 +3,7 @@
 //! `GET /api/v1/spaces` (paginated, default 50, max 100), `POST` to create,
 //! and `GET`/`PATCH`/`DELETE /{space_id}`. Each handler resolves the caller
 //! from the auth middleware and delegates to the space service, which owns
-//! authorization (no live role ⇒ 404, lesser role ⇒ 403).
+//! authorization (no live permission ⇒ 404, insufficient permission ⇒ 403).
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;

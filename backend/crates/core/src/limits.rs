@@ -1,8 +1,8 @@
 //! Product limits for notegate.
 //!
 //! Every create/list/search/read/subtree operation must be bounded. Most limits
-//! are fixed hard-max product constants. A later tier system may choose lower
-//! effective quotas per account, but it must not exceed these core maxima.
+//! are fixed hard-max product constants. Runtime effective quotas may be lower,
+//! but they must not exceed these core maxima.
 //! Expensive file-tree capacity caps can be lowered through [`crate::Config`]
 //! for E2E/dev testing while keeping these spec maxima.
 //!
@@ -58,8 +58,6 @@ pub const SPACE_NAME_MAX_LEN: usize = 63;
 pub const FOLDER_NAME_MAX_LEN: usize = 128;
 /// Maximum text node name length, in characters.
 pub const TEXT_NAME_MAX_LEN: usize = 128;
-/// Maximum text stem length, in characters.
-pub const TEXT_STEM_MAX_LEN: usize = 125;
 /// Maximum derived path length, in bytes.
 pub const MAX_PATH_LEN: usize = 645;
 /// Maximum path depth, in segments below the space root.

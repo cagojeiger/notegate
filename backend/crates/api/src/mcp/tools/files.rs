@@ -70,7 +70,7 @@ pub struct MkdirInput {
 pub struct TouchInput {
     #[serde(flatten)]
     pub selector: SpaceSelector,
-    /// Absolute path of the `.md` text to create.
+    /// Absolute path of the text node to create.
     #[serde(default)]
     pub path: Option<String>,
     /// Compact `<space>:/<path>` target (alternative to space+path).

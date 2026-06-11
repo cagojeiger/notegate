@@ -27,7 +27,7 @@ use crate::error::ServiceError;
 /// Why a file-tree command failed validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilesValidationError {
-    /// A name or path failed format validation (charset, length, depth, `.md`).
+    /// A name or path failed format validation (charset, length, depth).
     Name(ValidationError),
     /// The parent folder already holds the maximum live direct children.
     FanoutExceeded {
@@ -102,8 +102,8 @@ impl From<FilesValidationError> for ServiceError {
     }
 }
 
-/// Validate a basename for the given kind: shared node format plus the `.md`
-/// shared node-name rule for folders, text nodes, and file nodes.
+/// Validate a basename for the given kind using the shared node-name rule for
+/// folders, text nodes, and file nodes.
 pub fn validate_basename(name: &str, kind: NodeKind) -> Result<(), FilesValidationError> {
     match kind {
         NodeKind::Folder => validate_folder_name(name)?,

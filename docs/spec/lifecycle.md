@@ -127,8 +127,8 @@ text_objects
 
 - Text content는 UTF-8이다.
 - `byte_len`, `line_count`, `content_sha256`, `media_type`을 plaintext 기준으로 저장한다.
-- 현재 read/write/patch/grep은 plain Text만 대상으로 한다.
-- Server-side encrypted Text 저장 컬럼은 DB에 예약되어 있지만 현재 surface에서는 노출하지 않는다.
+- read/write/patch/grep은 plain Text만 대상으로 한다.
+- Server-side encrypted Text 저장 컬럼은 encrypted storage format에 사용한다.
 
 ### File
 
@@ -137,8 +137,8 @@ nodes(kind='file')
 file_objects
 ```
 
-- File schema는 binary/object content를 위해 준비되어 있다.
-- 현재 REST/MCP upload/download surface는 노출하지 않는다.
+- File은 binary/object content다.
+- REST/MCP upload/download surface는 제공하지 않는다.
 - File은 직접 text read/patch/grep 대상이 아니다.
 
 ### Node 삭제
@@ -165,7 +165,7 @@ api_keys(account_id=agent_id, created_by_user_id=owner_user_id) -- agent key
 ```
 
 - 평문 token은 생성/rotation 응답에서 한 번만 반환한다.
-- User key는 현재 user 자신에게만 만든다.
+- User key는 user 자신에게만 만든다.
 - Agent key는 caller가 소유한 active agent에게만 만든다.
 - `expires_at`은 필수이며 미래 시각이어야 한다.
 - User key TTL 최대 30일, agent key TTL 최대 365일.
@@ -181,4 +181,4 @@ api_keys.revoked_by_user_id=caller
 api_keys.revoked_reason=reason
 ```
 
-Rotation은 같은 account에 새 key를 만들고 old key를 같은 transaction에서 revoke한다. 기존 token 원문은 복구하지 않는다.
+Rotation은 같은 account에 새 key를 만들고 old key를 같은 transaction에서 revoke한다. Old token 원문은 복구하지 않는다.

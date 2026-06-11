@@ -2,8 +2,8 @@
 //!
 //! `GET /text/{node_id}` (bounded range + conditional read), `PUT` to
 //! replace the whole text, and `PATCH` to apply exact targeted edits. All
-//! delegate to the files service (no live role ⇒ 404, lesser role ⇒ 403; write
-//! and patch require `editor`).
+//! delegate to the files service (no live permission ⇒ 404, insufficient
+//! permission ⇒ 403; write and patch require write permission).
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::routing::get;

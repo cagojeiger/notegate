@@ -13,7 +13,7 @@ use crate::files::{
 use super::{FilesService, join_path};
 
 impl FilesService {
-    /// Metadata for a node (`stat`). Requires `viewer`.
+    /// Metadata for a node (`stat`). Requires read permission.
     pub async fn stat(
         &self,
         caller_account_id: Uuid,
@@ -27,7 +27,7 @@ impl FilesService {
     }
 
     /// Resolve an absolute path to a live node and return its view. Requires
-    /// `viewer`. A path that does not resolve to a live node is not-found
+    /// read permission. A path that does not resolve to a live node is not-found
     /// (`404`). Deleted nodes are not resolved.
     pub async fn resolve_path(
         &self,
@@ -47,7 +47,7 @@ impl FilesService {
         self.node_view(space_id, node).await
     }
 
-    /// List a folder's direct children (`ls`), keyset-paginated. Requires `viewer`.
+    /// List a folder's direct children (`ls`), keyset-paginated. Requires read permission.
     pub async fn children(
         &self,
         caller_account_id: Uuid,
@@ -117,7 +117,7 @@ impl FilesService {
         })
     }
 
-    /// Read a text with range limits (`read`/`open`). Requires `viewer`.
+    /// Read a text with range limits (`read`/`open`). Requires read permission.
     pub async fn read_text(
         &self,
         caller_account_id: Uuid,

@@ -1,4 +1,4 @@
-//! File-tree feature: command inputs, output views, validation, the role gate,
+//! File-tree feature: command inputs, output views, validation, the permission gate,
 //! the patch engine, and the [`FilesService`].
 //!
 //! Command semantics follow the shared file-command spec
@@ -44,7 +44,7 @@ use crate::error::{ServiceError, ServiceResult};
 /// Every command takes `(caller_account_id, space_id, ...)`. The service:
 ///
 /// 1. Resolves the caller's live [`Permission`] through the repository permission lookup FIRST. No
-///    live permission ⇒ not-found (`404`, hides the space); an insufficient role ⇒
+///    live permission ⇒ not-found (`404`, hides the space); insufficient permission ⇒
 ///    forbidden (`403`, via [`policy::require`]).
 /// 2. Validates input format (name, `.md`, depth, path length, text size)
 ///    with the pure [`validation`] functions.
@@ -75,8 +75,8 @@ impl FilesService {
 impl FilesService {
     // --- internal helpers ---
 
-    /// Resolve the caller's role (no role ⇒ 404) and gate by command (lesser
-    /// role ⇒ 403).
+    /// Resolve the caller's permission (none ⇒ 404) and gate by command
+    /// (insufficient permission ⇒ 403).
     pub(super) async fn authorize(
         &self,
         space_id: Uuid,

@@ -3,7 +3,7 @@
 //! `GET` returns the authenticated account, optional user/agent detail, and
 //! global non-space capabilities via the shared [`build_me`] builder, kept
 //! aligned with the MCP `me` tool (`docs/spec/mcp/identity.md`). Space-specific
-//! roles live in the Spaces category, not in `/me`.
+//! permissions live in the Spaces category, not in `/me`.
 //!
 //! `DELETE` is the user account teardown endpoint. It is intentionally REST-only:
 //! MCP remains a file/space tool surface and does not expose account deletion.

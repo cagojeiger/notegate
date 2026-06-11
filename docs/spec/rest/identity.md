@@ -1,6 +1,6 @@
 # REST Identity
 
-`/me`는 현재 caller identity와 전역 capability만 반환한다. Space 목록은 `/api/v1/spaces`에서 조회한다.
+`/me`는 caller identity와 전역 capability만 반환한다. Space 목록은 `/api/v1/spaces`에서 조회한다.
 
 ```http
 GET    /api/v1/me
@@ -45,5 +45,5 @@ User caller만 가능하다.
 ```
 
 - `expires_at`은 필수이며 최대 TTL은 30일이다.
-- `scopes`는 현재 빈 배열만 허용한다.
+- `scopes`는 빈 배열만 허용한다.
 - User account당 live key 최대 2개다.

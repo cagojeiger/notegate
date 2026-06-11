@@ -1,6 +1,6 @@
 # Performance and hard limits
 
-모든 limit은 시스템 hard limit이다. 나중에 tier 정책을 추가하더라도 이 값을 넘지 않는다.
+모든 limit은 시스템 hard limit이다. Runtime effective quota는 이 값을 넘지 않는다.
 
 ## HTTP safety limits
 
@@ -26,13 +26,13 @@ agent_api_key_max_ttl_days = 365
 api_key_name_max_chars = 63
 agent_name_max_chars = 63
 space_name_max_chars = 63
+space_name_pattern = ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
 ```
 
 ## Tree and content limits
 
 ```text
 node_name_max_chars = 128
-text_title_stem_max_chars = 125
 max_tree_depth = 5
 folder_max_children = 200
 space_max_nodes = 10000 live nodes
@@ -49,7 +49,7 @@ Depth는 root 아래 segment 수로 계산한다.
 ```text
 /                 depth 0
 /notes            depth 1
-/notes/today.md   depth 2
+/notes/today      depth 2
 ```
 
 ## Pagination defaults

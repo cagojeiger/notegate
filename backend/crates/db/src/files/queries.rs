@@ -590,6 +590,7 @@ pub mod search {
          WHERE d.space_id = $1 \
            AND n.deleted_at IS NULL \
            AND ($2::uuid IS NULL OR d.node_id IN (SELECT id FROM scope)) \
+           AND d.storage_format = 'plain' \
            AND d.content_text ILIKE $3"
         );
 

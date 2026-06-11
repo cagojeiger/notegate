@@ -30,7 +30,7 @@ pub struct FindInput {
     /// Compact `<space>:/<scope-path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
-    /// Optional kind filter: `folder` or `text`.
+    /// Optional kind filter: `folder`, `text`, or `file`.
     #[serde(default)]
     pub kind: Option<String>,
     /// Page size; clamped to the find limit, default `50`.

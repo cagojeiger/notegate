@@ -12,7 +12,7 @@ Space      User가 소유한 중앙 저장 범위.
 Node       Space 안 tree item. folder/text/file 중 하나다.
 Folder     하위 node를 담는 container.
 Text       UTF-8 content object. read/write/patch/grep 가능.
-File       binary/object content. 현재 schema만 준비되어 있으며 직접 read/patch/grep 불가.
+File       binary/object content. 직접 text read/patch/grep 대상이 아니다.
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
 API key    User 또는 Agent account로 인증되는 bearer credential.
 ```
@@ -54,4 +54,4 @@ write = read + create/update/patch/delete/move
 
 - 외부 제품 용어는 `space`, `agent connection`, `permission`, `text`, `file`을 사용한다.
 - 일반 authorization 설명에는 `access`라는 보안 용어를 쓸 수 있지만, 제품 리소스 이름으로는 `connection`을 사용한다.
-- `document`, `workspace`, `owner/editor/viewer`는 새 제품 정본 용어가 아니다.
+- 권한 용어는 `read`, `write`, `permission`을 사용한다.

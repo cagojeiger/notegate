@@ -9,7 +9,7 @@ Node name metadata를 검색한다.
 ```
 
 Folder/Text/File 모두 대상이다. Root node는 결과에서 제외한다.
-입력 필드: `target`(또는 `selector`+`path`), `q`(필수), `kind`(선택 `folder|text|file` 필터), `limit`(기본 50), `cursor`. `kind=file`은 현재 file 생성 경로가 없어 실질적으로 결과가 없다.
+입력 필드: `target`(또는 `selector`+`path`), `q`(필수), `kind`(선택 `folder|text|file` 필터), `limit`(기본 50), `cursor`. `kind=file`은 File surface에 포함된 node만 매칭한다.
 
 ## `files_grep`
 

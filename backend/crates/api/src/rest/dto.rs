@@ -98,7 +98,7 @@ pub(crate) struct ApiKeyMetadataListResponse {
     pub page: crate::page::Page,
 }
 
-/// Space output: metadata, caller role, and derived `root_node_id`.
+/// Space output: metadata, caller permission, and derived `root_node_id`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SpaceOut {
     pub id: Uuid,
