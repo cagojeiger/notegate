@@ -38,6 +38,46 @@ pub mod text {
         }))
     }
 
+    /// Load live text metrics for a bounded set of node ids.
+    pub async fn text_stats_many(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, TextStats>> {
+        if node_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows: Vec<(Uuid, String, i64, i32)> = sqlx::query_as(
+            "SELECT d.node_id, d.content_sha256, d.byte_len, d.line_count \
+             FROM text_objects d \
+             JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
+             WHERE d.space_id = $1 \
+               AND d.node_id = ANY($2) \
+               AND n.deleted_at IS NULL \
+               AND n.kind = 'text'",
+        )
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(node_id, content_sha256, byte_len, line_count)| {
+                (
+                    node_id,
+                    TextStats {
+                        content_sha256,
+                        byte_len,
+                        line_count,
+                    },
+                )
+            })
+            .collect())
+    }
+
     /// Load a live text (its node + content) by node id, or `None` when the node
     /// is missing, soft-deleted, or a folder.
     pub async fn find_text(
@@ -191,6 +231,53 @@ pub mod file {
             })
         })
         .transpose()
+    }
+
+    pub async fn file_stats_many(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, FileStats>> {
+        if node_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let columns = FILE_COLUMNS
+            .split(',')
+            .map(|c| format!("f.{}", c.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
+            "SELECT {columns} FROM file_objects f \
+             JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+             WHERE f.space_id = $1 \
+               AND f.node_id = ANY($2) \
+               AND n.deleted_at IS NULL \
+               AND n.kind = 'file'"
+        ))
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut stats = std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let file = row.into_file()?;
+            stats.insert(
+                file.node_id,
+                FileStats {
+                    storage_kind: file.storage_kind,
+                    media_type: file.media_type,
+                    byte_len: file.byte_len,
+                    content_sha256: file.content_sha256,
+                    original_filename: file.original_filename,
+                    encryption_mode: file.encryption_mode,
+                    encryption_metadata: file.encryption_metadata,
+                },
+            );
+        }
+        Ok(stats)
     }
 
     pub async fn find_file(
@@ -360,6 +447,33 @@ pub mod node {
         .await
         .map_err(map_sqlx_error)?;
         Ok(exists)
+    }
+
+    /// Whether each node in a bounded set has any live direct children.
+    pub async fn has_children_many(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, bool>> {
+        if node_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT parent_id::uuid \
+             FROM nodes \
+             WHERE space_id = $1 \
+               AND parent_id = ANY($2) \
+               AND deleted_at IS NULL \
+             GROUP BY parent_id",
+        )
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(rows.into_iter().map(|(node_id,)| (node_id, true)).collect())
     }
 
     /// Count of live direct children of a folder.

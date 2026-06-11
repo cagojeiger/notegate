@@ -57,6 +57,14 @@ impl FilesRepo {
         queries::node::has_children(&self.pool, space_id, node_id).await
     }
 
+    pub async fn has_children_many(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, bool>> {
+        queries::node::has_children_many(&self.pool, space_id, node_ids).await
+    }
+
     pub async fn count_live_children(&self, space_id: Uuid, parent_node_id: Uuid) -> Result<usize> {
         queries::node::count_live_children(&self.pool, space_id, parent_node_id).await
     }
@@ -86,6 +94,14 @@ impl FilesRepo {
         queries::text::text_stats(&self.pool, space_id, node_id).await
     }
 
+    pub async fn text_stats_many(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, TextStats>> {
+        queries::text::text_stats_many(&self.pool, space_id, node_ids).await
+    }
+
     pub async fn find_text(
         &self,
         space_id: Uuid,
@@ -108,6 +124,14 @@ impl FilesRepo {
 
     pub async fn file_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<FileStats>> {
         queries::file::file_stats(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn file_stats_many(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, FileStats>> {
+        queries::file::file_stats_many(&self.pool, space_id, node_ids).await
     }
 
     pub async fn find_file(

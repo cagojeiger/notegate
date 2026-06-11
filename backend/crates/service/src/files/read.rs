@@ -91,20 +91,27 @@ impl FilesService {
             None
         };
 
+        let child_ids: Vec<Uuid> = rows.iter().map(|node| node.id).collect();
+        let text_ids: Vec<Uuid> = rows
+            .iter()
+            .filter(|node| node.kind == NodeKind::Text)
+            .map(|node| node.id)
+            .collect();
+        let file_ids: Vec<Uuid> = rows
+            .iter()
+            .filter(|node| node.kind == NodeKind::File)
+            .map(|node| node.id)
+            .collect();
+        let child_has_children = self.store.has_children_many(space_id, &child_ids).await?;
+        let text_stats = self.store.text_stats_many(space_id, &text_ids).await?;
+        let file_stats = self.store.file_stats_many(space_id, &file_ids).await?;
+
         let mut items = Vec::with_capacity(rows.len());
         for node in rows {
             let path = join_path(&parent_path, &node.name);
-            let has_children = self.store.has_children(space_id, node.id).await?;
-            let text = if node.kind == NodeKind::Text {
-                self.store.text_stats(space_id, node.id).await?
-            } else {
-                None
-            };
-            let file = if node.kind == NodeKind::File {
-                self.store.file_stats(space_id, node.id).await?
-            } else {
-                None
-            };
+            let has_children = child_has_children.get(&node.id).copied().unwrap_or(false);
+            let text = text_stats.get(&node.id).cloned();
+            let file = file_stats.get(&node.id).cloned();
             items.push(NodeView {
                 node,
                 path,
