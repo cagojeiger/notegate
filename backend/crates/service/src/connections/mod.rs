@@ -5,10 +5,12 @@
 
 use notegate_core::limits;
 use notegate_db::ConnectionRepo;
-pub use notegate_model::{ConnectAgent, ConnectionPage, ListConnections, SpaceAgentConnection};
+pub use notegate_model::{
+    AccountKind, ConnectAgent, ConnectionPage, ListConnections, SpaceAgentConnection,
+};
 use uuid::Uuid;
 
-use crate::error::ServiceResult;
+use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::{clamp_limit, paginate_by_id};
 
 #[derive(Debug, Clone)]
@@ -23,20 +25,21 @@ impl ConnectionService {
 
     pub async fn list_page(
         &self,
+        caller_kind: AccountKind,
         caller_user_id: Uuid,
         space_id: Uuid,
         request: ListConnections,
     ) -> ServiceResult<ConnectionPage> {
-        // Repo enforces owner-only by requiring the same user on connect/disconnect;
-        // list uses the same visibility by attempting a no-op owner check through
-        // live rows? For now, callers reach this through REST owner gate.
-        let _ = caller_user_id;
+        require_user_caller(caller_kind)?;
         let limit = clamp_limit(
             request.limit,
             limits::CONNECTIONS_DEFAULT_LIMIT,
             limits::CONNECTIONS_MAX_LIMIT,
         );
-        let connections = self.store.list_connections(space_id).await?;
+        let connections = self
+            .store
+            .list_connections(space_id, caller_user_id)
+            .await?;
         let (items, has_more, next_cursor) = paginate_by_id(
             connections,
             |connection| connection.agent_id,
@@ -53,9 +56,11 @@ impl ConnectionService {
 
     pub async fn connect(
         &self,
+        caller_kind: AccountKind,
         caller_user_id: Uuid,
         command: ConnectAgent,
     ) -> ServiceResult<SpaceAgentConnection> {
+        require_user_caller(caller_kind)?;
         Ok(self
             .store
             .upsert_connection(&command, caller_user_id)
@@ -64,13 +69,24 @@ impl ConnectionService {
 
     pub async fn disconnect(
         &self,
+        caller_kind: AccountKind,
         caller_user_id: Uuid,
         space_id: Uuid,
         agent_id: Uuid,
     ) -> ServiceResult<()> {
+        require_user_caller(caller_kind)?;
         self.store
             .disconnect(space_id, agent_id, caller_user_id)
             .await?;
         Ok(())
+    }
+}
+
+fn require_user_caller(kind: AccountKind) -> ServiceResult<()> {
+    match kind {
+        AccountKind::User => Ok(()),
+        AccountKind::Agent => Err(ServiceError::Forbidden(
+            "only user accounts may manage agent connections".to_owned(),
+        )),
     }
 }

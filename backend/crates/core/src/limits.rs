@@ -144,8 +144,8 @@ pub const READ_MAX_BYTES: usize = 262_144;
 
 // --- Text creation and write limits ---
 
-/// Maximum bytes per text (512 KiB).
-pub const TEXT_MAX_BYTES: usize = 524_288;
+/// Maximum bytes per text (1 MiB).
+pub const TEXT_MAX_BYTES: usize = 1_048_576;
 /// Maximum lines per text.
 pub const TEXT_MAX_LINES: usize = 2_000;
 
@@ -153,6 +153,8 @@ pub const TEXT_MAX_LINES: usize = 2_000;
 
 /// Maximum nodes a synchronous folder delete may touch.
 pub const SUBTREE_DELETE_MAX_NODES: usize = 1_000;
+/// Days a deleted space is retained before it is eligible for hard purge.
+pub const DELETED_SPACE_RETENTION_DAYS: i64 = 30;
 /// Days a deleted node is retained before it is eligible for hard purge.
 pub const DELETED_NODE_RETENTION_DAYS: i64 = 30;
 /// Days a soft-deleted account is retained before the purge run anonymizes its PII

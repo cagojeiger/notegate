@@ -33,7 +33,7 @@ async fn space_with_root(
 ) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
     let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
     let space: Uuid =
-        sqlx::query_scalar("INSERT INTO spaces (created_by, name) VALUES ($1, $2) RETURNING id")
+        sqlx::query_scalar("INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2) RETURNING id")
             .bind(account)
             .bind(format!("ws-{sub}"))
             .fetch_one(pool)
@@ -81,7 +81,7 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
 
     // Soft-delete the space through the production path.
     SpaceRepo::new(db.pool.clone())
-        .delete_space(ws, account)
+        .delete_space(ws, account, account)
         .await?;
 
     // Every file mutation must now see the space as gone (not_found via lock_space).

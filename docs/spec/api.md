@@ -17,7 +17,6 @@ Identity    /api/v1/me, /api/v1/me/keys
 Spaces      /api/v1/spaces
 Nodes       /api/v1/spaces/{space_id}/nodes
 Text        /api/v1/spaces/{space_id}/text
-Files       /api/v1/spaces/{space_id}/files
 Search      /api/v1/spaces/{space_id}/search
 Agents      /api/v1/agents
 Connections /api/v1/spaces/{space_id}/agents
@@ -59,6 +58,6 @@ OAuth 계열 인증은 user로 처리한다. API key는 `api_keys.account_id`가
 - Space마다 root node `/`가 하나 있다.
 - Node kind는 `folder`, `text`, `file` 중 하나다.
 - Text는 UTF-8 content이며 read/write/patch/grep 가능하다.
-- File은 object/binary content이며 직접 text read/patch/grep 대상이 아니다.
+- File은 object/binary content이며 DB schema는 준비되어 있지만 현재 REST/MCP file surface는 노출하지 않는다.
 - Agent connection permission은 `read` 또는 `write`다. `write`는 `read`를 포함한다.
 - User/agent action attribution은 account id로 기록한다.

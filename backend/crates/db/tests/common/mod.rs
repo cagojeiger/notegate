@@ -184,7 +184,7 @@ pub async fn deactivate_account(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE accounts \
-         SET is_active = false, deleted_at = now(), deleted_by = $2, updated_at = now() \
+         SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
          WHERE id = $1",
     )
     .bind(account_id)

@@ -19,7 +19,7 @@ async fn space_with_root(
 ) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
     let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
     let space: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (created_by, name) \
+        "INSERT INTO spaces (owner_user_id, name) \
          VALUES ($1, $2) RETURNING id",
     )
     .bind(account)
@@ -44,7 +44,7 @@ async fn insert_child(
     kind: &str,
 ) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar(
-        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
+        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id \
          VALUES ($1, $2, $3, $4, $5, $5) RETURNING id",
     )
     .bind(ws)
@@ -62,13 +62,20 @@ async fn root_trigger_attributes_root_to_space_creator() -> TestResult {
         return Ok(());
     };
     let (account, ws, root) = space_with_root(&db.pool, "rootattr").await?;
-    let (created_by, updated_by): (Uuid, Uuid) =
-        sqlx::query_as("SELECT created_by, updated_by FROM nodes WHERE id = $1")
-            .bind(root)
-            .fetch_one(&db.pool)
-            .await?;
-    assert_eq!(created_by, account, "root created_by must equal ws creator");
-    assert_eq!(updated_by, account, "root updated_by must equal ws creator");
+    let (created_by_account_id, updated_by_account_id): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT created_by_account_id, updated_by_account_id FROM nodes WHERE id = $1",
+    )
+    .bind(root)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        created_by_account_id, account,
+        "root created_by must equal space creator"
+    );
+    assert_eq!(
+        updated_by_account_id, account,
+        "root updated_by must equal space creator"
+    );
     let _ = ws;
     db.cleanup().await;
     Ok(())
@@ -82,7 +89,7 @@ async fn second_root_node_is_rejected() -> TestResult {
     let (account, ws, _root) = space_with_root(&db.pool, "tworoots").await?;
     // A second parent_id IS NULL node violates nodes_one_root_per_space.
     let res = sqlx::query(
-        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
+        "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id \
          VALUES ($1, NULL, '/', 'folder', $2, $2)",
     )
     .bind(ws)
@@ -146,34 +153,38 @@ async fn text_byte_and_line_bounds_are_enforced() -> TestResult {
     let (account, ws, root) = space_with_root(&db.pool, "docbounds").await?;
     let node = insert_child(&db.pool, ws, root, account, "big.md", "text").await?;
 
-    // byte_len upper bound = 524288.
+    // byte_len upper bound = 1048576.
     let over_bytes = sqlx::query(
-        "INSERT INTO texts (node_id, space_id, byte_len, line_count, created_by, updated_by) \
-         VALUES ($1, $2, 524289, 0, $3, $3)",
+        "INSERT INTO text_objects \
+         (node_id, space_id, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, $3, 1048577, 0, 'text/plain', $4, $4)",
     )
     .bind(node)
     .bind(ws)
+    .bind("0".repeat(64))
     .bind(account)
     .execute(&db.pool)
     .await;
-    assert!(over_bytes.is_err(), "byte_len 524289 must violate CHECK");
+    assert!(over_bytes.is_err(), "byte_len 1048577 must violate CHECK");
 
-    // line_count upper bound = 2000; the boundary value 524288/2000 is accepted.
+    // line_count upper bound = 2000; the boundary value 1048576/2000 is accepted.
     let at_boundary = sqlx::query(
-        "INSERT INTO texts (node_id, space_id, byte_len, line_count, created_by, updated_by) \
-         VALUES ($1, $2, 524288, 2000, $3, $3)",
+        "INSERT INTO text_objects \
+         (node_id, space_id, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, $3, 1048576, 2000, 'text/plain', $4, $4)",
     )
     .bind(node)
     .bind(ws)
+    .bind("1".repeat(64))
     .bind(account)
     .execute(&db.pool)
     .await;
     assert!(
         at_boundary.is_ok(),
-        "byte_len 524288 / line_count 2000 must be accepted"
+        "byte_len 1048576 / line_count 2000 must be accepted"
     );
 
-    let over_lines = sqlx::query("UPDATE texts SET line_count = 2001 WHERE node_id = $1")
+    let over_lines = sqlx::query("UPDATE text_objects SET line_count = 2001 WHERE node_id = $1")
         .bind(node)
         .execute(&db.pool)
         .await;
@@ -189,18 +200,18 @@ async fn space_name_check_and_owner_unique() -> TestResult {
     };
     let account = insert_user_account(&db.pool, "wsname", "wsname@example.com").await?;
     // Invalid space name (space) violates the CHECK.
-    let bad = sqlx::query("INSERT INTO spaces (created_by, name) VALUES ($1, 'bad name')")
+    let bad = sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'bad name')")
         .bind(account)
         .execute(&db.pool)
         .await;
     assert!(bad.is_err(), "space name with space must be rejected");
 
     // Duplicate (owner, name) violates the UNIQUE constraint.
-    sqlx::query("INSERT INTO spaces (created_by, name) VALUES ($1, 'personal')")
+    sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'personal')")
         .bind(account)
         .execute(&db.pool)
         .await?;
-    let dup = sqlx::query("INSERT INTO spaces (created_by, name) VALUES ($1, 'personal')")
+    let dup = sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'personal')")
         .bind(account)
         .execute(&db.pool)
         .await;
@@ -219,23 +230,25 @@ async fn agent_key_token_hash_is_unique() -> TestResult {
         sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
             .fetch_one(&db.pool)
             .await?;
-    sqlx::query("INSERT INTO agents (id, name, created_by) VALUES ($1, 'agent', $2)")
+    sqlx::query("INSERT INTO agents (id, name, owner_user_id) VALUES ($1, 'agent', $2)")
         .bind(agent_account)
         .bind(creator)
         .execute(&db.pool)
         .await?;
     sqlx::query(
-        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name, expires_at) \
-         VALUES ($1, 'dup-hash-1', 'dup-hash', 'test-lookup', 'k1', now() + interval '1 day')",
+        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name, created_by_user_id, expires_at) \
+         VALUES ($1, 'dup-hash-1', 'dup-hash', 'test-lookup', 'k1', $2, now() + interval '1 day')",
     )
     .bind(agent_account)
+    .bind(creator)
     .execute(&db.pool)
     .await?;
     let dup = sqlx::query(
-        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name, expires_at) \
-         VALUES ($1, 'dup-hash-2', 'dup-hash', 'test-lookup', 'k2', now() + interval '1 day')",
+        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name, created_by_user_id, expires_at) \
+         VALUES ($1, 'dup-hash-2', 'dup-hash', 'test-lookup', 'k2', $2, now() + interval '1 day')",
     )
     .bind(agent_account)
+    .bind(creator)
     .execute(&db.pool)
     .await;
     assert!(dup.is_err(), "duplicate token_hash must be rejected");

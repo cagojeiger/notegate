@@ -1,4 +1,4 @@
-//! Texts category: read / replace / patch Markdown content.
+//! Text category: read / replace / patch UTF-8 text content.
 //!
 //! `GET /text/{node_id}` (bounded range + conditional read), `PUT` to
 //! replace the whole text, and `PATCH` to apply exact targeted edits. All

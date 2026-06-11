@@ -395,7 +395,7 @@ struct ApiKeyRow {
     token_hash: String,
     name: String,
     scopes: Vec<String>,
-    created_by: Option<Uuid>,
+    created_by: Uuid,
     created_at: DateTime<Utc>,
     last_used_at: Option<DateTime<Utc>>,
     expires_at: DateTime<Utc>,

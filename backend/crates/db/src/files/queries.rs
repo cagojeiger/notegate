@@ -13,7 +13,7 @@ pub mod text {
     use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
     use crate::to_usize;
 
-    /// Load live text metrics without the Markdown body.
+    /// Load live text metrics without the content body.
     pub async fn text_stats(
         pool: &PgPool,
         space_id: Uuid,
@@ -560,7 +560,7 @@ pub mod search {
 
     /// Fetch grep candidate texts whose content matches `q` (ILIKE), optionally
     /// restricted to the subtree of `scope_node_id`. Ordered by `(updated_at DESC,
-    /// node_id)` to use `texts_space_updated_idx`. The caller passes the exact
+    /// node_id)` to use `text_objects_space_updated_idx`. The caller passes the exact
     /// fetch size, including any lookahead. Each row carries the derived path and
     /// content for service-side line splitting.
     pub async fn grep_candidates(

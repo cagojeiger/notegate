@@ -50,7 +50,7 @@ async fn insert_agent_account(
     let id: Uuid = sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
         .fetch_one(pool)
         .await?;
-    sqlx::query("INSERT INTO agents (id, name, created_by) VALUES ($1, $2, $3)")
+    sqlx::query("INSERT INTO agents (id, name, owner_user_id) VALUES ($1, $2, $3)")
         .bind(id)
         .bind(name)
         .bind(creator)
@@ -506,7 +506,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     );
 
     sqlx::query(
-        "UPDATE accounts SET is_active = false, deleted_at = now(), deleted_by = $2 WHERE id = $1",
+        "UPDATE accounts SET is_active = false, deleted_at = now(), deleted_by_account_id = $2 WHERE id = $1",
     )
     .bind(agent_id)
     .bind(creator)

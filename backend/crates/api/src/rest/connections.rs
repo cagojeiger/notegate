@@ -87,6 +87,7 @@ pub(crate) async fn list(
     let page = state
         .connections
         .list_page(
+            caller.account.kind,
             caller.account_id(),
             space_id,
             ListConnections {
@@ -140,6 +141,7 @@ pub(crate) async fn connect(
     let connection = state
         .connections
         .connect(
+            caller.account.kind,
             caller.account_id(),
             ConnectAgent {
                 space_id,
@@ -171,7 +173,7 @@ pub(crate) async fn disconnect(
 ) -> Result<StatusCode, ApiError> {
     state
         .connections
-        .disconnect(caller.account_id(), space_id, agent_id)
+        .disconnect(caller.account.kind, caller.account_id(), space_id, agent_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

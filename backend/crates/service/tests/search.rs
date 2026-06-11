@@ -402,7 +402,7 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
     let total = 25usize;
     for index in 0..total {
         sqlx::query(
-            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by, updated_by) \
+            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id \
              VALUES ($1, $2, $3, 'text', $4, $4)",
         )
         .bind(ws)

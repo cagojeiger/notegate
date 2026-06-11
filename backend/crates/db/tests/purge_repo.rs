@@ -27,7 +27,7 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     let user = insert_user_account(&db.pool, "purger", "purger@example.test").await?;
 
     let due_space: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (created_by, name, deleted_at, deleted_by, purge_after) \
+        "INSERT INTO spaces (owner_user_id, name, deleted_at, deleted_by_user_id, purge_after) \
          VALUES ($1, 'due-space', now() - interval '40 days', $1, now() - interval '1 day') \
          RETURNING id",
     )
@@ -36,7 +36,7 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     .await?;
 
     let live_space: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (created_by, name) VALUES ($1, 'live-space') RETURNING id",
+        "INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'live-space') RETURNING id",
     )
     .bind(user)
     .fetch_one(&db.pool)
@@ -48,7 +48,7 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
             .await?;
     let due_node: Uuid = sqlx::query_scalar(
         "INSERT INTO nodes \
-         (space_id, parent_id, name, kind, created_by, updated_by, deleted_by, deleted_at, purge_after) \
+         (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id, deleted_by_account_id, deleted_at, purge_after) \
          VALUES ($1, $2, 'old.md', 'text', $3, $3, $3, now() - interval '40 days', now() - interval '1 day') \
          RETURNING id",
     )
@@ -58,11 +58,13 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     .fetch_one(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO texts (node_id, space_id, content, created_by, updated_by) \
-         VALUES ($1, $2, 'old', $3, $3)",
+        "INSERT INTO text_objects \
+         (node_id, space_id, content_text, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, 'old', $3, 3, 1, 'text/plain', $4, $4)",
     )
     .bind(due_node)
     .bind(live_space)
+    .bind("2".repeat(64))
     .bind(user)
     .execute(&db.pool)
     .await?;
@@ -85,7 +87,7 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     assert!(node_exists.is_none());
 
     let text_exists: Option<Uuid> =
-        sqlx::query_scalar("SELECT node_id FROM texts WHERE node_id = $1")
+        sqlx::query_scalar("SELECT node_id FROM text_objects WHERE node_id = $1")
             .bind(due_node)
             .fetch_optional(&db.pool)
             .await?;
@@ -103,7 +105,7 @@ async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::err
     };
     let user = insert_user_account(&db.pool, "locked", "locked@example.test").await?;
     let due_space: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (created_by, name, deleted_at, deleted_by, purge_after) \
+        "INSERT INTO spaces (owner_user_id, name, deleted_at, deleted_by_user_id, purge_after) \
          VALUES ($1, 'locked-space', now() - interval '40 days', $1, now() - interval '1 day') \
          RETURNING id",
     )
@@ -174,7 +176,7 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
     let recent_revoked = seed_key(&repo, user, "recent-revoked").await?;
 
     sqlx::query(
-        "UPDATE api_keys SET revoked_at = now() - interval '40 days', revoked_by = $2, \
+        "UPDATE api_keys SET revoked_at = now() - interval '40 days', revoked_by_user_id = $2, \
          revoked_reason = 'test' WHERE id = $1",
     )
     .bind(old_revoked)
@@ -186,7 +188,7 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
         .execute(&db.pool)
         .await?;
     sqlx::query(
-        "UPDATE api_keys SET revoked_at = now() - interval '1 day', revoked_by = $2, \
+        "UPDATE api_keys SET revoked_at = now() - interval '1 day', revoked_by_user_id = $2, \
          revoked_reason = 'test' WHERE id = $1",
     )
     .bind(recent_revoked)

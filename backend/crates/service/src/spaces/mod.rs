@@ -126,16 +126,18 @@ impl SpaceService {
 
     pub async fn rename(
         &self,
+        caller_kind: AccountKind,
         caller_account_id: Uuid,
         command: RenameSpace,
     ) -> ServiceResult<SpaceView> {
+        require_user_caller(caller_kind)?;
         validate_space_name(&command.new_name)?;
         self.require_write(command.space_id, caller_account_id)
             .await?;
 
         let space = self
             .store
-            .rename_space(command.space_id, &command.new_name)
+            .rename_space(command.space_id, caller_account_id, &command.new_name)
             .await?;
         let root_node_id = self
             .store
@@ -150,9 +152,17 @@ impl SpaceService {
         })
     }
 
-    pub async fn delete(&self, caller_account_id: Uuid, space_id: Uuid) -> ServiceResult<()> {
+    pub async fn delete(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+    ) -> ServiceResult<()> {
+        require_user_caller(caller_kind)?;
         self.require_write(space_id, caller_account_id).await?;
-        self.store.delete_space(space_id, caller_account_id).await?;
+        self.store
+            .delete_space(space_id, caller_account_id, caller_account_id)
+            .await?;
         Ok(())
     }
 
@@ -182,7 +192,7 @@ fn require_user_caller(kind: AccountKind) -> ServiceResult<()> {
     match kind {
         AccountKind::User => Ok(()),
         AccountKind::Agent => Err(ServiceError::Forbidden(
-            "only user accounts may create spaces".to_owned(),
+            "only user accounts may manage spaces".to_owned(),
         )),
     }
 }

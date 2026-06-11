@@ -116,7 +116,7 @@ pub struct WriteInput {
     /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
-    /// The full replacement Markdown content.
+    /// The full replacement text content.
     pub content: String,
     /// When true, a missing text is created; when false, it must exist.
     #[serde(default)]

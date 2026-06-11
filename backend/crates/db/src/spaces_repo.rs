@@ -254,12 +254,18 @@ impl SpaceRepo {
         rows.into_iter().map(SpaceViewRow::into_view).collect()
     }
 
-    pub async fn rename_space(&self, space_id: Uuid, new_name: &str) -> Result<Space> {
+    pub async fn rename_space(
+        &self,
+        space_id: Uuid,
+        owner_user_id: Uuid,
+        new_name: &str,
+    ) -> Result<Space> {
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
-            "UPDATE spaces SET name = $2, updated_at = now() \
-             WHERE id = $1 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
+            "UPDATE spaces SET name = $3, updated_at = now() \
+             WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
         ))
         .bind(space_id)
+        .bind(owner_user_id)
         .bind(new_name)
         .fetch_optional(&self.pool)
         .await
@@ -268,16 +274,22 @@ impl SpaceRepo {
         Ok(Space::from(row))
     }
 
-    pub async fn delete_space(&self, space_id: Uuid, deleted_by_user_id: Uuid) -> Result<()> {
+    pub async fn delete_space(
+        &self,
+        space_id: Uuid,
+        owner_user_id: Uuid,
+        deleted_by_user_id: Uuid,
+    ) -> Result<()> {
         let result = sqlx::query(
             "UPDATE spaces \
-             SET deleted_at = now(), deleted_by_user_id = $2, \
-                 purge_after = now() + make_interval(days => $3::int), updated_at = now() \
-             WHERE id = $1 AND deleted_at IS NULL",
+             SET deleted_at = now(), deleted_by_user_id = $3, \
+                 purge_after = now() + make_interval(days => $4::int), updated_at = now() \
+             WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
         )
         .bind(space_id)
+        .bind(owner_user_id)
         .bind(deleted_by_user_id)
-        .bind(i32::try_from(limits::DELETED_NODE_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(i32::try_from(limits::DELETED_SPACE_RETENTION_DAYS).unwrap_or(i32::MAX))
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;

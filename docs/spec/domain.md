@@ -12,7 +12,7 @@ Space      User가 소유한 중앙 저장 범위.
 Node       Space 안 tree item. folder/text/file 중 하나다.
 Folder     하위 node를 담는 container.
 Text       UTF-8 content object. read/write/patch/grep 가능.
-File       binary/object content. upload/download/stat 가능. 직접 read/patch/grep 불가.
+File       binary/object content. 현재 schema만 준비되어 있으며 직접 read/patch/grep 불가.
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
 API key    User 또는 Agent account로 인증되는 bearer credential.
 ```
@@ -46,8 +46,8 @@ Agent caller:
 Permission:
 
 ```text
-read  = list/stat/read text/search text/download file metadata
-write = read + create/update/patch/delete/move/upload
+read  = list/stat/read text/search text
+write = read + create/update/patch/delete/move
 ```
 
 ## Naming rules

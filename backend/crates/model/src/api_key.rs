@@ -11,7 +11,7 @@ pub struct ApiKey {
     pub token_hash: String,
     pub name: String,
     pub scopes: Vec<String>,
-    pub created_by: Option<Uuid>,
+    pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
     pub expires_at: DateTime<Utc>,

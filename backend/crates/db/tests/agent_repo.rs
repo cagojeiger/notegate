@@ -39,7 +39,7 @@ async fn insert_agent_account(
     let id: Uuid = sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
         .fetch_one(pool)
         .await?;
-    sqlx::query("INSERT INTO agents (id, name, created_by) VALUES ($1, $2, $3)")
+    sqlx::query("INSERT INTO agents (id, name, owner_user_id) VALUES ($1, $2, $3)")
         .bind(id)
         .bind(name)
         .bind(creator)
@@ -178,15 +178,15 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
         })
         .await?;
     let space_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (created_by, name) \
+        "INSERT INTO spaces (owner_user_id, name) \
          VALUES ($1, 'personal') RETURNING id",
     )
     .bind(owner)
     .fetch_one(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO space_access (space_id, account_id, role, granted_by) \
-         VALUES ($1, $2, 'editor', $3)",
+        "INSERT INTO space_agent_connections (space_id, agent_id, permission, connected_by_user_id) \
+         VALUES ($1, $2, 'write', $3)",
     )
     .bind(space_id)
     .bind(agent_id)
@@ -210,7 +210,7 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
     assert!(key_revoked.is_some());
 
     let access_revoked: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
-        "SELECT revoked_at FROM space_access WHERE space_id = $1 AND account_id = $2",
+        "SELECT disconnected_at FROM space_agent_connections WHERE space_id = $1 AND agent_id = $2",
     )
     .bind(space_id)
     .bind(agent_id)

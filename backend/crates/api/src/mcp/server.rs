@@ -153,7 +153,7 @@ impl McpServer {
 
     #[tool(
         name = "files_touch",
-        description = "Create an empty Markdown text.",
+        description = "Create an empty text object.",
         output_schema = object_output_schema()
     )]
     pub async fn files_touch_tool(
@@ -166,7 +166,7 @@ impl McpServer {
 
     #[tool(
         name = "files_read",
-        description = "Read a Markdown text with range limits.",
+        description = "Read a text object with range limits.",
         output_schema = object_output_schema()
     )]
     pub async fn files_read_tool(
@@ -179,7 +179,7 @@ impl McpServer {
 
     #[tool(
         name = "files_write",
-        description = "Replace a Markdown text.",
+        description = "Replace a text object.",
         output_schema = object_output_schema()
     )]
     pub async fn files_write_tool(
@@ -192,7 +192,7 @@ impl McpServer {
 
     #[tool(
         name = "files_patch",
-        description = "Apply exact targeted replacements to one Markdown text.",
+        description = "Apply exact targeted replacements to one text object.",
         output_schema = object_output_schema()
     )]
     pub async fn files_patch_tool(
@@ -244,7 +244,7 @@ impl McpServer {
 
     #[tool(
         name = "files_grep",
-        description = "Search Markdown body lines.",
+        description = "Search text content lines.",
         output_schema = object_output_schema()
     )]
     pub async fn files_grep_tool(

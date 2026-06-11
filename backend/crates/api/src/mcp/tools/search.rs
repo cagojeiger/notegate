@@ -184,5 +184,6 @@ pub async fn grep(
 }
 
 fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
-    NodeKind::parse(value).ok_or_else(|| invalid_input_error("kind must be 'folder' or 'text'"))
+    NodeKind::parse(value)
+        .ok_or_else(|| invalid_input_error("kind must be 'folder', 'text', or 'file'"))
 }

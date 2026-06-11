@@ -15,13 +15,13 @@ Request body examples:
 ```
 
 ```json
-{"expected_sha256":"...","edits":[{"old":"hello","new":"hi"}]}
+{"expected_sha256":"...","edits":[{"old_text":"hello","new_text":"hi"}]}
 ```
 
 Rules:
 
 - `node_id`는 `nodes.kind='text'`여야 한다.
 - Content는 UTF-8이다.
-- Patch는 exact-match 방식이며 각 `old`는 정확히 한 번만 매칭되어야 한다.
+- Patch는 exact-match 방식이며 각 `old_text`는 정확히 한 번만 매칭되어야 한다.
 - `expected_sha256`이 있으면 현재 plaintext hash와 일치해야 한다.
-- Encrypted Text도 서버가 복호화 가능한 경우 read/write/patch 가능하다.
+- 현재 REST text read/write/patch는 plain Text만 지원한다.

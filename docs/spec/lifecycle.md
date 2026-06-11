@@ -17,14 +17,13 @@ users
 
 ### User 삭제
 
-User 삭제는 deactivate 후 retention 경과 시 PII를 익명화한다.
+User 삭제는 live owned space가 없을 때만 허용한다. Space는 사용자가 먼저 명시적으로 삭제해야 한다.
 
 t=0:
 
 ```text
 accounts.is_active=false
 accounts.deleted_at/deleted_by_account_id 설정
-owned spaces soft delete
 owned agents deactivate
 owned user API keys revoke
 owned agent API keys revoke
@@ -128,19 +127,18 @@ text_objects
 
 - Text content는 UTF-8이다.
 - `byte_len`, `line_count`, `content_sha256`, `media_type`을 plaintext 기준으로 저장한다.
-- 기본은 plain 저장이지만 필요한 경우 server-side encryption으로 저장할 수 있다.
-- read/write/patch 대상이다. grep은 plain Text 또는 별도 검색 index가 있는 Text를 대상으로 한다.
+- 현재 read/write/patch/grep은 plain Text만 대상으로 한다.
+- Server-side encrypted Text 저장 컬럼은 DB에 예약되어 있지만 현재 surface에서는 노출하지 않는다.
 
-### File 업로드
+### File
 
 ```text
 nodes(kind='file')
 file_objects
 ```
 
-- `byte_len <= 262144`인 작은 File은 PostgreSQL `bytea`에 inline 저장할 수 있다.
-- 더 큰 File은 object storage 구현 시 object key로 저장한다.
-- DB에는 `storage_kind`, `byte_len`, `content_sha256`, `media_type`을 저장한다.
+- File schema는 binary/object content를 위해 준비되어 있다.
+- 현재 REST/MCP upload/download surface는 노출하지 않는다.
 - File은 직접 text read/patch/grep 대상이 아니다.
 
 ### Node 삭제

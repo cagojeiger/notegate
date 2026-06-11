@@ -56,17 +56,23 @@ impl ConnectionRow {
 const CONNECTION_COLUMNS: &str = "space_id, agent_id, permission, connected_by_user_id, connected_at, disconnected_at, disconnected_by_user_id";
 
 impl ConnectionRepo {
-    pub async fn list_connections(&self, space_id: Uuid) -> Result<Vec<SpaceAgentConnection>> {
+    pub async fn list_connections(
+        &self,
+        space_id: Uuid,
+        owner_user_id: Uuid,
+    ) -> Result<Vec<SpaceAgentConnection>> {
+        require_owned_space(&self.pool, space_id, owner_user_id).await?;
         let rows = sqlx::query_as::<_, ConnectionRow>(&format!(
             "SELECT c.{CONNECTION_COLUMNS} \
              FROM space_agent_connections c \
-             JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
+             JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL AND s.owner_user_id = $2 \
              JOIN agents a ON a.id = c.agent_id \
              JOIN accounts acc ON acc.id = a.id AND acc.is_active = true AND acc.deleted_at IS NULL \
              WHERE c.space_id = $1 AND c.disconnected_at IS NULL \
              ORDER BY c.connected_at, c.agent_id"
         ))
         .bind(space_id)
+        .bind(owner_user_id)
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -215,4 +221,19 @@ async fn lock_owned_live_agent(
     found
         .map(|_| ())
         .ok_or_else(|| Error::not_found("agent not found"))
+}
+
+async fn require_owned_space(pool: &PgPool, space_id: Uuid, owner_user_id: Uuid) -> Result<()> {
+    let found: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM spaces \
+         WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(space_id)
+    .bind(owner_user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    found
+        .map(|_| ())
+        .ok_or_else(|| Error::not_found("space not found"))
 }

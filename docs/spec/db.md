@@ -17,6 +17,23 @@ text_objects
 file_objects
 ```
 
+## Security tables
+
+```text
+crypto_key_epochs
+  key_id text pk
+  domain text check ('enc','lookup')
+  status text check ('active','verify_only','revoked')
+  verify_tag text not null
+  version int not null
+  activated_at timestamptz null
+  revoked_at timestamptz null
+  created_at timestamptz
+  updated_at timestamptz
+```
+
+Domain마다 active epoch는 하나다. `verify_tag`는 root key 원문 저장 없이 설정과 DB registry 일치를 검증한다.
+
 ## Actor tables
 
 ```text
@@ -142,6 +159,7 @@ nodes
 ```text
 text_objects
   node_id uuid pk references nodes(id)
+  space_id uuid not null references spaces(id)
   storage_format text not null check ('plain','encrypted')
   content_text text null
   content_ciphertext bytea null
@@ -153,11 +171,16 @@ text_objects
   line_count int not null
   media_type text not null
   encoding text not null default 'utf-8'
+  created_by_account_id uuid not null references accounts(id)
+  updated_by_account_id uuid not null references accounts(id)
+  created_at timestamptz
+  updated_at timestamptz
 ```
 
 ```text
 file_objects
   node_id uuid pk references nodes(id)
+  space_id uuid not null references spaces(id)
   storage_kind text not null check ('inline_pg','object')
   inline_bytes bytea null
   object_key text null
@@ -187,9 +210,9 @@ storage_format='encrypted' -> content_text IS NULL, content_ciphertext/nonce/enc
 
 File/Text 공통 암호화 정책:
 
-- Content 암호화가 필요한 space나 파일은 server-side encryption으로 저장할 수 있다.
+- Content 암호화용 컬럼은 server-side encryption을 위해 예약되어 있다.
+- 현재 REST/MCP read/write/patch/grep surface는 plain Text만 지원한다.
 - `content_sha256`, `byte_len`, `line_count`는 plaintext 기준 metadata다.
-- 암호화된 Text를 SQL `LIKE/ILIKE`로 직접 grep할 수는 없다. 검색 가능 암호화는 별도 index/extract 설계가 필요하다.
 
 Node-content invariant:
 

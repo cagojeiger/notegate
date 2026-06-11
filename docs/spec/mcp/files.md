@@ -8,7 +8,7 @@ MCP files tools는 Space tree를 path-first로 다룬다.
 files_ls
 files_stat
 files_mkdir
-files_touch_text
+files_touch
 files_mv
 files_rm
 ```
@@ -24,14 +24,14 @@ files_rm
 ## Text
 
 ```text
-files_read_text
-files_write_text
-files_patch_text
+files_read
+files_write
+files_patch
 ```
 
 - Text node에만 적용한다.
 - Content는 UTF-8이다.
-- Patch는 exact-match이며 각 old 문자열은 정확히 한 번만 매칭되어야 한다.
+- Patch는 exact-match이며 각 `old_text` 문자열은 정확히 한 번만 매칭되어야 한다.
 
 예:
 
@@ -45,12 +45,4 @@ files_patch_text
 
 ## File
 
-```text
-files_upload
-files_download
-```
-
-- File node에만 적용한다.
-- 256 KiB 이하 file은 PG inline 저장 가능하다.
-- 더 큰 file은 object storage 구현에서 다룬다.
-- File은 `files_read_text`/`files_patch_text`/`grep_text` 대상이 아니다.
+File schema는 준비되어 있지만 현재 MCP upload/download tool은 제공하지 않는다. File은 `files_read`/`files_patch`/`files_grep` 대상이 아니다.

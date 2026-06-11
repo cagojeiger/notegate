@@ -149,6 +149,7 @@ pub(crate) async fn rename(
     let view = state
         .spaces
         .rename(
+            caller.account.kind,
             caller.account_id(),
             RenameSpace {
                 space_id,
@@ -172,6 +173,9 @@ pub(crate) async fn delete(
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state.spaces.delete(caller.account_id(), space_id).await?;
+    state
+        .spaces
+        .delete(caller.account.kind, caller.account_id(), space_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

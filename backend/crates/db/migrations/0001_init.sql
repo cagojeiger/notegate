@@ -257,6 +257,7 @@ CREATE TABLE text_objects (
     )
 );
 CREATE INDEX text_objects_space_idx ON text_objects(space_id);
+CREATE INDEX text_objects_space_updated_idx ON text_objects(space_id, updated_at DESC, node_id);
 CREATE INDEX text_objects_content_trgm_idx
     ON text_objects USING gin (content_text gin_trgm_ops)
     WHERE storage_format = 'plain';
