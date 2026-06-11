@@ -101,7 +101,7 @@ impl McpServer {
 
     #[tool(
         name = "spaces_get",
-        description = "Return one accessible space by name, id, or single-space fallback.",
+        description = "Return one accessible space by name or single-space fallback.",
         output_schema = object_output_schema()
     )]
     pub async fn spaces_get_tool(
@@ -123,6 +123,19 @@ impl McpServer {
         params: Parameters<tools::files::LsInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::files::ls(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "files_tree",
+        description = "List a folder subtree as path-first node summaries.",
+        output_schema = object_output_schema()
+    )]
+    pub async fn files_tree_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::files::TreeInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::files::tree(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -399,40 +412,41 @@ mod tests {
             ("me", "", ""),
             ("spaces_list", "limit cursor", ""),
             ("spaces_create", "name", "name"),
-            ("spaces_get", "space space_id", ""),
-            ("files_ls", "space space_id path target limit cursor", ""),
-            ("files_stat", "space space_id path target", ""),
-            ("files_mkdir", "space space_id path target", ""),
-            ("files_touch", "space space_id path target", ""),
+            ("spaces_get", "space", ""),
+            ("files_ls", "space path target limit cursor", ""),
+            ("files_tree", "space path target depth limit cursor", ""),
+            ("files_stat", "space path target", ""),
+            ("files_mkdir", "space path target parents", ""),
+            ("files_touch", "space path target", ""),
             (
                 "files_read",
-                "space space_id path target start_line max_lines max_bytes if_none_match_sha256",
+                "space path target start_line max_lines max_bytes if_none_match_sha256",
                 "",
             ),
             (
                 "files_write",
-                "space space_id path target content create expected_sha256",
+                "space path target content create expected_sha256",
                 "content",
             ),
             (
                 "files_patch",
-                "space space_id path target edits expected_sha256",
+                "space path target edits expected_sha256",
                 "edits",
             ),
             (
                 "files_mv",
-                "space space_id source_path destination_path",
+                "space source_path destination_path",
                 "source_path destination_path",
             ),
-            ("files_rm", "space space_id path target recursive", ""),
+            ("files_rm", "space path target recursive", ""),
             (
                 "files_find",
-                "space space_id q path target kind match limit cursor",
+                "space q path target kind match limit cursor",
                 "q",
             ),
             (
                 "files_grep",
-                "space space_id q path target match include exclude limit cursor",
+                "space q path target match lines include exclude limit cursor",
                 "q",
             ),
         ] {
@@ -455,6 +469,7 @@ mod tests {
             "spaces_create",
             "spaces_get",
             "files_ls",
+            "files_tree",
             "files_stat",
             "files_mkdir",
             "files_touch",

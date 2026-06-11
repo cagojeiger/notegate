@@ -8,6 +8,7 @@ use notegate_service::files::{
     ChildrenRequest, CreateFolder, CreateText, DeleteNode, Edit as ServiceEdit, MoveNode,
     PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
+use notegate_service::search::TreeRequest;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
@@ -32,6 +33,28 @@ pub struct LsInput {
     /// Compact `<space>:/<path>` target (alternative to space+path).
     #[serde(default)]
     pub target: Option<String>,
+    /// Page size; clamped to `1..=200`, default `100`.
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Opaque pagination cursor from a previous page.
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// `files_tree` input: a space selector plus the root folder `path` (or `target`).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct TreeInput {
+    #[serde(flatten)]
+    pub selector: SpaceSelector,
+    /// Absolute folder path inside the selected space.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Compact `<space>:/<path>` target (alternative to space+path).
+    #[serde(default)]
+    pub target: Option<String>,
+    /// Maximum depth below the selected folder. Defaults to 2, max path depth.
+    #[serde(default)]
+    pub depth: Option<i64>,
     /// Page size; clamped to `1..=200`, default `100`.
     #[serde(default)]
     pub limit: Option<i64>,
@@ -230,6 +253,53 @@ pub async fn ls(
         "space": resolved.name(),
         "path": page.parent.path,
         "children": children,
+        "page": page_json(
+            page.limit,
+            returned,
+            page.has_more,
+            page.next_cursor.as_deref(),
+        ),
+    })))
+}
+
+pub async fn tree(
+    state: &AppState,
+    parts: &Parts,
+    Parameters(input): Parameters<TreeInput>,
+) -> Result<Json<Value>, ErrorData> {
+    let caller = caller(parts)?;
+    let (resolved, path) = resolve_target(
+        state,
+        caller,
+        &input.selector,
+        input.target.as_deref(),
+        input.path.as_deref(),
+    )
+    .await?;
+
+    let page = state
+        .search
+        .tree(
+            caller.account_id(),
+            resolved.space_id(),
+            TreeRequest {
+                path: Some(path.clone()),
+                depth: input.depth,
+                limit: input.limit,
+                cursor: input.cursor,
+            },
+        )
+        .await
+        .map_err(service_error)?;
+
+    let items: Vec<Value> = page.items.iter().map(node_summary).collect();
+    let returned = items.len();
+
+    Ok(Json(json!({
+        "space": resolved.name(),
+        "path": path,
+        "depth": page.depth,
+        "items": items,
         "page": page_json(
             page.limit,
             returned,
@@ -715,7 +785,6 @@ pub async fn rm(
     Ok(Json(json!({
         "space": resolved.name(),
         "path": result.path,
-        "node_id": result.node_id,
         "deleted": true,
         "purge_after": result.purge_after,
     })))

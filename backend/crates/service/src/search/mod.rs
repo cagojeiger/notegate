@@ -9,7 +9,7 @@ use notegate_db::FilesRepo;
 use notegate_model::files::{ChildrenCursor, NodeView, TextStats};
 pub use notegate_model::search::{
     DfsFrame, FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage,
-    GrepRequest, SearchCursor,
+    GrepRequest, SearchCursor, TreeCursor, TreeFrame, TreePage, TreeRequest,
 };
 use notegate_model::{Node, NodeKind, Permission, TextObject};
 use regex::{Regex, RegexBuilder};
@@ -21,6 +21,7 @@ use crate::files::policy::{self, FileCommand};
 
 mod find;
 mod grep;
+mod tree;
 
 /// Search service. The `find`/`grep` query methods are implemented in the
 /// [`find`] and [`grep`] submodules.

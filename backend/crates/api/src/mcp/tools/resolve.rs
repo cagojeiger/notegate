@@ -2,11 +2,10 @@
 //! request-scoped [`Caller`] lookup, and the service-error → [`ErrorData`] map.
 //!
 //! MCP/CLI callers select a space by its human-friendly **name** (the
-//! canonical selector), or with a compact `target` string (`<ws>:/<path>`), or
-//! — as an explicit fallback — by `space_id`. Resolution is stateless: every
-//! tool call resolves the selector against the caller's accessible spaces
-//! (`docs/spec/mcp/README.md`). Paths are resolved inside the selected space
-//! only.
+//! canonical selector), or with a compact `target` string (`<space>:/<path>`).
+//! Resolution is stateless: every tool call resolves the selector against the
+//! caller's accessible spaces (`docs/spec/mcp/README.md`). Paths are resolved
+//! inside the selected space only.
 
 use std::borrow::Cow;
 
@@ -27,19 +26,14 @@ use crate::state::AppState;
 
 /// The space-selector fields every file tool accepts.
 ///
-/// Exactly one selection path is taken, in priority order: a `target` string
-/// (which also carries the path), then an explicit `space_id`, then a
-/// `space` name. When none is given and the caller has exactly one
-/// accessible space, that space is used.
+/// Selection uses a `target` string (which also carries the path) or a `space`
+/// name. When none is given and the caller has exactly one accessible space,
+/// that space is used.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct SpaceSelector {
     /// Human-friendly space name (the canonical selector).
     #[serde(default)]
     pub space: Option<String>,
-    /// Explicit space id (UUID string), accepted as a fallback for name
-    /// ambiguity or debugging.
-    #[serde(default)]
-    pub space_id: Option<String>,
 }
 
 /// The request-scoped authenticated caller, inserted by the MCP auth wrapper.
@@ -69,35 +63,22 @@ impl ResolvedSpace {
     }
 }
 
-/// Resolve a space from the structured selector (`space` / `space_id`).
+/// Resolve a space from the structured selector (`space`).
 ///
-/// Resolution order: an explicit `space_id` (must be accessible), then a
-/// `space` name. With neither, exactly one accessible space is used and
-/// any other count is an error. A name matching more than one accessible
-/// space (an agent with access across owners) returns an ambiguity error
-/// listing the matches and a `spaces_list` hint.
+/// With no selector, exactly one accessible space is used and any other count
+/// is an error. A name matching more than one accessible space returns an
+/// ambiguity error.
 pub async fn resolve_space(
     state: &AppState,
     caller: &Caller,
     selector: &SpaceSelector,
 ) -> Result<ResolvedSpace, ErrorData> {
-    let space_id = parse_space_id(selector.space_id.as_deref())?;
-    let view = select_space(state, caller, selector.space.as_deref(), space_id).await?;
+    let view = select_space(state, caller, selector.space.as_deref()).await?;
     Ok(ResolvedSpace { view })
 }
 
-/// Parse the optional `space_id` selector string into a [`Uuid`].
-fn parse_space_id(raw: Option<&str>) -> Result<Option<Uuid>, ErrorData> {
-    match raw {
-        None => Ok(None),
-        Some(value) => Uuid::parse_str(value)
-            .map(Some)
-            .map_err(|_error| invalid_input_error("space_id must be a UUID")),
-    }
-}
-
 /// Resolve a space and an absolute path from either a `target` string or the
-/// structured `space`/`space_id` + an explicit `path`.
+/// structured `space` + an explicit `path`.
 ///
 /// `target` (`<ws>:/<path>`) takes precedence; it supplies both the space
 /// name and the path. Otherwise the space is resolved from the selector and
@@ -111,7 +92,7 @@ pub async fn resolve_target(
 ) -> Result<(ResolvedSpace, String), ErrorData> {
     if let Some(target) = target {
         let parsed = parse_target(target).map_err(service_error)?;
-        let view = select_space(state, caller, Some(&parsed.space), None).await?;
+        let view = select_space(state, caller, Some(&parsed.space)).await?;
         return Ok((ResolvedSpace { view }, parsed.path));
     }
 
@@ -121,27 +102,12 @@ pub async fn resolve_target(
     Ok((resolved, path))
 }
 
-/// Core name/id resolution against the caller's accessible spaces.
+/// Core name resolution against the caller's accessible spaces.
 async fn select_space(
     state: &AppState,
     caller: &Caller,
     name: Option<&str>,
-    space_id: Option<Uuid>,
 ) -> Result<SpaceView, ErrorData> {
-    if let Some(id) = space_id {
-        return state
-            .spaces
-            .find_visible_by_id(caller.account_id(), id)
-            .await
-            .map_err(service_error)?
-            .ok_or_else(|| {
-                ErrorData::invalid_params(
-                    "space_id is not accessible to this caller",
-                    error_meta("not_found"),
-                )
-            });
-    }
-
     if let Some(name) = name {
         validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
         let mut matches = state
@@ -186,28 +152,10 @@ async fn select_space(
 /// Pure selection over an already-loaded accessible-space list (the testable
 /// core of [`select_space`]).
 ///
-/// Order: explicit `space_id` (must be accessible) → `name` (exactly one
-/// match; many ⇒ ambiguity) → the single accessible space when neither is
-/// given.
+/// Order: `name` (exactly one match; many ⇒ ambiguity) → the single
+/// accessible space when neither is given.
 #[cfg(test)]
-fn pick_space(
-    accessible: Vec<SpaceView>,
-    name: Option<&str>,
-    space_id: Option<Uuid>,
-) -> Result<SpaceView, ErrorData> {
-    // Explicit id fallback: must be one the caller can access.
-    if let Some(id) = space_id {
-        return accessible
-            .into_iter()
-            .find(|view| view.space.id == id)
-            .ok_or_else(|| {
-                ErrorData::invalid_params(
-                    "space_id is not accessible to this caller",
-                    error_meta("not_found"),
-                )
-            });
-    }
-
+fn pick_space(accessible: Vec<SpaceView>, name: Option<&str>) -> Result<SpaceView, ErrorData> {
     // Name selector: must match exactly one accessible space.
     if let Some(name) = name {
         validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
@@ -246,20 +194,19 @@ fn ambiguity_error(name: &str, matches: &[SpaceView]) -> ErrorData {
         .iter()
         .map(|view| {
             json!({
-                "id": view.space.id,
                 "name": view.space.name,
                 "permission": view.permission.as_str(),
             })
         })
         .collect();
     ErrorData::invalid_params(
-        format!("space name '{name}' is ambiguous; pass 'space_id'"),
+        format!("space name '{name}' is ambiguous; use a unique space name"),
         Some(json!({
             "kind": "invalid_input",
             "code": "space_ambiguous",
             "space": name,
             "matches": spaces,
-            "hint": "call spaces_list and select a space_id",
+            "hint": "rename spaces so MCP can select by name",
         })),
     )
 }
@@ -326,23 +273,19 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
 /// The canonical space summary used by `spaces_list` and `spaces_get`.
 pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     json!({
-        "id": view.space.id,
         "name": view.space.name,
         "sort_order": view.space.sort_order,
         "permission": view.permission.as_str(),
-        "root_node_id": view.root_node_id,
     })
 }
 
 /// A path-first node summary for file tools (`ls`/`stat`/`find`/mutation
-/// results). Path is the canonical derived absolute path; `node_id` is included
-/// for callers that need a stable identity but is never required as input.
+/// results). Path is the canonical derived absolute path for MCP/CLI callers.
 pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Value {
     let mut value = json!({
         "path": view.path,
         "name": view.node.name,
         "kind": view.node.kind.as_str(),
-        "node_id": view.node.id,
         "has_children": view.has_children,
         "sort_order": view.node.sort_order,
         "created_at": view.node.created_at,
@@ -437,7 +380,7 @@ mod tests {
         assert_eq!(data["kind"], "invalid_input");
         assert_eq!(data["code"], "space_ambiguous");
         assert_eq!(data["matches"].as_array().unwrap().len(), 2);
-        assert!(data["hint"].as_str().unwrap().contains("spaces_list"));
+        assert!(data["hint"].as_str().unwrap().contains("select by name"));
     }
 
     #[test]
@@ -480,7 +423,7 @@ mod tests {
             view("shared", Uuid::new_v4()),
             view("shared", Uuid::new_v4()),
         ];
-        let error = pick_space(accessible, Some("shared"), None).unwrap_err();
+        let error = pick_space(accessible, Some("shared")).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("ambiguity carries data");
         assert_eq!(data["kind"], "invalid_input");
@@ -492,7 +435,7 @@ mod tests {
     fn single_accessible_space_used_when_selector_omitted() {
         let only = view("personal", Uuid::new_v4());
         let expected = only.space.id;
-        let chosen = pick_space(vec![only], None, None).unwrap();
+        let chosen = pick_space(vec![only], None).unwrap();
         assert_eq!(chosen.space.id, expected);
     }
 
@@ -502,49 +445,31 @@ mod tests {
             view("personal", Uuid::new_v4()),
             view("research", Uuid::new_v4()),
         ];
-        let chosen = pick_space(accessible, Some("research"), None).unwrap();
+        let chosen = pick_space(accessible, Some("research")).unwrap();
         assert_eq!(chosen.space.name, "research");
     }
 
     #[test]
     fn omitted_selector_with_many_accessible_requires_a_choice() {
         let accessible = vec![view("a", Uuid::new_v4()), view("b", Uuid::new_v4())];
-        let error = pick_space(accessible, None, None).unwrap_err();
+        let error = pick_space(accessible, None).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("invalid selection carries data");
         assert_eq!(data["kind"], "invalid_input");
     }
 
     #[test]
-    fn explicit_space_id_must_be_accessible() {
-        let accessible = vec![view("a", Uuid::new_v4())];
-        let error = pick_space(accessible, None, Some(Uuid::new_v4())).unwrap_err();
-        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
-        let data = error.data.expect("inaccessible id carries not_found data");
-        assert_eq!(data["kind"], "not_found");
-    }
-
-    #[test]
     fn name_matching_no_accessible_space_is_not_found() {
         let accessible = vec![view("a", Uuid::new_v4())];
-        let error = pick_space(accessible, Some("missing"), None).unwrap_err();
+        let error = pick_space(accessible, Some("missing")).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("missing name carries not_found data");
         assert_eq!(data["kind"], "not_found");
     }
 
     #[test]
-    fn explicit_space_id_selects_the_match() {
-        let target = view("a", Uuid::new_v4());
-        let id = target.space.id;
-        let accessible = vec![target, view("b", Uuid::new_v4())];
-        let chosen = pick_space(accessible, None, Some(id)).unwrap();
-        assert_eq!(chosen.space.id, id);
-    }
-
-    #[test]
     fn bad_space_name_grammar_is_rejected() {
-        let error = pick_space(Vec::new(), Some(".secret"), None).unwrap_err();
+        let error = pick_space(Vec::new(), Some(".secret")).unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("invalid name carries data");
         assert_eq!(data["kind"], "invalid_input");

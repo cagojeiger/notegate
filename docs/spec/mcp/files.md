@@ -24,6 +24,29 @@ type FilesLsOutput = {
 }
 ```
 
+
+## `files_tree`
+
+Folder subtree를 DFS pre-order로 조회한다. `files_ls`는 direct children 전용이고, `files_tree`는 depth 기반 구조 조회다.
+
+```ts
+type FilesTreeInput = TargetSelector & {
+  depth?: number
+  limit?: number
+  cursor?: string
+}
+
+type FilesTreeOutput = {
+  space: string
+  path: string
+  depth: number
+  items: McpNodeSummary[]
+  page: Page
+}
+```
+
+기본 `depth`는 2, 최소 1, 최대 Space path depth다. `depth=1`은 선택 folder의 direct children만 반환한다. 순서는 DFS pre-order이며 sibling order는 `sort_order ASC, name ASC` 뒤 내부 tie-breaker로 안정화한다.
+
 ## `files_stat`
 
 Folder/Text/File 상태를 조회한다. Node metadata는 MCP stat 응답에 포함하지 않는다.
@@ -145,7 +168,6 @@ Node를 rename/move한다.
 ```ts
 type FilesMvInput = {
   space?: string
-  space_id?: string
   source_path: string
   destination_path: string
 }
@@ -169,7 +191,6 @@ type FilesRmInput = TargetSelector & {
 
 type FilesRmOutput = {
   space: string
-  node_id: string
   path: string
   deleted: true
   purge_after: string

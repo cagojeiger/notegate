@@ -45,6 +45,14 @@ pub struct GrepRequest {
     pub cursor: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TreeRequest {
+    pub path: Option<String>,
+    pub depth: Option<i64>,
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrepMatchMode {
     Literal,
@@ -91,6 +99,21 @@ pub struct DfsFrame {
     pub after: Option<ChildrenCursor>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TreeCursor {
+    pub version: u8,
+    pub command: String,
+    pub fingerprint: String,
+    pub stack: Vec<TreeFrame>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TreeFrame {
+    pub folder_node_id: Uuid,
+    pub depth: i64,
+    pub after: Option<ChildrenCursor>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FindPage {
     pub items: Vec<NodeView>,
@@ -111,4 +134,13 @@ pub struct GrepPage {
 pub struct GrepHit {
     pub node: NodeView,
     pub match_lines: Vec<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TreePage {
+    pub items: Vec<NodeView>,
+    pub depth: i64,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
 }

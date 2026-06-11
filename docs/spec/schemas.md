@@ -23,12 +23,11 @@ MCP path-first tool이 공통으로 사용하는 대상 지정자다.
 type TargetSelector = {
   target?: string      // "space:/path" 축약형
   space?: string       // space name
-  space_id?: string    // space UUID fallback
   path?: string        // absolute path, 기본 "/"
 }
 ```
 
-`target`이 있으면 `space`, `space_id`, `path`보다 우선한다.
+`target`이 있으면 `space`, `path`보다 우선한다.
 
 ## NodeKind
 
@@ -99,11 +98,10 @@ type RestNode = {
 
 ## McpNodeSummary
 
-MCP `files_ls`, `files_stat`, `files_find`가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
+MCP `files_ls`, `files_tree`, `files_stat`, `files_find`가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
 
 ```ts
 type McpNodeSummary = {
-  node_id: string
   path: string
   name: string
   kind: NodeKind

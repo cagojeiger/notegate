@@ -17,6 +17,7 @@ space:/path/to/item
 
 ```text
 ls      folder children 목록
+tree    folder subtree 구조 조회
 stat    folder/text/file 상태 조회
 mkdir   folder 생성
 touch   empty text 생성
@@ -67,3 +68,8 @@ grep        plain Text content가 query를 포함하는 text node 후보 검색
 ```
 
 `grep`은 기본적으로 Text node 후보만 반환한다. 요청 옵션으로 첫 matching line 또는 모든 matching line number를 받을 수 있다. Context와 snippet은 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Encrypted Text와 File은 grep 대상이 아니다.
+
+
+## tree
+
+`tree`는 선택 folder 아래 subtree를 DFS pre-order로 반환한다. MCP/CLI 전용 path-first 구조 조회이며, REST의 node children API와 1:1 대응하지 않는다. 기본 depth는 2, 최소 1, 최대 Space path depth다.

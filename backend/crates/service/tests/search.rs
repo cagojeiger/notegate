@@ -24,6 +24,7 @@ use notegate_service::files::{
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
+    TreeRequest,
 };
 use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
@@ -480,6 +481,79 @@ async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
         .await?;
     assert_eq!(second.items.len(), 1);
     assert_eq!(second.items[0].node.id, sibling);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// tree returns bounded-depth DFS node summaries without exposing ids at the MCP layer.
+#[tokio::test]
+async fn tree_returns_depth_limited_subtree() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
+
+    let a = mkdir(&files, owner, ws, root, "a").await;
+    let b = mkdir(&files, owner, ws, a, "b").await;
+    let _c = write_doc(&files, owner, ws, b, "c.md", "nested\n").await;
+    let _z = write_doc(&files, owner, ws, root, "z.md", "sibling\n").await;
+
+    let depth_one = search
+        .tree(
+            owner,
+            ws,
+            TreeRequest {
+                path: None,
+                depth: Some(1),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    let depth_one_paths: Vec<&str> = depth_one
+        .items
+        .iter()
+        .map(|view| view.path.as_str())
+        .collect();
+    assert_eq!(depth_one_paths, vec!["/a", "/z.md"]);
+    assert!(!depth_one.has_more);
+
+    let depth_two = search
+        .tree(
+            owner,
+            ws,
+            TreeRequest {
+                path: None,
+                depth: Some(2),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    let depth_two_paths: Vec<&str> = depth_two
+        .items
+        .iter()
+        .map(|view| view.path.as_str())
+        .collect();
+    assert_eq!(depth_two_paths, vec!["/a", "/a/b", "/z.md"]);
+
+    let scoped = search
+        .tree(
+            owner,
+            ws,
+            TreeRequest {
+                path: Some("/a".to_owned()),
+                depth: Some(2),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    let scoped_paths: Vec<&str> = scoped.items.iter().map(|view| view.path.as_str()).collect();
+    assert_eq!(scoped_paths, vec!["/a/b", "/a/b/c.md"]);
 
     db.cleanup().await;
     Ok(())
