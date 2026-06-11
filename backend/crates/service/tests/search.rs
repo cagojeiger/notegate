@@ -22,7 +22,9 @@ use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_service::files::{
     CreateFolder, CreateText, FilesService, WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::{FindRequest, GrepRequest, SearchService};
+use notegate_service::search::{
+    FindMatchMode, FindRequest, GrepMatchMode, GrepRequest, SearchService,
+};
 use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
 
@@ -133,6 +135,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 q: "note".to_owned(),
                 path: None,
                 kind: None,
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: None,
             },
@@ -168,6 +171,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 q: "projects".to_owned(),
                 path: None,
                 kind: None,
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: None,
             },
@@ -196,6 +200,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 q: "note".to_owned(),
                 path: None,
                 kind: Some(notegate_model::NodeKind::Folder),
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: None,
             },
@@ -215,6 +220,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 q: "projects".to_owned(),
                 path: None,
                 kind: Some(notegate_model::NodeKind::Folder),
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: None,
             },
@@ -236,6 +242,7 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
                 q: "note".to_owned(),
                 path: Some("/projects".to_owned()),
                 kind: None,
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: None,
             },
@@ -255,10 +262,9 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-/// Search scope paths are node scopes: a folder scopes to its subtree, a text
-/// scopes to that single text, and an unresolved scope is an actionable not-found.
+/// Search scope paths are folder scopes; text scopes and unresolved scopes are rejected.
 #[tokio::test]
-async fn search_scope_accepts_text_and_rejects_missing_path()
+async fn search_scope_requires_folder_and_rejects_missing_path()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -267,27 +273,46 @@ async fn search_scope_accepts_text_and_rejects_missing_path()
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
-    let note = write_doc(&files, owner, ws, root, "note.md", "alpha\nneedle\n").await;
-    let _other = write_doc(&files, owner, ws, root, "other.md", "needle\n").await;
+    let _note = write_doc(
+        &files,
+        owner,
+        ws,
+        root,
+        "note.md",
+        "alpha
+needle
+",
+    )
+    .await;
+    let _other = write_doc(
+        &files, owner, ws, root, "other.md", "needle
+",
+    )
+    .await;
 
-    let single_doc = search
+    let text_scope = search
         .grep(
             owner,
             ws,
             GrepRequest {
                 q: "needle".to_owned(),
                 path: Some("/note.md".to_owned()),
+                match_mode: GrepMatchMode::Literal,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
         )
-        .await?;
-    assert_eq!(
-        single_doc.items.len(),
-        1,
-        "text scope returns that text only"
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            text_scope,
+            notegate_service::error::ServiceError::InvalidInput(_)
+        ),
+        "text scope is invalid, got {text_scope:?}"
     );
-    assert_eq!(single_doc.items[0].node.id, note);
 
     let missing = search
         .find(
@@ -297,6 +322,7 @@ async fn search_scope_accepts_text_and_rejects_missing_path()
                 q: "note".to_owned(),
                 path: Some("/missing".to_owned()),
                 kind: None,
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: None,
             },
@@ -339,6 +365,9 @@ l7
             GrepRequest {
                 q: "  needle  ".to_owned(),
                 path: None,
+                match_mode: GrepMatchMode::Literal,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: None,
             },
@@ -401,6 +430,7 @@ async fn find_cursor_pages_without_dup_or_loss() -> Result<(), Box<dyn std::erro
                     q: "match".to_owned(),
                     path: None,
                     kind: None,
+                    match_mode: FindMatchMode::Contains,
                     limit: Some(limit),
                     cursor: cursor.clone(),
                 },
@@ -485,6 +515,9 @@ hit-{index}
                 GrepRequest {
                     q: "hit-".to_owned(),
                     path: None,
+                    match_mode: GrepMatchMode::Literal,
+                    include: Vec::new(),
+                    exclude: Vec::new(),
                     limit: Some(limit),
                     cursor: cursor.clone(),
                 },
@@ -541,6 +574,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
                 q: "x".to_owned(),
                 path: None,
                 kind: None,
+                match_mode: FindMatchMode::Contains,
                 limit: None,
                 cursor: Some("!!!not-a-cursor!!!".to_owned()),
             },
@@ -562,6 +596,9 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
             GrepRequest {
                 q: "x".to_owned(),
                 path: None,
+                match_mode: GrepMatchMode::Literal,
+                include: Vec::new(),
+                exclude: Vec::new(),
                 limit: None,
                 cursor: Some("!!!not-a-cursor!!!".to_owned()),
             },

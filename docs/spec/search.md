@@ -131,6 +131,8 @@ regex    = node name regex match
 glob     = node name glob match
 ```
 
+Match는 대소문자를 구분하지 않는다.
+
 Glob과 regex는 명시적으로 선택한다. 예를 들어 `*.md`는 glob mode에서만 glob pattern이다.
 
 ### `grep` scanner
@@ -156,6 +158,8 @@ Match mode:
 literal = content substring match
 regex   = content regex match
 ```
+
+Match는 대소문자를 구분하지 않는다.
 
 `include`/`exclude` path filter는 glob pattern을 사용할 수 있다.
 
@@ -191,6 +195,7 @@ plain text scan upper bound = 256 MiB per space
 
 ```text
 children page           <= 200 node summaries
+node scan budget        <= 1000 node summaries
 grep scan budget        <= 8 MiB content bytes
 response result limit   <= 100 node summaries
 response body target    <= 256 KiB

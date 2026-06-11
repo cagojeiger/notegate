@@ -73,6 +73,7 @@ find_default_limit = 50
 grep_default_limit = 20
 search_max_limit = 100
 search_children_page_max = 200
+search_node_scan_max = 1000            # node summaries inspected per request
 grep_scan_budget_bytes = 8388608       # 8 MiB content bytes per request
 search_response_target_bytes = 262144  # 256 KiB response target
 api_keys_default_limit = 50
@@ -96,6 +97,7 @@ plain text scan upper bound = 256 MiB live text bytes per space
 
 ```text
 children page        <= 200 node summaries
+node scan budget     <= 1000 node summaries
 grep scan budget     <= 8 MiB content bytes
 result limit         <= 100 node summaries
 response target      <= 256 KiB

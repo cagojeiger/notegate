@@ -133,10 +133,12 @@ pub const FIND_MAX_LIMIT: i64 = 100;
 pub const GREP_DEFAULT_LIMIT: i64 = 20;
 /// Maximum `grep` page size.
 pub const GREP_MAX_LIMIT: i64 = 100;
-/// Default `grep` context lines.
-pub const GREP_DEFAULT_CONTEXT: i64 = 2;
-/// Maximum `grep` context lines.
-pub const GREP_MAX_CONTEXT: i64 = 5;
+/// Maximum direct children fetched by one search scanner page.
+pub const SEARCH_CHILDREN_PAGE_MAX: i64 = 200;
+/// Maximum node summaries inspected by one search request.
+pub const SEARCH_NODE_SCAN_MAX: usize = 1_000;
+/// Maximum plain text bytes read by one grep request (8 MiB).
+pub const GREP_SCAN_MAX_BYTES: usize = 8_388_608;
 /// Maximum search query length in Unicode scalar values.
 pub const SEARCH_QUERY_MAX_CHARS: usize = 256;
 

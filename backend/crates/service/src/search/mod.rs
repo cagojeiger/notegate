@@ -6,12 +6,16 @@
 
 use notegate_core::limits;
 use notegate_db::FilesRepo;
-use notegate_model::Permission;
+use notegate_model::files::{ChildrenCursor, NodeView};
 pub use notegate_model::search::{
-    FindCursor, FindPage, FindRequest, GrepCandidate, GrepCursor, GrepPage, GrepRequest,
+    DfsFrame, FindCursor, FindMatchMode, FindPage, FindRequest, GrepCandidate, GrepCursor,
+    GrepMatchMode, GrepPage, GrepRequest, SearchCursor,
 };
+use notegate_model::{Node, NodeKind, Permission};
+use regex::{Regex, RegexBuilder};
 use uuid::Uuid;
 
+use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::policy::{self, FileCommand};
 
@@ -28,6 +32,105 @@ pub struct SearchService {
 impl SearchService {
     pub fn new(store: FilesRepo) -> Self {
         Self { store }
+    }
+
+    async fn resolve_scope_folder(
+        &self,
+        space_id: Uuid,
+        path: Option<&str>,
+    ) -> ServiceResult<Uuid> {
+        let normalized = match path {
+            Some(path) => crate::files::validation::normalize_path(path)?,
+            None => "/".to_owned(),
+        };
+        let node_id = self
+            .store
+            .resolve_scope(space_id, Some(&normalized))
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
+        let node = self
+            .store
+            .find_node(space_id, node_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
+        if node.kind != NodeKind::Folder {
+            return Err(ServiceError::InvalidInput(
+                "search scope must be a folder".to_owned(),
+            ));
+        }
+        Ok(node_id)
+    }
+
+    async fn node_view(&self, space_id: Uuid, node: Node, path: String) -> ServiceResult<NodeView> {
+        let has_children = if node.kind == NodeKind::Folder {
+            self.store.has_children(space_id, node.id).await?
+        } else {
+            false
+        };
+        let text = if node.kind == NodeKind::Text {
+            self.store.text_stats(space_id, node.id).await?
+        } else {
+            None
+        };
+        let file = if node.kind == NodeKind::File {
+            self.store.file_stats(space_id, node.id).await?
+        } else {
+            None
+        };
+        Ok(NodeView {
+            node,
+            path,
+            has_children,
+            text,
+            file,
+        })
+    }
+
+    fn decode_search_cursor(
+        &self,
+        raw: Option<&str>,
+        command: &str,
+        fingerprint: &str,
+        scope_node_id: Uuid,
+    ) -> ServiceResult<Vec<DfsFrame>> {
+        match raw {
+            None => Ok(vec![DfsFrame {
+                folder_node_id: scope_node_id,
+                after: None,
+            }]),
+            Some(raw) => {
+                let cursor: SearchCursor = cursor::decode(raw)?;
+                if cursor.version != 1
+                    || cursor.command != command
+                    || cursor.fingerprint != fingerprint
+                {
+                    return Err(ServiceError::InvalidInput(
+                        "search cursor does not match this query".to_owned(),
+                    ));
+                }
+                Ok(cursor.stack)
+            }
+        }
+    }
+
+    fn encode_search_cursor(
+        &self,
+        command: &str,
+        fingerprint: String,
+        stack: Vec<DfsFrame>,
+    ) -> ServiceResult<Option<String>> {
+        if stack.is_empty() {
+            return Ok(None);
+        }
+        let cursor = SearchCursor {
+            version: 1,
+            command: command.to_owned(),
+            fingerprint,
+            stack,
+        };
+        cursor::encode(&cursor)
+            .map(Some)
+            .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
     }
 
     /// Resolve the caller's permission (none ⇒ `404`) and gate by command
@@ -69,6 +172,115 @@ fn validate_query(q: &str) -> ServiceResult<&str> {
         )));
     }
     Ok(trimmed)
+}
+
+fn child_cursor(node: &Node) -> ChildrenCursor {
+    ChildrenCursor {
+        sort_order: node.sort_order,
+        name: node.name.clone(),
+        id: node.id,
+    }
+}
+
+fn join_path(parent: &str, name: &str) -> String {
+    if parent == "/" {
+        format!("/{name}")
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+fn search_fingerprint(parts: &[String]) -> String {
+    parts.join("\u{1f}")
+}
+
+enum NameMatcher {
+    Contains(String),
+    Regex(Regex),
+    Glob(Regex),
+}
+
+impl NameMatcher {
+    fn new(q: &str, mode: FindMatchMode) -> ServiceResult<Self> {
+        match mode {
+            FindMatchMode::Contains => Ok(Self::Contains(q.to_lowercase())),
+            FindMatchMode::Regex => Ok(Self::Regex(compile_regex(q)?)),
+            FindMatchMode::Glob => Ok(Self::Glob(compile_glob(q)?)),
+        }
+    }
+
+    fn is_match(&self, value: &str) -> bool {
+        match self {
+            Self::Contains(needle) => value.to_lowercase().contains(needle),
+            Self::Regex(regex) | Self::Glob(regex) => regex.is_match(value),
+        }
+    }
+}
+
+enum ContentMatcher {
+    Literal(String),
+    Regex(Regex),
+}
+
+impl ContentMatcher {
+    fn new(q: &str, mode: GrepMatchMode) -> ServiceResult<Self> {
+        match mode {
+            GrepMatchMode::Literal => Ok(Self::Literal(q.to_lowercase())),
+            GrepMatchMode::Regex => Ok(Self::Regex(compile_regex(q)?)),
+        }
+    }
+
+    fn is_match(&self, value: &str) -> bool {
+        match self {
+            Self::Literal(needle) => value.to_lowercase().contains(needle),
+            Self::Regex(regex) => regex.is_match(value),
+        }
+    }
+}
+
+struct PathFilters {
+    include: Vec<Regex>,
+    exclude: Vec<Regex>,
+}
+
+impl PathFilters {
+    fn new(include: &[String], exclude: &[String]) -> ServiceResult<Self> {
+        Ok(Self {
+            include: include
+                .iter()
+                .map(|pattern| compile_glob(pattern))
+                .collect::<ServiceResult<_>>()?,
+            exclude: exclude
+                .iter()
+                .map(|pattern| compile_glob(pattern))
+                .collect::<ServiceResult<_>>()?,
+        })
+    }
+
+    fn allows(&self, path: &str) -> bool {
+        (self.include.is_empty() || self.include.iter().any(|regex| regex.is_match(path)))
+            && !self.exclude.iter().any(|regex| regex.is_match(path))
+    }
+}
+
+fn compile_regex(pattern: &str) -> ServiceResult<Regex> {
+    RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .map_err(|error| ServiceError::InvalidInput(format!("invalid regex pattern: {error}")))
+}
+
+fn compile_glob(pattern: &str) -> ServiceResult<Regex> {
+    let mut out = String::from("^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => out.push_str(".*"),
+            '?' => out.push('.'),
+            _ => out.push_str(&regex::escape(&ch.to_string())),
+        }
+    }
+    out.push('$');
+    compile_regex(&out)
 }
 
 #[cfg(test)]
@@ -114,6 +326,49 @@ mod tests {
     fn garbage_cursor_fails_to_decode() {
         assert!(cursor::decode::<FindCursor>("!!!not-base64!!!").is_err());
         assert!(cursor::decode::<GrepCursor>("not-a-cursor").is_err());
+    }
+
+    #[test]
+    fn name_match_modes_are_explicit() {
+        assert!(
+            NameMatcher::new("note", FindMatchMode::Contains)
+                .unwrap()
+                .is_match("daily-note.md")
+        );
+        assert!(
+            NameMatcher::new(r"^daily-\d+\.md$", FindMatchMode::Regex)
+                .unwrap()
+                .is_match("daily-42.md")
+        );
+        assert!(
+            NameMatcher::new("*.md", FindMatchMode::Glob)
+                .unwrap()
+                .is_match("daily.md")
+        );
+        assert!(
+            !NameMatcher::new("*.md", FindMatchMode::Contains)
+                .unwrap()
+                .is_match("daily.md")
+        );
+    }
+
+    #[test]
+    fn grep_match_and_path_filters_are_explicit() {
+        assert!(
+            ContentMatcher::new("TODO", GrepMatchMode::Literal)
+                .unwrap()
+                .is_match("todo item")
+        );
+        assert!(
+            ContentMatcher::new(r"todo\s+\d+", GrepMatchMode::Regex)
+                .unwrap()
+                .is_match("TODO 42")
+        );
+        let filters =
+            PathFilters::new(&["/notes/*.md".to_owned()], &["/notes/tmp*".to_owned()]).unwrap();
+        assert!(filters.allows("/notes/today.md"));
+        assert!(!filters.allows("/notes/tmp.md"));
+        assert!(!filters.allows("/archive/today.md"));
     }
 
     #[test]

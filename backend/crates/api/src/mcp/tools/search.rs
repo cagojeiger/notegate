@@ -2,7 +2,7 @@
 
 use axum::http::request::Parts;
 use notegate_model::NodeKind;
-use notegate_service::search::{FindRequest, GrepRequest};
+use notegate_service::search::{FindMatchMode, FindRequest, GrepMatchMode, GrepRequest};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
@@ -97,7 +97,7 @@ pub async fn find(
         None => None,
         Some(value) => Some(parse_kind(value)?),
     };
-    let _match_mode = input.match_mode;
+    let match_mode = parse_find_match_mode(input.match_mode.as_deref())?;
 
     let page = state
         .search
@@ -108,6 +108,7 @@ pub async fn find(
                 q: input.q,
                 path: scope_path,
                 kind,
+                match_mode,
                 limit: input.limit,
                 cursor: input.cursor,
             },
@@ -148,9 +149,7 @@ pub async fn grep(
         ),
     };
     let space = resolved.name().to_owned();
-    let _match_mode = input.match_mode;
-    let _include = input.include;
-    let _exclude = input.exclude;
+    let match_mode = parse_grep_match_mode(input.match_mode.as_deref())?;
 
     let page = state
         .search
@@ -160,6 +159,9 @@ pub async fn grep(
             GrepRequest {
                 q: input.q,
                 path: scope_path,
+                match_mode,
+                include: input.include.unwrap_or_default(),
+                exclude: input.exclude.unwrap_or_default(),
                 limit: input.limit,
                 cursor: input.cursor,
             },
@@ -185,4 +187,23 @@ pub async fn grep(
 fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
     NodeKind::parse(value)
         .ok_or_else(|| invalid_input_error("kind must be 'folder', 'text', or 'file'"))
+}
+
+fn parse_find_match_mode(value: Option<&str>) -> Result<FindMatchMode, ErrorData> {
+    match value.unwrap_or("contains") {
+        "contains" => Ok(FindMatchMode::Contains),
+        "regex" => Ok(FindMatchMode::Regex),
+        "glob" => Ok(FindMatchMode::Glob),
+        _ => Err(invalid_input_error(
+            "match must be 'contains', 'regex', or 'glob'",
+        )),
+    }
+}
+
+fn parse_grep_match_mode(value: Option<&str>) -> Result<GrepMatchMode, ErrorData> {
+    match value.unwrap_or("literal") {
+        "literal" => Ok(GrepMatchMode::Literal),
+        "regex" => Ok(GrepMatchMode::Regex),
+        _ => Err(invalid_input_error("match must be 'literal' or 'regex'")),
+    }
 }
