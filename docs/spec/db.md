@@ -131,7 +131,7 @@ space_agent_connections
   primary key (space_id, agent_id)
 ```
 
-Connection은 agent 전용이다. User-to-user membership은 제공하지 않는다.
+Connection은 agent 전용이다. User-to-user membership은 제공하지 않는다. 같은 owner user 안의 live space와 active agent만 연결하는 규칙은 connection repository transaction에서 검사한다.
 
 ## Tree and content tables
 

@@ -40,11 +40,10 @@ API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는�
 ## Identity mapping
 
 ```text
-browser login via authgate  -> user account
-MCP OAuth via authgate       -> user account
-device flow via authgate     -> user account
-ngk_v1_ user API key         -> user account
-ngk_v1_ agent API key        -> agent account
+browser login via authgate -> user account
+MCP OAuth via authgate      -> user account
+device flow via authgate    -> user account
+ngk_v1_ API key             -> api_keys.account_id account
 ```
 
 OAuth 계열 인증은 user로 처리한다. API key는 `api_keys.account_id`가 가리키는 account kind로 caller를 결정한다.

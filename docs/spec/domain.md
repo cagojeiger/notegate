@@ -36,6 +36,7 @@ User caller:
   owned space read/write/manage
   owned agent manage
   own user API key manage
+  owned agent API key manage
 
 Agent caller:
   connected space read/write according to permission
@@ -46,7 +47,7 @@ Agent caller:
 Permission:
 
 ```text
-read  = list/stat/read text/search text
+read  = list/stat/read text/find/grep
 write = read + create/update/patch/delete/move
 ```
 
