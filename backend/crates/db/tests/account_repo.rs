@@ -412,7 +412,7 @@ async fn soft_delete_user_tears_down_owned_lifecycle() -> Result<(), Box<dyn std
             &GrantAccess {
                 workspace_id,
                 account_id: member.id,
-                role: Role::Viewer,
+                role: Role::Owner,
             },
             owner.id,
         )
@@ -449,9 +449,9 @@ async fn soft_delete_user_tears_down_owned_lifecycle() -> Result<(), Box<dyn std
         .bind(workspace_id)
         .fetch_one(&db.pool)
         .await?;
-    assert!(workspace_deleted.0.is_some());
-    assert_eq!(workspace_deleted.1, Some(owner.id));
-    assert!(workspace_deleted.2.is_some());
+    assert!(workspace_deleted.0.is_none());
+    assert_eq!(workspace_deleted.1, None);
+    assert!(workspace_deleted.2.is_none());
 
     let agent_active: bool = sqlx::query_scalar("SELECT is_active FROM accounts WHERE id = $1")
         .bind(agent.id)
@@ -479,7 +479,57 @@ async fn soft_delete_user_tears_down_owned_lifecycle() -> Result<(), Box<dyn std
     .bind(workspace_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(live_access, 0);
+    assert_eq!(
+        live_access, 1,
+        "the remaining co-owner keeps the workspace live"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn soft_delete_user_rejects_sole_owned_workspace() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let accounts = AccountRepo::new(db.pool.clone());
+    let workspaces = WorkspaceRepo::new(db.pool.clone());
+
+    let (owner, _) = accounts
+        .upsert_user_by_sub(&attrs("solo-delete", "solo@example.test", "Solo"))
+        .await?;
+    let workspace_id = workspaces
+        .create_workspace(
+            owner.id,
+            &CreateWorkspace {
+                name: "solo".to_owned(),
+            },
+        )
+        .await?
+        .id;
+
+    let err = accounts
+        .soft_delete_user(owner.id, owner.id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::Conflict(_)),
+        "sole-owned workspace must block deletion, got {err:?}"
+    );
+
+    let account_active: bool = sqlx::query_scalar("SELECT is_active FROM accounts WHERE id = $1")
+        .bind(owner.id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert!(account_active);
+
+    let workspace_deleted_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT deleted_at FROM workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(workspace_deleted_at.is_none());
 
     db.cleanup().await;
     Ok(())

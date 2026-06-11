@@ -21,7 +21,8 @@ const AUTH_PROVIDER: &str = "authgate";
 
 /// FROM/WHERE selecting the live workspaces an account is the SOLE active-user owner
 /// of (no other active user owner exists). `$1` binds the account id. Shared by the
-/// deletion gate and the soft-delete teardown so both operate on the same set.
+/// service deletion gate and the repository transaction invariant so both operate on
+/// the same set.
 const SOLE_OWNED_WORKSPACES_FROM_WHERE: &str = "\
     FROM workspace_access wa \
     JOIN workspaces w ON w.id = wa.workspace_id AND w.deleted_at IS NULL \
@@ -220,8 +221,10 @@ impl AccountRepo {
     }
 
     /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
-    /// lifecycle (workspaces, agents, keys, access), but KEEP `provider_sub_hash` and
-    /// PII as a tombstone. The purge run anonymizes PII and frees the sub-hash once the
+    /// agents, keys, and access, but do not delete workspaces. If the user is the
+    /// sole active owner of any live workspace, reject so the caller must delete or
+    /// transfer those workspaces first. KEEP `provider_sub_hash` and PII as a
+    /// tombstone. The purge run anonymizes PII and frees the sub-hash once the
     /// retention window elapses; re-login during the window is rejected by
     /// `upsert_user_by_sub`, so a returning sub never duplicates the account.
     pub async fn soft_delete_user(&self, account_id: Uuid, deleted_by: Uuid) -> Result<()> {
@@ -252,13 +255,18 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        let owned_workspaces: Vec<Uuid> = sqlx::query_scalar(&format!(
-            "SELECT w.id {SOLE_OWNED_WORKSPACES_FROM_WHERE}"
+        let sole_owned: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) {SOLE_OWNED_WORKSPACES_FROM_WHERE}"
         ))
         .bind(account_id)
-        .fetch_all(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        if sole_owned > 0 {
+            return Err(Error::conflict(format!(
+                "delete or transfer your {sole_owned} owned workspace(s) before deleting your account"
+            )));
+        }
 
         let owned_agents: Vec<Uuid> = sqlx::query_scalar(
             "SELECT a.id FROM agents a \
@@ -268,19 +276,6 @@ impl AccountRepo {
         )
         .bind(account_id)
         .fetch_all(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        sqlx::query(
-            "UPDATE workspaces \
-             SET deleted_at = now(), deleted_by = $2, \
-                 purge_after = now() + make_interval(days => $3::int), updated_at = now() \
-             WHERE id = ANY($1) AND deleted_at IS NULL",
-        )
-        .bind(&owned_workspaces)
-        .bind(deleted_by)
-        .bind(i32::try_from(limits::DELETED_NODE_RETENTION_DAYS).unwrap_or(i32::MAX))
-        .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
 
@@ -312,12 +307,11 @@ impl AccountRepo {
             "UPDATE workspace_access \
              SET revoked_at = now(), revoked_by = $3 \
              WHERE revoked_at IS NULL \
-               AND (account_id = $1 OR account_id = ANY($2) OR workspace_id = ANY($4))",
+               AND (account_id = $1 OR account_id = ANY($2))",
         )
         .bind(account_id)
         .bind(&owned_agents)
         .bind(deleted_by)
-        .bind(&owned_workspaces)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
