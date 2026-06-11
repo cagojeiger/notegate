@@ -1,8 +1,8 @@
 //! DB-level file-tree lifecycle against a real Postgres schema.
 //!
 //! Drives the full command lifecycle through `FilesService` over the real
-//! `FilesRepo` (so validation + SQL run end-to-end), plus search via the
-//! concrete repository search queries directly.
+//! `FilesRepo` (so validation + SQL run end-to-end), plus search through the
+//! service scanner.
 //!
 //! Run with:
 //! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
@@ -25,6 +25,9 @@ use notegate_service::files::Edit;
 use notegate_service::files::{
     ChildrenCursor, CreateFile, CreateFolder, CreateText, DeleteNode, FilesService, MoveNode,
     PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
+};
+use notegate_service::search::{
+    FindMatchMode, FindRequest, GrepMatchMode, GrepRequest, SearchService,
 };
 use notegate_service::spaces::CreateSpace;
 use serde_json::json;
@@ -59,6 +62,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     };
     let ws_repo = SpaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let search = SearchService::new(FilesRepo::new(db.pool.clone()));
     let repo = FilesRepo::new(db.pool.clone());
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
@@ -324,31 +328,71 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // --- find by NAME: q='note' matches the text by name ---
-    let by_name = repo.find_nodes(ws, "note", None, None, 50, None).await?;
+    let by_name = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "note".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(50),
+                cursor: None,
+            },
+        )
+        .await?;
     assert!(
-        by_name.iter().any(|(n, _, _)| n.id == note_id),
+        by_name.items.iter().any(|item| item.node.id == note_id),
         "find by name must match the text"
     );
 
     // --- find remains name-only: q='projects' matches the folder, not the doc via path ---
-    let by_path = repo
-        .find_nodes(ws, "projects", None, None, 50, None)
+    let by_path = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "projects".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(50),
+                cursor: None,
+            },
+        )
         .await?;
     assert!(
-        by_path.iter().all(|(n, _, _)| n.id != note_id),
+        by_path.items.iter().all(|item| item.node.id != note_id),
         "find must not match the text by path substring"
     );
 
     // --- grep: content candidate by body substring, with derived path ---
-    let candidates = repo
-        .grep_candidates(ws, "alpha delta", None, 20, None)
+    let candidates = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "alpha delta".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: Some(20),
+                cursor: None,
+            },
+        )
         .await?;
     let hit = candidates
+        .items
         .iter()
-        .find(|c| c.node.id == note_id)
+        .find(|item| item.node.id == note_id)
         .expect("grep candidate present");
     assert_eq!(hit.path, "/projects/note.md", "grep returns derived path");
-    assert_eq!(hit.text.byte_len, doc_now.byte_len);
+    assert_eq!(
+        hit.text.as_ref().expect("text stats").byte_len,
+        doc_now.byte_len
+    );
 
     // --- mv: move /projects/note.md → /archive/note.md (rename parent) ---
     let archive = files
@@ -382,11 +426,24 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
 
     // find is name-only; the moved text keeps its name, and its derived
     // path (for display) reflects the move even though the match is on name.
-    let by_name = repo.find_nodes(ws, "note", None, None, 50, None).await?;
-    let hit = by_name.iter().find(|(n, _, _)| n.id == note_id);
+    let by_name = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "note".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(50),
+                cursor: None,
+            },
+        )
+        .await?;
+    let hit = by_name.items.iter().find(|item| item.node.id == note_id);
     assert!(hit.is_some(), "find by name must hit the moved text");
     assert_eq!(
-        hit.map(|(_, p, _)| p.as_str()),
+        hit.map(|item| item.path.as_str()),
         Some("/archive/note.md"),
         "derived path reflects the move",
     );
@@ -526,8 +583,7 @@ async fn keyset_pagination_is_stable() -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-/// Scoped find: a `scope_path` restricts results to that subtree. Used as a
-/// focused check of the recursive-CTE scope path resolution.
+/// Scoped find: a folder scope restricts results to that subtree.
 #[tokio::test]
 async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -535,7 +591,7 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
     };
     let ws_repo = SpaceRepo::new(db.pool.clone());
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
-    let repo = FilesRepo::new(db.pool.clone());
+    let search = SearchService::new(FilesRepo::new(db.pool.clone()));
 
     let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
     let (ws, root) = setup_space(&ws_repo, owner, "scoped").await;
@@ -593,17 +649,41 @@ async fn find_scope_restricts_to_subtree() -> Result<(), Box<dyn std::error::Err
         .id;
 
     // Unscoped find matches both target.md texts.
-    let all = repo.find_nodes(ws, "target", None, None, 50, None).await?;
-    assert!(all.iter().any(|(n, _, _)| n.id == inside_doc));
-    assert!(all.iter().any(|(n, _, _)| n.id == outside_doc));
+    let all = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "target".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(50),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert!(all.items.iter().any(|item| item.node.id == inside_doc));
+    assert!(all.items.iter().any(|item| item.node.id == outside_doc));
 
     // Scoped to /inside matches only the inside text.
-    let scoped = repo
-        .find_nodes(ws, "target", Some("/inside"), None, 50, None)
+    let scoped = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "target".to_owned(),
+                path: Some("/inside".to_owned()),
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(50),
+                cursor: None,
+            },
+        )
         .await?;
-    assert!(scoped.iter().any(|(n, _, _)| n.id == inside_doc));
+    assert!(scoped.items.iter().any(|item| item.node.id == inside_doc));
     assert!(
-        !scoped.iter().any(|(n, _, _)| n.id == outside_doc),
+        !scoped.items.iter().any(|item| item.node.id == outside_doc),
         "scope must exclude nodes outside the subtree"
     );
 

@@ -13,17 +13,15 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
-use notegate_model::{FileObject, Node, NodeKind, Permission, TextObject};
+use notegate_model::{FileObject, Node, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::files::{commands, queries};
 use notegate_model::files::{
     ChildrenCursor, CreateFolder, FileStats, MoveNode, StoredContent, StoredFile, TextStats,
 };
-use notegate_model::search::{FindCursor, GrepCandidate, GrepCursor};
-
-use crate::files::{commands, queries};
 
 #[derive(Debug, Clone)]
 pub struct FilesRepo {
@@ -290,37 +288,6 @@ impl FilesRepo {
         account_id: Uuid,
     ) -> Result<Option<Permission>> {
         queries::node::permission_for(&self.pool, space_id, account_id).await
-    }
-
-    pub async fn find_nodes(
-        &self,
-        space_id: Uuid,
-        q: &str,
-        scope: Option<&str>,
-        kind: Option<NodeKind>,
-        limit: i64,
-        cursor: Option<&FindCursor>,
-    ) -> Result<Vec<(Node, String, bool)>> {
-        let scope_node = self.resolve_scope(space_id, scope).await?;
-        if scope.is_some() && scope_node.is_none() {
-            return Err(notegate_core::Error::not_found("scope path not found"));
-        }
-        queries::search::find_nodes(&self.pool, space_id, q, scope_node, kind, limit, cursor).await
-    }
-
-    pub async fn grep_candidates(
-        &self,
-        space_id: Uuid,
-        q: &str,
-        scope: Option<&str>,
-        limit: i64,
-        cursor: Option<&GrepCursor>,
-    ) -> Result<Vec<GrepCandidate>> {
-        let scope_node = self.resolve_scope(space_id, scope).await?;
-        if scope.is_some() && scope_node.is_none() {
-            return Err(notegate_core::Error::not_found("scope path not found"));
-        }
-        queries::search::grep_candidates(&self.pool, space_id, q, scope_node, limit, cursor).await
     }
 }
 

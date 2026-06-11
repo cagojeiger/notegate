@@ -8,8 +8,8 @@ use notegate_core::limits;
 use notegate_db::FilesRepo;
 use notegate_model::files::{ChildrenCursor, NodeView};
 pub use notegate_model::search::{
-    DfsFrame, FindCursor, FindMatchMode, FindPage, FindRequest, GrepCandidate, GrepCursor,
-    GrepMatchMode, GrepPage, GrepRequest, SearchCursor,
+    DfsFrame, FindMatchMode, FindPage, FindRequest, GrepMatchMode, GrepPage, GrepRequest,
+    SearchCursor,
 };
 use notegate_model::{Node, NodeKind, Permission};
 use regex::{Regex, RegexBuilder};
@@ -294,81 +294,32 @@ mod tests {
     )]
     use super::*;
     use crate::cursor;
-    use chrono::Utc;
 
-    /// The `find` cursor round-trips through the shared opaque codec, preserving
-    /// its exact `(name, id)` tuple.
+    /// The search traversal cursor round-trips through the shared opaque codec.
     #[test]
-    fn find_cursor_round_trips() {
-        let value = FindCursor {
-            name: "note.md".to_owned(),
-            id: Uuid::new_v4(),
+    fn search_cursor_round_trips() {
+        let value = SearchCursor {
+            version: 1,
+            command: "find".to_owned(),
+            fingerprint: "fingerprint".to_owned(),
+            stack: vec![DfsFrame {
+                folder_node_id: Uuid::new_v4(),
+                after: Some(ChildrenCursor {
+                    sort_order: 0,
+                    name: "note.md".to_owned(),
+                    id: Uuid::new_v4(),
+                }),
+            }],
         };
         let encoded = cursor::encode(&value).unwrap();
-        let decoded: FindCursor = cursor::decode(&encoded).unwrap();
+        let decoded: SearchCursor = cursor::decode(&encoded).unwrap();
         assert_eq!(decoded, value);
     }
 
-    /// The `grep` cursor round-trips, preserving its exact keyset tuple.
-    #[test]
-    fn grep_cursor_round_trips() {
-        let value = GrepCursor {
-            updated_at: Utc::now(),
-            node_id: Uuid::new_v4(),
-        };
-        let encoded = cursor::encode(&value).unwrap();
-        let decoded: GrepCursor = cursor::decode(&encoded).unwrap();
-        assert_eq!(decoded, value);
-    }
-
-    /// A garbage cursor fails to decode for both cursor types.
+    /// A garbage cursor fails to decode.
     #[test]
     fn garbage_cursor_fails_to_decode() {
-        assert!(cursor::decode::<FindCursor>("!!!not-base64!!!").is_err());
-        assert!(cursor::decode::<GrepCursor>("not-a-cursor").is_err());
-    }
-
-    #[test]
-    fn name_match_modes_are_explicit() {
-        assert!(
-            NameMatcher::new("note", FindMatchMode::Contains)
-                .unwrap()
-                .is_match("daily-note.md")
-        );
-        assert!(
-            NameMatcher::new(r"^daily-\d+\.md$", FindMatchMode::Regex)
-                .unwrap()
-                .is_match("daily-42.md")
-        );
-        assert!(
-            NameMatcher::new("*.md", FindMatchMode::Glob)
-                .unwrap()
-                .is_match("daily.md")
-        );
-        assert!(
-            !NameMatcher::new("*.md", FindMatchMode::Contains)
-                .unwrap()
-                .is_match("daily.md")
-        );
-    }
-
-    #[test]
-    fn grep_match_and_path_filters_are_explicit() {
-        assert!(
-            ContentMatcher::new("TODO", GrepMatchMode::Literal)
-                .unwrap()
-                .is_match("todo item")
-        );
-        assert!(
-            ContentMatcher::new(r"todo\s+\d+", GrepMatchMode::Regex)
-                .unwrap()
-                .is_match("TODO 42")
-        );
-        let filters =
-            PathFilters::new(&["/notes/*.md".to_owned()], &["/notes/tmp*".to_owned()]).unwrap();
-        assert!(filters.allows("/notes/today.md"));
-        assert!(!filters.allows("/notes/tmp.md"));
-        assert!(!filters.allows("/archive/today.md"));
+        assert!(cursor::decode::<SearchCursor>("!!!not-base64!!!").is_err());
     }
 
     #[test]
