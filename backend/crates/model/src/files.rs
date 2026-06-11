@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{Node, TextObject, TextStorageFormat};
+use crate::{FileEncryptionMode, FileObject, FileStorageKind, Node, TextObject, TextStorageFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
@@ -23,6 +23,17 @@ pub struct CreateFolder {
 pub struct CreateText {
     pub parent_node_id: Uuid,
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateFile {
+    pub parent_node_id: Uuid,
+    pub name: String,
+    pub bytes: Vec<u8>,
+    pub media_type: String,
+    pub original_filename: Option<String>,
+    pub encryption_mode: FileEncryptionMode,
+    pub encryption_metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,10 +100,32 @@ pub struct StoredContent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFile {
+    pub bytes: Vec<u8>,
+    pub content_sha256: String,
+    pub byte_len: i64,
+    pub media_type: String,
+    pub original_filename: Option<String>,
+    pub encryption_mode: FileEncryptionMode,
+    pub encryption_metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextStats {
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStats {
+    pub storage_kind: FileStorageKind,
+    pub media_type: String,
+    pub byte_len: i64,
+    pub content_sha256: String,
+    pub original_filename: Option<String>,
+    pub encryption_mode: FileEncryptionMode,
+    pub encryption_metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,12 +134,26 @@ pub struct NodeView {
     pub path: String,
     pub has_children: bool,
     pub text: Option<TextStats>,
+    pub file: Option<FileStats>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextView {
     pub node: NodeView,
     pub text: TextObject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileView {
+    pub node: NodeView,
+    pub file: FileObject,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileContent {
+    pub node: NodeView,
+    pub file: FileObject,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

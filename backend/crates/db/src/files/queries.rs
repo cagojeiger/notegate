@@ -103,6 +103,119 @@ pub mod text {
     }
 }
 
+pub mod file {
+    //! File reads: metadata stats, file object lookup, inline bytes, and live file count.
+
+    use notegate_core::{Error, Result};
+    use notegate_model::files::FileStats;
+    use notegate_model::{FileObject, Node};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use super::super::error::map_sqlx_error;
+    use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow};
+    use crate::to_usize;
+
+    pub async fn file_stats(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<FileStats>> {
+        let row: Option<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
+            "SELECT {FILE_COLUMNS} FROM file_objects f \
+         JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+         WHERE f.space_id = $1 AND f.node_id = $2 AND n.deleted_at IS NULL"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        row.map(|row| {
+            let file = row.into_file()?;
+            Ok(FileStats {
+                storage_kind: file.storage_kind,
+                media_type: file.media_type,
+                byte_len: file.byte_len,
+                content_sha256: file.content_sha256,
+                original_filename: file.original_filename,
+                encryption_mode: file.encryption_mode,
+                encryption_metadata: file.encryption_metadata,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn find_file(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<(Node, FileObject)>> {
+        let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL AND kind = 'file'"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let Some(node_row) = node_row else {
+            return Ok(None);
+        };
+
+        let file_row = sqlx::query_as::<_, FileRow>(&format!(
+            "SELECT {FILE_COLUMNS} FROM file_objects WHERE space_id = $1 AND node_id = $2"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        match file_row {
+            Some(file_row) => Ok(Some((node_row.into_node()?, file_row.into_file()?))),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn read_inline_file(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<(Node, FileObject, Vec<u8>)>> {
+        let Some((node, file)) = find_file(pool, space_id, node_id).await? else {
+            return Ok(None);
+        };
+        let bytes: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT bytes FROM file_inline_contents WHERE space_id = $1 AND node_id = $2",
+        )
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let bytes = bytes.ok_or_else(|| Error::not_found("file content not found"))?;
+        Ok(Some((node, file, bytes)))
+    }
+
+    pub async fn count_live_files(pool: &PgPool, space_id: Uuid) -> Result<usize> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM file_objects f \
+         JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+         WHERE f.space_id = $1 AND n.deleted_at IS NULL",
+        )
+        .bind(space_id)
+        .fetch_one(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        to_usize(count, "file")
+    }
+}
+
 pub mod node {
     //! Node reads, counts, depth/subtree/ancestor checks, and path derivation.
     //!

@@ -6,8 +6,8 @@ use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
-    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, NodeView, ReadContent, ReadResult,
-    ReadText, ReadTextBody,
+    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, FileContent, NodeView, ReadContent,
+    ReadResult, ReadText, ReadTextBody,
 };
 
 use super::{FilesService, join_path};
@@ -95,11 +95,22 @@ impl FilesService {
         for node in rows {
             let path = join_path(&parent_path, &node.name);
             let has_children = self.store.has_children(space_id, node.id).await?;
+            let text = if node.kind == NodeKind::Text {
+                self.store.text_stats(space_id, node.id).await?
+            } else {
+                None
+            };
+            let file = if node.kind == NodeKind::File {
+                self.store.file_stats(space_id, node.id).await?
+            } else {
+                None
+            };
             items.push(NodeView {
                 node,
                 path,
                 has_children,
-                text: None,
+                text,
+                file,
             });
         }
 
@@ -109,11 +120,34 @@ impl FilesService {
                 path: parent_path,
                 has_children: parent_has_children,
                 text: None,
+                file: None,
             },
             items,
             limit,
             has_more,
             next_cursor,
+        })
+    }
+
+    /// Read an inline file's stored bytes. Requires read permission.
+    pub async fn read_file(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<FileContent> {
+        self.authorize(space_id, caller_account_id, FileCommand::Read)
+            .await?;
+        let (node, file, bytes) = self
+            .store
+            .read_inline_file(space_id, node_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("file not found".to_owned()))?;
+        let view = self.file_node_view(space_id, node, &file).await?;
+        Ok(FileContent {
+            node: view,
+            file,
+            bytes,
         })
     }
 

@@ -58,6 +58,6 @@ OAuth 계열 인증은 user로 처리한다. API key는 `api_keys.account_id`가
 - Node kind는 `folder`, `text`, `file` 중 하나다.
 - Node는 folder/text/file 공통 `metadata` JSON object를 가진다.
 - Text는 plain UTF-8 content 또는 client-side encrypted payload다. grep/patch는 plain Text만 대상으로 한다.
-- File은 object/binary content이며 REST/MCP file upload/download surface에 포함하지 않는다.
+- File은 object/binary content다. REST는 small file upload/download를 제공하고, MCP는 file content upload/download를 제공하지 않는다.
 - Agent connection permission은 `read` 또는 `write`다. `write`는 `read`를 포함한다.
 - User/agent action attribution은 account id로 기록한다.

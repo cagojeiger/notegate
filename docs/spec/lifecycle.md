@@ -139,7 +139,7 @@ file_objects
 ```
 
 - File은 binary/object content다.
-- REST/MCP upload/download surface는 제공하지 않는다.
+- REST는 small file upload/download를 제공한다. MCP는 file content upload/download를 제공하지 않고 file node metadata/stat만 노출한다.
 - File은 직접 text read/patch/grep 대상이 아니다.
 
 ### Node 삭제

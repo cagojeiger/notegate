@@ -1,8 +1,8 @@
-use notegate_model::{Node, NodeKind, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, TextObject};
 use uuid::Uuid;
 
 use crate::error::ServiceResult;
-use crate::files::{NodeView, TextStats, TextView};
+use crate::files::{FileStats, FileView, NodeView, TextStats, TextView};
 
 use super::FilesService;
 
@@ -16,11 +16,17 @@ impl FilesService {
         } else {
             None
         };
+        let file = if node.kind == NodeKind::File {
+            self.store.file_stats(space_id, node.id).await?
+        } else {
+            None
+        };
         Ok(NodeView {
             node,
             path,
             has_children,
             text,
+            file,
         })
     }
 
@@ -49,6 +55,24 @@ impl FilesService {
             path,
             has_children: false,
             text: Some(stats_from_text(text)),
+            file: None,
+        })
+    }
+
+    /// Build a file node view from an already-loaded file.
+    pub(super) async fn file_node_view(
+        &self,
+        space_id: Uuid,
+        node: Node,
+        file: &FileObject,
+    ) -> ServiceResult<NodeView> {
+        let path = self.path_of(space_id, node.id).await?;
+        Ok(NodeView {
+            node,
+            path,
+            has_children: false,
+            text: None,
+            file: Some(stats_from_file(file)),
         })
     }
 }
@@ -61,8 +85,23 @@ pub(super) fn text_view_at_path(node: Node, path: String, text: TextObject) -> T
             path,
             has_children: false,
             text: Some(stats),
+            file: None,
         },
         text,
+    }
+}
+
+pub(super) fn file_view_at_path(node: Node, path: String, file: FileObject) -> FileView {
+    let stats = stats_from_file(&file);
+    FileView {
+        node: NodeView {
+            node,
+            path,
+            has_children: false,
+            text: None,
+            file: Some(stats),
+        },
+        file,
     }
 }
 
@@ -71,5 +110,17 @@ fn stats_from_text(text: &TextObject) -> TextStats {
         content_sha256: text.content_sha256.clone(),
         byte_len: text.byte_len,
         line_count: text.line_count,
+    }
+}
+
+fn stats_from_file(file: &FileObject) -> FileStats {
+    FileStats {
+        storage_kind: file.storage_kind,
+        media_type: file.media_type.clone(),
+        byte_len: file.byte_len,
+        content_sha256: file.content_sha256.clone(),
+        original_filename: file.original_filename.clone(),
+        encryption_mode: file.encryption_mode,
+        encryption_metadata: file.encryption_metadata.clone(),
     }
 }

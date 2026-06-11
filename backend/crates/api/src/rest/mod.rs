@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod connections;
 pub mod dto;
+pub mod files;
 pub mod me;
 pub mod nodes;
 pub mod search;

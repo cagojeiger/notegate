@@ -4,7 +4,7 @@
 //! per-text and space caps. `write` and `patch` compute them once here so
 //! the validated values are exactly what the store writes.
 
-use super::types::{StoredContent, WriteTextBody};
+use super::types::{StoredContent, StoredFile, WriteTextBody};
 use crate::error::{ServiceError, ServiceResult};
 
 /// The derived metrics of a text's content.
@@ -59,6 +59,25 @@ pub fn compute_encrypted(payload: serde_json::Value) -> ServiceResult<StoredCont
         byte_len: bytes.len() as i64,
         line_count: 0,
     })
+}
+
+/// Build stored metadata for inline file bytes.
+pub fn compute_file(
+    bytes: Vec<u8>,
+    media_type: String,
+    original_filename: Option<String>,
+    encryption_mode: notegate_model::FileEncryptionMode,
+    encryption_metadata: Option<serde_json::Value>,
+) -> StoredFile {
+    StoredFile {
+        content_sha256: sha256_hex(&bytes),
+        byte_len: bytes.len() as i64,
+        bytes,
+        media_type,
+        original_filename,
+        encryption_mode,
+        encryption_metadata,
+    }
 }
 
 /// Logical line count: empty content is `0`; otherwise the number of `\n`-joined

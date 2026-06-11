@@ -7,12 +7,12 @@ use crate::error::{ServiceError, ServiceResult};
 use crate::files::patch::{apply_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
-    CreateFolder, CreateText, DeleteNode, DeleteResult, FileCommand, MoveNode, NodeView,
-    PatchResult, PatchText, StoredContent, TextView, WriteTarget, WriteText, WriteTextBody,
-    content,
+    CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, FileCommand, MoveNode,
+    NodeView, PatchResult, PatchText, StoredContent, TextView, WriteTarget, WriteText,
+    WriteTextBody, content,
 };
 
-use super::view::text_view_at_path;
+use super::view::{file_view_at_path, text_view_at_path};
 use super::{FilesService, join_path, path_depth};
 
 impl FilesService {
@@ -41,6 +41,7 @@ impl FilesService {
             path,
             has_children: false,
             text: None,
+            file: None,
         })
     }
 
@@ -76,6 +77,50 @@ impl FilesService {
             .await?;
         let path = join_path(&parent_path, &node.name);
         Ok(text_view_at_path(node, path, text))
+    }
+
+    /// Create an inline file. Requires write permission.
+    pub async fn create_file(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: CreateFile,
+    ) -> ServiceResult<crate::files::FileView> {
+        self.authorize(space_id, caller_account_id, FileCommand::Write)
+            .await?;
+        validation::validate_basename(&command.name, NodeKind::File)?;
+        validation::validate_file_bytes(command.bytes.len())?;
+        validate_file_encryption(
+            command.encryption_mode,
+            command.encryption_metadata.as_ref(),
+        )?;
+
+        let parent_path = self
+            .prepare_create(space_id, command.parent_node_id, &command.name)
+            .await?;
+
+        let files = self.store.count_live_files(space_id).await?;
+        validation::validate_space_file_count(files, self.limits)?;
+
+        let stored = content::compute_file(
+            command.bytes,
+            command.media_type,
+            command.original_filename,
+            command.encryption_mode,
+            command.encryption_metadata,
+        );
+        let (node, file) = self
+            .store
+            .insert_file(
+                space_id,
+                command.parent_node_id,
+                &command.name,
+                &stored,
+                caller_account_id,
+            )
+            .await?;
+        let path = join_path(&parent_path, &node.name);
+        Ok(file_view_at_path(node, path, file))
     }
 
     /// Replace a text's content (`write`/`save`). Requires write permission.
@@ -490,6 +535,30 @@ fn stored_text_body(body: WriteTextBody) -> ServiceResult<StoredContent> {
         }
         WriteTextBody::Encrypted(payload) => content::compute_encrypted(payload),
     }
+}
+
+fn validate_file_encryption(
+    mode: notegate_model::FileEncryptionMode,
+    metadata: Option<&Value>,
+) -> ServiceResult<()> {
+    match mode {
+        notegate_model::FileEncryptionMode::None => {
+            if metadata.is_some() {
+                return Err(ServiceError::InvalidInput(
+                    "encryption_metadata must be omitted when encryption_mode=none".to_owned(),
+                ));
+            }
+        }
+        notegate_model::FileEncryptionMode::Client => {
+            if !metadata.is_some_and(Value::is_object) {
+                return Err(ServiceError::InvalidInput(
+                    "encryption_metadata must be a JSON object when encryption_mode=client"
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn apply_json_merge_patch(target: &mut Value, patch: Value) {

@@ -13,12 +13,14 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
-use notegate_model::{Node, NodeKind, Permission, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use notegate_model::files::{ChildrenCursor, CreateFolder, MoveNode, StoredContent, TextStats};
+use notegate_model::files::{
+    ChildrenCursor, CreateFolder, FileStats, MoveNode, StoredContent, StoredFile, TextStats,
+};
 use notegate_model::search::{FindCursor, GrepCandidate, GrepCursor};
 
 use crate::files::{commands, queries};
@@ -93,6 +95,30 @@ impl FilesRepo {
         queries::text::find_text(&self.pool, space_id, node_id).await
     }
 
+    pub async fn count_live_files(&self, space_id: Uuid) -> Result<usize> {
+        queries::file::count_live_files(&self.pool, space_id).await
+    }
+
+    pub async fn file_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<FileStats>> {
+        queries::file::file_stats(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn find_file(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<(Node, FileObject)>> {
+        queries::file::find_file(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn read_inline_file(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> Result<Option<(Node, FileObject, Vec<u8>)>> {
+        queries::file::read_inline_file(&self.pool, space_id, node_id).await
+    }
+
     pub async fn paged_children(
         &self,
         space_id: Uuid,
@@ -152,6 +178,26 @@ impl FilesRepo {
             parent_node_id,
             name,
             content,
+            created_by,
+            self.limits,
+        )
+        .await
+    }
+
+    pub async fn insert_file(
+        &self,
+        space_id: Uuid,
+        parent_node_id: Uuid,
+        name: &str,
+        file: &StoredFile,
+        created_by: Uuid,
+    ) -> Result<(Node, FileObject)> {
+        commands::create::insert_file(
+            &self.pool,
+            space_id,
+            parent_node_id,
+            name,
+            file,
             created_by,
             self.limits,
         )

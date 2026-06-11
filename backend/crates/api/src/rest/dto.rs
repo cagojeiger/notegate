@@ -143,6 +143,16 @@ pub struct NodeOut {
     pub byte_len: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_metadata: Option<Value>,
     pub created_by: AccountRef,
     pub updated_by: AccountRef,
     pub created_at: DateTime<Utc>,
@@ -164,9 +174,34 @@ impl NodeOut {
             sort_order: node.sort_order,
             metadata: node.metadata.clone(),
             has_children: view.has_children,
-            content_sha256: view.text.as_ref().map(|text| text.content_sha256.clone()),
-            byte_len: view.text.as_ref().map(|text| text.byte_len),
+            content_sha256: view
+                .text
+                .as_ref()
+                .map(|text| text.content_sha256.clone())
+                .or_else(|| view.file.as_ref().map(|file| file.content_sha256.clone())),
+            byte_len: view
+                .text
+                .as_ref()
+                .map(|text| text.byte_len)
+                .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
             line_count: view.text.as_ref().map(|text| text.line_count),
+            storage_kind: view
+                .file
+                .as_ref()
+                .map(|file| file.storage_kind.as_str().to_owned()),
+            media_type: view.file.as_ref().map(|file| file.media_type.clone()),
+            original_filename: view
+                .file
+                .as_ref()
+                .and_then(|file| file.original_filename.clone()),
+            encryption_mode: view
+                .file
+                .as_ref()
+                .map(|file| file.encryption_mode.as_str().to_owned()),
+            encryption_metadata: view
+                .file
+                .as_ref()
+                .and_then(|file| file.encryption_metadata.clone()),
             created_by: AccountRef::resolve(node.created_by_account_id, refs),
             updated_by: AccountRef::resolve(node.updated_by_account_id, refs),
             created_at: node.created_at,

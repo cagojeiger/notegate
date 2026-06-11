@@ -46,4 +46,4 @@ files_patch
 
 ## File
 
-MCP upload/download tool은 제공하지 않는다. File은 `files_read`/`files_patch`/`files_grep` 대상이 아니다.
+MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_stat`/`files_find`에서 node metadata와 file stats만 확인한다. File은 `files_read`/`files_patch`/`files_grep` 대상이 아니다.

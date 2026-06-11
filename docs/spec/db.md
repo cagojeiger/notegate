@@ -183,23 +183,33 @@ file_objects
   node_id uuid pk references nodes(id)
   space_id uuid not null references spaces(id)
   storage_kind text not null check ('inline_pg','object')
-  inline_bytes bytea null
   object_key text null
   media_type text not null
   byte_len bigint not null
   content_sha256 text not null
   original_filename text null
+  encryption_mode text not null check ('none','client')
+  encryption_metadata jsonb null
   uploaded_at timestamptz
-  enc_key_id text null references crypto_key_epochs(key_id)
-  enc_version int null
-  nonce bytea null
+
+file_inline_contents
+  node_id uuid pk
+  space_id uuid not null
+  bytes bytea not null
 ```
 
-`File`은 작은 content를 PostgreSQL `bytea`에 저장할 수 있다. `byte_len <= 262144`이면 `storage_kind='inline_pg'`를 사용할 수 있고, 그보다 큰 파일은 object storage 구현 시 `storage_kind='object'`로 저장한다.
+`File`은 공통 metadata와 실제 bytes를 분리한다. 초기 구현은 `storage_kind='inline_pg'`만 생성하며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. object storage가 도입되기 전까지 더 큰 파일은 거부한다.
 
 ```text
-storage_kind='inline_pg' -> inline_bytes IS NOT NULL AND object_key IS NULL
-storage_kind='object'    -> inline_bytes IS NULL AND object_key IS NOT NULL
+storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL
+storage_kind='object'    -> object_key IS NOT NULL, object storage 도입 후 사용
+```
+
+File content encryption은 client-side only다.
+
+```text
+encryption_mode='none'   -> encryption_metadata IS NULL
+encryption_mode='client' -> encryption_metadata JSON object, bytes는 클라이언트 암호문
 ```
 
 Text 저장 invariant:

@@ -28,6 +28,39 @@ pub enum FileStorageKind {
     Object,
 }
 
+impl FileStorageKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InlinePg => "inline_pg",
+            Self::Object => "object",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FileEncryptionMode {
+    None,
+    Client,
+}
+
+impl FileEncryptionMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "client" => Some(Self::Client),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Client => "client",
+        }
+    }
+}
+
 /// The stored content of a text node, with plaintext-derived metrics.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TextObject {
@@ -57,5 +90,7 @@ pub struct FileObject {
     pub byte_len: i64,
     pub content_sha256: String,
     pub original_filename: Option<String>,
+    pub encryption_mode: FileEncryptionMode,
+    pub encryption_metadata: Option<Value>,
     pub uploaded_at: DateTime<Utc>,
 }

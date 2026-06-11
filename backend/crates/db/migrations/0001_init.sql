@@ -266,16 +266,14 @@ CREATE TABLE file_objects (
     node_id UUID PRIMARY KEY,
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     storage_kind TEXT NOT NULL CHECK (storage_kind IN ('inline_pg', 'object')),
-    inline_bytes BYTEA,
     object_key TEXT,
     media_type TEXT NOT NULL,
     byte_len BIGINT NOT NULL,
     content_sha256 TEXT NOT NULL,
     original_filename TEXT,
+    encryption_mode TEXT NOT NULL DEFAULT 'none' CHECK (encryption_mode IN ('none', 'client')),
+    encryption_metadata JSONB,
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    enc_key_id TEXT REFERENCES crypto_key_epochs(key_id),
-    enc_version INTEGER,
-    nonce BYTEA,
 
     UNIQUE (node_id, space_id),
     FOREIGN KEY (node_id, space_id)
@@ -283,15 +281,26 @@ CREATE TABLE file_objects (
         ON DELETE CASCADE,
     CHECK (byte_len >= 0 AND byte_len <= 104857600),
     CHECK (
-        (storage_kind = 'inline_pg' AND inline_bytes IS NOT NULL AND object_key IS NULL AND byte_len <= 262144)
-        OR (storage_kind = 'object' AND inline_bytes IS NULL AND object_key IS NOT NULL)
+        (storage_kind = 'inline_pg' AND object_key IS NULL AND byte_len <= 262144)
+        OR (storage_kind = 'object' AND object_key IS NOT NULL)
     ),
     CHECK (
-        (enc_key_id IS NULL AND enc_version IS NULL AND nonce IS NULL)
-        OR (enc_key_id IS NOT NULL AND enc_version IS NOT NULL AND nonce IS NOT NULL)
+        (encryption_mode = 'none' AND encryption_metadata IS NULL)
+        OR (encryption_mode = 'client' AND encryption_metadata IS NOT NULL AND jsonb_typeof(encryption_metadata) = 'object')
     )
 );
 CREATE INDEX file_objects_space_idx ON file_objects(space_id);
+
+CREATE TABLE file_inline_contents (
+    node_id UUID PRIMARY KEY,
+    space_id UUID NOT NULL,
+    bytes BYTEA NOT NULL,
+
+    FOREIGN KEY (node_id, space_id)
+        REFERENCES file_objects(node_id, space_id)
+        ON DELETE CASCADE,
+    CHECK (octet_length(bytes) <= 262144)
+);
 
 CREATE OR REPLACE FUNCTION assert_node_content_kind()
 RETURNS trigger

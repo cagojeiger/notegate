@@ -44,6 +44,16 @@ pub enum FilesValidationError {
         /// The configured maximum.
         max: usize,
     },
+    /// The space already holds the maximum live files.
+    SpaceFilesExceeded {
+        /// The configured maximum.
+        max: usize,
+    },
+    /// The uploaded file exceeds the inline PostgreSQL byte cap.
+    FileBytesExceeded {
+        /// The configured maximum ([`limits::FILE_INLINE_PG_MAX_BYTES`]).
+        max: usize,
+    },
     /// The text content exceeds the per-text byte cap.
     TextBytesExceeded {
         /// The configured maximum ([`limits::TEXT_MAX_BYTES`]).
@@ -79,6 +89,12 @@ impl FilesValidationError {
             Self::SpaceTextsExceeded { max } => {
                 ServiceError::Conflict(format!("space already has the maximum of {max} live texts"))
             }
+            Self::SpaceFilesExceeded { max } => {
+                ServiceError::Conflict(format!("space already has the maximum of {max} live files"))
+            }
+            Self::FileBytesExceeded { max } => ServiceError::InvalidInput(format!(
+                "file exceeds the maximum inline size of {max} bytes; object storage is not enabled"
+            )),
             Self::TextBytesExceeded { max } => ServiceError::InvalidInput(format!(
                 "text exceeds the maximum of {max} bytes; split the text into smaller notes"
             )),
@@ -245,6 +261,28 @@ pub fn validate_space_text_count(
 /// Reject text content over the per-text byte ([`limits::TEXT_MAX_BYTES`])
 /// or line ([`limits::TEXT_MAX_LINES`]) caps. `line_count` is the value
 /// computed by [`crate::files::content::compute`].
+pub fn validate_space_file_count(
+    live_files: usize,
+    limits: Limits,
+) -> Result<(), FilesValidationError> {
+    if live_files >= limits.space_max_files {
+        return Err(FilesValidationError::SpaceFilesExceeded {
+            max: limits.space_max_files,
+        });
+    }
+    Ok(())
+}
+
+/// Reject files larger than the current inline PostgreSQL cap.
+pub fn validate_file_bytes(byte_len: usize) -> Result<(), FilesValidationError> {
+    if byte_len > limits::FILE_INLINE_PG_MAX_BYTES {
+        return Err(FilesValidationError::FileBytesExceeded {
+            max: limits::FILE_INLINE_PG_MAX_BYTES,
+        });
+    }
+    Ok(())
+}
+
 pub fn validate_text_content(
     byte_len: usize,
     line_count: usize,

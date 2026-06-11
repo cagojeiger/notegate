@@ -355,6 +355,24 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         object.insert("byte_len".to_owned(), json!(text.byte_len));
         object.insert("line_count".to_owned(), json!(text.line_count));
     }
+    if let Some(file) = &view.file
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("content_sha256".to_owned(), json!(file.content_sha256));
+        object.insert("byte_len".to_owned(), json!(file.byte_len));
+        object.insert("media_type".to_owned(), json!(file.media_type));
+        object.insert("storage_kind".to_owned(), json!(file.storage_kind.as_str()));
+        object.insert(
+            "encryption_mode".to_owned(),
+            json!(file.encryption_mode.as_str()),
+        );
+        if let Some(name) = &file.original_filename {
+            object.insert("original_filename".to_owned(), json!(name));
+        }
+        if let Some(metadata) = &file.encryption_metadata {
+            object.insert("encryption_metadata".to_owned(), metadata.clone());
+        }
+    }
     value
 }
 

@@ -85,6 +85,7 @@ impl SearchService {
                 path,
                 has_children,
                 text: None,
+                file: None,
             })
             .collect();
 

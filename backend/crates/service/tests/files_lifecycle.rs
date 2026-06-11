@@ -20,10 +20,11 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
+use notegate_model::FileEncryptionMode;
 use notegate_service::files::Edit;
 use notegate_service::files::{
-    ChildrenCursor, CreateFolder, CreateText, DeleteNode, FilesService, MoveNode, PatchText,
-    ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
+    ChildrenCursor, CreateFile, CreateFolder, CreateText, DeleteNode, FilesService, MoveNode,
+    PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::spaces::CreateSpace;
 use serde_json::json;
@@ -239,6 +240,58 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect_err("encrypted text patch must fail");
     assert!(patch_err.to_string().contains("plaintext"));
+
+    // --- file: upload small inline bytes and read them back ---
+    let uploaded = files
+        .create_file(
+            owner,
+            ws,
+            CreateFile {
+                parent_node_id: projects_id,
+                name: "diagram.bin".to_owned(),
+                bytes: b"binary-data".to_vec(),
+                media_type: "application/octet-stream".to_owned(),
+                original_filename: Some("diagram.bin".to_owned()),
+                encryption_mode: FileEncryptionMode::None,
+                encryption_metadata: None,
+            },
+        )
+        .await?;
+    assert_eq!(uploaded.node.path, "/projects/diagram.bin");
+    assert_eq!(uploaded.file.byte_len, 11);
+    assert_eq!(
+        uploaded.node.file.as_ref().expect("file stats").byte_len,
+        11
+    );
+
+    let downloaded = files.read_file(owner, ws, uploaded.node.node.id).await?;
+    assert_eq!(downloaded.bytes, b"binary-data");
+    assert_eq!(downloaded.file.content_sha256, uploaded.file.content_sha256);
+
+    let page = files
+        .children(
+            owner,
+            ws,
+            projects_id,
+            notegate_service::files::ChildrenRequest {
+                limit: Some(100),
+                cursor: None,
+            },
+        )
+        .await?;
+    let listed_file = page
+        .items
+        .iter()
+        .find(|item| item.node.name == "diagram.bin")
+        .expect("file appears in ls");
+    assert_eq!(
+        listed_file
+            .file
+            .as_ref()
+            .expect("listed file stats")
+            .media_type,
+        "application/octet-stream"
+    );
 
     // --- patch: exact-match replacement ---
     let patched = files
