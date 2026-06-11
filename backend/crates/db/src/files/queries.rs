@@ -583,7 +583,7 @@ pub mod search {
             JOIN scope s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
-         SELECT d.node_id, t.path AS derived_path, d.content_text, d.updated_at \
+         SELECT d.node_id, t.path AS derived_path, d.content_text AS content, d.updated_at \
          FROM text_objects d \
          JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
          JOIN tree t ON t.id = d.node_id \
