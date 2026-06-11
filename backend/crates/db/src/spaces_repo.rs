@@ -86,13 +86,14 @@ impl SpaceViewRow {
 }
 
 const SPACE_COLUMNS: &str = "id, name, sort_order, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
-const SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
-                                  s.deleted_at, s.deleted_by_user_id, s.purge_after, \
-                                  CASE \
-                                    WHEN acc.kind = 'user' THEN 'write' \
-                                    ELSE c.permission \
-                                  END AS permission, \
-                                  root.id AS root_node_id";
+const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
+                                       s.deleted_at, s.deleted_by_user_id, s.purge_after";
+const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
+     s.deleted_at, s.deleted_by_user_id, s.purge_after, \
+     'write'::text AS permission, root.id AS root_node_id";
+const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
+     s.deleted_at, s.deleted_by_user_id, s.purge_after, \
+     c.permission AS permission, root.id AS root_node_id";
 
 impl SpaceRepo {
     pub async fn permission_for(
@@ -165,7 +166,9 @@ impl SpaceRepo {
         space_id: Uuid,
     ) -> Result<Option<SpaceView>> {
         let row = sqlx::query_as::<_, SpaceViewRow>(&format!(
-            "SELECT {SPACE_VIEW_COLUMNS} \
+            "SELECT {SPACE_VIEW_BASE_COLUMNS}, \
+                    CASE WHEN acc.kind = 'user' THEN 'write'::text ELSE c.permission END AS permission, \
+                    root.id AS root_node_id \
              FROM accounts acc \
              JOIN spaces s ON s.id = $2 AND s.deleted_at IS NULL \
              JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
@@ -190,16 +193,23 @@ impl SpaceRepo {
         limit: i64,
     ) -> Result<Vec<SpaceView>> {
         let rows = sqlx::query_as::<_, SpaceViewRow>(&format!(
-            "SELECT {SPACE_VIEW_COLUMNS} \
-             FROM accounts acc \
-             JOIN spaces s ON s.name = $2 AND s.deleted_at IS NULL \
-             JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
-             LEFT JOIN space_agent_connections c \
-               ON c.space_id = s.id AND c.agent_id = acc.id AND c.disconnected_at IS NULL \
-             WHERE acc.id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
-               AND ((acc.kind = 'user' AND s.owner_user_id = acc.id) \
-                    OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL)) \
-             ORDER BY s.sort_order, s.name, s.id LIMIT $3"
+            "SELECT * FROM ( \
+                 SELECT {USER_SPACE_VIEW_COLUMNS} \
+                 FROM accounts acc \
+                 JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
+                 JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
+                 WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
+                   AND s.name = $2 \
+                 UNION ALL \
+                 SELECT {AGENT_SPACE_VIEW_COLUMNS} \
+                 FROM accounts acc \
+                 JOIN space_agent_connections c ON c.agent_id = acc.id AND c.disconnected_at IS NULL \
+                 JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
+                 JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
+                 WHERE acc.id = $1 AND acc.kind = 'agent' AND acc.is_active = true AND acc.deleted_at IS NULL \
+                   AND s.name = $2 \
+             ) visible_spaces \
+             ORDER BY sort_order, name, id LIMIT $3"
         ))
         .bind(account_id)
         .bind(name)
@@ -217,22 +227,27 @@ impl SpaceRepo {
         cursor: Option<&SpaceCursor>,
     ) -> Result<Vec<SpaceView>> {
         let cursor_clause = if cursor.is_some() {
-            "AND (s.sort_order, s.name, s.id) > ($2, $3, $4)"
+            "WHERE (sort_order, name, id) > ($2, $3, $4)"
         } else {
             ""
         };
         let sql = format!(
-            "SELECT {SPACE_VIEW_COLUMNS} \
-             FROM accounts acc \
-             JOIN spaces s ON s.deleted_at IS NULL \
-             JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
-             LEFT JOIN space_agent_connections c \
-               ON c.space_id = s.id AND c.agent_id = acc.id AND c.disconnected_at IS NULL \
-             WHERE acc.id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
-               AND ((acc.kind = 'user' AND s.owner_user_id = acc.id) \
-                    OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL)) \
-               {cursor_clause} \
-             ORDER BY s.sort_order, s.name, s.id LIMIT {}",
+            "SELECT * FROM ( \
+                 SELECT {USER_SPACE_VIEW_COLUMNS} \
+                 FROM accounts acc \
+                 JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
+                 JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
+                 WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
+                 UNION ALL \
+                 SELECT {AGENT_SPACE_VIEW_COLUMNS} \
+                 FROM accounts acc \
+                 JOIN space_agent_connections c ON c.agent_id = acc.id AND c.disconnected_at IS NULL \
+                 JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
+                 JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
+                 WHERE acc.id = $1 AND acc.kind = 'agent' AND acc.is_active = true AND acc.deleted_at IS NULL \
+             ) visible_spaces \
+             {cursor_clause} \
+             ORDER BY sort_order, name, id LIMIT {}",
             if cursor.is_some() { "$5" } else { "$2" }
         );
         let rows = match cursor {
