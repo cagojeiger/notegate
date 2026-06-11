@@ -141,6 +141,10 @@ pub const SEARCH_NODE_SCAN_MAX: usize = 1_000;
 pub const GREP_SCAN_MAX_BYTES: usize = 8_388_608;
 /// Maximum search query length in Unicode scalar values.
 pub const SEARCH_QUERY_MAX_CHARS: usize = 256;
+/// Maximum include or exclude glob patterns accepted by one grep request.
+pub const SEARCH_GLOB_PATTERNS_MAX: usize = 32;
+/// Maximum length of one include/exclude glob pattern, in Unicode scalar values.
+pub const SEARCH_GLOB_PATTERN_MAX_CHARS: usize = 256;
 
 // --- Read limits ---
 

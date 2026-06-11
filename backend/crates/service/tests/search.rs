@@ -388,6 +388,116 @@ l7
     Ok(())
 }
 
+/// find follows DFS pre-order: it descends into a folder before scanning later
+/// siblings, and the cursor resumes from that traversal state.
+#[tokio::test]
+async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
+
+    let a = mkdir(&files, owner, ws, root, "a").await;
+    let nested = write_doc(&files, owner, ws, a, "b-match.md", "nested\n").await;
+    let sibling = write_doc(&files, owner, ws, root, "z-match.md", "sibling\n").await;
+
+    let first = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "match".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.items[0].node.id, nested);
+    assert!(first.has_more);
+
+    let second = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "match".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                limit: Some(1),
+                cursor: first.next_cursor,
+            },
+        )
+        .await?;
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].node.id, sibling);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// grep uses the same DFS cursor semantics as find while returning text-node
+/// candidates only.
+#[tokio::test]
+async fn grep_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
+
+    let a = mkdir(&files, owner, ws, root, "a").await;
+    let nested = write_doc(&files, owner, ws, a, "b.md", "needle nested\n").await;
+    let sibling = write_doc(&files, owner, ws, root, "z.md", "needle sibling\n").await;
+
+    let first = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.items[0].node.id, nested);
+    assert!(first.has_more);
+
+    let second = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: Some(1),
+                cursor: first.next_cursor,
+            },
+        )
+        .await?;
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].node.id, sibling);
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// find keyset cursor round-trips across a page boundary with no dup/loss when the
 /// seed exceeds the page limit.
 #[tokio::test]

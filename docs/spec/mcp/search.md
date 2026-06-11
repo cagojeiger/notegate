@@ -51,7 +51,7 @@ type FilesGrepOutput = {
 }
 ```
 
-기본 `match`는 `literal`이다. `include`/`exclude`는 path glob list다. 응답은 match line이 아니라 Text node 후보 목록이다. File, encrypted Text, metadata는 대상이 아니다. Match된 Text의 내용은 `files_read`로 조회한다.
+기본 `match`는 `literal`이다. `include`/`exclude`는 path glob list이며 각 list는 최대 32개 pattern, pattern 하나는 최대 256자다. 응답은 match line이 아니라 Text node 후보 목록이다. File, encrypted Text, metadata는 대상이 아니다. Match된 Text의 내용은 `files_read`로 조회한다.
 
 예:
 

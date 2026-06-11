@@ -38,6 +38,7 @@ impl SearchService {
             request.include.join(","),
             request.exclude.join(","),
             scope_node_id.to_string(),
+            "case-insensitive".to_owned(),
             "dfs-sort_order-name-id".to_owned(),
         ]);
         let mut stack = self.decode_search_cursor(
@@ -120,6 +121,8 @@ impl SearchService {
                         folder_node_id: child.id,
                         after: None,
                     });
+                    stopped_early = true;
+                    break;
                 }
                 if items.len() >= limit as usize
                     || scanned_nodes >= limits::SEARCH_NODE_SCAN_MAX

@@ -152,7 +152,7 @@ impl SearchService {
 }
 
 /// Reject empty, multi-line, or very long search strings before they can become
-/// broad or expensive `ILIKE` scans.
+/// broad or expensive search scans.
 fn validate_query(q: &str) -> ServiceResult<&str> {
     let trimmed = q.trim();
     if trimmed.is_empty() {
@@ -245,6 +245,8 @@ struct PathFilters {
 
 impl PathFilters {
     fn new(include: &[String], exclude: &[String]) -> ServiceResult<Self> {
+        validate_glob_patterns("include", include)?;
+        validate_glob_patterns("exclude", exclude)?;
         Ok(Self {
             include: include
                 .iter()
@@ -261,6 +263,24 @@ impl PathFilters {
         (self.include.is_empty() || self.include.iter().any(|regex| regex.is_match(path)))
             && !self.exclude.iter().any(|regex| regex.is_match(path))
     }
+}
+
+fn validate_glob_patterns(label: &str, patterns: &[String]) -> ServiceResult<()> {
+    if patterns.len() > limits::SEARCH_GLOB_PATTERNS_MAX {
+        return Err(ServiceError::InvalidInput(format!(
+            "{label} must contain at most {} glob patterns",
+            limits::SEARCH_GLOB_PATTERNS_MAX
+        )));
+    }
+    for pattern in patterns {
+        if pattern.chars().count() > limits::SEARCH_GLOB_PATTERN_MAX_CHARS {
+            return Err(ServiceError::InvalidInput(format!(
+                "{label} glob patterns must be at most {} characters",
+                limits::SEARCH_GLOB_PATTERN_MAX_CHARS
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn compile_regex(pattern: &str) -> ServiceResult<Regex> {
@@ -338,5 +358,20 @@ mod tests {
             Err(ServiceError::InvalidInput(_))
         ));
         assert_eq!(validate_query("  note  ").unwrap(), "note");
+    }
+
+    #[test]
+    fn glob_pattern_limits_are_rejected() {
+        let too_many = vec!["*.md".to_owned(); limits::SEARCH_GLOB_PATTERNS_MAX + 1];
+        assert!(matches!(
+            PathFilters::new(&too_many, &[]),
+            Err(ServiceError::InvalidInput(_))
+        ));
+
+        let too_long = vec!["x".repeat(limits::SEARCH_GLOB_PATTERN_MAX_CHARS + 1)];
+        assert!(matches!(
+            PathFilters::new(&[], &too_long),
+            Err(ServiceError::InvalidInput(_))
+        ));
     }
 }

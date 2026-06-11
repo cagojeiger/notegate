@@ -40,6 +40,7 @@ impl SearchService {
                 .unwrap_or_default(),
             request.match_mode.as_str().to_owned(),
             scope_node_id.to_string(),
+            "case-insensitive".to_owned(),
             "dfs-sort_order-name-id".to_owned(),
         ]);
         let mut stack = self.decode_search_cursor(
@@ -88,23 +89,20 @@ impl SearchService {
                 }
                 let path = join_path(&parent_path, &child.name);
                 let is_folder = child.kind == NodeKind::Folder;
+                let kind_matches = request.kind.is_none_or(|kind| kind == child.kind);
+                let name_matches = matcher.is_match(&child.name);
+                if kind_matches && name_matches {
+                    items.push(self.node_view(space_id, child.clone(), path).await?);
+                }
                 if is_folder {
                     stack.push(DfsFrame {
                         folder_node_id: child.id,
                         after: None,
                     });
+                    stopped_early = true;
+                    break;
                 }
-
-                let kind_matches = request.kind.is_none_or(|kind| kind == child.kind);
-                let name_matches = matcher.is_match(&child.name);
-                if kind_matches && name_matches {
-                    items.push(self.node_view(space_id, child, path).await?);
-                    if items.len() >= limit as usize {
-                        stopped_early = true;
-                        break;
-                    }
-                }
-                if scanned >= limits::SEARCH_NODE_SCAN_MAX {
+                if items.len() >= limit as usize || scanned >= limits::SEARCH_NODE_SCAN_MAX {
                     stopped_early = true;
                     break;
                 }
