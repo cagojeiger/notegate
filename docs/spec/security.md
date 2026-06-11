@@ -48,7 +48,7 @@ plain      = 서버가 읽을 수 있는 UTF-8 content
 encrypted  = client-side encrypted payload
 ```
 
-Encrypted Text에서 서버는 원문, 비밀번호, 복호화 키를 받거나 저장하지 않는다. 서버는 encrypted payload를 opaque JSON object로 저장하고 반환한다. Encrypted payload metric은 서버의 canonical JSON serialization 기준으로 계산한다.
+Encrypted Text에서 서버는 원문, 비밀번호, 복호화 키를 받거나 저장하지 않는다. 서버는 encrypted payload를 opaque JSON object로 저장하고 반환한다. Encrypted payload metric은 서버의 canonical JSON serialization 기준으로 계산한다. Canonical JSON은 UTF-8, object key 정렬, 불필요한 whitespace 없음, 동일 JSON value의 동일 byte serialization을 의미한다.
 
 ```text
 plain content_sha256 = SHA256(plaintext bytes)

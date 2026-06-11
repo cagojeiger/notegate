@@ -17,27 +17,13 @@ DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 
 ## Response shapes
 
-`children`과 MCP search 후보 목록은 `NodeTreeItem`을 반환한다. `GET /nodes/{node_id}`와 `files_stat` 성격의 조회는 `NodeDetail`을 반환한다.
+공통 schema는 `../schemas.md`를 따른다.
 
 ```text
-NodeTreeItem
-  id
-  parent_id
-  name
-  kind
-  path
-  sort_order
-  has_children
-  byte_len        # folder는 null, text/file은 저장 bytes 기준
-  updated_at
-
-NodeDetail = NodeTreeItem +
-  metadata
-  created_at
-  created_by_account_id
-  updated_by_account_id
-  text_summary    # kind=text일 때만
-  file_summary    # kind=file일 때만
+GET /nodes/{node_id}          -> NodeDetail
+GET /nodes/{node_id}/children -> NodeTreeItem[] + Page
+MCP files_stat                -> NodeDetail
+MCP search 후보 목록          -> NodeTreeItem[] + Page
 ```
 
 `NodeTreeItem`은 tree 화면과 후보 목록용이므로 content body와 전체 metadata를 포함하지 않는다.

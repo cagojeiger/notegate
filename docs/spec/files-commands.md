@@ -41,12 +41,11 @@ User caller는 자신이 소유한 space에서 read/write/manage 가능하다. A
 read   text content 읽기
 write  text content 전체 쓰기
 patch  exact-match patch 적용
-grep   query를 포함하는 text node 후보 검색
 ```
 
 - Text command는 plain UTF-8 content를 대상으로 한다.
-- `read`, `write`, `patch`, `grep`는 `nodes.kind='text'`에만 적용한다.
-- Encrypted Text content는 MCP/CLI read/write/patch/grep 대상이 아니다.
+- `read`, `write`, `patch`는 `nodes.kind='text'`에만 적용한다.
+- Encrypted Text content는 MCP/CLI read/write/patch 대상이 아니다.
 - `patch`는 각 edit의 `old_text` 문자열이 원문에서 정확히 한 번만 매칭되어야 한다.
 - 여러 edit은 원본 기준으로 검증한 뒤 적용한다.
 - `expected_sha256`이 주어지면 저장된 content hash와 일치해야 한다.

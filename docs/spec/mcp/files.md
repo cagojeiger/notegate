@@ -1,49 +1,172 @@
 # MCP Files
 
-MCP files tools는 Space tree를 path-first로 다룬다. `files_ls`는 `NodeTreeItem` 목록을 반환하고, `files_stat`은 `NodeDetail`을 반환한다. `NodeTreeItem`/`NodeDetail` 필드는 `../rest/nodes.md`를 따른다.
+MCP files tools는 Space tree를 path-first로 다룬다. 공통 schema는 `../schemas.md`를 따른다.
 
-## Common
+## Target selector
 
-```text
-files_ls
-files_stat
-files_mkdir
-files_touch
-files_mv
-files_rm
+`TargetSelector`는 `../schemas.md`를 따른다.
+
+## `files_ls`
+
+Folder children을 조회한다.
+
+```ts
+type FilesLsInput = TargetSelector & {
+  limit?: number
+  cursor?: string
+}
+
+type FilesLsOutput = {
+  space: string
+  parent: NodeDetail
+  items: NodeTreeItem[]
+  page: Page
+}
 ```
 
-예:
+## `files_stat`
 
-```json
-{"target":"personal:/notes"}
+Folder/Text/File 상태와 metadata를 조회한다.
+
+```ts
+type FilesStatInput = TargetSelector
+
+type FilesStatOutput = {
+  space: string
+  node: NodeDetail
+}
 ```
 
-`target`은 `space:/path` 축약형이다.
+## `files_mkdir`
 
-## Text
+Folder를 생성한다.
 
-```text
-files_read
-files_write
-files_patch
+```ts
+type FilesMkdirInput = TargetSelector
+
+type FilesMkdirOutput = {
+  space: string
+  node: NodeDetail
+}
 ```
 
-- Text node에만 적용한다.
-- Content는 plain UTF-8이다.
-- Encrypted Text content는 MCP files tools에서 읽거나 쓸 수 없다.
-- Patch는 exact-match이며 각 `old_text` 문자열은 정확히 한 번만 매칭되어야 한다.
+`path` 또는 `target`은 생성할 folder 경로다. Parent folder는 이미 존재해야 한다.
 
-예:
+## `files_touch`
 
-```json
-{"target":"personal:/memory/state.json"}
+빈 plain Text node를 생성한다.
+
+```ts
+type FilesTouchInput = TargetSelector
+
+type FilesTouchOutput = {
+  space: string
+  node: NodeDetail
+}
 ```
 
-```json
-{"target":"personal:/memory/state.json","content":"{\"ok\":true}\n"}
+`path` 또는 `target`은 생성할 Text 경로다. Parent folder는 이미 존재해야 한다.
+
+## `files_read`
+
+Plain Text content를 읽는다.
+
+```ts
+type FilesReadInput = TargetSelector & {
+  start_line?: number
+  max_lines?: number
+  max_bytes?: number
+  if_none_match_sha256?: string
+}
+
+type FilesReadOutput = TextReadResult
 ```
 
-## File
+Encrypted Text와 File은 `files_read` 대상이 아니다.
 
-MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_find`에서 node summary를 확인하고 `files_stat`에서 metadata와 file stats를 확인한다. File은 `files_read`/`files_patch`/`files_grep` 대상이 아니다.
+## `files_write`
+
+Plain Text content 전체를 쓴다.
+
+```ts
+type FilesWriteInput = TargetSelector & {
+  content: string
+  create?: boolean
+  expected_sha256?: string
+}
+
+type FilesWriteOutput = {
+  space: string
+  node: NodeDetail
+  content_sha256: string
+  byte_len: number
+  line_count: number
+}
+```
+
+`create=true`이면 없을 때 Text node를 생성한다. MCP는 encrypted Text write를 제공하지 않는다.
+
+## `files_patch`
+
+Plain Text exact-match patch를 적용한다.
+
+```ts
+type FilesPatchInput = TargetSelector & {
+  edits: { old_text: string, new_text: string }[]
+  expected_sha256?: string
+}
+
+type FilesPatchOutput = {
+  space: string
+  node: NodeDetail
+  previous_sha256: string
+  content_sha256: string
+  edits_applied: number
+  diff: string
+}
+```
+
+각 `old_text`는 원문에서 정확히 한 번만 매칭되어야 한다.
+
+## `files_mv`
+
+Node를 rename/move한다.
+
+```ts
+type FilesMvInput = {
+  space?: string
+  space_id?: string
+  source_path: string
+  destination_path: string
+}
+
+type FilesMvOutput = {
+  space: string
+  node: NodeDetail
+}
+```
+
+Space 간 move는 지원하지 않는다.
+
+## `files_rm`
+
+Node를 soft delete한다.
+
+```ts
+type FilesRmInput = TargetSelector & {
+  recursive?: boolean
+}
+
+type FilesRmOutput = {
+  space: string
+  node_id: string
+  path: string
+  purge_after: string
+}
+```
+
+Folder 삭제는 `recursive=true`가 필요하다.
+
+## File content
+
+MCP upload/download tool은 제공하지 않는다. File은 `files_ls`/`files_find`에서 `NodeTreeItem`으로 확인하고 `files_stat`에서 metadata와 file stats를 확인한다. File은 `files_read`/`files_write`/`files_patch`/`files_grep` 대상이 아니다.

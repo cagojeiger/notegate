@@ -17,6 +17,10 @@ agent caller:
 
 Search는 read permission으로 실행한다. 권한이 없으면 존재 여부를 숨긴다.
 
+## Result shape
+
+Search result는 `schemas.md`의 `NodeTreeItem[] + Page`다. 본문 또는 metadata는 search 응답에 싣지 않는다. 자세한 내용은 `files_stat`, `files_read`로 조회한다.
+
 ## Common traversal
 
 Search는 scope folder 아래를 deterministic DFS pre-order로 순회한다.
@@ -58,40 +62,66 @@ scope subtree 끝
 Scan budget에 먼저 도달하면 result가 없어도 `has_more=true`와 `next_cursor`를 반환할 수 있다.
 
 ```json
-{"items":[],"has_more":true,"next_cursor":"..."}
+{"items":[],"page":{"limit":20,"returned":0,"has_more":true,"next_cursor":"..."}}
 ```
 
 이 응답은 이번 요청의 budget 안에서 match가 없었지만 아직 탐색할 candidate가 남았다는 의미다.
 
-## Result shape
+## Scanner algorithm
 
-Search result는 기본적으로 node candidate 목록이다. 본문 또는 metadata는 search 응답에 싣지 않는다.
+### Cursor state
 
-```text
-node_id
-path
-name
-kind
-byte_len
-updated_at
+Cursor는 구현 세부 정보를 감싼 opaque string이다. 논리 상태는 다음 정보를 포함한다.
+
+```ts
+type SearchCursor = {
+  version: number
+  command: "find" | "grep"
+  query_fingerprint: string
+  scope_node_id: string
+  stack: DfsFrame[]
+}
+
+type DfsFrame = {
+  folder_node_id: string
+  after_sort_order?: number
+  after_name?: string
+  after_node_id?: string
+}
 ```
 
-자세한 내용은 `files_stat`, `files_read`로 조회한다.
+`query_fingerprint`는 `q`, match mode, kind filter, include/exclude, case policy, scope, traversal order를 묶은 값이다.
 
-## `find`
-
-`find`는 node name 검색이다.
-
-대상:
+### Common DFS scanner
 
 ```text
-nodes.kind IN ('folder','text','file')
-nodes.name
-node kind filter
-folder scope
+1. caller의 read permission을 확인한다.
+2. scope path를 live folder node로 resolve한다.
+3. cursor가 있으면 cursor state와 query fingerprint를 검증한다.
+4. cursor가 없으면 DFS stack을 scope folder로 초기화한다.
+5. stack top folder의 children을 (sort_order, name, id) 순서로 page 조회한다.
+6. child를 하나씩 검사한다.
+7. child가 folder이면 DFS stack에 추가한다.
+8. command별 matcher가 match하면 NodeTreeItem result에 추가한다.
+9. result limit 또는 scan budget에 도달하면 현재 traversal state로 next_cursor를 만든다.
+10. stack이 비면 has_more=false로 끝낸다.
 ```
 
-Root node `/`는 결과에서 제외한다. `find`는 content나 `nodes.metadata`를 검색하지 않는다.
+Folder의 children page size는 `search_children_page_max`를 넘지 않는다.
+
+### `find` scanner
+
+`find`는 node summary만 검사한다. Content와 metadata를 읽지 않는다.
+
+```text
+for each child in DFS order:
+  if child is root:
+    skip result
+  if kind filter mismatches:
+    continue
+  if name matches q with match mode:
+    emit NodeTreeItem
+```
 
 Match mode:
 
@@ -103,7 +133,7 @@ glob     = node name glob match
 
 Glob과 regex는 명시적으로 선택한다. 예를 들어 `*.md`는 glob mode에서만 glob pattern이다.
 
-## `grep`
+### `grep` scanner
 
 `grep`은 query를 포함하는 plain Text node 후보를 찾는다. Line number, context line, snippet은 반환하지 않는다.
 
@@ -129,12 +159,29 @@ regex   = content regex match
 
 `include`/`exclude` path filter는 glob pattern을 사용할 수 있다.
 
+Text 하나는 atomic scan unit이다. Text 하나의 `byte_len`은 `text_max_bytes`를 넘지 않는다.
+
+```text
+for each text child in DFS order:
+  if include/exclude path filter mismatches:
+    continue
+  if remaining_grep_scan_budget < text.byte_len:
+    stop before reading content
+    return cursor pointing to this text as next candidate
+  read plain content
+  remaining_grep_scan_budget -= text.byte_len
+  if content matches q with match mode:
+    emit NodeTreeItem
+```
+
+Text 내부 line offset cursor는 사용하지 않는다.
+
 ## Worst-case scan and memory model
 
 현재 hard limit에서 scope가 root이고 모든 live node가 scope 안에 있으면 최악의 논리 scan 범위는 다음과 같다.
 
 ```text
-node scan upper bound      = 10000 nodes
+node scan upper bound       = 10000 nodes
 plain text scan upper bound = 256 MiB per space
 ```
 
