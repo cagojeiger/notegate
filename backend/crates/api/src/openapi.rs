@@ -246,6 +246,29 @@ mod tests {
     }
 
     #[test]
+    fn openapi_spaces_schema_matches_update_contract() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+
+        assert_eq!(
+            value["components"]["schemas"]["SpaceOut"]["properties"]["sort_order"]["type"],
+            "integer"
+        );
+        assert_eq!(
+            value["paths"]["/api/v1/spaces/{space_id}"]["patch"]["requestBody"]["content"]["application/json"]
+                ["schema"]["$ref"],
+            "#/components/schemas/UpdateBody"
+        );
+        assert!(
+            value["components"]["schemas"]["UpdateBody"]["properties"]
+                .as_object()
+                .expect("UpdateBody properties")
+                .contains_key("sort_order"),
+            "UpdateBody must expose sort_order"
+        );
+    }
+
+    #[test]
     fn openapi_texts_connection_permission_enum() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");

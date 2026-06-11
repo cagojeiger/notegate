@@ -93,6 +93,7 @@ spaces.purge_after=now()+retention
 ```
 
 - 내부 nodes/text/file/connection은 즉시 hard delete하지 않는다.
+- 연결 row는 즉시 disconnect하지 않는다. 삭제된 space는 live 조회와 권한 확인에서 제외되어 agent 접근이 차단된다.
 - Live 조회는 deleted space를 제외한다.
 - `purge_after` 이후 background purge가 cascade hard delete할 수 있다.
 
@@ -178,7 +179,7 @@ Revoke:
 ```text
 api_keys.revoked_at=now()
 api_keys.revoked_by_user_id=caller
-api_keys.revoked_reason=reason
+api_keys.revoked_reason=optional_reason
 ```
 
-Rotation은 같은 account에 새 key를 만들고 old key를 같은 transaction에서 revoke한다. Old token 원문은 복구하지 않는다.
+Rotation은 같은 account에 새 key를 만들고 old key를 같은 transaction에서 `revoked_reason=rotated`로 revoke한다. Old token 원문은 복구하지 않는다.
