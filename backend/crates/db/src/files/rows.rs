@@ -58,6 +58,7 @@ pub struct TextRow {
     pub node_id: Uuid,
     pub space_id: Uuid,
     pub content: Option<String>,
+    pub encrypted_payload: Option<Value>,
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
@@ -85,6 +86,7 @@ impl TextRow {
             node_id: self.node_id,
             space_id: self.space_id,
             content: self.content,
+            encrypted_payload: self.encrypted_payload,
             content_sha256: self.content_sha256,
             byte_len: self.byte_len,
             line_count: self.line_count,
@@ -104,6 +106,6 @@ pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order,
      created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
 
 /// Selectable columns of `text_objects`, in [`TextRow`] order.
-pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, content_sha256, \
+pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, encrypted_payload, content_sha256, \
      byte_len, line_count, media_type, encoding, storage_format, \
      created_by_account_id, updated_by_account_id, created_at, updated_at";

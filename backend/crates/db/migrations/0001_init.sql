@@ -233,10 +233,7 @@ CREATE TABLE text_objects (
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     storage_format TEXT NOT NULL DEFAULT 'plain' CHECK (storage_format IN ('plain', 'encrypted')),
     content_text TEXT,
-    content_ciphertext BYTEA,
-    nonce BYTEA,
-    enc_key_id TEXT REFERENCES crypto_key_epochs(key_id),
-    enc_version INTEGER,
+    encrypted_payload JSONB,
     content_sha256 TEXT NOT NULL DEFAULT '',
     byte_len BIGINT NOT NULL DEFAULT 0,
     line_count INTEGER NOT NULL DEFAULT 0,
@@ -255,8 +252,8 @@ CREATE TABLE text_objects (
     CHECK (line_count >= 0 AND line_count <= 2000),
     CHECK (encoding = 'utf-8'),
     CHECK (
-        (storage_format = 'plain' AND content_text IS NOT NULL AND content_ciphertext IS NULL AND nonce IS NULL AND enc_key_id IS NULL AND enc_version IS NULL)
-        OR (storage_format = 'encrypted' AND content_text IS NULL AND content_ciphertext IS NOT NULL AND nonce IS NOT NULL AND enc_key_id IS NOT NULL AND enc_version IS NOT NULL)
+        (storage_format = 'plain' AND content_text IS NOT NULL AND encrypted_payload IS NULL)
+        OR (storage_format = 'encrypted' AND content_text IS NULL AND encrypted_payload IS NOT NULL AND jsonb_typeof(encrypted_payload) = 'object')
     )
 );
 CREATE INDEX text_objects_space_idx ON text_objects(space_id);

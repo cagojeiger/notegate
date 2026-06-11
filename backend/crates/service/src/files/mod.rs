@@ -23,11 +23,11 @@ pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use types::{
     ChildrenCursor, ChildrenPage, DeleteResult, NodeView, PatchResult, ReadContent, ReadResult,
-    StoredContent, TextStats, TextView,
+    ReadTextBody, StoredContent, TextStats, TextView,
 };
 pub use types::{
     ChildrenRequest, CreateFolder, CreateText, DeleteNode, Edit, MoveNode, PatchText, ReadText,
-    WriteTarget, WriteText,
+    WriteTarget, WriteText, WriteTextBody,
 };
 pub use validation::FilesValidationError;
 

@@ -166,10 +166,7 @@ text_objects
   space_id uuid not null references spaces(id)
   storage_format text not null check ('plain','encrypted')
   content_text text null
-  content_ciphertext bytea null
-  nonce bytea null
-  enc_key_id text null references crypto_key_epochs(key_id)
-  enc_version int null
+  encrypted_payload jsonb null
   content_sha256 text not null
   byte_len bigint not null
   line_count int not null
@@ -208,15 +205,18 @@ storage_kind='object'    -> inline_bytes IS NULL AND object_key IS NOT NULL
 Text 저장 invariant:
 
 ```text
-storage_format='plain'     -> content_text IS NOT NULL, content_ciphertext/nonce/enc_key_id/enc_version IS NULL
-storage_format='encrypted' -> content_text IS NULL, content_ciphertext/nonce/enc_key_id/enc_version IS NOT NULL
+storage_format='plain'     -> content_text IS NOT NULL, encrypted_payload IS NULL
+storage_format='encrypted' -> content_text IS NULL, encrypted_payload IS NOT NULL
 ```
 
-File/Text 공통 암호화 정책:
+Text 암호화 정책:
 
-- Content 암호화용 컬럼은 server-side encrypted storage format에 사용한다.
-- REST/MCP read/write/patch/grep surface는 plain Text만 대상으로 한다.
-- `content_sha256`, `byte_len`, `line_count`는 plaintext 기준 metadata다.
+- `storage_format='plain'`은 서버가 읽을 수 있는 UTF-8 content다.
+- `storage_format='encrypted'`는 client-side encrypted payload다. 서버는 원문과 복호화 키를 저장하지 않는다.
+- REST는 encrypted payload 저장/조회가 가능하다.
+- MCP read/write/patch/grep surface는 plain Text만 대상으로 한다.
+- plain Text의 `content_sha256`, `byte_len`, `line_count`는 plaintext 기준이다.
+- encrypted Text의 `content_sha256`, `byte_len`은 encrypted payload 직렬화 기준이고 `line_count=0`이다.
 
 Node-content invariant:
 

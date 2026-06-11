@@ -23,7 +23,7 @@ use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_service::files::Edit;
 use notegate_service::files::{
     ChildrenCursor, CreateFolder, CreateText, DeleteNode, FilesService, MoveNode, PatchText,
-    ReadText, WriteTarget, WriteText,
+    ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::spaces::CreateSpace;
 use serde_json::json;
@@ -150,7 +150,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             ws,
             WriteText {
                 target: WriteTarget::Existing { node_id: note_id },
-                content: "# Title\nalpha beta gamma\n".to_owned(),
+                body: WriteTextBody::Plain("# Title\nalpha beta gamma\n".to_owned()),
                 expected_sha256: None,
             },
         )
@@ -176,10 +176,69 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             },
         )
         .await?;
-    let content = read.content.expect("content present");
+    let content = match read.body {
+        notegate_service::files::ReadTextBody::Content(content) => content,
+        other => panic!("expected content body, got {other:?}"),
+    };
     assert_eq!(content.returned_lines, 2);
     assert!(content.content.contains("alpha beta gamma"));
     assert_eq!(read.content_sha256, after_write_sha);
+
+    // --- encrypted text: REST-visible opaque payload, not plaintext-patchable ---
+    let encrypted = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: projects_id,
+                    name: "secret.md".to_owned(),
+                },
+                body: WriteTextBody::Encrypted(json!({
+                    "version": 1,
+                    "alg": "AES-256-GCM",
+                    "ciphertext_b64": "abc"
+                })),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    assert_eq!(encrypted.text.line_count, 0);
+    assert!(encrypted.text.content.is_none());
+    assert!(encrypted.text.encrypted_payload.is_some());
+    let encrypted_read = files
+        .read_text(
+            owner,
+            ws,
+            ReadText {
+                node_id: encrypted.node.node.id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    match encrypted_read.body {
+        ReadTextBody::Encrypted(payload) => assert_eq!(payload["alg"], "AES-256-GCM"),
+        other => panic!("expected encrypted body, got {other:?}"),
+    }
+    let patch_err = files
+        .patch_text(
+            owner,
+            ws,
+            PatchText {
+                node_id: encrypted.node.node.id,
+                edits: vec![Edit {
+                    old_text: "abc".to_owned(),
+                    new_text: "def".to_owned(),
+                }],
+                expected_sha256: None,
+            },
+        )
+        .await
+        .expect_err("encrypted text patch must fail");
+    assert!(patch_err.to_string().contains("plaintext"));
 
     // --- patch: exact-match replacement ---
     let patched = files

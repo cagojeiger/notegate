@@ -2,10 +2,11 @@
 
 use axum::http::request::Parts;
 use notegate_core::validation::normalize_path;
+use notegate_model::TextStorageFormat;
 use notegate_service::ServiceError;
 use notegate_service::files::{
     ChildrenRequest, CreateFolder, CreateText, DeleteNode, Edit as ServiceEdit, MoveNode,
-    PatchText, ReadText, WriteTarget, WriteText,
+    PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
@@ -390,16 +391,27 @@ pub async fn read(
         .await
         .map_err(service_error)?;
 
+    if result.storage_format == TextStorageFormat::Encrypted {
+        return Err(service_error(ServiceError::InvalidInput(
+            "encrypted text is not readable through MCP".to_owned(),
+        )));
+    }
+
     let space = resolved.name();
-    let body = match &result.content {
-        None => json!({
+    let body = match &result.body {
+        ReadTextBody::Unchanged => json!({
             "space": space,
             "path": result.node.path,
             "unchanged": true,
             "content_returned": false,
             "content_sha256": result.content_sha256,
         }),
-        Some(content) => json!({
+        ReadTextBody::Encrypted(_) => {
+            return Err(service_error(ServiceError::InvalidInput(
+                "encrypted text is not readable through MCP".to_owned(),
+            )));
+        }
+        ReadTextBody::Content(content) => json!({
             "space": space,
             "path": result.node.path,
             "content": content.content,
@@ -469,7 +481,7 @@ pub async fn write(
             space_id,
             WriteText {
                 target,
-                content: input.content,
+                body: WriteTextBody::Plain(input.content),
                 expected_sha256: input.expected_sha256,
             },
         )

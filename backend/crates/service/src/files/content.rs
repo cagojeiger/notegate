@@ -4,7 +4,8 @@
 //! per-text and space caps. `write` and `patch` compute them once here so
 //! the validated values are exactly what the store writes.
 
-use super::types::StoredContent;
+use super::types::{StoredContent, WriteTextBody};
+use crate::error::{ServiceError, ServiceResult};
 
 /// The derived metrics of a text's content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,9 +23,9 @@ impl Metrics {
     /// Bundle these metrics with their content for the store, converting the
     /// counts to the `i32` columns. Values are validated against the caps before
     /// this is called, so they fit `i32`.
-    pub fn into_stored(self, content: String) -> StoredContent {
+    pub fn into_stored_plain(self, content: String) -> StoredContent {
         StoredContent {
-            content,
+            body: WriteTextBody::Plain(content),
             content_sha256: self.content_sha256,
             byte_len: self.byte_len as i64,
             line_count: self.line_count as i32,
@@ -32,13 +33,32 @@ impl Metrics {
     }
 }
 
-/// Compute the metrics of text content.
+/// Compute the metrics of plain text content.
 pub fn compute(content: &str) -> Metrics {
     Metrics {
-        content_sha256: sha256_hex(content),
+        content_sha256: sha256_hex(content.as_bytes()),
         byte_len: content.len(),
         line_count: line_count(content),
     }
+}
+
+/// Compute stored metrics for a client-side encrypted payload. The payload is
+/// opaque to the server, so line count is always `0` and hash/bytes are based on
+/// its JSON serialization.
+pub fn compute_encrypted(payload: serde_json::Value) -> ServiceResult<StoredContent> {
+    if !payload.is_object() {
+        return Err(ServiceError::InvalidInput(
+            "encrypted_payload must be a JSON object".to_owned(),
+        ));
+    }
+    let bytes = serde_json::to_vec(&payload)
+        .map_err(|error| ServiceError::InvalidInput(error.to_string()))?;
+    Ok(StoredContent {
+        body: WriteTextBody::Encrypted(payload),
+        content_sha256: sha256_hex(&bytes),
+        byte_len: bytes.len() as i64,
+        line_count: 0,
+    })
 }
 
 /// Logical line count: empty content is `0`; otherwise the number of `\n`-joined
@@ -52,9 +72,9 @@ fn line_count(content: &str) -> usize {
 }
 
 /// Hex-encoded SHA-256 of a string's UTF-8 bytes.
-fn sha256_hex(content: &str) -> String {
+fn sha256_hex(content: &[u8]) -> String {
     use sha2::{Digest as _, Sha256};
-    let digest = Sha256::digest(content.as_bytes());
+    let digest = Sha256::digest(content);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

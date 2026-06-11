@@ -5,13 +5,13 @@
 - Secret, bearer token, OAuth code, PKCE verifier, API key plaintext는 log/error/audit payload에 기록하지 않는다.
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
-- Content(Text/File)는 제품 설정이나 space 정책에 따라 server-side encryption으로 저장할 수 있다.
+- Text content는 plain 또는 client-side encrypted payload로 저장한다.
 - Node metadata는 content가 아니며 암호화 대상이 아니다.
 
 ## Root key domains
 
 ```text
-ENC_ROOT     PII와 content 암호화용
+ENC_ROOT     PII 암호화용
 LOOKUP_ROOT  provider/email/API key lookup HMAC와 session signing용
 ```
 
@@ -39,24 +39,28 @@ token_hash      = HMAC(API_KEY_SUBKEY, "api-key:v1:" || key_id || ":" || secret)
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
 - LOOKUP root key 폐기가 필요하면 영향받는 live key를 revoke하고 재발급한다.
 
-## Content encryption
+## Text content encryption
 
-Text/File content는 두 저장 방식을 가진다.
-
-```text
-plain      = DB 또는 object storage에 평문 content 저장
-encrypted  = ENC root에서 파생한 content subkey로 AEAD 암호화 저장
-```
-
-Text metadata는 plaintext 기준으로 계산한다.
+Text content는 두 저장 방식을 가진다.
 
 ```text
-content_sha256 = SHA256(plaintext bytes)
-byte_len       = plaintext byte length
-line_count     = plaintext line count for Text
+plain      = 서버가 읽을 수 있는 UTF-8 content
+encrypted  = client-side encrypted payload
 ```
 
-암호화 저장 시 DB에는 ciphertext, nonce, enc_key_id, enc_version을 저장한다. REST/MCP content surface는 plain Text만 대상으로 한다. SQL `LIKE/ILIKE` 기반 grep은 encrypted content에 직접 적용하지 않는다.
+Encrypted Text에서 서버는 원문, 비밀번호, 복호화 키를 받거나 저장하지 않는다. 서버는 encrypted payload를 opaque JSON object로 저장하고 반환한다.
+
+```text
+plain content_sha256 = SHA256(plaintext bytes)
+plain byte_len       = plaintext byte length
+plain line_count     = plaintext line count
+
+encrypted content_sha256 = SHA256(encrypted payload JSON bytes)
+encrypted byte_len       = encrypted payload JSON byte length
+encrypted line_count     = 0
+```
+
+REST는 encrypted payload 저장/조회가 가능하다. MCP content surface와 grep/patch는 plain Text만 대상으로 한다.
 
 ## Deletion and anonymization
 

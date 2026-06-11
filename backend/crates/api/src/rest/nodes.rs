@@ -25,6 +25,7 @@ use crate::state::AppState;
 
 use notegate_service::files::{
     ChildrenRequest, CreateFolder, CreateText, DeleteNode, MoveNode, WriteTarget, WriteText,
+    WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -233,7 +234,7 @@ pub(crate) async fn create(
                                     parent_node_id: body.parent_id,
                                     name: body.name,
                                 },
-                                content,
+                                body: WriteTextBody::Plain(content),
                                 expected_sha256: None,
                             },
                         )

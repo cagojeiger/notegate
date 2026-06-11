@@ -2,9 +2,10 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{Node, TextObject};
+use crate::{Node, TextObject, TextStorageFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
@@ -40,9 +41,15 @@ pub enum WriteTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteTextBody {
+    Plain(String),
+    Encrypted(Value),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteText {
     pub target: WriteTarget,
-    pub content: String,
+    pub body: WriteTextBody,
     pub expected_sha256: Option<String>,
 }
 
@@ -75,7 +82,7 @@ pub struct DeleteNode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredContent {
-    pub content: String,
+    pub body: WriteTextBody,
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
@@ -128,10 +135,18 @@ pub struct DeleteResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadResult {
     pub node: NodeView,
-    pub content: Option<ReadContent>,
+    pub storage_format: TextStorageFormat,
+    pub body: ReadTextBody,
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadTextBody {
+    Content(ReadContent),
+    Encrypted(Value),
+    Unchanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -30,7 +30,8 @@ files_patch
 ```
 
 - Text node에만 적용한다.
-- Content는 UTF-8이다.
+- Content는 plain UTF-8이다.
+- Encrypted Text content는 MCP files tools에서 읽거나 쓸 수 없다.
 - Patch는 exact-match이며 각 `old_text` 문자열은 정확히 한 번만 매칭되어야 한다.
 
 예:

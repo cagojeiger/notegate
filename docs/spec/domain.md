@@ -11,7 +11,7 @@ Agent      User가 만든 worker 계정. API key로 인증되고 연결된 Space
 Space      User가 소유한 중앙 저장 범위.
 Node       Space 안 tree item. folder/text/file 중 하나이며 metadata를 가진다.
 Folder     하위 node를 담는 container.
-Text       UTF-8 content object. read/write/patch/grep 가능.
+Text       plain UTF-8 또는 client-side encrypted payload content object.
 File       binary/object content. 직접 text read/patch/grep 대상이 아니다.
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
 API key    User 또는 Agent account로 인증되는 bearer credential.

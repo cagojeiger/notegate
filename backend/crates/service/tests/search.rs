@@ -19,7 +19,9 @@ mod common;
 
 use common::{TestDb, insert_user_account};
 use notegate_db::{FilesRepo, SpaceRepo};
-use notegate_service::files::{CreateFolder, CreateText, FilesService, WriteTarget, WriteText};
+use notegate_service::files::{
+    CreateFolder, CreateText, FilesService, WriteTarget, WriteText, WriteTextBody,
+};
 use notegate_service::search::{FindRequest, GrepRequest, SearchService};
 use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
@@ -96,7 +98,7 @@ async fn write_doc(
             ws,
             WriteText {
                 target: WriteTarget::Existing { node_id: node },
-                content: content.to_owned(),
+                body: WriteTextBody::Plain(content.to_owned()),
                 expected_sha256: None,
             },
         )

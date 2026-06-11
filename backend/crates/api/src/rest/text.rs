@@ -10,6 +10,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -18,8 +19,8 @@ use crate::rest::dto::{AccountRef, NodeRef};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    Edit as ServiceEdit, NodeView, PatchResult, PatchText, ReadResult, ReadText, TextView,
-    WriteTarget, WriteText,
+    Edit as ServiceEdit, NodeView, PatchResult, PatchText, ReadResult, ReadText, ReadTextBody,
+    TextView, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -51,12 +52,14 @@ pub(crate) struct ReadResponse {
 #[serde(untagged)]
 pub(crate) enum ReadTextOut {
     Content(ReadContentOut),
+    Encrypted(ReadEncryptedOut),
     Unchanged(ReadUnchangedOut),
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ReadContentOut {
     node_id: Uuid,
+    storage_format: String,
     content: String,
     content_sha256: String,
     byte_len: i64,
@@ -71,8 +74,21 @@ pub(crate) struct ReadContentOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ReadEncryptedOut {
+    node_id: Uuid,
+    storage_format: String,
+    encrypted_payload: Value,
+    content_sha256: String,
+    byte_len: i64,
+    line_count: i32,
+    updated_by: AccountRef,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ReadUnchangedOut {
     node_id: Uuid,
+    storage_format: String,
     unchanged: bool,
     content_returned: bool,
     content_sha256: String,
@@ -126,9 +142,18 @@ pub(crate) async fn read(
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct ReplaceBody {
-    content: String,
+    #[serde(default = "default_storage_format")]
+    storage_format: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    encrypted_payload: Option<Value>,
     #[serde(default)]
     expected_sha256: Option<String>,
+}
+
+fn default_storage_format() -> String {
+    "plain".to_owned()
 }
 
 #[utoipa::path(
@@ -153,7 +178,7 @@ pub(crate) async fn replace(
             space_id,
             WriteText {
                 target: WriteTarget::Existing { node_id },
-                content: body.content,
+                body: write_body(body.storage_format, body.content, body.encrypted_payload)?,
                 expected_sha256: body.expected_sha256,
             },
         )
@@ -184,6 +209,7 @@ pub(crate) struct TextResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TextMetaOut {
     node_id: Uuid,
+    storage_format: String,
     content_sha256: String,
     byte_len: i64,
     line_count: i32,
@@ -200,6 +226,7 @@ pub(crate) struct PatchResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct PatchTextOut {
     node_id: Uuid,
+    storage_format: String,
     content_sha256: String,
     byte_len: i64,
     line_count: i32,
@@ -262,17 +289,29 @@ async fn self_updated_by(state: &AppState, view: &NodeView) -> Result<AccountRef
 /// Build the `text` object for a read response, covering both the full-content
 /// slice and the `unchanged` (conditional-read hit) shapes.
 fn read_text_out(result: &ReadResult, updated_by: AccountRef) -> ReadTextOut {
-    match &result.content {
-        None => ReadTextOut::Unchanged(ReadUnchangedOut {
+    match &result.body {
+        ReadTextBody::Unchanged => ReadTextOut::Unchanged(ReadUnchangedOut {
             node_id: result.node.node.id,
+            storage_format: result.storage_format.as_str().to_owned(),
             unchanged: true,
             content_returned: false,
             content_sha256: result.content_sha256.clone(),
             byte_len: result.byte_len,
             line_count: result.line_count,
         }),
-        Some(content) => ReadTextOut::Content(ReadContentOut {
+        ReadTextBody::Encrypted(payload) => ReadTextOut::Encrypted(ReadEncryptedOut {
             node_id: result.node.node.id,
+            storage_format: result.storage_format.as_str().to_owned(),
+            encrypted_payload: payload.clone(),
+            content_sha256: result.content_sha256.clone(),
+            byte_len: result.byte_len,
+            line_count: result.line_count,
+            updated_by,
+            updated_at: result.node.node.updated_at,
+        }),
+        ReadTextBody::Content(content) => ReadTextOut::Content(ReadContentOut {
+            node_id: result.node.node.id,
+            storage_format: result.storage_format.as_str().to_owned(),
             content: content.content.clone(),
             content_sha256: result.content_sha256.clone(),
             byte_len: result.byte_len,
@@ -288,12 +327,35 @@ fn read_text_out(result: &ReadResult, updated_by: AccountRef) -> ReadTextOut {
     }
 }
 
+fn write_body(
+    storage_format: String,
+    content: Option<String>,
+    encrypted_payload: Option<Value>,
+) -> Result<WriteTextBody, ApiError> {
+    match storage_format.as_str() {
+        "plain" => Ok(WriteTextBody::Plain(content.ok_or_else(|| {
+            ApiError::invalid_field("content is required when storage_format=plain")
+        })?)),
+        "encrypted" => Ok(WriteTextBody::Encrypted(encrypted_payload.ok_or_else(
+            || {
+                ApiError::invalid_field(
+                    "encrypted_payload is required when storage_format=encrypted",
+                )
+            },
+        )?)),
+        _ => Err(ApiError::invalid_field(
+            "storage_format must be 'plain' or 'encrypted'",
+        )),
+    }
+}
+
 /// Build the response returned after a successful replace.
 fn text_response(view: &TextView, updated_by: AccountRef) -> TextResponse {
     TextResponse {
         node: NodeRef::from(&view.node),
         text: TextMetaOut {
             node_id: view.text.node_id,
+            storage_format: view.text.storage_format.as_str().to_owned(),
             content_sha256: view.text.content_sha256.clone(),
             byte_len: view.text.byte_len,
             line_count: view.text.line_count,
@@ -309,6 +371,7 @@ fn patch_response(result: &PatchResult, updated_by: AccountRef) -> PatchResponse
         node: NodeRef::from(&result.node),
         text: PatchTextOut {
             node_id: result.text.node_id,
+            storage_format: result.text.storage_format.as_str().to_owned(),
             content_sha256: result.text.content_sha256.clone(),
             byte_len: result.text.byte_len,
             line_count: result.text.line_count,

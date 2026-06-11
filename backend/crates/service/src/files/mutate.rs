@@ -8,7 +8,8 @@ use crate::files::patch::{apply_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
     CreateFolder, CreateText, DeleteNode, DeleteResult, FileCommand, MoveNode, NodeView,
-    PatchResult, PatchText, TextView, WriteTarget, WriteText, content,
+    PatchResult, PatchText, StoredContent, TextView, WriteTarget, WriteText, WriteTextBody,
+    content,
 };
 
 use super::view::text_view_at_path;
@@ -62,7 +63,7 @@ impl FilesService {
         let texts = self.store.count_live_texts(space_id).await?;
         validation::validate_space_text_count(texts, self.limits)?;
 
-        let empty = content::compute("").into_stored(String::new());
+        let empty = content::compute("").into_stored_plain(String::new());
         let (node, text) = self
             .store
             .insert_text(
@@ -93,8 +94,8 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
 
-        let metrics = content::compute(&command.content);
-        validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
+        let stored = stored_text_body(command.body)?;
+        validation::validate_text_content(stored.byte_len as usize, stored.line_count as usize)?;
 
         match command.target {
             WriteTarget::Existing { node_id } => {
@@ -105,11 +106,10 @@ impl FilesService {
                 validation::validate_space_text_bytes(
                     total,
                     text.byte_len.max(0) as usize,
-                    metrics.byte_len,
+                    stored.byte_len as usize,
                     self.limits,
                 )?;
 
-                let stored = metrics.into_stored(command.content);
                 let (node, text) = self
                     .store
                     .save_text_content(
@@ -139,9 +139,13 @@ impl FilesService {
                 let texts = self.store.count_live_texts(space_id).await?;
                 validation::validate_space_text_count(texts, self.limits)?;
                 let total = self.store.sum_live_text_bytes(space_id).await?;
-                validation::validate_space_text_bytes(total, 0, metrics.byte_len, self.limits)?;
+                validation::validate_space_text_bytes(
+                    total,
+                    0,
+                    stored.byte_len as usize,
+                    self.limits,
+                )?;
 
-                let stored = metrics.into_stored(command.content);
                 let (node, text) = self
                     .store
                     .insert_text(space_id, parent_node_id, &name, &stored, caller_account_id)
@@ -190,7 +194,7 @@ impl FilesService {
             self.limits,
         )?;
 
-        let stored = metrics.into_stored(new_content);
+        let stored = metrics.into_stored_plain(new_content);
         let save_guard = command
             .expected_sha256
             .as_deref()
@@ -475,6 +479,16 @@ impl FilesService {
             path,
             purge_after,
         })
+    }
+}
+
+fn stored_text_body(body: WriteTextBody) -> ServiceResult<StoredContent> {
+    match body {
+        WriteTextBody::Plain(content) => {
+            let metrics = content::compute(&content);
+            Ok(metrics.into_stored_plain(content))
+        }
+        WriteTextBody::Encrypted(payload) => content::compute_encrypted(payload),
     }
 }
 

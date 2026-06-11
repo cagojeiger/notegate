@@ -16,7 +16,7 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
-use notegate_model::files::{CreateFolder, MoveNode, StoredContent};
+use notegate_model::files::{CreateFolder, MoveNode, StoredContent, WriteTextBody};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -48,7 +48,7 @@ async fn space_with_root(
 
 fn content() -> StoredContent {
     StoredContent {
-        content: "hello".to_owned(),
+        body: WriteTextBody::Plain("hello".to_owned()),
         content_sha256: "0".repeat(64),
         byte_len: 5,
         line_count: 1,

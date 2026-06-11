@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -9,6 +10,15 @@ use uuid::Uuid;
 pub enum TextStorageFormat {
     Plain,
     Encrypted,
+}
+
+impl TextStorageFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Encrypted => "encrypted",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -24,6 +34,7 @@ pub struct TextObject {
     pub node_id: Uuid,
     pub space_id: Uuid,
     pub content: Option<String>,
+    pub encrypted_payload: Option<Value>,
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,

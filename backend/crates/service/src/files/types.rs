@@ -3,5 +3,6 @@
 pub use notegate_model::files::{
     ChildrenCursor, ChildrenPage, ChildrenRequest, CreateFolder, CreateText, DeleteNode,
     DeleteResult, Edit, MoveNode, NodeView, PatchResult, PatchText, ReadContent, ReadResult,
-    ReadText, StoredContent, TextStats, TextView, WriteTarget, WriteText,
+    ReadText, ReadTextBody, StoredContent, TextStats, TextView, WriteTarget, WriteText,
+    WriteTextBody,
 };

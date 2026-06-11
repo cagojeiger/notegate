@@ -246,6 +246,19 @@ pub mod checks {
     }
 }
 
+fn stored_text_parts(
+    content: &notegate_model::files::StoredContent,
+) -> (&'static str, Option<&str>, Option<&serde_json::Value>) {
+    match &content.body {
+        notegate_model::files::WriteTextBody::Plain(content) => {
+            ("plain", Some(content.as_str()), None)
+        }
+        notegate_model::files::WriteTextBody::Encrypted(payload) => {
+            ("encrypted", None, Some(payload))
+        }
+    }
+}
+
 pub mod create {
     //! Create commands: `mkdir` (folder) and `touch`/`write-create` (text).
     //!
@@ -264,7 +277,7 @@ pub mod create {
 
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-    use super::checks;
+    use super::{checks, stored_text_parts};
 
     /// Insert a folder under `parent_id`, attributing it to `created_by`.
     pub async fn insert_folder(
@@ -326,15 +339,18 @@ pub mod create {
         .await
         .map_err(map_constraint_error)?;
 
+        let (storage_format, content_text, encrypted_payload) = stored_text_parts(content);
         let doc_row = sqlx::query_as::<_, TextRow>(&format!(
             "INSERT INTO text_objects \
-            (node_id, space_id, content_text, content_sha256, byte_len, line_count, \
+            (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
              created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING {TEXT_COLUMNS}"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) RETURNING {TEXT_COLUMNS}"
         ))
         .bind(node_row.id)
         .bind(space_id)
-        .bind(&content.content)
+        .bind(storage_format)
+        .bind(content_text)
+        .bind(encrypted_payload)
         .bind(&content.content_sha256)
         .bind(content.byte_len)
         .bind(content.line_count)
@@ -615,7 +631,7 @@ pub mod save {
 
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-    use super::checks;
+    use super::{checks, stored_text_parts};
 
     /// Replace a live text's content + metrics, attributing the update to
     /// `updated_by` on both the text and its node.
@@ -660,15 +676,19 @@ pub mod save {
         checks::require_byte_budget(&mut tx, space_id, previous_bytes, content.byte_len, caps)
             .await?;
 
+        let (storage_format, content_text, encrypted_payload) = stored_text_parts(content);
         let doc_row = sqlx::query_as::<_, TextRow>(&format!(
             "UPDATE text_objects \
-         SET content_text = $3, content_sha256 = $4, byte_len = $5, line_count = $6, \
-             updated_by_account_id = $7, updated_at = now() \
+         SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
+             content_sha256 = $6, byte_len = $7, line_count = $8, \
+             updated_by_account_id = $9, updated_at = now() \
          WHERE space_id = $1 AND node_id = $2 RETURNING {TEXT_COLUMNS}"
         ))
         .bind(space_id)
         .bind(node_id)
-        .bind(&content.content)
+        .bind(storage_format)
+        .bind(content_text)
+        .bind(encrypted_payload)
         .bind(&content.content_sha256)
         .bind(content.byte_len)
         .bind(content.line_count)

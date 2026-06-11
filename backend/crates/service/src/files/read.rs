@@ -7,7 +7,7 @@ use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
     ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, NodeView, ReadContent, ReadResult,
-    ReadText,
+    ReadText, ReadTextBody,
 };
 
 use super::{FilesService, join_path};
@@ -135,27 +135,33 @@ impl FilesService {
         {
             return Ok(ReadResult {
                 node: view,
-                content: None,
+                storage_format: text.storage_format,
+                body: ReadTextBody::Unchanged,
                 content_sha256: text.content_sha256,
                 byte_len: text.byte_len,
                 line_count: text.line_count,
             });
         }
 
-        let plain_content = text.content.as_deref().ok_or_else(|| {
-            ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
-        })?;
-
-        let content = slice_text(
-            plain_content,
-            command.start_line,
-            command.max_lines,
-            command.max_bytes,
-        )?;
+        let body = if let Some(plain_content) = text.content.as_deref() {
+            ReadTextBody::Content(slice_text(
+                plain_content,
+                command.start_line,
+                command.max_lines,
+                command.max_bytes,
+            )?)
+        } else if let Some(payload) = text.encrypted_payload {
+            ReadTextBody::Encrypted(payload)
+        } else {
+            return Err(ServiceError::InvalidInput(
+                "text has neither plaintext nor encrypted payload".to_owned(),
+            ));
+        };
 
         Ok(ReadResult {
             node: view,
-            content: Some(content),
+            storage_format: text.storage_format,
+            body,
             content_sha256: text.content_sha256,
             byte_len: text.byte_len,
             line_count: text.line_count,
