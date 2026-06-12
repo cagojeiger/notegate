@@ -15,6 +15,7 @@ use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::error::{Error, Result};
 use crate::limits::Limits;
+use crate::tier::UserTier;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
@@ -71,6 +72,9 @@ pub struct Config {
     pub browser_session_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
+    /// Tier assigned to newly created users.
+    #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
+    pub default_user_tier: UserTier,
     /// Runtime-overridable capacity limits. Defaults match `docs/spec/performance-limits.md`.
     #[serde(default)]
     pub limits: Limits,
@@ -226,6 +230,20 @@ where
     Ok(Duration::from_secs(u64::deserialize(deserializer)?))
 }
 
+fn default_user_tier() -> UserTier {
+    UserTier::DEFAULT
+}
+
+fn user_tier_from_str<'de, D>(deserializer: D) -> std::result::Result<UserTier, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    UserTier::parse(&value).ok_or_else(|| {
+        serde::de::Error::custom("default_user_tier must be `tier0` or `system_max`")
+    })
+}
+
 fn validate_http_url_value(value: &str) -> std::result::Result<(), ValidationError> {
     let url = Url::parse(value).map_err(|_error| ValidationError::new("http_url"))?;
     let allowed_scheme = matches!(url.scheme(), "http" | "https");
@@ -348,6 +366,7 @@ mod tests {
     use validator::Validate;
 
     use crate::limits::Limits;
+    use crate::tier::UserTier;
 
     use super::{Config, load_from_sources};
 
@@ -373,6 +392,7 @@ mod tests {
             lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
+            default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
             secure_cookies: false,
         }
@@ -412,6 +432,7 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
                 ("PATH", "/bin"),
                 ("DATABASE_URL", "postgres://ignored"),
             ]),
@@ -422,6 +443,7 @@ mod tests {
         assert_eq!(config.db_max_connections, 7);
         assert_eq!(config.oauth_client_id, "notegate-web");
         assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
+        assert_eq!(config.default_user_tier, UserTier::Tier0);
         assert_eq!(
             config.jwks_cache_ttl.as_secs(),
             super::DEFAULT_JWKS_CACHE_TTL_SECS
@@ -469,6 +491,38 @@ mod tests {
         assert_eq!(config.limits.space_max_nodes, 5);
         assert_eq!(config.limits.space_max_content_bytes, 1024);
         Ok(())
+    }
+
+    #[test]
+    fn environment_layer_rejects_unknown_default_user_tier() {
+        let result = load_from_sources(
+            false,
+            test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
+                (
+                    "NOTEGATE_OAUTH_REDIRECT_URL",
+                    "http://localhost:9191/auth/callback",
+                ),
+                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_DEFAULT_USER_TIER", "enterprise"),
+            ]),
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]

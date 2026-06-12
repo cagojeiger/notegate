@@ -5,7 +5,7 @@ Limit은 두 층이다.
 1. **System hard max**: 코드와 DB가 절대 넘기지 않는 제품 상한.
 2. **User tier quota**: user별 실제 사용량 상한. 항상 system hard max 이하이다.
 
-현재 tier는 `tier0`와 `system_max`만 둔다. 현재 기본 가입 tier는 `system_max`이며, 운영 배포 전 기본값을 `tier0`로 낮춘다. 중간 tier는 나중에 추가한다.
+현재 tier는 `tier0`와 `system_max`만 둔다. 신규 user의 기본 tier는 `NOTEGATE_DEFAULT_USER_TIER`로 정하며 값은 `tier0` 또는 `system_max`다. 설정하지 않으면 `system_max`를 사용한다. 운영 배포 전에는 이 값을 `tier0`로 설정한다. 중간 tier는 나중에 추가한다.
 
 ## HTTP safety limits
 
@@ -53,7 +53,7 @@ tier0
   space_max_nodes = 2000
   folder_max_children = 200
 
-system_max            # current default signup tier
+system_max
   spaces_per_user = 20
   agents_per_user = 50
   connections_per_space = 50

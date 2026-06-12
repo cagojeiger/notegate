@@ -69,7 +69,11 @@ impl AppState {
             pii_crypto.version(),
         );
         let account_lifecycle = AccountService::with_api_keys(
-            AccountRepo::with_crypto(db.clone(), pii_crypto.clone()),
+            AccountRepo::with_crypto_and_default_user_tier(
+                db.clone(),
+                pii_crypto.clone(),
+                config.default_user_tier,
+            ),
             api_key_repo.clone(),
             pii_crypto.clone(),
         );
@@ -80,7 +84,11 @@ impl AppState {
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
         let files = FilesService::new(files_repo.clone());
         let search = SearchService::new(files_repo);
-        let accounts = AccountRepo::with_crypto(db.clone(), pii_crypto.clone());
+        let accounts = AccountRepo::with_crypto_and_default_user_tier(
+            db.clone(),
+            pii_crypto.clone(),
+            config.default_user_tier,
+        );
         Self {
             db,
             config,

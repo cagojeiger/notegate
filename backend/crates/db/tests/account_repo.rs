@@ -1,6 +1,8 @@
 mod common;
 
 use common::TestDb;
+use notegate_core::security::PiiCrypto;
+use notegate_core::tier::UserTier;
 use notegate_db::AccountRepo;
 use notegate_model::ResolveAttrs;
 
@@ -30,6 +32,27 @@ async fn upsert_user_creates_and_updates_same_account() -> Result<(), Box<dyn st
     assert_eq!(second.display_name, "Second");
     assert_eq!(first_user.id, second_user.id);
     assert_eq!(second_user.email.as_deref(), Some("second@example.test"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn upsert_user_uses_configured_default_tier() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let repo = AccountRepo::with_crypto_and_default_user_tier(
+        db.pool.clone(),
+        PiiCrypto::test(),
+        UserTier::Tier0,
+    );
+
+    let (_account, user) = repo
+        .upsert_user_by_sub(&attrs("tier-sub", "tier@example.test", "Tier User"))
+        .await?;
+
+    assert_eq!(user.tier, "tier0");
 
     db.cleanup().await;
     Ok(())

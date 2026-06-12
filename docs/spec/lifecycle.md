@@ -12,6 +12,7 @@ users
 ```
 
 - user 생성은 space, agent, API key를 자동 생성하지 않는다.
+- users.tier는 `NOTEGATE_DEFAULT_USER_TIER` 값으로 설정한다.
 - 첫 space는 user가 명시적으로 생성한다.
 - 재로그인은 PII ciphertext/hash만 갱신하고 space/agent/key를 만들지 않는다.
 

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
+use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result, limits};
 use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
@@ -30,6 +31,7 @@ const SOLE_OWNED_SPACES_FROM_WHERE: &str = "\
 pub struct AccountRepo {
     pool: PgPool,
     crypto: PiiCrypto,
+    default_user_tier: UserTier,
 }
 
 impl AccountRepo {
@@ -39,7 +41,19 @@ impl AccountRepo {
     }
 
     pub fn with_crypto(pool: PgPool, crypto: PiiCrypto) -> Self {
-        Self { pool, crypto }
+        Self::with_crypto_and_default_user_tier(pool, crypto, UserTier::DEFAULT)
+    }
+
+    pub fn with_crypto_and_default_user_tier(
+        pool: PgPool,
+        crypto: PiiCrypto,
+        default_user_tier: UserTier,
+    ) -> Self {
+        Self {
+            pool,
+            crypto,
+            default_user_tier,
+        }
     }
 }
 
@@ -461,8 +475,8 @@ impl AccountRepo {
                     "INSERT INTO users \
                      (id, provider_sub_hash, provider_sub_hash_key_id, provider_sub_hash_version, \
                       email_ciphertext, email_nonce, email_enc_key_id, email_enc_version, \
-                      email_hash, email_hash_key_id, email_hash_version) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+                      email_hash, email_hash_key_id, email_hash_version, tier) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                 )
                 .bind(id)
                 .bind(&provider_sub_hash)
@@ -475,6 +489,7 @@ impl AccountRepo {
                 .bind(&email_hash)
                 .bind(self.crypto.lookup_key_id())
                 .bind(self.crypto.version())
+                .bind(self.default_user_tier.as_str())
                 .execute(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;

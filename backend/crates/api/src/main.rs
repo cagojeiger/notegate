@@ -65,7 +65,11 @@ async fn main() -> anyhow::Result<()> {
     // The db-backed identity resolver: account_repo resolves users, api_key_repo
     // resolves key ownership, and agent_repo resolves agent callers.
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
-    let account_repo = notegate_db::AccountRepo::with_crypto(pool.clone(), pii_crypto.clone());
+    let account_repo = notegate_db::AccountRepo::with_crypto_and_default_user_tier(
+        pool.clone(),
+        pii_crypto.clone(),
+        config.default_user_tier,
+    );
     let agent_repo = notegate_db::AgentRepo::new(pool.clone());
     let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
         pool.clone(),
