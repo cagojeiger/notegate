@@ -63,7 +63,7 @@ type SearchInput = {
 - `op=find`: node name을 검색한다. `match`는 `contains`(기본), `regex`, `glob`이다.
 - `op=grep`: plain Text content를 검색한다. `match`는 `literal`(기본), `regex`이다.
 - `include`/`exclude`는 결과 path에 적용하는 glob list다.
-- `grep lines=none|first|all`은 line number만 반환하고 snippet은 반환하지 않는다.
+- `grep lines=none`은 line 정보를 반환하지 않는다. `first`는 첫 matching line number, `all`은 모든 matching line number를 반환한다. snippet은 반환하지 않는다.
 - File, encrypted Text, metadata는 `grep` 대상이 아니다.
 
 Traversal, cursor, memory budget은 [`../search.md`](../search.md)를 따른다.

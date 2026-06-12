@@ -45,7 +45,7 @@ GET /.well-known/oauth-protected-resource/mcp
 GET /.well-known/oauth-protected-resource/mcp/{path...}
 ```
 
-REST/MCP bearer-token client가 authgate authorization server와 resource metadata를 discovery할 수 있게 한다. MCP OAuth public client id는 `notegate-mcp`다.
+REST/MCP bearer-token client가 authgate authorization server와 resource metadata를 discovery할 수 있게 한다. MCP OAuth public client id 기본값은 `notegate-mcp`이며 설정으로 바꿀 수 있다.
 
 MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 포함한다.
 

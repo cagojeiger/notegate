@@ -119,7 +119,7 @@ pub(crate) async fn create_key(
             CreateApiKey {
                 name: body.name,
                 scopes: body.scopes,
-                expires_at: body.expires_at,
+                expires_at: Some(body.expires_at),
             },
         )
         .await?;

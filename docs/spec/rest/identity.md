@@ -27,7 +27,7 @@ Agent caller:
 }
 ```
 
-`DELETE /api/v1/me`는 user caller만 가능하다. Live owned space가 있으면 거부한다.
+`DELETE /api/v1/me`는 user caller만 가능하다. Live owned space가 있으면 거부한다. 성공하면 owned agents를 deactivate하고, user/agent API key를 revoke하고, owned agent connection을 disconnect한 뒤 user account를 soft-delete한다.
 
 ## Current user API keys
 

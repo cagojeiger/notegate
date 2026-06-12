@@ -84,7 +84,7 @@ impl Modify for SecurityAddon {
             SecurityScheme::Http(
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
-                    .bearer_format("JWT")
+                    .bearer_format("JWT or notegate API key")
                     .build(),
             ),
         );
@@ -159,8 +159,29 @@ mod tests {
     #[test]
     fn openapi_defines_bearer_security_scheme() {
         let doc = ApiDoc::openapi();
-        let components = doc.components.expect("components present");
-        assert!(components.security_schemes.contains_key("bearer_auth"));
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+        let scheme = &value["components"]["securitySchemes"]["bearer_auth"];
+        assert_eq!(scheme["scheme"].as_str(), Some("bearer"));
+        assert_eq!(
+            scheme["bearerFormat"].as_str(),
+            Some("JWT or notegate API key")
+        );
+    }
+
+    #[test]
+    fn openapi_api_key_create_requires_expires_at() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+        let required = value["components"]["schemas"]["CreateApiKeyBody"]["required"]
+            .as_array()
+            .expect("required array");
+
+        for field in ["name", "expires_at"] {
+            assert!(
+                required.iter().any(|value| value.as_str() == Some(field)),
+                "CreateApiKeyBody should require {field}"
+            );
+        }
     }
 
     #[test]

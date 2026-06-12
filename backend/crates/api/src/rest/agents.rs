@@ -237,7 +237,7 @@ pub(crate) async fn create_key(
                 agent_id,
                 name: body.name,
                 scopes: body.scopes,
-                expires_at: body.expires_at,
+                expires_at: Some(body.expires_at),
             },
         )
         .await?;

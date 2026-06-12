@@ -62,8 +62,7 @@ pub(crate) struct CreateApiKeyBody {
     pub name: String,
     #[serde(default)]
     pub scopes: Vec<String>,
-    #[serde(default)]
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
 }
 
 /// API-key metadata returned by key list endpoints. The plaintext token is never

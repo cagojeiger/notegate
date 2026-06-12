@@ -85,7 +85,7 @@ impl McpServer {
     pub async fn read_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::unified::UnifiedInput>,
+        params: Parameters<tools::unified::ReadInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::unified::read(&self.state, &parts, params).await
     }
@@ -99,7 +99,7 @@ impl McpServer {
     pub async fn search_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::unified::UnifiedInput>,
+        params: Parameters<tools::unified::SearchInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::unified::search(&self.state, &parts, params).await
     }
@@ -113,7 +113,7 @@ impl McpServer {
     pub async fn write_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::unified::UnifiedInput>,
+        params: Parameters<tools::unified::WriteInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::unified::write(&self.state, &parts, params).await
     }
@@ -127,7 +127,7 @@ impl McpServer {
     pub async fn manage_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::unified::UnifiedInput>,
+        params: Parameters<tools::unified::ManageInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::unified::manage(&self.state, &parts, params).await
     }
@@ -286,13 +286,28 @@ mod tests {
             expected_tool_names()
         );
 
-        let unified_properties = "op target source destination name q kind match lines include exclude content edits create parents recursive ensure_newline depth limit cursor start_line max_lines max_bytes expected_sha256 if_none_match_sha256";
         for (tool_name, properties, required) in [
             ("me", "", ""),
-            ("read", unified_properties, "op"),
-            ("search", unified_properties, "op"),
-            ("write", unified_properties, "op"),
-            ("manage", unified_properties, "op"),
+            (
+                "read",
+                "op target name depth limit cursor start_line max_lines max_bytes if_none_match_sha256",
+                "op",
+            ),
+            (
+                "search",
+                "op target q kind match lines include exclude limit cursor",
+                "op target q",
+            ),
+            (
+                "write",
+                "op target content edits create ensure_newline expected_sha256",
+                "op target",
+            ),
+            (
+                "manage",
+                "op target source destination parents recursive",
+                "op",
+            ),
             ("run_sequence", "commands", "commands"),
         ] {
             assert_input_properties(&tools, tool_name, properties);

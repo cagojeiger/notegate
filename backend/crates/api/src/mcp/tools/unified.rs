@@ -15,27 +15,48 @@ const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct UnifiedInput {
-    /// Operation to perform within this tool.
+pub struct ReadInput {
+    /// Operation: spaces/ls/tree/stat/read.
     pub op: String,
-
     /// Single target in `<space>:/absolute/path` form.
     #[serde(default)]
     pub target: Option<String>,
-    /// Source target for `mv` and `cp`.
-    #[serde(default)]
-    pub source: Option<String>,
-    /// Destination target for `mv` and `cp`.
-    #[serde(default)]
-    pub destination: Option<String>,
-
-    /// Optional exact space name filter for `read op=spaces`.
+    /// Optional exact space name filter for `op=spaces`.
     #[serde(default)]
     pub name: Option<String>,
-    /// Search query for `find` and `grep`.
+    /// Tree depth for `op=tree`.
     #[serde(default)]
-    pub q: Option<String>,
-    /// Node kind filter: `folder`, `text`, or `file`.
+    pub depth: Option<i64>,
+    /// Page size.
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Opaque pagination cursor.
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// 1-based first line for `op=read`.
+    #[serde(default)]
+    pub start_line: Option<i64>,
+    /// Maximum lines for `op=read`.
+    #[serde(default)]
+    pub max_lines: Option<i64>,
+    /// Maximum bytes for `op=read`.
+    #[serde(default)]
+    pub max_bytes: Option<usize>,
+    /// Conditional read guard.
+    #[serde(default)]
+    pub if_none_match_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchInput {
+    /// Operation: find/grep.
+    pub op: String,
+    /// Scope target in `<space>:/absolute/path` form.
+    pub target: String,
+    /// Search query.
+    pub q: String,
+    /// Node kind filter for `op=find`: folder/text/file.
     #[serde(default)]
     pub kind: Option<String>,
     /// Match mode. `find`: contains/regex/glob. `grep`: literal/regex.
@@ -50,53 +71,58 @@ pub struct UnifiedInput {
     /// Optional path glob excludes.
     #[serde(default)]
     pub exclude: Option<Vec<String>>,
-
-    /// Text content for write/append.
-    #[serde(default)]
-    pub content: Option<String>,
-    /// Patch or line-edit entries for patch/edit.
-    #[serde(default)]
-    pub edits: Option<Vec<Value>>,
-
-    /// Create missing text for write/append.
-    #[serde(default)]
-    pub create: bool,
-    /// Create missing parent folders for mkdir.
-    #[serde(default)]
-    pub parents: bool,
-    /// Required for folder cp/rm.
-    #[serde(default)]
-    pub recursive: bool,
-    /// Insert a newline before appended content when needed.
-    #[serde(default)]
-    pub ensure_newline: bool,
-
-    /// Tree/list depth.
-    #[serde(default)]
-    pub depth: Option<i64>,
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
     /// Opaque pagination cursor.
     #[serde(default)]
     pub cursor: Option<String>,
+}
 
-    /// 1-based first line for read.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WriteInput {
+    /// Operation: write/append/patch/edit.
+    pub op: String,
+    /// Text target in `<space>:/absolute/path` form.
+    pub target: String,
+    /// Text content for write/append.
     #[serde(default)]
-    pub start_line: Option<i64>,
-    /// Maximum lines for read.
+    pub content: Option<String>,
+    /// Patch or line-edit entries for patch/edit.
     #[serde(default)]
-    pub max_lines: Option<i64>,
-    /// Maximum bytes for read.
+    pub edits: Option<Vec<Value>>,
+    /// Create missing text for write/append.
     #[serde(default)]
-    pub max_bytes: Option<usize>,
-
+    pub create: bool,
+    /// Insert a newline before appended content when needed.
+    #[serde(default)]
+    pub ensure_newline: bool,
     /// Optimistic write guard.
     #[serde(default)]
     pub expected_sha256: Option<String>,
-    /// Conditional read guard.
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ManageInput {
+    /// Operation: mkdir/mv/cp/rm.
+    pub op: String,
+    /// Single target in `<space>:/absolute/path` form for mkdir/rm.
     #[serde(default)]
-    pub if_none_match_sha256: Option<String>,
+    pub target: Option<String>,
+    /// Source target for mv/cp.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Destination target for mv/cp.
+    #[serde(default)]
+    pub destination: Option<String>,
+    /// Create missing parent folders for mkdir.
+    #[serde(default)]
+    pub parents: bool,
+    /// Required for folder cp/rm.
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -195,34 +221,57 @@ pub struct SequenceCommand {
     pub if_none_match_sha256: Option<String>,
 }
 
-impl From<SequenceCommand> for UnifiedInput {
-    fn from(command: SequenceCommand) -> Self {
-        Self {
-            op: command.op,
-            target: command.target,
-            source: command.source,
-            destination: command.destination,
-            name: command.name,
-            q: command.q,
-            kind: command.kind,
-            match_mode: command.match_mode,
-            lines: command.lines,
-            include: command.include,
-            exclude: command.exclude,
-            content: command.content,
-            edits: command.edits,
-            create: command.create,
-            parents: command.parents,
-            recursive: command.recursive,
-            ensure_newline: command.ensure_newline,
-            depth: command.depth,
-            limit: command.limit,
-            cursor: command.cursor,
-            start_line: command.start_line,
-            max_lines: command.max_lines,
-            max_bytes: command.max_bytes,
-            expected_sha256: command.expected_sha256,
-            if_none_match_sha256: command.if_none_match_sha256,
+impl SequenceCommand {
+    fn into_read_input(self) -> ReadInput {
+        ReadInput {
+            op: self.op,
+            target: self.target,
+            name: self.name,
+            depth: self.depth,
+            limit: self.limit,
+            cursor: self.cursor,
+            start_line: self.start_line,
+            max_lines: self.max_lines,
+            max_bytes: self.max_bytes,
+            if_none_match_sha256: self.if_none_match_sha256,
+        }
+    }
+
+    fn into_search_input(self) -> Result<SearchInput, ErrorData> {
+        Ok(SearchInput {
+            op: self.op,
+            target: required(self.target, "target", "search command")?,
+            q: required(self.q, "q", "search command")?,
+            kind: self.kind,
+            match_mode: self.match_mode,
+            lines: self.lines,
+            include: self.include,
+            exclude: self.exclude,
+            limit: self.limit,
+            cursor: self.cursor,
+        })
+    }
+
+    fn into_write_input(self) -> Result<WriteInput, ErrorData> {
+        Ok(WriteInput {
+            op: self.op,
+            target: required(self.target, "target", "write command")?,
+            content: self.content,
+            edits: self.edits,
+            create: self.create,
+            ensure_newline: self.ensure_newline,
+            expected_sha256: self.expected_sha256,
+        })
+    }
+
+    fn into_manage_input(self) -> ManageInput {
+        ManageInput {
+            op: self.op,
+            target: self.target,
+            source: self.source,
+            destination: self.destination,
+            parents: self.parents,
+            recursive: self.recursive,
         }
     }
 }
@@ -230,7 +279,7 @@ impl From<SequenceCommand> for UnifiedInput {
 pub async fn read(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<UnifiedInput>,
+    Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
     match input.op.as_str() {
         "spaces" => {
@@ -305,7 +354,7 @@ pub async fn read(
 pub async fn search(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<UnifiedInput>,
+    Parameters(input): Parameters<SearchInput>,
 ) -> Result<Json<Value>, ErrorData> {
     match input.op.as_str() {
         "find" => {
@@ -313,8 +362,8 @@ pub async fn search(
                 state,
                 parts,
                 Parameters(search::FindInput {
-                    target: required(input.target, "target", "find")?,
-                    q: required(input.q, "q", "find")?,
+                    target: input.target,
+                    q: input.q,
                     kind: input.kind,
                     match_mode: input.match_mode,
                     include: input.include,
@@ -330,8 +379,8 @@ pub async fn search(
                 state,
                 parts,
                 Parameters(search::GrepInput {
-                    target: required(input.target, "target", "grep")?,
-                    q: required(input.q, "q", "grep")?,
+                    target: input.target,
+                    q: input.q,
                     match_mode: input.match_mode,
                     lines: input.lines,
                     include: input.include,
@@ -349,7 +398,7 @@ pub async fn search(
 pub async fn write(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<UnifiedInput>,
+    Parameters(input): Parameters<WriteInput>,
 ) -> Result<Json<Value>, ErrorData> {
     match input.op.as_str() {
         "write" => {
@@ -357,7 +406,7 @@ pub async fn write(
                 state,
                 parts,
                 Parameters(files::WriteInput {
-                    target: required(input.target, "target", "write")?,
+                    target: input.target,
                     content: required(input.content, "content", "write")?,
                     create: input.create,
                     expected_sha256: input.expected_sha256,
@@ -370,7 +419,7 @@ pub async fn write(
                 state,
                 parts,
                 Parameters(files::AppendInput {
-                    target: required(input.target, "target", "append")?,
+                    target: input.target,
                     content: required(input.content, "content", "append")?,
                     create: input.create,
                     ensure_newline: input.ensure_newline,
@@ -384,7 +433,7 @@ pub async fn write(
                 state,
                 parts,
                 Parameters(files::PatchInput {
-                    target: required(input.target, "target", "patch")?,
+                    target: input.target,
                     edits: parse_edits(input.edits, "patch")?,
                     expected_sha256: input.expected_sha256,
                 }),
@@ -396,7 +445,7 @@ pub async fn write(
                 state,
                 parts,
                 Parameters(files::EditInput {
-                    target: required(input.target, "target", "edit")?,
+                    target: input.target,
                     edits: parse_edits(input.edits, "edit")?,
                     expected_sha256: input.expected_sha256,
                 }),
@@ -410,7 +459,7 @@ pub async fn write(
 pub async fn manage(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<UnifiedInput>,
+    Parameters(input): Parameters<ManageInput>,
 ) -> Result<Json<Value>, ErrorData> {
     match input.op.as_str() {
         "mkdir" => {
@@ -516,13 +565,11 @@ async fn dispatch_command(
     parts: &Parts,
     command: SequenceCommand,
 ) -> Result<Json<Value>, ErrorData> {
-    let tool = command.tool.clone();
-    let input = UnifiedInput::from(command);
-    match tool.as_str() {
-        "read" => read(state, parts, Parameters(input)).await,
-        "search" => search(state, parts, Parameters(input)).await,
-        "write" => write(state, parts, Parameters(input)).await,
-        "manage" => manage(state, parts, Parameters(input)).await,
+    match command.tool.as_str() {
+        "read" => read(state, parts, Parameters(command.into_read_input())).await,
+        "search" => search(state, parts, Parameters(command.into_search_input()?)).await,
+        "write" => write(state, parts, Parameters(command.into_write_input()?)).await,
+        "manage" => manage(state, parts, Parameters(command.into_manage_input())).await,
         _ => Err(invalid_input_error(
             "invalid tool for run_sequence; allowed values are: read, search, write, manage",
         )),
