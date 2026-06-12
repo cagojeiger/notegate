@@ -14,7 +14,7 @@ export function App() {
 
   return (
     <ApiProvider apiKey={apiKey}>
-      <AppShell />
+      <AppShell onSignOut={() => setApiKey(null)} />
     </ApiProvider>
   );
 }
