@@ -23,8 +23,18 @@ function AuthBoundary({ apiKey, onAuthenticated, onSignOut }: { apiKey: string |
   const client = useApiClient();
   const meQuery = useQuery({ queryKey: [...queryKeys.me, apiKey], queryFn: () => getMe(client), retry: false });
 
-  if (meQuery.isLoading) return <FullScreenStatus label="Checking session" />;
-  if (meQuery.isError) return <DevAuthGate onAuthenticated={onAuthenticated} onSessionAuthenticated={() => void meQuery.refetch()} />;
+  if (!meQuery.isFetched && meQuery.isLoading) return <FullScreenStatus label="Checking session" />;
+  if (!meQuery.data) {
+    return (
+      <DevAuthGate
+        onAuthenticated={onAuthenticated}
+        onSessionAuthenticated={async () => {
+          const result = await meQuery.refetch();
+          return result.isSuccess;
+        }}
+      />
+    );
+  }
 
   return <AppShell onSignOut={onSignOut} />;
 }
