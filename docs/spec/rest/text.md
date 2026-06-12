@@ -62,7 +62,7 @@ type PatchTextMeta = TextMeta & {
 - `node_id`는 `nodes.kind='text'`여야 한다.
 - `storage_format`은 `plain` 또는 `encrypted`다. 생략하면 `plain`이다.
 - plain content는 UTF-8이다.
-- `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 plain 저장 결과를 문법 검증한다. 검증은 node name extension 기준이며 schema validation은 하지 않는다.
+- `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 service layer의 공통 규칙으로 plain 저장 결과를 문법 검증한다. 검증은 node name extension 기준이며 schema validation은 하지 않는다.
 - encrypted payload는 JSON object이며 서버가 복호화하지 않는다.
 - `PUT`은 plain/encrypted 전체 교체를 수행한다.
 - `PATCH`는 plain Text 전용 string replacement 방식이다. 기본 `mode`는 `unique`이며 각 `old_text`는 정확히 한 번만 매칭되어야 한다. `first`와 `all` mode를 명시할 수 있다.
