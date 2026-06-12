@@ -87,10 +87,7 @@ pub async fn list(
                 account_id,
                 space_id,
                 folder.node.id,
-                ChildrenRequest {
-                    limit: limit,
-                    cursor: cursor,
-                },
+                ChildrenRequest { limit, cursor },
             )
             .await
             .map_err(service_error)?;
@@ -120,8 +117,8 @@ pub async fn list(
             TreeRequest {
                 path: Some(path.clone()),
                 depth: Some(depth),
-                limit: limit,
-                cursor: cursor,
+                limit,
+                cursor,
             },
         )
         .await
@@ -296,10 +293,10 @@ pub async fn read(
             space_id,
             ReadText {
                 node_id: node.node.id,
-                start_line: start_line,
-                max_lines: max_lines,
-                max_bytes: max_bytes,
-                if_none_match_sha256: if_none_match_sha256,
+                start_line,
+                max_lines,
+                max_bytes,
+                if_none_match_sha256,
             },
         )
         .await
@@ -396,7 +393,7 @@ pub async fn write(
             WriteText {
                 target,
                 body: WriteTextBody::Plain(content),
-                expected_sha256: expected_sha256,
+                expected_sha256,
             },
         )
         .await
@@ -461,8 +458,8 @@ pub async fn append(
             space_id,
             AppendText {
                 target,
-                content: content,
-                expected_sha256: expected_sha256,
+                content,
+                expected_sha256,
                 ensure_newline,
             },
         )
@@ -517,7 +514,7 @@ pub async fn patch(
             PatchText {
                 node_id: node.node.id,
                 edits,
-                expected_sha256: expected_sha256,
+                expected_sha256,
             },
         )
         .await
@@ -568,7 +565,7 @@ pub async fn edit(
             EditText {
                 node_id: node.node.id,
                 edits,
-                expected_sha256: expected_sha256,
+                expected_sha256,
             },
         )
         .await
@@ -680,7 +677,7 @@ pub async fn copy(
                 node_id: source.node.id,
                 new_parent_node_id: parent.node.id,
                 new_name,
-                recursive: recursive,
+                recursive,
             },
         )
         .await
@@ -723,7 +720,7 @@ pub async fn rm(
             space_id,
             DeleteNode {
                 node_id: node.node.id,
-                recursive: recursive,
+                recursive,
             },
         )
         .await

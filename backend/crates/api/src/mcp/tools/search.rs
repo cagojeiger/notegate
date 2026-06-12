@@ -12,6 +12,7 @@ use super::resolve::{caller, invalid_input_error, node_summary, resolve_target, 
 use super::support::page_json;
 use crate::state::AppState;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn find(
     state: &AppState,
     parts: &Parts,
@@ -68,6 +69,7 @@ pub async fn find(
     })))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn grep(
     state: &AppState,
     parts: &Parts,
