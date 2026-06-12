@@ -2,8 +2,8 @@
 
 pub use notegate_model::files::{
     AppendText, ChildrenCursor, ChildrenPage, ChildrenRequest, CopyCounts, CopyNode, CopyResult,
-    CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit, FileContent, FileStats,
-    FileView, MoveNode, NodeView, PatchResult, PatchText, ReadContent, ReadResult, ReadText,
-    ReadTextBody, StoredContent, StoredFile, TextStats, TextView, WriteTarget, WriteText,
-    WriteTextBody,
+    CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit, EditText, FileContent,
+    FileStats, FileView, LineEdit, MoveNode, NodeView, PatchMode, PatchResult, PatchText,
+    ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent, StoredFile, TextStats,
+    TextView, WriteTarget, WriteText, WriteTextBody,
 };

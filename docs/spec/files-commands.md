@@ -30,7 +30,7 @@ grep    plain Text 후보 검색
 
 ```text
 read  permission -> list/stat/read text/find/grep 가능
-write permission -> read + mkdir/write/append/patch/mv/copy/rm 가능
+write permission -> read + mkdir/write/append/patch/edit/mv/copy/rm 가능
 ```
 
 User caller는 자신이 소유한 space에서 read/write/manage 가능하다. Agent caller는 connection permission에 따른다.
@@ -41,17 +41,20 @@ User caller는 자신이 소유한 space에서 read/write/manage 가능하다. A
 read   text content 읽기
 write  text content 전체 교체 (`>`)
 append text content 끝에 추가 (`>>`)
-patch  exact-match patch 적용
+patch  string replacement 적용
+edit   line 기반 insert/replace/delete 적용
 ```
 
 - Text command는 plain UTF-8 content를 대상으로 한다.
-- `read`, `write`, `append`, `patch`는 `nodes.kind='text'`에만 적용한다.
-- Encrypted Text content는 MCP/CLI read/write/append/patch 대상이 아니다.
+- `read`, `write`, `append`, `patch`, `edit`은 `nodes.kind='text'`에만 적용한다.
+- Encrypted Text content는 MCP/CLI read/write/append/patch/edit 대상이 아니다.
 - `write`는 전체 content replacement다.
 - 빈 Text 생성은 `write`에 `create=true`, `content=""`를 사용한다.
 - `append`는 기본적으로 정확한 EOF append다. 줄 구분이 필요하면 호출자가 newline을 포함하거나 `ensure_newline` 옵션을 사용한다.
-- `patch`는 각 edit의 `old_text` 문자열이 원문에서 정확히 한 번만 매칭되어야 한다.
-- 여러 edit은 원본 기준으로 검증한 뒤 적용한다.
+- `patch`는 string replacement다. 기본 mode는 `unique`이며 `old_text`가 정확히 한 번만 매칭되어야 한다.
+- `patch`는 명시적으로 `first` 또는 `all` mode를 사용할 수 있다. `expected_count`가 있으면 현재 match 수와 일치해야 한다.
+- `edit`은 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다.
+- 여러 patch/edit은 원본 기준으로 검증한 뒤 적용한다.
 - `expected_sha256`이 주어지면 저장된 content hash와 일치해야 한다.
 
 ## File commands

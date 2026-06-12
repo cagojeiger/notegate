@@ -182,7 +182,7 @@ impl McpServer {
 
     #[tool(
         name = "files_patch",
-        description = "Patch plain text by exact string replacement. Use for targeted edits; each old_text must match exactly once.",
+        description = "Patch plain text by string replacement. Default mode is `unique`; explicit modes are `unique`, `first`, and `all`.",
         output_schema = object_output_schema()
     )]
     pub async fn files_patch_tool(
@@ -191,6 +191,19 @@ impl McpServer {
         params: Parameters<tools::files::PatchInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::files::patch(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "files_edit",
+        description = "Edit plain text by 1-based line operations: insert_before_line, insert_after_line, replace_lines, delete_lines.",
+        output_schema = object_output_schema()
+    )]
+    pub async fn files_edit_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::files::EditInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::files::edit(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -425,6 +438,7 @@ mod tests {
                 "target edits expected_sha256",
                 "target edits",
             ),
+            ("files_edit", "target edits expected_sha256", "target edits"),
             ("files_mv", "source destination", "source destination"),
             (
                 "files_copy",
@@ -467,6 +481,7 @@ mod tests {
             "files_write",
             "files_append",
             "files_patch",
+            "files_edit",
             "files_mv",
             "files_copy",
             "files_rm",

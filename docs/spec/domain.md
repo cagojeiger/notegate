@@ -49,7 +49,7 @@ Permission:
 
 ```text
 read  = list/stat/read text/read file/read metadata/find/grep
-write = read + create folder/create text/upload file/update/append/patch/delete/move/write metadata
+write = read + create folder/create text/upload file/update/append/patch/edit/copy/delete/move/write metadata
 ```
 
 ## Naming rules

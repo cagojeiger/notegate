@@ -21,11 +21,10 @@ use common::{TestDb, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::FileEncryptionMode;
-use notegate_service::files::Edit;
 use notegate_service::files::{
-    AppendText, ChildrenCursor, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode,
-    FilesService, MoveNode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
-    WriteTextBody,
+    AppendText, ChildrenCursor, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
+    EditText, FilesService, LineEdit, MoveNode, PatchMode, PatchText, ReadText, ReadTextBody,
+    WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -284,6 +283,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 edits: vec![Edit {
                     old_text: "abc".to_owned(),
                     new_text: "def".to_owned(),
+                    mode: PatchMode::Unique,
+                    expected_count: None,
                 }],
                 expected_sha256: None,
             },
@@ -419,6 +420,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 edits: vec![Edit {
                     old_text: "beta".to_owned(),
                     new_text: "delta".to_owned(),
+                    mode: PatchMode::Unique,
+                    expected_count: None,
                 }],
                 expected_sha256: Some(after_write_sha.clone()),
             },
@@ -437,6 +440,55 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(
         doc_now.updated_by_account_id, owner,
         "patch sets doc updated_by"
+    );
+
+    let replace_all = files
+        .patch_text(
+            owner,
+            ws,
+            PatchText {
+                node_id: note_id,
+                edits: vec![Edit {
+                    old_text: "delta".to_owned(),
+                    new_text: "DELTA".to_owned(),
+                    mode: PatchMode::All,
+                    expected_count: Some(2),
+                }],
+                expected_sha256: Some(patched.text.content_sha256.clone()),
+            },
+        )
+        .await?;
+    assert_eq!(replace_all.edits_applied, 2);
+
+    let line_edited = files
+        .edit_text(
+            owner,
+            ws,
+            EditText {
+                node_id: note_id,
+                edits: vec![
+                    LineEdit::InsertAfter {
+                        line: 1,
+                        content: "inserted line\n".to_owned(),
+                    },
+                    LineEdit::ReplaceLines {
+                        start_line: 3,
+                        end_line: 3,
+                        content: "replacement line\n".to_owned(),
+                    },
+                ],
+                expected_sha256: Some(replace_all.text.content_sha256.clone()),
+            },
+        )
+        .await?;
+    assert_eq!(line_edited.edits_applied, 2);
+    let (_, edited_now) = repo_find_text(&repo, ws, note_id).await;
+    assert!(
+        edited_now
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("inserted line\nreplacement line\n")
     );
 
     // --- find by NAME: q='note' matches the text by name ---

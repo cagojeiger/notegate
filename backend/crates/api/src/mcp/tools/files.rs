@@ -4,8 +4,9 @@ use axum::http::request::Parts;
 use notegate_model::{NodeKind, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
-    AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, MoveNode,
-    PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
+    AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, EditText,
+    LineEdit, MoveNode, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
+    WriteTextBody,
 };
 use notegate_service::search::TreeRequest;
 use rmcp::handler::server::wrapper::Parameters;
@@ -112,6 +113,12 @@ pub struct PatchEdit {
     pub old_text: String,
     /// The replacement text (must differ from `old_text`).
     pub new_text: String,
+    /// Replacement mode: `unique` (default), `first`, or `all`.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// Optional guard for the number of matches in the current text.
+    #[serde(default)]
+    pub expected_count: Option<usize>,
 }
 
 /// `files_patch` input.
@@ -122,6 +129,37 @@ pub struct PatchInput {
     /// Non-empty list of exact replacements applied against the original content.
     pub edits: Vec<PatchEdit>,
     /// Optimistic guard; checked before matching.
+    #[serde(default)]
+    pub expected_sha256: Option<String>,
+}
+
+/// One line-based edit.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct LineEditInput {
+    /// `insert_before_line`, `insert_after_line`, `replace_lines`, or `delete_lines`.
+    pub op: String,
+    /// 1-based line for insert operations.
+    #[serde(default)]
+    pub line: Option<i64>,
+    /// 1-based first line for replace/delete operations.
+    #[serde(default)]
+    pub start_line: Option<i64>,
+    /// 1-based last line for replace/delete operations.
+    #[serde(default)]
+    pub end_line: Option<i64>,
+    /// Content to insert or replace with.
+    #[serde(default)]
+    pub content: Option<String>,
+}
+
+/// `files_edit` input.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct EditInput {
+    /// Plain text target in `<space>:/text-path` form.
+    pub target: String,
+    /// Non-empty list of line edits applied against the original content.
+    pub edits: Vec<LineEditInput>,
+    /// Optimistic guard; checked before editing.
     #[serde(default)]
     pub expected_sha256: Option<String>,
 }
@@ -451,6 +489,10 @@ pub async fn write(
         Err(error) => return Err(service_error(error)),
     };
 
+    if let Some(view) = &existing {
+        ensure_mcp_plain_text(state, account_id, space_id, view.node.id).await?;
+    }
+
     let target = match existing {
         Some(view) => WriteTarget::Existing {
             node_id: view.node.id,
@@ -580,11 +622,15 @@ pub async fn patch(
     let edits = input
         .edits
         .into_iter()
-        .map(|edit| ServiceEdit {
-            old_text: edit.old_text,
-            new_text: edit.new_text,
+        .map(|edit| {
+            Ok(ServiceEdit {
+                old_text: edit.old_text,
+                new_text: edit.new_text,
+                mode: parse_patch_mode(edit.mode.as_deref())?,
+                expected_count: edit.expected_count,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ErrorData>>()?;
 
     let result = state
         .files
@@ -605,6 +651,56 @@ pub async fn patch(
         "path": result.node.path,
         "node": node_summary(&result.node),
         "patched": true,
+        "edits_applied": result.edits_applied,
+        "content_sha256": result.text.content_sha256,
+        "previous_sha256": result.previous_sha256,
+        "byte_len": result.text.byte_len,
+        "line_count": result.text.line_count,
+        "diff": result.diff,
+    })))
+}
+
+pub async fn edit(
+    state: &AppState,
+    parts: &Parts,
+    Parameters(input): Parameters<EditInput>,
+) -> Result<Json<Value>, ErrorData> {
+    let caller = caller(parts)?;
+    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let account_id = caller.account_id();
+    let space_id = resolved.space_id();
+
+    let node = state
+        .files
+        .resolve_path(account_id, space_id, &path)
+        .await
+        .map_err(service_error)?;
+
+    let edits = input
+        .edits
+        .into_iter()
+        .map(parse_line_edit)
+        .collect::<Result<Vec<_>, ErrorData>>()?;
+
+    let result = state
+        .files
+        .edit_text(
+            account_id,
+            space_id,
+            EditText {
+                node_id: node.node.id,
+                edits,
+                expected_sha256: input.expected_sha256,
+            },
+        )
+        .await
+        .map_err(service_error)?;
+
+    Ok(Json(json!({
+        "space": resolved.name(),
+        "path": result.node.path,
+        "node": node_summary(&result.node),
+        "edited": true,
         "edits_applied": result.edits_applied,
         "content_sha256": result.text.content_sha256,
         "previous_sha256": result.previous_sha256,
@@ -759,4 +855,77 @@ pub async fn rm(
         "deleted": true,
         "purge_after": result.purge_after,
     })))
+}
+
+async fn ensure_mcp_plain_text(
+    state: &AppState,
+    account_id: uuid::Uuid,
+    space_id: uuid::Uuid,
+    node_id: uuid::Uuid,
+) -> Result<(), ErrorData> {
+    let result = state
+        .files
+        .read_text(
+            account_id,
+            space_id,
+            ReadText {
+                node_id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: Some(1),
+                if_none_match_sha256: None,
+            },
+        )
+        .await
+        .map_err(service_error)?;
+    if result.storage_format == TextStorageFormat::Encrypted {
+        return Err(service_error(ServiceError::InvalidInput(
+            "encrypted text cannot be modified through MCP content tools".to_owned(),
+        )));
+    }
+    Ok(())
+}
+
+fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ErrorData> {
+    match raw.unwrap_or("unique") {
+        "unique" => Ok(PatchMode::Unique),
+        "first" => Ok(PatchMode::First),
+        "all" => Ok(PatchMode::All),
+        _ => Err(invalid_input_error(
+            "mode must be 'unique', 'first', or 'all'",
+        )),
+    }
+}
+
+fn parse_line_edit(input: LineEditInput) -> Result<LineEdit, ErrorData> {
+    match input.op.as_str() {
+        "insert_before_line" => Ok(LineEdit::InsertBefore {
+            line: required_i64(input.line, "line")?,
+            content: required_string(input.content, "content")?,
+        }),
+        "insert_after_line" => Ok(LineEdit::InsertAfter {
+            line: required_i64(input.line, "line")?,
+            content: required_string(input.content, "content")?,
+        }),
+        "replace_lines" => Ok(LineEdit::ReplaceLines {
+            start_line: required_i64(input.start_line, "start_line")?,
+            end_line: required_i64(input.end_line, "end_line")?,
+            content: required_string(input.content, "content")?,
+        }),
+        "delete_lines" => Ok(LineEdit::DeleteLines {
+            start_line: required_i64(input.start_line, "start_line")?,
+            end_line: required_i64(input.end_line, "end_line")?,
+        }),
+        _ => Err(invalid_input_error(
+            "op must be insert_before_line, insert_after_line, replace_lines, or delete_lines",
+        )),
+    }
+}
+
+fn required_i64(value: Option<i64>, field: &'static str) -> Result<i64, ErrorData> {
+    value.ok_or_else(|| invalid_input_error(format!("{field} is required")))
+}
+
+fn required_string(value: Option<String>, field: &'static str) -> Result<String, ErrorData> {
+    value.ok_or_else(|| invalid_input_error(format!("{field} is required")))
 }

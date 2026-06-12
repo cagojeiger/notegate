@@ -4,12 +4,12 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
-use crate::files::patch::{apply_edits, unified_diff};
+use crate::files::patch::{apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
     AppendText, CopyNode, CopyResult, CreateFile, CreateFolder, CreateText, DeleteNode,
-    DeleteResult, FileCommand, MoveNode, NodeView, PatchResult, PatchText, StoredContent, TextView,
-    WriteTarget, WriteText, WriteTextBody, content,
+    DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText, StoredContent,
+    TextView, WriteTarget, WriteText, WriteTextBody, content,
 };
 
 use super::view::{file_view_at_path, text_view_at_path};
@@ -300,10 +300,10 @@ impl FilesService {
         let plain_content = text.content.as_deref().ok_or_else(|| {
             ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
         })?;
-        let new_content = apply_edits(plain_content, &command.edits)?;
-        let diff = unified_diff(plain_content, &new_content);
+        let applied = apply_edits(plain_content, &command.edits)?;
+        let diff = unified_diff(plain_content, &applied.content);
 
-        let metrics = content::compute(&new_content);
+        let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
         let total = self.store.sum_live_text_bytes(space_id).await?;
@@ -314,7 +314,7 @@ impl FilesService {
             self.limits,
         )?;
 
-        let stored = metrics.into_stored_plain(new_content);
+        let stored = metrics.into_stored_plain(applied.content);
         let save_guard = command
             .expected_sha256
             .as_deref()
@@ -335,7 +335,70 @@ impl FilesService {
             node: view.node,
             text: view.text,
             previous_sha256,
-            edits_applied: command.edits.len(),
+            edits_applied: applied.replacements,
+            diff,
+        })
+    }
+
+    /// Apply line-based edits to a plain text. Requires write permission.
+    pub async fn edit_text(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: EditText,
+    ) -> ServiceResult<PatchResult> {
+        self.authorize(space_id, caller_account_id, FileCommand::Edit)
+            .await?;
+
+        if command.edits.is_empty() {
+            return Err(ServiceError::InvalidInput(
+                "edits must not be empty".to_owned(),
+            ));
+        }
+
+        let (node, text) = self.load_text(space_id, command.node_id).await?;
+        let previous_sha256 = text.content_sha256.clone();
+        check_expected_sha(command.expected_sha256.as_deref(), &previous_sha256)?;
+
+        let plain_content = text.content.as_deref().ok_or_else(|| {
+            ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
+        })?;
+        let applied = apply_line_edits(plain_content, &command.edits)?;
+        let diff = unified_diff(plain_content, &applied.content);
+
+        let metrics = content::compute(&applied.content);
+        validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
+
+        let total = self.store.sum_live_text_bytes(space_id).await?;
+        validation::validate_space_text_bytes(
+            total,
+            text.byte_len.max(0) as usize,
+            metrics.byte_len,
+            self.limits,
+        )?;
+
+        let stored = metrics.into_stored_plain(applied.content);
+        let save_guard = command
+            .expected_sha256
+            .as_deref()
+            .unwrap_or(&previous_sha256);
+        let (node, text) = self
+            .store
+            .save_text_content(
+                space_id,
+                node.id,
+                &stored,
+                Some(save_guard),
+                caller_account_id,
+            )
+            .await?;
+        let view = self.text_view(space_id, node, text).await?;
+
+        Ok(PatchResult {
+            node: view.node,
+            text: view.text,
+            previous_sha256,
+            edits_applied: applied.replacements,
             diff,
         })
     }

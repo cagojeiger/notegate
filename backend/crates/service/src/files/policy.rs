@@ -19,6 +19,7 @@ pub enum FileCommand {
     Write,
     Append,
     Patch,
+    Edit,
     Copy,
     Mv,
     Rm,
@@ -33,6 +34,7 @@ impl FileCommand {
                 | Self::Write
                 | Self::Append
                 | Self::Patch
+                | Self::Edit
                 | Self::Copy
                 | Self::Mv
                 | Self::Rm
@@ -51,6 +53,7 @@ impl FileCommand {
             Self::Write => "write",
             Self::Append => "append",
             Self::Patch => "patch",
+            Self::Edit => "edit",
             Self::Copy => "copy",
             Self::Mv => "mv",
             Self::Rm => "rm",

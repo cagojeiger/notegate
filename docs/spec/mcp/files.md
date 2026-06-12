@@ -138,7 +138,12 @@ Plain Text exact-match patch를 적용한다.
 ```ts
 type FilesPatchInput = {
   target: string
-  edits: { old_text: string, new_text: string }[]
+  edits: {
+    old_text: string
+    new_text: string
+    mode?: "unique" | "first" | "all"
+    expected_count?: number
+  }[]
   expected_sha256?: string
 }
 
@@ -156,7 +161,39 @@ type FilesPatchOutput = {
 }
 ```
 
-각 `old_text`는 원문에서 정확히 한 번만 매칭되어야 한다.
+기본 `mode`는 `unique`이며 `old_text`는 원문에서 정확히 한 번만 매칭되어야 한다. `first`는 첫 match만 바꾸고, `all`은 모든 match를 바꾼다. `expected_count`가 있으면 현재 match 수와 일치해야 한다.
+
+## `files_edit`
+
+Plain Text line edit을 적용한다.
+
+```ts
+type FilesEditInput = {
+  target: string
+  edits: (
+    | { op: "insert_before_line", line: number, content: string }
+    | { op: "insert_after_line", line: number, content: string }
+    | { op: "replace_lines", start_line: number, end_line: number, content: string }
+    | { op: "delete_lines", start_line: number, end_line: number }
+  )[]
+  expected_sha256?: string
+}
+
+type FilesEditOutput = {
+  space: string
+  path: string
+  node: McpNodeSummary
+  edited: true
+  edits_applied: number
+  content_sha256: string
+  previous_sha256: string
+  byte_len: number
+  line_count: number
+  diff: string
+}
+```
+
+Line number는 1-based다. 여러 line edit은 원본 기준으로 검증한 뒤 적용한다. MCP는 encrypted Text edit을 제공하지 않는다.
 
 ## `files_mv`
 
@@ -224,4 +261,4 @@ Folder 삭제는 `recursive=true`가 필요하다.
 
 ## File content
 
-MCP upload/download tool은 제공하지 않는다. File은 `files_list`/`files_find`에서 `McpNodeSummary`로 확인하고 `files_stat`에서 file stats를 확인한다. File은 `files_read`/`files_write`/`files_append`/`files_patch`/`files_grep` 대상이 아니다.
+MCP upload/download tool은 제공하지 않는다. File은 `files_list`/`files_find`에서 `McpNodeSummary`로 확인하고 `files_stat`에서 file stats를 확인한다. File은 `files_read`/`files_write`/`files_append`/`files_patch`/`files_edit`/`files_grep` 대상이 아니다.

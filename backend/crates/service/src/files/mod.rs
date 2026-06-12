@@ -23,7 +23,8 @@ pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use types::{
     AppendText, ChildrenRequest, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
-    MoveNode, PatchText, ReadText, WriteTarget, WriteText, WriteTextBody,
+    EditText, LineEdit, MoveNode, PatchMode, PatchText, ReadText, WriteTarget, WriteText,
+    WriteTextBody,
 };
 pub use types::{
     ChildrenCursor, ChildrenPage, CopyCounts, CopyResult, DeleteResult, FileContent, FileStats,

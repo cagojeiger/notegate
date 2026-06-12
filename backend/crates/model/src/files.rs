@@ -72,16 +72,63 @@ pub struct AppendText {
     pub ensure_newline: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchMode {
+    Unique,
+    First,
+    All,
+}
+
+impl PatchMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unique => "unique",
+            Self::First => "first",
+            Self::All => "all",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edit {
     pub old_text: String,
     pub new_text: String,
+    pub mode: PatchMode,
+    pub expected_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchText {
     pub node_id: Uuid,
     pub edits: Vec<Edit>,
+    pub expected_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LineEdit {
+    InsertBefore {
+        line: i64,
+        content: String,
+    },
+    InsertAfter {
+        line: i64,
+        content: String,
+    },
+    ReplaceLines {
+        start_line: i64,
+        end_line: i64,
+        content: String,
+    },
+    DeleteLines {
+        start_line: i64,
+        end_line: i64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditText {
+    pub node_id: Uuid,
+    pub edits: Vec<LineEdit>,
     pub expected_sha256: Option<String>,
 }
 

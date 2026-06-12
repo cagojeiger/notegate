@@ -19,8 +19,8 @@ use crate::rest::dto::{AccountRef, NodeRef};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    Edit as ServiceEdit, NodeView, PatchResult, PatchText, ReadResult, ReadText, ReadTextBody,
-    TextView, WriteTarget, WriteText, WriteTextBody,
+    Edit as ServiceEdit, NodeView, PatchMode, PatchResult, PatchText, ReadResult, ReadText,
+    ReadTextBody, TextView, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -191,6 +191,10 @@ pub(crate) async fn replace(
 pub(crate) struct Edit {
     old_text: String,
     new_text: String,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    expected_count: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -255,11 +259,15 @@ pub(crate) async fn patch(
     let edits = body
         .edits
         .into_iter()
-        .map(|edit| ServiceEdit {
-            old_text: edit.old_text,
-            new_text: edit.new_text,
+        .map(|edit| {
+            Ok(ServiceEdit {
+                old_text: edit.old_text,
+                new_text: edit.new_text,
+                mode: parse_patch_mode(edit.mode.as_deref())?,
+                expected_count: edit.expected_count,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ApiError>>()?;
 
     let result = state
         .files
@@ -345,6 +353,17 @@ fn write_body(
         )?)),
         _ => Err(ApiError::invalid_field(
             "storage_format must be 'plain' or 'encrypted'",
+        )),
+    }
+}
+
+fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ApiError> {
+    match raw.unwrap_or("unique") {
+        "unique" => Ok(PatchMode::Unique),
+        "first" => Ok(PatchMode::First),
+        "all" => Ok(PatchMode::All),
+        _ => Err(ApiError::invalid_field(
+            "mode must be 'unique', 'first', or 'all'",
         )),
     }
 }
