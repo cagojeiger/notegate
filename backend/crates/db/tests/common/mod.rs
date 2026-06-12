@@ -1,7 +1,7 @@
 //! Env-gated Postgres test harness with per-test schema isolation.
 //!
 //! Each test creates a unique schema, sets `search_path` to it, applies the
-//! migration via `include_str!`, and drops the schema on cleanup. Tests are
+//! migrations via `include_str!`, and drops the schema on cleanup. Tests are
 //! skipped (returning `Ok(None)`) when `NOTEGATE_TEST_DATABASE_URL` is unset, so
 //! the suite is a no-op without a database.
 
@@ -20,8 +20,13 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 
-/// The single fresh schema migration, embedded at compile time.
-const MIGRATION: &str = include_str!("../../migrations/0001_init.sql");
+/// Fresh schema migrations, embedded at compile time and applied in version order.
+const MIGRATIONS: &[&str] = &[
+    include_str!("../../migrations/0001_extensions.sql"),
+    include_str!("../../migrations/0002_identity.sql"),
+    include_str!("../../migrations/0003_spaces.sql"),
+    include_str!("../../migrations/0004_nodes_content.sql"),
+];
 
 /// A throwaway schema-isolated database for one test.
 pub struct TestDb {
@@ -51,9 +56,6 @@ impl TestDb {
         sqlx::query("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
             .execute(&mut admin)
             .await?;
-        sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
-            .execute(&mut admin)
-            .await?;
         sqlx::query("SELECT pg_advisory_unlock(hashtextextended('notegate_test_extensions', 0))")
             .execute(&mut admin)
             .await?;
@@ -63,8 +65,7 @@ impl TestDb {
         admin.close().await?;
 
         // Put the unique test schema first so tables are created in it, but keep
-        // `public` on the path so shared extensions (pg_trgm's gin_trgm_ops) and
-        // pgcrypto's gen_random_uuid resolve.
+        // `public` on the path so pgcrypto's gen_random_uuid resolves.
         let search_path = format!("{schema},public");
         let options = PgConnectOptions::from_str(&database_url)?
             .options([("search_path", search_path.as_str())]);
@@ -73,12 +74,16 @@ impl TestDb {
             .connect_with(options)
             .await?;
 
-        let schema_migration = MIGRATION
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("CREATE EXTENSION"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        sqlx::raw_sql(&schema_migration).execute(&pool).await?;
+        for migration in MIGRATIONS {
+            let schema_migration = migration
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("CREATE EXTENSION"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !schema_migration.trim().is_empty() {
+                sqlx::raw_sql(&schema_migration).execute(&pool).await?;
+            }
+        }
         seed_crypto_key_epochs(&pool).await?;
         record_migration_ledger(&pool).await?;
 

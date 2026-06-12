@@ -2,7 +2,7 @@
 //!
 //! The regex patterns here are the single source of truth for space and
 //! node names and must stay aligned with the database `CHECK` constraints in
-//! `backend/crates/db/migrations/0001_init.sql`.
+//! `backend/crates/db/migrations/0004_nodes_content.sql`.
 
 use std::sync::LazyLock;
 
