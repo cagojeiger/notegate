@@ -61,7 +61,7 @@ const state = {
   ],
   recentOpen: true,
   recentView: "list",
-  sidebarSplit: 68,
+  sidebarSplit: 67,
   focusList: [],
   auxTab: "inspector",
   primaryVisible: true,
@@ -349,18 +349,6 @@ function renderNodeSurface(node, groupIndex) {
     </section>`;
 }
 
-
-function renderEditorInfoBar(node) {
-  const parts = [
-    `<span>${escapeHtml(node.path)}</span>`,
-    `<span>${escapeHtml(node.kind)}</span>`,
-    node.bytes ? `<span>${fmtBytes(node.bytes)}</span>` : "",
-    node.lines ? `<span>${node.lines} lines</span>` : "",
-    node.updated ? `<span>updated ${node.updated}</span>` : "",
-  ].filter(Boolean).join("");
-  return `<div class="editor-info-bar">${parts}</div>`;
-}
-
 function renderEditorGroup(groupIndex) {
   const group = state.editorGroups[groupIndex];
   const node = byId(group?.nodeId) || rootNode();
@@ -373,13 +361,13 @@ function renderEditorGroup(groupIndex) {
           <span class="node-icon">${icon(node.kind)}</span>
           <span class="node-title">${escapeHtml(node.name === "/" ? "Space root" : node.name)}</span>
         </div>
+        <div class="group-header-spacer" aria-hidden="true"></div>
         <div class="group-actions">
           ${node.kind === "text" ? `<button class="pill-button compact" data-action="mode" data-group="${groupIndex}">${group.mode === "preview" ? "Edit" : "Preview"}</button>` : ""}
           ${state.editorGroups.length > 1 ? `<button class="icon-button compact" title="Close editor group" data-action="close-group" data-group="${groupIndex}">×</button>` : ""}
         </div>
       </div>
       <div class="editor-viewport">${renderNodeSurface(node, groupIndex)}</div>
-      ${renderEditorInfoBar(node)}
     </section>`;
 }
 
@@ -471,7 +459,7 @@ function render() {
         ${renderEditor()}
         ${renderAux()}
       </div>
-      <footer class="status-bar"><div class="status-group"><span class="status-item"><span class="status-dot"></span>saved</span><span class="status-item">${escapeHtml(sample.spaces.find((s) => s.id === state.activeSpace)?.name || "")}</span></div></footer>
+      <footer class="status-bar"><div class="status-group"><span class="status-item"><span class="status-dot"></span>saved</span><span class="status-item">${escapeHtml(sample.spaces.find((s) => s.id === state.activeSpace)?.name || "")}</span></div><div class="status-reserved" aria-hidden="true"></div></footer>
       ${renderContextMenu()}
       <div class="overlay-backdrop ${state.mobileTreeOpen || state.mobileAuxOpen ? "visible" : ""}" data-action="close-mobile"></div>
     </div>`;

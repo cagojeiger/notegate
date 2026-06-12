@@ -164,7 +164,7 @@ PrimarySidebar
    └─ RecentSection
 ```
 
-`TreeSection`은 folder/text/file 계층을 보여준다. `RecentSection`은 최근 수정된 node를 단순 list로 보여준다. 두 section은 각각 독립적으로 스크롤하며, 사이 높이는 사용자가 조절할 수 있다. `PrimarySidebar` 자체의 폭도 사용자가 조절할 수 있다.
+`TreeSection`은 folder/text/file 계층을 보여준다. `RecentSection`은 최근 수정된 node를 단순 list로 보여준다. 두 section은 각각 독립적으로 스크롤한다. 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다. 사용자가 사이 resize bar를 조절하면 이후 비율은 사용자 설정을 따른다. `PrimarySidebar` 자체의 폭도 사용자가 조절할 수 있다.
 
 ### EditorArea
 
@@ -177,7 +177,6 @@ EditorArea
 └─ EditorGroup[]
    ├─ EditorGroupHeader
    ├─ EditorViewport
-   └─ EditorInfoBar
 ```
 
 `EditorArea`는 영역 이름이다. `EditorGroup`은 독립 pane이며, VSCode처럼 1개에서 최대 3개까지 분할될 수 있다. 각 `EditorGroup`은 열린 node와 preview/edit mode를 따로 가진다. Text는 기본 preview mode로 열리고, 사용자가 edit mode로 전환하면 해당 group 안에서 `TextEditor`를 보여준다. 새 group은 오른쪽에 추가되며, 최대 개수에 도달하면 추가 action은 disabled 상태가 된다. group 제거는 `EditorGroupHeader`의 close action으로 수행한다.
@@ -212,7 +211,7 @@ AgentPanel
 
 - save status
 - sync status
-- active agent status
+- 오른쪽 runtime status 예약 영역
 - word/line count
 
 
@@ -300,7 +299,6 @@ AuxiliarySidebar tab header
 
 규칙:
 
-- `EditorGroupHeader`에는 node name과 mode action을 두고, path와 byte/line 같은 부수 정보는 group 하단의 `EditorInfoBar`에 둔다.
 - EditorGroup이 2개 이상이어도 각 group의 header 높이와 기준선은 서로 같아야 한다.
 - `PrimarySidebar`의 section content와 `EditorViewport`, `AuxiliarySidebar` content는 같은 기준선 아래에서 시작한다.
 - 구체적인 높이, spacing, typography token은 visual guideline에서 정한다.

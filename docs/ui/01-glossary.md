@@ -42,7 +42,6 @@ AppRoot
 | `RecentSection` | `PrimarySidebar` 안에서 최근 수정된 node를 보여주는 section |
 | `EditorGroupHeader` | 각 `EditorGroup`의 상단 header. node identity와 group action을 담는다 |
 | `EditorViewport` | 각 `EditorGroup`의 실제 preview/editor/file view 영역 |
-| `EditorInfoBar` | 각 `EditorGroup` 하단에서 node path, byte/line count, updated_at 같은 부수 정보를 표시하는 얇은 정보 바 |
 
 ## View terms
 

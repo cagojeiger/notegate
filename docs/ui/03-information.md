@@ -147,7 +147,8 @@ GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?limit=...&cursor=...
 - `TreeSection`과 `RecentSection`은 각각 독립적으로 스크롤한다.
 - `TreeSection` header는 전체 folder 접기 action을 가질 수 있다.
 - `RecentSection` header는 표시 밀도 또는 보기 방식을 바꾸는 action을 가질 수 있다.
-- 두 section 사이 divider는 마우스로 높이를 조절할 수 있다.
+- 두 section의 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다.
+- 두 section 사이 divider는 마우스로 높이를 조절할 수 있고, 조절 후에는 사용자 설정 비율을 따른다.
 - 한 번에 전체 tree를 펼쳐서 렌더링하지 않는다.
 - 화면에 보이는 folder만 children을 요청한다.
 - folder children은 pagination cursor로 추가 로드한다.
@@ -211,7 +212,6 @@ updated_at DESC
 - editor groups
 - group별 `EditorGroupHeader`
 - group header 안의 node name
-- group별 `EditorInfoBar`의 path, byte/line count, updated_at
 - group별 preview/edit mode
 - save state
 
@@ -223,34 +223,17 @@ updated_at DESC
 
 - node icon
 - node name
+- empty center spacer
 - preview/edit mode action
 - group close action
 
 규칙:
 
 - header는 `PrimarySidebar` header, `AuxiliarySidebar` tab header와 같은 기준선에 맞춘다.
-- path와 파일 부수 정보는 header가 아니라 group 하단 `EditorInfoBar`에 표시한다.
+- node identity는 왼쪽 정렬, 가운데 영역은 비우고, mode/close action은 오른쪽 정렬한다.
 - node를 새로 선택하면 active `EditorGroup`의 내용을 대체한다. 새 group을 자동으로 계속 추가하지 않는다.
 - group을 추가하려면 전역 split/add action을 사용한다.
 
-### EditorInfoBar
-
-`EditorInfoBar`는 각 `EditorGroup` 하단에서 열린 node의 부수 정보를 표시한다. 전역 상태가 아니라 group-local 정보다.
-
-정보:
-
-- path
-- kind
-- byte_len
-- line_count
-- updated_at
-
-규칙:
-
-- `TitleBar`와 `StatusBar`는 현재 파일 경로를 반복 표시하지 않는다.
-- 파일과 관련된 부수 정보는 `EditorInfoBar`에 모은다.
-- `EditorInfoBar`는 content editor가 아니며, 긴 metadata를 표시하지 않는다.
-- 여러 `EditorGroup`이 있으면 각 group은 자기 node의 `EditorInfoBar`를 따로 가진다.
 
 ### Editor split
 
@@ -360,6 +343,7 @@ PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 규칙:
 
 - metadata는 content가 아니다.
+- path, byte_len, line_count, updated_at 같은 파일 부수 정보는 `InspectorPanel`에서 확인한다.
 - 민감한 값은 metadata에 넣지 않는다는 안내를 UI에 둘 수 있다.
 - Inspector는 content editor가 아니다.
 
@@ -383,11 +367,12 @@ PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 정보:
 
 - save status
-- sync/network status
 - current space
-- active agent status
+- reserved right-side runtime status area
 
 규칙:
 
 - 긴 메시지나 목록을 표시하지 않는다.
+- 현재 파일 경로, byte/line count, updated_at은 표시하지 않는다. 해당 정보는 `InspectorPanel` 책임이다.
+- agent/runtime 상태는 아직 표시하지 않는다. 향후 agent 실행 상태가 제품 기능으로 확정되면 오른쪽 예약 영역에 추가한다.
 - 모바일에서는 compact 또는 hidden presentation을 사용할 수 있다.
