@@ -7,6 +7,7 @@
 
 use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
+use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
 use notegate_model::account::{Account, AccountKind};
@@ -126,18 +127,20 @@ impl AgentRepo {
         validate_agent_name(&command.name)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        let creator_exists: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM accounts \
-             WHERE id = $1 AND kind = 'user' AND is_active = true AND deleted_at IS NULL \
-             FOR UPDATE",
+        let creator_tier: Option<String> = sqlx::query_scalar(
+            "SELECT u.tier FROM users u \
+             JOIN accounts acc ON acc.id = u.id \
+             WHERE u.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
+             FOR UPDATE OF acc",
         )
         .bind(owner_user_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        if creator_exists.is_none() {
+        let Some(creator_tier) = creator_tier else {
             return Err(Error::not_found("agent creator user account not found"));
-        }
+        };
+        let quota = UserTier::parse_db(&creator_tier)?.quota();
 
         let active: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM agents a \
@@ -150,10 +153,10 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
         let active =
             usize::try_from(active).map_err(|_error| Error::internal("negative agent count"))?;
-        if active >= limits::AGENTS_PER_CREATOR_MAX {
+        if active >= quota.agents_per_user {
             return Err(Error::conflict(format!(
-                "creator already has the maximum of {} active agents",
-                limits::AGENTS_PER_CREATOR_MAX
+                "creator already has the maximum of {} active agents for tier {creator_tier}",
+                quota.agents_per_user
             )));
         }
 

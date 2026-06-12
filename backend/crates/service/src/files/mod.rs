@@ -62,16 +62,11 @@ use crate::error::{ServiceError, ServiceResult};
 #[derive(Debug, Clone)]
 pub struct FilesService {
     store: FilesRepo,
-    limits: Limits,
 }
 
 impl FilesService {
     pub fn new(store: FilesRepo) -> Self {
-        Self::with_limits(store, Limits::default())
-    }
-
-    pub fn with_limits(store: FilesRepo, limits: Limits) -> Self {
-        Self { store, limits }
+        Self { store }
     }
 }
 
@@ -93,6 +88,10 @@ impl FilesService {
             .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
         policy::require(permission, command)?;
         Ok(permission)
+    }
+
+    pub(super) async fn effective_limits(&self, space_id: Uuid) -> ServiceResult<Limits> {
+        Ok(self.store.effective_limits_for_space(space_id).await?)
     }
 
     /// Load a live node or 404.
@@ -167,14 +166,15 @@ impl FilesService {
         validation::validate_depth(parent_depth + 1)?;
         validation::validate_path_len(&new_path)?;
 
+        let caps = self.effective_limits(space_id).await?;
         let children = self
             .store
             .count_live_children(space_id, parent_node_id)
             .await?;
-        validation::validate_fanout(children, self.limits)?;
+        validation::validate_fanout(children, caps)?;
 
         let nodes = self.store.count_live_nodes(space_id).await?;
-        validation::validate_space_node_count(nodes, self.limits)?;
+        validation::validate_space_node_count(nodes, caps)?;
 
         Ok(parent_path)
     }

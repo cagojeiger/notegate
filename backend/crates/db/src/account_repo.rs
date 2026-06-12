@@ -118,6 +118,7 @@ struct UserRow {
     email_nonce: Option<Vec<u8>>,
     email_enc_key_id: Option<String>,
     email_enc_version: Option<i32>,
+    tier: String,
     anonymized_at: Option<DateTime<Utc>>,
 }
 
@@ -147,6 +148,7 @@ impl UserRow {
         Ok(User {
             id: self.id,
             email,
+            tier: self.tier,
             anonymized_at: self.anonymized_at,
         })
     }
@@ -157,7 +159,7 @@ const ACCOUNT_COLUMNS: &str = "a.id, a.kind, a.display_name_ciphertext, a.displa
      a.is_active, a.deleted_at, a.deleted_by_account_id AS deleted_by, a.created_at, a.updated_at, \
      ag.name AS agent_name";
 const USER_COLUMNS: &str = "id, email_ciphertext, email_nonce, email_enc_key_id, \
-     email_enc_version, anonymized_at";
+     email_enc_version, tier, anonymized_at";
 
 impl AccountRepo {
     pub async fn find_caller_by_account_id(

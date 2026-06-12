@@ -180,6 +180,17 @@ pub async fn insert_user_account(
     Ok(account.id)
 }
 
+/// Assign a test user to a product tier.
+#[allow(dead_code)]
+pub async fn set_user_tier(pool: &PgPool, user_id: Uuid, tier: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET tier = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(tier)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Deactivate an account as a soft-delete, matching the production account lifecycle.
 #[allow(dead_code)]
 pub async fn deactivate_account(

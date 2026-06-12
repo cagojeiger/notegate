@@ -13,5 +13,6 @@ pub struct User {
     /// Equal to the owning `accounts.id`.
     pub id: Uuid,
     pub email: Option<String>,
+    pub tier: String,
     pub anonymized_at: Option<DateTime<Utc>>,
 }

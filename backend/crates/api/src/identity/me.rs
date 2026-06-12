@@ -117,6 +117,7 @@ mod tests {
         let user = User {
             id: Uuid::nil(),
             email: Some("user@example.test".to_owned()),
+            tier: "tier0".to_owned(),
             anonymized_at: None,
         };
         let caller = Caller {

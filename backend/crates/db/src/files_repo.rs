@@ -13,6 +13,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
+use notegate_core::tier::{UserTier, effective_file_tree_limits};
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{FileObject, Node, Permission, TextObject};
 use serde_json::Value;
@@ -43,6 +44,24 @@ impl FilesRepo {
 }
 
 impl FilesRepo {
+    pub async fn effective_limits_for_space(&self, space_id: Uuid) -> Result<Limits> {
+        let tier: String = sqlx::query_scalar(
+            "SELECT u.tier FROM spaces s \
+             JOIN users u ON u.id = s.owner_user_id \
+             JOIN accounts acc ON acc.id = u.id \
+             WHERE s.id = $1 AND s.deleted_at IS NULL \
+               AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL",
+        )
+        .bind(space_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(crate::map_sqlx_error)?;
+        Ok(effective_file_tree_limits(
+            UserTier::parse_db(&tier)?,
+            self.limits,
+        ))
+    }
+
     pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
         queries::node::find_node(&self.pool, space_id, node_id).await
     }
@@ -216,13 +235,14 @@ impl FilesRepo {
         command: &CreateFolder,
         created_by: Uuid,
     ) -> Result<Node> {
+        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_folder(
             &self.pool,
             space_id,
             command.parent_node_id,
             &command.name,
             created_by,
-            self.limits,
+            caps,
         )
         .await
     }
@@ -235,6 +255,7 @@ impl FilesRepo {
         content: &StoredContent,
         created_by: Uuid,
     ) -> Result<(Node, TextObject)> {
+        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_text(
             &self.pool,
             space_id,
@@ -242,7 +263,7 @@ impl FilesRepo {
             name,
             content,
             created_by,
-            self.limits,
+            caps,
         )
         .await
     }
@@ -255,6 +276,7 @@ impl FilesRepo {
         file: &StoredFile,
         created_by: Uuid,
     ) -> Result<(Node, FileObject)> {
+        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_file(
             &self.pool,
             space_id,
@@ -262,7 +284,7 @@ impl FilesRepo {
             name,
             file,
             created_by,
-            self.limits,
+            caps,
         )
         .await
     }
@@ -275,6 +297,7 @@ impl FilesRepo {
         expected_sha256: Option<&str>,
         updated_by: Uuid,
     ) -> Result<(Node, TextObject)> {
+        let caps = self.effective_limits_for_space(space_id).await?;
         commands::save::save_text_content(
             &self.pool,
             space_id,
@@ -282,7 +305,7 @@ impl FilesRepo {
             content,
             expected_sha256,
             updated_by,
-            self.limits,
+            caps,
         )
         .await
     }
@@ -293,6 +316,7 @@ impl FilesRepo {
         command: &MoveNode,
         updated_by: Uuid,
     ) -> Result<Node> {
+        let caps = self.effective_limits_for_space(space_id).await?;
         commands::move_node::move_node(commands::move_node::MoveNodeArgs {
             pool: &self.pool,
             space_id,
@@ -301,7 +325,7 @@ impl FilesRepo {
             new_name: command.new_name.as_deref(),
             expected_parent_id: command.expected_parent_id,
             updated_by,
-            caps: self.limits,
+            caps,
         })
         .await
     }
@@ -312,6 +336,7 @@ impl FilesRepo {
         command: &CopyNode,
         created_by: Uuid,
     ) -> Result<(Node, CopyCounts)> {
+        let caps = self.effective_limits_for_space(space_id).await?;
         commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
             pool: &self.pool,
             space_id,
@@ -320,7 +345,7 @@ impl FilesRepo {
             new_name: &command.new_name,
             recursive: command.recursive,
             created_by,
-            caps: self.limits,
+            caps,
         })
         .await
     }

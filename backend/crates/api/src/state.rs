@@ -78,7 +78,7 @@ impl AppState {
         let agents =
             AgentService::with_crypto(agent_repo.clone(), api_key_repo, pii_crypto.clone());
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
-        let files = FilesService::with_limits(files_repo.clone(), config.limits);
+        let files = FilesService::new(files_repo.clone());
         let search = SearchService::new(files_repo);
         let accounts = AccountRepo::with_crypto(db.clone(), pii_crypto.clone());
         Self {

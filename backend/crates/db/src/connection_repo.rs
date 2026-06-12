@@ -6,7 +6,8 @@
 
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
-use notegate_core::{Error, Result, limits};
+use notegate_core::tier::UserTier;
+use notegate_core::{Error, Result};
 use notegate_model::{ConnectAgent, Permission, SpaceAgentConnection};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -89,6 +90,8 @@ impl ConnectionRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         lock_owned_space(&mut tx, command.space_id, connected_by_user_id).await?;
         lock_owned_live_agent(&mut tx, command.agent_id, connected_by_user_id).await?;
+        let owner_tier = user_tier(&mut tx, connected_by_user_id).await?;
+        let quota = UserTier::parse_db(&owner_tier)?.quota();
 
         let active_connections: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM space_agent_connections c \
@@ -104,10 +107,10 @@ impl ConnectionRepo {
         .map_err(map_sqlx_error)?;
         let active_connections = usize::try_from(active_connections)
             .map_err(|_| Error::internal("negative connection count"))?;
-        if active_connections >= limits::CONNECTIONS_PER_SPACE_MAX {
+        if active_connections >= quota.connections_per_space {
             return Err(Error::conflict(format!(
-                "space already has the maximum of {} active agent connections",
-                limits::CONNECTIONS_PER_SPACE_MAX
+                "space already has the maximum of {} active agent connections for tier {owner_tier}",
+                quota.connections_per_space
             )));
         }
 
@@ -123,10 +126,10 @@ impl ConnectionRepo {
         .map_err(map_sqlx_error)?;
         let connected_spaces = usize::try_from(connected_spaces)
             .map_err(|_| Error::internal("negative connected space count"))?;
-        if connected_spaces >= limits::CONNECTED_SPACES_PER_AGENT_MAX {
+        if connected_spaces >= quota.connected_spaces_per_agent {
             return Err(Error::conflict(format!(
-                "agent is already connected to the maximum of {} spaces",
-                limits::CONNECTED_SPACES_PER_AGENT_MAX
+                "agent is already connected to the maximum of {} spaces for tier {owner_tier}",
+                quota.connected_spaces_per_agent
             )));
         }
 
@@ -179,6 +182,19 @@ impl ConnectionRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
+}
+
+async fn user_tier(tx: &mut sqlx::PgConnection, user_id: Uuid) -> Result<String> {
+    sqlx::query_scalar(
+        "SELECT u.tier FROM users u \
+         JOIN accounts acc ON acc.id = u.id \
+         WHERE u.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::not_found("user account not found"))
 }
 
 async fn lock_owned_space(

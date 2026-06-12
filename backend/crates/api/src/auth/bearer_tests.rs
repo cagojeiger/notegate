@@ -157,6 +157,7 @@ fn test_caller(attrs: ResolveAttrs, channel: Channel) -> Caller {
     let user = User {
         id: Uuid::nil(),
         email: Some(attrs.email),
+        tier: "tier0".to_owned(),
         anonymized_at: None,
     };
     Caller {

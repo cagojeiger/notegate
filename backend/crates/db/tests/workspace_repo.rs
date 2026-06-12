@@ -114,6 +114,7 @@ async fn list_spaces_uses_manual_order_name_id_cursor() -> Result<(), Box<dyn st
         return Ok(());
     };
     let owner = create_user(&db, "owner-space-order@example.com").await?;
+    common::set_user_tier(&db.pool, owner, "system_max").await?;
     let repo = SpaceRepo::new(db.pool.clone());
 
     let zeta = repo
@@ -150,6 +151,38 @@ async fn list_spaces_uses_manual_order_name_id_cursor() -> Result<(), Box<dyn st
         .map(|view| view.space.name.as_str())
         .collect();
     assert_eq!(names, vec!["alpha"]);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn tier0_limits_owner_to_one_space() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = create_user(&db, "owner-tier0@example.com").await?;
+    let repo = SpaceRepo::new(db.pool.clone());
+
+    repo.create_space(
+        owner,
+        &CreateSpace {
+            name: "one".to_owned(),
+        },
+    )
+    .await?;
+    let result = repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "two".to_owned(),
+            },
+        )
+        .await;
+    let Err(err) = result else {
+        return Err("tier0 should allow only one live space".into());
+    };
+    assert!(err.to_string().contains("maximum of 1 spaces"));
 
     db.cleanup().await;
     Ok(())
