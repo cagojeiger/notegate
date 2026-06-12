@@ -33,6 +33,9 @@ type UiState = {
   primarySidebarOpen: boolean;
   primaryWidth: number;
   treeRatio: number;
+  treeSectionOpen: boolean;
+  recentSectionOpen: boolean;
+  recentDensity: "list" | "compact";
   auxiliaryOpen: boolean;
   mobileTreeOpen: boolean;
   mobileAuxOpen: boolean;
@@ -53,6 +56,9 @@ type UiState = {
   togglePrimarySidebar: () => void;
   setPrimaryWidth: (width: number) => void;
   setTreeRatio: (ratio: number) => void;
+  toggleTreeSection: () => void;
+  toggleRecentSection: () => void;
+  toggleRecentDensity: () => void;
   toggleAuxiliary: () => void;
   toggleMobileTree: () => void;
   toggleMobileAux: () => void;
@@ -71,6 +77,9 @@ export const useUiStore = create<UiState>((set) => ({
   primarySidebarOpen: true,
   primaryWidth: 300,
   treeRatio: 0.62,
+  treeSectionOpen: true,
+  recentSectionOpen: true,
+  recentDensity: "list",
   auxiliaryOpen: true,
   mobileTreeOpen: false,
   mobileAuxOpen: false,
@@ -123,6 +132,9 @@ export const useUiStore = create<UiState>((set) => ({
   togglePrimarySidebar: () => set((state) => ({ primarySidebarOpen: !state.primarySidebarOpen })),
   setPrimaryWidth: (width) => set({ primaryWidth: Math.max(220, Math.min(520, Math.round(width))) }),
   setTreeRatio: (ratio) => set({ treeRatio: Math.max(0.2, Math.min(0.82, ratio)) }),
+  toggleTreeSection: () => set((state) => ({ treeSectionOpen: !state.treeSectionOpen })),
+  toggleRecentSection: () => set((state) => ({ recentSectionOpen: !state.recentSectionOpen })),
+  toggleRecentDensity: () => set((state) => ({ recentDensity: state.recentDensity === "list" ? "compact" : "list" })),
   toggleAuxiliary: () => set((state) => ({ auxiliaryOpen: !state.auxiliaryOpen })),
   toggleMobileTree: () => set((state) => ({ mobileTreeOpen: !state.mobileTreeOpen })),
   toggleMobileAux: () => set((state) => ({ mobileAuxOpen: !state.mobileAuxOpen })),

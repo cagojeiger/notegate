@@ -49,6 +49,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const resetGroups = useUiStore((state) => state.resetGroups);
   const toggleFolder = useUiStore((state) => state.toggleFolder);
   const addExpanded = useUiStore((state) => state.addExpanded);
+  const setExpanded = useUiStore((state) => state.setExpanded);
   const togglePrimarySidebar = useUiStore((state) => state.togglePrimarySidebar);
   const primaryWidth = useUiStore((state) => state.primaryWidth);
   const setPrimaryWidth = useUiStore((state) => state.setPrimaryWidth);
@@ -190,6 +191,16 @@ export function AppShell({ onSignOut }: AppShellProps) {
     createNodeMutation.mutate({ parentId, kind, name: name.trim(), content: kind === "text" ? "" : undefined });
   }
 
+  function promptCreateInFolder(folder: RestNode, kind: "folder" | "text") {
+    const name = window.prompt(`${kind} name`);
+    if (!name?.trim()) return;
+    createNodeMutation.mutate({ parentId: folder.id, kind, name: name.trim(), content: kind === "text" ? "" : undefined });
+  }
+
+  function collapseTree() {
+    if (activeSpace) setExpanded([activeSpace.root_node_id]);
+  }
+
   function promptRenameNode(node: RestNode) {
     if (node.parent_id === null) return;
     const name = window.prompt("New node name", node.name);
@@ -286,6 +297,8 @@ export function AppShell({ onSignOut }: AppShellProps) {
             onDeleteSpace={confirmDeleteSpace}
             onRenameNode={promptRenameNode}
             onDeleteNode={confirmDeleteNode}
+            onCollapseTree={collapseTree}
+            onCreateInFolder={promptCreateInFolder}
           />
         </div>
         {primarySidebarOpen ? (
