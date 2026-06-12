@@ -2,7 +2,7 @@
 
 ## 공통 규칙
 
-- `me`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
+- `me`와 `run_sequence`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
@@ -10,6 +10,7 @@
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
 - MCP는 encrypted Text와 binary File content를 읽거나 수정하지 않는다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
+- `run_sequence`는 여러 command를 순서대로 실행할 때만 사용한다. rollback은 제공하지 않는다.
 
 ## `me`
 
@@ -107,3 +108,69 @@ type ManageInput = {
 - `op=mv`: `source` node를 `destination`으로 이동/rename한다. 같은 Space 안에서만 가능하다.
 - `op=cp`: `source` node를 `destination`으로 복사한다. Folder copy는 `recursive=true`가 필요하다.
 - `op=rm`: `target` node를 soft-delete한다. Folder delete는 `recursive=true`가 필요하다.
+
+
+## `run_sequence`
+
+여러 Notegate command를 순서대로 실행한다. 단일 command는 `read`, `search`, `write`, `manage`를 직접 호출한다.
+
+```ts
+type RunSequenceInput = {
+  commands: SequenceCommand[] // 1..20
+}
+
+type SequenceCommand = {
+  tool: "read" | "search" | "write" | "manage"
+  op: string
+  target?: string
+  source?: string
+  destination?: string
+  name?: string
+  q?: string
+  kind?: "folder" | "text" | "file"
+  match?: string
+  lines?: "none" | "first" | "all"
+  include?: string[]
+  exclude?: string[]
+  content?: string
+  edits?: unknown[]
+  create?: boolean
+  parents?: boolean
+  recursive?: boolean
+  ensure_newline?: boolean
+  depth?: number
+  limit?: number
+  cursor?: string
+  start_line?: number
+  max_lines?: number
+  max_bytes?: number
+  expected_sha256?: string
+  if_none_match_sha256?: string
+}
+```
+
+Semantics:
+
+- `commands`는 입력 순서대로 실행한다.
+- 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
+- command 하나가 실패하면 즉시 중단한다.
+- 이미 성공한 command는 rollback하지 않는다.
+- `run_sequence` 안에서 `run_sequence`를 다시 호출할 수 없다.
+- 결과는 성공한 command의 결과와 실패 위치를 반환한다.
+
+```json
+{
+  "ok": false,
+  "completed": 2,
+  "failed_index": 2,
+  "results": [
+    { "index": 0, "tool": "manage", "op": "mkdir", "ok": true, "result": {} },
+    { "index": 1, "tool": "write", "op": "write", "ok": true, "result": {} }
+  ],
+  "error": {
+    "code": -32602,
+    "message": "...",
+    "data": { "kind": "invalid_input", "code": "invalid_input" }
+  }
+}
+```

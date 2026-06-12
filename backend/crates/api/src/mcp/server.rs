@@ -34,7 +34,7 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, and `manage` for mkdir/mv/cp/rm. Targets are `<space>:/absolute/path`. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -130,6 +130,20 @@ impl McpServer {
         params: Parameters<tools::unified::UnifiedInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::unified::manage(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "run_sequence",
+        description = "Run an ordered command sequence. Each command is committed independently; execution stops on first failure and completed commands are not rolled back.",
+        annotations(title = "Run Notegate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn run_sequence_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::RunSequenceInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::run_sequence(&self.state, &parts, params).await
     }
 }
 
@@ -279,6 +293,7 @@ mod tests {
             ("search", unified_properties, "op"),
             ("write", unified_properties, "op"),
             ("manage", unified_properties, "op"),
+            ("run_sequence", "commands", "commands"),
         ] {
             assert_input_properties(&tools, tool_name, properties);
             assert_required_properties(&tools, tool_name, required);
@@ -292,11 +307,12 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_sequence"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("cannot create"));
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {
-        BTreeSet::from(["me", "read", "search", "write", "manage"])
+        BTreeSet::from(["me", "read", "search", "write", "manage", "run_sequence"])
     }
 
     fn assert_input_properties(

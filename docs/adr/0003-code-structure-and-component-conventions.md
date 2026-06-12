@@ -55,7 +55,7 @@ api ──▶ service ──▶ db ──▶ model ──▶ core
   만들지 않는다.
 - db repo 파일명은 구조체 `XxxRepo`에 대응해 `<domain>_repo.rs`로 통일한다.
 - API 표면은 표면별 사용성에 맞춰 조직한다(REST는 리소스별, MCP는 identity와
-  read/search/write/manage 행동 영역별). transport DTO/schema는 api 레이어가 책임진다.
+  read/search/write/manage 행동 영역과 ordered command sequence별). transport DTO/schema는 api 레이어가 책임진다.
 - 공통 헬퍼는 실제 중복이 있을 때만 모은다(표면 내부 공유는 `support.rs`, 크레이트 전역 공유는
   크레이트 루트).
 
