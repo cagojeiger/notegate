@@ -342,7 +342,7 @@ pub mod node {
     //! Node reads, counts, depth/subtree/ancestor checks, and path derivation.
     //!
     //! Nodes have no stored path. The display path is derived by a recursive CTE
-    //! that walks the parent chain (bounded by `max_path_depth = 5`).
+    //! that walks the parent chain (bounded by `max_path_depth = 7`).
     //! All reads exclude soft-deleted rows unless the function name says otherwise.
 
     use notegate_core::Result;
