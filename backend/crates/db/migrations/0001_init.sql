@@ -83,7 +83,6 @@ CREATE TABLE agents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
 );
-CREATE INDEX agents_owner_user_live_idx ON agents(owner_user_id, id);
 
 CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,9 +107,7 @@ CREATE TABLE api_keys (
     ),
     CHECK (char_length(name) BETWEEN 1 AND 63 AND char_length(btrim(name)) >= 1)
 );
-CREATE INDEX api_keys_account_live_idx ON api_keys(account_id) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_account_created_idx ON api_keys(account_id, created_at DESC, id DESC);
-CREATE INDEX api_keys_expiring_live_idx ON api_keys(expires_at) WHERE revoked_at IS NULL;
 
 CREATE TABLE spaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -152,9 +149,6 @@ CREATE TABLE space_agent_connections (
 CREATE INDEX space_agent_connections_agent_live_idx
     ON space_agent_connections(agent_id, space_id)
     WHERE disconnected_at IS NULL;
-CREATE INDEX space_agent_connections_space_live_idx
-    ON space_agent_connections(space_id, agent_id)
-    WHERE disconnected_at IS NULL;
 
 CREATE TABLE nodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -189,9 +183,6 @@ CREATE TABLE nodes (
         OR (deleted_at IS NOT NULL AND deleted_by_account_id IS NOT NULL AND purge_after IS NOT NULL)
     )
 );
-CREATE INDEX nodes_purge_due_idx
-    ON nodes(purge_after, space_id, id)
-    WHERE deleted_at IS NOT NULL;
 CREATE UNIQUE INDEX nodes_one_root_per_space
     ON nodes(space_id)
     WHERE parent_id IS NULL;
