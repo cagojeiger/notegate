@@ -16,6 +16,8 @@ config/local.toml
 .omx/
 .codex/
 .sisyphus/
+.sample/
+.playwright-mcp/
 
 # OS
 .DS_Store
