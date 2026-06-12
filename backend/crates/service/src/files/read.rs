@@ -1,14 +1,16 @@
 use notegate_core::limits;
-use notegate_model::NodeKind;
+use notegate_model::{Node, NodeKind};
 use uuid::Uuid;
 
 use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
-    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, FileContent, NodeView, ReadContent,
-    ReadResult, ReadText, ReadTextBody,
+    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, FileContent, ListNodesRequest,
+    NodeListCursor, NodeListPage, NodeListSort, NodeReveal, NodeView, ReadContent, ReadResult,
+    ReadText, ReadTextBody,
 };
+use crate::pagination;
 
 use super::{FilesService, join_path};
 
@@ -136,6 +138,119 @@ impl FilesService {
         })
     }
 
+    /// List live nodes across a space for list-style views such as Recent.
+    /// Requires read permission.
+    pub async fn list_nodes(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        request: ListNodesRequest,
+    ) -> ServiceResult<NodeListPage> {
+        self.authorize(space_id, caller_account_id, FileCommand::Ls)
+            .await?;
+
+        let limit = pagination::clamp_limit(
+            request.limit,
+            limits::NODES_DEFAULT_LIMIT,
+            limits::NODES_MAX_LIMIT,
+        );
+        let decoded_cursor = match request.cursor.as_deref() {
+            None => None,
+            Some(raw) => {
+                let cursor = cursor::decode::<NodeListCursor>(raw)?;
+                if !node_list_cursor_matches_query(&cursor, request.sort, request.kind) {
+                    return Err(ServiceError::InvalidInput(
+                        "cursor does not match node list query".to_owned(),
+                    ));
+                }
+                Some(cursor)
+            }
+        };
+        let (rows, has_more) = self
+            .store
+            .paged_nodes(
+                space_id,
+                request.kind,
+                request.sort,
+                limit,
+                decoded_cursor.as_ref(),
+            )
+            .await?;
+
+        let next_cursor = if has_more {
+            rows.last()
+                .map(|node| node_list_cursor(node, request.sort, request.kind))
+                .map(|cursor| cursor::encode(&cursor))
+                .transpose()
+                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
+        } else {
+            None
+        };
+
+        let items = self.node_views(space_id, rows).await?;
+
+        Ok(NodeListPage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
+    }
+
+    /// Return the root-to-target chain needed to reveal a node in a lazy tree.
+    /// Requires read permission.
+    pub async fn reveal_node(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<NodeReveal> {
+        self.authorize(space_id, caller_account_id, FileCommand::Stat)
+            .await?;
+        let rows = self.store.ancestor_chain(space_id, node_id).await?;
+        if rows.is_empty() {
+            return Err(ServiceError::NotFound("node not found".to_owned()));
+        }
+        let mut views = self.node_views(space_id, rows).await?;
+        let target = views
+            .pop()
+            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
+        Ok(NodeReveal {
+            ancestors: views,
+            target,
+        })
+    }
+
+    async fn node_views(&self, space_id: Uuid, rows: Vec<Node>) -> ServiceResult<Vec<NodeView>> {
+        let node_ids: Vec<Uuid> = rows.iter().map(|node| node.id).collect();
+        let text_ids: Vec<Uuid> = rows
+            .iter()
+            .filter(|node| node.kind == NodeKind::Text)
+            .map(|node| node.id)
+            .collect();
+        let file_ids: Vec<Uuid> = rows
+            .iter()
+            .filter(|node| node.kind == NodeKind::File)
+            .map(|node| node.id)
+            .collect();
+        let has_children = self.store.has_children_many(space_id, &node_ids).await?;
+        let text_stats = self.store.text_stats_many(space_id, &text_ids).await?;
+        let file_stats = self.store.file_stats_many(space_id, &file_ids).await?;
+
+        let mut items = Vec::with_capacity(rows.len());
+        for node in rows {
+            let path = self.path_of(space_id, node.id).await?;
+            items.push(NodeView {
+                has_children: has_children.get(&node.id).copied().unwrap_or(false),
+                text: text_stats.get(&node.id).cloned(),
+                file: file_stats.get(&node.id).cloned(),
+                node,
+                path,
+            });
+        }
+        Ok(items)
+    }
+
     /// Read an inline file's stored bytes. Requires read permission.
     pub async fn read_file(
         &self,
@@ -217,6 +332,43 @@ fn clamp_children_limit(limit: Option<i64>) -> i64 {
         None => limits::CHILDREN_DEFAULT_LIMIT,
         Some(value) if value < 1 => 1,
         Some(value) => value.min(limits::CHILDREN_MAX_LIMIT),
+    }
+}
+
+fn node_list_cursor_matches_query(
+    cursor: &NodeListCursor,
+    sort: NodeListSort,
+    kind: Option<NodeKind>,
+) -> bool {
+    match (cursor, sort) {
+        (
+            NodeListCursor::UpdatedAtDesc {
+                kind: cursor_kind, ..
+            },
+            NodeListSort::UpdatedAtDesc,
+        )
+        | (
+            NodeListCursor::NameAsc {
+                kind: cursor_kind, ..
+            },
+            NodeListSort::NameAsc,
+        ) => *cursor_kind == kind,
+        _ => false,
+    }
+}
+
+fn node_list_cursor(node: &Node, sort: NodeListSort, kind: Option<NodeKind>) -> NodeListCursor {
+    match sort {
+        NodeListSort::UpdatedAtDesc => NodeListCursor::UpdatedAtDesc {
+            kind,
+            updated_at: node.updated_at,
+            id: node.id,
+        },
+        NodeListSort::NameAsc => NodeListCursor::NameAsc {
+            kind,
+            name: node.name.clone(),
+            id: node.id,
+        },
     }
 }
 

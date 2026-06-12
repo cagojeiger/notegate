@@ -15,7 +15,7 @@ use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::tier::effective_file_tree_limits;
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
-use notegate_model::{FileObject, Node, Permission, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -24,8 +24,8 @@ use uuid::Uuid;
 use crate::files::{commands, queries};
 use crate::tier_lookup;
 use notegate_model::files::{
-    ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, StoredContent,
-    StoredFile, TextStats,
+    ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, NodeListCursor,
+    NodeListSort, StoredContent, StoredFile, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -56,6 +56,10 @@ impl FilesRepo {
 
     pub async fn node_path(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
         queries::node::node_path(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn ancestor_chain(&self, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
+        queries::node::ancestor_chain(&self.pool, space_id, node_id).await
     }
 
     pub async fn resolve_path(&self, space_id: Uuid, path: &str) -> Result<Option<Uuid>> {
@@ -160,6 +164,32 @@ impl FilesRepo {
     ) -> Result<(Vec<Node>, bool)> {
         let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
         queries::node::paged_children(&self.pool, space_id, parent_node_id, limit, cursor).await
+    }
+
+    pub async fn paged_nodes(
+        &self,
+        space_id: Uuid,
+        kind: Option<NodeKind>,
+        sort: NodeListSort,
+        limit: i64,
+        cursor: Option<&NodeListCursor>,
+    ) -> Result<(Vec<Node>, bool)> {
+        let cursor = match cursor {
+            Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
+                Some(queries::node::NodeListDbCursor::UpdatedAtDesc {
+                    updated_at: *updated_at,
+                    id: *id,
+                })
+            }
+            Some(NodeListCursor::NameAsc { name, id, .. }) => {
+                Some(queries::node::NodeListDbCursor::NameAsc {
+                    name: name.as_str(),
+                    id: *id,
+                })
+            }
+            None => None,
+        };
+        queries::node::paged_nodes(&self.pool, space_id, kind, sort, limit, cursor).await
     }
 
     pub async fn search_node_candidates(

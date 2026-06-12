@@ -34,8 +34,10 @@ use crate::state::AppState;
         rest::spaces::update,
         rest::spaces::delete,
         rest::nodes::resolve_path,
+        rest::nodes::list,
         rest::nodes::create,
         rest::nodes::get_node,
+        rest::nodes::reveal,
         rest::nodes::update,
         rest::nodes::delete,
         rest::nodes::children,
@@ -194,6 +196,8 @@ mod tests {
 
         for schema in [
             "SpacesListResponse",
+            "NodesListResponse",
+            "RevealResponse",
             "ConnectionListResponse",
             "AgentsListResponse",
             "ErrorResponse",
@@ -208,6 +212,19 @@ mod tests {
         assert_eq!(
             response_ref(&value, "/api/v1/spaces", "get", "200"),
             "#/components/schemas/SpacesListResponse"
+        );
+        assert_eq!(
+            response_ref(&value, "/api/v1/spaces/{space_id}/nodes", "get", "200"),
+            "#/components/schemas/NodesListResponse"
+        );
+        assert_eq!(
+            response_ref(
+                &value,
+                "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
+                "get",
+                "200"
+            ),
+            "#/components/schemas/RevealResponse"
         );
         assert_eq!(
             response_ref(&value, "/api/v1/spaces/{space_id}/agents", "get", "200"),
@@ -244,6 +261,12 @@ mod tests {
             "/api/v1/spaces/{space_id}/paths/resolve",
             "get",
             &["path"],
+        );
+        assert_query_params(
+            &value,
+            "/api/v1/spaces/{space_id}/nodes",
+            "get",
+            &["kind", "sort", "limit", "cursor"],
         );
         assert_query_params(
             &value,
@@ -394,6 +417,7 @@ mod tests {
             "/api/v1/spaces/{space_id}/nodes",
             "/api/v1/spaces/{space_id}/nodes/{node_id}",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/move",
             "/api/v1/spaces/{space_id}/text/{node_id}",
             "/api/v1/spaces/{space_id}/files",
@@ -445,9 +469,11 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/text/{node_id}",
             "GET /api/v1/spaces/{space_id}/files/{node_id}",
             "GET /api/v1/spaces/{space_id}/files/{node_id}/content",
+            "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
+            "GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
             "GET /api/v1/spaces/{space_id}/paths/resolve",
             "PATCH /api/v1/spaces/{space_id}",
             "PATCH /api/v1/spaces/{space_id}/text/{node_id}",

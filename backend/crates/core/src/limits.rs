@@ -175,6 +175,10 @@ pub const DEAD_API_KEY_RETENTION_DAYS: i64 = 30;
 
 // --- API pagination limits ---
 
+/// Default `GET /spaces/{id}/nodes` page size.
+pub const NODES_DEFAULT_LIMIT: i64 = 50;
+/// Maximum `GET /spaces/{id}/nodes` page size.
+pub const NODES_MAX_LIMIT: i64 = 100;
 /// Default `GET /spaces` page size.
 pub const SPACES_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /spaces` page size.

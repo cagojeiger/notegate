@@ -20,11 +20,11 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
-use notegate_model::FileEncryptionMode;
+use notegate_model::{FileEncryptionMode, NodeKind};
 use notegate_service::files::{
     AppendText, ChildrenCursor, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
-    EditText, FilesService, LineEdit, MoveNode, PatchMode, PatchText, ReadText, ReadTextBody,
-    WriteTarget, WriteText, WriteTextBody,
+    EditText, FilesService, LineEdit, ListNodesRequest, MoveNode, NodeListSort, PatchMode,
+    PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -1375,6 +1375,130 @@ async fn grep_excludes_encrypted_and_pages() -> Result<(), Box<dyn std::error::E
         !paths.iter().any(|path| path == "/sec.md"),
         "encrypted text is excluded from grep even with a matching payload"
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// Space-wide node list supports kind filtering, keyset pagination, root
+/// exclusion, and rejects cursors reused with a different filter.
+#[tokio::test]
+async fn list_nodes_filters_pages_and_binds_cursor_to_kind()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "node-list").await;
+
+    let folder = mkdir(&files, owner, ws, root, "folder-a").await;
+    let a = mktext(&files, owner, ws, root, "a.md", "a").await;
+    let b = mktext(&files, owner, ws, root, "b.md", "b").await;
+
+    let all = files
+        .list_nodes(
+            owner,
+            ws,
+            ListNodesRequest {
+                kind: None,
+                sort: NodeListSort::NameAsc,
+                limit: Some(10),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert!(all.items.iter().any(|item| item.node.id == folder));
+    assert!(all.items.iter().any(|item| item.node.id == a));
+    assert!(all.items.iter().any(|item| item.node.id == b));
+    assert!(
+        all.items.iter().all(|item| item.path != "/"),
+        "space-wide node list excludes the root node"
+    );
+
+    let first_page = files
+        .list_nodes(
+            owner,
+            ws,
+            ListNodesRequest {
+                kind: Some(NodeKind::Text),
+                sort: NodeListSort::NameAsc,
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(first_page.items.len(), 1);
+    assert_eq!(first_page.items[0].path, "/a.md");
+    assert!(first_page.has_more);
+    let cursor = first_page.next_cursor.clone().expect("cursor");
+
+    let second_page = files
+        .list_nodes(
+            owner,
+            ws,
+            ListNodesRequest {
+                kind: Some(NodeKind::Text),
+                sort: NodeListSort::NameAsc,
+                limit: Some(1),
+                cursor: Some(cursor.clone()),
+            },
+        )
+        .await?;
+    assert_eq!(second_page.items.len(), 1);
+    assert_eq!(second_page.items[0].path, "/b.md");
+
+    let mismatched_kind = files
+        .list_nodes(
+            owner,
+            ws,
+            ListNodesRequest {
+                kind: Some(NodeKind::Folder),
+                sort: NodeListSort::NameAsc,
+                limit: Some(1),
+                cursor: Some(cursor),
+            },
+        )
+        .await
+        .expect_err("cursor must be bound to the original kind filter");
+    assert!(mismatched_kind.to_string().contains("node list query"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// Reveal returns the root-to-parent chain separately from the target node so a
+/// lazy tree can expand ancestors before selecting the target.
+#[tokio::test]
+async fn reveal_node_returns_ancestor_chain_and_target() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "reveal").await;
+
+    let projects = mkdir(&files, owner, ws, root, "projects").await;
+    let nested = mkdir(&files, owner, ws, projects, "nested").await;
+    let note = mktext(&files, owner, ws, nested, "note.md", "hello").await;
+
+    let reveal = files.reveal_node(owner, ws, note).await?;
+    let ancestor_paths: Vec<&str> = reveal
+        .ancestors
+        .iter()
+        .map(|view| view.path.as_str())
+        .collect();
+    assert_eq!(ancestor_paths, vec!["/", "/projects", "/projects/nested"]);
+    assert_eq!(reveal.target.path, "/projects/nested/note.md");
+    assert_eq!(reveal.target.node.id, note);
+
+    let root_reveal = files.reveal_node(owner, ws, root).await?;
+    assert!(root_reveal.ancestors.is_empty());
+    assert_eq!(root_reveal.target.path, "/");
 
     db.cleanup().await;
     Ok(())

@@ -1,7 +1,8 @@
 //! Nodes category: tree metadata under `/api/v1/spaces/{space_id}`.
 //!
-//! `GET /paths/resolve?path=`, `GET /nodes/{id}`, `GET /nodes/{id}/children`
-//! (paginated), `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
+//! `GET /paths/resolve?path=`, `GET /nodes`, `GET /nodes/{id}`,
+//! `GET /nodes/{id}/children` (paginated), `GET /nodes/{id}/reveal`,
+//! `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
 //! (rename / reorder), `GET`/`PUT`/`PATCH /nodes/{id}/metadata`,
 //! `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
 //! All handlers delegate to the files service,
@@ -24,18 +25,19 @@ use crate::rest::dto::{NodeOut, NodeRef, attribution_ids, parse_kind};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    ChildrenRequest, CreateFolder, CreateText, DeleteNode, MoveNode, WriteTarget, WriteText,
-    WriteTextBody,
+    ChildrenRequest, CreateFolder, CreateText, DeleteNode, ListNodesRequest, MoveNode,
+    NodeListSort, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/spaces/{space_id}/paths/resolve", get(resolve_path))
-        .route("/v1/spaces/{space_id}/nodes", post(create))
+        .route("/v1/spaces/{space_id}/nodes", get(list).post(create))
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}",
             get(get_node).patch(update).delete(delete),
         )
+        .route("/v1/spaces/{space_id}/nodes/{node_id}/reveal", get(reveal))
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/children",
             get(children),
@@ -110,6 +112,80 @@ pub(crate) async fn get_node(
 }
 
 #[derive(Debug, Deserialize)]
+pub(crate) struct ListNodesQuery {
+    kind: Option<String>,
+    sort: Option<String>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct NodesListResponse {
+    nodes: Vec<NodeOut>,
+    page: Page,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/nodes",
+    tag = "nodes",
+    params(
+        ("space_id" = Uuid, Path),
+        ("kind" = Option<String>, Query, description = "Optional kind filter: folder, text, or file"),
+        ("sort" = Option<String>, Query, description = "updated_at_desc (default) or name_asc"),
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List nodes in a space", body = NodesListResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+    Query(query): Query<ListNodesQuery>,
+) -> Result<Json<NodesListResponse>, ApiError> {
+    let kind = query.kind.as_deref().map(parse_kind).transpose()?;
+    let sort = match query.sort.as_deref().unwrap_or("updated_at_desc") {
+        value => NodeListSort::parse(value).ok_or_else(|| {
+            ApiError::invalid_field("sort must be 'updated_at_desc' or 'name_asc'")
+        })?,
+    };
+    let page = state
+        .files
+        .list_nodes(
+            caller.account_id(),
+            space_id,
+            ListNodesRequest {
+                kind,
+                sort,
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids(page.items.iter()))
+        .await?;
+    let nodes = page
+        .items
+        .iter()
+        .map(|view| NodeOut::from_view(view, &refs))
+        .collect();
+
+    Ok(Json(NodesListResponse {
+        nodes,
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct ChildrenQuery {
     limit: Option<i64>,
     cursor: Option<String>,
@@ -176,6 +252,48 @@ pub(crate) async fn children(
             page.has_more,
             page.next_cursor,
         ),
+    }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct RevealResponse {
+    ancestors: Vec<NodeOut>,
+    target: NodeOut,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
+    tag = "nodes",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses((status = 200, description = "Reveal a node in the tree", body = RevealResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn reveal(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<RevealResponse>, ApiError> {
+    let reveal = state
+        .files
+        .reveal_node(caller.account_id(), space_id, node_id)
+        .await?;
+
+    let mut all: Vec<&notegate_service::files::NodeView> = reveal.ancestors.iter().collect();
+    all.push(&reveal.target);
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids(all))
+        .await?;
+    let ancestors = reveal
+        .ancestors
+        .iter()
+        .map(|view| NodeOut::from_view(view, &refs))
+        .collect();
+
+    Ok(Json(RevealResponse {
+        ancestors,
+        target: NodeOut::from_view(&reveal.target, &refs),
     }))
 }
 
