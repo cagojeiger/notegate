@@ -83,3 +83,69 @@ export type NodeRevealResponse = {
   ancestors: RestNode[];
   target: RestNode;
 };
+
+export type ReadTextResponse = {
+  node: {
+    id: string;
+    path: string;
+  };
+  text:
+    | {
+        node_id: string;
+        storage_format: "plain";
+        content: string;
+        content_sha256: string;
+        byte_len: number;
+        line_count: number;
+        start_line: number;
+        end_line: number;
+        returned_lines: number;
+        truncated: boolean;
+        next_start_line: number | null;
+        updated_by: AccountRef;
+        updated_at: string;
+      }
+    | {
+        node_id: string;
+        storage_format: "encrypted";
+        encrypted_payload: unknown;
+        content_sha256: string;
+        byte_len: number;
+        line_count: number;
+        updated_by: AccountRef;
+        updated_at: string;
+      }
+    | {
+        node_id: string;
+        storage_format: string;
+        unchanged: boolean;
+        content_returned: boolean;
+        content_sha256: string;
+        byte_len: number;
+        line_count: number;
+      };
+};
+
+export type TextResponse = {
+  node: {
+    id: string;
+    path: string;
+  };
+  text: {
+    node_id: string;
+    storage_format: string;
+    content_sha256: string;
+    byte_len: number;
+    line_count: number;
+    updated_by: AccountRef;
+    updated_at: string;
+  };
+};
+
+export type FileResponse = {
+  node: RestNode;
+};
+
+export type MetadataResponse = {
+  metadata: Record<string, unknown>;
+};

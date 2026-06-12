@@ -25,3 +25,29 @@ export function listNodes(
 export function revealNode(client: ApiClient, spaceId: string, nodeId: string): Promise<NodeRevealResponse> {
   return client.get<NodeRevealResponse>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/reveal`);
 }
+
+export function createNode(
+  client: ApiClient,
+  spaceId: string,
+  input: { parent_id: string; kind: "folder" | "text"; name: string; content?: string }
+): Promise<RestNode> {
+  return client.post<RestNode>(`/api/v1/spaces/${spaceId}/nodes`, input);
+}
+
+export function updateNode(client: ApiClient, spaceId: string, nodeId: string, input: { name?: string; sort_order?: number }): Promise<RestNode> {
+  return client.patch<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`, input);
+}
+
+export function moveNode(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  input: { new_parent_id: string; new_name?: string; expected_parent_id?: string | null }
+): Promise<RestNode> {
+  return client.post<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/move`, input);
+}
+
+export function deleteNode(client: ApiClient, spaceId: string, nodeId: string, recursive: boolean): Promise<void> {
+  const params = new URLSearchParams({ recursive: String(recursive) });
+  return client.delete<void>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}?${params}`);
+}
