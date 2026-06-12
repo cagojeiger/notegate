@@ -7,6 +7,7 @@
 ```text
 request_body_max_bytes = 2097152      # 2 MiB JSON/body 기본 상한
 server_timeout_seconds = 30
+control_plane_timeout_seconds = 5      # /health, /ready 등 control-plane 요청
 rate_limit_global_per_process = 600/minute
 ```
 
@@ -25,6 +26,9 @@ user_api_key_max_ttl_days = 30
 agent_api_key_max_ttl_days = 365
 api_key_name_max_chars = 63
 agent_name_max_chars = 63
+oauth_provider_sub_max_chars = 255
+user_display_name_max_chars = 128
+user_email_max_chars = 254
 space_name_max_chars = 63
 space_name_pattern = ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
 ```
@@ -104,9 +108,15 @@ connections_default_limit = 100
 connections_max_limit = 100
 children_default_limit = 100
 children_max_limit = 200
+read_default_max_lines = 200
+read_max_lines = 1000
+read_default_max_bytes = 65536          # 64 KiB
+read_max_bytes = 262144                 # 256 KiB
 find_default_limit = 50
 grep_default_limit = 20
 search_max_limit = 100
+search_query_max_chars = 256
+search_children_page_max = 200
 search_candidate_page_max = 1000
 search_node_scan_max = 1000            # node summaries inspected per request
 grep_scan_budget_bytes = 8388608       # 8 MiB content bytes per request
@@ -175,6 +185,7 @@ PostgreSQL physical estimate는 row overhead, index, TOAST, WAL, dead tuple, vac
 deleted_space_retention_days = 30
 deleted_node_retention_days = 30
 account_deletion_retention_days = 15
+subtree_delete_max_nodes = 1000
 api_key_retention_days = 30
 purge_batch_spaces = 100
 purge_batch_nodes = 1000

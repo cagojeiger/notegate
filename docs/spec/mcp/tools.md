@@ -11,6 +11,7 @@
 - MCP는 encrypted Text와 binary File content를 읽거나 수정하지 않는다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
 - `run_sequence`는 여러 command를 순서대로 실행할 때만 사용한다. rollback은 제공하지 않는다.
+- 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 여러 tool의 필드를 담는 공통 상위 타입이지만, 여기에 없는 필드도 거부한다.
 
 ## `me`
 
@@ -41,6 +42,16 @@ type ReadInput = {
 - `op=stat`: Folder/Text/File node summary를 반환한다.
 - `op=read`: plain Text content를 읽는다. line/byte range를 지원한다.
 
+필수 필드:
+
+```text
+spaces: op
+ls:     op, target
+tree:   op, target
+stat:   op, target
+read:   op, target
+```
+
 ## `search`
 
 Read-only search tool이다.
@@ -66,6 +77,13 @@ type SearchInput = {
 - `grep lines=none`은 line 정보를 반환하지 않는다. `first`는 첫 matching line number, `all`은 모든 matching line number를 반환한다. snippet은 반환하지 않는다.
 - File, encrypted Text, metadata는 `grep` 대상이 아니다.
 
+필수 필드:
+
+```text
+find: op, target, q
+grep: op, target, q
+```
+
 Traversal, cursor, memory budget은 [`../search.md`](../search.md)를 따른다.
 
 ## `write`
@@ -87,7 +105,16 @@ type WriteInput = {
 - `op=write`: 전체 content replacement다. 없으면 `create=true`가 필요하다.
 - `op=append`: EOF append다. `ensure_newline=true`이면 기존 content가 비어 있지 않고 newline으로 끝나지 않을 때 content 앞에 newline을 넣는다.
 - `op=patch`: string replacement다. edit entry는 `old_text`, `new_text`, optional `mode: "unique"|"first"|"all"`, optional `expected_count`를 가진다.
-- `op=edit`: 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다.
+- `op=edit`: 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. `content`는 여러 줄을 포함할 수 있다.
+
+필수 필드:
+
+```text
+write:  op, target, content
+append: op, target, content
+patch:  op, target, edits
+edit:   op, target, edits
+```
 
 ## `manage`
 
@@ -109,6 +136,14 @@ type ManageInput = {
 - `op=cp`: `source` node를 `destination`으로 복사한다. Folder copy는 `recursive=true`가 필요하다.
 - `op=rm`: `target` node를 soft-delete한다. Folder delete는 `recursive=true`가 필요하다.
 
+필수 필드:
+
+```text
+mkdir: op, target
+mv:    op, source, destination
+cp:    op, source, destination
+rm:    op, target
+```
 
 ## `run_sequence`
 
@@ -153,6 +188,8 @@ Semantics:
 
 - `commands`는 입력 순서대로 실행한다.
 - 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
+- 각 command의 필수 필드는 해당 tool의 필수 필드를 따른다.
+- `SequenceCommand`는 공통 상위 타입이다. 해당 op가 사용하지 않는 known 필드는 실행 입력으로 전달되지 않는다.
 - command 하나가 실패하면 즉시 중단한다.
 - 이미 성공한 command는 rollback하지 않는다.
 - `run_sequence` 안에서 `run_sequence`를 다시 호출할 수 없다.

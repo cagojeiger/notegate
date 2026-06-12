@@ -35,6 +35,13 @@ crypto_key_epochs
 
 Domain마다 active epoch는 하나다. `verify_tag`는 root key 원문 저장 없이 설정과 DB registry 일치를 검증한다.
 
+Security DB 제약:
+
+```text
+crypto_key_epochs.key_id: 1..127자이며 첫 글자는 영문/숫자, 이후 영문/숫자/`.`/`_`/`-`
+crypto_key_epochs.revoked_at: status='revoked'이면 non-NULL, 아니면 NULL
+```
+
 ## Actor tables
 
 ```text
@@ -80,6 +87,17 @@ agents
 
 Agent는 user가 관리한다. Agent name은 제품 메타데이터이며 PII 저장소로 사용하지 않는다.
 
+Actor DB 제약:
+
+```text
+agents.name: 1..63자이며 trim 후 빈 문자열이면 안 됨
+accounts.display_name_*: 암호화 display-name 필드는 모두 NULL이거나 모두 non-NULL
+accounts.deleted_*: deleted_at과 deleted_by_account_id는 모두 NULL이거나 모두 non-NULL
+users.provider_sub_hash_*: provider_sub hash 필드는 모두 NULL이거나 모두 non-NULL
+users.email_enc_*: email 암호화 필드는 모두 NULL이거나 모두 non-NULL
+users.email_hash_*: email lookup hash 필드는 모두 NULL이거나 모두 non-NULL
+```
+
 ## Credential table
 
 ```text
@@ -104,6 +122,14 @@ api_keys
 
 평문 token은 저장하지 않는다. `scopes`는 빈 배열만 허용한다.
 
+Credential DB 제약:
+
+```text
+api_keys.name: 1..63자이며 trim 후 빈 문자열이면 안 됨
+api_keys.scopes: cardinality(scopes) = 0
+api_keys.revoked_*: revoked_at, revoked_by_user_id, revoked_reason은 모두 NULL이거나 모두 non-NULL
+```
+
 ## Space and connection tables
 
 ```text
@@ -119,7 +145,7 @@ spaces
   purge_after timestamptz null
 ```
 
-Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다. Space 목록 기본 정렬은 `(sort_order, name, id)`다.
+Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 
 ```text
 space_agent_connections
@@ -133,7 +159,7 @@ space_agent_connections
   primary key (space_id, agent_id)
 ```
 
-Connection은 agent 전용이다. User-to-user membership은 제공하지 않는다. 같은 owner user 안의 live space와 active agent만 연결하는 규칙은 connection repository transaction에서 검사한다.
+Connection은 agent 전용이다. User-to-user membership은 제공하지 않는다. `disconnected_at`, `disconnected_by_user_id`는 모두 NULL이거나 모두 non-NULL이다. 같은 owner user 안의 live space와 active agent만 연결하는 규칙은 connection repository transaction에서 검사한다.
 
 ## Tree and content tables
 
@@ -156,10 +182,12 @@ nodes
 ```
 
 - `(parent_id, space_id)`는 `nodes(id, space_id)`를 참조하는 composite FK다(`UNIQUE (id, space_id)`로 보장). parent는 항상 같은 space 안에 있다.
-- Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`인 node다.
+- Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`, `deleted_at IS NULL`인 node다.
+- Non-root node name은 1~128자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다. `/`, `.`, `..`는 허용하지 않는다.
 - 같은 parent 안 live node name은 unique다.
+- `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다.
+- `deleted_at`, `deleted_by_account_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 - Full path는 저장하지 않는다.
-- `metadata`는 folder/text/file 공통 JSON object다. content가 아니며 암호화 대상이 아니다.
 
 ```text
 text_objects
@@ -169,10 +197,10 @@ text_objects
   content_text text null
   encrypted_payload jsonb null
   content_sha256 text not null
-  byte_len bigint not null
-  line_count int not null
+  byte_len bigint not null check 0..1048576
+  line_count int not null check 0..2000
   media_type text not null
-  encoding text not null default 'utf-8'
+  encoding text not null default 'utf-8' check = 'utf-8'
   created_by_account_id uuid not null references accounts(id)
   updated_by_account_id uuid not null references accounts(id)
   created_at timestamptz
@@ -186,17 +214,19 @@ file_objects
   storage_kind text not null check ('inline_pg','object')
   object_key text null
   media_type text not null
-  byte_len bigint not null
+  byte_len bigint not null check 0..104857600
   content_sha256 text not null
   original_filename text null
   encryption_mode text not null check ('none','client')
   encryption_metadata jsonb null
   uploaded_at timestamptz
+```
 
+```text
 file_inline_contents
   node_id uuid pk
   space_id uuid not null
-  bytes bytea not null
+  bytes bytea not null check octet_length(bytes) <= 262144
 ```
 
 `File`은 공통 metadata와 실제 bytes를 분리한다. 현재 content 저장 방식은 `storage_kind='inline_pg'`이며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. 262144 bytes 초과 file은 제품 상한 `file_max_bytes` 안에 있어도 아직 저장하지 않는다.
@@ -204,8 +234,8 @@ file_inline_contents
 Space content quota는 live Text bytes와 live File bytes의 합으로 계산한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 
 ```text
-storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL
-storage_kind='object'    -> 262144 bytes 초과 file 저장 방식으로 예약됨
+storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL, byte_len <= 262144
+storage_kind='object'    -> 262144 bytes 초과 file 저장 방식으로 예약됨, object_key IS NOT NULL
 ```
 
 Content FK invariant:
@@ -214,8 +244,11 @@ Content FK invariant:
 DB FK: text_objects/file_objects row -> matching nodes(id, space_id) ON DELETE CASCADE
 DB FK: file_inline_contents row -> matching file_objects(node_id, space_id) ON DELETE CASCADE
 DB CHECK: file_inline_contents.bytes <= 262144
-Service transaction: storage_kind='inline_pg' creates exactly one file_inline_contents row
-Service transaction: current create path never writes storage_kind='object'
+DB CHECK: file_objects.byte_len <= 104857600
+DB CHECK: inline_pg는 byte_len <= 262144 그리고 object_key IS NULL
+DB CHECK: object는 object_key IS NOT NULL
+Service transaction: storage_kind='inline_pg'는 file_inline_contents row를 하나 생성
+Service transaction: 현재 create path는 storage_kind='object'를 쓰지 않음
 ```
 
 File content encryption은 client-side only다.
@@ -229,7 +262,10 @@ Text 저장 invariant:
 
 ```text
 storage_format='plain'     -> content_text IS NOT NULL, encrypted_payload IS NULL
-storage_format='encrypted' -> content_text IS NULL, encrypted_payload IS NOT NULL
+storage_format='encrypted' -> content_text IS NULL, encrypted_payload IS NOT NULL, encrypted_payload는 JSON object
+byte_len                  -> 0..1048576
+line_count                -> 0..2000
+encoding                  -> 'utf-8'만 허용
 ```
 
 Text 암호화 정책:

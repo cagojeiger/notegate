@@ -90,7 +90,7 @@ type RestNode = {
 }
 ```
 
-`byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다.
+`byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `storage_kind="object"`는 schema와 DB에는 예약되어 있지만 현재 create path는 `inline_pg`만 생성한다.
 
 ## McpNodeSummary
 
@@ -121,6 +121,8 @@ type McpNodeSummary = {
   encryption_metadata?: object
 }
 ```
+
+`storage_kind="object"`는 schema와 DB에는 예약되어 있지만 현재 create path는 `inline_pg`만 생성한다.
 
 ## McpGrepSummary
 
