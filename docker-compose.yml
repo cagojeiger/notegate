@@ -1,3 +1,27 @@
+x-api-environment: &api-environment
+  NOTEGATE_BIND_ADDR: 0.0.0.0:9191
+  NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
+  NOTEGATE_DB_MAX_CONNECTIONS: 10
+  LOG_FORMAT: json
+  NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
+  NOTEGATE_PUBLIC_URL: http://localhost:9191
+  NOTEGATE_OAUTH_CLIENT_ID: notegate-web
+  NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
+  NOTEGATE_OAUTH_REDIRECT_URL: http://localhost:9191/auth/callback
+  NOTEGATE_RESOURCE_URL: http://localhost:9191/mcp
+  NOTEGATE_JWKS_CACHE_TTL_SECS: 300
+  NOTEGATE_ENC_ROOT_KEY_ID: dev-enc
+  NOTEGATE_ENC_ROOT_SECRET: dev-notegate-enc-root-secret-32-bytes
+  NOTEGATE_LOOKUP_ROOT_KEY_ID: dev-lookup
+  NOTEGATE_LOOKUP_ROOT_SECRET: dev-notegate-lookup-root-secret-32-bytes
+  NOTEGATE_BROWSER_SESSION_TTL_SECS: 3600
+  NOTEGATE_OPENAPI_ENABLED: "false"
+  # Capacity caps default to spec values. Uncomment small values for cheap
+  # local/E2E boundary tests.
+  # NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN: "3"
+  # NOTEGATE_LIMITS__SPACE_MAX_NODES: "5"
+  # NOTEGATE_LIMITS__SPACE_MAX_CONTENT_BYTES: "1024"
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -17,22 +41,16 @@ services:
     restart: unless-stopped
 
   api:
+    # Local default runs two replicas so MCP/API horizontal scaling is exercised
+    # during normal docker compose development.
+    scale: 2
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      NOTEGATE_BIND_ADDR: 0.0.0.0:9191
-      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
-      NOTEGATE_DB_MAX_CONNECTIONS: 10
-      LOG_FORMAT: json
-      NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
-      NOTEGATE_PUBLIC_URL: http://localhost:9191
-      NOTEGATE_OAUTH_CLIENT_ID: notegate-web
-      NOTEGATE_OAUTH_REDIRECT_URL: http://localhost:9191/callback
-      NOTEGATE_RESOURCE_URL: http://localhost:9191/mcp
-      NOTEGATE_JWKS_CACHE_TTL_SECS: 300
-    ports:
-      - "9191:9191"
+      <<: *api-environment
+    expose:
+      - "9191"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,21 +61,18 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-  # Frontend (Next.js) — uncomment once frontend/ exists.
-  # Separate Dockerfile + context: backend and web have different base images,
-  # build caches, and deploy cadences, so they never share one build.
-  # web:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #   environment:
-  #     # Server-side calls to the API use the compose network hostname.
-  #     API_URL: http://api:9191
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - api
-  #   restart: unless-stopped
+
+  # Local reverse proxy. It owns the public 9191 port so the api service can
+  # be scaled without host port conflicts.
+  proxy:
+    image: nginx:1.27-alpine
+    ports:
+      - "9191:9191"
+    volumes:
+      - ./deploy/nginx/notegate.conf:/etc/nginx/conf.d/notegate.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   pgdata:

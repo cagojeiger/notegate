@@ -5,13 +5,25 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# Exposes test-only repo constructors (e.g. `AccountRepo::new`). Default-off; the
+# integration tests in `tests/` enable it via the dev-dependency self-edge below.
+test-util = ["notegate-core/test-util"]
+
 [dependencies]
 notegate-core.workspace = true
-notegate-domain.workspace = true
+notegate-model.workspace = true
 sqlx.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+notegate-db = { path = ".", features = ["test-util"] }
+tokio.workspace = true
+sha2.workspace = true
+secrecy.workspace = true
 
 [lints]
 workspace = true

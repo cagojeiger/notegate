@@ -8,54 +8,155 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use config::{Config as LayeredConfig, Environment, File, FileFormat};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer};
 use url::Url;
-use validator::{Validate, ValidationError};
+use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::error::{Error, Result};
+use crate::limits::Limits;
+use crate::tier::UserTier;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
+const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
+const DEFAULT_OPENAPI_ENABLED: bool = false;
 
 /// Server + database configuration.
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
     /// Postgres connection string.
-    #[validate(length(min = 1))]
     pub database_url: String,
     /// Max connections in the sqlx pool.
-    #[validate(range(min = 1, max = 256))]
     pub db_max_connections: u32,
     /// Base URL for authgate, with trailing slash trimmed.
-    #[validate(custom(function = "validate_http_url_value"))]
     pub authgate_url: String,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
     #[serde(rename = "public_url")]
-    #[validate(custom(function = "validate_http_url_value"))]
     pub notegate_public_url: String,
-    /// Public OAuth client id registered in authgate.
-    #[validate(length(min = 1))]
+    /// Public browser OAuth client id registered in authgate.
     pub oauth_client_id: String,
+    /// Public MCP OAuth client id registered in authgate.
+    pub mcp_oauth_client_id: String,
     /// Exact redirect URL registered in authgate.
-    #[validate(custom(function = "validate_http_url_value"))]
     pub oauth_redirect_url: String,
     /// Resource/audience URL for REST and MCP, with trailing slash trimmed.
-    #[validate(custom(function = "validate_http_url_value"))]
     pub resource_url: String,
     /// Shared JWKS cache TTL.
     #[serde(
         rename = "jwks_cache_ttl_secs",
         deserialize_with = "duration_from_secs"
     )]
-    #[validate(custom(function = "validate_jwks_cache_ttl"))]
     pub jwks_cache_ttl: Duration,
+    /// Active ENC root key id registered in crypto_key_epochs.
+    pub enc_root_key_id: String,
+    /// Active ENC root secret used to derive PII encryption subkeys.
+    pub enc_root_secret: SecretString,
+    /// Active LOOKUP root key id registered in crypto_key_epochs.
+    pub lookup_root_key_id: String,
+    /// Active LOOKUP root secret used to derive HMAC/session subkeys.
+    pub lookup_root_secret: SecretString,
+    /// Optional verify-only LOOKUP root key id for provider subject migration.
+    pub lookup_verify_0_key_id: Option<String>,
+    /// Optional verify-only LOOKUP root secret for provider subject migration.
+    pub lookup_verify_0_secret: Option<SecretString>,
+    /// Browser session cookie TTL.
+    #[serde(
+        rename = "browser_session_ttl_secs",
+        deserialize_with = "duration_from_secs"
+    )]
+    pub browser_session_ttl: Duration,
+    /// Whether OpenAPI JSON and Swagger UI routes are exposed.
+    pub openapi_enabled: bool,
+    /// Tier assigned to newly created users.
+    #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
+    pub default_user_tier: UserTier,
+    /// Runtime-overridable capacity limits. Defaults match `docs/spec/performance-limits.md`.
+    #[serde(default)]
+    pub limits: Limits,
     /// Whether login flow cookies must carry the Secure flag.
     #[serde(skip)]
     pub secure_cookies: bool,
+}
+
+impl Validate for Config {
+    fn validate(&self) -> std::result::Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if self.database_url.is_empty() {
+            errors.add("database_url", ValidationError::new("length"));
+        }
+        if !(1..=256).contains(&self.db_max_connections) {
+            errors.add("db_max_connections", ValidationError::new("range"));
+        }
+        if validate_http_url_value(&self.authgate_url).is_err() {
+            errors.add("authgate_url", ValidationError::new("http_url"));
+        }
+        if validate_http_url_value(&self.notegate_public_url).is_err() {
+            errors.add("notegate_public_url", ValidationError::new("http_url"));
+        }
+        if self.oauth_client_id.is_empty() {
+            errors.add("oauth_client_id", ValidationError::new("length"));
+        }
+        if self.mcp_oauth_client_id.is_empty() {
+            errors.add("mcp_oauth_client_id", ValidationError::new("length"));
+        }
+        if validate_http_url_value(&self.oauth_redirect_url).is_err() {
+            errors.add("oauth_redirect_url", ValidationError::new("http_url"));
+        }
+        if validate_http_url_value(&self.resource_url).is_err() {
+            errors.add("resource_url", ValidationError::new("http_url"));
+        }
+        if validate_jwks_cache_ttl(&self.jwks_cache_ttl).is_err() {
+            errors.add("jwks_cache_ttl", ValidationError::new("range"));
+        }
+        if validate_key_id(&self.enc_root_key_id).is_err() {
+            errors.add("enc_root_key_id", ValidationError::new("format"));
+        }
+        if validate_secret_min_32(&self.enc_root_secret).is_err() {
+            errors.add("enc_root_secret", ValidationError::new("length"));
+        }
+        if validate_key_id(&self.lookup_root_key_id).is_err() {
+            errors.add("lookup_root_key_id", ValidationError::new("format"));
+        }
+        if validate_secret_min_32(&self.lookup_root_secret).is_err() {
+            errors.add("lookup_root_secret", ValidationError::new("length"));
+        }
+        if self.enc_root_key_id == self.lookup_root_key_id {
+            errors.add("lookup_root_key_id", ValidationError::new("reused_root"));
+        }
+        if self.enc_root_secret.expose_secret() == self.lookup_root_secret.expose_secret() {
+            errors.add("lookup_root_secret", ValidationError::new("reused_root"));
+        }
+        match (&self.lookup_verify_0_key_id, &self.lookup_verify_0_secret) {
+            (Some(key_id), Some(secret)) => {
+                if validate_key_id(key_id).is_err() {
+                    errors.add("lookup_verify_0_key_id", ValidationError::new("format"));
+                }
+                if validate_secret_min_32(secret).is_err() {
+                    errors.add("lookup_verify_0_secret", ValidationError::new("length"));
+                }
+            }
+            (None, None) => {}
+            _ => {
+                errors.add("lookup_verify_0", ValidationError::new("paired"));
+            }
+        }
+        if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
+            errors.add("browser_session_ttl", ValidationError::new("range"));
+        }
+        validate_limits(&self.limits, &mut errors);
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 impl Config {
@@ -85,6 +186,10 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .set_default("db_max_connections", DEFAULT_DB_MAX_CONNECTIONS)
         .map_err(map_config_error)?
         .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
+        .map_err(map_config_error)?
+        .set_default("browser_session_ttl_secs", DEFAULT_BROWSER_SESSION_TTL_SECS)
+        .map_err(map_config_error)?
+        .set_default("openapi_enabled", DEFAULT_OPENAPI_ENABLED)
         .map_err(map_config_error)?;
 
     if include_files {
@@ -94,7 +199,12 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
     }
 
     let mut config = builder
-        .add_source(environment.try_parsing(true))
+        .add_source(
+            environment
+                .separator("__")
+                .prefix_separator("_")
+                .try_parsing(true),
+        )
         .build()
         .map_err(map_config_error)?
         .try_deserialize::<Config>()
@@ -120,6 +230,20 @@ where
     Ok(Duration::from_secs(u64::deserialize(deserializer)?))
 }
 
+fn default_user_tier() -> UserTier {
+    UserTier::DEFAULT
+}
+
+fn user_tier_from_str<'de, D>(deserializer: D) -> std::result::Result<UserTier, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    UserTier::parse(&value).ok_or_else(|| {
+        serde::de::Error::custom("default_user_tier must be `tier0` or `system_max`")
+    })
+}
+
 fn validate_http_url_value(value: &str) -> std::result::Result<(), ValidationError> {
     let url = Url::parse(value).map_err(|_error| ValidationError::new("http_url"))?;
     let allowed_scheme = matches!(url.scheme(), "http" | "https");
@@ -136,6 +260,65 @@ fn validate_jwks_cache_ttl(value: &Duration) -> std::result::Result<(), Validati
         Ok(())
     } else {
         Err(ValidationError::new("range"))
+    }
+}
+
+fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), ValidationError> {
+    let seconds = value.as_secs();
+    if (60..=86_400).contains(&seconds) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("range"))
+    }
+}
+
+fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
+    if limits.space_max_nodes == 0 {
+        errors.add("limits.space_max_nodes", ValidationError::new("range"));
+    }
+    if limits.space_max_nodes > crate::limits::SPACE_MAX_NODES {
+        errors.add("limits.space_max_nodes", ValidationError::new("range"));
+    }
+    if limits.space_max_content_bytes == 0 {
+        errors.add(
+            "limits.space_max_content_bytes",
+            ValidationError::new("range"),
+        );
+    }
+    if limits.space_max_content_bytes > crate::limits::SPACE_MAX_CONTENT_BYTES {
+        errors.add(
+            "limits.space_max_content_bytes",
+            ValidationError::new("range"),
+        );
+    }
+    if limits.folder_max_children == 0 {
+        errors.add("limits.folder_max_children", ValidationError::new("range"));
+    }
+    if limits.folder_max_children > crate::limits::FOLDER_MAX_CHILDREN {
+        errors.add("limits.folder_max_children", ValidationError::new("range"));
+    }
+}
+
+fn validate_secret_min_32(value: &SecretString) -> std::result::Result<(), ValidationError> {
+    if value.expose_secret().len() >= 32 {
+        Ok(())
+    } else {
+        Err(ValidationError::new("length"))
+    }
+}
+
+fn validate_key_id(value: &str) -> std::result::Result<(), ValidationError> {
+    let valid = !value.is_empty()
+        && value.len() <= 127
+        && value.bytes().enumerate().all(|(idx, byte)| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' => true,
+            b'.' | b'_' | b'-' => idx > 0,
+            _ => false,
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(ValidationError::new("format"))
     }
 }
 
@@ -167,12 +350,23 @@ fn map_validation_error(error: validator::ValidationErrors) -> Error {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::time::Duration;
 
     use config::Environment;
+    use secrecy::{ExposeSecret, SecretString};
     use validator::Validate;
+
+    use crate::limits::Limits;
+    use crate::tier::UserTier;
 
     use super::{Config, load_from_sources};
 
@@ -184,9 +378,22 @@ mod tests {
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
-            oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
+            mcp_oauth_client_id: "notegate-mcp".to_owned(),
+            oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
             resource_url: "http://localhost:9191/mcp".to_owned(),
             jwks_cache_ttl: Duration::from_secs(300),
+            enc_root_key_id: "test-enc".to_owned(),
+            enc_root_secret: SecretString::from("test-enc-root-secret-32-bytes-long".to_owned()),
+            lookup_root_key_id: "test-lookup".to_owned(),
+            lookup_root_secret: SecretString::from(
+                "test-lookup-root-secret-32-bytes-long".to_owned(),
+            ),
+            lookup_verify_0_key_id: None,
+            lookup_verify_0_secret: None,
+            browser_session_ttl: Duration::from_secs(3600),
+            openapi_enabled: false,
+            default_user_tier: UserTier::DEFAULT,
+            limits: Limits::default(),
             secure_cookies: false,
         }
     }
@@ -208,12 +415,24 @@ mod tests {
                 ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
                 (
                     "NOTEGATE_OAUTH_REDIRECT_URL",
-                    "http://localhost:9191/callback",
+                    "http://localhost:9191/auth/callback",
                 ),
                 ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
                 ("PATH", "/bin"),
                 ("DATABASE_URL", "postgres://ignored"),
             ]),
@@ -222,11 +441,88 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert_eq!(config.oauth_client_id, "notegate-web");
+        assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
+        assert_eq!(config.default_user_tier, UserTier::Tier0);
         assert_eq!(
             config.jwks_cache_ttl.as_secs(),
             super::DEFAULT_JWKS_CACHE_TTL_SECS
         );
+        assert_eq!(
+            config.browser_session_ttl.as_secs(),
+            super::DEFAULT_BROWSER_SESSION_TTL_SECS
+        );
+        assert_eq!(config.limits, Limits::default());
         Ok(())
+    }
+
+    #[test]
+    fn environment_layer_accepts_nested_limit_overrides() -> crate::Result<()> {
+        let config = load_from_sources(
+            false,
+            test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
+                (
+                    "NOTEGATE_OAUTH_REDIRECT_URL",
+                    "http://localhost:9191/auth/callback",
+                ),
+                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN", "3"),
+                ("NOTEGATE_LIMITS__SPACE_MAX_NODES", "5"),
+                ("NOTEGATE_LIMITS__SPACE_MAX_CONTENT_BYTES", "1024"),
+            ]),
+        )?;
+
+        assert_eq!(config.limits.folder_max_children, 3);
+        assert_eq!(config.limits.space_max_nodes, 5);
+        assert_eq!(config.limits.space_max_content_bytes, 1024);
+        Ok(())
+    }
+
+    #[test]
+    fn environment_layer_rejects_unknown_default_user_tier() {
+        let result = load_from_sources(
+            false,
+            test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
+                (
+                    "NOTEGATE_OAUTH_REDIRECT_URL",
+                    "http://localhost:9191/auth/callback",
+                ),
+                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_DEFAULT_USER_TIER", "enterprise"),
+            ]),
+        );
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -237,6 +533,8 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:9191");
         assert_eq!(config.db_max_connections, 10);
         assert_eq!(config.jwks_cache_ttl.as_secs(), 300);
+        assert_eq!(config.browser_session_ttl.as_secs(), 3600);
+        assert!(!config.openapi_enabled);
         assert!(!config.secure_cookies);
         Ok(())
     }
@@ -250,6 +548,70 @@ mod tests {
         let mut config = valid_config();
         config.jwks_cache_ttl = Duration::from_secs(1);
         assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.enc_root_secret = SecretString::from("too-short".to_owned());
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.lookup_root_key_id = "_bad".to_owned();
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.browser_session_ttl = Duration::from_secs(1);
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.space_max_nodes = crate::limits::SPACE_MAX_NODES + 1;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.space_max_content_bytes = crate::limits::SPACE_MAX_CONTENT_BYTES + 1;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.limits.folder_max_children = crate::limits::FOLDER_MAX_CHILDREN + 1;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_reused_root_key_id_and_secret() {
+        // Equal key-ids are rejected.
+        let mut config = valid_config();
+        config.lookup_root_key_id = config.enc_root_key_id.clone();
+        assert!(config.validate().is_err());
+
+        // Equal secrets are rejected.
+        let mut config = valid_config();
+        config.lookup_root_secret =
+            SecretString::from("test-enc-root-secret-32-bytes-long".to_owned());
+        assert!(
+            config.lookup_root_secret.expose_secret() == config.enc_root_secret.expose_secret()
+        );
+        assert!(config.validate().is_err());
+
+        // Distinct ids + secrets pass.
+        let config = valid_config();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn env_example_uses_distinct_root_secret_placeholders() {
+        let example = include_str!("../../../../.env.example");
+        let secret_line = |key: &str| -> String {
+            example
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .map(str::to_owned)
+                .unwrap_or_default()
+        };
+        let enc = secret_line("NOTEGATE_ENC_ROOT_SECRET=");
+        let lookup = secret_line("NOTEGATE_LOOKUP_ROOT_SECRET=");
+        assert!(!enc.is_empty() && !lookup.is_empty());
+        assert_ne!(
+            enc, lookup,
+            ".env.example ENC/LOOKUP root secrets must be distinct"
+        );
     }
 
     #[test]

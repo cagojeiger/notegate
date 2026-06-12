@@ -1,0 +1,126 @@
+use notegate_model::{FileObject, Node, NodeKind, TextObject};
+use uuid::Uuid;
+
+use crate::error::ServiceResult;
+use crate::files::{FileStats, FileView, NodeView, TextStats, TextView};
+
+use super::FilesService;
+
+impl FilesService {
+    /// Build a [`NodeView`] for an existing node (derives path + has_children).
+    pub(super) async fn node_view(&self, space_id: Uuid, node: Node) -> ServiceResult<NodeView> {
+        let path = self.path_of(space_id, node.id).await?;
+        let has_children = self.store.has_children(space_id, node.id).await?;
+        let text = if node.kind == NodeKind::Text {
+            self.store.text_stats(space_id, node.id).await?
+        } else {
+            None
+        };
+        let file = if node.kind == NodeKind::File {
+            self.store.file_stats(space_id, node.id).await?
+        } else {
+            None
+        };
+        Ok(NodeView {
+            node,
+            path,
+            has_children,
+            text,
+            file,
+        })
+    }
+
+    /// Build a [`TextView`] for an existing text node.
+    pub(super) async fn text_view(
+        &self,
+        space_id: Uuid,
+        node: Node,
+        text: TextObject,
+    ) -> ServiceResult<TextView> {
+        let node = self.text_node_view(space_id, node, &text).await?;
+        Ok(TextView { node, text })
+    }
+
+    /// Build a text node view from an already-loaded text, avoiding an
+    /// extra metrics lookup through `text_stats`.
+    pub(super) async fn text_node_view(
+        &self,
+        space_id: Uuid,
+        node: Node,
+        text: &TextObject,
+    ) -> ServiceResult<NodeView> {
+        let path = self.path_of(space_id, node.id).await?;
+        Ok(NodeView {
+            node,
+            path,
+            has_children: false,
+            text: Some(stats_from_text(text)),
+            file: None,
+        })
+    }
+
+    /// Build a file node view from an already-loaded file.
+    pub(super) async fn file_node_view(
+        &self,
+        space_id: Uuid,
+        node: Node,
+        file: &FileObject,
+    ) -> ServiceResult<NodeView> {
+        let path = self.path_of(space_id, node.id).await?;
+        Ok(NodeView {
+            node,
+            path,
+            has_children: false,
+            text: None,
+            file: Some(stats_from_file(file)),
+        })
+    }
+}
+
+pub(super) fn text_view_at_path(node: Node, path: String, text: TextObject) -> TextView {
+    let stats = stats_from_text(&text);
+    TextView {
+        node: NodeView {
+            node,
+            path,
+            has_children: false,
+            text: Some(stats),
+            file: None,
+        },
+        text,
+    }
+}
+
+pub(super) fn file_view_at_path(node: Node, path: String, file: FileObject) -> FileView {
+    let stats = stats_from_file(&file);
+    FileView {
+        node: NodeView {
+            node,
+            path,
+            has_children: false,
+            text: None,
+            file: Some(stats),
+        },
+        file,
+    }
+}
+
+fn stats_from_text(text: &TextObject) -> TextStats {
+    TextStats {
+        content_sha256: text.content_sha256.clone(),
+        byte_len: text.byte_len,
+        line_count: text.line_count,
+    }
+}
+
+fn stats_from_file(file: &FileObject) -> FileStats {
+    FileStats {
+        storage_kind: file.storage_kind,
+        media_type: file.media_type.clone(),
+        byte_len: file.byte_len,
+        content_sha256: file.content_sha256.clone(),
+        original_filename: file.original_filename.clone(),
+        encryption_mode: file.encryption_mode,
+        encryption_metadata: file.encryption_metadata.clone(),
+    }
+}

@@ -51,17 +51,14 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 
 COPY --from=planner /app/recipe.json recipe.json
-# sqlx query! / query_as! macros are checked against committed `.sqlx`
-# metadata, not a live DB. This keeps Docker builds reproducible.
-ENV SQLX_OFFLINE=true
+# Queries are runtime-checked (no sqlx `query!`/`query_as!` macros), so the build
+# needs neither offline `.sqlx` metadata nor SQLX_OFFLINE / a live DB.
 RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
     --mount=type=cache,id=notegate-target-release,target=/app/target,sharing=locked \
     cargo chef cook --release --locked --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
-# Required by SQLX_OFFLINE=true.
-COPY .sqlx ./.sqlx
 COPY backend ./backend
 RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \

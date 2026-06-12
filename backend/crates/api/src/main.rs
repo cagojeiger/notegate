@@ -1,6 +1,7 @@
 use std::io;
 
 use notegate_core::Config;
+use notegate_core::security::PiiCrypto;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
@@ -12,6 +13,9 @@ mod auth;
 mod error;
 mod identity;
 mod mcp;
+mod openapi;
+mod page;
+mod purge_worker;
 mod rest;
 mod routes;
 mod state;
@@ -20,6 +24,11 @@ use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|arg| arg == "--print-openapi") {
+        println!("{}", openapi::json_pretty()?);
+        return Ok(());
+    }
+
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
     init_tracing();
@@ -37,34 +46,60 @@ async fn main() -> anyhow::Result<()> {
         max_connections = config.db_max_connections
     );
 
+    let pii_crypto = PiiCrypto::from_root_secrets(
+        config.enc_root_key_id.clone(),
+        &config.enc_root_secret,
+        config.lookup_root_key_id.clone(),
+        &config.lookup_root_secret,
+    )?;
+    let key_epochs = notegate_db::CryptoKeyEpochRepo::new(pool.clone());
+    key_epochs.ensure_active(&pii_crypto).await?;
+    info!(event = "crypto_key_epochs.ensured");
+
     let bind_addr = config.bind_addr;
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let jwks_url = format!("{}/keys", config.authgate_url);
-    let user_repo = notegate_db::UserRepo::new(pool.clone());
-    let resolver = notegate_domain::Resolver::new(user_repo);
+    // The db-backed identity resolver: account_repo resolves users, api_key_repo
+    // resolves key ownership, and agent_repo resolves agent callers.
+    notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
+    let account_repo = notegate_db::AccountRepo::with_crypto_and_default_user_tier(
+        pool.clone(),
+        pii_crypto.clone(),
+        config.default_user_tier,
+    );
+    let agent_repo = notegate_db::AgentRepo::new(pool.clone());
+    let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
+        pool.clone(),
+        pii_crypto.lookup_key_id(),
+        pii_crypto.version(),
+    );
+    let resolver = notegate_service::identity::Resolver::new(
+        account_repo,
+        agent_repo,
+        api_key_repo,
+        pii_crypto.clone(),
+    );
     let config = std::sync::Arc::new(config);
-    let jwks = std::sync::Arc::new(auth::jwks::JwksCache::new(
-        jwks_url,
-        config.authgate_url.clone(),
-        config.resource_url.clone(),
-        config.jwks_cache_ttl,
-        http.clone(),
-    ));
+    let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));
     let state = AppState::new(
         pool.clone(),
         config.clone(),
-        jwks,
+        jwt,
         oidc,
         std::sync::Arc::new(resolver),
         http,
+        pii_crypto,
     );
 
     let listener = TcpListener::bind(bind_addr).await?;
     info!(event = "server.listening", addr = %bind_addr);
+
+    let purge_shutdown_token = CancellationToken::new();
+    let purge_worker = purge_worker::spawn(pool.clone(), purge_shutdown_token.clone());
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -82,11 +117,16 @@ async fn main() -> anyhow::Result<()> {
 
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
+    purge_shutdown_token.cancel();
 
     let server_result = match server_result {
         Some(result) => result,
         None => server.await,
     };
+
+    if let Err(error) = purge_worker.await {
+        tracing::error!(event = "purge_worker.join_failed", %error);
+    }
 
     // Drain the connection pool before exiting so in-flight queries finish.
     pool.close().await;

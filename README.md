@@ -1,7 +1,7 @@
 # notegate
 
-Monorepo: a Rust backend (Axum + Tokio + sqlx + PostgreSQL) with a Next.js
-frontend to follow.
+A Rust backend (Axum + Tokio + sqlx + PostgreSQL) for notegate, a personal
+Markdown file-tree notes service authenticated through authgate.
 
 ## Layout
 
@@ -10,13 +10,13 @@ notegate/
 ├─ Cargo.toml              # workspace root (shared deps, lints, profiles)
 ├─ rust-toolchain.toml     # pinned to Rust 1.95.0
 ├─ backend/crates/
-│  ├─ api/                 # bin: Axum server, routes, HTTP errors
-│  ├─ domain/              # pure business logic (no HTTP / no sqlx)
-│  ├─ db/                  # sqlx pool + migrations
-│  └─ core/                # config + shared error type
+│  ├─ api/                 # bin: Axum server, routes, HTTP/MCP surfaces
+│  ├─ service/             # business logic and command semantics
+│  ├─ db/                  # sqlx pool, repositories, migrations
+│  ├─ model/               # shared domain data types
+│  └─ core/                # config, limits, validation, shared error type
 ├─ backend/Dockerfile      # cargo-chef multi-stage, non-root Debian runtime
-├─ docker-compose.yml      # postgres + api (hardened)
-└─ frontend/               # Next.js (later)
+└─ docker-compose.yml      # postgres + scaled api + proxy
 ```
 
 ## Local development
@@ -36,19 +36,22 @@ Health checks:
 
 ```sh
 curl localhost:9191/health   # liveness
-curl localhost:9191/ready    # readiness (pings the database)
+curl localhost:9191/ready    # readiness (database + applied migrations)
 ```
 
 Auth/MCP local defaults are configured in `.env.example`:
 
 - `NOTEGATE_AUTHGATE_URL=https://authgate.project-jelly.io`
 - `NOTEGATE_PUBLIC_URL=http://localhost:9191` (builds first-time `login_url`)
-- `NOTEGATE_OAUTH_CLIENT_ID=notegate-web`
-- `NOTEGATE_OAUTH_REDIRECT_URL=http://localhost:9191/callback`
+- `NOTEGATE_OAUTH_CLIENT_ID=notegate-web` (browser OAuth client)
+- `NOTEGATE_MCP_OAUTH_CLIENT_ID=notegate-mcp` (MCP OAuth client)
+- `NOTEGATE_OAUTH_REDIRECT_URL=http://localhost:9191/auth/callback`
 - `NOTEGATE_RESOURCE_URL=http://localhost:9191/mcp` (MCP URL/audience)
+- `NOTEGATE_ENC_ROOT_SECRET` and `NOTEGATE_LOOKUP_ROOT_SECRET` must be at least 32 bytes. The LOOKUP root derives browser session/API-key HMAC keys.
 
-First-time MCP users must open `${NOTEGATE_PUBLIC_URL}/login` once to create the
-local notegate user row, then reconnect the MCP client to `NOTEGATE_RESOURCE_URL`.
+First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login` once to create the local notegate user row, then reconnect the MCP client to `NOTEGATE_RESOURCE_URL`. MCP OAuth clients must request the advertised `resource` and use the registered `notegate-mcp` public client.
+
+On startup, the API idempotently ensures missing active ENC/LOOKUP key epoch rows from the configured root key IDs/secrets, then verifies them. If the database already has a different active key for a domain, startup fails; rotation is not automatic.
 
 ## Checks
 
@@ -63,3 +66,10 @@ cargo test
 ```sh
 docker compose up --build
 ```
+
+Brings up Postgres + two API replicas behind a local nginx proxy:
+
+- `proxy` -> `http://localhost:9191`
+- `api` -> `scale: 2`, exposed only inside the compose network
+
+Both API replicas use the same `notegate-api` image and run the purge worker. Postgres advisory locking guarantees only one active purge transaction per database. Browser OAuth and MCP use the canonical `http://localhost:9191` public URL through the proxy.

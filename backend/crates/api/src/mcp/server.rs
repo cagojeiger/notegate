@@ -15,33 +15,135 @@ use axum::http::request::Parts;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::tool::Extension;
-use rmcp::model::{Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{Implementation, JsonObject, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData, Json, ServerHandler, tool, tool_handler, tool_router};
+use serde_json::Value;
+use url::Url;
 
+use notegate_model::Channel;
+
+use crate::auth::api_key::verify_api_key;
 use crate::auth::bearer::{
-    AuthError, auth_error_body, extract_bearer, shared_challenge_header, status_for_error,
+    AuthError, auth_error_body, extract_bearer, shared_scoped_challenge_header, status_for_error,
     verify_bearer_mcp,
 };
 use crate::identity::me::MeOutput;
+use crate::mcp::tools;
 use crate::state::AppState;
 
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
+
+/// A permissive `{"type":"object"}` output schema for the path-first file tools.
+///
+/// Those tools return dynamic JSON objects (`Json<Value>`); rmcp 1.7 cannot
+/// derive a valid MCP `outputSchema` from `serde_json::Value` (the spec requires
+/// the schema root to be `type: object`, and `Value`'s schema has no root type),
+/// and it panics at tool-list/call time if we let it try. Supplying this
+/// object-typed schema satisfies the spec while keeping the concrete fields
+/// dynamic. The typed `me` tool keeps its derived schema.
+fn object_output_schema() -> Arc<JsonObject> {
+    let mut schema = JsonObject::new();
+    schema.insert("type".to_owned(), Value::String("object".to_owned()));
+    Arc::new(schema)
+}
+
+/// The MCP server handler. Holds a clone of the shared [`AppState`] so each
+/// path-first tool can call the same services REST uses; the authenticated
+/// [`Caller`](notegate_model::Caller) is read per-request from the HTTP
+/// `Parts` the auth wrapper inserts.
 #[derive(Clone)]
-pub struct McpServer;
+pub struct McpServer {
+    state: AppState,
+}
 
 #[tool_router]
 impl McpServer {
-    pub fn new() -> Self {
-        Self
+    pub fn new(state: AppState) -> Self {
+        Self { state }
     }
 
-    #[tool(name = "me", description = "Return the authenticated caller identity.")]
+    #[tool(
+        name = "me",
+        description = "Show who is calling notegate and what this caller can generally do."
+    )]
     pub async fn me_tool(
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<Json<MeOutput>, ErrorData> {
-        crate::mcp::tools::me::call(&parts)
+        tools::identity::call(&parts)
+    }
+
+    #[tool(
+        name = "read",
+        description = "Read Notegate spaces, folders, nodes, and plain text. Read-only. Use op=spaces/ls/tree/stat/read.",
+        annotations(title = "Read Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn read_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::ReadInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::read(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "search",
+        description = "Search Notegate node names and plain text. Read-only. Use op=find or op=grep.",
+        annotations(title = "Search Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn search_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::SearchInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::search(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "write",
+        description = "Create or modify plain text content. Use op=write/append/patch/edit. Does not move or delete nodes.",
+        annotations(title = "Write Notegate", read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn write_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::WriteInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::write(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "manage",
+        description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. MCP cannot create spaces.",
+        annotations(title = "Manage Notegate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn manage_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::ManageInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::manage(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "run_sequence",
+        description = "Run an ordered command sequence. Each command is committed independently; execution stops on first failure and completed commands are not rolled back.",
+        annotations(title = "Run Notegate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        output_schema = object_output_schema()
+    )]
+    pub async fn run_sequence_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::RunSequenceInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        tools::unified::run_sequence(&self.state, &parts, params).await
     }
 }
 
@@ -53,7 +155,7 @@ impl ServerHandler for McpServer {
             .with_server_info(
                 Implementation::new("notegate", env!("CARGO_PKG_VERSION")).with_title("notegate"),
             )
-            .with_instructions("Identity tools for notegate.")
+            .with_instructions(MCP_SERVER_INSTRUCTIONS)
     }
 }
 
@@ -62,9 +164,18 @@ pub async fn mcp_handler(State(state): State<AppState>, mut request: Request<Bod
     let Some(token) = extract_bearer(&parts.headers).map(str::to_owned) else {
         return mcp_auth_response(&state, AuthError::MissingToken);
     };
-    let caller = match verify_bearer_mcp(&state, &token).await {
-        Ok(caller) => caller,
-        Err(error) => return mcp_auth_response(&state, error),
+    // MCP is bearer-only: prefixed notegate API key → user/agent, otherwise
+    // OAuth bearer JWT → user.
+    let caller = if notegate_service::api_keys::looks_like_token(&token) {
+        match verify_api_key(&state, &token, Channel::Mcp).await {
+            Ok(caller) => caller,
+            Err(error) => return mcp_auth_response(&state, error),
+        }
+    } else {
+        match verify_bearer_mcp(&state, &token).await {
+            Ok(caller) => caller,
+            Err(error) => return mcp_auth_response(&state, error),
+        }
     };
     parts.extensions.insert(caller);
     request = Request::from_parts(parts, body);
@@ -72,11 +183,42 @@ pub async fn mcp_handler(State(state): State<AppState>, mut request: Request<Bod
     let config = StreamableHttpServerConfig::default()
         .with_stateful_mode(false)
         .with_json_response(true)
-        .disable_allowed_hosts();
+        .with_allowed_hosts(allowed_mcp_hosts(&state));
     let manager = Arc::new(NeverSessionManager::default());
-    let service = StreamableHttpService::new(|| Ok(McpServer::new()), manager, config);
+    let server_state = state.clone();
+    let service = StreamableHttpService::new(
+        move || Ok(McpServer::new(server_state.clone())),
+        manager,
+        config,
+    );
     let response = service.handle(request).await;
     response.map(Body::new).into_response()
+}
+
+fn allowed_mcp_hosts(state: &AppState) -> Vec<String> {
+    let mut hosts = vec![
+        "localhost".to_owned(),
+        "127.0.0.1".to_owned(),
+        "::1".to_owned(),
+    ];
+    push_url_host(&mut hosts, &state.config.notegate_public_url);
+    push_url_host(&mut hosts, &state.config.resource_url);
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+fn push_url_host(hosts: &mut Vec<String>, raw_url: &str) {
+    let Ok(url) = Url::parse(raw_url) else {
+        return;
+    };
+    let Some(host) = url.host_str() else {
+        return;
+    };
+    hosts.push(host.to_owned());
+    if let Some(port) = url.port() {
+        hosts.push(format!("{host}:{port}"));
+    }
 }
 
 fn mcp_auth_response(state: &AppState, error: AuthError) -> Response {
@@ -86,8 +228,146 @@ fn mcp_auth_response(state: &AppState, error: AuthError) -> Response {
     if status == StatusCode::UNAUTHORIZED {
         response.headers_mut().insert(
             WWW_AUTHENTICATE,
-            shared_challenge_header(&state.config.resource_url),
+            shared_scoped_challenge_header(&state.config.resource_url),
         );
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_in_result
+    )]
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// Building the tool router materializes every tool's input/output schema —
+    /// the same path rmcp runs when answering `tools/list`. Before the fix, the
+    /// `Json<Value>` file tools panicked here because rmcp cannot derive a valid
+    /// MCP `outputSchema` (root `type: object`) from `serde_json::Value`. This
+    /// test fails (panics) on regression and asserts every advertised
+    /// `outputSchema` is an object, without needing a DB or auth token.
+    #[test]
+    fn every_tool_output_schema_is_a_valid_object() {
+        let router = McpServer::tool_router();
+        let tools = router.list_all();
+        let tool_names: BTreeSet<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
+        let expected_tool_names = expected_tool_names();
+        assert_eq!(tool_names, expected_tool_names);
+
+        for tool in &tools {
+            if let Some(schema) = &tool.output_schema {
+                assert_eq!(
+                    schema.get("type").and_then(Value::as_str),
+                    Some("object"),
+                    "tool `{}` outputSchema root must be type=object",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_tool_input_schema_matches_contract_fields() {
+        let router = McpServer::tool_router();
+        let tools: BTreeMap<_, _> = router
+            .list_all()
+            .into_iter()
+            .map(|tool| (tool.name.to_string(), tool))
+            .collect();
+
+        assert_eq!(
+            tools.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+            expected_tool_names()
+        );
+
+        for (tool_name, properties, required) in [
+            ("me", "", ""),
+            (
+                "read",
+                "op target name depth limit cursor start_line max_lines max_bytes if_none_match_sha256",
+                "op",
+            ),
+            (
+                "search",
+                "op target q kind match lines include exclude limit cursor",
+                "op target q",
+            ),
+            (
+                "write",
+                "op target content edits create ensure_newline expected_sha256",
+                "op target",
+            ),
+            (
+                "manage",
+                "op target source destination parents recursive",
+                "op",
+            ),
+            ("run_sequence", "commands", "commands"),
+        ] {
+            assert_input_properties(&tools, tool_name, properties);
+            assert_required_properties(&tools, tool_name, required);
+        }
+    }
+
+    #[test]
+    fn server_instructions_describe_all_mcp_categories() {
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("run_sequence"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("cannot create"));
+    }
+
+    fn expected_tool_names() -> BTreeSet<&'static str> {
+        BTreeSet::from(["me", "read", "search", "write", "manage", "run_sequence"])
+    }
+
+    fn assert_input_properties(
+        tools: &BTreeMap<String, rmcp::model::Tool>,
+        tool_name: &str,
+        expected: &str,
+    ) {
+        let tool = tools.get(tool_name).expect("tool exists");
+        let properties = tool
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("input schema properties object");
+        for property in expected.split_whitespace() {
+            assert!(
+                properties.contains_key(property),
+                "tool `{tool_name}` input schema missing property `{property}`"
+            );
+        }
+    }
+
+    fn assert_required_properties(
+        tools: &BTreeMap<String, rmcp::model::Tool>,
+        tool_name: &str,
+        expected: &str,
+    ) {
+        let tool = tools.get(tool_name).expect("tool exists");
+        let required: BTreeSet<_> = tool
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        for property in expected.split_whitespace() {
+            assert!(
+                required.contains(property),
+                "tool `{tool_name}` input schema should require `{property}`"
+            );
+        }
+    }
 }

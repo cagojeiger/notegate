@@ -2,16 +2,18 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
-use notegate_domain::{IdentityError, ResolveAttrs};
+use axum_extra::extract::cookie::Cookie;
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
 
 use crate::auth::oauth_exchange::exchange_code_for_userinfo;
 use crate::auth::oauth_flow::{
     LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE, clear_flow_cookies, flow_cookie,
-    new_login_flow,
+    hardened_cookie, new_login_flow,
 };
 use crate::auth::page::html_page;
+use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
+use crate::identity::{IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -148,17 +150,42 @@ pub async fn callback(
         email: userinfo.email.unwrap_or_default(),
         name: userinfo.name.unwrap_or_default(),
     };
-    match state.resolver.resolve_browser(attrs.clone()).await {
+    let session_sub = attrs.sub.clone();
+    match state.resolver.resolve_browser(attrs).await {
         Ok(_caller) => {
-            let body = format!(
-                "You're registered, sub={}. Reconnect your MCP client to {}.",
-                attrs.sub, state.config.resource_url
-            );
-            (jar, html_page(StatusCode::OK, "Login complete", &body)).into_response()
+            let session = match create_browser_session(&state, &session_sub) {
+                Ok(session) => session,
+                Err(error) => {
+                    tracing::error!(event = "oauth.session_failed", %error);
+                    return (
+                        jar,
+                        html_page(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Login error",
+                            "internal error",
+                        ),
+                    )
+                        .into_response();
+                }
+            };
+            (
+                jar.add(browser_session_cookie(&state, session)),
+                Redirect::to("/auth/success"),
+            )
+                .into_response()
         }
         Err(IdentityError::Inactive) => (
             jar,
             html_page(StatusCode::FORBIDDEN, "Login forbidden", "user is inactive"),
+        )
+            .into_response(),
+        Err(IdentityError::InvalidInput) => (
+            jar,
+            html_page(
+                StatusCode::BAD_REQUEST,
+                "Login error",
+                "identity attributes exceed notegate limits",
+            ),
         )
             .into_response(),
         Err(error) => {
@@ -174,4 +201,33 @@ pub async fn callback(
                 .into_response()
         }
     }
+}
+
+pub async fn success() -> Response {
+    html_page(
+        StatusCode::OK,
+        "Login complete",
+        "Login complete. You can close this tab and reconnect your MCP client.",
+    )
+}
+
+pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {
+    (
+        jar.add(expired_browser_session_cookie(state.config.secure_cookies)),
+        Redirect::to("/"),
+    )
+        .into_response()
+}
+
+fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
+    hardened_cookie(
+        BROWSER_SESSION_COOKIE,
+        value,
+        state.config.browser_session_ttl.as_secs() as i64,
+        state.config.secure_cookies,
+    )
+}
+
+fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
+    hardened_cookie(BROWSER_SESSION_COOKIE, String::new(), 0, secure)
 }

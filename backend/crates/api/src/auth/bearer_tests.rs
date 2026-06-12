@@ -1,26 +1,37 @@
-use std::collections::HashMap;
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_in_result
+)]
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
+use axum::http::header::{CONTENT_TYPE, WWW_AUTHENTICATE};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, encode};
-use notegate_domain::{Caller, Channel, IdentityError, ResolveAttrs, User};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use notegate_model::account::{Account, AccountKind};
+use notegate_model::{Caller, CallerIdentity, Channel, User};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-use crate::auth::jwks::JwksCache;
-use crate::identity::CallerResolver;
+use crate::auth::jwt::JwtAuthority;
+use crate::identity::{CallerResolver, IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
 use crate::auth::bearer::{AuthError, verify_bearer};
+use crate::auth::session::{
+    BROWSER_SESSION_COOKIE, create_browser_session, verify_browser_session,
+};
 
 const KEY: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCx8TUdJX0WeXTQ
@@ -51,16 +62,6 @@ lq0mdqBAHuT8W8E2jRw9CejdITWxllSS0L8xhhSv5JMJ+3CUmpbsWP1X6ByQmF/E
 EmW0T9kajxWyy7ochOgNdA==
 -----END PRIVATE KEY-----"#;
 
-const PUB_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsfE1HSV9Fnl00COG8SPE
-tPGOMa95P4XMhpsnSV4lbfoUFyuAjPUc/uFtkmH2s3VoNKdYdHsi/PNycvS5sX0L
-OOE9Zon7OwmZZvIocZmY97p7BUAAO4XfXxh8MDW1UKzBswG+7TVekRKAbPNNKUjJ
-egbWtFYErU/7WlF8CrCX5ebDfyjkuGUH+bYRRnRd10pX/PTIQ6159FdJ6R9wgNIk
-0gRNRHsWEdlV+AxhPAmYXPWFNvYpDtiNlCi3anCp8kTlWzLKKeJdWBHzr3xuByUG
-XLcfCIoVsBd+SXtpS62E2pkt8D8OitcxcE9/8DZcXB7Z+TIj544uAY3XaPTmeKPc
-dwIDAQAB
------END PUBLIC KEY-----"#;
-
 #[derive(Debug, Serialize)]
 struct TestClaims {
     sub: String,
@@ -87,7 +88,23 @@ impl CallerResolver for TestResolver {
         &self,
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        self.resolve_api(attrs)
+        Box::pin(async move { self.resolve(attrs, Channel::Browser) })
+    }
+
+    fn resolve_browser_session(
+        &self,
+        sub: String,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        Box::pin(async move {
+            self.resolve(
+                ResolveAttrs {
+                    sub,
+                    email: String::new(),
+                    name: String::new(),
+                },
+                Channel::Browser,
+            )
+        })
     }
 
     fn resolve_api(
@@ -103,6 +120,16 @@ impl CallerResolver for TestResolver {
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move { self.resolve(attrs, Channel::Mcp) })
     }
+
+    fn resolve_api_key(
+        &self,
+        _token: String,
+        _channel: Channel,
+    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
+        // The bearer test harness only exercises the JWT/cookie paths; an
+        // An unrecognized notegate API key resolves to nothing.
+        Box::pin(async { Err(IdentityError::NotRegistered) })
+    }
 }
 
 impl TestResolver {
@@ -110,33 +137,44 @@ impl TestResolver {
         match self.mode {
             ResolverMode::Missing => Err(IdentityError::NotRegistered),
             ResolverMode::Registered(active) if !active => Err(IdentityError::Inactive),
-            ResolverMode::Registered(_active) => Ok(Caller {
-                user: test_user(attrs),
-                channel,
-            }),
+            ResolverMode::Registered(_active) => Ok(test_caller(attrs, channel)),
         }
     }
 }
 
-fn test_user(attrs: ResolveAttrs) -> User {
+fn test_caller(attrs: ResolveAttrs, channel: Channel) -> Caller {
     let now = Utc::now();
-    User {
+    let account = Account {
         id: Uuid::nil(),
-        sub: attrs.sub,
-        email: attrs.email,
+        kind: AccountKind::User,
         display_name: attrs.name,
         is_active: true,
+        deleted_at: None,
+        deleted_by: None,
         created_at: now,
         updated_at: now,
+    };
+    let user = User {
+        id: Uuid::nil(),
+        email: Some(attrs.email),
+        tier: "tier0".to_owned(),
+        anonymized_at: None,
+    };
+    Caller {
+        account,
+        identity: CallerIdentity::User(user),
+        channel,
     }
 }
 
 fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
-    let mut keys = HashMap::new();
-    keys.insert(
-        "kid-1".to_owned(),
-        DecodingKey::from_rsa_pem(PUB_KEY.as_bytes())?,
-    );
+    state_with_resource(mode, "https://api.example.test")
+}
+
+fn state_with_resource(
+    mode: ResolverMode,
+    resource_url: &str,
+) -> Result<AppState, Box<dyn std::error::Error>> {
     let pool =
         PgPoolOptions::new().connect_lazy("postgres://notegate:notegate@localhost/notegate")?;
     let config = Arc::new(notegate_core::Config {
@@ -145,28 +183,46 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
         db_max_connections: 1,
         authgate_url: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
-        oauth_client_id: "client".to_owned(),
-        oauth_redirect_url: "http://localhost:9191/callback".to_owned(),
-        resource_url: "https://api.example.test".to_owned(),
+        oauth_client_id: "notegate-web".to_owned(),
+        mcp_oauth_client_id: "notegate-mcp".to_owned(),
+        oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
+        resource_url: resource_url.to_owned(),
         jwks_cache_ttl: Duration::from_secs(300),
+        enc_root_key_id: "test-enc".to_owned(),
+        enc_root_secret: secrecy::SecretString::from(
+            "test-enc-root-secret-32-bytes-long".to_owned(),
+        ),
+        lookup_root_key_id: "test-lookup".to_owned(),
+        lookup_root_secret: secrecy::SecretString::from(
+            "test-lookup-root-secret-32-bytes-long".to_owned(),
+        ),
+        lookup_verify_0_key_id: None,
+        lookup_verify_0_secret: None,
+        browser_session_ttl: Duration::from_secs(3600),
+        openapi_enabled: false,
+        default_user_tier: notegate_core::tier::UserTier::DEFAULT,
+        limits: notegate_core::limits::Limits::default(),
         secure_cookies: false,
     });
-    let jwks = Arc::new(JwksCache::with_keys(
-        config.authgate_url.clone(),
-        config.resource_url.clone(),
-        keys,
-    ));
+    let jwt = Arc::new(JwtAuthority::from_jwks(&config, aliri_jwks()?));
     let oidc = Arc::new(crate::auth::oidc::OidcProvider::new(
         &config,
         reqwest::Client::new(),
     ));
     Ok(AppState::new(
         pool,
-        config,
-        jwks,
+        config.clone(),
+        jwt,
         oidc,
         Arc::new(TestResolver { mode }),
         reqwest::Client::new(),
+        notegate_core::security::PiiCrypto::from_root_secrets(
+            config.enc_root_key_id.clone(),
+            &config.enc_root_secret,
+            config.lookup_root_key_id.clone(),
+            &config.lookup_root_secret,
+        )
+        .expect("derive test crypto"),
     ))
 }
 
@@ -216,7 +272,10 @@ async fn verify_accepts_valid_token() -> Result<(), Box<dyn std::error::Error>> 
         "kid-1",
     )?;
     let caller = verify_bearer(&state, &token).await?;
-    assert_eq!(caller.user.sub, "sub-1");
+    assert_eq!(
+        caller.user().and_then(|user| user.email.as_deref()),
+        Some("user@example.test")
+    );
     Ok(())
 }
 
@@ -276,7 +335,10 @@ async fn verify_accepts_aud_array_and_trailing_slash() -> Result<(), Box<dyn std
         "kid-1",
     )?;
     let caller = verify_bearer(&state, &token).await?;
-    assert_eq!(caller.user.sub, "sub-1");
+    assert_eq!(
+        caller.user().and_then(|user| user.email.as_deref()),
+        Some("user@example.test")
+    );
     Ok(())
 }
 
@@ -334,6 +396,125 @@ async fn api_routes_accept_valid_bearer() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[tokio::test]
+async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+    let app = crate::routes::app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_cookie_mutation_requires_same_origin_header() -> Result<(), Box<dyn std::error::Error>>
+{
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+    let app = crate::routes::app(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/missing")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/missing")
+                .header("origin", "http://localhost:9191")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    Ok(())
+}
+
+#[tokio::test]
+async fn bearer_mutation_does_not_require_browser_origin() -> Result<(), Box<dyn std::error::Error>>
+{
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let valid = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("https://api.example.test"),
+        future_exp(),
+        "kid-1",
+    )?;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/missing")
+                .header("authorization", format!("Bearer {valid}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_json_error(response, "not_found", "api route not found").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn browser_session_resolves_browser_channel() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+
+    let caller = verify_browser_session(&state, &session).await?;
+
+    assert_eq!(caller.channel, Channel::Browser);
+    assert!(caller.user().is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?;
+    let session = create_browser_session(&state, "sub-cookie")?;
+    let app = crate::routes::app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let challenge = response
+        .headers()
+        .get(WWW_AUTHENTICATE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(challenge.contains("resource_metadata="));
+    assert!(challenge.contains("/.well-known/oauth-protected-resource/mcp"));
+    assert!(challenge.contains("scope=\"openid offline_access\""));
+    Ok(())
+}
+
+#[tokio::test]
 async fn unknown_api_routes_still_require_bearer() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
@@ -348,15 +529,99 @@ async fn unknown_api_routes_still_require_bearer() -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+async fn assert_json_error(
+    response: axum::response::Response,
+    kind: &str,
+    message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json; charset=utf-8")
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await?;
+    let value: Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["error"], kind);
+    assert_eq!(value["kind"], kind);
+    assert_eq!(value["message"], message);
+    Ok(())
+}
+
 #[tokio::test]
 async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?);
     let response = app
+        .clone()
         .oneshot(Request::builder().uri("/health").body(Body::empty())?)
         .await?;
-
     assert_eq!(response.status(), StatusCode::OK);
+
+    for path in ["/auth/success"] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let logout_get = app
+        .clone()
+        .oneshot(Request::builder().uri("/auth/logout").body(Body::empty())?)
+        .await?;
+    assert_eq!(logout_get.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    let logout_post = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(logout_post.status(), StatusCode::SEE_OTHER);
+
+    for path in [
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-protected-resource/mcp/tools",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json; charset=utf-8")
+        );
+    }
     Ok(())
+}
+
+fn aliri_jwks() -> Result<aliri::Jwks, Box<dyn std::error::Error>> {
+    use base64::Engine as _;
+
+    let n = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(
+        "sfE1HSV9Fnl00COG8SPEtPGOMa95P4XMhpsnSV4lbfoUFyuAjPUc_uFtkmH2s3VoNKdYdHsi_PNycvS5sX0LOOE9Zon7OwmZZvIocZmY97p7BUAAO4XfXxh8MDW1UKzBswG-7TVekRKAbPNNKUjJegbWtFYErU_7WlF8CrCX5ebDfyjkuGUH-bYRRnRd10pX_PTIQ6159FdJ6R9wgNIk0gRNRHsWEdlV-AxhPAmYXPWFNvYpDtiNlCi3anCp8kTlWzLKKeJdWBHzr3xuByUGXLcfCIoVsBd-SXtpS62E2pkt8D8OitcxcE9_8DZcXB7Z-TIj544uAY3XaPTmeKPcdw",
+    )?;
+    let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode("AQAB")?;
+    let rsa = aliri::jwa::Rsa::from_public_components(n, e)?;
+    let key = aliri::Jwk::from(rsa)
+        .with_algorithm(aliri::jwa::Algorithm::RS256)
+        .with_key_id(aliri::jwk::KeyId::from_static("kid-1"));
+    let mut jwks = aliri::Jwks::default();
+    jwks.add_key(key);
+    Ok(jwks)
 }
 
 fn alg_none_token() -> String {
