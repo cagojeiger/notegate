@@ -22,13 +22,27 @@ AppRoot
 | `AppRoot` | 앱 루트 | 인증 상태에 따라 `AuthScreen` 또는 `AppShell`을 렌더링하는 최상위 entry |
 | `AuthScreen` | 인증 화면 | 로그인, 로그인 성공, 인증 오류를 보여주는 독립 화면. `Workbench`를 포함하지 않는다 |
 | `AppShell` | 앱 셸 | 로그인 이후 대시보드 전체 화면의 최상위 레이아웃 컨테이너 |
-| `TitleBar` | 상단 바 | 앱 전역 action 영역. space 이름, command/search, account action을 둔다 |
+| `TitleBar` | 상단 바 | 앱 전역 action 영역. 제품 context와 레이아웃 제어를 둔다 |
 | `Workbench` | 작업대 | 사용자가 문서를 탐색하고 편집하는 주 작업 영역 |
-| `ActivityRail` | 액티비티 레일 | 좌측의 좁은 전역 rail. Space 목록을 스크롤로 표시하고 하단에 account/settings를 둔다 |
-| `PrimarySidebar` | 주 사이드바 | active space의 node tree와 recent list를 표시하는 좌측 사이드바 |
-| `EditorArea` | 에디터 영역 | 현재 열린 node의 주 작업 영역. tab, header, editor viewport를 포함한다 |
+| `ActivityRail` | 스페이스 레일 | 좌측의 좁은 전역 rail. Space 목록, Space 추가 진입점, settings 진입점을 둔다 |
+| `PrimarySidebar` | 주 사이드바 | active space의 node tree와 recent list를 표시하는 좌측 탐색 사이드바 |
+| `EditorArea` | 에디터 영역 | 현재 열린 node의 주 작업 영역. 하나 이상의 `EditorGroup`을 포함한다 |
+| `EditorGroup` | 에디터 그룹 | `EditorArea` 안의 독립 pane. 각 group은 열린 node와 preview/edit mode를 따로 가지며 최대 3개까지 나란히 열린다 |
 | `AuxiliarySidebar` | 보조 사이드바 | 우측 보조 영역. Inspector, Agent, References 같은 contextual view를 표시한다 |
-| `StatusBar` | 상태 바 | 앱 하단 상태 표시줄. 저장 상태, 동기화 상태, 현재 경로, agent 상태를 표시한다 |
+| `StatusBar` | 상태 바 | 앱 하단 상태 표시줄. 저장 상태, 동기화 상태, 현재 경로, agent 상태를 짧게 표시한다 |
+
+## Structural terms
+
+| 표준명 | 의미 |
+|---|---|
+| `SpaceRailList` | `ActivityRail` 안에서 접근 가능한 Space 목록을 보여주는 스크롤 영역 |
+| `SpaceAddButton` | Space 생성 화면으로 진입하는 고정 action. `SpaceRailList` 바로 아래에 둔다 |
+| `RailFooter` | `ActivityRail` 하단의 고정 action 영역. Settings 진입점을 둔다 |
+| `TreeSection` | `PrimarySidebar` 안에서 folder/text/file 계층을 보여주는 section |
+| `RecentSection` | `PrimarySidebar` 안에서 최근 수정된 node를 보여주는 section |
+| `EditorGroupHeader` | 각 `EditorGroup`의 상단 header. node identity와 group action을 담는다 |
+| `EditorViewport` | 각 `EditorGroup`의 실제 preview/editor/file view 영역 |
+| `EditorInfoBar` | 각 `EditorGroup` 하단에서 node path, byte/line count, updated_at 같은 부수 정보를 표시하는 얇은 정보 바 |
 
 ## View terms
 
@@ -49,7 +63,8 @@ AppRoot
 - view 이름은 실제로 보여주는 내용을 나타낸다.
 - `PrimarySidebar` 안에 `NodeTreeView`가 들어간다.
 - `AuxiliarySidebar` 안에 `InspectorPanel`, `AgentPanel`, `ReferencesPanel`이 들어간다.
-- `EditorArea` 안에 `TextEditor`, `MarkdownPreview`, `FilePreview`가 들어간다.
+- `EditorArea` 안에 하나 이상의 `EditorGroup`이 들어가고, 각 `EditorGroup` 안에 `EditorGroupHeader`와 `EditorViewport`가 들어간다.
+- `EditorViewport` 안에는 node 종류와 mode에 따라 `TextEditor`, `MarkdownPreview`, `FilePreview`가 들어간다.
 - 오른쪽 전체 영역은 `AuxiliarySidebar`라고 부른다. `AgentPanel`은 그 안의 view 중 하나다.
 
 ## Avoided names
