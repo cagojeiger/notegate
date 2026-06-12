@@ -1,4 +1,4 @@
-//! Search MCP tools (`docs/spec/mcp/search.md`).
+//! Internal search handlers used by the unified MCP `search` tool.
 
 use axum::http::request::Parts;
 use notegate_model::NodeKind;
@@ -15,7 +15,7 @@ use super::resolve::{caller, invalid_input_error, node_summary, resolve_target, 
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `files_find` input.
+/// Internal find input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct FindInput {
     /// Folder scope in `<space>:/folder-path` form.
@@ -42,7 +42,7 @@ pub struct FindInput {
     pub cursor: Option<String>,
 }
 
-/// `files_grep` input.
+/// Internal grep input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct GrepInput {
     /// Folder scope in `<space>:/folder-path` form.

@@ -34,7 +34,7 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use path-first targets like `space:/path`. file tools are Unix-like: list/stat/mkdir/read/write/append/patch/mv/rm. search tools are find/grep. `write` replaces the whole text, `append` adds at EOF, and `patch` performs exact targeted replacements.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, and `manage` for mkdir/mv/cp/rm. Targets are `<space>:/absolute/path`. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -77,198 +77,59 @@ impl McpServer {
     }
 
     #[tool(
-        name = "spaces_list",
-        description = "List spaces this caller can access. Use this first when you do not know the space name.",
+        name = "read",
+        description = "Read Notegate spaces, folders, nodes, and plain text. Read-only. Use op=spaces/ls/tree/stat/read.",
+        annotations(title = "Read Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
-    pub async fn spaces_list_tool(
+    pub async fn read_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::spaces::ListInput>,
+        params: Parameters<tools::unified::UnifiedInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::spaces::list(&self.state, &parts, params).await
+        tools::unified::read(&self.state, &parts, params).await
     }
 
     #[tool(
-        name = "spaces_create",
-        description = "Create a new space. Only user callers can create spaces; agent callers cannot.",
+        name = "search",
+        description = "Search Notegate node names and plain text. Read-only. Use op=find or op=grep.",
+        annotations(title = "Search Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
-    pub async fn spaces_create_tool(
+    pub async fn search_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::spaces::CreateInput>,
+        params: Parameters<tools::unified::UnifiedInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::spaces::create(&self.state, &parts, params).await
+        tools::unified::search(&self.state, &parts, params).await
     }
 
     #[tool(
-        name = "files_list",
-        description = "List folder contents. Default `depth=1` is like `ls`; larger depth returns tree-style subtree items.",
+        name = "write",
+        description = "Create or modify plain text content. Use op=write/append/patch/edit. Does not move or delete nodes.",
+        annotations(title = "Write Notegate", read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
-    pub async fn files_list_tool(
+    pub async fn write_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::ListInput>,
+        params: Parameters<tools::unified::UnifiedInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files::list(&self.state, &parts, params).await
+        tools::unified::write(&self.state, &parts, params).await
     }
 
     #[tool(
-        name = "files_stat",
-        description = "Show metadata and size/hash stats for a folder, text, or file path, like `stat`.",
+        name = "manage",
+        description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. MCP cannot create spaces.",
+        annotations(title = "Manage Notegate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
-    pub async fn files_stat_tool(
+    pub async fn manage_tool(
         &self,
         Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::StatInput>,
+        params: Parameters<tools::unified::UnifiedInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::files::stat(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_mkdir",
-        description = "Create a folder, like `mkdir`. Set `parents=true` for `mkdir -p` behavior.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_mkdir_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::MkdirInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::mkdir(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_read",
-        description = "Read plain text content. Supports line/byte ranges; encrypted text and binary files are not readable here.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_read_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::ReadInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::read(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_write",
-        description = "Replace the entire plain text content, like shell `>` redirection. Use files_append for EOF append.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_write_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::WriteInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::write(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_append",
-        description = "Append plain text content at EOF, like shell `>>` redirection. Use `ensure_newline` when appending a new line item.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_append_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::AppendInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::append(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_patch",
-        description = "Patch plain text by string replacement. Default mode is `unique`; explicit modes are `unique`, `first`, and `all`.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_patch_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::PatchInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::patch(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_edit",
-        description = "Edit plain text by 1-based line operations: insert_before_line, insert_after_line, replace_lines, delete_lines.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_edit_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::EditInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::edit(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_mv",
-        description = "Move or rename a node within the same space, like `mv`.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_mv_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::MvInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::mv(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_copy",
-        description = "Copy a node within the same space, like `cp`. Folders require `recursive=true`.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_copy_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::CopyInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::copy(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_rm",
-        description = "Soft delete a node, like `rm`. Folders require `recursive=true`.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_rm_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::files::RmInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::files::rm(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_find",
-        description = "Find folders, text nodes, and file nodes by name under a folder, like `find -name`.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_find_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::search::FindInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::search::find(&self.state, &parts, params).await
-    }
-
-    #[tool(
-        name = "files_grep",
-        description = "Find plain text nodes whose content matches a literal or regex, like `grep -rl`. Returns node candidates, not snippets.",
-        output_schema = object_output_schema()
-    )]
-    pub async fn files_grep_tool(
-        &self,
-        Extension(parts): Extension<Parts>,
-        params: Parameters<tools::search::GrepInput>,
-    ) -> Result<Json<Value>, ErrorData> {
-        tools::search::grep(&self.state, &parts, params).await
+        tools::unified::manage(&self.state, &parts, params).await
     }
 }
 
@@ -411,51 +272,13 @@ mod tests {
             expected_tool_names()
         );
 
+        let unified_properties = "op target source destination name q kind match lines include exclude content edits create parents recursive ensure_newline depth limit cursor start_line max_lines max_bytes expected_sha256 if_none_match_sha256";
         for (tool_name, properties, required) in [
             ("me", "", ""),
-            ("spaces_list", "name limit cursor", ""),
-            ("spaces_create", "name", "name"),
-            ("files_list", "target depth limit cursor", "target"),
-            ("files_stat", "target", "target"),
-            ("files_mkdir", "target parents", "target"),
-            (
-                "files_read",
-                "target start_line max_lines max_bytes if_none_match_sha256",
-                "target",
-            ),
-            (
-                "files_write",
-                "target content create expected_sha256",
-                "target content",
-            ),
-            (
-                "files_append",
-                "target content create ensure_newline expected_sha256",
-                "target content",
-            ),
-            (
-                "files_patch",
-                "target edits expected_sha256",
-                "target edits",
-            ),
-            ("files_edit", "target edits expected_sha256", "target edits"),
-            ("files_mv", "source destination", "source destination"),
-            (
-                "files_copy",
-                "source destination recursive",
-                "source destination",
-            ),
-            ("files_rm", "target recursive", "target"),
-            (
-                "files_find",
-                "target q kind match include exclude limit cursor",
-                "target q",
-            ),
-            (
-                "files_grep",
-                "target q match lines include exclude limit cursor",
-                "target q",
-            ),
+            ("read", unified_properties, "op"),
+            ("search", unified_properties, "op"),
+            ("write", unified_properties, "op"),
+            ("manage", unified_properties, "op"),
         ] {
             assert_input_properties(&tools, tool_name, properties);
             assert_required_properties(&tools, tool_name, required);
@@ -465,29 +288,15 @@ mod tests {
     #[test]
     fn server_instructions_describe_all_mcp_categories() {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("file"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("cannot create"));
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {
-        BTreeSet::from([
-            "me",
-            "spaces_list",
-            "spaces_create",
-            "files_list",
-            "files_stat",
-            "files_mkdir",
-            "files_read",
-            "files_write",
-            "files_append",
-            "files_patch",
-            "files_edit",
-            "files_mv",
-            "files_copy",
-            "files_rm",
-            "files_find",
-            "files_grep",
-        ])
+        BTreeSet::from(["me", "read", "search", "write", "manage"])
     }
 
     fn assert_input_properties(

@@ -1,4 +1,4 @@
-//! File MCP tools (`docs/spec/mcp/files.md`).
+//! Internal file operation handlers used by the unified MCP tools (`docs/spec/mcp/tools.md`).
 
 use axum::http::request::Parts;
 use notegate_model::{NodeKind, TextStorageFormat};
@@ -21,7 +21,7 @@ use super::resolve::{
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `files_list` input.
+/// Internal list input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ListInput {
     /// Folder target in `<space>:/<folder-path>` form, for example `notes:/projects`.
@@ -37,14 +37,14 @@ pub struct ListInput {
     pub cursor: Option<String>,
 }
 
-/// `files_stat` input.
+/// Internal stat input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct StatInput {
     /// Node target in `<space>:/path` form. Works for folders, text, and files.
     pub target: String,
 }
 
-/// `files_mkdir` input.
+/// Internal mkdir input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct MkdirInput {
     /// Folder path to create in `<space>:/folder-path` form.
@@ -54,7 +54,7 @@ pub struct MkdirInput {
     pub parents: bool,
 }
 
-/// `files_read` input.
+/// Internal text read input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ReadInput {
     /// Plain text target in `<space>:/text-path` form.
@@ -73,7 +73,7 @@ pub struct ReadInput {
     pub if_none_match_sha256: Option<String>,
 }
 
-/// `files_write` input.
+/// Internal text write input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct WriteInput {
     /// Plain text target in `<space>:/text-path` form.
@@ -88,7 +88,7 @@ pub struct WriteInput {
     pub expected_sha256: Option<String>,
 }
 
-/// `files_append` input.
+/// Internal text append input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AppendInput {
     /// Plain text target in `<space>:/text-path` form.
@@ -108,6 +108,7 @@ pub struct AppendInput {
 
 /// One exact replacement.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PatchEdit {
     /// The exact text to find (must match exactly once).
     pub old_text: String,
@@ -121,7 +122,7 @@ pub struct PatchEdit {
     pub expected_count: Option<usize>,
 }
 
-/// `files_patch` input.
+/// Internal text patch input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PatchInput {
     /// Plain text target in `<space>:/text-path` form.
@@ -135,6 +136,7 @@ pub struct PatchInput {
 
 /// One line-based edit.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LineEditInput {
     /// `insert_before_line`, `insert_after_line`, `replace_lines`, or `delete_lines`.
     pub op: String,
@@ -152,7 +154,7 @@ pub struct LineEditInput {
     pub content: Option<String>,
 }
 
-/// `files_edit` input.
+/// Internal line edit input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct EditInput {
     /// Plain text target in `<space>:/text-path` form.
@@ -164,7 +166,7 @@ pub struct EditInput {
     pub expected_sha256: Option<String>,
 }
 
-/// `files_mv` input.
+/// Internal move input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct MvInput {
     /// Source node target in `<space>:/path` form.
@@ -173,7 +175,7 @@ pub struct MvInput {
     pub destination: String,
 }
 
-/// `files_copy` input.
+/// Internal copy input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct CopyInput {
     /// Source node target in `<space>:/path` form.
@@ -185,7 +187,7 @@ pub struct CopyInput {
     pub recursive: bool,
 }
 
-/// `files_rm` input.
+/// Internal remove input.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RmInput {
     /// Node target in `<space>:/path` form.

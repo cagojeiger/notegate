@@ -2,7 +2,7 @@
 
 ## `me`
 
-Caller identity와 전역 capability를 반환한다. Space 목록은 `spaces_list`로 조회한다.
+Caller identity와 전역 capability를 반환한다. Space 목록은 `read` tool의 `op=spaces`로 조회한다.
 
 User caller:
 

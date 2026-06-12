@@ -94,7 +94,7 @@ type RestNode = {
 
 ## McpNodeSummary
 
-MCP `files_list`, `files_stat`, `files_find`와 mutation 결과가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
+MCP `read`, `search`, `write`, `manage` 결과가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.
 
 ```ts
 type McpNodeSummary = {
@@ -124,7 +124,7 @@ type McpNodeSummary = {
 
 ## McpGrepSummary
 
-`files_grep` item은 `McpNodeSummary`에 선택적 line match 정보를 더한다. `match_lines`는 `lines="first"` 또는 `lines="all"`일 때만 존재한다.
+`search op=grep` item은 `McpNodeSummary`에 선택적 line match 정보를 더한다. `match_lines`는 `lines="first"` 또는 `lines="all"`일 때만 존재한다.
 
 ```ts
 type McpGrepSummary = McpNodeSummary & {
@@ -134,7 +134,7 @@ type McpGrepSummary = McpNodeSummary & {
 
 ## Text read shapes
 
-REST Text read는 `{ node: NodeRef, text: ... }` envelope를 사용한다. MCP `files_read`는 path-first flat shape를 사용한다.
+REST Text read는 `{ node: NodeRef, text: ... }` envelope를 사용한다. MCP `read op=read`는 path-first flat shape를 사용한다.
 
 ```ts
 type RestTextReadResponse = {

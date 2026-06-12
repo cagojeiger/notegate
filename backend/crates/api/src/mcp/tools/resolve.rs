@@ -113,7 +113,7 @@ fn pick_space(accessible: Vec<SpaceView>, name: &str) -> Result<SpaceView, Error
 }
 
 /// Build the ambiguity error for a name that resolves to multiple accessible
-/// spaces, embedding the matches and a `spaces_list` hint in `data`.
+/// spaces, embedding the matches and a `read op=spaces` hint in `data`.
 fn ambiguity_error(name: &str, matches: &[SpaceView]) -> ErrorData {
     let spaces: Vec<_> = matches
         .iter()
@@ -131,7 +131,7 @@ fn ambiguity_error(name: &str, matches: &[SpaceView]) -> ErrorData {
             "code": "space_ambiguous",
             "space": name,
             "matches": spaces,
-            "hint": "rename spaces so MCP can select by name",
+            "hint": "rename spaces so MCP can select by name; use read op=spaces to inspect accessible spaces",
         })),
     )
 }
@@ -195,7 +195,7 @@ pub fn split_parent_name(path: &str) -> Result<(String, String), ErrorData> {
     Ok((parent, name.to_owned()))
 }
 
-/// The canonical space summary used by `spaces_list`.
+/// The canonical space summary used by `read op=spaces`.
 pub fn space_summary(view: &SpaceView) -> serde_json::Value {
     json!({
         "name": view.space.name,

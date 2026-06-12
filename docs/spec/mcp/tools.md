@@ -1,0 +1,109 @@
+# MCP tool contract
+
+## 공통 규칙
+
+- `me`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
+- 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
+- 이동/복사는 `source`와 `destination`을 사용한다.
+- 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
+- 페이지네이션은 `limit`과 `cursor`를 사용한다.
+- 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
+- MCP는 encrypted Text와 binary File content를 읽거나 수정하지 않는다.
+- MCP는 space create/delete/rename을 제공하지 않는다.
+
+## `me`
+
+Caller identity와 capability를 반환한다. Space 목록은 `read`의 `op=spaces`로 조회한다.
+
+## `read`
+
+Read-only tool이다.
+
+```ts
+type ReadInput = {
+  op: "spaces" | "ls" | "tree" | "stat" | "read"
+  target?: string
+  name?: string
+  depth?: number
+  limit?: number
+  cursor?: string
+  start_line?: number
+  max_lines?: number
+  max_bytes?: number
+  if_none_match_sha256?: string
+}
+```
+
+- `op=spaces`: 접근 가능한 Space 목록을 반환한다. `name`이 있으면 exact name으로 조회한다.
+- `op=ls`: `target` folder의 direct children을 반환한다.
+- `op=tree`: `target` folder의 subtree를 DFS pre-order로 반환한다. `depth` 생략 시 5를 사용한다.
+- `op=stat`: Folder/Text/File node summary를 반환한다.
+- `op=read`: plain Text content를 읽는다. line/byte range를 지원한다.
+
+## `search`
+
+Read-only search tool이다.
+
+```ts
+type SearchInput = {
+  op: "find" | "grep"
+  target: string
+  q: string
+  kind?: "folder" | "text" | "file"
+  match?: string
+  lines?: "none" | "first" | "all"
+  include?: string[]
+  exclude?: string[]
+  limit?: number
+  cursor?: string
+}
+```
+
+- `op=find`: node name을 검색한다. `match`는 `contains`(기본), `regex`, `glob`이다.
+- `op=grep`: plain Text content를 검색한다. `match`는 `literal`(기본), `regex`이다.
+- `include`/`exclude`는 결과 path에 적용하는 glob list다.
+- `grep lines=none|first|all`은 line number만 반환하고 snippet은 반환하지 않는다.
+- File, encrypted Text, metadata는 `grep` 대상이 아니다.
+
+Traversal, cursor, memory budget은 [`../search.md`](../search.md)를 따른다.
+
+## `write`
+
+Plain Text content를 생성하거나 수정한다. Folder 이동/삭제는 하지 않는다.
+
+```ts
+type WriteInput = {
+  op: "write" | "append" | "patch" | "edit"
+  target: string
+  content?: string
+  edits?: unknown[]
+  create?: boolean
+  ensure_newline?: boolean
+  expected_sha256?: string
+}
+```
+
+- `op=write`: 전체 content replacement다. 없으면 `create=true`가 필요하다.
+- `op=append`: EOF append다. `ensure_newline=true`이면 기존 content가 비어 있지 않고 newline으로 끝나지 않을 때 content 앞에 newline을 넣는다.
+- `op=patch`: string replacement다. edit entry는 `old_text`, `new_text`, optional `mode: "unique"|"first"|"all"`, optional `expected_count`를 가진다.
+- `op=edit`: 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다.
+
+## `manage`
+
+기존 Space 내부의 tree/location을 변경한다. Space lifecycle은 제공하지 않는다.
+
+```ts
+type ManageInput = {
+  op: "mkdir" | "mv" | "cp" | "rm"
+  target?: string
+  source?: string
+  destination?: string
+  parents?: boolean
+  recursive?: boolean
+}
+```
+
+- `op=mkdir`: `target` folder를 만든다. `parents=true`이면 `mkdir -p`처럼 missing parent를 생성한다.
+- `op=mv`: `source` node를 `destination`으로 이동/rename한다. 같은 Space 안에서만 가능하다.
+- `op=cp`: `source` node를 `destination`으로 복사한다. Folder copy는 `recursive=true`가 필요하다.
+- `op=rm`: `target` node를 soft-delete한다. Folder delete는 `recursive=true`가 필요하다.

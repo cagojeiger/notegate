@@ -1,7 +1,7 @@
-//! Space MCP tools (`docs/spec/mcp/spaces.md`).
+//! Internal space listing handler used by the unified MCP `read` tool.
 
 use axum::http::request::Parts;
-use notegate_service::spaces::{CreateSpace, ListSpaces};
+use notegate_service::spaces::ListSpaces;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
@@ -12,7 +12,7 @@ use super::resolve::{caller, resolve_space, service_error, space_summary};
 use super::support::page_json;
 use crate::state::AppState;
 
-/// `spaces_list` input.
+/// Internal space list input.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListInput {
     /// Optional exact space name filter. When set, returns at most one space.
@@ -21,16 +21,9 @@ pub struct ListInput {
     /// Page size. Defaults to 50 and is clamped by the service.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque cursor from the previous `spaces_list` page.
+    /// Opaque cursor from the previous spaces page.
     #[serde(default)]
     pub cursor: Option<String>,
-}
-
-/// `spaces_create` input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct CreateInput {
-    /// Human-friendly unique space name for path targets such as `<name>:/`.
-    pub name: String,
 }
 
 pub async fn list(
@@ -71,22 +64,4 @@ pub async fn list(
             page.next_cursor.as_deref(),
         ),
     })))
-}
-
-pub async fn create(
-    state: &AppState,
-    parts: &Parts,
-    Parameters(input): Parameters<CreateInput>,
-) -> Result<Json<Value>, ErrorData> {
-    let caller = caller(parts)?;
-    let view = state
-        .spaces
-        .create(
-            caller.account.kind,
-            caller.account_id(),
-            CreateSpace { name: input.name },
-        )
-        .await
-        .map_err(service_error)?;
-    Ok(Json(space_summary(&view)))
 }
