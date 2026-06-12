@@ -12,6 +12,7 @@ export default {
         border: "var(--ng-border)",
         "border-strong": "var(--ng-border-strong)",
         text: "var(--ng-text)",
+        "primary-contrast": "var(--ng-primary-contrast)",
         muted: "var(--ng-muted)",
         faint: "var(--ng-faint)",
         primary: "var(--ng-primary)",

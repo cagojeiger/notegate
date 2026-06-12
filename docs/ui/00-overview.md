@@ -10,7 +10,6 @@
 02-layout.md        AppShell/Workbench 레이아웃
 03-information.md   영역별 정보 배치
 04-flows.md         핵심 사용자 흐름
-05-screens.md       핵심 화면 wireframe
 06-visual.md        visual style guideline
 ```
 
@@ -19,7 +18,7 @@
 처음부터 시각 스타일을 만들지 않는다. 다음 순서로 결정한다.
 
 ```text
-용어 -> 레이아웃 -> 정보 구조 -> 사용자 흐름 -> 화면 -> visual style
+용어 -> 레이아웃 -> 정보 구조 -> 사용자 흐름 -> visual style
 ```
 
 ## Current baseline

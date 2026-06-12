@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light;
+  --font-ui: "Camera Plain Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --ng-bg: #f7f4ed;
+  --ng-surface: #fcfbf8;
+  --ng-panel: #f2efe7;
+  --ng-panel-strong: #e9e4d8;
+  --ng-border: #e3ded2;
+  --ng-border-strong: rgba(28, 28, 28, 0.22);
+  --ng-text: #1c1c1c;
+  --ng-muted: rgba(28, 28, 28, 0.58);
+  --ng-faint: rgba(28, 28, 28, 0.36);
+  --ng-primary: #1c1c1c;
+  --ng-primary-hover: rgba(28, 28, 28, 0.82);
+  --ng-primary-contrast: #fcfbf8;
+  --ng-success: #147a3d;
+  --ng-warning: #a15c07;
+  --ng-danger: #b42318;
+  --ng-focus-shadow: rgba(0, 0, 0, 0.1) 0 4px 12px;
+  --ng-inset-shadow: rgba(255, 255, 255, 0.2) 0 0.5px 0 inset, rgba(0, 0, 0, 0.2) 0 0 0 0.5px inset, rgba(0, 0, 0, 0.05) 0 1px 2px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ng-bg: #171512;
+  --ng-surface: #1f1c17;
+  --ng-panel: #27231d;
+  --ng-panel-strong: #332d25;
+  --ng-border: #3b352c;
+  --ng-border-strong: rgba(247, 244, 237, 0.24);
+  --ng-text: #f4efe6;
+  --ng-muted: rgba(244, 239, 230, 0.62);
+  --ng-faint: rgba(244, 239, 230, 0.38);
+  --ng-primary: #f4efe6;
+  --ng-primary-hover: rgba(244, 239, 230, 0.82);
+  --ng-primary-contrast: #171512;
+  --ng-success: #7bcf9b;
+  --ng-warning: #f2b766;
+  --ng-danger: #ff8a7a;
+  --ng-focus-shadow: rgba(0, 0, 0, 0.28) 0 4px 16px;
+  --ng-inset-shadow: rgba(255, 255, 255, 0.1) 0 0.5px 0 inset, rgba(0, 0, 0, 0.36) 0 0 0 0.5px inset, rgba(0, 0, 0, 0.18) 0 1px 2px;
+}

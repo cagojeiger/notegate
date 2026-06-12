@@ -26,7 +26,8 @@ test("dev API key dashboard supports space, text, metadata, and file basics", as
   await expect(page.locator("body")).toContainText(spaceName);
 
   dialogResponses.push(textName);
-  await page.getByRole("button", { name: "Text" }).click();
+  await page.getByLabel("Create node").click();
+  await page.getByRole("button", { name: "New text" }).first().click();
   await expect(page.locator("body")).toContainText(textName);
 
   await page.getByRole("button", { name: "Edit", exact: true }).click();
@@ -44,11 +45,16 @@ test("dev API key dashboard supports space, text, metadata, and file basics", as
   writeFileSync(uploadPath, "small upload from web smoke e2e\n");
 
   dialogResponses.push(fileName);
-  await page.locator('input[type="file"]').setInputFiles(uploadPath);
+  await page.getByLabel("Create node").click();
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.getByText("Upload file").click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(uploadPath);
   await expect(page.locator("body")).toContainText(fileName);
   await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
 
   dialogResponses.push("");
+  await page.getByLabel("Manage space").click();
   await page.getByRole("button", { name: "Delete space" }).click();
   await expect(page.locator("body")).not.toContainText(spaceName);
 });
