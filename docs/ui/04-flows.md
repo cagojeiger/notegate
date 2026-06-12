@@ -279,12 +279,18 @@ Trigger:
 Backend:
 
 ```text
-GET /api/v1/me
+GET /api/v1/me                         # session check
+GET /auth/login?next=/                 # OAuth login start
+GET /auth/callback                     # OAuth callback; sets browser session cookie
+POST /auth/logout                      # clears browser session cookie
 GET /api/v1/spaces?limit=...
 ```
 
 UI result:
 
+- `AuthScreen`은 먼저 `/me`로 기존 browser session을 확인한다.
+- session이 없으면 OAuth login CTA를 보여준다.
+- 개발/e2e 전용 user API key fallback은 보조 경로이며 기본 로그인 경로가 아니다.
 - 로그인 성공 후 `AppShell`을 렌더링한다.
 - `ActivityRail`에 접근 가능한 space 목록을 표시한다.
 - `lastActiveSpaceId`(local)가 접근 가능하면 그 space를, 없으면 첫 space를 active로 선택하고 root children을 로드한다.
@@ -294,6 +300,8 @@ UI result:
 Constraints:
 
 - 로그인 성공만으로 space를 자동 생성하지 않는다.
+- OAuth session은 HttpOnly browser cookie다.
+- Login `next` 값은 same-origin relative path만 사용한다.
 - `/me`는 identity와 전역 capability만 반환한다. Space permission은 `/spaces` 응답에서 본다.
 - Account/profile 진입은 Settings에서 처리한다.
 

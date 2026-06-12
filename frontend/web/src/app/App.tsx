@@ -1,20 +1,30 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { ApiProvider } from "../api/ApiProvider";
+import { ApiProvider, useApiClient } from "../api/ApiProvider";
+import { getMe } from "../api/me";
+import { queryKeys } from "../api/queryKeys";
 import { DevAuthGate } from "../auth/DevAuthGate";
 import { readDevApiKey } from "../auth/session";
 import { AppShell } from "../layout/AppShell";
+import { FullScreenStatus } from "../layout/FullScreenStatus";
 
 export function App() {
   const [apiKey, setApiKey] = useState(() => readDevApiKey());
 
-  if (!apiKey) {
-    return <DevAuthGate onAuthenticated={setApiKey} />;
-  }
-
   return (
     <ApiProvider apiKey={apiKey}>
-      <AppShell onSignOut={() => setApiKey(null)} />
+      <AuthBoundary apiKey={apiKey} onAuthenticated={setApiKey} onSignOut={() => setApiKey(null)} />
     </ApiProvider>
   );
+}
+
+function AuthBoundary({ apiKey, onAuthenticated, onSignOut }: { apiKey: string | null; onAuthenticated: (apiKey: string) => void; onSignOut: () => void }) {
+  const client = useApiClient();
+  const meQuery = useQuery({ queryKey: [...queryKeys.me, apiKey], queryFn: () => getMe(client), retry: false });
+
+  if (meQuery.isLoading) return <FullScreenStatus label="Checking session" />;
+  if (meQuery.isError) return <DevAuthGate onAuthenticated={onAuthenticated} onSessionAuthenticated={() => void meQuery.refetch()} />;
+
+  return <AppShell onSignOut={onSignOut} />;
 }

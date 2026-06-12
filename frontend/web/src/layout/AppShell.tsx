@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { useApiClient } from "../api/ApiProvider";
+import { logout } from "../api/auth";
 import { uploadFile } from "../api/files";
 import { replaceMetadata } from "../api/metadata";
-import { getMe } from "../api/me";
 import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../api/nodes";
 import { queryKeys } from "../api/queryKeys";
 import { createSpace, deleteSpace, listSpaces, updateSpace } from "../api/spaces";
@@ -33,7 +33,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const spacesQuery = useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client) });
-  const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe(client) });
   const spaces = spacesQuery.data?.spaces ?? [];
   const [theme, setTheme] = useState<ThemeMode>(initialTheme);
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(() => window.localStorage.getItem("notegate.lastActiveSpaceId"));
@@ -42,7 +41,6 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const [primarySidebarOpen, setPrimarySidebarOpen] = useState(true);
   const [auxiliaryOpen, setAuxiliaryOpen] = useState(true);
 
-  void meQuery.data;
 
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
   const showAuxiliary = auxiliaryOpen && activeNode !== null;
@@ -222,9 +220,13 @@ export function AppShell({ onSignOut }: AppShellProps) {
     }
   }
 
-  function handleSignOut() {
-    clearDevApiKey();
-    onSignOut();
+  async function handleSignOut() {
+    try {
+      await logout(client);
+    } finally {
+      clearDevApiKey();
+      onSignOut();
+    }
   }
 
   if (spacesQuery.isLoading) return <FullScreenStatus label="Loading spaces" />;

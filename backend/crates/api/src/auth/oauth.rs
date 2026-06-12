@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
 use serde::Deserialize;
@@ -8,8 +8,8 @@ use subtle::ConstantTimeEq;
 
 use crate::auth::oauth_exchange::exchange_code_for_userinfo;
 use crate::auth::oauth_flow::{
-    LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE, clear_flow_cookies, flow_cookie,
-    hardened_cookie, new_login_flow,
+    LOGIN_NEXT_COOKIE, LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE,
+    clear_flow_cookies, flow_cookie, hardened_cookie, new_login_flow,
 };
 use crate::auth::page::html_page;
 use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
@@ -23,7 +23,16 @@ pub struct CallbackQuery {
     error: Option<String>,
 }
 
-pub async fn login(State(state): State<AppState>, jar: CookieJar) -> Response {
+#[derive(Debug, Deserialize)]
+pub struct LoginQuery {
+    next: Option<String>,
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<LoginQuery>,
+) -> Response {
     let login_flow = match new_login_flow(&state.oidc).await {
         Ok(flow) => flow,
         Err(error) => {
@@ -35,7 +44,8 @@ pub async fn login(State(state): State<AppState>, jar: CookieJar) -> Response {
             );
         }
     };
-    let jar = jar
+    let next = sanitize_next(query.next.as_deref());
+    let mut jar = jar
         .add(flow_cookie(
             LOGIN_STATE_COOKIE,
             login_flow.csrf_state,
@@ -51,6 +61,13 @@ pub async fn login(State(state): State<AppState>, jar: CookieJar) -> Response {
             login_flow.nonce,
             state.config.secure_cookies,
         ));
+    if let Some(next) = next {
+        jar = jar.add(flow_cookie(
+            LOGIN_NEXT_COOKIE,
+            next,
+            state.config.secure_cookies,
+        ));
+    }
     (jar, Redirect::temporary(&login_flow.redirect_url)).into_response()
 }
 
@@ -68,6 +85,9 @@ pub async fn callback(
     let cookie_nonce = jar
         .get(LOGIN_NONCE_COOKIE)
         .map(|cookie| cookie.value().to_owned());
+    let next = jar
+        .get(LOGIN_NEXT_COOKIE)
+        .and_then(|cookie| sanitize_next(Some(cookie.value())));
     let jar = clear_flow_cookies(jar, state.config.secure_cookies);
 
     if query.error.is_some() {
@@ -170,7 +190,7 @@ pub async fn callback(
             };
             (
                 jar.add(browser_session_cookie(&state, session)),
-                Redirect::to("/auth/success"),
+                Redirect::to(next.as_deref().unwrap_or("/auth/success")),
             )
                 .into_response()
         }
@@ -204,11 +224,26 @@ pub async fn callback(
 }
 
 pub async fn success() -> Response {
-    html_page(
-        StatusCode::OK,
-        "Login complete",
-        "Login complete. You can close this tab and reconnect your MCP client.",
+    Html(
+        r#"<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Login complete</title>
+</head>
+<body>
+  <h1>Login complete</h1>
+  <p>Login complete. You can close this tab and return to Notegate.</p>
+  <script>
+    if (window.opener) {
+      window.opener.postMessage({ type: "notegate:login-complete" }, "*");
+      window.close();
+    }
+  </script>
+</body>
+</html>"#,
     )
+    .into_response()
 }
 
 pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {
@@ -219,6 +254,14 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {
         .into_response()
 }
 
+fn sanitize_next(value: Option<&str>) -> Option<String> {
+    let value = value?;
+    if value.starts_with('/') && !value.starts_with("//") && !value.contains('\\') {
+        Some(value.to_owned())
+    } else {
+        None
+    }
+}
 fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
     hardened_cookie(
         BROWSER_SESSION_COOKIE,
@@ -230,4 +273,22 @@ fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
 
 fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
     hardened_cookie(BROWSER_SESSION_COOKIE, String::new(), 0, secure)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_next;
+
+    #[test]
+    fn sanitize_next_allows_relative_paths_only() {
+        assert_eq!(sanitize_next(Some("/")).as_deref(), Some("/"));
+        assert_eq!(
+            sanitize_next(Some("/dashboard?x=1")).as_deref(),
+            Some("/dashboard?x=1")
+        );
+        assert_eq!(sanitize_next(Some("https://evil.test")), None);
+        assert_eq!(sanitize_next(Some("//evil.test")), None);
+        assert_eq!(sanitize_next(Some("/bad\\path")), None);
+        assert_eq!(sanitize_next(None), None);
+    }
 }

@@ -8,7 +8,7 @@ describe("createApiClient", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends bearer credentials", async () => {
+  it("sends bearer credentials and same-origin cookies", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const client = createApiClient(() => "user-key");
 
@@ -16,6 +16,7 @@ describe("createApiClient", () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect((init?.headers as Headers).get("authorization")).toBe("Bearer user-key");
+    expect(init?.credentials).toBe("same-origin");
   });
 
   it("normalizes api errors", async () => {

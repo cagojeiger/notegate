@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, ReactNode, useContext, useMemo } from "react";
 
 import { createApiClient, type ApiClient } from "./client";
-import { readDevApiKey } from "../auth/session";
 
 const ApiClientContext = createContext<ApiClient | null>(null);
 
@@ -21,7 +20,7 @@ type ApiProviderProps = {
 };
 
 export function ApiProvider({ apiKey, children }: ApiProviderProps) {
-  const client = useMemo(() => createApiClient(() => apiKey ?? readDevApiKey()), [apiKey]);
+  const client = useMemo(() => createApiClient(() => apiKey), [apiKey]);
 
   return (
     <QueryClientProvider client={queryClient}>

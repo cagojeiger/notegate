@@ -26,6 +26,7 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
     const response = await fetch(path, {
       method: options.method,
       headers,
+      credentials: "same-origin",
       body: options.formData ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined)
     });
 
@@ -51,7 +52,7 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
       const apiKey = getApiKey();
       const headers = new Headers();
       if (apiKey) headers.set("authorization", `Bearer ${apiKey}`);
-      const response = await fetch(path, { method: "GET", headers });
+      const response = await fetch(path, { method: "GET", headers, credentials: "same-origin" });
       if (!response.ok) throw await apiErrorFromResponse(response);
       return response.blob();
     }
