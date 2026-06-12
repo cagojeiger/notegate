@@ -4,7 +4,7 @@
 //! per-text and space caps. `write` and `patch` compute them once here so
 //! the validated values are exactly what the store writes.
 
-use super::types::{StoredContent, StoredFile, WriteTextBody};
+use super::{StoredContent, StoredFile, WriteTextBody};
 use crate::error::{ServiceError, ServiceResult};
 
 /// The derived metrics of a text's content.

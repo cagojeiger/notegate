@@ -10,7 +10,7 @@ use similar::TextDiff;
 
 use crate::error::ServiceError;
 
-use super::types::{Edit, LineEdit, PatchMode};
+use super::{Edit, LineEdit, PatchMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedText {

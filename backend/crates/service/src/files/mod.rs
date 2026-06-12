@@ -11,7 +11,6 @@ pub mod content;
 pub mod patch;
 pub mod policy;
 pub mod target;
-pub mod types;
 pub mod validation;
 
 mod format;
@@ -19,19 +18,16 @@ mod mutate;
 mod read;
 mod view;
 
+pub use notegate_model::files::{
+    AppendText, ChildrenCursor, ChildrenPage, ChildrenRequest, CopyCounts, CopyNode, CopyResult,
+    CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit, EditText, FileContent,
+    FileStats, FileView, LineEdit, MoveNode, NodeView, PatchMode, PatchResult, PatchText,
+    ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent, StoredFile, TextStats,
+    TextView, WriteTarget, WriteText, WriteTextBody,
+};
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
 pub use target::{Target, parse_target};
-pub use types::{
-    AppendText, ChildrenRequest, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
-    EditText, LineEdit, MoveNode, PatchMode, PatchText, ReadText, WriteTarget, WriteText,
-    WriteTextBody,
-};
-pub use types::{
-    ChildrenCursor, ChildrenPage, CopyCounts, CopyResult, DeleteResult, FileContent, FileStats,
-    FileView, NodeView, PatchResult, ReadContent, ReadResult, ReadTextBody, StoredContent,
-    StoredFile, TextStats, TextView,
-};
 pub use validation::FilesValidationError;
 
 use notegate_core::limits::Limits;
