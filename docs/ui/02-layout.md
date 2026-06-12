@@ -160,11 +160,11 @@ PrimarySidebar
 ├─ SidebarHeader
 └─ SidebarContent
    ├─ TreeSection
-   ├─ SectionResizeHandle
-   └─ RecentSection
+   ├─ SectionResizeHandle        # RecentSection이 있을 때만
+   └─ RecentSection              # optional
 ```
 
-`TreeSection`은 folder/text/file 계층을 보여준다. `RecentSection`은 최근 수정된 node를 단순 list로 보여준다. 두 section은 각각 독립적으로 스크롤한다. 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다. 사용자가 사이 resize bar를 조절하면 이후 비율은 사용자 설정을 따른다. `PrimarySidebar` 자체의 폭도 사용자가 조절할 수 있다.
+`TreeSection`은 folder/text/file 계층을 보여준다. `RecentSection`은 최근 수정된 node를 단순 list로 보여주는 선택 영역이다. Recent 데이터 소스가 활성화된 경우 두 section은 각각 독립적으로 스크롤하고, 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다. Recent 데이터 소스가 없으면 `RecentSection`과 `SectionResizeHandle`을 숨기고 `TreeSection`이 sidebar content를 차지한다. 사용자가 사이 resize bar를 조절하면 이후 비율은 사용자 설정을 따른다. `PrimarySidebar` 자체의 폭도 사용자가 조절할 수 있다.
 
 ### EditorArea
 
@@ -210,9 +210,8 @@ AgentPanel
 담는 것:
 
 - save status
-- sync status
+- current space
 - 오른쪽 runtime status 예약 영역
-- word/line count
 
 
 ## Tree context actions

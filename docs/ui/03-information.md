@@ -119,8 +119,8 @@ PrimarySidebar
 ├─ SidebarHeader
 └─ SidebarContent
    ├─ TreeSection
-   ├─ SectionResizeHandle
-   └─ RecentSection
+   ├─ SectionResizeHandle        # RecentSection이 있을 때만
+   └─ RecentSection              # optional
 ```
 
 #### TreeSection
@@ -144,10 +144,12 @@ GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?limit=...&cursor=...
 
 규칙:
 
-- `TreeSection`과 `RecentSection`은 각각 독립적으로 스크롤한다.
+- `TreeSection`은 항상 표시한다.
+- `RecentSection`은 recent 데이터 소스가 있을 때만 표시한다.
+- `TreeSection`과 `RecentSection`이 함께 표시되면 각각 독립적으로 스크롤한다.
 - `TreeSection` header는 전체 folder 접기 action을 가질 수 있다.
 - `RecentSection` header는 표시 밀도 또는 보기 방식을 바꾸는 action을 가질 수 있다.
-- 두 section의 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다.
+- 두 section이 함께 표시될 때 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다.
 - 두 section 사이 divider는 마우스로 높이를 조절할 수 있고, 조절 후에는 사용자 설정 비율을 따른다.
 - 한 번에 전체 tree를 펼쳐서 렌더링하지 않는다.
 - 화면에 보이는 folder만 children을 요청한다.
@@ -177,7 +179,7 @@ Upload File
 - Root/empty context에서 생성하면 active space root가 parent가 된다.
 - Text/File context에서는 child 생성 action을 제공하지 않는다.
 - 같은 생성 action은 `PrimarySidebar` header에서도 접근 가능해야 한다.
-- 생성 후 parent folder children과 recent list만 갱신한다.
+- 생성 후 parent folder children을 갱신한다. `RecentSection`이 활성화되어 있으면 recent list도 갱신한다.
 
 #### RecentSection
 
@@ -201,7 +203,8 @@ updated_at DESC
 
 - `Recent`는 tree 구조를 보여주지 않는다.
 - 문서/파일을 빠르게 다시 여는 목적이다.
-- 현재 backend에 전용 recent endpoint가 없으면 초기 구현에서는 숨기거나, 별도 API가 생긴 뒤 활성화한다.
+- 현재 backend에는 전용 recent endpoint가 없으므로 실제 대시보드 구현에서는 숨긴다.
+- 별도 recent API가 생기면 같은 영역을 활성화한다.
 
 ## EditorArea
 
