@@ -9,6 +9,7 @@
 ```text
 Space list       -> GET /api/v1/spaces
 Node children    -> GET /api/v1/spaces/{space_id}/nodes/{node_id}/children
+Node list        -> GET /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc
 Node detail      -> GET /api/v1/spaces/{space_id}/nodes/{node_id}
 Node metadata    -> GET/PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 Text content     -> GET/PUT/PATCH /api/v1/spaces/{space_id}/text/{node_id}
@@ -89,7 +90,43 @@ GET /api/v1/spaces?limit=...&cursor=...
 - `ActivityRail` 전체가 page scroll을 만들지 않는다.
 - `SpaceAddButton`은 `SpaceRailList` 실제 항목 바로 아래, `RailFooter` 위에 항상 표시한다.
 - Settings는 스크롤 영역에 들어가지 않고 하단에 고정한다.
-- Space create/delete/rename은 rail 안에서 직접 처리하지 않고 dashboard의 명시적 관리 화면에서 처리한다.
+- Space create는 `SpaceAddButton` 또는 empty state CTA에서 시작한다.
+- Space rename/delete는 rail item 안에서 inline 처리하지 않고 명시적 management surface에서 처리한다.
+
+### Space management actions
+
+Space 관리는 active node와 독립된 account/space 관리 action이다.
+
+Action:
+
+```text
+Create Space
+Rename Space
+Delete Space
+```
+
+정보:
+
+- space name
+- sort_order가 필요한 관리 화면에서는 정렬 값
+- validation error
+- destructive confirm message
+
+Backend:
+
+```text
+POST   /api/v1/spaces
+PATCH  /api/v1/spaces/{space_id}
+DELETE /api/v1/spaces/{space_id}
+```
+
+규칙:
+
+- Space create/update/delete는 user caller만 가능하다.
+- Create는 입력값이 작으므로 dialog로 시작할 수 있다.
+- Rename/delete는 Settings 또는 Space management 화면에서 처리한다.
+- Delete는 soft delete지만 UI에서는 목록에서 즉시 제거된 것으로 취급한다.
+- Space 관리 action은 `EditorArea`의 active node를 직접 수정하지 않는다.
 
 ### RailFooter
 
@@ -163,14 +200,33 @@ GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?limit=...&cursor=...
 
 ### Tree context actions
 
-Folder 또는 root/empty tree context에서 생성 action을 제공한다.
+Tree context menu와 `PrimarySidebar` header action은 node 생성과 node 위치/이름 관리를 시작한다.
 
-Action:
+Create action:
 
 ```text
 New Folder
 New Text
 Upload File
+```
+
+Node action:
+
+```text
+Rename
+Move
+Delete
+Copy Path
+```
+
+Backend:
+
+```text
+POST   /api/v1/spaces/{space_id}/nodes              # folder/text create
+POST   /api/v1/spaces/{space_id}/files              # file upload/create
+PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}    # rename/reorder
+POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
+DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```
 
 규칙:
@@ -179,7 +235,11 @@ Upload File
 - Root/empty context에서 생성하면 active space root가 parent가 된다.
 - Text/File context에서는 child 생성 action을 제공하지 않는다.
 - 같은 생성 action은 `PrimarySidebar` header에서도 접근 가능해야 한다.
-- 생성 후 parent folder children을 갱신한다. `RecentSection`이 활성화되어 있으면 recent list도 갱신한다.
+- Rename은 node name만 바꾸며 content body를 수정하지 않는다.
+- Move는 같은 space 안에서 parent 또는 name을 바꾼다.
+- Folder delete는 recursive confirm을 요구한다.
+- Root node는 rename/move/delete 대상이 아니다.
+- 생성/수정/삭제 후 관련 parent folder children을 갱신한다. `RecentSection`이 활성화되어 있으면 recent list도 갱신한다.
 
 #### RecentSection
 
@@ -199,12 +259,19 @@ Upload File
 updated_at DESC
 ```
 
+Backend:
+
+```text
+GET /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&limit=...
+```
+
 규칙:
 
 - `Recent`는 tree 구조를 보여주지 않는다.
 - 문서/파일을 빠르게 다시 여는 목적이다.
-- 현재 backend에는 전용 recent endpoint가 없으므로 실제 대시보드 구현에서는 숨긴다.
-- 별도 recent API가 생기면 같은 영역을 활성화한다.
+- 별도 recent resource가 아니라 Space-wide node list를 `updated_at DESC`로 조회한다.
+- `kind` filter가 필요하면 같은 endpoint의 `kind=folder|text|file` query를 사용한다.
+- Space root node는 recent list에 표시하지 않는다.
 
 ## EditorArea
 
