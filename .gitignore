@@ -50,3 +50,7 @@ frontend/**/.turbo/
 frontend/**/*.tsbuildinfo
 
 node_modules/
+
+# Playwright artifacts
+frontend/web/test-results/
+frontend/web/playwright-report/
