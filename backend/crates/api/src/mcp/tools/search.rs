@@ -5,84 +5,34 @@ use notegate_model::NodeKind;
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest,
 };
-use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::resolve::{caller, invalid_input_error, node_summary, resolve_target, service_error};
 use super::support::page_json;
 use crate::state::AppState;
 
-/// Internal find input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct FindInput {
-    /// Folder scope in `<space>:/folder-path` form.
-    pub target: String,
-    /// Node name query. Interpreted by `match`: contains, regex, or glob.
-    pub q: String,
-    /// Optional node kind filter: `folder`, `text`, or `file`.
-    #[serde(default)]
-    pub kind: Option<String>,
-    /// Name match mode. Defaults to `contains`; use `glob` for patterns like `*.md`.
-    #[serde(default, rename = "match")]
-    pub match_mode: Option<String>,
-    /// Optional path globs to include, for example `/notes/*`.
-    #[serde(default)]
-    pub include: Option<Vec<String>>,
-    /// Optional path globs to exclude, for example `/archive/*`.
-    #[serde(default)]
-    pub exclude: Option<Vec<String>>,
-    /// Page size; clamped to the find limit, default `50`.
-    #[serde(default)]
-    pub limit: Option<i64>,
-    /// Opaque pagination cursor from a previous page.
-    #[serde(default)]
-    pub cursor: Option<String>,
-}
-
-/// Internal grep input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct GrepInput {
-    /// Folder scope in `<space>:/folder-path` form.
-    pub target: String,
-    /// Content query for plain text nodes.
-    pub q: String,
-    /// Content match mode. Defaults to `literal`; use `regex` for Rust-regex patterns.
-    #[serde(default, rename = "match")]
-    pub match_mode: Option<String>,
-    /// Line-number detail: `none`, `first`, or `all`. Content snippets are not returned.
-    #[serde(default)]
-    pub lines: Option<String>,
-    /// Optional path globs to include, for example `/notes/*`.
-    #[serde(default)]
-    pub include: Option<Vec<String>>,
-    /// Optional path globs to exclude, for example `/archive/*`.
-    #[serde(default)]
-    pub exclude: Option<Vec<String>>,
-    /// Page size; clamped to the grep limit, default `20`.
-    #[serde(default)]
-    pub limit: Option<i64>,
-    /// Opaque pagination cursor from a previous page.
-    #[serde(default)]
-    pub cursor: Option<String>,
-}
-
 pub async fn find(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<FindInput>,
+    target: String,
+    q: String,
+    kind: Option<String>,
+    match_mode: Option<String>,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    limit: Option<i64>,
+    cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, scope_path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
 
-    let kind = match input.kind.as_deref() {
+    let kind = match kind.as_deref() {
         None => None,
         Some(value) => Some(parse_kind(value)?),
     };
-    let match_mode = parse_find_match_mode(input.match_mode.as_deref())?;
+    let match_mode = parse_find_match_mode(match_mode.as_deref())?;
 
     let page = state
         .search
@@ -90,14 +40,14 @@ pub async fn find(
             caller.account_id(),
             resolved.space_id(),
             FindRequest {
-                q: input.q,
+                q,
                 path: scope_path,
                 kind,
                 match_mode,
-                include: input.include.unwrap_or_default(),
-                exclude: input.exclude.unwrap_or_default(),
-                limit: input.limit,
-                cursor: input.cursor,
+                include: include.unwrap_or_default(),
+                exclude: exclude.unwrap_or_default(),
+                limit,
+                cursor,
             },
         )
         .await
@@ -121,14 +71,21 @@ pub async fn find(
 pub async fn grep(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<GrepInput>,
+    target: String,
+    q: String,
+    match_mode: Option<String>,
+    lines: Option<String>,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    limit: Option<i64>,
+    cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, scope_path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
     let space = resolved.name().to_owned();
-    let match_mode = parse_grep_match_mode(input.match_mode.as_deref())?;
-    let line_mode = parse_grep_line_mode(input.lines.as_deref())?;
+    let match_mode = parse_grep_match_mode(match_mode.as_deref())?;
+    let line_mode = parse_grep_line_mode(lines.as_deref())?;
 
     let page = state
         .search
@@ -136,14 +93,14 @@ pub async fn grep(
             caller.account_id(),
             resolved.space_id(),
             GrepRequest {
-                q: input.q,
+                q,
                 path: scope_path,
                 match_mode,
                 line_mode,
-                include: input.include.unwrap_or_default(),
-                exclude: input.exclude.unwrap_or_default(),
-                limit: input.limit,
-                cursor: input.cursor,
+                include: include.unwrap_or_default(),
+                exclude: exclude.unwrap_or_default(),
+                limit,
+                cursor,
             },
         )
         .await

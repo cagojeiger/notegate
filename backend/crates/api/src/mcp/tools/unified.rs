@@ -282,28 +282,15 @@ pub async fn read(
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
     match input.op.as_str() {
-        "spaces" => {
-            spaces::list(
-                state,
-                parts,
-                Parameters(spaces::ListInput {
-                    name: input.name,
-                    limit: input.limit,
-                    cursor: input.cursor,
-                }),
-            )
-            .await
-        }
+        "spaces" => spaces::list(state, parts, input.name, input.limit, input.cursor).await,
         "ls" => {
             files::list(
                 state,
                 parts,
-                Parameters(files::ListInput {
-                    target: required(input.target, "target", "ls")?,
-                    depth: Some(1),
-                    limit: input.limit,
-                    cursor: input.cursor,
-                }),
+                required(input.target, "target", "ls")?,
+                Some(1),
+                input.limit,
+                input.cursor,
             )
             .await
         }
@@ -311,36 +298,23 @@ pub async fn read(
             files::list(
                 state,
                 parts,
-                Parameters(files::ListInput {
-                    target: required(input.target, "target", "tree")?,
-                    depth: Some(input.depth.unwrap_or(5)),
-                    limit: input.limit,
-                    cursor: input.cursor,
-                }),
+                required(input.target, "target", "tree")?,
+                Some(input.depth.unwrap_or(5)),
+                input.limit,
+                input.cursor,
             )
             .await
         }
-        "stat" => {
-            files::stat(
-                state,
-                parts,
-                Parameters(files::StatInput {
-                    target: required(input.target, "target", "stat")?,
-                }),
-            )
-            .await
-        }
+        "stat" => files::stat(state, parts, required(input.target, "target", "stat")?).await,
         "read" => {
             files::read(
                 state,
                 parts,
-                Parameters(files::ReadInput {
-                    target: required(input.target, "target", "read")?,
-                    start_line: input.start_line,
-                    max_lines: input.max_lines,
-                    max_bytes: input.max_bytes,
-                    if_none_match_sha256: input.if_none_match_sha256,
-                }),
+                required(input.target, "target", "read")?,
+                input.start_line,
+                input.max_lines,
+                input.max_bytes,
+                input.if_none_match_sha256,
             )
             .await
         }
@@ -361,16 +335,14 @@ pub async fn search(
             search::find(
                 state,
                 parts,
-                Parameters(search::FindInput {
-                    target: input.target,
-                    q: input.q,
-                    kind: input.kind,
-                    match_mode: input.match_mode,
-                    include: input.include,
-                    exclude: input.exclude,
-                    limit: input.limit,
-                    cursor: input.cursor,
-                }),
+                input.target,
+                input.q,
+                input.kind,
+                input.match_mode,
+                input.include,
+                input.exclude,
+                input.limit,
+                input.cursor,
             )
             .await
         }
@@ -378,16 +350,14 @@ pub async fn search(
             search::grep(
                 state,
                 parts,
-                Parameters(search::GrepInput {
-                    target: input.target,
-                    q: input.q,
-                    match_mode: input.match_mode,
-                    lines: input.lines,
-                    include: input.include,
-                    exclude: input.exclude,
-                    limit: input.limit,
-                    cursor: input.cursor,
-                }),
+                input.target,
+                input.q,
+                input.match_mode,
+                input.lines,
+                input.include,
+                input.exclude,
+                input.limit,
+                input.cursor,
             )
             .await
         }
@@ -405,12 +375,10 @@ pub async fn write(
             files::write(
                 state,
                 parts,
-                Parameters(files::WriteInput {
-                    target: input.target,
-                    content: required(input.content, "content", "write")?,
-                    create: input.create,
-                    expected_sha256: input.expected_sha256,
-                }),
+                input.target,
+                required(input.content, "content", "write")?,
+                input.create,
+                input.expected_sha256,
             )
             .await
         }
@@ -418,13 +386,11 @@ pub async fn write(
             files::append(
                 state,
                 parts,
-                Parameters(files::AppendInput {
-                    target: input.target,
-                    content: required(input.content, "content", "append")?,
-                    create: input.create,
-                    ensure_newline: input.ensure_newline,
-                    expected_sha256: input.expected_sha256,
-                }),
+                input.target,
+                required(input.content, "content", "append")?,
+                input.create,
+                input.ensure_newline,
+                input.expected_sha256,
             )
             .await
         }
@@ -432,11 +398,9 @@ pub async fn write(
             files::patch(
                 state,
                 parts,
-                Parameters(files::PatchInput {
-                    target: input.target,
-                    edits: parse_edits(input.edits, "patch")?,
-                    expected_sha256: input.expected_sha256,
-                }),
+                input.target,
+                parse_edits(input.edits, "patch")?,
+                input.expected_sha256,
             )
             .await
         }
@@ -444,11 +408,9 @@ pub async fn write(
             files::edit(
                 state,
                 parts,
-                Parameters(files::EditInput {
-                    target: input.target,
-                    edits: parse_edits(input.edits, "edit")?,
-                    expected_sha256: input.expected_sha256,
-                }),
+                input.target,
+                parse_edits(input.edits, "edit")?,
+                input.expected_sha256,
             )
             .await
         }
@@ -466,10 +428,8 @@ pub async fn manage(
             files::mkdir(
                 state,
                 parts,
-                Parameters(files::MkdirInput {
-                    target: required(input.target, "target", "mkdir")?,
-                    parents: input.parents,
-                }),
+                required(input.target, "target", "mkdir")?,
+                input.parents,
             )
             .await
         }
@@ -477,10 +437,8 @@ pub async fn manage(
             files::mv(
                 state,
                 parts,
-                Parameters(files::MvInput {
-                    source: required(input.source, "source", "mv")?,
-                    destination: required(input.destination, "destination", "mv")?,
-                }),
+                required(input.source, "source", "mv")?,
+                required(input.destination, "destination", "mv")?,
             )
             .await
         }
@@ -488,11 +446,9 @@ pub async fn manage(
             files::copy(
                 state,
                 parts,
-                Parameters(files::CopyInput {
-                    source: required(input.source, "source", "cp")?,
-                    destination: required(input.destination, "destination", "cp")?,
-                    recursive: input.recursive,
-                }),
+                required(input.source, "source", "cp")?,
+                required(input.destination, "destination", "cp")?,
+                input.recursive,
             )
             .await
         }
@@ -500,10 +456,8 @@ pub async fn manage(
             files::rm(
                 state,
                 parts,
-                Parameters(files::RmInput {
-                    target: required(input.target, "target", "rm")?,
-                    recursive: input.recursive,
-                }),
+                required(input.target, "target", "rm")?,
+                input.recursive,
             )
             .await
         }

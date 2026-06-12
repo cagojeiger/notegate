@@ -9,7 +9,6 @@ use notegate_service::files::{
     WriteTextBody,
 };
 use notegate_service::search::TreeRequest;
-use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -20,91 +19,6 @@ use super::resolve::{
 };
 use super::support::page_json;
 use crate::state::AppState;
-
-/// Internal list input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct ListInput {
-    /// Folder target in `<space>:/<folder-path>` form, for example `notes:/projects`.
-    pub target: String,
-    /// Maximum depth below the selected folder. Defaults to `1`, which behaves like `ls`.
-    #[serde(default)]
-    pub depth: Option<i64>,
-    /// Page size; clamped to `1..=200`, default `100`.
-    #[serde(default)]
-    pub limit: Option<i64>,
-    /// Opaque pagination cursor from a previous page.
-    #[serde(default)]
-    pub cursor: Option<String>,
-}
-
-/// Internal stat input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct StatInput {
-    /// Node target in `<space>:/path` form. Works for folders, text, and files.
-    pub target: String,
-}
-
-/// Internal mkdir input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct MkdirInput {
-    /// Folder path to create in `<space>:/folder-path` form.
-    pub target: String,
-    /// Create missing parent folders, like `mkdir -p`.
-    #[serde(default)]
-    pub parents: bool,
-}
-
-/// Internal text read input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct ReadInput {
-    /// Plain text target in `<space>:/text-path` form.
-    pub target: String,
-    /// 1-based first line to return; defaults to `1`.
-    #[serde(default)]
-    pub start_line: Option<i64>,
-    /// Maximum lines to return; clamped to the read limit.
-    #[serde(default)]
-    pub max_lines: Option<i64>,
-    /// Maximum bytes to return; clamped to the read limit.
-    #[serde(default)]
-    pub max_bytes: Option<usize>,
-    /// Return `unchanged=true` instead of content when this equals the current hash.
-    #[serde(default)]
-    pub if_none_match_sha256: Option<String>,
-}
-
-/// Internal text write input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct WriteInput {
-    /// Plain text target in `<space>:/text-path` form.
-    pub target: String,
-    /// Full replacement content. This overwrites the whole text.
-    pub content: String,
-    /// When true, a missing text is created; when false, it must exist.
-    #[serde(default)]
-    pub create: bool,
-    /// Optimistic guard; conflict if it does not match the current content hash.
-    #[serde(default)]
-    pub expected_sha256: Option<String>,
-}
-
-/// Internal text append input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct AppendInput {
-    /// Plain text target in `<space>:/text-path` form.
-    pub target: String,
-    /// Content to append exactly at EOF.
-    pub content: String,
-    /// When true, a missing text is created; when false, it must exist.
-    #[serde(default)]
-    pub create: bool,
-    /// Insert one newline before `content` when the existing text is non-empty and lacks a trailing newline.
-    #[serde(default)]
-    pub ensure_newline: bool,
-    /// Optimistic guard; conflict if it does not match the current content hash.
-    #[serde(default)]
-    pub expected_sha256: Option<String>,
-}
 
 /// One exact replacement.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -120,18 +34,6 @@ pub struct PatchEdit {
     /// Optional guard for the number of matches in the current text.
     #[serde(default)]
     pub expected_count: Option<usize>,
-}
-
-/// Internal text patch input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct PatchInput {
-    /// Plain text target in `<space>:/text-path` form.
-    pub target: String,
-    /// Non-empty list of exact replacements applied against the original content.
-    pub edits: Vec<PatchEdit>,
-    /// Optimistic guard; checked before matching.
-    #[serde(default)]
-    pub expected_sha256: Option<String>,
 }
 
 /// One line-based edit.
@@ -154,59 +56,19 @@ pub struct LineEditInput {
     pub content: Option<String>,
 }
 
-/// Internal line edit input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct EditInput {
-    /// Plain text target in `<space>:/text-path` form.
-    pub target: String,
-    /// Non-empty list of line edits applied against the original content.
-    pub edits: Vec<LineEditInput>,
-    /// Optimistic guard; checked before editing.
-    #[serde(default)]
-    pub expected_sha256: Option<String>,
-}
-
-/// Internal move input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct MvInput {
-    /// Source node target in `<space>:/path` form.
-    pub source: String,
-    /// Destination target in `<space>:/path` form. Must be in the same space as `source`.
-    pub destination: String,
-}
-
-/// Internal copy input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct CopyInput {
-    /// Source node target in `<space>:/path` form.
-    pub source: String,
-    /// Destination target in `<space>:/path` form. Must be in the same space as `source`.
-    pub destination: String,
-    /// Required when the source is a folder.
-    #[serde(default)]
-    pub recursive: bool,
-}
-
-/// Internal remove input.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct RmInput {
-    /// Node target in `<space>:/path` form.
-    pub target: String,
-    /// Required to delete a folder (and its subtree).
-    #[serde(default)]
-    pub recursive: bool,
-}
-
 pub async fn list(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<ListInput>,
+    target: String,
+    depth: Option<i64>,
+    limit: Option<i64>,
+    cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
-    let depth = input.depth.unwrap_or(1);
+    let depth = depth.unwrap_or(1);
 
     if depth < 1 {
         return Err(invalid_input_error("depth must be at least 1"));
@@ -226,8 +88,8 @@ pub async fn list(
                 space_id,
                 folder.node.id,
                 ChildrenRequest {
-                    limit: input.limit,
-                    cursor: input.cursor,
+                    limit: limit,
+                    cursor: cursor,
                 },
             )
             .await
@@ -258,8 +120,8 @@ pub async fn list(
             TreeRequest {
                 path: Some(path.clone()),
                 depth: Some(depth),
-                limit: input.limit,
-                cursor: input.cursor,
+                limit: limit,
+                cursor: cursor,
             },
         )
         .await
@@ -285,10 +147,10 @@ pub async fn list(
 pub async fn stat(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<StatInput>,
+    target: String,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
 
     let view = state
         .files
@@ -305,14 +167,15 @@ pub async fn stat(
 pub async fn mkdir(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<MkdirInput>,
+    target: String,
+    parents: bool,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    if input.parents {
+    if parents {
         return mkdir_parents(state, account_id, space_id, resolved.name(), &path).await;
     }
 
@@ -409,10 +272,14 @@ async fn mkdir_parents(
 pub async fn read(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<ReadInput>,
+    target: String,
+    start_line: Option<i64>,
+    max_lines: Option<i64>,
+    max_bytes: Option<usize>,
+    if_none_match_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -429,10 +296,10 @@ pub async fn read(
             space_id,
             ReadText {
                 node_id: node.node.id,
-                start_line: input.start_line,
-                max_lines: input.max_lines,
-                max_bytes: input.max_bytes,
-                if_none_match_sha256: input.if_none_match_sha256,
+                start_line: start_line,
+                max_lines: max_lines,
+                max_bytes: max_bytes,
+                if_none_match_sha256: if_none_match_sha256,
             },
         )
         .await
@@ -478,10 +345,13 @@ pub async fn read(
 pub async fn write(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<WriteInput>,
+    target: String,
+    content: String,
+    create: bool,
+    expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -500,7 +370,7 @@ pub async fn write(
             node_id: view.node.id,
         },
         None => {
-            if !input.create {
+            if !create {
                 return Err(service_error(ServiceError::NotFound(
                     "text does not exist; pass create=true to create it".to_owned(),
                 )));
@@ -525,8 +395,8 @@ pub async fn write(
             space_id,
             WriteText {
                 target,
-                body: WriteTextBody::Plain(input.content),
-                expected_sha256: input.expected_sha256,
+                body: WriteTextBody::Plain(content),
+                expected_sha256: expected_sha256,
             },
         )
         .await
@@ -544,10 +414,14 @@ pub async fn write(
 pub async fn append(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<AppendInput>,
+    target: String,
+    content: String,
+    create: bool,
+    ensure_newline: bool,
+    expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -562,7 +436,7 @@ pub async fn append(
             node_id: view.node.id,
         },
         None => {
-            if !input.create {
+            if !create {
                 return Err(service_error(ServiceError::NotFound(
                     "text does not exist; pass create=true to create it".to_owned(),
                 )));
@@ -587,9 +461,9 @@ pub async fn append(
             space_id,
             AppendText {
                 target,
-                content: input.content,
-                expected_sha256: input.expected_sha256,
-                ensure_newline: input.ensure_newline,
+                content: content,
+                expected_sha256: expected_sha256,
+                ensure_newline,
             },
         )
         .await
@@ -608,10 +482,12 @@ pub async fn append(
 pub async fn patch(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<PatchInput>,
+    target: String,
+    edits: Vec<PatchEdit>,
+    expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -621,8 +497,7 @@ pub async fn patch(
         .await
         .map_err(service_error)?;
 
-    let edits = input
-        .edits
+    let edits = edits
         .into_iter()
         .map(|edit| {
             Ok(ServiceEdit {
@@ -642,7 +517,7 @@ pub async fn patch(
             PatchText {
                 node_id: node.node.id,
                 edits,
-                expected_sha256: input.expected_sha256,
+                expected_sha256: expected_sha256,
             },
         )
         .await
@@ -665,10 +540,12 @@ pub async fn patch(
 pub async fn edit(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<EditInput>,
+    target: String,
+    edits: Vec<LineEditInput>,
+    expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -678,8 +555,7 @@ pub async fn edit(
         .await
         .map_err(service_error)?;
 
-    let edits = input
-        .edits
+    let edits = edits
         .into_iter()
         .map(parse_line_edit)
         .collect::<Result<Vec<_>, ErrorData>>()?;
@@ -692,7 +568,7 @@ pub async fn edit(
             EditText {
                 node_id: node.node.id,
                 edits,
-                expected_sha256: input.expected_sha256,
+                expected_sha256: expected_sha256,
             },
         )
         .await
@@ -715,12 +591,12 @@ pub async fn edit(
 pub async fn mv(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<MvInput>,
+    source: String,
+    destination: String,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (source_space, source_path) = resolve_target(state, caller, &input.source).await?;
-    let (destination_space, destination_path) =
-        resolve_target(state, caller, &input.destination).await?;
+    let (source_space, source_path) = resolve_target(state, caller, &source).await?;
+    let (destination_space, destination_path) = resolve_target(state, caller, &destination).await?;
     let account_id = caller.account_id();
     let space_id = source_space.space_id();
 
@@ -767,12 +643,13 @@ pub async fn mv(
 pub async fn copy(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<CopyInput>,
+    source: String,
+    destination: String,
+    recursive: bool,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (source_space, source_path) = resolve_target(state, caller, &input.source).await?;
-    let (destination_space, destination_path) =
-        resolve_target(state, caller, &input.destination).await?;
+    let (source_space, source_path) = resolve_target(state, caller, &source).await?;
+    let (destination_space, destination_path) = resolve_target(state, caller, &destination).await?;
     let account_id = caller.account_id();
     let space_id = source_space.space_id();
 
@@ -803,7 +680,7 @@ pub async fn copy(
                 node_id: source.node.id,
                 new_parent_node_id: parent.node.id,
                 new_name,
-                recursive: input.recursive,
+                recursive: recursive,
             },
         )
         .await
@@ -825,10 +702,11 @@ pub async fn copy(
 pub async fn rm(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<RmInput>,
+    target: String,
+    recursive: bool,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &input.target).await?;
+    let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
@@ -845,7 +723,7 @@ pub async fn rm(
             space_id,
             DeleteNode {
                 node_id: node.node.id,
-                recursive: input.recursive,
+                recursive: recursive,
             },
         )
         .await

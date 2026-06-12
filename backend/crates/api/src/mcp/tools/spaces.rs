@@ -2,37 +2,22 @@
 
 use axum::http::request::Parts;
 use notegate_service::spaces::ListSpaces;
-use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::resolve::{caller, resolve_space, service_error, space_summary};
 use super::support::page_json;
 use crate::state::AppState;
 
-/// Internal space list input.
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-pub struct ListInput {
-    /// Optional exact space name filter. When set, returns at most one space.
-    #[serde(default)]
-    pub name: Option<String>,
-    /// Page size. Defaults to 50 and is clamped by the service.
-    #[serde(default)]
-    pub limit: Option<i64>,
-    /// Opaque cursor from the previous spaces page.
-    #[serde(default)]
-    pub cursor: Option<String>,
-}
-
 pub async fn list(
     state: &AppState,
     parts: &Parts,
-    Parameters(input): Parameters<ListInput>,
+    name: Option<String>,
+    limit: Option<i64>,
+    cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
-    if let Some(name) = input.name {
+    if let Some(name) = name {
         let resolved = resolve_space(state, caller, &name).await?;
         return Ok(Json(json!({
             "spaces": [space_summary(&resolved.view)],
@@ -42,13 +27,7 @@ pub async fn list(
 
     let page = state
         .spaces
-        .list(
-            caller.account_id(),
-            ListSpaces {
-                limit: input.limit,
-                cursor: input.cursor,
-            },
-        )
+        .list(caller.account_id(), ListSpaces { limit, cursor })
         .await
         .map_err(service_error)?;
 
