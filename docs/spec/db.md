@@ -234,7 +234,7 @@ Text 암호화 정책:
 - `storage_format='plain'`은 서버가 읽을 수 있는 UTF-8 content다.
 - `storage_format='encrypted'`는 client-side encrypted payload다. 서버는 원문과 복호화 키를 저장하지 않는다.
 - REST는 encrypted payload 저장/조회가 가능하다.
-- MCP read/write/append/patch/grep surface는 plain Text만 대상으로 한다.
+- MCP `read op=read`, `write op=write/append/patch/edit`, `search op=grep`은 plain Text만 대상으로 한다.
 - plain Text의 `content_sha256`, `byte_len`, `line_count`는 plaintext 기준이다.
 - encrypted Text의 `content_sha256`, `byte_len`은 서버 canonical JSON serialization 기준이고 `line_count=0`이다.
 

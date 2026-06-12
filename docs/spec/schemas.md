@@ -17,7 +17,7 @@ type Page = {
 
 ## Target
 
-MCP file/search tool이 사용하는 대상 지정자다.
+MCP `read`/`search`/`write`/`manage` tool이 사용하는 대상 지정자다.
 
 ```ts
 type Target = string // "space:/absolute/path"

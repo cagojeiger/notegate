@@ -62,7 +62,7 @@ edit   line 기반 insert/replace/delete 적용
 File은 binary/object content node다. MCP/CLI command surface는 file upload/download를 포함하지 않고 file node stat만 노출한다. Node metadata는 REST metadata API에서 다룬다.
 
 - File은 `nodes.kind='file'`이다.
-- File은 text read/patch/grep 대상이 아니다.
+- File은 Text content operation과 grep 대상이 아니다.
 
 ## Copy semantics
 

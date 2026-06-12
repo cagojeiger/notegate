@@ -60,7 +60,7 @@ encrypted byte_len       = canonical encrypted payload JSON byte length
 encrypted line_count     = 0
 ```
 
-REST는 encrypted payload 저장/조회가 가능하다. MCP content surface와 grep/patch는 plain Text만 대상으로 한다.
+REST는 encrypted payload 저장/조회가 가능하다. MCP Text content operation과 `search op=grep`은 plain Text만 대상으로 한다.
 
 
 ## File content encryption

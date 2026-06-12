@@ -1,6 +1,6 @@
 # REST Files
 
-File은 binary/object content node다. Text read/patch/grep 대상이 아니다.
+File은 binary/object content node다. Text content operation이나 search op=grep 대상이 아니다.
 
 ## Endpoints
 

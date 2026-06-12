@@ -129,7 +129,7 @@ text_objects
 - plain Text content는 UTF-8이다.
 - plain Text는 `byte_len`, `line_count`, `content_sha256`을 plaintext 기준으로 저장한다. `media_type`은 Text object 속성으로 저장한다.
 - encrypted Text는 client-side encrypted payload를 저장하고 `line_count=0`을 사용한다.
-- REST read/write는 plain Text와 encrypted payload를 모두 다룬다. REST patch는 plain Text만 대상으로 한다. MCP/CLI content command와 grep은 plain Text만 대상으로 한다.
+- REST read/write는 plain Text와 encrypted payload를 모두 다룬다. REST patch는 plain Text만 대상으로 한다. MCP/CLI Text content operation과 `search op=grep`은 plain Text만 대상으로 한다.
 
 ### File
 
@@ -143,7 +143,7 @@ file_inline_contents
 - REST는 262144 bytes 이하 file upload/download를 제공한다.
 - 262144 bytes 초과 file은 제품 상한 안에 있어도 아직 저장하지 않는다.
 - MCP는 file content upload/download를 제공하지 않고 file node stat만 노출한다. Node metadata는 REST metadata API에서 다룬다.
-- File은 직접 text read/patch/grep 대상이 아니다.
+- File은 `read op=read`, `write op=patch/edit`, `search op=grep` 대상이 아니다.
 
 ### Node 삭제
 
