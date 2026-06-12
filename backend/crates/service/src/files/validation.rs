@@ -11,7 +11,7 @@
 //! - Format-of-input failures (bad name, non-absolute/too-long/too-deep path,
 //!   per-text content over the byte/line cap) are `400` (`InvalidInput`).
 //! - Capacity failures against current space state (folder fanout, live node
-//!   count, live text count, total live text bytes) are `409`
+//!   count, total live content bytes) are `409`
 //!   (`Conflict`), carrying an actionable hint.
 //!
 //! Everything here is pure: no IO, no store access. The service supplies the
@@ -39,16 +39,6 @@ pub enum FilesValidationError {
         /// The configured maximum.
         max: usize,
     },
-    /// The space already holds the maximum live texts.
-    SpaceTextsExceeded {
-        /// The configured maximum.
-        max: usize,
-    },
-    /// The space already holds the maximum live files.
-    SpaceFilesExceeded {
-        /// The configured maximum.
-        max: usize,
-    },
     /// The uploaded file exceeds the inline PostgreSQL byte cap.
     FileBytesExceeded {
         /// The configured maximum ([`limits::FILE_INLINE_PG_MAX_BYTES`]).
@@ -64,8 +54,8 @@ pub enum FilesValidationError {
         /// The configured maximum ([`limits::TEXT_MAX_LINES`]).
         max: usize,
     },
-    /// Storing the text would exceed the space's total live byte budget.
-    SpaceTextBytesExceeded {
+    /// Storing content would exceed the space's total live byte budget.
+    SpaceContentBytesExceeded {
         /// The configured maximum.
         max: usize,
     },
@@ -86,12 +76,6 @@ impl FilesValidationError {
             Self::SpaceNodesExceeded { max } => {
                 ServiceError::Conflict(format!("space already has the maximum of {max} live nodes"))
             }
-            Self::SpaceTextsExceeded { max } => {
-                ServiceError::Conflict(format!("space already has the maximum of {max} live texts"))
-            }
-            Self::SpaceFilesExceeded { max } => {
-                ServiceError::Conflict(format!("space already has the maximum of {max} live files"))
-            }
             Self::FileBytesExceeded { max } => ServiceError::InvalidInput(format!(
                 "file exceeds the maximum inline size of {max} bytes; object storage is not enabled"
             )),
@@ -101,8 +85,8 @@ impl FilesValidationError {
             Self::TextLinesExceeded { max } => ServiceError::InvalidInput(format!(
                 "text exceeds the maximum of {max} lines; split the text into smaller notes"
             )),
-            Self::SpaceTextBytesExceeded { max } => ServiceError::Conflict(format!(
-                "space live text content would exceed the maximum of {max} bytes; split or move content"
+            Self::SpaceContentBytesExceeded { max } => ServiceError::Conflict(format!(
+                "space content would exceed the maximum of {max} bytes; delete, move, or split content"
             )),
             Self::MetadataInvalid(message) => ServiceError::InvalidInput(message),
         }
@@ -244,35 +228,6 @@ pub fn validate_space_node_count(
     Ok(())
 }
 
-/// Reject creating a text when the space already holds the maximum live
-/// texts.
-pub fn validate_space_text_count(
-    live_texts: usize,
-    limits: Limits,
-) -> Result<(), FilesValidationError> {
-    if live_texts >= limits.space_max_texts {
-        return Err(FilesValidationError::SpaceTextsExceeded {
-            max: limits.space_max_texts,
-        });
-    }
-    Ok(())
-}
-
-/// Reject text content over the per-text byte ([`limits::TEXT_MAX_BYTES`])
-/// or line ([`limits::TEXT_MAX_LINES`]) caps. `line_count` is the value
-/// computed by [`crate::files::content::compute`].
-pub fn validate_space_file_count(
-    live_files: usize,
-    limits: Limits,
-) -> Result<(), FilesValidationError> {
-    if live_files >= limits.space_max_files {
-        return Err(FilesValidationError::SpaceFilesExceeded {
-            max: limits.space_max_files,
-        });
-    }
-    Ok(())
-}
-
 /// Reject files larger than the current inline PostgreSQL cap.
 pub fn validate_file_bytes(byte_len: usize) -> Result<(), FilesValidationError> {
     if byte_len > limits::FILE_INLINE_PG_MAX_BYTES {
@@ -300,13 +255,13 @@ pub fn validate_text_content(
     Ok(())
 }
 
-/// Reject a write/patch that would push the space's total live text
-/// bytes over the configured space byte budget.
+/// Reject a mutation that would push the space's total live content bytes
+/// over the configured space byte budget.
 ///
-/// `current_total_bytes` is the space's current live text byte sum,
-/// `previous_byte_len` is the byte length of the text being replaced (0 for
-/// a new text), and `new_byte_len` is the byte length about to be stored.
-pub fn validate_space_text_bytes(
+/// `current_total_bytes` is the space's current live text+file byte sum,
+/// `previous_byte_len` is the byte length being replaced (0 for new content),
+/// and `new_byte_len` is the byte length about to be stored.
+pub fn validate_space_content_bytes(
     current_total_bytes: usize,
     previous_byte_len: usize,
     new_byte_len: usize,
@@ -315,9 +270,9 @@ pub fn validate_space_text_bytes(
     let projected = current_total_bytes
         .saturating_sub(previous_byte_len)
         .saturating_add(new_byte_len);
-    if projected > limits.space_max_text_bytes {
-        return Err(FilesValidationError::SpaceTextBytesExceeded {
-            max: limits.space_max_text_bytes,
+    if projected > limits.space_max_content_bytes {
+        return Err(FilesValidationError::SpaceContentBytesExceeded {
+            max: limits.space_max_content_bytes,
         });
     }
     Ok(())
@@ -396,17 +351,12 @@ mod tests {
     }
 
     #[test]
-    fn space_node_and_text_count_boundaries() {
+    fn space_node_count_boundaries() {
         let caps = Limits::default();
         assert!(validate_space_node_count(limits::SPACE_MAX_NODES - 1, caps).is_ok());
         assert!(matches!(
             validate_space_node_count(limits::SPACE_MAX_NODES, caps),
             Err(FilesValidationError::SpaceNodesExceeded { .. })
-        ));
-        assert!(validate_space_text_count(limits::SPACE_MAX_TEXTS - 1, caps).is_ok());
-        assert!(matches!(
-            validate_space_text_count(limits::SPACE_MAX_TEXTS, caps),
-            Err(FilesValidationError::SpaceTextsExceeded { .. })
         ));
     }
 
@@ -424,18 +374,18 @@ mod tests {
     }
 
     #[test]
-    fn space_text_bytes_accounts_for_replacement() {
-        let max = limits::SPACE_MAX_TEXT_BYTES;
+    fn space_content_bytes_accounts_for_replacement() {
+        let max = limits::SPACE_MAX_CONTENT_BYTES;
         let caps = Limits::default();
         // Replacing a doc of equal size at the cap stays at the cap (ok).
-        assert!(validate_space_text_bytes(max, 10, 10, caps).is_ok());
+        assert!(validate_space_content_bytes(max, 10, 10, caps).is_ok());
         // Growing past the cap is rejected.
         assert!(matches!(
-            validate_space_text_bytes(max, 0, 1, caps),
-            Err(FilesValidationError::SpaceTextBytesExceeded { .. })
+            validate_space_content_bytes(max, 0, 1, caps),
+            Err(FilesValidationError::SpaceContentBytesExceeded { .. })
         ));
         // Shrinking is always fine.
-        assert!(validate_space_text_bytes(max, 100, 1, caps).is_ok());
+        assert!(validate_space_content_bytes(max, 100, 1, caps).is_ok());
     }
 
     #[test]
@@ -451,7 +401,7 @@ mod tests {
             ServiceError::Conflict(_)
         ));
         assert!(matches!(
-            FilesValidationError::SpaceTextBytesExceeded { max: 1 }.into_service_error(),
+            FilesValidationError::SpaceContentBytesExceeded { max: 1 }.into_service_error(),
             ServiceError::Conflict(_)
         ));
     }

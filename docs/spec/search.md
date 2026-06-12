@@ -218,8 +218,8 @@ Text 내부 line offset cursor는 사용하지 않는다.
 현재 hard limit에서 scope가 root이고 모든 live node가 scope 안에 있으면 최악의 논리 scan 범위는 다음과 같다.
 
 ```text
-node scan upper bound       = 10000 nodes
-plain text scan upper bound = 256 MiB per space
+node scan upper bound       = 25000 nodes
+plain text scan upper bound = 1 GiB live Text content per space
 ```
 
 최악의 경우 search는 위 범위를 끝까지 탐색해야 한다. 하지만 한 요청에서 전체를 메모리에 올리지 않는다.

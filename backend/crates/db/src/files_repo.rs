@@ -84,12 +84,8 @@ impl FilesRepo {
         queries::node::count_live_nodes(&self.pool, space_id).await
     }
 
-    pub async fn count_live_texts(&self, space_id: Uuid) -> Result<usize> {
-        queries::text::count_live_texts(&self.pool, space_id).await
-    }
-
-    pub async fn sum_live_text_bytes(&self, space_id: Uuid) -> Result<usize> {
-        queries::text::sum_live_text_bytes(&self.pool, space_id).await
+    pub async fn sum_live_content_bytes(&self, space_id: Uuid) -> Result<usize> {
+        queries::quota::sum_live_content_bytes(&self.pool, space_id).await
     }
 
     pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
@@ -118,10 +114,6 @@ impl FilesRepo {
         node_ids: &[Uuid],
     ) -> Result<HashMap<Uuid, TextObject>> {
         queries::text::find_texts(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn count_live_files(&self, space_id: Uuid) -> Result<usize> {
-        queries::file::count_live_files(&self.pool, space_id).await
     }
 
     pub async fn file_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<FileStats>> {

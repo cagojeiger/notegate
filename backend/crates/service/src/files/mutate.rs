@@ -60,10 +60,6 @@ impl FilesService {
             .prepare_create(space_id, command.parent_node_id, &command.name)
             .await?;
 
-        // A text also consumes the live-text quota.
-        let texts = self.store.count_live_texts(space_id).await?;
-        validation::validate_space_text_count(texts, self.limits)?;
-
         let empty = content::compute("").into_stored_plain(String::new());
         let (node, text) = self
             .store
@@ -89,7 +85,8 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
         validation::validate_basename(&command.name, NodeKind::File)?;
-        validation::validate_file_bytes(command.bytes.len())?;
+        let byte_len = command.bytes.len();
+        validation::validate_file_bytes(byte_len)?;
         validate_file_encryption(
             command.encryption_mode,
             command.encryption_metadata.as_ref(),
@@ -99,8 +96,8 @@ impl FilesService {
             .prepare_create(space_id, command.parent_node_id, &command.name)
             .await?;
 
-        let files = self.store.count_live_files(space_id).await?;
-        validation::validate_space_file_count(files, self.limits)?;
+        let total = self.store.sum_live_content_bytes(space_id).await?;
+        validation::validate_space_content_bytes(total, 0, byte_len, self.limits)?;
 
         let stored = content::compute_file(
             command.bytes,
@@ -147,8 +144,8 @@ impl FilesService {
                 let (node, text) = self.load_text(space_id, node_id).await?;
                 check_expected_sha(command.expected_sha256.as_deref(), &text.content_sha256)?;
 
-                let total = self.store.sum_live_text_bytes(space_id).await?;
-                validation::validate_space_text_bytes(
+                let total = self.store.sum_live_content_bytes(space_id).await?;
+                validation::validate_space_content_bytes(
                     total,
                     text.byte_len.max(0) as usize,
                     stored.byte_len as usize,
@@ -180,11 +177,9 @@ impl FilesService {
                 validation::validate_basename(&name, NodeKind::Text)?;
                 self.prepare_create(space_id, parent_node_id, &name).await?;
 
-                // New-text quotas: live-text count and total byte budget.
-                let texts = self.store.count_live_texts(space_id).await?;
-                validation::validate_space_text_count(texts, self.limits)?;
-                let total = self.store.sum_live_text_bytes(space_id).await?;
-                validation::validate_space_text_bytes(
+                // New text consumes the shared live content byte budget.
+                let total = self.store.sum_live_content_bytes(space_id).await?;
+                validation::validate_space_content_bytes(
                     total,
                     0,
                     stored.byte_len as usize,
@@ -228,8 +223,8 @@ impl FilesService {
                 let metrics = content::compute(&content);
                 validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
-                let total = self.store.sum_live_text_bytes(space_id).await?;
-                validation::validate_space_text_bytes(
+                let total = self.store.sum_live_content_bytes(space_id).await?;
+                validation::validate_space_content_bytes(
                     total,
                     text.byte_len.max(0) as usize,
                     metrics.byte_len,
@@ -306,8 +301,8 @@ impl FilesService {
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
-        let total = self.store.sum_live_text_bytes(space_id).await?;
-        validation::validate_space_text_bytes(
+        let total = self.store.sum_live_content_bytes(space_id).await?;
+        validation::validate_space_content_bytes(
             total,
             text.byte_len.max(0) as usize,
             metrics.byte_len,
@@ -369,8 +364,8 @@ impl FilesService {
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
-        let total = self.store.sum_live_text_bytes(space_id).await?;
-        validation::validate_space_text_bytes(
+        let total = self.store.sum_live_content_bytes(space_id).await?;
+        validation::validate_space_content_bytes(
             total,
             text.byte_len.max(0) as usize,
             metrics.byte_len,

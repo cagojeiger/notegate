@@ -19,9 +19,8 @@ x-api-environment: &api-environment
   # Capacity caps default to spec values. Uncomment small values for cheap
   # local/E2E boundary tests.
   # NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN: "3"
-  # NOTEGATE_LIMITS__WORKSPACE_MAX_NODES: "5"
-  # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENTS: "2"
-  # NOTEGATE_LIMITS__WORKSPACE_MAX_DOCUMENT_BYTES: "1024"
+  # NOTEGATE_LIMITS__SPACE_MAX_NODES: "5"
+  # NOTEGATE_LIMITS__SPACE_MAX_CONTENT_BYTES: "1024"
 
 services:
   postgres:

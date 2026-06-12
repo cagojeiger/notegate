@@ -59,17 +59,13 @@ pub const FOLDER_NAME_MAX_LEN: usize = 128;
 /// Maximum text node name length, in characters.
 pub const TEXT_NAME_MAX_LEN: usize = 128;
 /// Maximum derived path length, in bytes.
-pub const MAX_PATH_LEN: usize = 645;
+pub const MAX_PATH_LEN: usize = 903;
 /// Maximum path depth, in segments below the space root.
-pub const MAX_PATH_DEPTH: usize = 5;
+pub const MAX_PATH_DEPTH: usize = 7;
 /// Maximum live nodes per space.
-pub const SPACE_MAX_NODES: usize = 10_000;
-/// Maximum live texts per space.
-pub const SPACE_MAX_TEXTS: usize = 5_000;
-/// Maximum live file nodes per space.
-pub const SPACE_MAX_FILES: usize = 5_000;
-/// Maximum total live text bytes per space (256 MiB).
-pub const SPACE_MAX_TEXT_BYTES: usize = 268_435_456;
+pub const SPACE_MAX_NODES: usize = 25_000;
+/// Maximum total live text+file content bytes per space (1 GiB).
+pub const SPACE_MAX_CONTENT_BYTES: usize = 1_073_741_824;
 /// Maximum file bytes stored inline in PostgreSQL (256 KiB).
 pub const FILE_INLINE_PG_MAX_BYTES: usize = 262_144;
 /// Maximum bytes per uploaded file (100 MiB).
@@ -89,7 +85,7 @@ pub const NODE_METADATA_STRING_MAX_CHARS: usize = 2_048;
 // --- Listing and folder fanout limits ---
 
 /// Maximum live direct children per folder.
-pub const FOLDER_MAX_CHILDREN: usize = 200;
+pub const FOLDER_MAX_CHILDREN: usize = 1_000;
 
 /// Runtime-overridable space/file-tree capacity limits.
 ///
@@ -100,9 +96,7 @@ pub const FOLDER_MAX_CHILDREN: usize = 200;
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub space_max_nodes: usize,
-    pub space_max_texts: usize,
-    pub space_max_text_bytes: usize,
-    pub space_max_files: usize,
+    pub space_max_content_bytes: usize,
     pub folder_max_children: usize,
 }
 
@@ -110,9 +104,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             space_max_nodes: SPACE_MAX_NODES,
-            space_max_texts: SPACE_MAX_TEXTS,
-            space_max_text_bytes: SPACE_MAX_TEXT_BYTES,
-            space_max_files: SPACE_MAX_FILES,
+            space_max_content_bytes: SPACE_MAX_CONTENT_BYTES,
             folder_max_children: FOLDER_MAX_CHILDREN,
         }
     }

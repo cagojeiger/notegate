@@ -75,7 +75,6 @@ CREATE TABLE users (
         OR (email_hash IS NOT NULL AND email_hash_key_id IS NOT NULL AND email_hash_version IS NOT NULL)
     )
 );
-CREATE INDEX users_email_hash_idx ON users(email_hash) WHERE email_hash IS NOT NULL;
 
 CREATE TABLE agents (
     id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
@@ -111,9 +110,7 @@ CREATE TABLE api_keys (
 );
 CREATE INDEX api_keys_account_live_idx ON api_keys(account_id) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_account_created_idx ON api_keys(account_id, created_at DESC, id DESC);
-CREATE INDEX api_keys_hash_key_live_idx ON api_keys(hash_key_id) WHERE revoked_at IS NULL;
 CREATE INDEX api_keys_expiring_live_idx ON api_keys(expires_at) WHERE revoked_at IS NULL;
-CREATE INDEX api_keys_rotated_from_idx ON api_keys(rotated_from_key_id) WHERE rotated_from_key_id IS NOT NULL;
 
 CREATE TABLE spaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -204,9 +201,6 @@ CREATE UNIQUE INDEX nodes_live_sibling_name_key
 CREATE INDEX nodes_children_idx
     ON nodes(space_id, parent_id, sort_order, name, id)
     WHERE deleted_at IS NULL;
-CREATE INDEX nodes_kind_idx
-    ON nodes(space_id, kind)
-    WHERE deleted_at IS NULL;
 
 CREATE OR REPLACE FUNCTION create_space_root_node()
 RETURNS trigger
@@ -253,7 +247,6 @@ CREATE TABLE text_objects (
     )
 );
 CREATE INDEX text_objects_space_idx ON text_objects(space_id);
-CREATE INDEX text_objects_space_updated_idx ON text_objects(space_id, updated_at DESC, node_id);
 
 CREATE TABLE file_objects (
     node_id UUID PRIMARY KEY,

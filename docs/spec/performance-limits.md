@@ -31,24 +31,31 @@ space_name_pattern = ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
 
 ## Tree and content limits
 
+Limit은 두 단계로 정의한다.
+
 ```text
-node_name_max_chars = 128
-max_tree_depth = 5
-folder_max_children = 200
-space_max_nodes = 10000 live nodes
-space_max_texts = 5000 live text nodes
-space_max_files = 5000 live file nodes
-space_max_text_bytes = 268435456       # 256 MiB live text total per space
-text_max_bytes = 1048576               # 1 MiB per text object
-file_inline_pg_max_bytes = 262144       # 현재 저장 가능한 file bytes 상한
-file_max_bytes = 104857600             # file product hard max
-node_metadata_max_bytes = 16384         # 16 KiB per node metadata object
-node_metadata_max_depth = 4
-node_metadata_key_max_chars = 64
-node_metadata_string_max_chars = 2048
+Space-level limits
+  space_max_content_bytes = 1073741824   # 1 GiB live text+file content per space
+  space_max_nodes = 25000                # live folder/text/file nodes per space
+  max_tree_depth = 7                     # segments below root
+  max_path_bytes = 903                   # derived path byte upper bound
+  folder_max_children = 1000             # live direct children per folder
+
+Node/content-level limits
+  node_name_max_chars = 128
+  text_max_bytes = 1048576               # 1 MiB per text object
+  text_max_lines = 2000                  # lines per text object
+  file_inline_pg_max_bytes = 262144      # 현재 inline_pg로 저장 가능한 file bytes 상한
+  file_max_bytes = 104857600             # 100 MiB per file product hard max
+  node_metadata_max_bytes = 16384        # 16 KiB per node metadata object
+  node_metadata_max_depth = 4
+  node_metadata_key_max_chars = 64
+  node_metadata_string_max_chars = 2048
 ```
 
-현재 File 저장 구현은 `file_inline_pg_max_bytes` 이하만 지원한다. `file_max_bytes`는 file 객체의 제품 hard max이며, 현재 지원 크기를 의미하지 않는다.
+`space_max_content_bytes`는 live Text bytes와 live File bytes의 합이다. 모든 content budget을 Text가 사용하면 grep의 논리 scan 상한은 1 GiB다. Soft-deleted node의 bytes는 physical storage에는 남지만 live quota에는 포함하지 않는다.
+
+현재 File 저장 구현은 `file_inline_pg_max_bytes` 이하만 지원한다. `file_max_bytes`는 File 하나의 제품 hard max이며, 현재 지원 크기를 의미하지 않는다.
 
 Depth는 root 아래 segment 수로 계산한다.
 
@@ -56,6 +63,34 @@ Depth는 root 아래 segment 수로 계산한다.
 /                 depth 0
 /notes            depth 1
 /notes/today      depth 2
+```
+
+## Limit error contract
+
+Limit 초과는 다음 분류와 메시지를 사용한다. 메시지는 사용자가 다음 행동을 판단할 수 있어야 한다.
+
+```text
+Space-level
+  nodes exceeded:
+    409 conflict "space already has the maximum of {max} live nodes"
+  content bytes exceeded:
+    409 conflict "space content would exceed the maximum of {max} bytes; delete, move, or split content"
+  folder children exceeded:
+    409 conflict "folder already has the maximum of {max} live children; split into subfolders"
+  depth exceeded:
+    400 invalid_input "path is too deep (max {max})"
+
+Node/content-level
+  text bytes exceeded:
+    400 invalid_input "text exceeds the maximum of {max} bytes; split the text into smaller notes"
+  text lines exceeded:
+    400 invalid_input "text exceeds the maximum of {max} lines; split the text into smaller notes"
+  file bytes exceeded:
+    400 invalid_input "file exceeds the maximum of {max} bytes"
+  inline file unsupported:
+    400 invalid_input "file exceeds the maximum inline size of {max} bytes; object storage is not enabled"
+  metadata bytes/depth/key/string exceeded:
+    400 invalid_input with the exceeded metadata limit
 ```
 
 ## Pagination defaults
@@ -91,8 +126,8 @@ Search는 MCP/CLI command이며 REST resource API에는 노출하지 않는다. 
 최악의 논리 scan 범위:
 
 ```text
-node scan upper bound       = 10000 live nodes per space
-plain text scan upper bound = 256 MiB live text bytes per space
+node scan upper bound       = 25000 live nodes per space
+plain text scan upper bound = 1 GiB live Text content per space
 ```
 
 최악의 경우 전체 subtree를 탐색해야 하지만 한 요청에서 전체를 읽지 않는다. `limit`은 반환할 result 수이고 scan budget은 검사할 candidate 양이다. Scan budget에 먼저 도달하면 result가 없어도 `has_more=true`와 `next_cursor`를 반환할 수 있다.
@@ -111,6 +146,28 @@ response target     <= 256 KiB
 DB candidate scan은 DFS order를 `sort_order, name, id`와 내부 `sort_path`로 안정화한다. Cursor는 마지막으로 소비한 candidate의 위치를 기억하고, 다음 page는 그 이후 candidate부터 검사한다. Regex matching은 DB regex가 아니라 application Rust regex로 수행한다.
 
 `grep`은 기본적으로 query를 포함하는 Text node 후보를 반환한다. 요청 옵션으로 matching line number를 반환할 수 있지만 본문과 snippet은 별도 read command로 조회한다.
+
+## Storage sizing guideline
+
+1만 user 기준 hard-limit worst case는 다음과 같다.
+
+```text
+spaces_per_user_max = 20
+space_max_content_bytes = 1 GiB
+worst_case_logical_content_per_user = 20 GiB
+worst_case_logical_content_10000_users = 200 TiB
+```
+
+운영 sizing은 평균 사용률을 별도로 가정한다.
+
+```text
+10000 users, 2% usage -> logical 4 TiB, PostgreSQL physical 6~8 TiB estimate
+10000 users, 5% usage -> logical 10 TiB, PostgreSQL physical 15~20 TiB estimate
+```
+
+PostgreSQL physical estimate는 row overhead, index, TOAST, WAL, dead tuple, vacuum 여유, backup 여유를 포함해 logical content의 약 1.5~2배로 본다.
+
+1만 user 규모에서는 PgBouncer와 connection pool 상한을 전제로 한다. File content가 hard-limit worst case에 가까워지면 object storage와 backup/restore 전략을 별도로 둔다.
 
 ## Purge limits
 

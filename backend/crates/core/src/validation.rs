@@ -193,7 +193,7 @@ mod tests {
         );
         assert_eq!(normalize_path("/a/../b"), Err(ValidationError::Reserved));
         assert_eq!(
-            normalize_path("/a/b/c/d/e/f"),
+            normalize_path("/a/b/c/d/e/f/g/h"),
             Err(ValidationError::PathTooDeep)
         );
     }

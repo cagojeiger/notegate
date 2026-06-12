@@ -1,7 +1,39 @@
 //! Read queries for the file tree.
+pub mod quota {
+    //! Space-level quota reads shared by service and in-transaction guards.
+
+    use notegate_core::Result;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use super::super::error::map_sqlx_error;
+    use crate::to_usize;
+
+    /// Sum of live Text and File bytes in a space.
+    pub async fn sum_live_content_bytes(pool: &PgPool, space_id: Uuid) -> Result<usize> {
+        let total: i64 = sqlx::query_scalar(
+            "SELECT \
+                COALESCE(( \
+                    SELECT sum(t.byte_len) FROM text_objects t \
+                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
+                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
+                ), 0)::bigint + \
+                COALESCE(( \
+                    SELECT sum(f.byte_len) FROM file_objects f \
+                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
+                ), 0)::bigint",
+        )
+        .bind(space_id)
+        .fetch_one(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        to_usize(total, "content byte")
+    }
+}
+
 pub mod text {
-    //! Text reads: load a live text (node + content), and space-level
-    //! text count / total byte sum used by the in-tx capacity checks.
+    //! Text reads: load live text content and metrics.
 
     use notegate_core::Result;
     use notegate_model::files::TextStats;
@@ -12,7 +44,6 @@ pub mod text {
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-    use crate::to_usize;
 
     /// Load live text metrics without the content body.
     pub async fn text_stats(
@@ -154,38 +185,10 @@ pub mod text {
         }
         Ok(texts)
     }
-
-    /// Count of live texts in a space (joins `text_objects` to live nodes).
-    pub async fn count_live_texts(pool: &PgPool, space_id: Uuid) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM text_objects d \
-         JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(count, "text")
-    }
-
-    /// Sum of `byte_len` over the space's live texts.
-    pub async fn sum_live_text_bytes(pool: &PgPool, space_id: Uuid) -> Result<usize> {
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(sum(d.byte_len), 0)::bigint FROM text_objects d \
-         JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(total, "text byte")
-    }
 }
 
 pub mod file {
-    //! File reads: metadata stats, file object lookup, inline bytes, and live file count.
+    //! File reads: metadata stats, file object lookup, and inline bytes.
 
     use notegate_core::{Error, Result};
     use notegate_model::files::FileStats;
@@ -195,7 +198,6 @@ pub mod file {
 
     use super::super::error::map_sqlx_error;
     use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow};
-    use crate::to_usize;
 
     pub async fn file_stats(
         pool: &PgPool,
@@ -333,19 +335,6 @@ pub mod file {
 
         let bytes = bytes.ok_or_else(|| Error::not_found("file content not found"))?;
         Ok(Some((node, file, bytes)))
-    }
-
-    pub async fn count_live_files(pool: &PgPool, space_id: Uuid) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM file_objects f \
-         JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-         WHERE f.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(count, "file")
     }
 }
 

@@ -261,17 +261,17 @@ fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
     if limits.space_max_nodes > crate::limits::SPACE_MAX_NODES {
         errors.add("limits.space_max_nodes", ValidationError::new("range"));
     }
-    if limits.space_max_texts == 0 {
-        errors.add("limits.space_max_texts", ValidationError::new("range"));
+    if limits.space_max_content_bytes == 0 {
+        errors.add(
+            "limits.space_max_content_bytes",
+            ValidationError::new("range"),
+        );
     }
-    if limits.space_max_texts > crate::limits::SPACE_MAX_TEXTS {
-        errors.add("limits.space_max_texts", ValidationError::new("range"));
-    }
-    if limits.space_max_text_bytes == 0 {
-        errors.add("limits.space_max_text_bytes", ValidationError::new("range"));
-    }
-    if limits.space_max_text_bytes > crate::limits::SPACE_MAX_TEXT_BYTES {
-        errors.add("limits.space_max_text_bytes", ValidationError::new("range"));
+    if limits.space_max_content_bytes > crate::limits::SPACE_MAX_CONTENT_BYTES {
+        errors.add(
+            "limits.space_max_content_bytes",
+            ValidationError::new("range"),
+        );
     }
     if limits.folder_max_children == 0 {
         errors.add("limits.folder_max_children", ValidationError::new("range"));
@@ -461,15 +461,13 @@ mod tests {
                 ),
                 ("NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN", "3"),
                 ("NOTEGATE_LIMITS__SPACE_MAX_NODES", "5"),
-                ("NOTEGATE_LIMITS__SPACE_MAX_TEXTS", "2"),
-                ("NOTEGATE_LIMITS__SPACE_MAX_TEXT_BYTES", "1024"),
+                ("NOTEGATE_LIMITS__SPACE_MAX_CONTENT_BYTES", "1024"),
             ]),
         )?;
 
         assert_eq!(config.limits.folder_max_children, 3);
         assert_eq!(config.limits.space_max_nodes, 5);
-        assert_eq!(config.limits.space_max_texts, 2);
-        assert_eq!(config.limits.space_max_text_bytes, 1024);
+        assert_eq!(config.limits.space_max_content_bytes, 1024);
         Ok(())
     }
 
@@ -514,11 +512,7 @@ mod tests {
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
-        config.limits.space_max_texts = crate::limits::SPACE_MAX_TEXTS + 1;
-        assert!(config.validate().is_err());
-
-        let mut config = valid_config();
-        config.limits.space_max_text_bytes = crate::limits::SPACE_MAX_TEXT_BYTES + 1;
+        config.limits.space_max_content_bytes = crate::limits::SPACE_MAX_CONTENT_BYTES + 1;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

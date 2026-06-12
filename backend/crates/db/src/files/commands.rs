@@ -165,58 +165,10 @@ pub mod checks {
         Ok(())
     }
 
-    /// Enforce the space live-text cap.
-    pub async fn require_text_budget(
-        tx: &mut PgConnection,
-        space_id: Uuid,
-        caps: Limits,
-    ) -> Result<()> {
-        let docs: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM text_objects d \
-         JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if to_usize(docs, "text")? >= caps.space_max_texts {
-            return Err(Error::conflict(format!(
-                "space already has the maximum of {} texts",
-                caps.space_max_texts
-            )));
-        }
-        Ok(())
-    }
-
-    /// Enforce the space live-file cap.
-    pub async fn require_file_budget(
-        tx: &mut PgConnection,
-        space_id: Uuid,
-        caps: Limits,
-    ) -> Result<()> {
-        let files: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM file_objects f \
-         JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-         WHERE f.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if to_usize(files, "file")? >= caps.space_max_files {
-            return Err(Error::conflict(format!(
-                "space already has the maximum of {} files",
-                caps.space_max_files
-            )));
-        }
-        Ok(())
-    }
-
-    /// Enforce the space total live text-byte budget for a write that
+    /// Enforce the space total live content-byte budget for a mutation that
     /// replaces `previous_bytes` with `new_bytes` (use `previous_bytes = 0` on
     /// create). Errors when the resulting total would exceed the cap.
-    pub async fn require_byte_budget(
+    pub async fn require_content_budget(
         tx: &mut PgConnection,
         space_id: Uuid,
         previous_bytes: i64,
@@ -224,19 +176,27 @@ pub mod checks {
         caps: Limits,
     ) -> Result<()> {
         let total: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(sum(d.byte_len), 0)::bigint FROM text_objects d \
-         JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND n.deleted_at IS NULL",
+            "SELECT \
+                COALESCE(( \
+                    SELECT sum(t.byte_len) FROM text_objects t \
+                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
+                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
+                ), 0)::bigint + \
+                COALESCE(( \
+                    SELECT sum(f.byte_len) FROM file_objects f \
+                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
+                ), 0)::bigint",
         )
         .bind(space_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
         let projected = total - previous_bytes + new_bytes;
-        if projected > caps.space_max_text_bytes as i64 {
+        if projected > caps.space_max_content_bytes as i64 {
             return Err(Error::conflict(format!(
-                "write would exceed the space text byte budget of {}",
-                caps.space_max_text_bytes
+                "space content would exceed the maximum of {} bytes; delete, move, or split content",
+                caps.space_max_content_bytes
             )));
         }
         Ok(())
@@ -287,9 +247,8 @@ pub mod create {
     //! Create commands: `mkdir` (folder) and `touch`/`write-create` (text).
     //!
     //! Both run in one transaction that re-checks every create invariant — parent is
-    //! a live folder, resulting depth ≤ 5, parent fanout < 200, space node count
-    //! < 10000, sibling-name unique (texts also: text count < 5000, byte
-    //! budget) — then inserts the node (and the `text_objects` row for a text) with
+    //! a live folder, resulting depth/fanout/node caps, sibling-name unique, and
+    //! shared content byte budget — then inserts the node (and content row) with
     //! attribution = the caller.
 
     use notegate_core::limits::{self, Limits};
@@ -348,8 +307,7 @@ pub mod create {
 
         checks::lock_space(&mut tx, space_id).await?;
         prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-        checks::require_text_budget(&mut tx, space_id, caps).await?;
-        checks::require_byte_budget(&mut tx, space_id, 0, content.byte_len, caps).await?;
+        checks::require_content_budget(&mut tx, space_id, 0, content.byte_len, caps).await?;
 
         let node_row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -401,7 +359,7 @@ pub mod create {
 
         checks::lock_space(&mut tx, space_id).await?;
         prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-        checks::require_file_budget(&mut tx, space_id, caps).await?;
+        checks::require_content_budget(&mut tx, space_id, 0, file.byte_len, caps).await?;
 
         let node_row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -556,8 +514,8 @@ pub mod copy_node {
             texts: snapshot.iter().filter(|node| node.kind == "text").count(),
             files: snapshot.iter().filter(|node| node.kind == "file").count(),
         };
-        let text_bytes = copied_text_bytes(&mut tx, space_id, source_node_id).await?;
-        require_copy_budgets(&mut tx, space_id, counts, text_bytes, caps).await?;
+        let content_bytes = copied_content_bytes(&mut tx, space_id, source_node_id).await?;
+        require_copy_budgets(&mut tx, space_id, counts, content_bytes, caps).await?;
 
         let mut id_map = HashMap::with_capacity(snapshot.len());
         let mut copied_root = None;
@@ -629,7 +587,7 @@ pub mod copy_node {
         .map_err(map_sqlx_error)
     }
 
-    async fn copied_text_bytes(
+    async fn copied_content_bytes(
         tx: &mut PgConnection,
         space_id: Uuid,
         source_node_id: Uuid,
@@ -641,9 +599,9 @@ pub mod copy_node {
                 SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
-             SELECT COALESCE(sum(t.byte_len), 0)::bigint \
-             FROM text_objects t JOIN subtree s ON s.id = t.node_id \
-             WHERE t.space_id = $1",
+             SELECT \
+                COALESCE((SELECT sum(t.byte_len) FROM text_objects t JOIN subtree s ON s.id = t.node_id WHERE t.space_id = $1), 0)::bigint + \
+                COALESCE((SELECT sum(f.byte_len) FROM file_objects f JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1), 0)::bigint",
         )
         .bind(space_id)
         .bind(source_node_id)
@@ -656,7 +614,7 @@ pub mod copy_node {
         tx: &mut PgConnection,
         space_id: Uuid,
         copied: CopyCounts,
-        copied_text_bytes: i64,
+        copied_content_bytes: i64,
         caps: Limits,
     ) -> Result<()> {
         let live_nodes: i64 = sqlx::query_scalar(
@@ -673,51 +631,27 @@ pub mod copy_node {
             )));
         }
 
-        let live_texts: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM text_objects t \
-             JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-             WHERE t.space_id = $1 AND n.deleted_at IS NULL",
+        let live_content_bytes: i64 = sqlx::query_scalar(
+            "SELECT \
+                COALESCE(( \
+                    SELECT sum(t.byte_len) FROM text_objects t \
+                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
+                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
+                ), 0)::bigint + \
+                COALESCE(( \
+                    SELECT sum(f.byte_len) FROM file_objects f \
+                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
+                ), 0)::bigint",
         )
         .bind(space_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        if to_usize(live_texts, "text")?.saturating_add(copied.texts) > caps.space_max_texts {
+        if live_content_bytes + copied_content_bytes > caps.space_max_content_bytes as i64 {
             return Err(Error::conflict(format!(
-                "copy would exceed the space text limit of {}",
-                caps.space_max_texts
-            )));
-        }
-
-        let live_files: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM file_objects f \
-             JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-             WHERE f.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if to_usize(live_files, "file")?.saturating_add(copied.files) > caps.space_max_files {
-            return Err(Error::conflict(format!(
-                "copy would exceed the space file limit of {}",
-                caps.space_max_files
-            )));
-        }
-
-        let live_text_bytes: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(sum(t.byte_len), 0)::bigint FROM text_objects t \
-             JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-             WHERE t.space_id = $1 AND n.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if live_text_bytes + copied_text_bytes > caps.space_max_text_bytes as i64 {
-            return Err(Error::conflict(format!(
-                "copy would exceed the space text byte budget of {}",
-                caps.space_max_text_bytes
+                "copy would exceed the space content byte budget of {}",
+                caps.space_max_content_bytes
             )));
         }
         Ok(())
@@ -961,8 +895,8 @@ pub mod move_node {
     //! attribution). Descendants are never rewritten — their paths are derived,
     //! so they follow the moved node automatically. The transaction re-checks the
     //! move invariants: destination is a live folder, the move is not into the node
-    //! itself or its own subtree, sibling-name is unique at the destination, the
-    //! resulting subtree depth ≤ 5, and the destination fanout < 200.
+    //! itself or its own subtree, sibling-name is unique at the destination, and
+    //! the resulting subtree depth and destination fanout stay within limits.
 
     use notegate_core::limits::{self, Limits};
     use notegate_core::{Error, Result};
@@ -1146,7 +1080,7 @@ pub mod save {
             ));
         }
 
-        checks::require_byte_budget(&mut tx, space_id, previous_bytes, content.byte_len, caps)
+        checks::require_content_budget(&mut tx, space_id, previous_bytes, content.byte_len, caps)
             .await?;
 
         let (storage_format, content_text, encrypted_payload) = stored_text_parts(content);

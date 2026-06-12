@@ -201,6 +201,8 @@ file_inline_contents
 
 `File`은 공통 metadata와 실제 bytes를 분리한다. 현재 content 저장 방식은 `storage_kind='inline_pg'`이며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. 262144 bytes 초과 file은 제품 상한 `file_max_bytes` 안에 있어도 아직 저장하지 않는다.
 
+Space content quota는 live Text bytes와 live File bytes의 합으로 계산한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
+
 ```text
 storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL
 storage_kind='object'    -> 262144 bytes 초과 file 저장 방식으로 예약됨
