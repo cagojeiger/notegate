@@ -4,7 +4,7 @@
 
 notegate는 개인이 소유하고 AI agent가 함께 사용하는 중앙 저장소다. 사용자는 익숙한 파일/폴더 UX로 정보를 관리하고, agent는 같은 tree를 API/MCP로 읽고 쓴다.
 
-notegate의 제품 경계는 개인 저장소다. Team/organization 협업 모델은 이 제품 라인의 범위에 포함하지 않는다.
+notegate의 제품 경계는 개인 저장소다. Team/organization 협업 모델은 이 제품 라인의 범위에 포함하지 않는다. 한 사람이 서로 다른 로그인 신원으로 접근하면 별개 user로 취급하며, 계정 병합도 범위에 포함하지 않는다.
 
 ## Decision
 
