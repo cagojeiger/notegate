@@ -5,7 +5,7 @@ Limit은 두 층이다.
 1. **System hard max**: 코드와 DB가 절대 넘기지 않는 제품 상한.
 2. **User tier quota**: user별 실제 사용량 상한. 항상 system hard max 이하이다.
 
-현재 tier는 `tier0`와 `system_max`만 둔다. 중간 tier는 나중에 추가한다.
+현재 tier는 `tier0`와 `system_max`만 둔다. 현재 기본 가입 tier는 `system_max`이며, 운영 배포 전 기본값을 `tier0`로 낮춘다. 중간 tier는 나중에 추가한다.
 
 ## HTTP safety limits
 
@@ -44,7 +44,7 @@ space_name_pattern = ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
 User tier quotas:
 
 ```text
-tier0                 # default signup tier
+tier0
   spaces_per_user = 1
   agents_per_user = 3
   connections_per_space = 5
@@ -53,7 +53,7 @@ tier0                 # default signup tier
   space_max_nodes = 2000
   folder_max_children = 200
 
-system_max
+system_max            # current default signup tier
   spaces_per_user = 20
   agents_per_user = 50
   connections_per_space = 50

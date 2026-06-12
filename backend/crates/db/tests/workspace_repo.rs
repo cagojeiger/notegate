@@ -162,6 +162,7 @@ async fn tier0_limits_owner_to_one_space() -> Result<(), Box<dyn std::error::Err
         return Ok(());
     };
     let owner = create_user(&db, "owner-tier0@example.com").await?;
+    common::set_user_tier(&db.pool, owner, "tier0").await?;
     let repo = SpaceRepo::new(db.pool.clone());
 
     repo.create_space(

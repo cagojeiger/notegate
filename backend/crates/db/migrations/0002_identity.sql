@@ -55,7 +55,7 @@ CREATE TABLE users (
     email_hash TEXT,
     email_hash_key_id TEXT REFERENCES crypto_key_epochs(key_id),
     email_hash_version INTEGER,
-    tier TEXT NOT NULL DEFAULT 'tier0' CHECK (tier IN ('tier0', 'system_max')),
+    tier TEXT NOT NULL DEFAULT 'system_max' CHECK (tier IN ('tier0', 'system_max')),
     anonymized_at TIMESTAMPTZ,
     CHECK (
         (provider_sub_hash IS NULL AND provider_sub_hash_key_id IS NULL AND provider_sub_hash_version IS NULL)

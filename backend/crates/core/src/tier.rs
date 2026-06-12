@@ -16,7 +16,7 @@ pub enum UserTier {
 }
 
 impl UserTier {
-    pub const DEFAULT: Self = Self::Tier0;
+    pub const DEFAULT: Self = Self::SystemMax;
 
     pub fn as_str(self) -> &'static str {
         match self {
