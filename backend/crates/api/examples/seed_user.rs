@@ -26,7 +26,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ensure_active(&crypto)
         .await?;
 
-    let account_repo = AccountRepo::with_crypto(pool.clone(), crypto.clone());
+    let account_repo = AccountRepo::with_crypto_and_default_user_tier(
+        pool.clone(),
+        crypto.clone(),
+        config.default_user_tier,
+    );
     let (account, _user) = account_repo
         .upsert_user_by_sub(&ResolveAttrs {
             sub: "dev|seed-user-1".to_owned(),
