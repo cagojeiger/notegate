@@ -156,8 +156,8 @@ PrimarySidebar
 ├─ SidebarHeader
 └─ SidebarContent
    ├─ TreeSection
-   ├─ SectionResizeHandle        # RecentSection이 있을 때만
-   └─ RecentSection              # optional
+   ├─ SectionResizeHandle
+   └─ RecentSection
 ```
 
 #### TreeSection
@@ -181,12 +181,10 @@ GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?limit=...&cursor=...
 
 규칙:
 
-- `TreeSection`은 항상 표시한다.
-- `RecentSection`은 recent 데이터 소스가 있을 때만 표시한다.
-- `TreeSection`과 `RecentSection`이 함께 표시되면 각각 독립적으로 스크롤한다.
+- `TreeSection`과 `RecentSection`은 각각 독립적으로 스크롤한다.
 - `TreeSection` header는 전체 folder 접기 action을 가질 수 있다.
 - `RecentSection` header는 표시 밀도 또는 보기 방식을 바꾸는 action을 가질 수 있다.
-- 두 section이 함께 표시될 때 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다.
+- 두 section의 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다.
 - 두 section 사이 divider는 마우스로 높이를 조절할 수 있고, 조절 후에는 사용자 설정 비율을 따른다.
 - 한 번에 전체 tree를 펼쳐서 렌더링하지 않는다.
 - 화면에 보이는 folder만 children을 요청한다.
@@ -239,7 +237,7 @@ DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 - Move는 같은 space 안에서 parent 또는 name을 바꾼다.
 - Folder delete는 recursive confirm을 요구한다.
 - Root node는 rename/move/delete 대상이 아니다.
-- 생성/수정/삭제 후 관련 parent folder children을 갱신한다. `RecentSection`이 활성화되어 있으면 recent list도 갱신한다.
+- 생성/수정/삭제 후 관련 parent folder children과 recent list를 갱신한다.
 
 #### RecentSection
 
@@ -445,4 +443,4 @@ PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 - 긴 메시지나 목록을 표시하지 않는다.
 - 현재 파일 경로, byte/line count, updated_at은 표시하지 않는다. 해당 정보는 `InspectorPanel` 책임이다.
 - agent/runtime 상태는 아직 표시하지 않는다. 향후 agent 실행 상태가 제품 기능으로 확정되면 오른쪽 예약 영역에 추가한다.
-- 모바일에서는 compact 또는 hidden presentation을 사용할 수 있다.
+- 모바일에서는 `StatusBar`를 숨기고 save status는 일시 toast로 표시한다.

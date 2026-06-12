@@ -29,7 +29,7 @@ AppRoot
 | `EditorArea` | 에디터 영역 | 현재 열린 node의 주 작업 영역. 하나 이상의 `EditorGroup`을 포함한다 |
 | `EditorGroup` | 에디터 그룹 | `EditorArea` 안의 독립 pane. 각 group은 열린 node와 preview/edit mode를 따로 가지며 최대 3개까지 나란히 열린다 |
 | `AuxiliarySidebar` | 보조 사이드바 | 우측 보조 영역. Inspector, Agent, References 같은 contextual view를 표시한다 |
-| `StatusBar` | 상태 바 | 앱 하단 상태 표시줄. 저장 상태, 동기화 상태, 현재 경로, agent 상태를 짧게 표시한다 |
+| `StatusBar` | 상태 바 | 앱 하단 상태 표시줄. 저장 상태, 현재 space, 향후 runtime 상태 예약 영역을 짧게 표시한다 |
 
 ## Structural terms
 

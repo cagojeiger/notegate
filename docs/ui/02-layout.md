@@ -160,11 +160,11 @@ PrimarySidebar
 ├─ SidebarHeader
 └─ SidebarContent
    ├─ TreeSection
-   ├─ SectionResizeHandle        # RecentSection이 있을 때만
-   └─ RecentSection              # optional
+   ├─ SectionResizeHandle
+   └─ RecentSection
 ```
 
-`TreeSection`은 folder/text/file 계층을 보여준다. `RecentSection`은 최근 수정된 node를 단순 list로 보여주는 선택 영역이다. Recent 데이터 소스가 활성화된 경우 두 section은 각각 독립적으로 스크롤하고, 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다. Recent 데이터 소스가 없으면 `RecentSection`과 `SectionResizeHandle`을 숨기고 `TreeSection`이 sidebar content를 차지한다. 사용자가 사이 resize bar를 조절하면 이후 비율은 사용자 설정을 따른다. `PrimarySidebar` 자체의 폭도 사용자가 조절할 수 있다.
+`TreeSection`은 folder/text/file 계층을 보여준다. `RecentSection`은 최근 수정된 node를 단순 list로 보여준다. 두 section은 각각 독립적으로 스크롤하고, 초기 기본 높이 비율은 `TreeSection:RecentSection = 2:1`이다. 사용자가 사이 resize bar를 조절하면 이후 비율은 사용자 설정을 따른다. `PrimarySidebar` 자체의 폭도 사용자가 조절할 수 있다.
 
 ### EditorArea
 
@@ -399,7 +399,7 @@ AuxiliarySidebar  hidden, opened as sheet from TitleBar control
 StatusBar         hidden
 ```
 
-Mobile에서 `ActivityRail`은 좌측 rail 대신 화면 하단의 가로 space switcher bar로 표현한다. 이 bar는 접근 가능한 space 전환(현재 space는 active 표시), space 추가, Settings 진입을 담는다. Mobile에서는 `StatusBar`를 숨기므로 현재 space는 bar의 active 표시로 구분한다. 레이아웃 제어(`PrimarySidebar`/`AuxiliarySidebar` 토글)와는 분리하며, 레이아웃 제어는 `TitleBar` 우측에 둔다.
+Mobile에서 `ActivityRail`은 좌측 rail 대신 화면 하단의 가로 space switcher bar로 표현한다. 이 bar는 접근 가능한 space 전환(현재 space는 active 표시), space 추가, Settings 진입을 담는다. Mobile에서는 `StatusBar`를 숨기므로 현재 space는 bar의 active 표시로 구분하고, save status는 일시 toast로 표시한다. 레이아웃 제어(`PrimarySidebar`/`AuxiliarySidebar` 토글)와는 분리하며, 레이아웃 제어는 `TitleBar` 우측에 둔다.
 
 bar 안의 배치는 세로 `ActivityRail`과 같은 순서를 유지한다.
 
