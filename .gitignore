@@ -43,3 +43,10 @@ config/local.toml
 frontend/node_modules/
 frontend/dist/
 frontend/.next/
+frontend/**/node_modules/
+frontend/**/dist/
+frontend/**/.vite/
+frontend/**/.turbo/
+frontend/**/*.tsbuildinfo
+
+node_modules/
