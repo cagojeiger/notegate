@@ -4,6 +4,8 @@
 //! `first` and `all` are explicit opt-ins for broader replacement. Line edits use
 //! 1-based logical line ranges and preserve untouched bytes around edited ranges.
 
+use std::borrow::Cow;
+
 use similar::TextDiff;
 
 use crate::error::ServiceError;
@@ -64,7 +66,7 @@ impl From<PatchError> for ServiceError {
 struct Span<'a> {
     start: usize,
     end: usize,
-    new_text: &'a str,
+    new_text: Cow<'a, str>,
 }
 
 /// Apply string replacements against the original content.
@@ -119,7 +121,7 @@ fn push_match_span<'a>(spans: &mut Vec<Span<'a>>, matched: (usize, &'a str), new
     spans.push(Span {
         start: matched.0,
         end: matched.0 + matched.1.len(),
-        new_text,
+        new_text: Cow::Borrowed(new_text),
     });
 }
 
@@ -139,7 +141,7 @@ pub fn apply_line_edits(original: &str, edits: &[LineEdit]) -> Result<AppliedTex
                 spans.push(Span {
                     start,
                     end: start,
-                    new_text: content.as_str(),
+                    new_text: Cow::Owned(line_content_before(content, true)),
                 });
             }
             LineEdit::InsertAfter { line, content } => {
@@ -151,7 +153,7 @@ pub fn apply_line_edits(original: &str, edits: &[LineEdit]) -> Result<AppliedTex
                 spans.push(Span {
                     start: end,
                     end,
-                    new_text: content.as_str(),
+                    new_text: Cow::Owned(line_content_after(original, end, content)),
                 });
             }
             LineEdit::ReplaceLines {
@@ -163,7 +165,7 @@ pub fn apply_line_edits(original: &str, edits: &[LineEdit]) -> Result<AppliedTex
                 spans.push(Span {
                     start,
                     end,
-                    new_text: content.as_str(),
+                    new_text: Cow::Owned(line_content_before(content, end < original.len())),
                 });
             }
             LineEdit::DeleteLines {
@@ -174,13 +176,44 @@ pub fn apply_line_edits(original: &str, edits: &[LineEdit]) -> Result<AppliedTex
                 spans.push(Span {
                     start,
                     end,
-                    new_text: "",
+                    new_text: Cow::Borrowed(""),
                 });
             }
         }
     }
 
     apply_spans(original, spans)
+}
+
+fn line_content_before(content: &str, has_following_line: bool) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+    if has_following_line && !content.ends_with('\n') {
+        format!("{content}\n")
+    } else {
+        content.to_owned()
+    }
+}
+
+fn line_content_after(original: &str, offset: usize, content: &str) -> String {
+    if content.is_empty() {
+        return String::new();
+    }
+
+    let needs_leading_newline = offset > 0 && !original[..offset].ends_with('\n');
+    let needs_trailing_newline = offset < original.len() && !content.ends_with('\n');
+    let mut out = String::with_capacity(
+        content.len() + usize::from(needs_leading_newline) + usize::from(needs_trailing_newline),
+    );
+    if needs_leading_newline {
+        out.push('\n');
+    }
+    out.push_str(content);
+    if needs_trailing_newline {
+        out.push('\n');
+    }
+    out
 }
 
 fn apply_spans<'a>(original: &str, mut spans: Vec<Span<'a>>) -> Result<AppliedText, PatchError> {
@@ -197,7 +230,7 @@ fn apply_spans<'a>(original: &str, mut spans: Vec<Span<'a>>) -> Result<AppliedTe
     let mut cursor = 0_usize;
     for span in &spans {
         out.push_str(&original[cursor..span.start]);
-        out.push_str(span.new_text);
+        out.push_str(&span.new_text);
         cursor = span.end;
     }
     out.push_str(&original[cursor..]);
@@ -444,5 +477,52 @@ mod tests {
         .unwrap();
         assert_eq!(out.content, "a\nx\nB\n");
         assert_eq!(out.replacements, 3);
+    }
+
+    #[test]
+    fn line_edits_without_trailing_newline_preserve_boundaries() {
+        let inserted_after = apply_line_edits(
+            "L1\nL2\nL3\n",
+            &[LineEdit::InsertAfter {
+                line: 1,
+                content: "NEW".to_owned(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(inserted_after.content, "L1\nNEW\nL2\nL3\n");
+
+        let inserted_before = apply_line_edits(
+            "L1\nL2\nL3\n",
+            &[LineEdit::InsertBefore {
+                line: 2,
+                content: "NEW".to_owned(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(inserted_before.content, "L1\nNEW\nL2\nL3\n");
+
+        let replaced = apply_line_edits(
+            "L1\nL2\nL3\n",
+            &[LineEdit::ReplaceLines {
+                start_line: 2,
+                end_line: 2,
+                content: "X".to_owned(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(replaced.content, "L1\nX\nL3\n");
+    }
+
+    #[test]
+    fn insert_after_last_line_without_newline_adds_separator() {
+        let out = apply_line_edits(
+            "L1",
+            &[LineEdit::InsertAfter {
+                line: 1,
+                content: "L2".to_owned(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(out.content, "L1\nL2");
     }
 }

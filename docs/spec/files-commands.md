@@ -53,7 +53,7 @@ edit   line 기반 insert/replace/delete 적용
 - `append`는 기본적으로 정확한 EOF append다. 줄 구분이 필요하면 호출자가 newline을 포함하거나 `ensure_newline` 옵션을 사용한다.
 - `patch`는 string replacement다. 기본 mode는 `unique`이며 `old_text`가 정확히 한 번만 매칭되어야 한다.
 - `patch`는 명시적으로 `first` 또는 `all` mode를 사용할 수 있다. `expected_count`가 있으면 현재 match 수와 일치해야 한다.
-- `edit`은 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다.
+- `edit`은 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다.
 - 여러 patch/edit은 원본 기준으로 검증한 뒤 적용한다.
 - `expected_sha256`이 주어지면 저장된 content hash와 일치해야 한다.
 

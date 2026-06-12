@@ -193,7 +193,7 @@ type FilesEditOutput = {
 }
 ```
 
-Line number는 1-based다. 여러 line edit은 원본 기준으로 검증한 뒤 적용한다. MCP는 encrypted Text edit을 제공하지 않는다.
+Line number는 1-based다. 여러 line edit은 원본 기준으로 검증한 뒤 적용한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. MCP는 encrypted Text edit을 제공하지 않는다.
 
 ## `files_mv`
 
