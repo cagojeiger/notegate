@@ -374,7 +374,6 @@ File을 선택하면 file preview 또는 metadata view를 보여준다.
 
 ```text
 InspectorPanel
-AgentPanel
 ```
 
 예약 view:
@@ -415,19 +414,6 @@ PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 - 민감한 값은 metadata에 넣지 않는다는 안내를 UI에 둘 수 있다.
 - Inspector는 content editor가 아니다.
 
-### AgentPanel
-
-현재 문맥에서 agent 작업을 보조하는 view다.
-
-정보 후보:
-
-- current node context
-- prompt/input
-- task status
-- result/diff proposal
-
-초기에는 구체 기능이 확정될 때까지 최소 view로 둔다.
-
 ## StatusBar
 
 `StatusBar`는 짧은 상태만 표시한다.
@@ -442,5 +428,4 @@ PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 
 - 긴 메시지나 목록을 표시하지 않는다.
 - 현재 파일 경로, byte/line count, updated_at은 표시하지 않는다. 해당 정보는 `InspectorPanel` 책임이다.
-- agent/runtime 상태는 아직 표시하지 않는다. 향후 agent 실행 상태가 제품 기능으로 확정되면 오른쪽 예약 영역에 추가한다.
 - 모바일에서는 `StatusBar`를 숨기고 save status는 일시 toast로 표시한다.

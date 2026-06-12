@@ -16,7 +16,7 @@ MCP/CLI      -> 별도 path-first 도구 표면
 - 대시보드는 REST API를 기준으로 화면을 그린다.
 - UI는 `space_id`, `node_id`를 사용해 선택 상태를 유지한다.
 - MCP/CLI의 `target` 문자열이나 sequence command를 대시보드 흐름으로 가져오지 않는다.
-- 아직 backend에 없는 전역 command/search, agent runtime status, 파일별 권한 흐름은 만들지 않는다.
+- 아직 backend에 없는 전역 command/search, 파일별 권한 흐름은 만들지 않는다.
 - 화면 분할, sidebar 열기/닫기, pane resize는 local UI state다. Backend에 저장되는 흐름으로 정의하지 않는다.
 
 ## Workbench state rules
@@ -232,10 +232,6 @@ Backend에 저장되는 제품 데이터:
 5. File
    - file metadata
    - file bytes
-
-6. Agent/connection
-   - agent configuration
-   - space connection configuration
 
 규칙:
 
@@ -829,30 +825,27 @@ Constraints:
 - 각 group은 열린 node와 preview/edit mode를 독립적으로 가진다.
 - 최대 group 수에 도달하면 add action은 disabled 상태가 된다.
 
-## 12. Auxiliary inspector and agent view
+## 12. Auxiliary inspector view
 
 Trigger:
 
 ```text
-사용자가 AuxiliarySidebar tab을 전환한다.
+사용자가 AuxiliarySidebar를 연다.
 ```
 
 Backend:
 
 ```text
 Inspector: current node REST response and metadata endpoints
-AgentPanel: no runtime status endpoint yet
 ```
 
 UI result:
 
 - Inspector는 active node의 kind/path/metadata/stat/attribution을 보여준다.
-- AgentPanel은 현재 backend가 제공하는 agent runtime 상태가 없으면 placeholder 또는 관리 진입만 보여준다.
 
 Constraints:
 
 - EditorGroup 안에 중복 inspector button을 두지 않는다.
-- Agent 실행 로그, runtime state, live task 상태는 아직 UI flow로 정의하지 않는다.
 
 ## 13. Mobile presentation
 
@@ -882,7 +875,6 @@ same REST API as desktop
 global command/search box
 semantic search screen
 MCP sequence execution UI
-agent runtime log/status
 file-level ACL/chmod
 cross-space move/copy
 byte-offset editor

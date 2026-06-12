@@ -114,7 +114,6 @@ warning          #f2b766
 
 - 선택된 node가 없으면 기본으로 숨긴다.
 - 선택된 node가 있을 때 Inspector를 보여준다.
-- Agent view는 자리만 예약한다.
 
 ## Light/dark behavior
 

@@ -93,7 +93,6 @@ logged in                                 -> AppShell
 
 - node tree를 직접 렌더링하지 않는다.
 - text/file content를 직접 수정하지 않는다.
-- agent 실행 로직을 직접 갖지 않는다.
 
 ### TitleBar
 
@@ -189,19 +188,13 @@ EditorArea
 
 ```text
 inspector
-agent
 references
 outline
 ```
 
-초기 기본 view는 다음 두 개다.
+초기 기본 view는 `InspectorPanel`이다.
 
-```text
-InspectorPanel
-AgentPanel
-```
-
-`AuxiliarySidebar`는 오른쪽 전체 영역이고, `AgentPanel`은 그 안의 view 중 하나다.
+`AuxiliarySidebar`는 오른쪽 전체 영역이고, `InspectorPanel`은 그 안의 view 중 하나다.
 
 ### StatusBar
 
@@ -412,7 +405,7 @@ bar 안의 배치는 세로 `ActivityRail`과 같은 순서를 유지한다.
 - Settings(`⚙`)는 bar의 가장 오른쪽에 고정한다.
 - space 목록과 `＋`, `Settings`는 각각 구분선으로 나눈다.
 
-Mobile에서 문서가 열려 있지 않으면 `EditorArea`는 empty state를 표시한다. `PrimarySidebar` drawer와 `AuxiliarySidebar` sheet는 `TitleBar` 우측의 같은 레이아웃 제어로 연다. Mobile 전용 별도 nav 버튼은 두지 않는다. `PrimarySidebar` drawer에서 node를 선택하면 drawer를 닫고 `EditorArea`로 돌아온다. `AuxiliarySidebar` sheet는 inspector, agent, references 같은 보조 view를 일시적으로 보여준다.
+Mobile에서 문서가 열려 있지 않으면 `EditorArea`는 empty state를 표시한다. `PrimarySidebar` drawer와 `AuxiliarySidebar` sheet는 `TitleBar` 우측의 같은 레이아웃 제어로 연다. Mobile 전용 별도 nav 버튼은 두지 않는다. `PrimarySidebar` drawer에서 node를 선택하면 drawer를 닫고 `EditorArea`로 돌아온다. `AuxiliarySidebar` sheet는 inspector, references 같은 보조 view를 일시적으로 보여준다.
 
 ## Presentation mapping
 

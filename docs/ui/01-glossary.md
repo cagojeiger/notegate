@@ -28,7 +28,7 @@ AppRoot
 | `PrimarySidebar` | 주 사이드바 | active space의 node tree와 recent list를 표시하는 좌측 탐색 사이드바 |
 | `EditorArea` | 에디터 영역 | 현재 열린 node의 주 작업 영역. 하나 이상의 `EditorGroup`을 포함한다 |
 | `EditorGroup` | 에디터 그룹 | `EditorArea` 안의 독립 pane. 각 group은 열린 node와 preview/edit mode를 따로 가지며 최대 3개까지 나란히 열린다 |
-| `AuxiliarySidebar` | 보조 사이드바 | 우측 보조 영역. Inspector, Agent, References 같은 contextual view를 표시한다 |
+| `AuxiliarySidebar` | 보조 사이드바 | 우측 보조 영역. Inspector, References 같은 contextual view를 표시한다 |
 | `StatusBar` | 상태 바 | 앱 하단 상태 표시줄. 저장 상태, 현재 space, 향후 runtime 상태 예약 영역을 짧게 표시한다 |
 
 ## Structural terms
@@ -49,7 +49,6 @@ AppRoot
 |---|---|
 | `NodeTreeView` | Space 안 folder/text/file tree를 보여주는 view |
 | `InspectorPanel` | 선택된 node의 metadata와 속성을 보여주는 보조 panel |
-| `AgentPanel` | AI agent 작업 상태와 대화를 보여주는 보조 panel |
 | `ReferencesPanel` | 연결 문서, backlink, reference를 보여주는 보조 panel |
 | `OutlineView` | 현재 text의 heading outline을 보여주는 view |
 | `TextEditor` | plain text/markdown 편집기 |
@@ -61,10 +60,10 @@ AppRoot
 - layout 이름은 영역의 위치와 책임을 나타낸다.
 - view 이름은 실제로 보여주는 내용을 나타낸다.
 - `PrimarySidebar` 안에 `NodeTreeView`가 들어간다.
-- `AuxiliarySidebar` 안에 `InspectorPanel`, `AgentPanel`, `ReferencesPanel`이 들어간다.
+- `AuxiliarySidebar` 안에 `InspectorPanel`, `ReferencesPanel`이 들어간다.
 - `EditorArea` 안에 하나 이상의 `EditorGroup`이 들어가고, 각 `EditorGroup` 안에 `EditorGroupHeader`와 `EditorViewport`가 들어간다.
 - `EditorViewport` 안에는 node 종류와 mode에 따라 `TextEditor`, `MarkdownPreview`, `FilePreview`가 들어간다.
-- 오른쪽 전체 영역은 `AuxiliarySidebar`라고 부른다. `AgentPanel`은 그 안의 view 중 하나다.
+- 오른쪽 전체 영역은 `AuxiliarySidebar`라고 부른다. `InspectorPanel`은 그 안의 view 중 하나다.
 
 ## Avoided names
 
