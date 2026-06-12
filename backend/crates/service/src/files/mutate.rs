@@ -4,6 +4,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::files::format::validate_structured_text;
 use crate::files::patch::{apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
@@ -143,6 +144,7 @@ impl FilesService {
             WriteTarget::Existing { node_id } => {
                 let (node, text) = self.load_text(space_id, node_id).await?;
                 check_expected_sha(command.expected_sha256.as_deref(), &text.content_sha256)?;
+                validate_stored_text_format(&node.name, &stored)?;
 
                 let total = self.store.sum_live_content_bytes(space_id).await?;
                 validation::validate_space_content_bytes(
@@ -175,6 +177,7 @@ impl FilesService {
                     ));
                 }
                 validation::validate_basename(&name, NodeKind::Text)?;
+                validate_stored_text_format(&name, &stored)?;
                 self.prepare_create(space_id, parent_node_id, &name).await?;
 
                 // New text consumes the shared live content byte budget.
@@ -220,6 +223,7 @@ impl FilesService {
                 }
                 content.push_str(&command.content);
 
+                validate_structured_text(&node.name, &content)?;
                 let metrics = content::compute(&content);
                 validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
@@ -298,6 +302,7 @@ impl FilesService {
         let applied = apply_edits(plain_content, &command.edits)?;
         let diff = unified_diff(plain_content, &applied.content);
 
+        validate_structured_text(&node.name, &applied.content)?;
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
@@ -361,6 +366,7 @@ impl FilesService {
         let applied = apply_line_edits(plain_content, &command.edits)?;
         let diff = unified_diff(plain_content, &applied.content);
 
+        validate_structured_text(&node.name, &applied.content)?;
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
@@ -694,6 +700,13 @@ fn stored_text_body(body: WriteTextBody) -> ServiceResult<StoredContent> {
         }
         WriteTextBody::Encrypted(payload) => content::compute_encrypted(payload),
     }
+}
+
+fn validate_stored_text_format(name: &str, stored: &StoredContent) -> ServiceResult<()> {
+    if let WriteTextBody::Plain(content) = &stored.body {
+        validate_structured_text(name, content)?;
+    }
+    Ok(())
 }
 
 fn validate_file_encryption(

@@ -14,6 +14,7 @@ pub mod target;
 pub mod types;
 pub mod validation;
 
+mod format;
 mod mutate;
 mod read;
 mod view;

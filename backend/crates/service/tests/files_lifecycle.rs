@@ -654,6 +654,136 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[tokio::test]
+async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "owner", "o@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "structured").await;
+
+    let invalid_create = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "config.json".to_owned(),
+                },
+                body: WriteTextBody::Plain(r#"{"ok":}"#.to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await
+        .expect_err("invalid json must be rejected before create");
+    assert!(invalid_create.to_string().contains("invalid json syntax"));
+
+    let json_doc = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "settings.json".to_owned(),
+                },
+                body: WriteTextBody::Plain(r#"{"ok":true}"#.to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+
+    let invalid_append = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing {
+                    node_id: json_doc.node.node.id,
+                },
+                content: "broken".to_owned(),
+                expected_sha256: Some(json_doc.text.content_sha256.clone()),
+                ensure_newline: false,
+            },
+        )
+        .await
+        .expect_err("append that breaks json must be rejected");
+    assert!(invalid_append.to_string().contains("invalid json syntax"));
+
+    let toml_doc = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "app.toml".to_owned(),
+                },
+                body: WriteTextBody::Plain("[app]\nname = \"ok\"\n".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let invalid_patch = files
+        .patch_text(
+            owner,
+            ws,
+            PatchText {
+                node_id: toml_doc.node.node.id,
+                edits: vec![Edit {
+                    old_text: "name = \"ok\"".to_owned(),
+                    new_text: "name =".to_owned(),
+                    mode: PatchMode::Unique,
+                    expected_count: Some(1),
+                }],
+                expected_sha256: Some(toml_doc.text.content_sha256.clone()),
+            },
+        )
+        .await
+        .expect_err("patch that breaks toml must be rejected");
+    assert!(invalid_patch.to_string().contains("invalid toml syntax"));
+
+    let yaml_doc = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "app.yaml".to_owned(),
+                },
+                body: WriteTextBody::Plain("app:\n  name: ok\n".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let invalid_edit = files
+        .edit_text(
+            owner,
+            ws,
+            EditText {
+                node_id: yaml_doc.node.node.id,
+                edits: vec![LineEdit::ReplaceLines {
+                    start_line: 2,
+                    end_line: 2,
+                    content: "  name: [".to_owned(),
+                }],
+                expected_sha256: Some(yaml_doc.text.content_sha256.clone()),
+            },
+        )
+        .await
+        .expect_err("line edit that breaks yaml must be rejected");
+    assert!(invalid_edit.to_string().contains("invalid yaml syntax"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// `append` branch coverage the lifecycle test does not exercise: create-on-append,
 /// the create + `expected_sha256` conflict, the empty-text `ensure_newline` guard,
 /// and the encrypted-text rejection.
