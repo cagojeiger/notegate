@@ -13,7 +13,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
-use notegate_core::tier::{UserTier, effective_file_tree_limits};
+use notegate_core::tier::effective_file_tree_limits;
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{FileObject, Node, Permission, TextObject};
 use serde_json::Value;
@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::files::{commands, queries};
+use crate::tier_lookup;
 use notegate_model::files::{
     ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, StoredContent,
     StoredFile, TextStats,
@@ -45,21 +46,8 @@ impl FilesRepo {
 
 impl FilesRepo {
     pub async fn effective_limits_for_space(&self, space_id: Uuid) -> Result<Limits> {
-        let tier: String = sqlx::query_scalar(
-            "SELECT u.tier FROM spaces s \
-             JOIN users u ON u.id = s.owner_user_id \
-             JOIN accounts acc ON acc.id = u.id \
-             WHERE s.id = $1 AND s.deleted_at IS NULL \
-               AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(crate::map_sqlx_error)?;
-        Ok(effective_file_tree_limits(
-            UserTier::parse_db(&tier)?,
-            self.limits,
-        ))
+        let tier = tier_lookup::active_space_owner_tier(&self.pool, space_id).await?;
+        Ok(effective_file_tree_limits(tier, self.limits))
     }
 
     pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {

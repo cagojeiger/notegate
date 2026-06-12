@@ -19,6 +19,7 @@ pub mod postgres_pool;
 pub mod purge_repo;
 mod space_permission;
 pub mod spaces_repo;
+mod tier_lookup;
 
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;

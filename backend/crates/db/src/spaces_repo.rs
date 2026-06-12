@@ -1,8 +1,7 @@
 //! Space lifecycle persistence.
 
-use crate::{map_sqlx_error, space_permission};
+use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
-use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result, limits};
 use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
 use sqlx::{FromRow, PgPool};
@@ -108,20 +107,13 @@ impl SpaceRepo {
     pub async fn create_space(&self, owner_user_id: Uuid, command: &CreateSpace) -> Result<Space> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        let owner_tier: Option<String> = sqlx::query_scalar(
-            "SELECT u.tier FROM users u \
-             JOIN accounts acc ON acc.id = u.id \
-             WHERE u.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-             FOR UPDATE OF acc",
+        let owner_tier = tier_lookup::lock_active_user_tier(
+            &mut tx,
+            owner_user_id,
+            "space owner user account not found",
         )
-        .bind(owner_user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        let Some(owner_tier) = owner_tier else {
-            return Err(Error::not_found("space owner user account not found"));
-        };
-        let quota = UserTier::parse_db(&owner_tier)?.quota();
+        .await?;
+        let quota = owner_tier.quota();
 
         let owned: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM spaces WHERE owner_user_id = $1 AND deleted_at IS NULL",
@@ -133,8 +125,9 @@ impl SpaceRepo {
         let owned = usize::try_from(owned).map_err(|_| Error::internal("negative space count"))?;
         if owned >= quota.spaces_per_user {
             return Err(Error::conflict(format!(
-                "owner already has the maximum of {} spaces for tier {owner_tier}",
-                quota.spaces_per_user
+                "owner already has the maximum of {} spaces for tier {}",
+                quota.spaces_per_user,
+                owner_tier.as_str()
             )));
         }
 

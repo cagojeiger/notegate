@@ -5,9 +5,8 @@
 //! `agents` row in one transaction, attributing `owner_user_id` to the caller. API
 //! keys are persisted by `ApiKeyRepo`, not this aggregate repository.
 
-use crate::{active_account_predicate, map_sqlx_error};
+use crate::{active_account_predicate, map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
-use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
 use notegate_model::account::{Account, AccountKind};
@@ -127,20 +126,13 @@ impl AgentRepo {
         validate_agent_name(&command.name)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        let creator_tier: Option<String> = sqlx::query_scalar(
-            "SELECT u.tier FROM users u \
-             JOIN accounts acc ON acc.id = u.id \
-             WHERE u.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-             FOR UPDATE OF acc",
+        let creator_tier = tier_lookup::lock_active_user_tier(
+            &mut tx,
+            owner_user_id,
+            "agent creator user account not found",
         )
-        .bind(owner_user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        let Some(creator_tier) = creator_tier else {
-            return Err(Error::not_found("agent creator user account not found"));
-        };
-        let quota = UserTier::parse_db(&creator_tier)?.quota();
+        .await?;
+        let quota = creator_tier.quota();
 
         let active: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM agents a \
@@ -155,8 +147,9 @@ impl AgentRepo {
             usize::try_from(active).map_err(|_error| Error::internal("negative agent count"))?;
         if active >= quota.agents_per_user {
             return Err(Error::conflict(format!(
-                "creator already has the maximum of {} active agents for tier {creator_tier}",
-                quota.agents_per_user
+                "creator already has the maximum of {} active agents for tier {}",
+                quota.agents_per_user,
+                creator_tier.as_str()
             )));
         }
 

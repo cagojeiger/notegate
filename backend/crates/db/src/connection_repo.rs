@@ -4,9 +4,8 @@
 //! space. Users do not appear in this table: the space owner always has write
 //! permission through `spaces.owner_user_id`.
 
-use crate::map_sqlx_error;
+use crate::{map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
-use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result};
 use notegate_model::{ConnectAgent, Permission, SpaceAgentConnection};
 use sqlx::{FromRow, PgPool};
@@ -90,8 +89,13 @@ impl ConnectionRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         lock_owned_space(&mut tx, command.space_id, connected_by_user_id).await?;
         lock_owned_live_agent(&mut tx, command.agent_id, connected_by_user_id).await?;
-        let owner_tier = user_tier(&mut tx, connected_by_user_id).await?;
-        let quota = UserTier::parse_db(&owner_tier)?.quota();
+        let owner_tier = tier_lookup::lock_active_user_tier(
+            &mut tx,
+            connected_by_user_id,
+            "user account not found",
+        )
+        .await?;
+        let quota = owner_tier.quota();
 
         let active_connections: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM space_agent_connections c \
@@ -109,8 +113,9 @@ impl ConnectionRepo {
             .map_err(|_| Error::internal("negative connection count"))?;
         if active_connections >= quota.connections_per_space {
             return Err(Error::conflict(format!(
-                "space already has the maximum of {} active agent connections for tier {owner_tier}",
-                quota.connections_per_space
+                "space already has the maximum of {} active agent connections for tier {}",
+                quota.connections_per_space,
+                owner_tier.as_str()
             )));
         }
 
@@ -128,8 +133,9 @@ impl ConnectionRepo {
             .map_err(|_| Error::internal("negative connected space count"))?;
         if connected_spaces >= quota.connected_spaces_per_agent {
             return Err(Error::conflict(format!(
-                "agent is already connected to the maximum of {} spaces for tier {owner_tier}",
-                quota.connected_spaces_per_agent
+                "agent is already connected to the maximum of {} spaces for tier {}",
+                quota.connected_spaces_per_agent,
+                owner_tier.as_str()
             )));
         }
 
@@ -182,19 +188,6 @@ impl ConnectionRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
-}
-
-async fn user_tier(tx: &mut sqlx::PgConnection, user_id: Uuid) -> Result<String> {
-    sqlx::query_scalar(
-        "SELECT u.tier FROM users u \
-         JOIN accounts acc ON acc.id = u.id \
-         WHERE u.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL",
-    )
-    .bind(user_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("user account not found"))
 }
 
 async fn lock_owned_space(
