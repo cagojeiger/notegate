@@ -1,11 +1,8 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronsDownUp, Folder } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { listChildren } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
+import { useNodeChildrenQuery } from "./useNodeQueries";
 import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
@@ -45,7 +42,7 @@ function RootTree(props: TreeProps) {
 
 function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, onToggleFolder, onOpenNode, onNodeContextMenu }: TreeProps & { node: RestNode; depth: number }) {
   const isExpanded = expandedFolderIds.has(node.id);
-  const childrenQuery = useNodeChildren(activeSpace.id, node.id, node.kind === "folder" && isExpanded);
+  const childrenQuery = useNodeChildrenQuery(activeSpace.id, node.id, node.kind === "folder" && isExpanded);
   const children = childrenQuery.data?.pages.flatMap((page) => page.children) ?? [];
   return (
     <div>
@@ -86,17 +83,4 @@ function AutoLoadMore({ loaded, depth, isFetching, fetchNextPage }: { loaded: nu
       {isFetching ? "Loading…" : `Scroll to load more (${loaded} loaded)`}
     </div>
   );
-}
-
-function useNodeChildren(spaceId: string, nodeId: string, enabled: boolean) {
-  const client = useApiClient();
-  return useInfiniteQuery({
-    queryKey: queryKeys.children(spaceId, nodeId),
-    queryFn: ({ pageParam }) => listChildren(client, spaceId, nodeId, pageParam),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined),
-    // Poll while the tab is visible so externally-created nodes (MCP/REST) appear.
-    refetchInterval: 20_000,
-    enabled
-  });
 }

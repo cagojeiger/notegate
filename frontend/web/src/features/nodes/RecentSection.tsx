@@ -1,10 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { FileText, List } from "lucide-react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { listNodes } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
+import { useRecentNodesQuery } from "./useNodeQueries";
 import { EmptyState } from "../../shared/ui";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
@@ -24,8 +21,7 @@ export function RecentSection({ activeSpace, activeNodeId, density, open, onTogg
 }
 
 function RecentList({ activeSpace, activeNodeId, density, onOpenNode, onNodeContextMenu }: { activeSpace: Space; activeNodeId: string | null; density: "list" | "compact"; onOpenNode: (node: RestNode) => void; onNodeContextMenu: NodeContextHandler }) {
-  const client = useApiClient();
-  const recentQuery = useQuery({ queryKey: queryKeys.recent(activeSpace.id), queryFn: () => listNodes(client, activeSpace.id, { sort: "updated_at_desc" }), refetchInterval: 15_000 });
+  const recentQuery = useRecentNodesQuery(activeSpace.id);
   if (recentQuery.isLoading) return <div className="text-xs text-muted">Loading recent…</div>;
   if (recentQuery.isError) return <EmptyState>Recent is unavailable for this server build.</EmptyState>;
   const nodes = recentQuery.data?.nodes ?? [];

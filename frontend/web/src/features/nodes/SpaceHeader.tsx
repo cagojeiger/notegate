@@ -1,12 +1,11 @@
 import { FileText, Folder, MoreHorizontal, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-
 import type { Space } from "../../api/types";
 import { Card, IconButton, MenuButton } from "../../shared/ui";
+import { useRefreshSpace } from "./useNodeQueries";
 
 export function SpaceHeader({ activeSpace, onCreateFolder, onCreateText, onFileSelected, onRenameSpace, onDeleteSpace }: { activeSpace: Space | null; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onRenameSpace: () => void; onDeleteSpace: () => void }) {
-  const queryClient = useQueryClient();
+  const refreshSpace = useRefreshSpace();
   const [createOpen, setCreateOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   return (
@@ -16,7 +15,7 @@ export function SpaceHeader({ activeSpace, onCreateFolder, onCreateText, onFileS
         {activeSpace ? <div className="text-[10px] uppercase tracking-wide text-faint">active space</div> : null}
       </div>
       <div className="flex items-center gap-1">
-        <IconButton label="Refresh from server" onClick={() => { if (activeSpace) void queryClient.invalidateQueries({ queryKey: ["spaces", activeSpace.id] }); }}><RefreshCw size={15} /></IconButton>
+        <IconButton label="Refresh from server" onClick={() => { if (activeSpace) refreshSpace(activeSpace.id); }}><RefreshCw size={15} /></IconButton>
         <IconButton label="Create node" onClick={() => setCreateOpen((open) => !open)}><Plus size={15} /></IconButton>
         <IconButton label="Manage space" onClick={() => setManageOpen((open) => !open)}><MoreHorizontal size={15} /></IconButton>
       </div>
