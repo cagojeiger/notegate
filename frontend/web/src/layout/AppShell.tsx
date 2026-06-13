@@ -18,6 +18,7 @@ import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 import { DialogHost, type AppDialog } from "./dialogs/DialogHost";
+import { createNodeDialog, deleteNodeDialog, deleteSpaceDialog, metadataDialog, moveNodeDialog, newSpaceDialog, renameNodeDialog, renameSpaceDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import { FullScreenStatus } from "./FullScreenStatus";
 import { SettingsModal } from "./SettingsModal";
 import { StatusBar } from "./StatusBar";
@@ -173,34 +174,34 @@ export function AppShell({ onSignOut }: AppShellProps) {
   }
 
   function promptCreateSpace() {
-    setDialog({ kind: "prompt", title: "New space", label: "Space name", initial: "", submitLabel: "Create", onSubmit: (name) => createSpaceMutation.mutate(name) });
+    setDialog(newSpaceDialog((name) => createSpaceMutation.mutate(name)));
   }
 
   function promptRenameSpace() {
     if (!activeSpace) return;
     const space = activeSpace;
-    setDialog({ kind: "prompt", title: "Rename space", label: "Space name", initial: space.name, submitLabel: "Rename", onSubmit: (name) => { if (name !== space.name) updateSpaceMutation.mutate({ spaceId: space.id, name }); } });
+    setDialog(renameSpaceDialog(space, (spaceId, name) => updateSpaceMutation.mutate({ spaceId, name })));
   }
 
   function confirmDeleteSpace() {
     if (!activeSpace) return;
     const space = activeSpace;
-    setDialog({ kind: "confirm", title: "Delete space", message: `Delete space "${space.name}"? This permanently removes all of its nodes.`, danger: true, confirmLabel: "Delete", onConfirm: () => deleteSpaceMutation.mutate(space.id) });
+    setDialog(deleteSpaceDialog(space, (spaceId) => deleteSpaceMutation.mutate(spaceId)));
   }
 
   function promptCreateNode(kind: "folder" | "text") {
     const parentId = parentForCreate();
     if (!parentId) return;
-    setDialog({ kind: "prompt", title: kind === "folder" ? "New folder" : "New text", label: "Name", initial: "", submitLabel: "Create", onSubmit: (name) => createNodeMutation.mutate({ parentId, kind, name, content: kind === "text" ? "" : undefined }) });
+    setDialog(createNodeDialog(parentId, kind, (input) => createNodeMutation.mutate(input)));
   }
 
   function promptCreateInFolder(folder: RestNode, kind: "folder" | "text") {
-    setDialog({ kind: "prompt", title: kind === "folder" ? "New folder" : "New text", label: "Name", initial: "", submitLabel: "Create", onSubmit: (name) => createNodeMutation.mutate({ parentId: folder.id, kind, name, content: kind === "text" ? "" : undefined }) });
+    setDialog(createNodeDialog(folder.id, kind, (input) => createNodeMutation.mutate(input)));
   }
 
   function uploadInFolder(folder: RestNode, file: File | null) {
     if (!file) return;
-    setDialog({ kind: "prompt", title: "Upload file", label: "File node name", initial: file.name, submitLabel: "Upload", onSubmit: (name) => uploadFileMutation.mutate({ parentId: folder.id, name, file }) });
+    setDialog(uploadFileDialog(folder.id, file, (input) => uploadFileMutation.mutate(input)));
   }
 
   function collapseTree() {
@@ -209,30 +210,29 @@ export function AppShell({ onSignOut }: AppShellProps) {
 
   function promptRenameNode(node: RestNode) {
     if (node.parent_id === null) return;
-    setDialog({ kind: "prompt", title: "Rename", label: "Name", initial: node.name, submitLabel: "Rename", onSubmit: (name) => { if (name !== node.name) updateNodeMutation.mutate({ node, name }); } });
+    setDialog(renameNodeDialog(node, (renamedNode, name) => updateNodeMutation.mutate({ node: renamedNode, name })));
   }
 
   function promptMoveNode(node: RestNode) {
     if (node.parent_id === null || !activeSpace) return;
-    setDialog({ kind: "move", node, space: activeSpace, onMove: (parentId) => moveNodeMutation.mutate({ node, parentId }) });
+    setDialog(moveNodeDialog(node, activeSpace, (movedNode, parentId) => moveNodeMutation.mutate({ node: movedNode, parentId })));
   }
 
   function confirmDeleteNode(node: RestNode) {
     if (node.parent_id === null) return;
-    const recursive = node.kind === "folder";
-    setDialog({ kind: "confirm", title: "Delete", message: `Delete "${node.name}"${recursive ? " and everything inside it" : ""}?`, danger: true, confirmLabel: "Delete", onConfirm: () => deleteNodeMutation.mutate({ node, recursive }) });
+    setDialog(deleteNodeDialog(node, (deletedNode, recursive) => deleteNodeMutation.mutate({ node: deletedNode, recursive })));
   }
 
   function handleFileSelected(file: File | null) {
     const parentId = parentForCreate();
     if (!file || !parentId) return;
-    setDialog({ kind: "prompt", title: "Upload file", label: "File node name", initial: file.name, submitLabel: "Upload", onSubmit: (name) => uploadFileMutation.mutate({ parentId, name, file }) });
+    setDialog(uploadFileDialog(parentId, file, (input) => uploadFileMutation.mutate(input)));
   }
 
   function promptReplaceMetadata() {
     if (!activeNode) return;
     const node = activeNode;
-    setDialog({ kind: "metadata", node, onSave: (metadata) => replaceMetadataMutation.mutate({ node, metadata }) });
+    setDialog(metadataDialog(node, (metadataNode, metadata) => replaceMetadataMutation.mutate({ node: metadataNode, metadata })));
   }
 
   async function handleSignOut() {

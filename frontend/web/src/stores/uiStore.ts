@@ -23,6 +23,52 @@ function initialActiveSpaceId(): string | null {
 // preview/edit mode, so each group toggles independently of the others.
 export type EditorGroup = { id: number; node: RestNode | null; mode: "preview" | "edit" };
 
+type EditorGroupState = {
+  editorGroups: EditorGroup[];
+  activeGroupIndex: number;
+  nextGroupId: number;
+};
+
+function openNodeInActiveGroupState(state: EditorGroupState, node: RestNode): Pick<EditorGroupState, "editorGroups"> {
+  return {
+    editorGroups: state.editorGroups.map((group, index) => (index === state.activeGroupIndex ? { ...group, node, mode: "preview" } : group))
+  };
+}
+
+function addEditorGroupState(state: EditorGroupState): Partial<EditorGroupState> {
+  if (state.editorGroups.length >= MAX_EDITOR_GROUPS) return {};
+  const active = state.editorGroups[state.activeGroupIndex];
+  const editorGroups = [...state.editorGroups, { id: state.nextGroupId, node: active?.node ?? null, mode: "preview" as const }];
+  return { editorGroups, activeGroupIndex: editorGroups.length - 1, nextGroupId: state.nextGroupId + 1 };
+}
+
+function closeEditorGroupState(state: EditorGroupState, index: number): Partial<EditorGroupState> {
+  if (state.editorGroups.length <= 1) return {};
+  const editorGroups = state.editorGroups.filter((_, i) => i !== index);
+  const activeGroupIndex = Math.max(0, Math.min(state.activeGroupIndex - (index <= state.activeGroupIndex ? 1 : 0), editorGroups.length - 1));
+  return { editorGroups, activeGroupIndex };
+}
+
+function updateEditorGroupNodeState(editorGroups: EditorGroup[], node: RestNode): EditorGroup[] {
+  return editorGroups.map((group) => (group.node?.id === node.id ? { ...group, node } : group));
+}
+
+function clearEditorGroupNodeState(editorGroups: EditorGroup[], nodeId: string): EditorGroup[] {
+  return editorGroups.map((group) => (group.node?.id === nodeId ? { ...group, node: null, mode: "preview" } : group));
+}
+
+function setEditorGroupModeState(editorGroups: EditorGroup[], index: number, mode: "preview" | "edit"): EditorGroup[] {
+  return editorGroups.map((group, i) => (i === index ? { ...group, mode } : group));
+}
+
+function resetEditorGroupsState(state: Pick<EditorGroupState, "nextGroupId">): EditorGroupState {
+  return {
+    editorGroups: [{ id: state.nextGroupId, node: null, mode: "preview" }],
+    activeGroupIndex: 0,
+    nextGroupId: state.nextGroupId + 1
+  };
+}
+
 type UiState = {
   theme: ThemeMode;
   activeSpaceId: string | null;
@@ -91,38 +137,14 @@ export const useUiStore = create<UiState>((set) => ({
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((state) => ({ theme: state.theme === "light" ? "dark" : "light" })),
   setActiveSpaceId: (activeSpaceId) => set({ activeSpaceId }),
-  openInActiveGroup: (node) =>
-    set((state) => ({
-      editorGroups: state.editorGroups.map((group, index) => (index === state.activeGroupIndex ? { ...group, node, mode: "preview" } : group))
-    })),
-  addGroup: () =>
-    set((state) => {
-      if (state.editorGroups.length >= MAX_EDITOR_GROUPS) return state;
-      const active = state.editorGroups[state.activeGroupIndex];
-      const groups = [...state.editorGroups, { id: state.nextGroupId, node: active?.node ?? null, mode: "preview" as const }];
-      return { editorGroups: groups, activeGroupIndex: groups.length - 1, nextGroupId: state.nextGroupId + 1 };
-    }),
-  closeGroup: (index) =>
-    set((state) => {
-      if (state.editorGroups.length <= 1) return state;
-      const groups = state.editorGroups.filter((_, i) => i !== index);
-      const activeGroupIndex = Math.max(0, Math.min(state.activeGroupIndex - (index <= state.activeGroupIndex ? 1 : 0), groups.length - 1));
-      return { editorGroups: groups, activeGroupIndex };
-    }),
+  openInActiveGroup: (node) => set((state) => openNodeInActiveGroupState(state, node)),
+  addGroup: () => set((state) => addEditorGroupState(state)),
+  closeGroup: (index) => set((state) => closeEditorGroupState(state, index)),
   focusGroup: (index) => set({ activeGroupIndex: index }),
-  updateGroupsNode: (node) =>
-    set((state) => ({
-      editorGroups: state.editorGroups.map((group) => (group.node?.id === node.id ? { ...group, node } : group))
-    })),
-  clearGroupsWithNode: (nodeId) =>
-    set((state) => ({
-      editorGroups: state.editorGroups.map((group) => (group.node?.id === nodeId ? { ...group, node: null, mode: "preview" } : group))
-    })),
-  setGroupMode: (index, mode) =>
-    set((state) => ({
-      editorGroups: state.editorGroups.map((group, i) => (i === index ? { ...group, mode } : group))
-    })),
-  resetGroups: () => set((state) => ({ editorGroups: [{ id: state.nextGroupId, node: null, mode: "preview" }], activeGroupIndex: 0, nextGroupId: state.nextGroupId + 1 })),
+  updateGroupsNode: (node) => set((state) => ({ editorGroups: updateEditorGroupNodeState(state.editorGroups, node) })),
+  clearGroupsWithNode: (nodeId) => set((state) => ({ editorGroups: clearEditorGroupNodeState(state.editorGroups, nodeId) })),
+  setGroupMode: (index, mode) => set((state) => ({ editorGroups: setEditorGroupModeState(state.editorGroups, index, mode) })),
+  resetGroups: () => set((state) => resetEditorGroupsState(state)),
   toggleFolder: (id) =>
     set((state) => {
       const next = new Set(state.expandedFolderIds);
