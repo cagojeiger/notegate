@@ -42,11 +42,14 @@ export function ApiProvider({ apiKey, onUnauthorized, children }: ApiProviderPro
       // Mutations have no per-call error UI by default, so surface failures:
       // 401 → re-auth, anything else → a toast so writes never fail silently.
       mutationCache: new MutationCache({
-        onError: (error) => {
+        onError: (error, _variables, _context, mutation) => {
           if (error instanceof ApiError && error.status === 401) {
             onUnauthorizedRef.current?.();
             return;
           }
+          // Mutations with their own error UI (e.g. the text-save conflict banner)
+          // opt out of the global toast via meta.silentError.
+          if (mutation.options.meta?.silentError) return;
           const message = error instanceof Error ? error.message : "Request failed";
           useUiStore.getState().showToast(message);
         }

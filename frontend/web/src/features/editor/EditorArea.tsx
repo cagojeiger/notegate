@@ -191,6 +191,7 @@ function TextGroup({ node, mode, canClose, onClose, onSetMode, onRenameNode, onM
   const dirty = mode === "edit" && draft !== content;
   const isMarkdown = /\.(md|markdown)$/i.test(node.name);
   const saveMutation = useMutation({
+    meta: { silentError: true },
     mutationFn: (force: boolean) => replaceText(client, node.space_id, node.id, draft, force ? undefined : sha),
     onMutate: () => setSaveState("saving"),
     onSuccess: () => {
