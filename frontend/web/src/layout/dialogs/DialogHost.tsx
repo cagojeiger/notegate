@@ -6,7 +6,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { listChildren } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
-import { Button, Modal } from "../../shared/ui";
+import { Button, Card, EmptyState, Modal, TextAreaField, TextField } from "../../shared/ui";
 
 // Discriminated union of every in-app dialog. Replaces window.prompt/confirm so
 // flows match the app tone and stay keyboard/escape friendly.
@@ -38,17 +38,14 @@ function PromptDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind: 
       onClose={onClose}
       footer={<><Button secondary onClick={onClose}>Cancel</Button><Button onClick={submit} disabled={!trimmed}>{dialog.submitLabel ?? "Save"}</Button></>}
     >
-      <label className="block text-sm">
-        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted">{dialog.label}</span>
-        <input
-          autoFocus
-          value={value}
-          placeholder={dialog.placeholder}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
-          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-text outline-none"
-        />
-      </label>
+      <TextField
+        autoFocus
+        label={dialog.label}
+        value={value}
+        placeholder={dialog.placeholder}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
+      />
     </Modal>
   );
 }
@@ -65,15 +62,9 @@ function ConfirmDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind:
       footer={
         <>
           <Button secondary onClick={onClose}>Cancel</Button>
-          <button
-            type="button"
-            onClick={confirm}
-            className={dialog.danger
-              ? "rounded-lg bg-danger px-3 py-2 text-sm font-semibold text-primary-contrast hover:opacity-90"
-              : "rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-contrast hover:bg-[var(--ng-primary-hover)]"}
-          >
+          <Button variant={dialog.danger ? "danger" : "primary"} onClick={confirm}>
             {dialog.confirmLabel ?? "Confirm"}
-          </button>
+          </Button>
         </>
       }
     >
@@ -125,11 +116,11 @@ function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind: "m
           </span>
         ))}
       </div>
-      <div className="mt-3 max-h-64 min-h-[8rem] overflow-y-auto rounded-xl border border-border bg-surface p-1">
+      <Card padding="none" className="mt-3 max-h-64 min-h-[8rem] overflow-y-auto p-1">
         {childrenQuery.isLoading ? (
           <div className="px-3 py-2 text-sm text-muted">Loading…</div>
         ) : folders.length === 0 ? (
-          <div className="flex items-center gap-2 px-3 py-2 text-sm text-faint"><FolderOpen size={14} /> No subfolders here</div>
+          <EmptyState><span className="inline-flex items-center gap-2"><FolderOpen size={14} /> No subfolders here</span></EmptyState>
         ) : (
           folders.map((folder) => (
             <button
@@ -143,7 +134,7 @@ function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind: "m
             </button>
           ))
         )}
-      </div>
+      </Card>
       <p className="mt-3 text-xs text-muted">Destination: <span className="font-mono text-text">{current.name === "/" ? "/" : current.name}</span>{alreadyHere ? " (already here)" : ""}</p>
     </Modal>
   );
@@ -167,13 +158,14 @@ function MetadataDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind
       width="max-w-lg"
       footer={<><Button secondary onClick={onClose}>Cancel</Button><Button onClick={() => { if (parsed.ok) { dialog.onSave(parsed.value); onClose(); } }} disabled={!parsed.ok}>Save</Button></>}
     >
-      <textarea
+      <TextAreaField
         autoFocus
+        label="Metadata JSON"
         value={text}
         onChange={(event) => setText(event.target.value)}
         spellCheck={false}
         rows={10}
-        className="w-full resize-y rounded-lg border border-border bg-surface p-3 font-mono text-xs text-text outline-none"
+        textareaClassName="font-mono text-xs"
       />
       <p className={`mt-2 text-xs ${parsed.ok ? "text-faint" : "text-danger"}`}>{parsed.ok ? "Valid JSON object. Metadata is stored unencrypted." : parsed.error}</p>
     </Modal>

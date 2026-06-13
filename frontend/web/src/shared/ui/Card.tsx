@@ -4,9 +4,9 @@ import { cn } from "../lib/cn";
 
 type CardTone = "default" | "success" | "danger";
 type CardPadding = "none" | "sm" | "md";
-type CardElement = "div" | "section" | "ul" | "li";
+type CardElement = "div" | "section" | "form" | "ul" | "li";
 
-export function Card({ children, tone = "default", padding = "md", className, as = "div", ...props }: HTMLAttributes<HTMLDivElement | HTMLElement | HTMLUListElement | HTMLLIElement> & { children: ReactNode; tone?: CardTone; padding?: CardPadding; as?: CardElement }) {
+export function Card({ children, tone = "default", padding = "md", className, as = "div", ...props }: HTMLAttributes<HTMLDivElement | HTMLElement | HTMLFormElement | HTMLUListElement | HTMLLIElement> & { children: ReactNode; tone?: CardTone; padding?: CardPadding; as?: CardElement }) {
   const toneClass = {
     default: "border-border bg-surface",
     success: "border-success/40 bg-success/10",
@@ -21,6 +21,9 @@ export function Card({ children, tone = "default", padding = "md", className, as
 
   if (as === "section") {
     return <section className={cardClass} {...props}>{children}</section>;
+  }
+  if (as === "form") {
+    return <form className={cardClass} {...props}>{children}</form>;
   }
   if (as === "ul") {
     return <ul className={cardClass} {...props}>{children}</ul>;
