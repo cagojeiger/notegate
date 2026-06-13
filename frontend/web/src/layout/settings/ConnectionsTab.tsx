@@ -6,6 +6,7 @@ import { listAgents } from "../../api/agents";
 import { connectAgent, disconnectAgent, listConnections, type Permission } from "../../api/connections";
 import { queryKeys } from "../../api/queryKeys";
 import type { Space } from "../../api/types";
+import { Badge, Button, Card, EmptyState } from "../../shared/ui";
 
 export function ConnectionsTab({ activeSpace }: { activeSpace: Space | null }) {
   const client = useApiClient();
@@ -23,19 +24,19 @@ export function ConnectionsTab({ activeSpace }: { activeSpace: Space | null }) {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(spaceId) })
   });
 
-  if (!activeSpace) return <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">Select a space to manage agent connections.</div>;
+  if (!activeSpace) return <EmptyState>Select a space to manage agent connections.</EmptyState>;
 
   const agents = agentsQuery.data?.agents ?? [];
-  const connByAgent = new Map((connQuery.data?.connections ?? []).map((c) => [c.agent.id, c.permission] as const));
+  const connByAgent = new Map((connQuery.data?.connections ?? []).map((connection) => [connection.agent.id, connection.permission] as const));
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">Connect agents to <span className="font-medium text-text">{activeSpace.name}</span> and grant read or write.</p>
       {agentsQuery.isLoading ? (
         <div className="text-sm text-muted">Loading…</div>
       ) : agents.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">Create an agent first (Agents tab).</div>
+        <EmptyState>Create an agent first (Agents tab).</EmptyState>
       ) : (
-        <ul className="divide-y divide-seam rounded-xl border border-border bg-surface">
+        <Card as="ul" padding="none" className="divide-y divide-seam">
           {agents.map((agent) => {
             const permission = connByAgent.get(agent.id);
             return (
@@ -44,19 +45,19 @@ export function ConnectionsTab({ activeSpace }: { activeSpace: Space | null }) {
                 <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
                 {permission ? (
                   <div className="flex shrink-0 items-center gap-2">
-                    <span className="rounded-full border border-border px-2 py-0.5 text-xs capitalize text-muted">{permission}</span>
-                    <button type="button" onClick={() => disconnectMutation.mutate(agent.id)} className="rounded-lg border border-border px-2.5 py-1 text-xs text-muted hover:text-text">Disconnect</button>
+                    <Badge>{permission}</Badge>
+                    <Button size="sm" secondary onClick={() => disconnectMutation.mutate(agent.id)}>Disconnect</Button>
                   </div>
                 ) : (
                   <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => connectMutation.mutate({ agentId: agent.id, permission: "read" })} className="rounded-lg border border-border px-2.5 py-1 text-xs text-muted hover:text-text">Read</button>
-                    <button type="button" onClick={() => connectMutation.mutate({ agentId: agent.id, permission: "write" })} className="rounded-lg border border-border px-2.5 py-1 text-xs text-muted hover:text-text">Write</button>
+                    <Button size="sm" secondary onClick={() => connectMutation.mutate({ agentId: agent.id, permission: "read" })}>Read</Button>
+                    <Button size="sm" secondary onClick={() => connectMutation.mutate({ agentId: agent.id, permission: "write" })}>Write</Button>
                   </div>
                 )}
               </li>
             );
           })}
-        </ul>
+        </Card>
       )}
     </div>
   );

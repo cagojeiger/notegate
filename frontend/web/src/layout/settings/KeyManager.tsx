@@ -3,8 +3,8 @@ import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
+import { Button, Card, EmptyState, IconButton, SelectField, TextField } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
-import { Button } from "../../shared/ui";
 
 // Backend caps API-key lifetime to within 30 days.
 const EXPIRY_OPTIONS = [
@@ -50,37 +50,38 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   return (
     <div className="space-y-4">
       {created ? (
-        <div className="rounded-xl border border-success/40 bg-success/10 p-4">
+        <Card tone="success">
           <div className="text-sm font-semibold text-text">Key “{created.name}” created</div>
           <p className="mt-1 text-xs text-muted">Copy it now — the token is shown only once.</p>
           <div className="mt-3 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs">{created.token}</code>
-            <button type="button" onClick={() => { void navigator.clipboard?.writeText(created.token); showToast("Copied"); }} className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface text-muted hover:bg-panel hover:text-text" aria-label="Copy token"><Copy size={15} /></button>
+            <IconButton label="Copy token" onClick={() => { void navigator.clipboard?.writeText(created.token); showToast("Copied"); }}><Copy size={15} /></IconButton>
           </div>
           <div className="mt-3 text-right"><Button secondary onClick={() => setCreated(null)}>Done</Button></div>
-        </div>
+        </Card>
       ) : null}
 
       <div className="flex flex-wrap items-end gap-2">
-        <label className="min-w-0 flex-1 text-sm">
-          <span className="mb-1.5 block text-xs text-muted">Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(); }} placeholder="e.g. cli, ci, claude-test" className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-text outline-none" />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1.5 block text-xs text-muted">Expires</span>
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-border bg-surface px-3 py-2 text-text outline-none">
-            {EXPIRY_OPTIONS.map((o) => <option key={o.days} value={o.days}>{o.label}</option>)}
-          </select>
-        </label>
+        <TextField
+          label="Name"
+          className="min-w-0 flex-1"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(); }}
+          placeholder="e.g. cli, ci, claude-test"
+        />
+        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-32">
+          {EXPIRY_OPTIONS.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
+        </SelectField>
         <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
       </div>
 
       {keysQuery.isLoading ? (
         <div className="text-sm text-muted">Loading…</div>
       ) : keys.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted">{emptyLabel}</div>
+        <EmptyState>{emptyLabel}</EmptyState>
       ) : (
-        <ul className="divide-y divide-seam rounded-xl border border-border bg-surface">
+        <Card padding="none" as="ul" className="divide-y divide-seam">
           {keys.map((key) => (
             <li key={key.id} className="flex items-center gap-3 px-4 py-3 text-sm">
               <KeyRound size={15} className="shrink-0 text-muted" />
@@ -90,15 +91,15 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
               </div>
               {confirmId === key.id ? (
                 <div className="flex shrink-0 items-center gap-1">
-                  <button type="button" onClick={() => revokeMutation.mutate(key.id)} className="rounded-lg bg-danger px-2.5 py-1 text-xs font-semibold text-primary-contrast hover:opacity-90">Confirm</button>
-                  <button type="button" onClick={() => setConfirmId(null)} className="rounded-lg border border-border px-2.5 py-1 text-xs text-muted hover:text-text">Cancel</button>
+                  <Button size="sm" variant="danger" onClick={() => revokeMutation.mutate(key.id)}>Confirm</Button>
+                  <Button size="sm" secondary onClick={() => setConfirmId(null)}>Cancel</Button>
                 </div>
               ) : (
-                <button type="button" onClick={() => setConfirmId(key.id)} aria-label={`Revoke ${key.name}`} className="grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-danger/10 hover:text-danger"><Trash2 size={15} /></button>
+                <IconButton label={`Revoke ${key.name}`} onClick={() => setConfirmId(key.id)}><Trash2 size={15} /></IconButton>
               )}
             </li>
           ))}
-        </ul>
+        </Card>
       )}
     </div>
   );
