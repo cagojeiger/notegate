@@ -11,6 +11,7 @@ export function PrimarySidebarSections({
   onToggleFolder,
   onOpenNode,
   onNodeContextMenu,
+  onMoveNodeToFolder,
   onCollapseTree
 }: {
   activeSpace: Space;
@@ -19,6 +20,7 @@ export function PrimarySidebarSections({
   onToggleFolder: (nodeId: string) => void;
   onOpenNode: (node: RestNode) => void;
   onNodeContextMenu: NodeContextHandler;
+  onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
   onCollapseTree: () => void;
 }) {
   const sections = usePrimarySidebarSections();
@@ -34,6 +36,7 @@ export function PrimarySidebarSections({
         onToggleFolder={onToggleFolder}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
+        onMoveNodeToFolder={onMoveNodeToFolder}
       />
       <div onPointerDown={sections.startTreeResize} className={`border-y border-seam bg-surface ${sections.bothSectionsOpen ? "cursor-row-resize transition-colors hover:bg-primary/30" : ""}`} aria-hidden="true" />
       <RecentSection

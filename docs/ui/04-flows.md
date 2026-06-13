@@ -749,7 +749,7 @@ Constraints:
 Trigger:
 
 ```text
-Tree context menu 또는 move dialog에서 parent 변경
+Tree context menu, move dialog, 또는 node row를 folder row로 drag/drop하여 parent 변경
 ```
 
 Backend:
@@ -770,6 +770,8 @@ Constraints:
 
 - Move는 같은 space 안에서만 가능하다.
 - Root node는 move할 수 없다.
+- Drag/drop move는 `sort_order`를 변경하지 않는다. 기본 sort_order가 모두 0이면 destination folder 안에서는 name/id 기준으로 정렬된다.
+- Mobile에서는 long-press context menu 또는 `Move...` dialog가 drag의 fallback이다.
 
 ### 10.4 Delete node
 

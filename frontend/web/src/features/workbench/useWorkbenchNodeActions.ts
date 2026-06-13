@@ -71,7 +71,12 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
 
   function promptMoveNode(node: RestNode) {
     if (node.parent_id === null || !activeSpace) return;
-    setDialog(moveNodeDialog(node, activeSpace, (movedNode, parentId) => moveNodeMutation.mutate({ node: movedNode, parentId })));
+    setDialog(moveNodeDialog(node, activeSpace, (movedNode, parentId) => moveNodeMutation.mutate({ node: movedNode, parentId }, { onSuccess: () => addExpanded([parentId]) })));
+  }
+
+  function moveNodeToFolder(node: RestNode, folder: RestNode) {
+    if (node.parent_id === null || folder.kind !== "folder" || node.id === folder.id) return;
+    moveNodeMutation.mutate({ node, parentId: folder.id }, { onSuccess: () => addExpanded([folder.id]) });
   }
 
   function confirmDeleteNode(node: RestNode) {
@@ -100,6 +105,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
     collapseTree,
     promptRenameNode,
     promptMoveNode,
+    moveNodeToFolder,
     confirmDeleteNode,
     promptReplaceMetadata
   };

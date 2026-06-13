@@ -19,6 +19,8 @@ export function PrimarySidebar({
   onRenameSpace,
   onDeleteSpace,
   onRenameNode,
+  onMoveNode,
+  onMoveNodeToFolder,
   onDeleteNode,
   onCollapseTree,
   onCreateInFolder,
@@ -35,6 +37,8 @@ export function PrimarySidebar({
   onRenameSpace: () => void;
   onDeleteSpace: () => void;
   onRenameNode: (node: RestNode) => void;
+  onMoveNode: (node: RestNode) => void;
+  onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
   onDeleteNode: (node: RestNode) => void;
   onCollapseTree: () => void;
   onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void;
@@ -59,6 +63,7 @@ export function PrimarySidebar({
           onToggleFolder={onToggleFolder}
           onOpenNode={onOpenNode}
           onNodeContextMenu={onNodeContextMenu}
+          onMoveNodeToFolder={onMoveNodeToFolder}
           onCollapseTree={onCollapseTree}
         />
       ) : (
@@ -70,6 +75,7 @@ export function PrimarySidebar({
           onClose={() => setMenu(null)}
           onOpenNode={onOpenNode}
           onRenameNode={onRenameNode}
+          onMoveNode={onMoveNode}
           onDeleteNode={onDeleteNode}
           onCreateInFolder={onCreateInFolder}
           onUploadInFolder={onUploadInFolder}

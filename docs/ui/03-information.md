@@ -236,10 +236,10 @@ DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 - Text/File context에서는 child 생성 action을 제공하지 않는다.
 - 같은 생성 action은 `PrimarySidebar` header에서도 접근 가능해야 한다.
 - Rename은 node name만 바꾸며 content body를 수정하지 않는다.
-- Move는 같은 space 안에서 parent 또는 name을 바꾼다.
+- Move는 같은 space 안에서 parent 또는 name을 바꾼다. Tree drag/drop은 folder parent 변경만 수행하며 `sort_order`를 바꾸지 않는다.
 - Folder delete는 recursive confirm을 요구한다.
 - Root node는 rename/move/delete 대상이 아니다.
-- 생성/수정/삭제 후 관련 parent folder children과 recent list를 갱신한다.
+- 생성/수정/삭제/이동 후 관련 parent folder children과 recent list를 갱신한다.
 
 #### RecentSection
 

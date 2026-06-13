@@ -51,6 +51,8 @@ export function AppShell({ onSignOut }: AppShellProps) {
             onRenameSpace={actions.promptRenameSpace}
             onDeleteSpace={actions.confirmDeleteSpace}
             onRenameNode={actions.promptRenameNode}
+            onMoveNode={actions.promptMoveNode}
+            onMoveNodeToFolder={actions.moveNodeToFolder}
             onDeleteNode={actions.confirmDeleteNode}
             onCollapseTree={actions.collapseTree}
             onCreateInFolder={actions.promptCreateInFolder}

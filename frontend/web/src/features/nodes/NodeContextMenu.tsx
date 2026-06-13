@@ -1,11 +1,11 @@
-import { Copy, FilePlus, FolderPlus, Pencil, Trash2, Upload } from "lucide-react";
+import { Copy, FilePlus, FolderPlus, Move, Pencil, Trash2, Upload } from "lucide-react";
 import { useEffect } from "react";
 
 import type { RestNode } from "../../api/types";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 
-export function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onDeleteNode, onCreateInFolder, onUploadInFolder }: { menu: { x: number; y: number; node: RestNode }; onClose: () => void; onOpenNode: (node: RestNode) => void; onRenameNode: (node: RestNode) => void; onDeleteNode: (node: RestNode) => void; onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void; onUploadInFolder: (folder: RestNode, file: File | null) => void }) {
+export function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onMoveNode, onDeleteNode, onCreateInFolder, onUploadInFolder }: { menu: { x: number; y: number; node: RestNode }; onClose: () => void; onOpenNode: (node: RestNode) => void; onRenameNode: (node: RestNode) => void; onMoveNode: (node: RestNode) => void; onDeleteNode: (node: RestNode) => void; onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void; onUploadInFolder: (folder: RestNode, file: File | null) => void }) {
   const showToast = useUiStore((state) => state.showToast);
   const { node } = menu;
   const isRoot = node.parent_id === null;
@@ -45,6 +45,7 @@ export function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onDel
         ) : null}
         <MenuButton onClick={() => run(() => onOpenNode(node))}>Open</MenuButton>
         <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={isRoot}><Pencil size={14} /> Rename</MenuButton>
+        <MenuButton onClick={() => run(() => onMoveNode(node))} disabled={isRoot}><Move size={14} /> Move…</MenuButton>
         <MenuButton onClick={() => run(copyPath)}><Copy size={14} /> Copy path</MenuButton>
         <MenuButton danger onClick={() => run(() => onDeleteNode(node))} disabled={isRoot}><Trash2 size={14} /> Delete</MenuButton>
       </Card>

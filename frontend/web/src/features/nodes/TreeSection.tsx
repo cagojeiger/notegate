@@ -1,5 +1,6 @@
 import { ChevronsDownUp, Folder } from "lucide-react";
-import { useEffect, useRef } from "react";
+import type { DragEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { RestNode, Space } from "../../api/types";
 import { useNodeChildrenQuery } from "./useNodeQueries";
@@ -12,24 +13,70 @@ type TreeProps = {
   activeSpace: Space;
   activeNodeId: string | null;
   expandedFolderIds: Set<string>;
+  draggedNode: RestNode | null;
+  dropFolderId: string | null;
+  onDragStartNode: (node: RestNode) => void;
+  onDragOverNode: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
+  onDropOnNode: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
+  onDragEndNode: () => void;
   onToggleFolder: (nodeId: string) => void;
   onOpenNode: (node: RestNode) => void;
   onNodeContextMenu: NodeContextHandler;
+  onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
 };
 
-export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open, onToggle, onCollapseTree, onToggleFolder, onOpenNode, onNodeContextMenu }: TreeProps & { open: boolean; onToggle: () => void; onCollapseTree: () => void }) {
+export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open, onToggle, onCollapseTree, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder }: Omit<TreeProps, "draggedNode" | "dropFolderId" | "onDragStartNode" | "onDragOverNode" | "onDropOnNode" | "onDragEndNode"> & { open: boolean; onToggle: () => void; onCollapseTree: () => void }) {
+  const [draggedNode, setDraggedNode] = useState<RestNode | null>(null);
+  const [dropFolderId, setDropFolderId] = useState<string | null>(null);
+
+  function clearDrag() {
+    setDraggedNode(null);
+    setDropFolderId(null);
+  }
+
+  function handleDragOver(node: RestNode, event: DragEvent<HTMLDivElement>) {
+    if (!draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropFolderId(node.id);
+  }
+
+  function handleDrop(node: RestNode, event: DragEvent<HTMLDivElement>) {
+    if (!draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    event.preventDefault();
+    onMoveNodeToFolder(draggedNode, node);
+    clearDrag();
+  }
+
   return (
     <section className="flex min-h-0 min-w-0 flex-col px-3 py-2">
       <SidebarSectionHeader icon={<Folder size={13} />} label="Tree" open={open} onToggle={onToggle} action={{ label: "Collapse all folders", icon: <ChevronsDownUp size={13} />, onClick: onCollapseTree }} />
       {open ? (
         <div
           className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto"
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropFolderId(null);
+          }}
           onContextMenu={(event) => {
             if ((event.target as HTMLElement).closest("[data-node-row]")) return;
             onNodeContextMenu(makeRootNode(activeSpace), event);
           }}
         >
-          <RootTree activeSpace={activeSpace} activeNodeId={activeNodeId} expandedFolderIds={expandedFolderIds} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} />
+          <RootTree
+            activeSpace={activeSpace}
+            activeNodeId={activeNodeId}
+            expandedFolderIds={expandedFolderIds}
+            draggedNode={draggedNode}
+            dropFolderId={dropFolderId}
+            onDragStartNode={setDraggedNode}
+            onDragOverNode={handleDragOver}
+            onDropOnNode={handleDrop}
+            onDragEndNode={clearDrag}
+            onToggleFolder={onToggleFolder}
+            onOpenNode={onOpenNode}
+            onNodeContextMenu={onNodeContextMenu}
+            onMoveNodeToFolder={onMoveNodeToFolder}
+          />
         </div>
       ) : null}
     </section>
@@ -40,18 +87,32 @@ function RootTree(props: TreeProps) {
   return <TreeNode node={makeRootNode(props.activeSpace)} depth={0} {...props} />;
 }
 
-function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, onToggleFolder, onOpenNode, onNodeContextMenu }: TreeProps & { node: RestNode; depth: number }) {
+function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, draggedNode, dropFolderId, onDragStartNode, onDragOverNode, onDropOnNode, onDragEndNode, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder }: TreeProps & { node: RestNode; depth: number }) {
   const isExpanded = expandedFolderIds.has(node.id);
   const childrenQuery = useNodeChildrenQuery(activeSpace.id, node.id, node.kind === "folder" && isExpanded);
   const children = childrenQuery.data?.pages.flatMap((page) => page.children) ?? [];
   return (
     <div>
-      <NodeRow node={node} depth={depth} selected={activeNodeId === node.id} expanded={isExpanded} suffix={nodeMetaSuffix(node)} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} />
+      <NodeRow
+        node={node}
+        depth={depth}
+        selected={activeNodeId === node.id}
+        expanded={isExpanded}
+        suffix={nodeMetaSuffix(node)}
+        dropTarget={dropFolderId === node.id}
+        onToggleFolder={onToggleFolder}
+        onOpenNode={onOpenNode}
+        onNodeContextMenu={onNodeContextMenu}
+        onDragStartNode={onDragStartNode}
+        onDragOverNode={onDragOverNode}
+        onDropOnNode={onDropOnNode}
+        onDragEndNode={onDragEndNode}
+      />
       {node.kind === "folder" && isExpanded ? (
         <div>
           {childrenQuery.isLoading ? <div className="px-8 py-1 text-xs text-muted">Loading…</div> : null}
           {children.map((child) => (
-            <TreeNode key={child.id} node={child} depth={depth + 1} activeSpace={activeSpace} activeNodeId={activeNodeId} expandedFolderIds={expandedFolderIds} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} />
+            <TreeNode key={child.id} node={child} depth={depth + 1} activeSpace={activeSpace} activeNodeId={activeNodeId} expandedFolderIds={expandedFolderIds} draggedNode={draggedNode} dropFolderId={dropFolderId} onDragStartNode={onDragStartNode} onDragOverNode={onDragOverNode} onDropOnNode={onDropOnNode} onDragEndNode={onDragEndNode} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} onMoveNodeToFolder={onMoveNodeToFolder} />
           ))}
           {childrenQuery.hasNextPage ? (
             <AutoLoadMore loaded={children.length} depth={depth + 1} isFetching={childrenQuery.isFetchingNextPage} fetchNextPage={() => childrenQuery.fetchNextPage()} />

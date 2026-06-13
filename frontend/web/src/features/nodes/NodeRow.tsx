@@ -1,10 +1,49 @@
+import type { DragEvent } from "react";
+import { useRef } from "react";
 import { ChevronRight, Database, FileText, Folder } from "lucide-react";
 
 import type { RestNode } from "../../api/types";
 import type { NodeContextHandler } from "./types";
 
-export function NodeRow({ node, depth, selected, expanded, meta, suffix, onToggleFolder, onOpenNode, onNodeContextMenu }: { node: RestNode; depth: number; selected: boolean; expanded?: boolean; meta?: string; suffix?: string; onToggleFolder?: (nodeId: string) => void; onOpenNode: (node: RestNode) => void; onNodeContextMenu: NodeContextHandler }) {
+export function NodeRow({
+  node,
+  depth,
+  selected,
+  expanded,
+  meta,
+  suffix,
+  dropTarget,
+  onToggleFolder,
+  onOpenNode,
+  onNodeContextMenu,
+  onDragStartNode,
+  onDragOverNode,
+  onDropOnNode,
+  onDragEndNode
+}: {
+  node: RestNode;
+  depth: number;
+  selected: boolean;
+  expanded?: boolean;
+  meta?: string;
+  suffix?: string;
+  dropTarget?: boolean;
+  onToggleFolder?: (nodeId: string) => void;
+  onOpenNode: (node: RestNode) => void;
+  onNodeContextMenu: NodeContextHandler;
+  onDragStartNode?: (node: RestNode) => void;
+  onDragOverNode?: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
+  onDropOnNode?: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
+  onDragEndNode?: () => void;
+}) {
   const Icon = node.kind === "folder" ? Folder : node.kind === "file" ? Database : FileText;
+  const draggable = node.parent_id !== null && Boolean(onDragStartNode);
+  const longPressRef = useRef<number | null>(null);
+  function clearLongPress() {
+    if (longPressRef.current === null) return;
+    window.clearTimeout(longPressRef.current);
+    longPressRef.current = null;
+  }
   function handleOpen() {
     if (node.kind === "folder") onToggleFolder?.(node.id);
     onOpenNode(node);
@@ -12,7 +51,29 @@ export function NodeRow({ node, depth, selected, expanded, meta, suffix, onToggl
   return (
     <div
       data-node-row
-      className={`group flex w-full items-center gap-1 rounded-lg py-1.5 pr-2 text-sm transition ${selected ? "bg-panel-strong text-text" : "text-muted hover:bg-surface hover:text-text"}`}
+      draggable={draggable}
+      onDragStart={(event) => {
+        if (!draggable) return;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", node.id);
+        onDragStartNode?.(node);
+      }}
+      onDragOver={(event) => onDragOverNode?.(node, event)}
+      onDrop={(event) => onDropOnNode?.(node, event)}
+      onDragEnd={onDragEndNode}
+      onTouchStart={(event) => {
+        clearLongPress();
+        const touch = event.touches[0];
+        if (!touch) return;
+        longPressRef.current = window.setTimeout(() => {
+          onNodeContextMenu(node, { clientX: touch.clientX, clientY: touch.clientY, preventDefault: () => undefined });
+          longPressRef.current = null;
+        }, 520);
+      }}
+      onTouchMove={clearLongPress}
+      onTouchEnd={clearLongPress}
+      onTouchCancel={clearLongPress}
+      className={`group flex w-full items-center gap-1 rounded-lg border py-1.5 pr-2 text-sm transition ${selected ? "bg-panel-strong text-text" : "text-muted hover:bg-surface hover:text-text"} ${dropTarget ? "border-primary bg-primary/10 text-text" : "border-transparent"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{ paddingLeft: `${8 + depth * 14}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >

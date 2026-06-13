@@ -231,9 +231,12 @@ Upload File
 규칙:
 
 - Folder와 root/empty context에서만 child 생성 action을 제공한다.
-- Text/File context에서는 open, rename, delete, copy path 같은 node action만 제공한다.
+- Text/File context에서는 open, move, rename, delete, copy path 같은 node action만 제공한다.
 - 생성 후 전체 tree를 reload하지 않고 parent folder children만 갱신한다.
 - 생성된 Text/File은 active `EditorGroup`에 열 수 있다.
+- Desktop/tablet에서는 node row를 folder row로 drag/drop하여 해당 folder 안으로 이동할 수 있다.
+- Mobile에서는 drag를 강제하지 않고 long-press context menu와 `Move...` dialog를 fallback으로 사용한다.
+- Tree drag 이동은 parent 변경만 수행한다. 같은 parent 안의 manual reorder는 정의하지 않는다.
 
 ## Layout controls
 
