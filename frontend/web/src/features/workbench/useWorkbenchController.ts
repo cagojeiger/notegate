@@ -1,8 +1,9 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 import { useIsMobile } from "../../shared/hooks/useMediaQuery";
-import { persistLastSpace, persistTheme, useUiStore } from "../../stores/uiStore";
+import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchActions } from "./useWorkbenchActions";
+import { useWorkbenchPersistence } from "./useWorkbenchPersistence";
 import { useSpacesQuery } from "./useWorkbenchQueries";
 
 type WorkbenchControllerProps = {
@@ -25,21 +26,10 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
   const mobileAuxOpen = useUiStore((state) => state.mobileAuxOpen);
   const isMobile = useIsMobile();
   const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
-  const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
-  const addExpanded = useUiStore((state) => state.addExpanded);
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
   const showAuxiliary = auxiliaryOpen && activeNode !== null;
 
-  useEffect(() => {
-    persistTheme(theme);
-  }, [theme]);
-
-  useEffect(() => {
-    if (!activeSpace) return;
-    setActiveSpaceId(activeSpace.id);
-    persistLastSpace(activeSpace.id);
-    addExpanded([activeSpace.root_node_id]);
-  }, [activeSpace, setActiveSpaceId, addExpanded]);
+  useWorkbenchPersistence(theme, activeSpace);
 
   const { settingsOpen, dialog, actions } = useWorkbenchActions({
     activeSpace,
