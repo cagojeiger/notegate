@@ -1,12 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { listChildren } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
 import { Button, Card, EmptyState, Modal, TextAreaField, TextField } from "../../shared/ui";
+import { useMovePickerChildren } from "./useDialogQueries";
 
 // Discriminated union of every in-app dialog. Replaces window.prompt/confirm so
 // flows match the app tone and stay keyboard/escape friendly.
@@ -77,13 +74,9 @@ type Crumb = { id: string; name: string };
 
 function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind: "move" }>; onClose: () => void }) {
   const { node, space } = dialog;
-  const client = useApiClient();
   const [stack, setStack] = useState<Crumb[]>([{ id: space.root_node_id, name: "/" }]);
   const current = stack[stack.length - 1];
-  const childrenQuery = useQuery({
-    queryKey: [...queryKeys.children(space.id, current.id), "move-picker"],
-    queryFn: () => listChildren(client, space.id, current.id)
-  });
+  const childrenQuery = useMovePickerChildren(space.id, current.id);
   // Only folders are valid destinations; never let the user descend into the
   // node being moved (that would also block reaching its descendants).
   const folders = useMemo(
