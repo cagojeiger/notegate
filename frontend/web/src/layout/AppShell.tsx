@@ -328,7 +328,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
       <MobileSpaceBar spaces={spaces} activeSpace={activeSpace} onSelectSpace={selectSpace} onCreateSpace={promptCreateSpace} onOpenSettings={() => setSettingsOpen(true)} />
       <StatusBar activeSpace={activeSpace} />
       <Toast />
-      {settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} onSignOut={handleSignOut} /> : null}
+      {settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} onSignOut={handleSignOut} activeSpace={activeSpace} /> : null}
       <DialogHost dialog={dialog} onClose={() => setDialog(null)} />
     </div>
   );
