@@ -8,7 +8,11 @@ const ApiClientContext = createContext<ApiClient | null>(null);
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false,
+      // External writes (MCP, REST, another tab) have no server push to rely on,
+      // so re-sync whenever the tab regains focus or the network reconnects.
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      staleTime: 5_000,
       retry: 1
     }
   }
