@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { createAgent, deleteAgent, listAgents } from "../../api/agents";
+import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey } from "../../api/agents";
 import { connectAgent, disconnectAgent, listConnections, type Permission } from "../../api/connections";
-import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
+import { createMyKey, listMyKeys, revokeMyKey, type ApiKeyListResponse, type MintedKey } from "../../api/keys";
 import { getMe } from "../../api/me";
 import { queryKeys } from "../../api/queryKeys";
 
@@ -88,4 +88,24 @@ export function useRevokeApiKeyMutation(queryKey: QueryKey, revoke: (id: string)
       void queryClient.invalidateQueries({ queryKey });
     }
   });
+}
+
+export function useMyKeyManagerProps() {
+  const client = useApiClient();
+  return {
+    queryKey: queryKeys.myKeys,
+    list: () => listMyKeys(client),
+    create: (input: { name: string; expires_at: string }) => createMyKey(client, input),
+    revoke: (id: string) => revokeMyKey(client, id)
+  };
+}
+
+export function useAgentKeyManagerProps(agentId: string) {
+  const client = useApiClient();
+  return {
+    queryKey: queryKeys.agentKeys(agentId),
+    list: () => listAgentKeys(client, agentId),
+    create: (input: { name: string; expires_at: string }) => createAgentKey(client, agentId, input),
+    revoke: (keyId: string) => revokeAgentKey(client, agentId, keyId)
+  };
 }

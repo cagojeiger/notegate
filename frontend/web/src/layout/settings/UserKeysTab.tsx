@@ -1,9 +1,7 @@
-import { useApiClient } from "../../api/ApiProvider";
-import { createMyKey, listMyKeys, revokeMyKey } from "../../api/keys";
-import { queryKeys } from "../../api/queryKeys";
 import { KeyManager } from "./KeyManager";
+import { useMyKeyManagerProps } from "./useSettingsQueries";
 
 export function UserKeysTab() {
-  const client = useApiClient();
-  return <KeyManager queryKey={queryKeys.myKeys} list={() => listMyKeys(client)} create={(input) => createMyKey(client, input)} revoke={(id) => revokeMyKey(client, id)} emptyLabel="No active keys." />;
+  const keyManagerProps = useMyKeyManagerProps();
+  return <KeyManager {...keyManagerProps} emptyLabel="No active keys." />;
 }

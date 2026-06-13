@@ -1,15 +1,11 @@
 import { Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { createAgentKey, listAgentKeys, revokeAgentKey } from "../../api/agents";
-import { queryKeys } from "../../api/queryKeys";
 import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
 import { KeyManager } from "./KeyManager";
-import { useAgentsQuery, useCreateAgentMutation, useDeleteAgentMutation } from "./useSettingsQueries";
+import { useAgentKeyManagerProps, useAgentsQuery, useCreateAgentMutation, useDeleteAgentMutation } from "./useSettingsQueries";
 
 export function AgentsTab() {
-  const client = useApiClient();
   const agentsQuery = useAgentsQuery();
   const [name, setName] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -59,13 +55,7 @@ export function AgentsTab() {
               {openId === agent.id ? (
                 <div className="border-t border-seam p-4">
                   <SectionHeader title={`${agent.name} keys`} />
-                  <KeyManager
-                    queryKey={queryKeys.agentKeys(agent.id)}
-                    list={() => listAgentKeys(client, agent.id)}
-                    create={(input) => createAgentKey(client, agent.id, input)}
-                    revoke={(keyId) => revokeAgentKey(client, agent.id, keyId)}
-                    emptyLabel="No keys for this agent."
-                  />
+                  <AgentKeyManager agentId={agent.id} />
                 </div>
               ) : null}
             </Card>
@@ -74,4 +64,9 @@ export function AgentsTab() {
       )}
     </div>
   );
+}
+
+function AgentKeyManager({ agentId }: { agentId: string }) {
+  const keyManagerProps = useAgentKeyManagerProps(agentId);
+  return <KeyManager {...keyManagerProps} emptyLabel="No keys for this agent." />;
 }
