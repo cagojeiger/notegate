@@ -1,28 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { logout } from "../../api/auth";
-import { uploadFile } from "../../api/files";
-import { replaceMetadata } from "../../api/metadata";
-import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
-import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
 import type { RestNode, Space } from "../../api/types";
 import { clearDevApiKey } from "../../auth/session";
 import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { persistLastSpace, persistTheme, useUiStore } from "../../stores/uiStore";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { createNodeDialog, deleteNodeDialog, deleteSpaceDialog, metadataDialog, moveNodeDialog, newSpaceDialog, renameNodeDialog, renameSpaceDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
+import { useCreateNodeMutation, useCreateSpaceMutation, useDeleteNodeMutation, useDeleteSpaceMutation, useLogout, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useSpacesQuery, useUpdateNodeMutation, useUpdateSpaceMutation, useUploadFileMutation } from "./useWorkbenchQueries";
 
 type WorkbenchControllerProps = {
   onSignOut: () => void;
 };
 
 export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  const spacesQuery = useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client) });
+  const spacesQuery = useSpacesQuery();
   const spaces = spacesQuery.data?.spaces ?? [];
 
   const theme = useUiStore((state) => state.theme);
@@ -73,82 +64,32 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
     addExpanded([activeSpace.root_node_id]);
   }, [activeSpace, setActiveSpaceId, addExpanded]);
 
-  function invalidateSpace(spaceId: string) {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
-    void queryClient.invalidateQueries({ queryKey: ["spaces", spaceId] });
-  }
-
-  const createSpaceMutation = useMutation({
-    mutationFn: (name: string) => createSpace(client, name),
-    onSuccess: (space) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
-      setActiveSpaceId(space.id);
-      resetGroups();
-    }
+  const createSpaceMutation = useCreateSpaceMutation((space) => {
+    setActiveSpaceId(space.id);
+    resetGroups();
   });
-  const updateSpaceMutation = useMutation({
-    mutationFn: ({ spaceId, name }: { spaceId: string; name: string }) => updateSpace(client, spaceId, { name }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.spaces })
+  const updateSpaceMutation = useUpdateSpaceMutation();
+  const deleteSpaceMutation = useDeleteSpaceMutation(() => {
+    resetGroups();
+    setActiveSpaceId(null);
   });
-  const deleteSpaceMutation = useMutation({
-    mutationFn: (spaceId: string) => deleteSpace(client, spaceId),
-    onSuccess: () => {
-      resetGroups();
-      setActiveSpaceId(null);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
-    }
+  const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
+    addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
+    openInActiveGroup(node);
   });
-  const createNodeMutation = useMutation({
-    mutationFn: ({ parentId, kind, name, content }: { parentId: string; kind: "folder" | "text"; name: string; content?: string }) =>
-      createNode(client, activeSpace!.id, { parent_id: parentId, kind, name, content }),
-    onSuccess: (node) => {
-      invalidateSpace(node.space_id);
-      addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
-      openInActiveGroup(node);
-    }
-  });
-  const updateNodeMutation = useMutation({
-    mutationFn: ({ node, name }: { node: RestNode; name: string }) => updateNode(client, node.space_id, node.id, { name }),
-    onSuccess: (node) => {
-      invalidateSpace(node.space_id);
-      updateGroupsNode(node);
-    }
-  });
-  const moveNodeMutation = useMutation({
-    mutationFn: ({ node, parentId }: { node: RestNode; parentId: string }) =>
-      moveNode(client, node.space_id, node.id, { new_parent_id: parentId, expected_parent_id: node.parent_id }),
-    onSuccess: (node) => {
-      invalidateSpace(node.space_id);
-      updateGroupsNode(node);
-    }
-  });
-  const deleteNodeMutation = useMutation({
-    mutationFn: ({ node, recursive }: { node: RestNode; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive),
-    onSuccess: (_, variables) => {
-      clearGroupsWithNode(variables.node.id);
-      invalidateSpace(variables.node.space_id);
-    }
-  });
-  const uploadFileMutation = useMutation({
-    mutationFn: ({ parentId, name, file }: { parentId: string; name: string; file: File }) => uploadFile(client, activeSpace!.id, { parentNodeId: parentId, name, file }),
-    onSuccess: (response) => {
-      invalidateSpace(response.node.space_id);
-      openInActiveGroup(response.node);
-    }
-  });
-  const replaceMetadataMutation = useMutation({
-    mutationFn: ({ node, metadata }: { node: RestNode; metadata: Record<string, unknown> }) => replaceMetadata(client, node.space_id, node.id, metadata),
-    onSuccess: (node) => {
-      invalidateSpace(node.space_id);
-      updateGroupsNode(node);
-    }
-  });
+  const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
+  const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
+  const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
+  const uploadFileMutation = useUploadFileMutation(activeSpace, openInActiveGroup);
+  const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
+  const revealNodeInSpace = useRevealNode();
+  const logoutSession = useLogout();
 
   async function openNode(node: RestNode) {
     openInActiveGroup(node);
     closeMobile();
     if (!activeSpace || node.parent_id === null) return;
-    const reveal = await revealNode(client, activeSpace.id, node.id);
+    const reveal = await revealNodeInSpace(activeSpace.id, node.id);
     addExpanded(reveal.ancestors.map((ancestor) => ancestor.id));
   }
 
@@ -228,7 +169,7 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
 
   async function handleSignOut() {
     try {
-      await logout(client);
+      await logoutSession();
     } finally {
       clearDevApiKey();
       onSignOut();
