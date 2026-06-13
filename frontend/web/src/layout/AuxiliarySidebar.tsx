@@ -4,7 +4,7 @@ import type { RestNode } from "../api/types";
 
 export function AuxiliarySidebar({ activeNode, onReplaceMetadata }: { activeNode: RestNode | null; onReplaceMetadata: () => void }) {
   return (
-    <aside className="h-full w-full min-h-0 overflow-y-auto border-l border-border bg-panel p-3">
+    <aside className="h-full w-full min-h-0 overflow-y-auto border-l border-seam bg-panel p-3">
       <div className="rounded-xl bg-surface px-3 py-1.5 text-sm font-medium">Inspector</div>
       {activeNode ? (
         <div className="mt-4 space-y-3">

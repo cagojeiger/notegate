@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useApiClient } from "../api/ApiProvider";
 import { logout } from "../api/auth";
@@ -17,7 +17,9 @@ import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
+import { DialogHost, type AppDialog } from "./dialogs/DialogHost";
 import { FullScreenStatus } from "./FullScreenStatus";
+import { SettingsModal } from "./SettingsModal";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 
@@ -44,6 +46,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const addGroup = useUiStore((state) => state.addGroup);
   const closeGroup = useUiStore((state) => state.closeGroup);
   const focusGroup = useUiStore((state) => state.focusGroup);
+  const setGroupMode = useUiStore((state) => state.setGroupMode);
   const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
   const resetGroups = useUiStore((state) => state.resetGroups);
@@ -61,6 +64,8 @@ export function AppShell({ onSignOut }: AppShellProps) {
   const closeMobile = useUiStore((state) => state.closeMobile);
 
   const isMobile = useIsMobile();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dialog, setDialog] = useState<AppDialog | null>(null);
   const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
   const showAuxiliary = auxiliaryOpen && activeNode !== null;
@@ -168,33 +173,34 @@ export function AppShell({ onSignOut }: AppShellProps) {
   }
 
   function promptCreateSpace() {
-    const name = window.prompt("Space name");
-    if (name?.trim()) createSpaceMutation.mutate(name.trim());
+    setDialog({ kind: "prompt", title: "New space", label: "Space name", initial: "", submitLabel: "Create", onSubmit: (name) => createSpaceMutation.mutate(name) });
   }
 
   function promptRenameSpace() {
     if (!activeSpace) return;
-    const name = window.prompt("New space name", activeSpace.name);
-    if (name?.trim() && name.trim() !== activeSpace.name) updateSpaceMutation.mutate({ spaceId: activeSpace.id, name: name.trim() });
+    const space = activeSpace;
+    setDialog({ kind: "prompt", title: "Rename space", label: "Space name", initial: space.name, submitLabel: "Rename", onSubmit: (name) => { if (name !== space.name) updateSpaceMutation.mutate({ spaceId: space.id, name }); } });
   }
 
   function confirmDeleteSpace() {
     if (!activeSpace) return;
-    if (window.confirm(`Delete space '${activeSpace.name}'?`)) deleteSpaceMutation.mutate(activeSpace.id);
+    const space = activeSpace;
+    setDialog({ kind: "confirm", title: "Delete space", message: `Delete space "${space.name}"? This permanently removes all of its nodes.`, danger: true, confirmLabel: "Delete", onConfirm: () => deleteSpaceMutation.mutate(space.id) });
   }
 
   function promptCreateNode(kind: "folder" | "text") {
     const parentId = parentForCreate();
     if (!parentId) return;
-    const name = window.prompt(`${kind} name`);
-    if (!name?.trim()) return;
-    createNodeMutation.mutate({ parentId, kind, name: name.trim(), content: kind === "text" ? "" : undefined });
+    setDialog({ kind: "prompt", title: kind === "folder" ? "New folder" : "New text", label: "Name", initial: "", submitLabel: "Create", onSubmit: (name) => createNodeMutation.mutate({ parentId, kind, name, content: kind === "text" ? "" : undefined }) });
   }
 
   function promptCreateInFolder(folder: RestNode, kind: "folder" | "text") {
-    const name = window.prompt(`${kind} name`);
-    if (!name?.trim()) return;
-    createNodeMutation.mutate({ parentId: folder.id, kind, name: name.trim(), content: kind === "text" ? "" : undefined });
+    setDialog({ kind: "prompt", title: kind === "folder" ? "New folder" : "New text", label: "Name", initial: "", submitLabel: "Create", onSubmit: (name) => createNodeMutation.mutate({ parentId: folder.id, kind, name, content: kind === "text" ? "" : undefined }) });
+  }
+
+  function uploadInFolder(folder: RestNode, file: File | null) {
+    if (!file) return;
+    setDialog({ kind: "prompt", title: "Upload file", label: "File node name", initial: file.name, submitLabel: "Upload", onSubmit: (name) => uploadFileMutation.mutate({ parentId: folder.id, name, file }) });
   }
 
   function collapseTree() {
@@ -203,39 +209,30 @@ export function AppShell({ onSignOut }: AppShellProps) {
 
   function promptRenameNode(node: RestNode) {
     if (node.parent_id === null) return;
-    const name = window.prompt("New node name", node.name);
-    if (name?.trim() && name.trim() !== node.name) updateNodeMutation.mutate({ node, name: name.trim() });
+    setDialog({ kind: "prompt", title: "Rename", label: "Name", initial: node.name, submitLabel: "Rename", onSubmit: (name) => { if (name !== node.name) updateNodeMutation.mutate({ node, name }); } });
   }
 
   function promptMoveNode(node: RestNode) {
-    if (node.parent_id === null) return;
-    const parentId = window.prompt("Destination parent node id", node.parent_id);
-    if (parentId?.trim()) moveNodeMutation.mutate({ node, parentId: parentId.trim() });
+    if (node.parent_id === null || !activeSpace) return;
+    setDialog({ kind: "move", node, space: activeSpace, onMove: (parentId) => moveNodeMutation.mutate({ node, parentId }) });
   }
 
   function confirmDeleteNode(node: RestNode) {
     if (node.parent_id === null) return;
     const recursive = node.kind === "folder";
-    if (window.confirm(`Delete '${node.name}'${recursive ? " recursively" : ""}?`)) deleteNodeMutation.mutate({ node, recursive });
+    setDialog({ kind: "confirm", title: "Delete", message: `Delete "${node.name}"${recursive ? " and everything inside it" : ""}?`, danger: true, confirmLabel: "Delete", onConfirm: () => deleteNodeMutation.mutate({ node, recursive }) });
   }
 
   function handleFileSelected(file: File | null) {
     const parentId = parentForCreate();
     if (!file || !parentId) return;
-    const name = window.prompt("File node name", file.name);
-    if (name?.trim()) uploadFileMutation.mutate({ parentId, name: name.trim(), file });
+    setDialog({ kind: "prompt", title: "Upload file", label: "File node name", initial: file.name, submitLabel: "Upload", onSubmit: (name) => uploadFileMutation.mutate({ parentId, name, file }) });
   }
 
   function promptReplaceMetadata() {
     if (!activeNode) return;
-    const raw = window.prompt("Metadata JSON", JSON.stringify(activeNode.metadata, null, 2));
-    if (!raw) return;
-    try {
-      const metadata = JSON.parse(raw) as Record<string, unknown>;
-      replaceMetadataMutation.mutate({ node: activeNode, metadata });
-    } catch {
-      window.alert("Metadata must be valid JSON");
-    }
+    const node = activeNode;
+    setDialog({ kind: "metadata", node, onSave: (metadata) => replaceMetadataMutation.mutate({ node, metadata }) });
   }
 
   async function handleSignOut() {
@@ -278,8 +275,8 @@ export function AppShell({ onSignOut }: AppShellProps) {
         onTogglePrimarySidebar={isMobile ? toggleMobileTree : togglePrimarySidebar}
         onToggleAuxiliary={isMobile ? toggleMobileAux : toggleAuxiliary}
       />
-      <main className="relative flex min-h-0 flex-1 border-y border-border">
-        <ActivityRail spaces={spaces} activeSpace={activeSpace} onSelectSpace={selectSpace} onCreateSpace={promptCreateSpace} onSignOut={handleSignOut} />
+      <main className="relative flex min-h-0 flex-1 border-y border-seam">
+        <ActivityRail spaces={spaces} activeSpace={activeSpace} onSelectSpace={selectSpace} onCreateSpace={promptCreateSpace} onOpenSettings={() => setSettingsOpen(true)} />
         <div
           style={isMobile ? undefined : { width: primaryWidth }}
           className={`min-h-0 max-md:fixed max-md:left-0 max-md:bottom-0 max-md:top-12 max-md:z-40 max-md:flex max-md:w-[85%] max-md:max-w-[320px] max-md:shadow-2xl max-md:transition-transform ${mobileTreeOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"} ${primarySidebarOpen ? "md:flex md:shrink-0" : "md:hidden"}`}
@@ -299,10 +296,11 @@ export function AppShell({ onSignOut }: AppShellProps) {
             onDeleteNode={confirmDeleteNode}
             onCollapseTree={collapseTree}
             onCreateInFolder={promptCreateInFolder}
+            onUploadInFolder={uploadInFolder}
           />
         </div>
         {primarySidebarOpen ? (
-          <div onPointerDown={startPrimaryResize} className="hidden w-1 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/40 md:block" aria-hidden="true" />
+          <div onPointerDown={startPrimaryResize} className="hidden w-1 shrink-0 cursor-col-resize bg-seam transition-colors hover:bg-primary/40 md:block" aria-hidden="true" />
         ) : null}
         <EditorArea
           groups={editorGroups}
@@ -310,6 +308,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
           activeSpace={activeSpace}
           onFocusGroup={focusGroup}
           onCloseGroup={closeGroup}
+          onSetGroupMode={setGroupMode}
           onCreateFolder={() => promptCreateNode("folder")}
           onCreateText={() => promptCreateNode("text")}
           onFileSelected={handleFileSelected}
@@ -318,7 +317,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
           onDeleteNode={confirmDeleteNode}
         />
         <div
-          className={`min-h-0 max-md:fixed max-md:right-0 max-md:bottom-0 max-md:top-12 max-md:z-40 max-md:flex max-md:w-[85%] max-md:max-w-[340px] max-md:shadow-2xl max-md:transition-transform ${mobileAuxOpen ? "max-md:translate-x-0" : "max-md:translate-x-full"} ${showAuxiliary ? "md:flex md:w-[320px] md:shrink-0" : "md:hidden"}`}
+          className={`min-h-0 hidden max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:z-40 max-md:flex max-md:h-[70vh] max-md:max-w-none max-md:rounded-t-2xl max-md:shadow-2xl max-md:transition-transform ${mobileAuxOpen ? "max-md:translate-y-0" : "max-md:translate-y-full"} md:max-[1120px]:fixed md:max-[1120px]:right-0 md:max-[1120px]:top-12 md:max-[1120px]:bottom-7 md:max-[1120px]:z-30 md:max-[1120px]:w-[340px] md:max-[1120px]:shadow-2xl ${showAuxiliary ? "md:max-[1120px]:flex min-[1120px]:flex min-[1120px]:w-[320px] min-[1120px]:shrink-0" : "md:max-[1120px]:hidden min-[1120px]:hidden"}`}
         >
           <AuxiliarySidebar activeNode={activeNode} onReplaceMetadata={promptReplaceMetadata} />
         </div>
@@ -326,9 +325,11 @@ export function AppShell({ onSignOut }: AppShellProps) {
           <button type="button" aria-label="Close panel" onClick={closeMobile} className="fixed inset-x-0 bottom-0 top-12 z-30 bg-black/40 md:hidden" />
         ) : null}
       </main>
-      <MobileSpaceBar spaces={spaces} activeSpace={activeSpace} onSelectSpace={selectSpace} onCreateSpace={promptCreateSpace} onSignOut={handleSignOut} />
+      <MobileSpaceBar spaces={spaces} activeSpace={activeSpace} onSelectSpace={selectSpace} onCreateSpace={promptCreateSpace} onOpenSettings={() => setSettingsOpen(true)} />
       <StatusBar activeSpace={activeSpace} />
       <Toast />
+      {settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} onSignOut={handleSignOut} /> : null}
+      <DialogHost dialog={dialog} onClose={() => setDialog(null)} />
     </div>
   );
 }

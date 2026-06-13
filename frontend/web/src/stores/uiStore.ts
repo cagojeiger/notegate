@@ -19,9 +19,9 @@ function initialActiveSpaceId(): string | null {
   return window.localStorage.getItem(LAST_SPACE_KEY);
 }
 
-// An EditorGroup is an independent pane. It owns the node it shows; preview/edit
-// mode is kept locally by the TextEditor instance so each group toggles on its own.
-export type EditorGroup = { id: number; node: RestNode | null };
+// An EditorGroup is an independent pane. It owns the node it shows and its own
+// preview/edit mode, so each group toggles independently of the others.
+export type EditorGroup = { id: number; node: RestNode | null; mode: "preview" | "edit" };
 
 type UiState = {
   theme: ThemeMode;
@@ -40,6 +40,7 @@ type UiState = {
   mobileTreeOpen: boolean;
   mobileAuxOpen: boolean;
   toast: string | null;
+  saveState: "idle" | "saving" | "saved" | "error" | "conflict";
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
   setActiveSpaceId: (id: string | null) => void;
@@ -49,6 +50,7 @@ type UiState = {
   focusGroup: (index: number) => void;
   updateGroupsNode: (node: RestNode) => void;
   clearGroupsWithNode: (nodeId: string) => void;
+  setGroupMode: (index: number, mode: "preview" | "edit") => void;
   resetGroups: () => void;
   toggleFolder: (id: string) => void;
   addExpanded: (ids: string[]) => void;
@@ -65,18 +67,19 @@ type UiState = {
   closeMobile: () => void;
   showToast: (message: string) => void;
   clearToast: () => void;
+  setSaveState: (saveState: "idle" | "saving" | "saved" | "error" | "conflict") => void;
 };
 
 export const useUiStore = create<UiState>((set) => ({
   theme: initialTheme(),
   activeSpaceId: initialActiveSpaceId(),
-  editorGroups: [{ id: 0, node: null }],
+  editorGroups: [{ id: 0, node: null, mode: "preview" }],
   activeGroupIndex: 0,
   nextGroupId: 1,
   expandedFolderIds: new Set(),
   primarySidebarOpen: true,
   primaryWidth: 300,
-  treeRatio: 0.62,
+  treeRatio: 0.67,
   treeSectionOpen: true,
   recentSectionOpen: true,
   recentDensity: "list",
@@ -84,18 +87,19 @@ export const useUiStore = create<UiState>((set) => ({
   mobileTreeOpen: false,
   mobileAuxOpen: false,
   toast: null,
+  saveState: "idle",
   setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((state) => ({ theme: state.theme === "light" ? "dark" : "light" })),
   setActiveSpaceId: (activeSpaceId) => set({ activeSpaceId }),
   openInActiveGroup: (node) =>
     set((state) => ({
-      editorGroups: state.editorGroups.map((group, index) => (index === state.activeGroupIndex ? { ...group, node } : group))
+      editorGroups: state.editorGroups.map((group, index) => (index === state.activeGroupIndex ? { ...group, node, mode: "preview" } : group))
     })),
   addGroup: () =>
     set((state) => {
       if (state.editorGroups.length >= MAX_EDITOR_GROUPS) return state;
       const active = state.editorGroups[state.activeGroupIndex];
-      const groups = [...state.editorGroups, { id: state.nextGroupId, node: active?.node ?? null }];
+      const groups = [...state.editorGroups, { id: state.nextGroupId, node: active?.node ?? null, mode: "preview" as const }];
       return { editorGroups: groups, activeGroupIndex: groups.length - 1, nextGroupId: state.nextGroupId + 1 };
     }),
   closeGroup: (index) =>
@@ -112,9 +116,13 @@ export const useUiStore = create<UiState>((set) => ({
     })),
   clearGroupsWithNode: (nodeId) =>
     set((state) => ({
-      editorGroups: state.editorGroups.map((group) => (group.node?.id === nodeId ? { ...group, node: null } : group))
+      editorGroups: state.editorGroups.map((group) => (group.node?.id === nodeId ? { ...group, node: null, mode: "preview" } : group))
     })),
-  resetGroups: () => set((state) => ({ editorGroups: [{ id: state.nextGroupId, node: null }], activeGroupIndex: 0, nextGroupId: state.nextGroupId + 1 })),
+  setGroupMode: (index, mode) =>
+    set((state) => ({
+      editorGroups: state.editorGroups.map((group, i) => (i === index ? { ...group, mode } : group))
+    })),
+  resetGroups: () => set((state) => ({ editorGroups: [{ id: state.nextGroupId, node: null, mode: "preview" }], activeGroupIndex: 0, nextGroupId: state.nextGroupId + 1 })),
   toggleFolder: (id) =>
     set((state) => {
       const next = new Set(state.expandedFolderIds);
@@ -140,7 +148,8 @@ export const useUiStore = create<UiState>((set) => ({
   toggleMobileAux: () => set((state) => ({ mobileAuxOpen: !state.mobileAuxOpen })),
   closeMobile: () => set({ mobileTreeOpen: false, mobileAuxOpen: false }),
   showToast: (toast) => set({ toast }),
-  clearToast: () => set({ toast: null })
+  clearToast: () => set({ toast: null }),
+  setSaveState: (saveState) => set({ saveState })
 }));
 
 export function persistTheme(theme: ThemeMode): void {

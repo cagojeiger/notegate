@@ -8,6 +8,7 @@
   --ng-panel-strong: #e9e4d8;
   --ng-border: #e3ded2;
   --ng-border-strong: rgba(28, 28, 28, 0.22);
+  --ng-seam: rgba(28, 28, 28, 0.06);
   --ng-text: #1c1c1c;
   --ng-muted: rgba(28, 28, 28, 0.58);
   --ng-faint: rgba(28, 28, 28, 0.36);
@@ -29,6 +30,7 @@
   --ng-panel-strong: #332d25;
   --ng-border: #3b352c;
   --ng-border-strong: rgba(247, 244, 237, 0.24);
+  --ng-seam: rgba(247, 244, 237, 0.08);
   --ng-text: #f4efe6;
   --ng-muted: rgba(244, 239, 230, 0.62);
   --ng-faint: rgba(244, 239, 230, 0.38);
