@@ -38,7 +38,7 @@ export function PrimarySidebarSections({
         onNodeContextMenu={onNodeContextMenu}
         onMoveNodeToFolder={onMoveNodeToFolder}
       />
-      <div onPointerDown={sections.startTreeResize} className={`border-y border-seam bg-surface ${sections.bothSectionsOpen ? "cursor-row-resize transition-colors hover:bg-primary/30" : ""}`} aria-hidden="true" />
+      <div onPointerDown={sections.startTreeResize} className={`border-y border-seam bg-surface ${sections.bothSectionsOpen ? "cursor-row-resize transition-colors hover:bg-[var(--ng-selection)]" : ""}`} aria-hidden="true" />
       <RecentSection
         activeSpace={activeSpace}
         activeNodeId={activeNodeId}

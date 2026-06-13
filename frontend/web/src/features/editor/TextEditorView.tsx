@@ -37,8 +37,8 @@ export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRen
   );
   const actions = (
     <>
-      {mode === "edit" ? <Button onClick={() => saveMutation.mutate(false)} disabled={saveMutation.isPending || !dirty}>Save</Button> : null}
-      <Button secondary onClick={() => onSetMode(mode === "edit" ? "preview" : "edit")} disabled={encrypted}>{mode === "edit" ? "Preview" : "Edit"}</Button>
+      {mode === "edit" ? <Button size="xs" onClick={() => saveMutation.mutate(false)} disabled={saveMutation.isPending || !dirty}>Save</Button> : null}
+      <Button size="xs" secondary onClick={() => onSetMode(mode === "edit" ? "preview" : "edit")} disabled={encrypted}>{mode === "edit" ? "Preview" : "Edit"}</Button>
       <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null} />
     </>
   );
@@ -63,11 +63,11 @@ export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRen
             </div>
           ) : null}
           {mode === "edit" ? (
-            <textarea className="min-h-0 flex-1 resize-none bg-bg p-8 font-mono text-sm text-text outline-none" value={draft} onChange={(event) => setDraft(event.target.value)} />
+            <textarea className="min-h-0 flex-1 resize-none bg-[var(--ng-editor)] p-8 font-mono text-sm text-text outline-none" value={draft} onChange={(event) => setDraft(event.target.value)} />
           ) : isMarkdown ? (
-            <div className="mx-auto w-full max-w-3xl overflow-y-auto px-10 py-14"><Markdown content={content} /></div>
+            <div className="mx-auto w-full max-w-[44rem] overflow-y-auto px-10 py-14"><Markdown content={content} /></div>
           ) : (
-            <article className="mx-auto max-w-3xl overflow-y-auto whitespace-pre-wrap px-10 py-14 font-mono text-sm text-text">{content}</article>
+            <article className="mx-auto max-w-[44rem] overflow-y-auto whitespace-pre-wrap px-10 py-14 font-mono text-sm text-text">{content}</article>
           )}
         </div>
       )}

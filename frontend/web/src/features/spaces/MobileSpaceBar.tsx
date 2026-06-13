@@ -14,19 +14,19 @@ export function MobileSpaceBar({ spaces, activeSpace, onSelectSpace, onCreateSpa
             type="button"
             title={space.name}
             onClick={() => onSelectSpace(space)}
-            className={`grid size-9 shrink-0 place-items-center rounded-full border text-sm font-semibold transition ${activeSpace?.id === space.id ? "border-border-strong bg-primary text-primary-contrast shadow-[var(--ng-inset-shadow)]" : "border-border bg-panel text-muted"}`}
+            className={`grid size-9 shrink-0 place-items-center rounded-xl text-sm font-semibold transition ${activeSpace?.id === space.id ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
           >
             {space.name.slice(0, 1).toUpperCase()}
           </button>
         ))}
       </div>
       <div className="shrink-0 border-l border-seam pl-2">
-        <button type="button" aria-label="Add space" onClick={onCreateSpace} className="grid size-9 place-items-center rounded-full border border-dashed border-border text-muted">
+        <button type="button" aria-label="Add space" onClick={onCreateSpace} className="grid size-9 place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text">
           <Plus size={16} />
         </button>
       </div>
       <div className="ml-auto shrink-0 border-l border-seam pl-2">
-        <button type="button" aria-label="Settings" onClick={onOpenSettings} className="grid size-9 place-items-center rounded-full border border-border bg-panel text-muted">
+        <button type="button" aria-label="Settings" onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text">
           <Settings size={16} />
         </button>
       </div>

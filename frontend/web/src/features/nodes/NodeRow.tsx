@@ -73,7 +73,7 @@ export function NodeRow({
       onTouchMove={clearLongPress}
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
-      className={`group flex w-full items-center gap-1 rounded-lg border py-1.5 pr-2 text-sm transition ${selected ? "bg-panel-strong text-text" : "text-muted hover:bg-surface hover:text-text"} ${dropTarget ? "border-primary bg-primary/10 text-text" : "border-transparent"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`group flex w-full items-center gap-1 rounded-[9px] py-1.5 pr-2 text-sm transition ${selected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{ paddingLeft: `${8 + depth * 14}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >

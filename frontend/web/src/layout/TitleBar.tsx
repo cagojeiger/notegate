@@ -13,7 +13,7 @@ export function TitleBar({ activeSpace, theme, primarySidebarOpen, auxiliaryOpen
   return (
     <header className="flex h-12 items-center justify-between border-b border-seam bg-surface px-3">
       <div className="flex min-w-0 items-center gap-2">
-        <div className="grid size-7 place-items-center rounded-xl bg-primary text-sm font-semibold text-primary-contrast shadow-[var(--ng-inset-shadow)]">N</div>
+        <div className="grid size-7 place-items-center rounded-xl bg-text text-sm font-semibold text-bg">N</div>
         <span className="font-semibold tracking-tight">Notegate</span>
         {activeSpace ? <span className="truncate text-sm text-muted">/ {activeSpace.name}</span> : null}
       </div>

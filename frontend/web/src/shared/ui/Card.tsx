@@ -17,7 +17,7 @@ export function Card({ children, tone = "default", padding = "md", className, as
     sm: "p-3",
     md: "p-4"
   }[padding];
-  const cardClass = cn("rounded-xl border", toneClass, paddingClass, className);
+  const cardClass = cn("rounded-2xl border", toneClass, paddingClass, className);
 
   if (as === "section") {
     return <section className={cardClass} {...props}>{children}</section>;

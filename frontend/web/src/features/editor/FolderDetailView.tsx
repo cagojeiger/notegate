@@ -6,7 +6,7 @@ export function FolderDetailView({ node }: { node: RestNode }) {
   const childrenQuery = useFolderChildrenStat(node);
   const childCount = childrenQuery.data ? `${childrenQuery.data.children.length}${childrenQuery.data.page.has_more ? "+" : ""}` : "…";
   return (
-    <article className="mx-auto max-w-3xl px-10 py-14">
+    <article className="mx-auto max-w-[44rem] px-10 py-14">
       <p className="text-sm text-muted">{node.path}</p>
       <h1 className="mt-4 text-4xl font-semibold tracking-tight">{node.name}</h1>
       <Card className="mt-8">

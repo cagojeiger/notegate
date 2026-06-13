@@ -9,7 +9,7 @@ export function DevAuthGate(props: DevAuthGateProps) {
     <main className="grid h-full place-items-center bg-bg px-6 text-text">
       <Card as="form" onSubmit={auth.handleSubmit} className="w-full max-w-md bg-panel p-6 shadow-[var(--ng-focus-shadow)]">
         <div className="mb-6 flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-xl bg-primary text-lg font-bold text-bg">N</div>
+          <div className="grid size-10 place-items-center rounded-xl bg-text text-lg font-bold text-bg">N</div>
           <div>
             <h1 className="text-xl font-semibold">Sign in to Notegate</h1>
             <p className="text-sm text-muted">Use your Notegate account to open the dashboard.</p>

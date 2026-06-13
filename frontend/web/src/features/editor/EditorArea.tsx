@@ -32,7 +32,7 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, onFocusGroup
           <section
             key={group.id}
             onMouseDown={() => onFocusGroup(index)}
-            className={`flex min-w-0 flex-1 flex-col bg-bg ${index > 0 ? "border-l border-seam" : ""} ${active ? "" : "max-md:hidden"} ${multiple && active ? "ring-1 ring-inset ring-primary/40" : ""}`}
+            className={`flex min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active ? "" : "max-md:hidden"} ${multiple && active ? "ring-1 ring-inset ring-[var(--ng-border-strong)]" : ""}`}
           >
             <GroupBody
               node={group.node}

@@ -13,7 +13,7 @@ export function PrimarySidebarFrame({ isMobile, open, mobileOpen, width, childre
 
 export function PrimarySidebarResizeHandle({ visible, onPointerDown }: { visible: boolean; onPointerDown: PointerEventHandler<HTMLDivElement> }) {
   if (!visible) return null;
-  return <div onPointerDown={onPointerDown} className="hidden w-1 shrink-0 cursor-col-resize bg-seam transition-colors hover:bg-primary/40 md:block" aria-hidden="true" />;
+  return <div onPointerDown={onPointerDown} className="hidden w-1 shrink-0 cursor-col-resize bg-seam transition-colors hover:bg-[var(--ng-selection)] md:block" aria-hidden="true" />;
 }
 
 export function AuxiliarySidebarFrame({ open, mobileOpen, children }: { open: boolean; mobileOpen: boolean; children: ReactNode }) {
