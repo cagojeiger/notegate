@@ -1,29 +1,10 @@
 //! Shared name and path validation.
 //!
-//! The regex patterns here are the single source of truth for space and
-//! node names and must stay aligned with the database `CHECK` constraints in
-//! `backend/crates/db/migrations/0004_nodes_content.sql`.
-
-use std::sync::LazyLock;
-
-use regex::Regex;
+//! Name rules are intentionally Unicode-friendly: Korean and other scripts are
+//! valid. The database `CHECK` constraints in `backend/crates/db/migrations`
+//! must stay aligned with these functions.
 
 use crate::limits;
-
-/// Space name pattern: 1..=63 chars, leading alphanumeric.
-pub const SPACE_NAME_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$";
-/// Node name pattern: 1..=128 chars, leading alphanumeric.
-pub const NODE_NAME_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
-
-static SPACE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::expect_used)]
-    Regex::new(SPACE_NAME_PATTERN).expect("space name pattern is valid")
-});
-
-static NODE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
-    #[allow(clippy::expect_used)]
-    Regex::new(NODE_NAME_PATTERN).expect("node name pattern is valid")
-});
 
 /// Why a name or path failed validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,8 +15,17 @@ pub enum ValidationError {
     Reserved,
     /// The name contains a path separator.
     ContainsSlash,
-    /// The name does not match the required pattern (charset / length).
-    Pattern,
+    /// The space name contains `:`, which would make `<space>:/path` targets ambiguous.
+    ContainsColon,
+    /// The name contains a control character.
+    ContainsControl,
+    /// The name has leading or trailing whitespace.
+    LeadingOrTrailingWhitespace,
+    /// The name exceeds the maximum number of Unicode scalar values.
+    TooLong {
+        /// The maximum allowed character count.
+        max: usize,
+    },
     /// The path does not start with `/`.
     PathNotAbsolute,
     /// The path exceeds the maximum length.
@@ -50,9 +40,10 @@ impl std::fmt::Display for ValidationError {
             Self::Empty => "name cannot be empty",
             Self::Reserved => "name cannot be '.' or '..'",
             Self::ContainsSlash => "name cannot contain '/'",
-            Self::Pattern => {
-                "name must start with a letter or digit and use only letters, digits, '.', '_' or '-'"
-            }
+            Self::ContainsColon => "space name cannot contain ':'",
+            Self::ContainsControl => "name cannot contain control characters",
+            Self::LeadingOrTrailingWhitespace => "name cannot start or end with whitespace",
+            Self::TooLong { max } => return write!(f, "name cannot exceed {max} characters"),
             Self::PathNotAbsolute => "path must start with /",
             Self::PathTooLong => "path is too long",
             Self::PathTooDeep => "path is too deep",
@@ -63,45 +54,66 @@ impl std::fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-/// Validate a space name against the shared pattern.
+/// Validate a space name.
+///
+/// Space names are Unicode-friendly but cannot contain `/` or `:` because MCP
+/// compact targets use the `<space>:/path` syntax.
 pub fn validate_space_name(name: &str) -> Result<(), ValidationError> {
-    if name.is_empty() {
-        return Err(ValidationError::Empty);
-    }
-    if !SPACE_NAME_RE.is_match(name) {
-        return Err(ValidationError::Pattern);
-    }
-    Ok(())
-}
-
-/// Validate a folder name: shared node pattern, not `.`/`..`.
-pub fn validate_folder_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)
-}
-
-/// Validate a text name: shared node pattern, not `.`/`..`.
-pub fn validate_text_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)
-}
-
-/// Validate a file name: shared node pattern, not `.`/`..`.
-pub fn validate_file_name(name: &str) -> Result<(), ValidationError> {
-    validate_node_name(name)
-}
-
-/// Validate a bare node name against the shared pattern.
-pub fn validate_node_name(name: &str) -> Result<(), ValidationError> {
-    if name.is_empty() {
-        return Err(ValidationError::Empty);
-    }
+    validate_common_name(name, limits::SPACE_NAME_MAX_LEN)?;
     if name == "." || name == ".." {
         return Err(ValidationError::Reserved);
     }
     if name.contains('/') {
         return Err(ValidationError::ContainsSlash);
     }
-    if !NODE_NAME_RE.is_match(name) {
-        return Err(ValidationError::Pattern);
+    if name.contains(':') {
+        return Err(ValidationError::ContainsColon);
+    }
+    Ok(())
+}
+
+/// Validate a folder name with the shared node-name rule.
+pub fn validate_folder_name(name: &str) -> Result<(), ValidationError> {
+    validate_node_name(name)
+}
+
+/// Validate a text name with the shared node-name rule.
+pub fn validate_text_name(name: &str) -> Result<(), ValidationError> {
+    validate_node_name(name)
+}
+
+/// Validate a file name with the shared node-name rule.
+pub fn validate_file_name(name: &str) -> Result<(), ValidationError> {
+    validate_node_name(name)
+}
+
+/// Validate a bare node name.
+///
+/// Node names are Unicode-friendly and may contain internal spaces. `/` remains
+/// reserved as the path separator.
+pub fn validate_node_name(name: &str) -> Result<(), ValidationError> {
+    validate_common_name(name, limits::TEXT_NAME_MAX_LEN)?;
+    if name == "." || name == ".." {
+        return Err(ValidationError::Reserved);
+    }
+    if name.contains('/') {
+        return Err(ValidationError::ContainsSlash);
+    }
+    Ok(())
+}
+
+fn validate_common_name(name: &str, max_chars: usize) -> Result<(), ValidationError> {
+    if name.is_empty() {
+        return Err(ValidationError::Empty);
+    }
+    if name.chars().count() > max_chars {
+        return Err(ValidationError::TooLong { max: max_chars });
+    }
+    if name.chars().any(char::is_control) {
+        return Err(ValidationError::ContainsControl);
+    }
+    if name.trim() != name {
+        return Err(ValidationError::LeadingOrTrailingWhitespace);
     }
     Ok(())
 }
@@ -156,22 +168,36 @@ mod tests {
     fn space_name_accepts_valid_and_rejects_invalid() {
         assert!(validate_space_name("notes").is_ok());
         assert!(validate_space_name("a.b-c_1").is_ok());
+        assert!(validate_space_name("개인 노트").is_ok());
+        assert!(validate_space_name(".hidden").is_ok());
         assert_eq!(validate_space_name(""), Err(ValidationError::Empty));
+        assert_eq!(validate_space_name("."), Err(ValidationError::Reserved));
         assert_eq!(
-            validate_space_name(".hidden"),
-            Err(ValidationError::Pattern)
+            validate_space_name("bad:name"),
+            Err(ValidationError::ContainsColon)
         );
         assert_eq!(
-            validate_space_name(&"a".repeat(64)),
-            Err(ValidationError::Pattern)
+            validate_space_name("bad/name"),
+            Err(ValidationError::ContainsSlash)
+        );
+        assert_eq!(
+            validate_space_name(" bad"),
+            Err(ValidationError::LeadingOrTrailingWhitespace)
+        );
+        assert_eq!(
+            validate_space_name(&"가".repeat(64)),
+            Err(ValidationError::TooLong {
+                max: limits::SPACE_NAME_MAX_LEN
+            })
         );
     }
 
     #[test]
     fn folder_text_and_file_names_share_node_rules() {
         assert!(validate_folder_name("notes").is_ok());
-        assert!(validate_text_name("state.json").is_ok());
-        assert!(validate_file_name("image.png").is_ok());
+        assert!(validate_folder_name("회의 자료").is_ok());
+        assert!(validate_text_name("상태.json").is_ok());
+        assert!(validate_file_name("이미지.png").is_ok());
     }
 
     #[test]
@@ -180,6 +206,14 @@ mod tests {
         assert_eq!(
             validate_node_name("a/b"),
             Err(ValidationError::ContainsSlash)
+        );
+        assert_eq!(
+            validate_node_name("name\n"),
+            Err(ValidationError::ContainsControl)
+        );
+        assert_eq!(
+            validate_node_name(" trailing "),
+            Err(ValidationError::LeadingOrTrailingWhitespace)
         );
     }
 

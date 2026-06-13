@@ -32,7 +32,7 @@ root node '/'
 
 즉 새 space는 기본적으로 현재 목록의 마지막에 추가된다.
 
-Space name은 1~63자이며, 첫 글자는 영문/숫자이고 이후 글자는 영문/숫자/`.`/`_`/`-`만 허용한다.
+Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. `:`는 MCP compact target(`<space>:/path`) 파싱을 위해 예약한다.
 
 ## Get space
 

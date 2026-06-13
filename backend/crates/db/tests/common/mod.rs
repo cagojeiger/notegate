@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0002_identity.sql"),
     include_str!("../../migrations/0003_spaces.sql"),
     include_str!("../../migrations/0004_nodes_content.sql"),
+    include_str!("../../migrations/0005_unicode_names.sql"),
 ];
 
 /// A throwaway schema-isolated database for one test.

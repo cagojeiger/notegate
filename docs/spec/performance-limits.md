@@ -37,7 +37,9 @@ oauth_provider_sub_max_chars = 255
 user_display_name_max_chars = 128
 user_email_max_chars = 254
 space_name_max_chars = 63
-space_name_pattern = ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
+space_name_forbidden = '/', ':', control chars, leading/trailing whitespace, '.', '..'
+node_name_max_chars = 128
+node_name_forbidden = '/', control chars, leading/trailing whitespace, '.', '..'
 ```
 
 

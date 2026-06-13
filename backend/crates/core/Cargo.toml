@@ -17,7 +17,6 @@ hmac.workspace = true
 hkdf.workspace = true
 aes-gcm.workspace = true
 config.workspace = true
-regex.workspace = true
 serde.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true

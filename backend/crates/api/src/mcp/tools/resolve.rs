@@ -291,7 +291,7 @@ mod tests {
         // Non-absolute path after the separator.
         assert!(parse_target("personal:notes.md").is_err());
         // Invalid space-name segment.
-        assert!(parse_target(".secret:/notes.md").is_err());
+        assert!(parse_target("bad/name:/notes.md").is_err());
     }
 
     #[test]
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn bad_space_name_grammar_is_rejected() {
-        let error = pick_space(Vec::new(), ".secret").unwrap_err();
+        let error = pick_space(Vec::new(), "bad/name").unwrap_err();
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("invalid name carries data");
         assert_eq!(data["kind"], "invalid_input");

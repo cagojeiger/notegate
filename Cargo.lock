@@ -1825,7 +1825,6 @@ dependencies = [
  "hkdf",
  "hmac",
  "rand 0.8.6",
- "regex",
  "secrecy",
  "serde",
  "sha2",

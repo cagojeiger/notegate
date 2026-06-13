@@ -1,9 +1,9 @@
 //! MCP/CLI compact target parsing: `<space>:/<absolute-path>`.
 //!
 //! `target` is syntactic sugar for the structured `space` + `path` fields
-//! (`docs/spec/mcp/README.md`). Space names cannot contain `:` (they match the
-//! restricted name grammar), so the target splits on the first `:`; the remainder
-//! must be an absolute path inside the space.
+//! (`docs/spec/mcp/README.md`). Space names cannot contain `:`, so the target
+//! splits on the first `:`; the remainder must be an absolute path inside the
+//! space.
 
 use notegate_core::validation::{normalize_path, validate_space_name};
 
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn rejects_invalid_space_name() {
         assert!(matches!(
-            parse_target(".secret:/notes.md"),
+            parse_target("bad/name:/notes.md"),
             Err(ServiceError::InvalidInput(_))
         ));
         // An empty space segment is invalid.

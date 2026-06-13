@@ -11,6 +11,7 @@ target = space:/path/to/item
 - Root path는 `/`다.
 - Full path는 저장하지 않고 parent chain에서 derive한다.
 - 같은 folder 안 live node name은 unique다.
+- Node name은 1~128자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다.
 - Node kind는 `folder`, `text`, `file`이다.
 
 ## Common commands
