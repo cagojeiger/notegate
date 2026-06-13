@@ -1,11 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { ApiProvider, useApiClient } from "../api/ApiProvider";
+import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
-import { getMe } from "../api/me";
-import { queryKeys } from "../api/queryKeys";
 import { DevAuthGate } from "../auth/DevAuthGate";
+import { useSessionQuery } from "../auth/useAuthQueries";
 import { clearDevApiKey, readDevApiKey } from "../auth/session";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
@@ -27,8 +25,7 @@ export function App() {
 }
 
 function AuthBoundary({ apiKey, onAuthenticated, onSignOut }: { apiKey: string | null; onAuthenticated: (apiKey: string) => void; onSignOut: () => void }) {
-  const client = useApiClient();
-  const meQuery = useQuery({ queryKey: [...queryKeys.me, apiKey], queryFn: () => getMe(client), retry: false });
+  const meQuery = useSessionQuery(apiKey);
 
   if (!meQuery.isFetched && meQuery.isLoading) return <FullScreenStatus label="Checking session" />;
   // react-query keeps the last good `data` on error, so an expired session
