@@ -1,14 +1,16 @@
 import { Moon, Sun } from "lucide-react";
 
 import { Button, Card, SectionHeader } from "../../shared/ui";
+import { KeyManager } from "./KeyManager";
 import { useUiStore } from "../../stores/uiStore";
-import { useMeQuery } from "./useSettingsQueries";
+import { useMeQuery, useMyKeyManagerProps } from "./useSettingsQueries";
 
 export function AccountTab({ onSignOut }: { onSignOut: () => void }) {
   const meQuery = useMeQuery();
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
   const me = meQuery.data;
+  const keyManagerProps = useMyKeyManagerProps();
   return (
     <div className="space-y-4">
       <section>
@@ -25,6 +27,11 @@ export function AccountTab({ onSignOut }: { onSignOut: () => void }) {
           <span>Theme</span>
           <span className="flex items-center gap-2 capitalize text-muted">{theme === "light" ? <Sun size={16} /> : <Moon size={16} />} {theme}</span>
         </button>
+      </section>
+
+      <section>
+        <SectionHeader title="My API Keys" description="User keys authenticate as your account." />
+        <KeyManager {...keyManagerProps} emptyLabel="No user API keys." />
       </section>
 
       <Button variant="danger" className="w-full" onClick={onSignOut}>Sign out</Button>

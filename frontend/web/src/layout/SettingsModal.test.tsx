@@ -26,8 +26,12 @@ function mockSettingsApi() {
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const path = String(input);
     if (path.includes("/api/v1/me/keys")) return jsonResponse({ keys: [], page });
-    if (path.includes("/api/v1/agents")) return jsonResponse({ agents: [], page });
-    if (path.includes("/api/v1/spaces/") && path.includes("/agents")) return jsonResponse({ connections: [], page });
+    if (path.includes("/api/v1/agents/agent-1/keys")) return jsonResponse({ keys: [], page });
+    if (path.includes("/api/v1/spaces/space-1/agents")) {
+      return jsonResponse({ connections: [{ agent: { id: "agent-1", kind: "agent", display_name: "ci-bot" }, permission: "write", connected_at: "2026-06-13T00:00:00Z" }], page });
+    }
+    if (path.includes("/api/v1/spaces?")) return jsonResponse({ spaces: [space], page });
+    if (path.endsWith("/api/v1/agents?limit=100")) return jsonResponse({ agents: [{ id: "agent-1", name: "ci-bot", owner_user_id: "user-1" }], page });
     if (path.includes("/api/v1/me")) {
       return jsonResponse({ account: { id: "user-1", kind: "user", display_name: "Kang" }, user: { email: "kang@example.com" } });
     }
@@ -46,31 +50,28 @@ function renderSettings(activeSpace: Space | null = space) {
 describe("SettingsModal", () => {
   beforeEach(mockSettingsApi);
 
-  it("switches between top-level settings tabs", async () => {
-    const user = userEvent.setup();
+  it("keeps user API keys inside the account tab", async () => {
     renderSettings();
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByText("Appearance")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "API Keys" }));
-    expect(await screen.findByText("No active keys.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Agents" }));
-    expect(screen.getByText("New agent name")).toBeInTheDocument();
-    expect(await screen.findByText("No agents yet.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Connections" }));
-    expect(await screen.findByText(/Connect agents to/)).toBeInTheDocument();
-    expect(await screen.findByText("Create an agent first (Agents tab).")).toBeInTheDocument();
+    expect(screen.getByText("My API Keys")).toBeInTheDocument();
+    expect(await screen.findByText("No user API keys.")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "API Keys" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
   });
 
-  it("shows a clear connections empty state when no space is selected", async () => {
+  it("shows agent keys and space access inside an expanded agent", async () => {
     const user = userEvent.setup();
-    renderSettings(null);
+    renderSettings();
 
-    await user.click(screen.getByRole("tab", { name: "Connections" }));
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
 
-    expect(screen.getByText("Select a space to manage agent connections.")).toBeInTheDocument();
+    expect(screen.getByText("Agent API Keys")).toBeInTheDocument();
+    expect(await screen.findByText("No keys for this agent.")).toBeInTheDocument();
+    expect(screen.getByText("Space Access")).toBeInTheDocument();
+    expect(await screen.findByText("Personal")).toBeInTheDocument();
+    expect(await screen.findByText("write")).toBeInTheDocument();
   });
 });

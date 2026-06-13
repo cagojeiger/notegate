@@ -6,6 +6,7 @@ import { connectAgent, disconnectAgent, listConnections, type Permission } from 
 import { createMyKey, listMyKeys, revokeMyKey, type ApiKeyListResponse, type MintedKey } from "../../api/keys";
 import { getMe } from "../../api/me";
 import { queryKeys } from "../../api/queryKeys";
+import { listSpaces } from "../../api/spaces";
 
 export function useMeQuery() {
   const client = useApiClient();
@@ -15,6 +16,11 @@ export function useMeQuery() {
 export function useAgentsQuery() {
   const client = useApiClient();
   return useQuery({ queryKey: queryKeys.agents, queryFn: () => listAgents(client) });
+}
+
+export function useSpacesQuery() {
+  const client = useApiClient();
+  return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client) });
 }
 
 export function useCreateAgentMutation(onCreated: () => void) {
@@ -46,21 +52,22 @@ export function useConnectionsQuery(spaceId: string) {
   return useQuery({ queryKey: queryKeys.connections(spaceId), queryFn: () => listConnections(client, spaceId), enabled: !!spaceId });
 }
 
-export function useConnectAgentMutation(spaceId: string) {
+
+export function useConnectAgentToSpaceMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ agentId, permission }: { agentId: string; permission: Permission }) => connectAgent(client, spaceId, agentId, permission),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(spaceId) })
+    mutationFn: ({ spaceId, agentId, permission }: { spaceId: string; agentId: string; permission: Permission }) => connectAgent(client, spaceId, agentId, permission),
+    onSuccess: (_connection, variables) => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(variables.spaceId) })
   });
 }
 
-export function useDisconnectAgentMutation(spaceId: string) {
+export function useDisconnectAgentFromSpaceMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (agentId: string) => disconnectAgent(client, spaceId, agentId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(spaceId) })
+    mutationFn: ({ spaceId, agentId }: { spaceId: string; agentId: string }) => disconnectAgent(client, spaceId, agentId),
+    onSuccess: (_result, variables) => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(variables.spaceId) })
   });
 }
 

@@ -1,5 +1,6 @@
-import type { ApiClient } from "./client";
-
-export function logout(client: ApiClient): Promise<void> {
-  return client.post<void>("/auth/logout");
+export async function logout(): Promise<void> {
+  await fetch("/auth/logout", {
+    method: "POST",
+    credentials: "same-origin"
+  });
 }
