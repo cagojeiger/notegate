@@ -142,11 +142,11 @@ function NodeActionMenu({ onRenameNode, onMoveNode, onDeleteNode, disabled }: { 
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} onContextMenu={(event) => { event.preventDefault(); setOpen(false); }} aria-hidden="true" />
-          <div className="absolute right-0 top-9 z-20 w-40 rounded-xl border border-border bg-surface p-1 text-sm shadow-[var(--ng-focus-shadow)]">
+          <Card className="absolute right-0 top-9 z-20 w-40 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
             <MenuButton onClick={() => { onRenameNode(); setOpen(false); }}>Rename</MenuButton>
             <MenuButton onClick={() => { onMoveNode(); setOpen(false); }}>Move</MenuButton>
             <MenuButton danger onClick={() => { onDeleteNode(); setOpen(false); }}><Trash2 size={14} /> Delete</MenuButton>
-          </div>
+          </Card>
         </>
       ) : null}
     </div>
