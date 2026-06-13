@@ -1,29 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey } from "../../api/agents";
+import { createAgentKey, listAgentKeys, revokeAgentKey } from "../../api/agents";
 import { queryKeys } from "../../api/queryKeys";
 import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
 import { KeyManager } from "./KeyManager";
+import { useAgentsQuery, useCreateAgentMutation, useDeleteAgentMutation } from "./useSettingsQueries";
 
 export function AgentsTab() {
   const client = useApiClient();
-  const queryClient = useQueryClient();
-  const agentsQuery = useQuery({ queryKey: queryKeys.agents, queryFn: () => listAgents(client) });
+  const agentsQuery = useAgentsQuery();
   const [name, setName] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
-  const createMutation = useMutation({
-    mutationFn: () => createAgent(client, name.trim()),
-    onSuccess: () => { setName(""); void queryClient.invalidateQueries({ queryKey: queryKeys.agents }); }
-  });
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteAgent(client, id),
-    onSuccess: () => { setConfirmId(null); void queryClient.invalidateQueries({ queryKey: queryKeys.agents }); }
-  });
+  const createMutation = useCreateAgentMutation(() => setName(""));
+  const deleteMutation = useDeleteAgentMutation(() => setConfirmId(null));
 
   const agents = agentsQuery.data?.agents ?? [];
   return (
@@ -34,10 +27,10 @@ export function AgentsTab() {
           className="min-w-0 flex-1"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(name.trim()); }}
           placeholder="e.g. ci-bot, importer"
         />
-        <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+        <Button onClick={() => createMutation.mutate(name.trim())} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
       </div>
 
       {agentsQuery.isLoading ? (

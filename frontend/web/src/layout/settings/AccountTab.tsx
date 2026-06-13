@@ -1,15 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
 import { Moon, Sun } from "lucide-react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { getMe } from "../../api/me";
-import { queryKeys } from "../../api/queryKeys";
 import { Button, Card, SectionHeader } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
+import { useMeQuery } from "./useSettingsQueries";
 
 export function AccountTab({ onSignOut }: { onSignOut: () => void }) {
-  const client = useApiClient();
-  const meQuery = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe(client) });
+  const meQuery = useMeQuery();
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
   const me = meQuery.data;

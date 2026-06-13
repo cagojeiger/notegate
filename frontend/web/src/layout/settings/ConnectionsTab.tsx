@@ -1,28 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { listAgents } from "../../api/agents";
-import { connectAgent, disconnectAgent, listConnections, type Permission } from "../../api/connections";
-import { queryKeys } from "../../api/queryKeys";
 import type { Space } from "../../api/types";
 import { Badge, Button, Card, EmptyState } from "../../shared/ui";
+import { useAgentsQuery, useConnectAgentMutation, useConnectionsQuery, useDisconnectAgentMutation } from "./useSettingsQueries";
 
 export function ConnectionsTab({ activeSpace }: { activeSpace: Space | null }) {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  const agentsQuery = useQuery({ queryKey: queryKeys.agents, queryFn: () => listAgents(client) });
+  const agentsQuery = useAgentsQuery();
   const spaceId = activeSpace?.id ?? "";
-  const connQuery = useQuery({ queryKey: queryKeys.connections(spaceId), queryFn: () => listConnections(client, spaceId), enabled: !!spaceId });
-
-  const connectMutation = useMutation({
-    mutationFn: ({ agentId, permission }: { agentId: string; permission: Permission }) => connectAgent(client, spaceId, agentId, permission),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(spaceId) })
-  });
-  const disconnectMutation = useMutation({
-    mutationFn: (agentId: string) => disconnectAgent(client, spaceId, agentId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(spaceId) })
-  });
+  const connQuery = useConnectionsQuery(spaceId);
+  const connectMutation = useConnectAgentMutation(spaceId);
+  const disconnectMutation = useDisconnectAgentMutation(spaceId);
 
   if (!activeSpace) return <EmptyState>Select a space to manage agent connections.</EmptyState>;
 

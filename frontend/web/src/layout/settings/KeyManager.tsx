@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import type { QueryKey } from "@tanstack/react-query";
 import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { ApiKeyListResponse, MintedKey } from "../../api/keys";
 import { Button, Card, EmptyState, IconButton, SelectField, TextField } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
+import { useApiKeysQuery, useCreateApiKeyMutation, useRevokeApiKeyMutation } from "./useSettingsQueries";
 
 // Backend caps API-key lifetime to within 30 days.
 const EXPIRY_OPTIONS = [
@@ -21,30 +22,23 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   revoke: (id: string) => Promise<void>;
   emptyLabel?: string;
 }) {
-  const queryClient = useQueryClient();
   const showToast = useUiStore((state) => state.showToast);
-  const keysQuery = useQuery({ queryKey, queryFn: list });
+  const keysQuery = useApiKeysQuery(queryKey, list);
   const [name, setName] = useState("");
   const [days, setDays] = useState(30);
   const [created, setCreated] = useState<MintedKey | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
-  const createMutation = useMutation({
+  const createMutation = useCreateApiKeyMutation(queryKey, create, (key) => {
+    setCreated(key);
+    setName("");
+  });
+  const revokeMutation = useRevokeApiKeyMutation(queryKey, revoke, () => setConfirmId(null));
+
+  function createInput() {
     // 5-min buffer keeps the 30-day option within the server limit despite clock skew.
-    mutationFn: () => create({ name: name.trim(), expires_at: new Date(Date.now() + days * 86_400_000 - 300_000).toISOString() }),
-    onSuccess: (key) => {
-      setCreated(key);
-      setName("");
-      void queryClient.invalidateQueries({ queryKey });
-    }
-  });
-  const revokeMutation = useMutation({
-    mutationFn: (id: string) => revoke(id),
-    onSuccess: () => {
-      setConfirmId(null);
-      void queryClient.invalidateQueries({ queryKey });
-    }
-  });
+    return { name: name.trim(), expires_at: new Date(Date.now() + days * 86_400_000 - 300_000).toISOString() };
+  }
 
   const keys = keysQuery.data?.keys ?? [];
   return (
@@ -67,13 +61,13 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           className="min-w-0 flex-1"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(createInput()); }}
           placeholder="e.g. cli, ci, claude-test"
         />
         <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-32">
           {EXPIRY_OPTIONS.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
         </SelectField>
-        <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+        <Button onClick={() => createMutation.mutate(createInput())} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
       </div>
 
       {keysQuery.isLoading ? (
