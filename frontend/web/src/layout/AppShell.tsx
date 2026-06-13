@@ -37,7 +37,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
         onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
       />
       <main className="relative flex min-h-0 flex-1 border-y border-seam">
-        <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenSettings={() => actions.setSettingsOpen(true)} />
+        <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} onSelectSpace={actions.selectSpace} onReorderSpaces={actions.reorderSpaces} onCreateSpace={actions.promptCreateSpace} onOpenSettings={() => actions.setSettingsOpen(true)} />
         <PrimarySidebarFrame isMobile={workbench.isMobile} open={workbench.primarySidebarOpen} mobileOpen={workbench.mobileTreeOpen} width={workbench.primaryWidth}>
           <PrimarySidebar
             activeSpace={workbench.activeSpace}

@@ -158,7 +158,7 @@ Ephemeral state
 1. Reload 후 복원하지 않아도 된다.
 2. Pagination cursor는 현재 query의 continuation token이다.
 3. Cursor를 장기 저장하지 않는다.
-4. Right-click menu, hover, temporary drag target은 저장하지 않는다.
+4. Right-click menu, hover, temporary drag target은 저장하지 않는다. 단, drag가 drop으로 확정된 reorder 결과는 backend `sort_order`로 저장한다.
 5. Stale children page cache와 failed request body는 저장하지 않는다.
 
 ### 5. Region interaction flow
@@ -171,6 +171,15 @@ ActivityRail
 -> PrimarySidebar root tree 초기화
 -> EditorArea empty
 -> AuxiliarySidebar empty inspector
+```
+
+1-1. Space reorder
+
+```text
+ActivityRail drag/drop
+-> visible space order optimistic update
+-> PATCH /api/v1/spaces/{space_id} with sort_order for changed spaces
+-> GET /api/v1/spaces order remains sort_order, name, id
 ```
 
 2. Node 선택

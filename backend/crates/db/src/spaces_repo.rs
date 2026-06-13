@@ -131,11 +131,21 @@ impl SpaceRepo {
             )));
         }
 
+        let sort_order: i32 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1000 \
+             FROM spaces WHERE owner_user_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(owner_user_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
-            "INSERT INTO spaces (name, owner_user_id) VALUES ($1, $2) RETURNING {SPACE_COLUMNS}"
+            "INSERT INTO spaces (name, owner_user_id, sort_order) VALUES ($1, $2, $3) RETURNING {SPACE_COLUMNS}"
         ))
         .bind(&command.name)
         .bind(owner_user_id)
+        .bind(sort_order)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;

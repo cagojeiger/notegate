@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "../../api/ApiProvider";
 import { queryKeys } from "../../api/queryKeys";
 import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
-import type { Space } from "../../api/types";
+import type { Space, SpacesListResponse } from "../../api/types";
+import { buildSpaceSortOrderUpdates } from "../spaces/spaceReorder";
 
 export function useSpacesQuery() {
   const client = useApiClient();
@@ -26,8 +27,29 @@ export function useUpdateSpaceMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ spaceId, name }: { spaceId: string; name: string }) => updateSpace(client, spaceId, { name }),
+    mutationFn: ({ spaceId, name, sort_order }: { spaceId: string; name?: string; sort_order?: number }) => updateSpace(client, spaceId, { name, sort_order }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.spaces })
+  });
+}
+
+export function useReorderSpacesMutation() {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ spaces }: { spaces: Space[] }) => {
+      const updates = buildSpaceSortOrderUpdates(spaces);
+      await Promise.all(updates.map((update) => updateSpace(client, update.spaceId, { sort_order: update.sort_order })));
+    },
+    onMutate: async ({ spaces }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.spaces });
+      const previous = queryClient.getQueryData<SpacesListResponse>(queryKeys.spaces);
+      if (previous) queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, { ...previous, spaces });
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKeys.spaces, context.previous);
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.spaces })
   });
 }
 

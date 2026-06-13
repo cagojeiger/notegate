@@ -144,6 +144,7 @@ ActivityRail
 - 현재 active space를 표시한다.
 - Space가 많으면 `SpaceRailList` 내부만 스크롤한다.
 - Space 추가 버튼은 Space list 실제 항목 바로 아래에 항상 표시한다.
+- Space item은 desktop에서 drag-and-drop reorder를 지원한다. drop 결과는 backend `sort_order`로 저장한다.
 - Settings는 하단에 고정한다. Account 관련 진입도 Settings에서 처리한다.
 
 `ActivityRail`은 파일 트리가 아니다. 파일 트리는 `PrimarySidebar` 안의 `NodeTreeView`다.

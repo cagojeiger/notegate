@@ -67,6 +67,39 @@ async fn create_space_creates_root_and_owner_write_permission()
 }
 
 #[tokio::test]
+async fn create_space_appends_sort_order() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = create_user(&db, "owner-space-append@example.com").await?;
+    common::set_user_tier(&db.pool, owner, "system_max").await?;
+    let repo = SpaceRepo::new(db.pool.clone());
+
+    let first = repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "first".to_owned(),
+            },
+        )
+        .await?;
+    let second = repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "second".to_owned(),
+            },
+        )
+        .await?;
+
+    assert_eq!(first.sort_order, 1000);
+    assert_eq!(second.sort_order, 2000);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn agent_connection_grants_and_disconnects_permission()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

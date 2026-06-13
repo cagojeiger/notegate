@@ -4,7 +4,7 @@ import type { Space } from "../../api/types";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "../../layout/dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
-import { useCreateSpaceMutation, useDeleteSpaceMutation, useUpdateSpaceMutation } from "./useWorkbenchQueries";
+import { useCreateSpaceMutation, useDeleteSpaceMutation, useReorderSpacesMutation, useUpdateSpaceMutation } from "./useWorkbenchQueries";
 
 type SpaceActionsProps = {
   activeSpace: Space | null;
@@ -21,6 +21,7 @@ export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceAction
     resetGroups();
   });
   const updateSpaceMutation = useUpdateSpaceMutation();
+  const reorderSpacesMutation = useReorderSpacesMutation();
   const deleteSpaceMutation = useDeleteSpaceMutation(() => {
     resetGroups();
     setActiveSpaceId(null);
@@ -36,6 +37,10 @@ export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceAction
     setDialog(newSpaceDialog((name) => createSpaceMutation.mutate(name)));
   }
 
+  function reorderSpaces(spaces: Space[]) {
+    reorderSpacesMutation.mutate({ spaces });
+  }
+
   function promptRenameSpace() {
     if (!activeSpace) return;
     const space = activeSpace;
@@ -48,5 +53,5 @@ export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceAction
     setDialog(deleteSpaceDialog(space, (spaceId) => deleteSpaceMutation.mutate(spaceId)));
   }
 
-  return { selectSpace, promptCreateSpace, promptRenameSpace, confirmDeleteSpace };
+  return { selectSpace, reorderSpaces, promptCreateSpace, promptRenameSpace, confirmDeleteSpace };
 }

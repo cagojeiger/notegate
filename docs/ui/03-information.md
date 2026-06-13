@@ -91,6 +91,7 @@ GET /api/v1/spaces?limit=...&cursor=...
 - `SpaceAddButton`은 `SpaceRailList` 실제 항목 바로 아래, `RailFooter` 위에 항상 표시한다.
 - Settings는 스크롤 영역에 들어가지 않고 하단에 고정한다.
 - Space create는 `SpaceAddButton` 또는 empty state CTA에서 시작한다.
+- Desktop에서는 space item drag-and-drop으로 우선순위를 바꿀 수 있다. 저장 값은 `sort_order`다.
 - Space rename/delete는 rail item 안에서 inline 처리하지 않고 명시적 management surface에서 처리한다.
 
 ### Space management actions
@@ -102,13 +103,14 @@ Action:
 ```text
 Create Space
 Rename Space
+Reorder Space
 Delete Space
 ```
 
 정보:
 
 - space name
-- sort_order가 필요한 관리 화면에서는 정렬 값
+- sort_order. `ActivityRail` reorder에서 갱신되는 정렬 값
 - validation error
 - destructive confirm message
 
