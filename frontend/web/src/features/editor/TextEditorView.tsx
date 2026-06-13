@@ -1,25 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { ApiError } from "../../api/errors";
-import { queryKeys } from "../../api/queryKeys";
-import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
 import { Button } from "../../shared/ui";
 import { Markdown } from "../../shared/ui/Markdown";
-import { useUiStore } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { NodeActionMenu } from "./NodeActionMenu";
 import type { NodeActions } from "./types";
+import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & { node: RestNode; mode: "preview" | "edit"; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  const showToast = useUiStore((state) => state.showToast);
-  const setSaveState = useUiStore((state) => state.setSaveState);
-  const textQuery = useQuery({ queryKey: queryKeys.text(node.space_id, node.id), queryFn: () => readText(client, node.space_id, node.id) });
+  const textQuery = useTextDocument(node);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState(false);
   const text = textQuery.data?.text;
@@ -34,28 +25,16 @@ export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRen
   }, [mode, content]);
   const dirty = mode === "edit" && draft !== content;
   const isMarkdown = /\.(md|markdown)$/i.test(node.name);
-  const saveMutation = useMutation({
-    meta: { silentError: true },
-    mutationFn: (force: boolean) => replaceText(client, node.space_id, node.id, draft, force ? undefined : sha),
-    onMutate: () => setSaveState("saving"),
-    onSuccess: () => {
-      setSaveState("saved");
+  const saveMutation = useSaveTextDocument(
+    node,
+    draft,
+    sha,
+    () => {
       setConflict(false);
-      showToast("Saved");
       onSetMode("preview");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.text(node.space_id, node.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.recent(node.space_id) });
-      void queryClient.invalidateQueries({ queryKey: ["spaces", node.space_id] });
     },
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) {
-        setConflict(true);
-        setSaveState("conflict");
-      } else {
-        setSaveState("error");
-      }
-    }
-  });
+    () => setConflict(true)
+  );
   const actions = (
     <>
       {mode === "edit" ? <Button onClick={() => saveMutation.mutate(false)} disabled={saveMutation.isPending || !dirty}>Save</Button> : null}
@@ -78,7 +57,7 @@ export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRen
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               <span>This node changed elsewhere since you opened it.</span>
               <div className="flex gap-2">
-                <Button size="sm" secondary onClick={() => { void textQuery.refetch(); setConflict(false); setSaveState("idle"); }}>Reload</Button>
+                <Button size="sm" secondary onClick={() => { void textQuery.refetch(); setConflict(false); }}>Reload</Button>
                 <Button size="sm" variant="danger" onClick={() => saveMutation.mutate(true)}>Overwrite</Button>
               </div>
             </div>

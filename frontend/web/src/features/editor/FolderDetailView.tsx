@@ -1,14 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { useApiClient } from "../../api/ApiProvider";
-import { listChildren } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import { Card, MetaRow } from "../../shared/ui";
+import { useFolderChildrenStat } from "./useEditorQueries";
 
 export function FolderDetailView({ node }: { node: RestNode }) {
-  const client = useApiClient();
-  const childrenQuery = useQuery({ queryKey: [...queryKeys.children(node.space_id, node.id), "stat"], queryFn: () => listChildren(client, node.space_id, node.id) });
+  const childrenQuery = useFolderChildrenStat(node);
   const childCount = childrenQuery.data ? `${childrenQuery.data.children.length}${childrenQuery.data.page.has_more ? "+" : ""}` : "…";
   return (
     <article className="mx-auto max-w-3xl px-10 py-14">

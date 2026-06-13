@@ -1,14 +1,13 @@
 import { Download } from "lucide-react";
 
-import { useApiClient } from "../../api/ApiProvider";
-import { downloadFile } from "../../api/files";
 import type { RestNode } from "../../api/types";
 import { Button, Card, MetaRow } from "../../shared/ui";
+import { useFileDownload } from "./useEditorQueries";
 
 export function FileDetailView({ node }: { node: RestNode }) {
-  const client = useApiClient();
+  const download = useFileDownload(node);
   async function handleDownload() {
-    const blob = await downloadFile(client, node.space_id, node.id);
+    const blob = await download();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
