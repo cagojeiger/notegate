@@ -12,7 +12,7 @@ import type { RestNode, Space } from "../../api/types";
 import type { EditorGroup } from "../../stores/uiStore";
 import { useUiStore } from "../../stores/uiStore";
 import { Markdown } from "../../shared/ui/Markdown";
-import { Button, IconButton, MenuButton } from "../../shared/ui";
+import { Button, Card, IconButton, MenuButton, MetaRow } from "../../shared/ui";
 
 type NodeActions = {
   onRenameNode: (node: RestNode) => void;
@@ -108,14 +108,14 @@ function EmptyEditor({ activeSpace, onCreateFolder, onCreateText, onFileSelected
   return (
     <section className="grid min-w-0 flex-1 place-items-center bg-bg px-6 text-muted">
       <div className="max-w-md text-center">
-        <div className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl border border-border bg-surface"><FileText size={26} /></div>
+        <Card className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl p-0"><FileText size={26} /></Card>
         <div className="text-xl font-semibold text-text">Open a node</div>
         <p className="mt-2 text-sm leading-6">Select an item from Tree or Recent. Create a first item when this space is empty.</p>
         {activeSpace ? (
           <div className="mt-6 flex justify-center gap-2">
             <Button onClick={onCreateText}>New text</Button>
             <Button secondary onClick={onCreateFolder}>New folder</Button>
-            <label className="inline-flex cursor-pointer items-center rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted hover:bg-panel hover:text-text">
+            <label className="inline-flex cursor-pointer items-center rounded-lg border border-border bg-surface px-3 py-2 text-sm font-semibold text-muted transition hover:bg-panel hover:text-text">
               Upload file
               <input className="hidden" type="file" onChange={(event) => onFileSelected(event.target.files?.[0] ?? null)} />
             </label>
@@ -161,10 +161,12 @@ function FolderView({ node }: { node: RestNode }) {
     <article className="mx-auto max-w-3xl px-10 py-14">
       <p className="text-sm text-muted">{node.path}</p>
       <h1 className="mt-4 text-4xl font-semibold tracking-tight">{node.name}</h1>
-      <dl className="mt-8 grid grid-cols-[120px_1fr] gap-y-3 text-sm">
-        <dt className="font-semibold">Children</dt><dd className="text-muted">{childCount}</dd>
-        <dt className="font-semibold">Updated</dt><dd className="text-muted">{node.updated_at.slice(0, 10)}</dd>
-      </dl>
+      <Card className="mt-8">
+        <dl className="space-y-3">
+          <MetaRow label="Children" value={childCount} />
+          <MetaRow label="Updated" value={node.updated_at.slice(0, 10)} />
+        </dl>
+      </Card>
       <p className="mt-8 leading-7 text-muted">Folder selected. Use the tree to browse children or create a node.</p>
     </article>
   );
@@ -234,8 +236,8 @@ function TextGroup({ node, mode, canClose, onClose, onSetMode, onRenameNode, onM
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               <span>This node changed elsewhere since you opened it.</span>
               <div className="flex gap-2">
-                <button className="rounded-lg border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-panel" onClick={() => { void textQuery.refetch(); setConflict(false); setSaveState("idle"); }}>Reload</button>
-                <button className="rounded-lg border border-warning/50 px-3 py-1 text-xs text-warning hover:bg-warning/20" onClick={() => saveMutation.mutate(true)}>Overwrite</button>
+                <Button size="sm" secondary onClick={() => { void textQuery.refetch(); setConflict(false); setSaveState("idle"); }}>Reload</Button>
+                <Button size="sm" variant="danger" onClick={() => saveMutation.mutate(true)}>Overwrite</Button>
               </div>
             </div>
           ) : null}
@@ -263,5 +265,18 @@ function FileView({ node }: { node: RestNode }) {
     anchor.click();
     URL.revokeObjectURL(url);
   }
-  return <article className="mx-auto max-w-3xl px-10 py-14"><p className="text-sm text-muted">{node.path}</p><h1 className="mt-4 text-4xl font-semibold tracking-tight">{node.name}</h1><dl className="mt-8 grid grid-cols-[120px_1fr] gap-y-3 text-sm"><dt className="font-semibold">Media type</dt><dd className="text-muted">{node.media_type ?? "unknown"}</dd><dt className="font-semibold">Bytes</dt><dd className="text-muted">{node.byte_len ?? 0}</dd><dt className="font-semibold">SHA-256</dt><dd className="break-all text-muted">{node.content_sha256}</dd></dl><button className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-contrast shadow-[var(--ng-inset-shadow)]" onClick={handleDownload}><Download size={16} /> Download</button></article>;
+  return (
+    <article className="mx-auto max-w-3xl px-10 py-14">
+      <p className="text-sm text-muted">{node.path}</p>
+      <h1 className="mt-4 text-4xl font-semibold tracking-tight">{node.name}</h1>
+      <Card className="mt-8">
+        <dl className="space-y-3">
+          <MetaRow label="Media type" value={node.media_type ?? "unknown"} />
+          <MetaRow label="Bytes" value={node.byte_len ?? 0} />
+          <MetaRow label="SHA-256" value={node.content_sha256} />
+        </dl>
+      </Card>
+      <Button className="mt-8" onClick={handleDownload}><Download size={16} /> Download</Button>
+    </article>
+  );
 }
