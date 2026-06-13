@@ -7,7 +7,7 @@ import { listChildren, listNodes } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
-import { IconButton, MenuButton } from "../../shared/ui";
+import { Card, EmptyState, IconButton, MenuButton } from "../../shared/ui";
 
 type NodeContextHandler = (node: RestNode, event: MouseEvent) => void;
 
@@ -188,7 +188,7 @@ function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onDeleteNode
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
-      <div className="fixed z-50 w-48 rounded-xl border border-border bg-surface p-1 text-sm shadow-[var(--ng-focus-shadow)]" style={{ left, top }} role="menu">
+      <Card className="fixed z-50 w-48 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
         <div className="truncate px-3 py-1 text-xs text-muted">{node.path}</div>
         {isFolder ? (
           <>
@@ -205,7 +205,7 @@ function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onDeleteNode
         <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={isRoot}><Pencil size={14} /> Rename</MenuButton>
         <MenuButton onClick={() => run(copyPath)}><Copy size={14} /> Copy path</MenuButton>
         <MenuButton danger onClick={() => run(() => onDeleteNode(node))} disabled={isRoot}><Trash2 size={14} /> Delete</MenuButton>
-      </div>
+      </Card>
     </>
   );
 }
@@ -234,7 +234,7 @@ function CreateMenu({ onCreateFolder, onCreateText, onFileSelected, onClose }: {
   return (
     <>
       <MenuBackdrop onClose={onClose} />
-      <div className="absolute right-3 top-11 z-20 w-44 rounded-xl border border-border bg-surface p-1 text-sm shadow-[var(--ng-focus-shadow)]">
+      <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
         <MenuButton onClick={() => run(onCreateFolder)}><Folder size={14} /> New folder</MenuButton>
         <MenuButton onClick={() => run(onCreateText)}><FileText size={14} /> New text</MenuButton>
         <label className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-muted hover:bg-panel hover:text-text">
@@ -248,7 +248,7 @@ function CreateMenu({ onCreateFolder, onCreateText, onFileSelected, onClose }: {
             }}
           />
         </label>
-      </div>
+      </Card>
     </>
   );
 }
@@ -263,10 +263,10 @@ function SpaceMenu({ onRenameSpace, onDeleteSpace, onClose }: { onRenameSpace: (
   return (
     <>
       <MenuBackdrop onClose={onClose} />
-      <div className="absolute right-3 top-11 z-20 w-44 rounded-xl border border-border bg-surface p-1 text-sm shadow-[var(--ng-focus-shadow)]">
+      <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
         <MenuButton onClick={() => run(onRenameSpace)}>Rename space</MenuButton>
         <MenuButton danger onClick={() => run(onDeleteSpace)}><Trash2 size={14} /> Delete space</MenuButton>
-      </div>
+      </Card>
     </>
   );
 }
@@ -355,7 +355,7 @@ function RecentList({ activeSpace, activeNodeId, density, onOpenNode, onNodeCont
   const client = useApiClient();
   const recentQuery = useQuery({ queryKey: queryKeys.recent(activeSpace.id), queryFn: () => listNodes(client, activeSpace.id, { sort: "updated_at_desc" }), refetchInterval: 15_000 });
   if (recentQuery.isLoading) return <div className="text-xs text-muted">Loading recent…</div>;
-  if (recentQuery.isError) return <div className="rounded-lg border border-border bg-surface p-3 text-xs text-muted">Recent is unavailable for this server build.</div>;
+  if (recentQuery.isError) return <EmptyState>Recent is unavailable for this server build.</EmptyState>;
   const nodes = recentQuery.data?.nodes ?? [];
   if (nodes.length === 0) return <div className="text-xs text-muted">No recent nodes yet.</div>;
   return (
