@@ -70,12 +70,24 @@ describe("SettingsModal", () => {
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByText("Appearance")).toBeInTheDocument();
-    expect(screen.getByText("MCP Connection")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
     expect(screen.getByText("My API Keys")).toBeInTheDocument();
     expect(await screen.findByText("No user API keys.")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "API Keys" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+  });
+
+  it("shows the MCP connection cheat sheet in its own tab", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByRole("tab", { name: "MCP" }));
+
+    expect(screen.getByText("External clients use one endpoint and one bearer header.")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Authorization: Bearer <credential>")).toBeInTheDocument();
+    expect(screen.getByText("OAuth login")).toBeInTheDocument();
+    expect(screen.getByText("Agent API key")).toBeInTheDocument();
+    expect(screen.getByText("User API key")).toBeInTheDocument();
   });
 
   it("shows agent keys and space access inside an expanded agent", async () => {

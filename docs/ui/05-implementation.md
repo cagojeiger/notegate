@@ -79,7 +79,7 @@ Zustand does not own:
 | `TextPreview` | preview mode selection for markdown/plain/structured text |
 | `TextEditor` | text editing presentation and save action wiring |
 | `AuxiliarySidebar` | Inspector presentation |
-| `SettingsModal` | Account and Agents settings surfaces |
+| `SettingsModal` | Account, Agents, and MCP settings surfaces |
 
 ## Test baseline
 

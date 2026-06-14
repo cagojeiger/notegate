@@ -173,7 +173,7 @@ Rules:
 | Editor group header | Open node | Rename, move, copy path, delete, close group. File nodes also expose download. |
 | Editor empty state | Empty group | New text, new folder, upload file. |
 | AuxiliarySidebar Inspector | Node card | Copy path, copy node id, edit metadata. |
-| Settings | Account/Agents rows | Use visible row buttons only. No custom right-click menu. |
+| Settings | Account/Agents/MCP rows | Use visible row buttons only. No custom right-click menu. |
 
 ## Node management flows
 

@@ -194,13 +194,13 @@ Tabs:
 ```text
 Account
 Agents
+MCP
 ```
 
 Account shows:
 
 - current user/account
 - theme control
-- MCP server URL and auth guidance
 - user API keys
 - sign out
 
@@ -211,10 +211,18 @@ Agents shows:
 - agent API keys inside the expanded agent
 - agent space access inside the expanded agent
 
+MCP shows:
+
+- MCP server URL
+- bearer authorization header
+- OAuth login method summary
+- agent API key method summary
+- user API key method summary
+
 Rules:
 
 - User API keys belong in Account.
 - Agent API keys belong under the agent that owns them.
-- MCP connection guidance belongs in Account because it explains how external clients authenticate to this Notegate server.
+- MCP connection guidance belongs in the MCP tab. Account and Agents remain the places where user and agent API keys are created.
 - Connections are managed inside the expanded agent, not as a separate top-level tab.
 - `scopes` are not shown because the current backend policy requires empty scopes.
