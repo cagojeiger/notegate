@@ -60,6 +60,7 @@ This builds one `web` image containing both the Rust server and the built dashbo
 The Rust server handles `/api`, `/auth`, `/mcp`, and serves the SPA for browser routes.
 
 ```sh
+cp .env.example .env
 make up
 ```
 

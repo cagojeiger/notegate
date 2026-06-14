@@ -1,22 +1,3 @@
-x-web-environment: &web-environment
-  NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
-  LOG_FORMAT: json
-  NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
-  NOTEGATE_PUBLIC_URL: http://localhost:9191
-  NOTEGATE_OAUTH_CLIENT_ID: notegate-web
-  NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
-  NOTEGATE_ENC_ROOT_KEY_ID: dev-enc
-  NOTEGATE_ENC_ROOT_SECRET: dev-notegate-enc-root-secret-32-bytes
-  NOTEGATE_LOOKUP_ROOT_KEY_ID: dev-lookup
-  NOTEGATE_LOOKUP_ROOT_SECRET: dev-notegate-lookup-root-secret-32-bytes
-  # Production should normally set this to `tier0`.
-  # NOTEGATE_DEFAULT_USER_TIER: tier0
-  # Capacity caps default to spec values. Uncomment small values for cheap
-  # local/E2E boundary tests.
-  # NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN: "3"
-  # NOTEGATE_LIMITS__SPACE_MAX_NODES: "5"
-  # NOTEGATE_LIMITS__SPACE_MAX_CONTENT_BYTES: "1024"
-
 services:
   postgres:
     image: postgres:17-alpine
@@ -36,14 +17,14 @@ services:
     restart: unless-stopped
 
   web:
-    # Local default runs two replicas so the combined dashboard/API service is
-    # exercised behind the reverse proxy during normal compose development.
     scale: 2
     build:
       context: .
       dockerfile: deploy/docker/web.Dockerfile
+    env_file:
+      - .env
     environment:
-      <<: *web-environment
+      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
     expose:
       - "9191"
     depends_on:
@@ -56,9 +37,6 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
-
-  # Local reverse proxy. It owns the public 9191 port so the web service can
-  # be scaled without host port conflicts.
   proxy:
     image: nginx:1.27-alpine
     ports:
