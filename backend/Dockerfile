@@ -42,7 +42,24 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY backend ./backend
 RUN cargo chef prepare --recipe-path recipe.json
 
-# Stage 3: dependency cache + application build.
+# Stage 3: dashboard build.
+#
+# The final runtime image serves this Vite build from the Rust server, so the
+# deployed `web` container contains both the dashboard and the API/MCP backend.
+FROM node:22-bookworm-slim AS web-builder
+
+WORKDIR /app
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY frontend/web/package.json ./frontend/web/package.json
+RUN --mount=type=cache,id=notegate-pnpm-store,target=/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile
+COPY frontend ./frontend
+RUN pnpm --filter web build
+
+# Stage 4: dependency cache + application build.
 #
 # First cook dependencies from recipe.json, then copy the real source and build
 # the notegate-api binary. BuildKit cache mounts keep Cargo registry/git data,
@@ -67,11 +84,10 @@ RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/regist
     cargo build --release --locked --bin notegate-api \
     && cp /app/target/release/notegate-api /usr/local/bin/notegate-api
 
-# Stage 4: minimal runtime image.
+# Stage 5: minimal runtime image.
 #
-# The final image contains only Debian slim, the CA bundle, a non-root user,
-# and the compiled binary. Rust/Cargo/build caches stay behind in builder
-# stages and are not shipped.
+# The final image contains Debian slim, the CA bundle, a non-root user, the
+# compiled backend, and the built dashboard assets.
 FROM debian:bookworm-slim AS runtime
 
 # Runtime only needs a CA bundle for outbound HTTPS. Copy it from the build
@@ -82,8 +98,10 @@ RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin appuser
 WORKDIR /app
 COPY --from=builder /usr/local/bin/notegate-api /usr/local/bin/notegate-api
+COPY --from=web-builder /app/frontend/web/dist /app/web
 
-ENV NOTEGATE_BIND_ADDR=0.0.0.0:9191
+ENV NOTEGATE_BIND_ADDR=0.0.0.0:9191 \
+    NOTEGATE_WEB_DIST_DIR=/app/web
 EXPOSE 9191
 
 USER appuser

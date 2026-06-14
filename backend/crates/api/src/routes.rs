@@ -17,6 +17,7 @@ use serde::Serialize;
 use tower::ServiceBuilder;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{Span, info, info_span};
@@ -33,24 +34,27 @@ use crate::state::AppState;
 pub fn app(state: AppState) -> Router {
     let x_request_id = HeaderName::from_static("x-request-id");
 
-    Router::new()
-        .merge(control_plane_routes())
-        .merge(data_plane_routes(state.clone()))
-        .with_state(state)
-        .layer(
-            ServiceBuilder::new()
-                .layer(SetRequestIdLayer::new(
-                    x_request_id.clone(),
-                    MakeRequestUuid,
-                ))
-                .layer(
-                    TraceLayer::new_for_http()
-                        .make_span_with(make_request_span)
-                        .on_response(log_request_end),
-                )
-                .layer(from_fn(add_json_charset))
-                .layer(PropagateRequestIdLayer::new(x_request_id)),
-        )
+    with_web_fallback(
+        Router::new()
+            .merge(control_plane_routes())
+            .merge(data_plane_routes(state.clone())),
+        state.config.web_dist_dir.as_deref(),
+    )
+    .with_state(state)
+    .layer(
+        ServiceBuilder::new()
+            .layer(SetRequestIdLayer::new(
+                x_request_id.clone(),
+                MakeRequestUuid,
+            ))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(make_request_span)
+                    .on_response(log_request_end),
+            )
+            .layer(from_fn(add_json_charset))
+            .layer(PropagateRequestIdLayer::new(x_request_id)),
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +71,18 @@ impl Default for DataPlaneLimits {
             request_timeout: Duration::from_secs(limits::HTTP_REQUEST_TIMEOUT_SECS),
             rate_limit_requests_per_minute: limits::HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE,
         }
+    }
+}
+
+fn with_web_fallback<S>(router: Router<S>, web_dist_dir: Option<&str>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    match web_dist_dir {
+        Some(dir) => router.fallback_service(
+            ServeDir::new(dir).fallback(ServeFile::new(format!("{dir}/index.html"))),
+        ),
+        None => router,
     }
 }
 
@@ -250,10 +266,42 @@ fn make_request_span<B>(req: &Request<B>) -> Span {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use axum::routing::{get, post};
     use tower::ServiceExt as _;
 
     use super::*;
+
+    #[tokio::test]
+    async fn web_fallback_serves_index_for_unknown_route() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("notegate-web-{nonce}"));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("index.html"), "<html>notegate</html>").unwrap();
+
+        let app = with_web_fallback(Router::new(), Some(dir.to_str().unwrap()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"<html>notegate</html>");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[tokio::test]
     async fn data_plane_limits_reject_oversized_request_body() {

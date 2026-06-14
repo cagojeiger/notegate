@@ -1,4 +1,4 @@
-x-api-environment: &api-environment
+x-web-environment: &web-environment
   NOTEGATE_BIND_ADDR: 0.0.0.0:9191
   NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
   NOTEGATE_DB_MAX_CONNECTIONS: 10
@@ -16,6 +16,7 @@ x-api-environment: &api-environment
   NOTEGATE_LOOKUP_ROOT_SECRET: dev-notegate-lookup-root-secret-32-bytes
   NOTEGATE_BROWSER_SESSION_TTL_SECS: 3600
   NOTEGATE_OPENAPI_ENABLED: "false"
+  NOTEGATE_WEB_DIST_DIR: /app/web
   # Capacity caps default to spec values. Uncomment small values for cheap
   # local/E2E boundary tests.
   # NOTEGATE_LIMITS__FOLDER_MAX_CHILDREN: "3"
@@ -40,15 +41,15 @@ services:
       retries: 5
     restart: unless-stopped
 
-  api:
-    # Local default runs two replicas so MCP/API horizontal scaling is exercised
-    # during normal docker compose development.
+  web:
+    # Local default runs two replicas so the combined dashboard/API service is
+    # exercised behind the reverse proxy during normal compose development.
     scale: 2
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      <<: *api-environment
+      <<: *web-environment
     expose:
       - "9191"
     depends_on:
@@ -62,7 +63,7 @@ services:
     restart: unless-stopped
 
 
-  # Local reverse proxy. It owns the public 9191 port so the api service can
+  # Local reverse proxy. It owns the public 9191 port so the web service can
   # be scaled without host port conflicts.
   proxy:
     image: nginx:1.27-alpine
@@ -71,7 +72,7 @@ services:
     volumes:
       - ./deploy/nginx/notegate.conf:/etc/nginx/conf.d/notegate.conf:ro
     depends_on:
-      - api
+      - web
     restart: unless-stopped
 
 volumes:

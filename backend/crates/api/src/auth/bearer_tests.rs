@@ -200,6 +200,7 @@ fn state_with_resource(
         lookup_verify_0_secret: None,
         browser_session_ttl: Duration::from_secs(3600),
         openapi_enabled: false,
+        web_dist_dir: None,
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
         limits: notegate_core::limits::Limits::default(),
         secure_cookies: false,

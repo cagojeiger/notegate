@@ -1,10 +1,10 @@
 import { Button, Card, TextField } from "../shared/ui";
 import { useDevAuthGateController, type DevAuthGateControllerProps } from "./useDevAuthGateController";
 
-type DevAuthGateProps = DevAuthGateControllerProps;
+type DevAuthGateProps = DevAuthGateControllerProps & { devApiKeyFallbackEnabled: boolean };
 
-export function DevAuthGate(props: DevAuthGateProps) {
-  const auth = useDevAuthGateController(props);
+export function DevAuthGate({ devApiKeyFallbackEnabled, ...controllerProps }: DevAuthGateProps) {
+  const auth = useDevAuthGateController(controllerProps);
   return (
     <main className="grid h-full place-items-center bg-bg px-6 text-text">
       <Card as="form" onSubmit={auth.handleSubmit} className="w-full max-w-md bg-panel p-6 shadow-[var(--ng-focus-shadow)]">
@@ -26,20 +26,22 @@ export function DevAuthGate(props: DevAuthGateProps) {
         </a>
         <p className="mt-3 text-xs leading-5 text-muted">OAuth creates an HttpOnly browser session cookie.</p>
         {auth.loginHint ? <Card className="mt-3 text-xs leading-5 text-muted" padding="sm">{auth.loginHint}</Card> : null}
-        <details className="mt-5 rounded-xl border border-border bg-surface p-3">
-          <summary className="cursor-pointer text-sm font-medium">Developer API key fallback</summary>
-          <TextField
-            id="api-key"
-            name="apiKey"
-            label="User API key"
-            value={auth.apiKey}
-            onChange={(event) => auth.setApiKey(event.target.value)}
-            inputClassName="mt-2 bg-bg font-mono text-sm"
-            placeholder="ngk_v1_..."
-            autoComplete="off"
-          />
-          <Button type="submit" className="mt-4 w-full" secondary disabled={!auth.canSubmitApiKey}>Open with API key</Button>
-        </details>
+        {devApiKeyFallbackEnabled ? (
+          <details className="mt-5 rounded-xl border border-border bg-surface p-3">
+            <summary className="cursor-pointer text-sm font-medium">Developer API key fallback</summary>
+            <TextField
+              id="api-key"
+              name="apiKey"
+              label="User API key"
+              value={auth.apiKey}
+              onChange={(event) => auth.setApiKey(event.target.value)}
+              inputClassName="mt-2 bg-bg font-mono text-sm"
+              placeholder="ngk_v1_..."
+              autoComplete="off"
+            />
+            <Button type="submit" className="mt-4 w-full" secondary disabled={!auth.canSubmitApiKey}>Open with API key</Button>
+          </details>
+        ) : null}
       </Card>
     </main>
   );

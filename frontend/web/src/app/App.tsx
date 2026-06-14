@@ -8,8 +8,11 @@ import { clearDevApiKey, readDevApiKey } from "../auth/session";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 
+const DEV_API_KEY_FALLBACK_ENABLED =
+  import.meta.env.DEV || import.meta.env.MODE === "test" || import.meta.env.VITE_NOTEGATE_ENABLE_DEV_API_KEY === "true";
+
 export function App() {
-  const [apiKey, setApiKey] = useState(() => readDevApiKey());
+  const [apiKey, setApiKey] = useState(() => (DEV_API_KEY_FALLBACK_ENABLED ? readDevApiKey() : null));
   const [sessionRevision, setSessionRevision] = useState(0);
 
   // A 401 from any non-session query, or an explicit sign-out, means the
@@ -37,6 +40,7 @@ export function App() {
       <AuthBoundary
         apiKey={apiKey}
         sessionRevision={sessionRevision}
+        devApiKeyFallbackEnabled={DEV_API_KEY_FALLBACK_ENABLED}
         onAuthenticated={handleApiKeyAuthenticated}
         onBrowserSessionAuthenticated={handleBrowserSessionAuthenticated}
         onSignOut={resetSession}
@@ -48,12 +52,14 @@ export function App() {
 function AuthBoundary({
   apiKey,
   sessionRevision,
+  devApiKeyFallbackEnabled,
   onAuthenticated,
   onBrowserSessionAuthenticated,
   onSignOut
 }: {
   apiKey: string | null;
   sessionRevision: number;
+  devApiKeyFallbackEnabled: boolean;
   onAuthenticated: (apiKey: string) => void;
   onBrowserSessionAuthenticated: () => void;
   onSignOut: () => void;
@@ -73,6 +79,7 @@ function AuthBoundary({
   if (!meQuery.data || unauthorized) {
     return (
       <DevAuthGate
+        devApiKeyFallbackEnabled={devApiKeyFallbackEnabled}
         onAuthenticated={onAuthenticated}
         onSessionAuthenticated={async () => {
           const result = await meQuery.refetch();

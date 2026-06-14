@@ -72,6 +72,9 @@ pub struct Config {
     pub browser_session_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
+    /// Optional directory containing the built web dashboard. When set, unknown
+    /// non-API routes fall back to this directory's `index.html`.
+    pub web_dist_dir: Option<String>,
     /// Tier assigned to newly created users.
     #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
     pub default_user_tier: UserTier,
@@ -392,6 +395,7 @@ mod tests {
             lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
+            web_dist_dir: None,
             default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
             secure_cookies: false,
@@ -404,6 +408,39 @@ mod tests {
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
                 .collect::<HashMap<_, _>>(),
         ))
+    }
+
+    #[test]
+    fn environment_layer_accepts_web_dist_dir() -> crate::Result<()> {
+        let config = load_from_sources(
+            false,
+            test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
+                (
+                    "NOTEGATE_OAUTH_REDIRECT_URL",
+                    "http://localhost:9191/auth/callback",
+                ),
+                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_WEB_DIST_DIR", "/app/web"),
+            ]),
+        )?;
+
+        assert_eq!(config.web_dist_dir.as_deref(), Some("/app/web"));
+        Ok(())
     }
 
     #[test]
