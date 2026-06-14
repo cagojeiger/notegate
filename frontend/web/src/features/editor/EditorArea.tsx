@@ -31,10 +31,13 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, onFocusGroup
         return (
           <section
             key={group.id}
+            data-editor-group
+            data-active={active ? "true" : "false"}
             onMouseDown={() => onFocusGroup(index)}
-            className={`flex min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active ? "" : "max-md:hidden"} ${multiple && active ? "ring-1 ring-inset ring-[var(--ng-border-strong)]" : ""}`}
+            className={`flex min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
           >
             <GroupBody
+              active={active}
               node={group.node}
               mode={group.mode}
               activeSpace={activeSpace}
@@ -55,22 +58,23 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, onFocusGroup
   );
 }
 
-function GroupBody({ node, mode, activeSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & { node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void }) {
+function GroupBody({ active, node, mode, activeSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void }) {
   if (!node) {
     return (
       <>
-        <EditorGroupHeader title="Open a node" canClose={canClose} onClose={onClose} />
+        <EditorGroupHeader title="Open a node" canClose={canClose} onClose={onClose} active={active} />
         <EmptyEditor activeSpace={activeSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} />
       </>
     );
   }
   if (node.kind === "text") {
-    return <TextEditorView node={node} mode={mode} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
+    return <TextEditorView active={active} node={node} mode={mode} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
   }
   const Icon = node.kind === "file" ? Database : Folder;
   return (
     <>
       <EditorGroupHeader
+        active={active}
         title={node.name}
         icon={<Icon size={17} />}
         canClose={canClose}

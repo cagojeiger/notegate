@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { StructuredPreview } from "./StructuredPreview";
 import { TextPreview } from "./TextPreview";
 
 describe("TextPreview", () => {
@@ -18,13 +18,25 @@ describe("TextPreview", () => {
     expect(container.querySelector("pre.ng-code-fallback")?.textContent).toBe("line 1\nline 2");
   });
 
-  it("renders json as a collapsible tree with a source fallback tab", async () => {
-    const user = userEvent.setup();
+  it("renders plain text without a nested code-block card", () => {
+    const { container } = render(<TextPreview name="notes.txt" content={"Just plain text."} />);
+
+    expect(screen.getByText("Just plain text.")).toBeInTheDocument();
+    expect(container.querySelector("pre.ng-code-fallback")).not.toBeInTheDocument();
+  });
+
+  it("renders json as a collapsible tree", async () => {
     render(<TextPreview name="config.json" content={'{"server":{"port":9191}}'} />);
 
-    expect(await screen.findByText(/server/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Source" }));
-    expect(screen.getAllByText((_, element) => element?.textContent === '{"server":{"port":9191}}').length).toBeGreaterThan(0);
+    expect(await screen.findByRole("tree", { name: "Structured data tree" })).toBeInTheDocument();
+    expect(screen.getByText(/server/)).toBeInTheDocument();
+    expect(screen.getByText(/port/)).toBeInTheDocument();
+  });
+
+  it("renders structured source when controlled by the parent header", async () => {
+    render(<StructuredPreview format="json" content={'{"server":{"port":9191}}'} mode="source" />);
+
+    await waitFor(() => expect(screen.getAllByText((_, element) => element?.textContent === '{"server":{"port":9191}}').length).toBeGreaterThan(0));
   });
 
   it("shows parse errors for invalid structured text", async () => {

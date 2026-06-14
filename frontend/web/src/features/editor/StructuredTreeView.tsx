@@ -1,4 +1,6 @@
-import { collapseAllNested, JsonView, type Props as JsonViewProps } from "react-json-view-lite";
+import { allExpanded, collapseAllNested, JsonView, type Props as JsonViewProps } from "react-json-view-lite";
+
+export type StructuredExpansionMode = "default" | "expanded" | "collapsed";
 
 const jsonTreeStyle: NonNullable<JsonViewProps["style"]> = {
   container: "ng-json-tree",
@@ -25,14 +27,22 @@ const jsonTreeStyle: NonNullable<JsonViewProps["style"]> = {
   }
 };
 
-export function StructuredTreeView({ value }: { value: Record<string, unknown> | unknown[] }) {
+function shouldExpandNode(mode: StructuredExpansionMode) {
+  if (mode === "expanded") return allExpanded;
+  if (mode === "collapsed") return () => false;
+  return collapseAllNested;
+}
+
+export function StructuredTreeView({ value, expansionMode = "default" }: { value: Record<string, unknown> | unknown[]; expansionMode?: StructuredExpansionMode }) {
   return (
     <JsonView
+      key={expansionMode}
       data={value}
       style={jsonTreeStyle}
-      shouldExpandNode={collapseAllNested}
+      shouldExpandNode={shouldExpandNode(expansionMode)}
       clickToExpandNode
       compactTopLevel={Array.isArray(value) ? false : true}
+      aria-label="Structured data tree"
     />
   );
 }

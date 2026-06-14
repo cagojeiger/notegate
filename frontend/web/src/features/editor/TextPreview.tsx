@@ -1,12 +1,14 @@
 import { lazy, Suspense } from "react";
 
-import { ShikiCodeBlock } from "./ShikiCodeBlock";
-import { inferTextFormat, isStructuredFormat, shikiLangForFormat } from "./textFormat";
+import { PlainTextPreview } from "./PlainTextPreview";
+import { inferTextFormat, isStructuredFormat } from "./textFormat";
+import type { StructuredPreviewMode } from "./StructuredPreview";
+import type { StructuredExpansionMode } from "./StructuredTreeView";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((module) => ({ default: module.MarkdownPreview })));
 const StructuredPreview = lazy(() => import("./StructuredPreview").then((module) => ({ default: module.StructuredPreview })));
 
-export function TextPreview({ name, content }: { name: string; content: string }) {
+export function TextPreview({ name, content, structuredMode = "tree", structuredExpansionMode = "expanded" }: { name: string; content: string; structuredMode?: StructuredPreviewMode; structuredExpansionMode?: StructuredExpansionMode }) {
   const format = inferTextFormat(name);
 
   if (format === "markdown") {
@@ -14,14 +16,10 @@ export function TextPreview({ name, content }: { name: string; content: string }
   }
 
   if (isStructuredFormat(format)) {
-    return <PreviewSuspense><StructuredPreview format={format} content={content} /></PreviewSuspense>;
+    return <PreviewSuspense><StructuredPreview format={format} content={content} mode={structuredMode} expansionMode={structuredExpansionMode} /></PreviewSuspense>;
   }
 
-  return (
-    <div className="mx-auto w-full max-w-[52rem] overflow-y-auto px-10 py-14">
-      <ShikiCodeBlock code={content} language={shikiLangForFormat(format)} />
-    </div>
-  );
+  return <PlainTextPreview content={content} />;
 }
 
 function PreviewSuspense({ children }: { children: React.ReactNode }) {

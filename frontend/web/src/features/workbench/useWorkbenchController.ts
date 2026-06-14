@@ -27,7 +27,7 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
   const isMobile = useIsMobile();
   const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
-  const showAuxiliary = auxiliaryOpen && activeNode !== null;
+  const showAuxiliary = auxiliaryOpen;
 
   useWorkbenchPersistence(theme, activeSpace);
 

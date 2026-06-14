@@ -50,7 +50,7 @@ export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open
 
   return (
     <section className="flex min-h-0 min-w-0 flex-col px-3 py-2">
-      <SidebarSectionHeader icon={<Folder size={13} />} label="Tree" open={open} onToggle={onToggle} action={{ label: "Collapse all folders", icon: <ChevronsDownUp size={13} />, onClick: onCollapseTree }} />
+      <SidebarSectionHeader icon={<Folder size={13} />} label="Files" open={open} onToggle={onToggle} action={{ label: "Collapse all folders", icon: <ChevronsDownUp size={13} />, onClick: onCollapseTree }} />
       {open ? (
         <div
           className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto"
@@ -84,7 +84,22 @@ export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open
 }
 
 function RootTree(props: TreeProps) {
-  return <TreeNode node={makeRootNode(props.activeSpace)} depth={0} {...props} />;
+  const root = makeRootNode(props.activeSpace);
+  const childrenQuery = useNodeChildrenQuery(props.activeSpace.id, root.id, true);
+  const children = childrenQuery.data?.pages.flatMap((page) => page.children) ?? [];
+
+  return (
+    <div>
+      {childrenQuery.isLoading ? <div className="px-2 py-1 text-xs text-muted">Loading…</div> : null}
+      {!childrenQuery.isLoading && children.length === 0 ? <div className="px-2 py-2 text-xs text-muted">No nodes yet.</div> : null}
+      {children.map((child) => (
+        <TreeNode key={child.id} node={child} depth={0} {...props} />
+      ))}
+      {childrenQuery.hasNextPage ? (
+        <AutoLoadMore loaded={children.length} depth={0} isFetching={childrenQuery.isFetchingNextPage} fetchNextPage={() => childrenQuery.fetchNextPage()} />
+      ) : null}
+    </div>
+  );
 }
 
 function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, draggedNode, dropFolderId, onDragStartNode, onDragOverNode, onDropOnNode, onDragEndNode, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder }: TreeProps & { node: RestNode; depth: number }) {

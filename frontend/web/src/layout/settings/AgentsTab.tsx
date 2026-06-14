@@ -54,7 +54,7 @@ export function AgentsTab() {
           {agents.map((agent) => (
             <Card key={agent.id} as="li" padding="none">
               <div className="flex items-center gap-3 px-4 py-3 text-sm">
-                <button type="button" aria-expanded={openId === agent.id} aria-label={`Toggle ${agent.name} details`} onClick={() => setOpenId(openId === agent.id ? null : agent.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <button type="button" aria-expanded={openId === agent.id} aria-label={`Toggle ${agent.name} details`} onClick={() => setOpenId(openId === agent.id ? null : agent.id)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-[var(--ng-hover)] hover:text-text">
                   <ChevronRight size={14} className={`shrink-0 text-muted transition ${openId === agent.id ? "rotate-90" : ""}`} />
                   <Bot size={15} className="shrink-0 text-muted" />
                   <span className="truncate font-medium">{agent.name}</span>

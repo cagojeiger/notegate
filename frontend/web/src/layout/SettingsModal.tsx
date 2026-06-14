@@ -17,8 +17,10 @@ export function SettingsModal({ onClose, onSignOut }: { onClose: () => void; onS
   return (
     <Modal title="Settings" onClose={onClose} width="max-w-2xl">
       <Tabs items={TABS} value={tab} onChange={setTab} label="Settings sections" />
-      {tab === "account" ? <AccountTab onSignOut={onSignOut} /> : null}
-      {tab === "agents" ? <AgentsTab /> : null}
+      <div className="min-h-[34rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1">
+        {tab === "account" ? <AccountTab onSignOut={onSignOut} /> : null}
+        {tab === "agents" ? <AgentsTab /> : null}
+      </div>
     </Modal>
   );
 }
