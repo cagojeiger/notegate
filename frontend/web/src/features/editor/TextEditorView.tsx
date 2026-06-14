@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { Button, IconButton } from "../../shared/ui";
+import { useUiStore } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { TextPreview } from "./TextPreview";
@@ -10,12 +11,17 @@ import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { NodeActions } from "./types";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useNodeFreshness, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu?: (node: RestNode, event: MouseEvent) => void }) {
   const textQuery = useTextDocument(node);
+  const freshnessQuery = useNodeFreshness(node);
+  const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [externalUpdate, setExternalUpdate] = useState<RestNode | null>(null);
+  const lastAutoReloadSha = useRef<string | null>(null);
+  const dismissedExternalSha = useRef<string | null>(null);
   const [structuredMode, setStructuredMode] = useState<StructuredPreviewMode>("tree");
   const [structuredExpansionMode, setStructuredExpansionMode] = useState<StructuredExpansionMode>("expanded");
   const text = textQuery.data?.text;
@@ -32,6 +38,9 @@ export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClo
   useEffect(() => {
     setStructuredMode("tree");
     setStructuredExpansionMode("expanded");
+    setExternalUpdate(null);
+    lastAutoReloadSha.current = null;
+    dismissedExternalSha.current = null;
   }, [node.id]);
 
   useEffect(() => {
@@ -45,6 +54,38 @@ export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClo
   }, [canEditText, mode, onSetMode, textQuery.isSuccess]);
 
   const dirty = mode === "edit" && canEditText && draft !== content;
+
+  async function reloadLatestText() {
+    const result = await textQuery.refetch();
+    const nextText = result.data?.text;
+    if (isPlainTextContent(nextText)) setDraft(nextText.content);
+    setExternalUpdate(null);
+    dismissedExternalSha.current = null;
+  }
+
+  useEffect(() => {
+    const latestNode = freshnessQuery.data;
+    const latestSha = latestNode?.content_sha256;
+    if (!latestNode || !latestSha || !sha) return;
+
+    updateGroupsNode(latestNode);
+
+    if (latestSha === sha) {
+      if (externalUpdate?.content_sha256 === latestSha) setExternalUpdate(null);
+      lastAutoReloadSha.current = null;
+      return;
+    }
+
+    if (dirty) {
+      if (dismissedExternalSha.current !== latestSha) setExternalUpdate(latestNode);
+      return;
+    }
+
+    if (lastAutoReloadSha.current === latestSha) return;
+    lastAutoReloadSha.current = latestSha;
+    void reloadLatestText();
+  }, [dirty, externalUpdate?.content_sha256, freshnessQuery.data, sha]);
+
   const saveMutation = useSaveTextDocument(
     node,
     draft,
@@ -98,8 +139,17 @@ export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClo
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               <span>This node changed elsewhere since you opened it.</span>
               <div className="flex gap-2">
-                <Button size="sm" secondary onClick={() => { void textQuery.refetch(); setConflict(false); }}>Reload</Button>
+                <Button size="sm" secondary onClick={() => { void reloadLatestText(); setConflict(false); }}>Reload</Button>
                 <Button size="sm" variant="danger" onClick={() => saveMutation.mutate(true)}>Overwrite</Button>
+              </div>
+            </div>
+          ) : null}
+          {externalUpdate ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+              <span>This document changed outside this editor.</span>
+              <div className="flex gap-2">
+                <Button size="sm" secondary onClick={() => { void reloadLatestText(); onSetMode("preview"); }}>Reload latest</Button>
+                <Button size="sm" secondary onClick={() => { dismissedExternalSha.current = externalUpdate.content_sha256 ?? null; setExternalUpdate(null); }}>Keep editing</Button>
               </div>
             </div>
           ) : null}

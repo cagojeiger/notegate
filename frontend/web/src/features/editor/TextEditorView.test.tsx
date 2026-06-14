@@ -1,11 +1,13 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { TextEditorView } from "./TextEditorView";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useNodeFreshness, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 vi.mock("./useEditorQueries", () => ({
+  useNodeFreshness: vi.fn(),
   useTextDocument: vi.fn(),
   useSaveTextDocument: vi.fn()
 }));
@@ -71,6 +73,7 @@ describe("TextEditorView", () => {
       isSuccess: true,
       refetch: vi.fn()
     } as never);
+    vi.mocked(useNodeFreshness).mockReturnValue({ data: node } as never);
     vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: vi.fn(), isPending: false } as never);
   });
 
@@ -94,4 +97,38 @@ describe("TextEditorView", () => {
 
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
+  it("warns instead of overwriting a dirty editor when the server sha changes", async () => {
+    const user = userEvent.setup();
+    const onSetMode = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "original", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    vi.mocked(useNodeFreshness).mockReturnValue({ data: { ...node, content_sha256: "server-sha" } } as never);
+
+    render(
+      <TextEditorView
+        active
+        node={node}
+        mode="edit"
+        canWriteActiveSpace
+        canClose={false}
+        onClose={vi.fn()}
+        onSetMode={onSetMode}
+        onRenameNode={vi.fn()}
+        onMoveNode={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    );
+
+    await user.type(screen.getByRole("textbox", { name: /edit text content/i }), " local");
+
+    expect(screen.getByText("This document changed outside this editor.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload latest" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep editing" })).toBeInTheDocument();
+  });
+
 });
