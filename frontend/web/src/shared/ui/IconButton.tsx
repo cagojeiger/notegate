@@ -9,7 +9,7 @@ export function IconButton({ label, onClick, pressed, disabled, size = "md", chi
       aria-pressed={pressed}
       onClick={onClick}
       disabled={disabled}
-      className={`grid place-items-center text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-40 ${sizeClass} ${pressed ? "bg-panel-strong text-text" : ""}`}
+      className={`grid place-items-center text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40 ${sizeClass} ${pressed ? "bg-panel-strong text-text" : ""}`}
     >
       {children}
     </button>
