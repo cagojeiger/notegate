@@ -3,7 +3,7 @@ import { Button, MetaRow, SectionHeader } from "../shared/ui";
 
 const EMPTY = "—";
 
-export function AuxiliarySidebar({ activeNode, onReplaceMetadata }: { activeNode: RestNode | null; onReplaceMetadata: () => void }) {
+export function AuxiliarySidebar({ activeNode, canWriteActiveSpace, onReplaceMetadata }: { activeNode: RestNode | null; canWriteActiveSpace: boolean; onReplaceMetadata: () => void }) {
   const metadata = activeNode?.metadata ?? {};
 
   return (
@@ -26,7 +26,7 @@ export function AuxiliarySidebar({ activeNode, onReplaceMetadata }: { activeNode
         <section className="p-4">
           <SectionHeader title="Metadata" />
           <pre className="whitespace-pre-wrap font-mono text-xs text-muted">{JSON.stringify(metadata, null, 2)}</pre>
-          <Button size="sm" secondary className="mt-3" onClick={onReplaceMetadata} disabled={!activeNode}>Edit metadata</Button>
+          <Button size="sm" secondary className="mt-3" onClick={onReplaceMetadata} disabled={!activeNode || !canWriteActiveSpace}>Edit metadata</Button>
         </section>
         <section className="p-4">
           <SectionHeader title="Policy" />

@@ -1,5 +1,5 @@
 import { ChevronsDownUp, ChevronsUpDown, FileText } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { Button, IconButton } from "../../shared/ui";
@@ -12,7 +12,7 @@ import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { NodeActions } from "./types";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
-export function TextEditorView({ active, node, mode, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
+export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu?: (node: RestNode, event: MouseEvent) => void }) {
   const textQuery = useTextDocument(node);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -24,7 +24,7 @@ export function TextEditorView({ active, node, mode, canClose, onClose, onSetMod
   const sha = text?.content_sha256;
   const encrypted = isEncryptedTextContent(text);
   const partialText = plainText?.truncated ? plainText : null;
-  const canEditText = !!plainText && !partialText;
+  const canEditText = canWriteActiveSpace && !!plainText && !partialText;
   const format = inferTextFormat(node.name);
   const structured = isStructuredFormat(format);
   const prevMode = useRef<"preview" | "edit">(mode);
@@ -75,12 +75,12 @@ export function TextEditorView({ active, node, mode, canClose, onClose, onSetMod
       ) : null}
       {mode === "edit" ? <Button size="xs" onClick={() => saveMutation.mutate(false)} disabled={saveMutation.isPending || !dirty}>Save</Button> : null}
       <Button size="xs" secondary onClick={() => onSetMode(mode === "edit" ? "preview" : "edit")} disabled={mode === "preview" && !canEditText}>{mode === "edit" ? "Preview" : "Edit"}</Button>
-      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null} />
+      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />
     </>
   );
   return (
     <>
-      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} dirty={dirty} />
+      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={onHeaderContextMenu ? (event) => onHeaderContextMenu(node, event) : undefined} dirty={dirty} />
       {textQuery.isLoading ? (
         <div className="p-10 text-muted">Loading text…</div>
       ) : textQuery.isError ? (

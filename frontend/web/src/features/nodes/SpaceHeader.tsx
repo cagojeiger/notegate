@@ -4,10 +4,11 @@ import type { Space } from "../../api/types";
 import { Card, IconButton, MenuButton } from "../../shared/ui";
 import { useRefreshSpace } from "./useNodeQueries";
 
-export function SpaceHeader({ activeSpace, onCreateFolder, onCreateText, onFileSelected, onRenameSpace, onDeleteSpace }: { activeSpace: Space | null; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onRenameSpace: () => void; onDeleteSpace: () => void }) {
+export function SpaceHeader({ activeSpace, canWriteActiveSpace, canManageActiveSpace, onCreateFolder, onCreateText, onFileSelected, onRenameSpace, onDeleteSpace }: { activeSpace: Space | null; canWriteActiveSpace: boolean; canManageActiveSpace: boolean; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onRenameSpace: () => void; onDeleteSpace: () => void }) {
   const refreshSpace = useRefreshSpace();
   const [createOpen, setCreateOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const canRefresh = !!activeSpace;
   return (
     <div className="relative flex h-12 items-center justify-between border-b border-seam px-3">
       <div className="min-w-0">
@@ -15,12 +16,12 @@ export function SpaceHeader({ activeSpace, onCreateFolder, onCreateText, onFileS
         {activeSpace ? <div className="text-[10px] uppercase tracking-wide text-faint">active space</div> : null}
       </div>
       <div className="flex items-center gap-1">
-        <IconButton label="Refresh from server" onClick={() => { if (activeSpace) refreshSpace(activeSpace.id); }}><RefreshCw size={15} /></IconButton>
-        <IconButton label="Create node" onClick={() => setCreateOpen((open) => !open)}><Plus size={15} /></IconButton>
-        <IconButton label="Manage space" onClick={() => setManageOpen((open) => !open)}><MoreHorizontal size={15} /></IconButton>
+        <IconButton label="Refresh from server" onClick={() => { if (activeSpace) refreshSpace(activeSpace.id); }} disabled={!canRefresh}><RefreshCw size={15} /></IconButton>
+        <IconButton label="Create node" onClick={() => setCreateOpen((open) => !open)} disabled={!canWriteActiveSpace}><Plus size={15} /></IconButton>
+        <IconButton label="Manage space" onClick={() => setManageOpen((open) => !open)} disabled={!canManageActiveSpace}><MoreHorizontal size={15} /></IconButton>
       </div>
-      {createOpen ? <CreateMenu onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} onClose={() => setCreateOpen(false)} /> : null}
-      {manageOpen ? <SpaceMenu onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} onClose={() => setManageOpen(false)} /> : null}
+      {createOpen && canWriteActiveSpace ? <CreateMenu onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} onClose={() => setCreateOpen(false)} /> : null}
+      {manageOpen && canManageActiveSpace ? <SpaceMenu onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} onClose={() => setManageOpen(false)} /> : null}
     </div>
   );
 }

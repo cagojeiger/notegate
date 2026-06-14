@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import type { Me } from "../../api/types";
+import { canCreateSpace, canManageSpace, canWriteSpace } from "../../auth/permissions";
 import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchActions } from "./useWorkbenchActions";
@@ -7,10 +9,11 @@ import { useWorkbenchPersistence } from "./useWorkbenchPersistence";
 import { useSpacesQuery } from "./useWorkbenchQueries";
 
 type WorkbenchControllerProps = {
+  me: Me;
   onSignOut: () => void;
 };
 
-export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) {
+export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerProps) {
   const spacesQuery = useSpacesQuery();
   const spaces = spacesQuery.data?.spaces ?? [];
 
@@ -27,6 +30,9 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
   const isMobile = useIsMobile();
   const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
+  const canCreateSpaceForCaller = canCreateSpace(me);
+  const canWriteActiveSpace = canWriteSpace(activeSpace);
+  const canManageActiveSpace = canManageSpace(me, activeSpace);
   const showAuxiliary = auxiliaryOpen;
 
   useWorkbenchPersistence(theme, activeSpace);
@@ -34,6 +40,9 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
   const { settingsOpen, dialog, actions } = useWorkbenchActions({
     activeSpace,
     activeNode,
+    canCreateSpace: canCreateSpaceForCaller,
+    canWriteActiveSpace,
+    canManageActiveSpace,
     primaryWidth,
     onSignOut
   });
@@ -45,6 +54,9 @@ export function useWorkbenchController({ onSignOut }: WorkbenchControllerProps) 
     theme,
     activeSpace,
     activeNode,
+    canCreateSpace: canCreateSpaceForCaller,
+    canWriteActiveSpace,
+    canManageActiveSpace,
     editorGroups,
     activeGroupIndex,
     expandedFolderIds,

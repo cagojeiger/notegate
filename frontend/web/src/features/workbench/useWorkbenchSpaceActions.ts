@@ -8,10 +8,12 @@ import { useCreateSpaceMutation, useDeleteSpaceMutation, useReorderSpacesMutatio
 
 type SpaceActionsProps = {
   activeSpace: Space | null;
+  canCreateSpace: boolean;
+  canManageActiveSpace: boolean;
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;
 };
 
-export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceActionsProps) {
+export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManageActiveSpace, setDialog }: SpaceActionsProps) {
   const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
   const resetGroups = useUiStore((state) => state.resetGroups);
   const closeMobile = useUiStore((state) => state.closeMobile);
@@ -34,26 +36,28 @@ export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceAction
   }
 
   function promptCreateSpace() {
+    if (!canCreateSpace) return;
     setDialog(newSpaceDialog(async (name) => {
       await createSpaceMutation.mutateAsync(name);
     }));
   }
 
   function reorderSpaces(spaces: Space[]) {
+    if (!canCreateSpace) return;
     reorderSpacesMutation.mutate({ spaces });
   }
 
-  function promptRenameSpace() {
-    if (!activeSpace) return;
-    const space = activeSpace;
+  function promptRenameSpace(targetSpace = activeSpace) {
+    if (!targetSpace || !canManageActiveSpace) return;
+    const space = targetSpace;
     setDialog(renameSpaceDialog(space, async (spaceId, name) => {
       await updateSpaceMutation.mutateAsync({ spaceId, name });
     }));
   }
 
-  function confirmDeleteSpace() {
-    if (!activeSpace) return;
-    const space = activeSpace;
+  function confirmDeleteSpace(targetSpace = activeSpace) {
+    if (!targetSpace || !canManageActiveSpace) return;
+    const space = targetSpace;
     setDialog(deleteSpaceDialog(space, async (spaceId) => {
       await deleteSpaceMutation.mutateAsync(spaceId);
     }));

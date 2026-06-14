@@ -1,4 +1,6 @@
+import type { Me } from "../api/types";
 import { EditorArea } from "../features/editor/EditorArea";
+import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
@@ -13,12 +15,17 @@ import { Toast } from "./Toast";
 import { AuxiliarySidebarFrame, MobilePanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
 
 type AppShellProps = {
+  me: Me;
   onSignOut: () => void;
 };
 
-export function AppShell({ onSignOut }: AppShellProps) {
-  const workbench = useWorkbenchController({ onSignOut });
+export function AppShell({ me, onSignOut }: AppShellProps) {
+  const workbench = useWorkbenchController({ me, onSignOut });
   const { actions } = workbench;
+  const openSettings = () => {
+    actions.closeMobile();
+    actions.setSettingsOpen(true);
+  };
 
   if (workbench.loading) return <FullScreenStatus label="Loading spaces" />;
   if (workbench.error) return <FullScreenStatus label="Could not load spaces" detail={workbench.error} />;
@@ -37,7 +44,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
         onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
       />
       <main className="relative flex min-h-0 flex-1 border-y border-seam">
-        <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} onSelectSpace={actions.selectSpace} onReorderSpaces={actions.reorderSpaces} onCreateSpace={actions.promptCreateSpace} onOpenSettings={() => actions.setSettingsOpen(true)} />
+        <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onReorderSpaces={actions.reorderSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenSettings={openSettings} />
         <PrimarySidebarFrame isMobile={workbench.isMobile} open={workbench.primarySidebarOpen} mobileOpen={workbench.mobileTreeOpen} width={workbench.primaryWidth}>
           <PrimarySidebar
             activeSpace={workbench.activeSpace}
@@ -45,6 +52,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
             expandedFolderIds={workbench.expandedFolderIds}
             onToggleFolder={actions.toggleFolder}
             onOpenNode={actions.openNode}
+            onOpenNodeInNewGroup={actions.openNodeInNewGroup}
             onCreateFolder={() => actions.promptCreateNode("folder")}
             onCreateText={() => actions.promptCreateNode("text")}
             onFileSelected={actions.handleFileSelected}
@@ -54,9 +62,13 @@ export function AppShell({ onSignOut }: AppShellProps) {
             onMoveNode={actions.promptMoveNode}
             onMoveNodeToFolder={actions.moveNodeToFolder}
             onDeleteNode={actions.confirmDeleteNode}
+            onDownloadFile={actions.downloadFileNode}
             onCollapseTree={actions.collapseTree}
             onCreateInFolder={actions.promptCreateInFolder}
             onUploadInFolder={actions.uploadInFolder}
+            canWriteActiveSpace={workbench.canWriteActiveSpace}
+            canManageActiveSpace={workbench.canManageActiveSpace}
+            canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
           />
         </PrimarySidebarFrame>
         <PrimarySidebarResizeHandle visible={workbench.primarySidebarOpen} onPointerDown={actions.startPrimaryResize} />
@@ -65,6 +77,8 @@ export function AppShell({ onSignOut }: AppShellProps) {
           activeGroupIndex={workbench.activeGroupIndex}
           activeSpace={workbench.activeSpace}
           onFocusGroup={actions.focusGroup}
+          onOpenNode={actions.openNode}
+          onOpenNodeInNewGroup={actions.openNodeInNewGroup}
           onCloseGroup={actions.closeGroup}
           onSetGroupMode={actions.setGroupMode}
           onCreateFolder={() => actions.promptCreateNode("folder")}
@@ -73,16 +87,18 @@ export function AppShell({ onSignOut }: AppShellProps) {
           onRenameNode={actions.promptRenameNode}
           onMoveNode={actions.promptMoveNode}
           onDeleteNode={actions.confirmDeleteNode}
+          onDownloadFile={actions.downloadFileNode}
+          canWriteActiveSpace={workbench.canWriteActiveSpace}
         />
         <AuxiliarySidebarFrame open={workbench.showAuxiliary} mobileOpen={workbench.mobileAuxOpen}>
-          <AuxiliarySidebar activeNode={workbench.activeNode} onReplaceMetadata={actions.promptReplaceMetadata} />
+          <AuxiliarySidebar activeNode={workbench.activeNode} canWriteActiveSpace={workbench.canWriteActiveSpace} onReplaceMetadata={actions.promptReplaceMetadata} />
         </AuxiliarySidebarFrame>
         <MobilePanelOverlay visible={workbench.mobileTreeOpen || workbench.mobileAuxOpen} onClose={actions.closeMobile} />
       </main>
-      <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenSettings={() => actions.setSettingsOpen(true)} />
+      <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenSettings={openSettings} />
       <StatusBar activeSpace={workbench.activeSpace} />
       <Toast />
-      {workbench.settingsOpen ? <SettingsModal onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} /> : null}
+      {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />
     </div>
   );

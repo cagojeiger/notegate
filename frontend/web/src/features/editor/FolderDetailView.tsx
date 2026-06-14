@@ -15,7 +15,7 @@ export function FolderDetailView({ node }: { node: RestNode }) {
           <MetaRow label="Updated" value={node.updated_at.slice(0, 10)} />
         </dl>
       </Card>
-      <p className="mt-8 leading-7 text-muted">Folder selected. Use the tree to browse children or create a node.</p>
+      <p className="mt-8 leading-7 text-muted">Folder selected. Use the tree to browse children.</p>
     </article>
   );
 }

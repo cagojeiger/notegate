@@ -19,9 +19,17 @@ export function openNodeInActiveGroupState(state: EditorGroupState, node: RestNo
 }
 
 export function addEditorGroupState(state: EditorGroupState): Partial<EditorGroupState> {
-  if (state.editorGroups.length >= MAX_EDITOR_GROUPS) return {};
   const active = state.editorGroups[state.activeGroupIndex];
-  const editorGroups = [...state.editorGroups, { id: state.nextGroupId, node: active?.node ?? null, mode: "preview" as const }];
+  return appendEditorGroupState(state, active?.node ?? null);
+}
+
+export function openNodeInNewGroupState(state: EditorGroupState, node: RestNode): Partial<EditorGroupState> {
+  return appendEditorGroupState(state, node);
+}
+
+function appendEditorGroupState(state: EditorGroupState, node: RestNode | null): Partial<EditorGroupState> {
+  if (state.editorGroups.length >= MAX_EDITOR_GROUPS) return {};
+  const editorGroups = [...state.editorGroups, { id: state.nextGroupId, node, mode: "preview" as const }];
   return { editorGroups, activeGroupIndex: editorGroups.length - 1, nextGroupId: state.nextGroupId + 1 };
 }
 

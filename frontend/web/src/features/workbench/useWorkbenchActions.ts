@@ -11,11 +11,14 @@ import { useWorkbenchSpaceActions } from "./useWorkbenchSpaceActions";
 type WorkbenchActionsProps = {
   activeSpace: Space | null;
   activeNode: RestNode | null;
+  canCreateSpace: boolean;
+  canWriteActiveSpace: boolean;
+  canManageActiveSpace: boolean;
   primaryWidth: number;
   onSignOut: () => void;
 };
 
-export function useWorkbenchActions({ activeSpace, activeNode, primaryWidth, onSignOut }: WorkbenchActionsProps) {
+export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, canWriteActiveSpace, canManageActiveSpace, primaryWidth, onSignOut }: WorkbenchActionsProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dialog, setDialog] = useState<AppDialog | null>(null);
 
@@ -32,8 +35,8 @@ export function useWorkbenchActions({ activeSpace, activeNode, primaryWidth, onS
   const toggleMobileAux = useUiStore((state) => state.toggleMobileAux);
   const closeMobile = useUiStore((state) => state.closeMobile);
 
-  const spaceActions = useWorkbenchSpaceActions({ activeSpace, setDialog });
-  const nodeActions = useWorkbenchNodeActions({ activeSpace, activeNode, setDialog });
+  const spaceActions = useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManageActiveSpace, setDialog });
+  const nodeActions = useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog });
   const logoutSession = useLogout();
 
   async function handleSignOut() {

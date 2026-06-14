@@ -23,9 +23,10 @@ type TreeProps = {
   onOpenNode: (node: RestNode) => void;
   onNodeContextMenu: NodeContextHandler;
   onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
+  canWriteActiveSpace: boolean;
 };
 
-export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open, onToggle, onCollapseTree, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder }: Omit<TreeProps, "draggedNode" | "dropFolderId" | "onDragStartNode" | "onDragOverNode" | "onDropOnNode" | "onDragEndNode"> & { open: boolean; onToggle: () => void; onCollapseTree: () => void }) {
+export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open, onToggle, onCollapseTree, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder, canWriteActiveSpace }: Omit<TreeProps, "draggedNode" | "dropFolderId" | "onDragStartNode" | "onDragOverNode" | "onDropOnNode" | "onDragEndNode"> & { open: boolean; onToggle: () => void; onCollapseTree: () => void }) {
   const [draggedNode, setDraggedNode] = useState<RestNode | null>(null);
   const [dropFolderId, setDropFolderId] = useState<string | null>(null);
 
@@ -35,14 +36,14 @@ export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open
   }
 
   function handleDragOver(node: RestNode, event: DragEvent<HTMLDivElement>) {
-    if (!draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     setDropFolderId(node.id);
   }
 
   function handleDrop(node: RestNode, event: DragEvent<HTMLDivElement>) {
-    if (!draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
     event.preventDefault();
     onMoveNodeToFolder(draggedNode, node);
     clearDrag();
@@ -76,6 +77,7 @@ export function TreeSection({ activeSpace, activeNodeId, expandedFolderIds, open
             onOpenNode={onOpenNode}
             onNodeContextMenu={onNodeContextMenu}
             onMoveNodeToFolder={onMoveNodeToFolder}
+            canWriteActiveSpace={canWriteActiveSpace}
           />
         </div>
       ) : null}
@@ -102,7 +104,7 @@ function RootTree(props: TreeProps) {
   );
 }
 
-function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, draggedNode, dropFolderId, onDragStartNode, onDragOverNode, onDropOnNode, onDragEndNode, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder }: TreeProps & { node: RestNode; depth: number }) {
+function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, draggedNode, dropFolderId, onDragStartNode, onDragOverNode, onDropOnNode, onDragEndNode, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder, canWriteActiveSpace }: TreeProps & { node: RestNode; depth: number }) {
   const isExpanded = expandedFolderIds.has(node.id);
   const childrenQuery = useNodeChildrenQuery(activeSpace.id, node.id, node.kind === "folder" && isExpanded);
   const children = childrenQuery.data?.pages.flatMap((page) => page.children) ?? [];
@@ -118,7 +120,7 @@ function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, d
         onToggleFolder={onToggleFolder}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
-        onDragStartNode={onDragStartNode}
+        onDragStartNode={canWriteActiveSpace ? onDragStartNode : undefined}
         onDragOverNode={onDragOverNode}
         onDropOnNode={onDropOnNode}
         onDragEndNode={onDragEndNode}
@@ -127,7 +129,7 @@ function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, d
         <div>
           {childrenQuery.isLoading ? <div className="px-8 py-1 text-xs text-muted">Loading…</div> : null}
           {children.map((child) => (
-            <TreeNode key={child.id} node={child} depth={depth + 1} activeSpace={activeSpace} activeNodeId={activeNodeId} expandedFolderIds={expandedFolderIds} draggedNode={draggedNode} dropFolderId={dropFolderId} onDragStartNode={onDragStartNode} onDragOverNode={onDragOverNode} onDropOnNode={onDropOnNode} onDragEndNode={onDragEndNode} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} onMoveNodeToFolder={onMoveNodeToFolder} />
+            <TreeNode key={child.id} node={child} depth={depth + 1} activeSpace={activeSpace} activeNodeId={activeNodeId} expandedFolderIds={expandedFolderIds} draggedNode={draggedNode} dropFolderId={dropFolderId} onDragStartNode={onDragStartNode} onDragOverNode={onDragOverNode} onDropOnNode={onDropOnNode} onDragEndNode={onDragEndNode} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} onMoveNodeToFolder={onMoveNodeToFolder} canWriteActiveSpace={canWriteActiveSpace} />
           ))}
           {childrenQuery.hasNextPage ? (
             <AutoLoadMore loaded={children.length} depth={depth + 1} isFetching={childrenQuery.isFetchingNextPage} fetchNextPage={() => childrenQuery.fetchNextPage()} />

@@ -63,6 +63,20 @@ describe("useUiStore", () => {
     expect(state.editorGroups[1]).toMatchObject({ node: second, mode: "preview" });
   });
 
+  it("opens a node directly in a new editor group", () => {
+    const first = node("node-1");
+    const second = node("node-2");
+
+    useUiStore.getState().openInActiveGroup(first);
+    useUiStore.getState().openInNewGroup(second);
+
+    const state = useUiStore.getState();
+    expect(state.editorGroups).toHaveLength(2);
+    expect(state.activeGroupIndex).toBe(1);
+    expect(state.editorGroups[0]).toMatchObject({ node: first });
+    expect(state.editorGroups[1]).toMatchObject({ node: second, mode: "preview" });
+  });
+
   it("closes editor groups without removing the last group", () => {
     useUiStore.getState().addGroup();
     useUiStore.getState().addGroup();

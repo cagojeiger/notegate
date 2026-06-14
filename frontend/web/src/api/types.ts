@@ -12,17 +12,24 @@ export type Me = {
     display_name: string;
   };
   user?: {
-    sub: string;
-    email: string;
+    email?: string | null;
   } | null;
-  capabilities?: Record<string, boolean>;
+  agent?: {
+    name: string;
+  } | null;
+  capabilities: {
+    can_create_space: boolean;
+    can_manage_agents: boolean;
+  };
 };
+
+export type SpacePermission = "read" | "write";
 
 export type Space = {
   id: string;
   name: string;
   sort_order: number;
-  permission: string;
+  permission: SpacePermission;
   root_node_id: string;
   created_at: string;
   updated_at: string;

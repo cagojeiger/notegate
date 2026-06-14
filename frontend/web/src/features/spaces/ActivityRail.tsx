@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { Plus, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Copy, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
+import { Card, MenuButton } from "../../shared/ui";
+import { useUiStore } from "../../stores/uiStore";
 import { reorderSpacesByDrop } from "./spaceReorder";
 
 type DropPosition = "before" | "after";
@@ -14,16 +16,21 @@ type DragTarget = {
 type ActivityRailProps = {
   spaces: Space[];
   activeSpace: Space | null;
+  canCreateSpace: boolean;
+  canManageSpaces: boolean;
   onSelectSpace: (space: Space) => void;
   onReorderSpaces: (spaces: Space[]) => void;
   onCreateSpace: () => void;
+  onRenameSpace: (space: Space) => void;
+  onDeleteSpace: (space: Space) => void;
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, onSelectSpace, onReorderSpaces, onCreateSpace, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
-  const canReorder = spaces.length > 1;
+  const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
+  const canReorder = canManageSpaces && spaces.length > 1;
 
   function clearDrag() {
     setDraggedSpaceId(null);
@@ -42,6 +49,10 @@ export function ActivityRail({ spaces, activeSpace, onSelectSpace, onReorderSpac
             <div
               key={space.id}
               draggable={canReorder}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu({ x: event.clientX, y: event.clientY, space });
+              }}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("text/plain", space.id);
@@ -79,15 +90,56 @@ export function ActivityRail({ spaces, activeSpace, onSelectSpace, onReorderSpac
             </div>
           );
         })}
-        <button onClick={onCreateSpace} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="Add space">
-          <Plus size={16} />
-        </button>
+        {canCreateSpace ? (
+          <button onClick={onCreateSpace} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="Add space">
+            <Plus size={16} />
+          </button>
+        ) : null}
       </div>
       <div className="border-t border-seam p-2">
         <button onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="Settings">
           <Settings size={16} />
         </button>
       </div>
+      {menu ? <SpaceContextMenu menu={menu} canManageSpaces={canManageSpaces} onClose={() => setMenu(null)} onSelectSpace={onSelectSpace} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} /> : null}
     </aside>
+  );
+}
+
+function SpaceContextMenu({ menu, canManageSpaces, onClose, onSelectSpace, onRenameSpace, onDeleteSpace }: { menu: { x: number; y: number; space: Space }; canManageSpaces: boolean; onClose: () => void; onSelectSpace: (space: Space) => void; onRenameSpace: (space: Space) => void; onDeleteSpace: (space: Space) => void }) {
+  const showToast = useUiStore((state) => state.showToast);
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function run(action: () => void) {
+    action();
+    onClose();
+  }
+
+  const canManageSpace = canManageSpaces && menu.space.permission === "write";
+
+  function copySpaceId() {
+    void navigator.clipboard?.writeText(menu.space.id);
+    showToast("Space id copied");
+  }
+
+  const left = Math.min(menu.x, window.innerWidth - 196);
+  const top = Math.min(menu.y, window.innerHeight - 184);
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
+      <Card className="fixed z-50 w-48 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
+        <div className="truncate px-3 py-1 text-xs text-muted">{menu.space.name}</div>
+        <MenuButton onClick={() => run(() => onSelectSpace(menu.space))}>Select</MenuButton>
+        <MenuButton onClick={() => run(() => onRenameSpace(menu.space))} disabled={!canManageSpace}><Pencil size={14} /> Rename</MenuButton>
+        <MenuButton onClick={() => run(copySpaceId)}><Copy size={14} /> Copy space id</MenuButton>
+        <MenuButton danger onClick={() => run(() => onDeleteSpace(menu.space))} disabled={!canManageSpace}><Trash2 size={14} /> Delete</MenuButton>
+      </Card>
+    </>
   );
 }

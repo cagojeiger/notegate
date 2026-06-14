@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import type { Permission } from "../../api/connections";
 import type { Space } from "../../api/types";
+import { canWriteSpace } from "../../auth/permissions";
 import { Badge, Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
 import {
   useAgentKeyManagerProps,
@@ -16,8 +17,8 @@ import {
 } from "./useSettingsQueries";
 import { KeyManager } from "./KeyManager";
 
-export function AgentsTab() {
-  const agentsQuery = useAgentsQuery();
+export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
+  const agentsQuery = useAgentsQuery(canManageAgents);
   const [name, setName] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -31,6 +32,8 @@ export function AgentsTab() {
   }
 
   const agents = agentsQuery.data?.agents ?? [];
+  if (!canManageAgents) return <EmptyState>Agent management is unavailable for this account.</EmptyState>;
+
   return (
     <div className="space-y-4">
       <div className="flex items-end gap-2">
@@ -94,11 +97,11 @@ function AgentKeyManager({ agentId }: { agentId: string }) {
 }
 
 function AgentSpaceAccess({ agentId }: { agentId: string }) {
-  const spacesQuery = useSpacesQuery();
-  const spaces = spacesQuery.data?.spaces ?? [];
+  const spacesQuery = useSpacesQuery(true);
+  const spaces = (spacesQuery.data?.spaces ?? []).filter(canWriteSpace);
 
   if (spacesQuery.isLoading) return <div className="text-sm text-muted">Loading spaces…</div>;
-  if (spaces.length === 0) return <EmptyState>No spaces yet.</EmptyState>;
+  if (spaces.length === 0) return <EmptyState>No writable spaces.</EmptyState>;
 
   return (
     <Card as="ul" padding="none" className="max-h-72 divide-y divide-seam overflow-y-auto">

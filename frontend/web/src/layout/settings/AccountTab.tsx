@@ -1,15 +1,14 @@
 import { Moon, Sun } from "lucide-react";
 
+import type { Me } from "../../api/types";
 import { Button, Card, SectionHeader } from "../../shared/ui";
 import { KeyManager } from "./KeyManager";
 import { useUiStore } from "../../stores/uiStore";
-import { useMeQuery, useMyKeyManagerProps } from "./useSettingsQueries";
+import { useMyKeyManagerProps } from "./useSettingsQueries";
 
-export function AccountTab({ onSignOut }: { onSignOut: () => void }) {
-  const meQuery = useMeQuery();
+export function AccountTab({ me, onSignOut }: { me: Me | undefined; onSignOut: () => void }) {
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
-  const me = meQuery.data;
   const keyManagerProps = useMyKeyManagerProps();
   return (
     <div className="space-y-4">

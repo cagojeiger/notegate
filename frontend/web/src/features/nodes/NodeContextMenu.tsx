@@ -1,15 +1,48 @@
-import { Copy, FilePlus, FolderPlus, Move, Pencil, Trash2, Upload } from "lucide-react";
+import { Copy, Download, FilePlus, FolderPlus, Move, PanelRightOpen, Pencil, Trash2, Upload, X } from "lucide-react";
 import { useEffect } from "react";
 
 import type { RestNode } from "../../api/types";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 
-export function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onMoveNode, onDeleteNode, onCreateInFolder, onUploadInFolder }: { menu: { x: number; y: number; node: RestNode }; onClose: () => void; onOpenNode: (node: RestNode) => void; onRenameNode: (node: RestNode) => void; onMoveNode: (node: RestNode) => void; onDeleteNode: (node: RestNode) => void; onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void; onUploadInFolder: (folder: RestNode, file: File | null) => void }) {
+export function NodeContextMenu({
+  menu,
+  canWriteActiveSpace,
+  canOpenInNewGroup = false,
+  showCreateActions = true,
+  onClose,
+  onOpenNode,
+  onOpenInNewGroup,
+  onCloseGroup,
+  onDownloadFile,
+  onRenameNode,
+  onMoveNode,
+  onDeleteNode,
+  onCreateInFolder,
+  onUploadInFolder
+}: {
+  menu: { x: number; y: number; node: RestNode };
+  canWriteActiveSpace: boolean;
+  canOpenInNewGroup?: boolean;
+  showCreateActions?: boolean;
+  onClose: () => void;
+  onOpenNode: (node: RestNode) => void;
+  onOpenInNewGroup?: (node: RestNode) => void;
+  onCloseGroup?: () => void;
+  onDownloadFile?: (node: RestNode) => void;
+  onRenameNode: (node: RestNode) => void;
+  onMoveNode: (node: RestNode) => void;
+  onDeleteNode: (node: RestNode) => void;
+  onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void;
+  onUploadInFolder: (folder: RestNode, file: File | null) => void;
+}) {
   const showToast = useUiStore((state) => state.showToast);
   const { node } = menu;
   const isRoot = node.parent_id === null;
   const isFolder = node.kind === "folder";
+  const canMutateNode = !isRoot && canWriteActiveSpace;
+  const canCreateInNode = showCreateActions && isFolder && canWriteActiveSpace;
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -17,22 +50,27 @@ export function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onMov
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
   function run(action: () => void) {
     action();
     onClose();
   }
+
   function copyPath() {
     void navigator.clipboard?.writeText(node.path);
     showToast("Path copied");
   }
-  const left = Math.min(menu.x, window.innerWidth - 196);
-  const top = Math.min(menu.y, window.innerHeight - (isFolder ? 232 : 176));
+
+  const maxHeight = canCreateInNode ? 304 : 236;
+  const left = Math.min(menu.x, window.innerWidth - 216);
+  const top = Math.min(menu.y, window.innerHeight - maxHeight);
+
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
-      <Card className="fixed z-50 w-48 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
+      <Card className="fixed z-50 w-52 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
         <div className="truncate px-3 py-1 text-xs text-muted">{node.path}</div>
-        {isFolder ? (
+        {canCreateInNode ? (
           <>
             <MenuButton onClick={() => run(() => onCreateInFolder(node, "folder"))}><FolderPlus size={14} /> New folder</MenuButton>
             <MenuButton onClick={() => run(() => onCreateInFolder(node, "text"))}><FilePlus size={14} /> New text</MenuButton>
@@ -44,10 +82,13 @@ export function NodeContextMenu({ menu, onClose, onOpenNode, onRenameNode, onMov
           </>
         ) : null}
         <MenuButton onClick={() => run(() => onOpenNode(node))}>Open</MenuButton>
-        <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={isRoot}><Pencil size={14} /> Rename</MenuButton>
-        <MenuButton onClick={() => run(() => onMoveNode(node))} disabled={isRoot}><Move size={14} /> Move…</MenuButton>
+        {onOpenInNewGroup ? <MenuButton onClick={() => run(() => onOpenInNewGroup(node))} disabled={!canOpenInNewGroup || isRoot}><PanelRightOpen size={14} /> Open in new group</MenuButton> : null}
+        {onDownloadFile && node.kind === "file" ? <MenuButton onClick={() => run(() => onDownloadFile(node))}><Download size={14} /> Download</MenuButton> : null}
+        <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={!canMutateNode}><Pencil size={14} /> Rename</MenuButton>
+        <MenuButton onClick={() => run(() => onMoveNode(node))} disabled={!canMutateNode}><Move size={14} /> Move…</MenuButton>
         <MenuButton onClick={() => run(copyPath)}><Copy size={14} /> Copy path</MenuButton>
-        <MenuButton danger onClick={() => run(() => onDeleteNode(node))} disabled={isRoot}><Trash2 size={14} /> Delete</MenuButton>
+        {onCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}
+        <MenuButton danger onClick={() => run(() => onDeleteNode(node))} disabled={!canMutateNode}><Trash2 size={14} /> Delete</MenuButton>
       </Card>
     </>
   );

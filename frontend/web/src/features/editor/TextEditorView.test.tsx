@@ -45,12 +45,13 @@ const partialText: ReadTextResponse = {
   }
 };
 
-function renderTextEditorView() {
+function renderTextEditorView(canWriteActiveSpace = true) {
   render(
     <TextEditorView
       active
       node={node}
       mode="preview"
+      canWriteActiveSpace={canWriteActiveSpace}
       canClose={false}
       onClose={vi.fn()}
       onSetMode={vi.fn()}
@@ -77,6 +78,20 @@ describe("TextEditorView", () => {
     renderTextEditorView();
 
     expect(screen.getByText(/Loaded 1000 of 2000 lines/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+
+  it("disables editing without write permission", () => {
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    renderTextEditorView(false);
+
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 });

@@ -13,6 +13,7 @@ export function PrimarySidebar({
   expandedFolderIds,
   onToggleFolder,
   onOpenNode,
+  onOpenNodeInNewGroup,
   onCreateFolder,
   onCreateText,
   onFileSelected,
@@ -22,15 +23,23 @@ export function PrimarySidebar({
   onMoveNode,
   onMoveNodeToFolder,
   onDeleteNode,
+  onDownloadFile,
   onCollapseTree,
   onCreateInFolder,
-  onUploadInFolder
+  onUploadInFolder,
+  canWriteActiveSpace,
+  canManageActiveSpace,
+  canOpenInNewGroup
 }: {
   activeSpace: Space | null;
   activeNodeId: string | null;
   expandedFolderIds: Set<string>;
+  canWriteActiveSpace: boolean;
+  canManageActiveSpace: boolean;
+  canOpenInNewGroup: boolean;
   onToggleFolder: (nodeId: string) => void;
   onOpenNode: (node: RestNode) => void;
+  onOpenNodeInNewGroup: (node: RestNode) => void;
   onCreateFolder: () => void;
   onCreateText: () => void;
   onFileSelected: (file: File | null) => void;
@@ -40,6 +49,7 @@ export function PrimarySidebar({
   onMoveNode: (node: RestNode) => void;
   onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
   onDeleteNode: (node: RestNode) => void;
+  onDownloadFile: (node: RestNode) => void;
   onCollapseTree: () => void;
   onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void;
   onUploadInFolder: (folder: RestNode, file: File | null) => void;
@@ -54,7 +64,7 @@ export function PrimarySidebar({
 
   return (
     <aside ref={asideRef} onKeyDown={onSidebarKeyDown} className="flex h-full w-full min-h-0 flex-col border-r border-seam bg-panel">
-      <SpaceHeader activeSpace={activeSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} />
+      <SpaceHeader activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} canManageActiveSpace={canManageActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} />
       {activeSpace ? (
         <PrimarySidebarSections
           activeSpace={activeSpace}
@@ -65,6 +75,7 @@ export function PrimarySidebar({
           onNodeContextMenu={onNodeContextMenu}
           onMoveNodeToFolder={onMoveNodeToFolder}
           onCollapseTree={onCollapseTree}
+          canWriteActiveSpace={canWriteActiveSpace}
         />
       ) : (
         <div className="p-4 text-sm text-muted">Create a space to start.</div>
@@ -74,11 +85,15 @@ export function PrimarySidebar({
           menu={menu}
           onClose={() => setMenu(null)}
           onOpenNode={onOpenNode}
+          onOpenInNewGroup={onOpenNodeInNewGroup}
+          canOpenInNewGroup={canOpenInNewGroup}
           onRenameNode={onRenameNode}
           onMoveNode={onMoveNode}
           onDeleteNode={onDeleteNode}
+          onDownloadFile={onDownloadFile}
           onCreateInFolder={onCreateInFolder}
           onUploadInFolder={onUploadInFolder}
+          canWriteActiveSpace={canWriteActiveSpace}
         />
       ) : null}
     </aside>

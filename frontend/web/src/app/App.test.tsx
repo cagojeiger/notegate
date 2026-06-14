@@ -10,7 +10,8 @@ vi.mock("../layout/AppShell", () => ({
 function meResponse() {
   return {
     account: { id: "acct_1", kind: "user", display_name: "Kang" },
-    user: { id: "user_1", email: "kang@example.com" }
+    user: { email: "kang@example.com" },
+    capabilities: { can_create_space: true, can_manage_agents: true }
   };
 }
 

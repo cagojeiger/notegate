@@ -13,14 +13,14 @@ export function useMeQuery() {
   return useQuery({ queryKey: queryKeys.me, queryFn: () => getMe(client) });
 }
 
-export function useAgentsQuery() {
+export function useAgentsQuery(enabled = true) {
   const client = useApiClient();
-  return useQuery({ queryKey: queryKeys.agents, queryFn: () => listAgents(client) });
+  return useQuery({ queryKey: queryKeys.agents, queryFn: () => listAgents(client), enabled });
 }
 
-export function useSpacesQuery() {
+export function useSpacesQuery(enabled = true) {
   const client = useApiClient();
-  return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client) });
+  return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client), enabled });
 }
 
 export function useCreateAgentMutation(onCreated: () => void) {

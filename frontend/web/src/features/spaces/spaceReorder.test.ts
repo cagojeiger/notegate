@@ -8,7 +8,7 @@ function space(id: string, sort_order = 0): Space {
     id,
     name: id,
     sort_order,
-    permission: "owner",
+    permission: "write",
     root_node_id: `root-${id}`,
     created_at: "2026-06-14T00:00:00Z",
     updated_at: "2026-06-14T00:00:00Z"

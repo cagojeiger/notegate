@@ -1,12 +1,14 @@
+import { useState, type MouseEvent } from "react";
 import { Database, Folder } from "lucide-react";
 
 import type { RestNode, Space } from "../../api/types";
-import type { EditorGroup } from "../../stores/uiStore";
+import { MAX_EDITOR_GROUPS, type EditorGroup } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EmptyEditor } from "./EmptyEditor";
 import { FileDetailView } from "./FileDetailView";
 import { FolderDetailView } from "./FolderDetailView";
 import { NodeActionMenu } from "./NodeActionMenu";
+import { NodeContextMenu } from "../nodes/NodeContextMenu";
 import { TextEditorView } from "./TextEditorView";
 import type { NodeActions } from "./types";
 
@@ -15,17 +17,22 @@ type EditorAreaProps = NodeActions & {
   activeGroupIndex: number;
   activeSpace: Space | null;
   onFocusGroup: (index: number) => void;
+  onOpenNode: (node: RestNode) => void;
+  onOpenNodeInNewGroup: (node: RestNode) => void;
   onCloseGroup: (index: number) => void;
   onSetGroupMode: (index: number, mode: "preview" | "edit") => void;
   onCreateFolder: () => void;
   onCreateText: () => void;
   onFileSelected: (file: File | null) => void;
+  onDownloadFile: (node: RestNode) => void;
+  canWriteActiveSpace: boolean;
 };
 
-export function EditorArea({ groups, activeGroupIndex, activeSpace, onFocusGroup, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
+export function EditorArea({ groups, activeGroupIndex, activeSpace, canWriteActiveSpace, onFocusGroup, onOpenNode, onOpenNodeInNewGroup, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
   const multiple = groups.length > 1;
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; node: RestNode; groupIndex: number } | null>(null);
   return (
-    <div className="flex min-w-0 flex-1">
+    <div className="relative flex min-w-0 flex-1">
       {groups.map((group, index) => {
         const active = index === activeGroupIndex;
         return (
@@ -41,6 +48,7 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, onFocusGroup
               node={group.node}
               mode={group.mode}
               activeSpace={activeSpace}
+              canWriteActiveSpace={canWriteActiveSpace}
               canClose={multiple}
               onClose={() => onCloseGroup(index)}
               onSetMode={(mode) => onSetGroupMode(index, mode)}
@@ -50,25 +58,49 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, onFocusGroup
               onRenameNode={onRenameNode}
               onMoveNode={onMoveNode}
               onDeleteNode={onDeleteNode}
+              onDownloadFile={onDownloadFile}
+              onHeaderContextMenu={(node, event) => {
+                event.preventDefault();
+                onFocusGroup(index);
+                setHeaderMenu({ x: event.clientX, y: event.clientY, node, groupIndex: index });
+              }}
             />
           </section>
         );
       })}
+      {headerMenu ? (
+        <NodeContextMenu
+          menu={headerMenu}
+          canWriteActiveSpace={canWriteActiveSpace}
+          canOpenInNewGroup={groups.length < MAX_EDITOR_GROUPS}
+          showCreateActions={false}
+          onClose={() => setHeaderMenu(null)}
+          onOpenNode={onOpenNode}
+          onOpenInNewGroup={onOpenNodeInNewGroup}
+          onCloseGroup={groups.length > 1 ? () => onCloseGroup(headerMenu.groupIndex) : undefined}
+          onRenameNode={onRenameNode}
+          onMoveNode={onMoveNode}
+          onDeleteNode={onDeleteNode}
+          onDownloadFile={onDownloadFile}
+          onCreateInFolder={() => undefined}
+          onUploadInFolder={() => undefined}
+        />
+      ) : null}
     </div>
   );
 }
 
-function GroupBody({ active, node, mode, activeSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void }) {
+function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onDownloadFile, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void; onDownloadFile: (node: RestNode) => void }) {
   if (!node) {
     return (
       <>
         <EditorGroupHeader title="Open a node" canClose={canClose} onClose={onClose} active={active} />
-        <EmptyEditor activeSpace={activeSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} />
+        <EmptyEditor activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} />
       </>
     );
   }
   if (node.kind === "text") {
-    return <TextEditorView active={active} node={node} mode={mode} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
+    return <TextEditorView active={active} node={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} onHeaderContextMenu={onHeaderContextMenu} />;
   }
   const Icon = node.kind === "file" ? Database : Folder;
   return (
@@ -79,7 +111,8 @@ function GroupBody({ active, node, mode, activeSpace, canClose, onClose, onSetMo
         icon={<Icon size={17} />}
         canClose={canClose}
         onClose={onClose}
-        actions={<NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null} />}
+        onContextMenu={(event) => onHeaderContextMenu(node, event)}
+        actions={<NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />}
       />
       {node.kind === "file" ? <FileDetailView node={node} /> : <FolderDetailView node={node} />}
     </>

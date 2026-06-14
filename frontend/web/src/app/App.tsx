@@ -83,5 +83,5 @@ function AuthBoundary({
     );
   }
 
-  return <AppShell onSignOut={onSignOut} />;
+  return <AppShell me={meQuery.data} onSignOut={onSignOut} />;
 }

@@ -4,7 +4,7 @@ import type { Page } from "./types";
 export type Permission = "read" | "write";
 
 export type ConnectionAgentRef = { id: string; kind: string; display_name: string };
-export type Connection = { agent: ConnectionAgentRef; permission: string; connected_at: string };
+export type Connection = { agent: ConnectionAgentRef; permission: Permission; connected_at: string };
 export type ConnectionListResponse = {
   connections: Connection[];
   page: Page;

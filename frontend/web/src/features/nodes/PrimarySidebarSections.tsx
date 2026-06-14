@@ -12,11 +12,13 @@ export function PrimarySidebarSections({
   onOpenNode,
   onNodeContextMenu,
   onMoveNodeToFolder,
-  onCollapseTree
+  onCollapseTree,
+  canWriteActiveSpace
 }: {
   activeSpace: Space;
   activeNodeId: string | null;
   expandedFolderIds: Set<string>;
+  canWriteActiveSpace: boolean;
   onToggleFolder: (nodeId: string) => void;
   onOpenNode: (node: RestNode) => void;
   onNodeContextMenu: NodeContextHandler;
@@ -37,6 +39,7 @@ export function PrimarySidebarSections({
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
         onMoveNodeToFolder={onMoveNodeToFolder}
+        canWriteActiveSpace={canWriteActiveSpace}
       />
       <div onPointerDown={sections.startTreeResize} className={`border-y border-seam bg-surface ${sections.bothSectionsOpen ? "cursor-row-resize transition-colors hover:bg-[var(--ng-selection)]" : ""}`} aria-hidden="true" />
       <RecentSection

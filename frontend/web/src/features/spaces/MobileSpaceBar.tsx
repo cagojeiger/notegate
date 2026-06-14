@@ -4,9 +4,9 @@ import type { Space } from "../../api/types";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
 // Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 02-layout).
-export function MobileSpaceBar({ spaces, activeSpace, onSelectSpace, onCreateSpace, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenSettings: () => void }) {
+export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSpace, onCreateSpace, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenSettings: () => void }) {
   return (
-    <nav aria-label="Spaces" className="flex items-center gap-2 border-t border-seam bg-surface px-3 py-2 md:hidden">
+    <nav aria-label="Spaces" className="flex h-14 shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 py-2 md:hidden">
       <div className="flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto">
         {spaces.map((space) => (
           <button
@@ -20,11 +20,13 @@ export function MobileSpaceBar({ spaces, activeSpace, onSelectSpace, onCreateSpa
           </button>
         ))}
       </div>
-      <div className="shrink-0 border-l border-seam pl-2">
-        <button type="button" aria-label="Add space" onClick={onCreateSpace} className="grid size-9 place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text">
-          <Plus size={16} />
-        </button>
-      </div>
+      {canCreateSpace ? (
+        <div className="shrink-0 border-l border-seam pl-2">
+          <button type="button" aria-label="Add space" onClick={onCreateSpace} className="grid size-9 place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text">
+            <Plus size={16} />
+          </button>
+        </div>
+      ) : null}
       <div className="ml-auto shrink-0 border-l border-seam pl-2">
         <button type="button" aria-label="Settings" onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted hover:bg-[var(--ng-hover)] hover:text-text">
           <Settings size={16} />

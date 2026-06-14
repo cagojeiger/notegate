@@ -1,5 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
+import { downloadFile } from "../../api/files";
+import { useApiClient } from "../../api/ApiProvider";
 import type { RestNode, Space } from "../../api/types";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
@@ -9,11 +11,14 @@ import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useR
 type NodeActionsProps = {
   activeSpace: Space | null;
   activeNode: RestNode | null;
+  canWriteActiveSpace: boolean;
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;
 };
 
-export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: NodeActionsProps) {
+export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog }: NodeActionsProps) {
+  const client = useApiClient();
   const openInActiveGroup = useUiStore((state) => state.openInActiveGroup);
+  const openInNewGroup = useUiStore((state) => state.openInNewGroup);
   const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
   const addExpanded = useUiStore((state) => state.addExpanded);
@@ -34,6 +39,16 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
   async function openNode(node: RestNode) {
     openInActiveGroup(node);
     closeMobile();
+    await revealNode(node);
+  }
+
+  async function openNodeInNewGroup(node: RestNode) {
+    openInNewGroup(node);
+    closeMobile();
+    await revealNode(node);
+  }
+
+  async function revealNode(node: RestNode) {
     if (!activeSpace || node.parent_id === null) return;
     const reveal = await revealNodeInSpace(activeSpace.id, node.id);
     addExpanded(reveal.ancestors.map((ancestor) => ancestor.id));
@@ -46,6 +61,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
   }
 
   function promptCreateNode(kind: "folder" | "text") {
+    if (!canWriteActiveSpace) return;
     const parentId = parentForCreate();
     if (!parentId) return;
     setDialog(createNodeDialog(parentId, kind, async (input) => {
@@ -54,13 +70,14 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
   }
 
   function promptCreateInFolder(folder: RestNode, kind: "folder" | "text") {
+    if (!canWriteActiveSpace) return;
     setDialog(createNodeDialog(folder.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
   }
 
   function uploadInFolder(folder: RestNode, file: File | null) {
-    if (!file) return;
+    if (!canWriteActiveSpace || !file) return;
     setDialog(uploadFileDialog(folder.id, file, async (input) => {
       await uploadFileMutation.mutateAsync(input);
     }));
@@ -71,26 +88,26 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
   }
 
   function promptRenameNode(node: RestNode) {
-    if (node.parent_id === null) return;
+    if (!canWriteActiveSpace || node.parent_id === null) return;
     setDialog(renameNodeDialog(node, async (renamedNode, name) => {
       await updateNodeMutation.mutateAsync({ node: renamedNode, name });
     }));
   }
 
   function promptMoveNode(node: RestNode) {
-    if (node.parent_id === null || !activeSpace) return;
+    if (!canWriteActiveSpace || node.parent_id === null || !activeSpace) return;
     setDialog(moveNodeDialog(node, activeSpace, async (movedNode, parentId) => {
       await moveNodeMutation.mutateAsync({ node: movedNode, parentId }, { onSuccess: () => addExpanded([parentId]) });
     }));
   }
 
   function moveNodeToFolder(node: RestNode, folder: RestNode) {
-    if (node.parent_id === null || folder.kind !== "folder" || node.id === folder.id) return;
+    if (!canWriteActiveSpace || node.parent_id === null || folder.kind !== "folder" || node.id === folder.id) return;
     moveNodeMutation.mutate({ node, parentId: folder.id }, { onSuccess: () => addExpanded([folder.id]) });
   }
 
   function confirmDeleteNode(node: RestNode) {
-    if (node.parent_id === null) return;
+    if (!canWriteActiveSpace || node.parent_id === null) return;
     setDialog(deleteNodeDialog(node, async (deletedNode, recursive) => {
       await deleteNodeMutation.mutateAsync({ node: deletedNode, recursive });
     }));
@@ -98,14 +115,25 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
 
   function handleFileSelected(file: File | null) {
     const parentId = parentForCreate();
-    if (!file || !parentId) return;
+    if (!canWriteActiveSpace || !file || !parentId) return;
     setDialog(uploadFileDialog(parentId, file, async (input) => {
       await uploadFileMutation.mutateAsync(input);
     }));
   }
 
+  async function downloadFileNode(node: RestNode) {
+    if (node.kind !== "file") return;
+    const blob = await downloadFile(client, node.space_id, node.id);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = node.original_filename ?? node.name;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   function promptReplaceMetadata() {
-    if (!activeNode) return;
+    if (!canWriteActiveSpace || !activeNode) return;
     const node = activeNode;
     setDialog(metadataDialog(node, async (metadataNode, metadata) => {
       await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
@@ -114,6 +142,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
 
   return {
     openNode,
+    openNodeInNewGroup,
     promptCreateNode,
     promptCreateInFolder,
     handleFileSelected,
@@ -123,6 +152,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
     promptMoveNode,
     moveNodeToFolder,
     confirmDeleteNode,
-    promptReplaceMetadata
+    promptReplaceMetadata,
+    downloadFileNode
   };
 }
