@@ -29,11 +29,20 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
   const queryClient = useQueryClient();
   const showToast = useUiStore((state) => state.showToast);
   const setSaveState = useUiStore((state) => state.setSaveState);
+  const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   return useMutation({
     meta: { silentError: true },
     mutationFn: (force: boolean) => replaceText(client, node.space_id, node.id, draft, force ? undefined : sha),
     onMutate: () => setSaveState("saving"),
-    onSuccess: () => {
+    onSuccess: (response) => {
+      updateGroupsNode({
+        ...node,
+        content_sha256: response.text.content_sha256,
+        byte_len: response.text.byte_len,
+        line_count: response.text.line_count,
+        updated_by: response.text.updated_by,
+        updated_at: response.text.updated_at
+      });
       setSaveState("saved");
       showToast("Saved");
       onSaved();
