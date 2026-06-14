@@ -1,25 +1,17 @@
-# UI docs
+# UI 문서
 
-`docs/ui` is the dashboard UI source of truth.
+Notegate 대시보드 UI의 현재 합의 상태를 기록한다.
 
-Read in order:
+규칙:
 
-```text
-00-overview.md
-01-glossary.md
-02-layout.md
-03-information.md
-04-flows.md
-05-implementation.md
-06-visual.md
-```
+- 문서는 한글로 작성한다.
+- 구현 결과와 유지할 규칙만 적는다.
+- 변경 이력, 논의 과정, 장황한 배경 설명은 넣지 않는다.
+- 코드와 충돌하면 코드 또는 문서 중 하나를 바로 정본에 맞춘다.
 
-| Document | Role |
-|---|---|
-| [`00-overview.md`](./00-overview.md) | UI scope and baseline shape |
-| [`01-glossary.md`](./01-glossary.md) | Canonical terms |
-| [`02-layout.md`](./02-layout.md) | Layout regions and responsive rules |
-| [`03-information.md`](./03-information.md) | Backend data to UI mapping |
-| [`04-flows.md`](./04-flows.md) | User actions and state changes |
-| [`05-implementation.md`](./05-implementation.md) | Frontend code and state ownership |
-| [`06-visual.md`](./06-visual.md) | Light/dark visual rules |
+읽는 순서:
+
+1. `00-overview.md`
+2. `01-layout.md`
+3. `02-data-and-flows.md`
+4. `03-implementation.md`
