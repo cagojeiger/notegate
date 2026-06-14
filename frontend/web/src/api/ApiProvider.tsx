@@ -33,10 +33,14 @@ export function ApiProvider({ apiKey, onUnauthorized, children }: ApiProviderPro
           retry: 1
         }
       },
-      // 401 from any read → bounce to the login gate.
+      // 401 from resource reads → bounce to the login gate. The dedicated
+      // /me session check handles its own 401 inside AuthBoundary so it can
+      // render the login page without a duplicate global reset.
       queryCache: new QueryCache({
-        onError: (error) => {
-          if (error instanceof ApiError && error.status === 401) onUnauthorizedRef.current?.();
+        onError: (error, query) => {
+          if (error instanceof ApiError && error.status === 401 && query.meta?.authSessionCheck !== true) {
+            onUnauthorizedRef.current?.();
+          }
         }
       }),
       // Mutations have no per-call error UI by default, so surface failures:
