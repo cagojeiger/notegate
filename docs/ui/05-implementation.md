@@ -78,7 +78,7 @@ Zustand does not own:
 | `EditorArea` | editor group rendering and active group presentation |
 | `TextPreview` | preview mode selection for markdown/plain/structured text |
 | `TextEditor` | text editing presentation and save action wiring |
-| `AuxiliarySidebar` | Inspector/Agent tab presentation |
+| `AuxiliarySidebar` | Inspector presentation |
 | `SettingsModal` | Account and Agents settings surfaces |
 
 ## Test baseline

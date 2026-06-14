@@ -45,5 +45,5 @@ AppShell
 - Tablet/mobile keep the same layout roles and change presentation to overlays/sheets.
 - `EditorArea` is the main reading and editing surface.
 - `PrimarySidebar` owns navigation: `FilesSection` and `RecentSection`.
-- `AuxiliarySidebar` owns contextual information: Inspector and Agent.
+- `AuxiliarySidebar` owns contextual node information: Inspector.
 - Long-running history or migration notes do not belong in UI docs.

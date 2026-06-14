@@ -76,6 +76,8 @@ ActivityRail click space
 
 ### Create space
 
+Available when `/api/v1/me.capabilities.can_create_space` is true.
+
 ```text
 SpaceAddButton
 -> create-space dialog
@@ -85,6 +87,8 @@ SpaceAddButton
 ```
 
 ### Reorder spaces
+
+Available for callers that can manage spaces.
 
 ```text
 drag space item
@@ -145,6 +149,31 @@ scroll near section end
 ```
 
 Cursor values are request continuations and are not persisted.
+
+## Context menus
+
+Right-click menus are shortcuts, not the only way to act. Every context-menu action must also be reachable through a visible button, overflow menu, dialog, or touch fallback.
+
+Rules:
+
+- Do not override native browser context menus inside text editing areas or selectable document content.
+- Mutating actions are hidden or disabled when the active space is not writable.
+- Destructive actions require confirmation.
+- Touch devices use long-press or the visible overflow menu.
+
+| Surface | Target | Actions |
+| --- | --- | --- |
+| ActivityRail | Space item | Select, rename, delete, copy space id. Mutating actions require account capability and writable space. |
+| ActivityRail | Add-space button | Open create-space dialog. No right-click menu. |
+| PrimarySidebar Files | Empty/root area | New folder, new text, upload file. |
+| PrimarySidebar Files | Folder row | Open/toggle, new folder, new text, upload file, rename, move, copy path, delete. |
+| PrimarySidebar Files | Text row | Open, open in new group, rename, move, copy path, delete. |
+| PrimarySidebar Files | File row | Open, open in new group, download, rename, move, copy path, delete. |
+| PrimarySidebar Recent | Any row | Open, reveal in Files, open in new group, copy path, rename, move, delete. |
+| Editor group header | Open node | Rename, move, copy path, delete, close group. File nodes also expose download. |
+| Editor empty state | Empty group | New text, new folder, upload file. |
+| AuxiliarySidebar Inspector | Node card | Copy path, copy node id, edit metadata. |
+| Settings | Account/Agents rows | Use visible row buttons only. No custom right-click menu. |
 
 ## Node management flows
 

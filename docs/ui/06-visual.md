@@ -88,7 +88,7 @@ warning          #facc15
 ### ActivityRail
 
 - Selected space is clear without heavy borders on every item.
-- Add-space action stays directly below the dynamic space list.
+- When visible, add-space action stays directly below the dynamic space list.
 - Settings stays at the bottom.
 
 ### PrimarySidebar

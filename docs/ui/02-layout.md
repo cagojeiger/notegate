@@ -80,9 +80,9 @@ ActivityRail
 Rules:
 
 - `SpaceRailList` is scrollable.
-- `SpaceAddButton` is always visible directly below the space list.
+- `SpaceAddButton` is visible directly below the space list when the caller can create spaces.
 - Settings is fixed at the bottom.
-- Space reorder is drag-and-drop on desktop and persists `sort_order`.
+- Space reorder is drag-and-drop on desktop for callers that can manage spaces and persists `sort_order`.
 - Account and settings live behind Settings, not in `TitleBar`.
 
 ## PrimarySidebar
@@ -133,7 +133,6 @@ Rules:
 Contains:
 
 - `InspectorPanel`
-- `AgentPanel`
 
 Rules:
 
@@ -141,6 +140,7 @@ Rules:
 - The sidebar can be shown even when no node is selected; Inspector then renders an empty state.
 - Desktop renders it inline.
 - Tablet/mobile render it as overlay/sheet.
+- Agent management lives in Settings, not in `AuxiliarySidebar`.
 
 ## StatusBar
 

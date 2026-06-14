@@ -11,6 +11,7 @@ Node list/create    -> GET/POST /api/v1/spaces/{space_id}/nodes
 Node children       -> GET /api/v1/spaces/{space_id}/nodes/{node_id}/children
 Node reveal         -> GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 Node detail         -> GET/PATCH/DELETE /api/v1/spaces/{space_id}/nodes/{node_id}
+Node move           -> POST /api/v1/spaces/{space_id}/nodes/{node_id}/move
 Node metadata       -> GET/PUT/PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 Text content        -> GET/PUT/PATCH /api/v1/spaces/{space_id}/text/{node_id}
 File metadata       -> GET /api/v1/spaces/{space_id}/files/{node_id}
@@ -65,12 +66,13 @@ Shows:
 
 - accessible spaces
 - active space
-- add-space action
+- add-space action when `/api/v1/me.capabilities.can_create_space` is true
 - settings entry
 
 Rules:
 
 - Space create/update/delete is user-only.
+- Agent callers do not see space creation or space management actions.
 - Space delete removes the space from the UI immediately after success.
 - Space reorder persists `sort_order`.
 
@@ -161,7 +163,7 @@ Data:
 
 ```text
 GET /api/v1/spaces/{space_id}/nodes/{node_id}
-GET /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
+GET /api/v1/spaces/{space_id}/nodes/{node_id}/metadata   # available; current Inspector reads metadata from RestNode
 ```
 
 Shows:
@@ -181,9 +183,9 @@ Rules:
 - Metadata is not encrypted content.
 - Metadata editing uses explicit action.
 
-### AgentPanel
+### Future AgentPanel
 
-Reserved for future agent context. It does not own node data.
+Reserved for future contextual agent state. It does not own node data or agent management.
 
 ## Settings
 
@@ -203,7 +205,7 @@ Account shows:
 
 Agents shows:
 
-- agent list with pagination
+- agent list as a bounded page
 - one expanded agent at a time
 - agent API keys inside the expanded agent
 - agent space access inside the expanded agent
