@@ -51,6 +51,20 @@ Rules:
 - Global mutation errors show toast unless the mutation opts out with `silentError`.
 - Auth/session query uses query meta to avoid duplicate global 401 handling.
 
+## External sync
+
+Dashboard sync uses slow polling plus focus/reconnect refetch. It does not use WebSocket or SSE.
+
+Automatic polling runs only while the browser document is visible. Hidden tabs keep their current cache and rely on focus/reconnect refetch when the user returns.
+
+| Query | Default interval |
+|---|---:|
+| opened node freshness | 30s |
+| Recent list | 60s |
+| visible/expanded folder children | 60s |
+
+Text bodies are not polled directly. The dashboard checks node metadata first and refetches text content only when the content hash changes.
+
 ## Zustand rules
 
 Zustand owns UI state only:

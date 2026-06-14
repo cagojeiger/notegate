@@ -4,9 +4,11 @@ import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { downloadFile } from "../../api/files";
 import { getNode, listChildren } from "../../api/nodes";
+import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
+import { usePageVisible } from "../../shared/hooks/usePageVisible";
 import { useUiStore } from "../../stores/uiStore";
 
 export function useFolderChildrenStat(node: RestNode) {
@@ -26,11 +28,12 @@ export function useTextDocument(node: RestNode) {
 
 export function useNodeFreshness(node: RestNode) {
   const client = useApiClient();
+  const pageVisible = usePageVisible();
   return useQuery({
     queryKey: queryKeys.node(node.space_id, node.id),
     queryFn: () => getNode(client, node.space_id, node.id),
-    enabled: node.kind === "text",
-    refetchInterval: 15_000
+    enabled: node.kind === "text" && pageVisible,
+    refetchInterval: pageVisible ? POLLING.openedNodeMs : false
   });
 }
 
