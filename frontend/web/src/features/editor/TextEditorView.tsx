@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 
 import type { RestNode } from "../../api/types";
 import { Button } from "../../shared/ui";
-import { Markdown } from "../../shared/ui/Markdown";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { NodeActionMenu } from "./NodeActionMenu";
+import { TextPreview } from "./TextPreview";
 import type { NodeActions } from "./types";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
@@ -24,7 +24,6 @@ export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRen
     prevMode.current = mode;
   }, [mode, content]);
   const dirty = mode === "edit" && draft !== content;
-  const isMarkdown = /\.(md|markdown)$/i.test(node.name);
   const saveMutation = useSaveTextDocument(
     node,
     draft,
@@ -64,10 +63,8 @@ export function TextEditorView({ node, mode, canClose, onClose, onSetMode, onRen
           ) : null}
           {mode === "edit" ? (
             <textarea className="min-h-0 flex-1 resize-none bg-[var(--ng-editor)] p-8 font-mono text-sm text-text outline-none" value={draft} onChange={(event) => setDraft(event.target.value)} />
-          ) : isMarkdown ? (
-            <div className="mx-auto w-full max-w-[44rem] overflow-y-auto px-10 py-14"><Markdown content={content} /></div>
           ) : (
-            <article className="mx-auto max-w-[44rem] overflow-y-auto whitespace-pre-wrap px-10 py-14 font-mono text-sm text-text">{content}</article>
+            <TextPreview name={node.name} content={content} />
           )}
         </div>
       )}

@@ -629,6 +629,7 @@ Constraints:
 
 - Text read는 line/byte 제한을 가진다. UI는 부분 응답을 전체 문서로 오해하지 않아야 한다.
 - Plain Text만 server-side preview/edit/patch 대상이다.
+- Preview는 파일 이름 확장자로 format을 추론한다. Markdown은 rendered preview, JSON/JSONL/YAML/TOML은 tree/source structured preview를 사용한다.
 - Encrypted Text는 서버가 복호화하지 않는다. UI는 encrypted payload 상태를 명확히 보여준다.
 - `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` 이름의 plain Text는 저장 후 문법 검증 대상이다.
 - Conflict 방지를 위해 가능하면 `expected_sha256`을 사용한다.

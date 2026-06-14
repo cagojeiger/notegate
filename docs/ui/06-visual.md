@@ -121,6 +121,8 @@ warning          #ffd60a
 
 - 선택 전 empty state는 조용하게 표시하고 `New text`, `Upload file`, `Create folder` CTA를 제공한다.
 - Text는 기본 preview mode다.
+- Markdown preview는 문서처럼 읽히는 surface를 우선한다. Code fence는 syntax highlight를 적용하고, Mermaid fence는 diagram 영역으로 렌더링한다.
+- JSON/JSONL/YAML/TOML preview는 tree/source 전환을 제공한다. Tree는 긴 구조를 기본적으로 접어 노이즈를 줄이고, Source는 원문 확인용으로 둔다.
 - Edit mode는 같은 group 안에서 전환한다.
 - Node 위험 action은 header에 항상 노출하지 않고 compact menu에 둔다.
 - 문서 면은 사이드바보다 더 깨끗해야 한다. 본문 주변에 불필요한 카드/프레임을 만들지 않는다.

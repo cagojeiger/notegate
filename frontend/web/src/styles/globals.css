@@ -177,3 +177,155 @@ textarea:focus-visible {
   max-width: 100%;
   border-radius: 8px;
 }
+
+.shiki {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  border-radius: 14px;
+  background: var(--shiki-light-bg, var(--ng-surface));
+  color: var(--shiki-light, var(--ng-text));
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.shiki code {
+  display: block;
+  min-width: max-content;
+}
+
+.shiki .line {
+  min-height: 1.4em;
+}
+
+:root[data-theme="dark"] .shiki,
+:root[data-theme="dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg, var(--ng-surface)) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+.ng-code-fallback {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid var(--ng-border);
+  background: var(--ng-surface);
+  color: var(--ng-text);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.markdown .shiki,
+.markdown .ng-code-fallback {
+  margin: 1rem 0;
+  border: 1px solid var(--ng-border);
+}
+
+.markdown .shiki code,
+.markdown .ng-code-fallback code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+.ng-mermaid,
+.ng-mermaid-loading,
+.ng-mermaid-error {
+  margin: 1rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--ng-border);
+  border-radius: 14px;
+  background: var(--ng-surface);
+  padding: 1rem;
+}
+
+.ng-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.ng-mermaid-loading {
+  color: var(--ng-muted);
+  font-size: 0.9rem;
+}
+
+.ng-mermaid-error pre {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--ng-text);
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+}
+
+.ng-json-tree {
+  color: var(--ng-text);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.ng-json-tree-children {
+  margin: 0;
+  padding: 0 0 0 1.15rem;
+}
+
+.ng-json-tree-child {
+  list-style: none;
+  white-space: nowrap;
+}
+
+.ng-json-tree-label,
+.ng-json-tree-punctuation {
+  color: var(--ng-muted);
+}
+
+.ng-json-tree-label-clickable {
+  cursor: pointer;
+}
+
+.ng-json-tree-string {
+  color: #0b6b4b;
+}
+
+:root[data-theme="dark"] .ng-json-tree-string {
+  color: #7ee0b8;
+}
+
+.ng-json-tree-number {
+  color: #9a5b00;
+}
+
+:root[data-theme="dark"] .ng-json-tree-number {
+  color: #ffd08a;
+}
+
+.ng-json-tree-boolean,
+.ng-json-tree-null,
+.ng-json-tree-other {
+  color: var(--ng-primary);
+}
+
+.ng-json-tree-expand,
+.ng-json-tree-collapse {
+  margin-right: 0.35rem;
+  color: var(--ng-faint);
+}
+
+.ng-json-tree-expand::after {
+  content: "▸";
+}
+
+.ng-json-tree-collapse::after {
+  content: "▾";
+}
+
+.ng-json-tree-collapsed::after {
+  content: " …";
+  color: var(--ng-faint);
+}

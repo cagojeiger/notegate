@@ -346,6 +346,8 @@ Text를 선택하면 기본으로 preview를 보여준다. 사용자가 edit mod
 규칙:
 
 - plain Text는 기본 preview mode로 읽고, edit mode로 전환해 수정한다.
+- `md`/`markdown` Text는 Markdown preview로 표시한다. fenced code는 syntax highlight를 적용하고, `mermaid` fence는 diagram으로 렌더링한다.
+- `json`/`jsonl`/`yaml`/`yml`/`toml` Text는 structured preview로 표시한다. 기본은 접을 수 있는 tree view이며, source view로 원문을 볼 수 있다.
 - encrypted Text는 서버가 복호화하지 않으므로 preview/edit 대신 encrypted 상태를 명확히 표시한다.
 - content body는 `RestNode`가 아니라 Text API에서 별도로 가져온다.
 
