@@ -146,11 +146,8 @@ pub(crate) async fn list(
     Query(query): Query<ListNodesQuery>,
 ) -> Result<Json<NodesListResponse>, ApiError> {
     let kind = query.kind.as_deref().map(parse_kind).transpose()?;
-    let sort = match query.sort.as_deref().unwrap_or("updated_at_desc") {
-        value => NodeListSort::parse(value).ok_or_else(|| {
-            ApiError::invalid_field("sort must be 'updated_at_desc' or 'name_asc'")
-        })?,
-    };
+    let sort = NodeListSort::parse(query.sort.as_deref().unwrap_or("updated_at_desc"))
+        .ok_or_else(|| ApiError::invalid_field("sort must be 'updated_at_desc' or 'name_asc'"))?;
     let page = state
         .files
         .list_nodes(

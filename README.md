@@ -76,9 +76,6 @@ Services:
 - `web` -> two FE+BE replicas inside the compose network
 - `postgres` -> local database on host port `5433`
 
-The web image sets `NOTEGATE_WEB_DIST_DIR=/app/web`, so the Rust server serves the
-Vite build copied into `/app/web`.
-
 ## Auth/MCP settings
 
 Auth/MCP settings are configured from `.env`:
@@ -91,8 +88,8 @@ Auth/MCP settings are configured from `.env`:
 - resource URL defaults to `${NOTEGATE_PUBLIC_URL}/mcp`
 - `NOTEGATE_ENC_ROOT_SECRET` and `NOTEGATE_LOOKUP_ROOT_SECRET` must be at least 32 bytes.
 
-First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login` once to create the
-local notegate user row, then reconnect the MCP client to `${NOTEGATE_PUBLIC_URL}/mcp`.
+First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login`, then reconnect
+the MCP client to `${NOTEGATE_PUBLIC_URL}/mcp`.
 
 On startup, the API idempotently ensures missing active ENC/LOOKUP key epoch rows from
 the configured root key IDs/secrets, then verifies them. If the database already has a

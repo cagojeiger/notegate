@@ -346,7 +346,7 @@ pub mod node {
     //! All reads exclude soft-deleted rows unless the function name says otherwise.
 
     use chrono::{DateTime, Utc};
-    use notegate_core::Result;
+    use notegate_core::{Error, Result};
     use notegate_model::files::NodeListSort;
     use notegate_model::{Node, NodeKind};
     use sqlx::PgPool;
@@ -689,7 +689,7 @@ pub mod node {
                 .fetch_all(pool)
                 .await
             }
-            _ => unreachable!("node list cursor sort mismatch"),
+            _ => return Err(Error::internal("node list cursor sort mismatch")),
         }
         .map_err(map_sqlx_error)?;
 
