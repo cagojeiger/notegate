@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Copy, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
+import { copyText } from "../../shared/lib/clipboard";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { reorderSpacesByDrop } from "./spaceReorder";
@@ -123,9 +124,8 @@ function SpaceContextMenu({ menu, canManageSpaces, onClose, onSelectSpace, onRen
 
   const canManageSpace = canManageSpaces && menu.space.permission === "write";
 
-  function copySpaceId() {
-    void navigator.clipboard?.writeText(menu.space.id);
-    showToast("Space id copied");
+  async function copySpaceId() {
+    showToast((await copyText(menu.space.id)) ? "Space id copied" : "Could not copy space id");
   }
 
   const left = Math.min(menu.x, window.innerWidth - 196);
@@ -137,7 +137,7 @@ function SpaceContextMenu({ menu, canManageSpaces, onClose, onSelectSpace, onRen
         <div className="truncate px-3 py-1 text-xs text-muted">{menu.space.name}</div>
         <MenuButton onClick={() => run(() => onSelectSpace(menu.space))}>Select</MenuButton>
         <MenuButton onClick={() => run(() => onRenameSpace(menu.space))} disabled={!canManageSpace}><Pencil size={14} /> Rename</MenuButton>
-        <MenuButton onClick={() => run(copySpaceId)}><Copy size={14} /> Copy space id</MenuButton>
+        <MenuButton onClick={() => run(() => { void copySpaceId(); })}><Copy size={14} /> Copy space id</MenuButton>
         <MenuButton danger onClick={() => run(() => onDeleteSpace(menu.space))} disabled={!canManageSpace}><Trash2 size={14} /> Delete</MenuButton>
       </Card>
     </>

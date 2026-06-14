@@ -4,21 +4,15 @@ import { useApiClient } from "../../api/ApiProvider";
 import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey } from "../../api/agents";
 import { connectAgent, disconnectAgent, listConnections, type Permission } from "../../api/connections";
 import { createMyKey, listMyKeys, revokeMyKey, type ApiKeyListResponse, type MintedKey } from "../../api/keys";
-import { getMe } from "../../api/me";
 import { queryKeys } from "../../api/queryKeys";
 import { listSpaces } from "../../api/spaces";
-
-export function useMeQuery() {
-  const client = useApiClient();
-  return useQuery({ queryKey: queryKeys.me, queryFn: () => getMe(client) });
-}
 
 export function useAgentsQuery(enabled = true) {
   const client = useApiClient();
   return useQuery({ queryKey: queryKeys.agents, queryFn: () => listAgents(client), enabled });
 }
 
-export function useSpacesQuery(enabled = true) {
+export function useSettingsSpacesQuery(enabled = true) {
   const client = useApiClient();
   return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client), enabled });
 }

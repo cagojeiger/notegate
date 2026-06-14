@@ -9,6 +9,7 @@ import { FileDetailView } from "./FileDetailView";
 import { FolderDetailView } from "./FolderDetailView";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { NodeContextMenu } from "../nodes/NodeContextMenu";
+import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { TextEditorView } from "./TextEditorView";
 import type { NodeActions } from "./types";
 
@@ -99,8 +100,31 @@ function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canCl
       </>
     );
   }
+  return (
+    <OpenedNodeGuard node={node}>
+      {(freshNode) => (
+        <NodeGroupContent
+          active={active}
+          node={freshNode}
+          mode={mode}
+          canWriteActiveSpace={canWriteActiveSpace}
+          canClose={canClose}
+          onClose={onClose}
+          onSetMode={onSetMode}
+          onRenameNode={onRenameNode}
+          onMoveNode={onMoveNode}
+          onDeleteNode={onDeleteNode}
+          onDownloadFile={onDownloadFile}
+          onHeaderContextMenu={onHeaderContextMenu}
+        />
+      )}
+    </OpenedNodeGuard>
+  );
+}
+
+function NodeGroupContent({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onDownloadFile, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void; onDownloadFile: (node: RestNode) => void }) {
   if (node.kind === "text") {
-    return <TextEditorView active={active} node={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} onHeaderContextMenu={onHeaderContextMenu} />;
+    return <TextEditorView active={active} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} onHeaderContextMenu={onHeaderContextMenu} />;
   }
   const Icon = node.kind === "file" ? Database : Folder;
   return (

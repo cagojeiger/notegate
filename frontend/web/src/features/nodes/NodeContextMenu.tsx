@@ -2,6 +2,7 @@ import { Copy, Download, FilePlus, FolderPlus, Move, PanelRightOpen, Pencil, Tra
 import { useEffect } from "react";
 
 import type { RestNode } from "../../api/types";
+import { copyText } from "../../shared/lib/clipboard";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 
@@ -56,9 +57,8 @@ export function NodeContextMenu({
     onClose();
   }
 
-  function copyPath() {
-    void navigator.clipboard?.writeText(node.path);
-    showToast("Path copied");
+  async function copyPath() {
+    showToast((await copyText(node.path)) ? "Path copied" : "Could not copy path");
   }
 
   const maxHeight = canCreateInNode ? 304 : 236;
@@ -86,7 +86,7 @@ export function NodeContextMenu({
         {onDownloadFile && node.kind === "file" ? <MenuButton onClick={() => run(() => onDownloadFile(node))}><Download size={14} /> Download</MenuButton> : null}
         <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={!canMutateNode}><Pencil size={14} /> Rename</MenuButton>
         <MenuButton onClick={() => run(() => onMoveNode(node))} disabled={!canMutateNode}><Move size={14} /> Move…</MenuButton>
-        <MenuButton onClick={() => run(copyPath)}><Copy size={14} /> Copy path</MenuButton>
+        <MenuButton onClick={() => run(() => { void copyPath(); })}><Copy size={14} /> Copy path</MenuButton>
         {onCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}
         <MenuButton danger onClick={() => run(() => onDeleteNode(node))} disabled={!canMutateNode}><Trash2 size={14} /> Delete</MenuButton>
       </Card>

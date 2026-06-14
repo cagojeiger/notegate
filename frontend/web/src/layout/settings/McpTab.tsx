@@ -1,5 +1,6 @@
 import { Copy } from "lucide-react";
 
+import { copyText } from "../../shared/lib/clipboard";
 import { Card, IconButton, SectionHeader } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 
@@ -10,9 +11,8 @@ export function McpTab() {
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const mcpUrl = `${origin}/mcp`;
 
-  function copy(value: string) {
-    void navigator.clipboard?.writeText(value);
-    showToast("Copied");
+  async function copy(value: string) {
+    showToast((await copyText(value)) ? "Copied" : "Could not copy");
   }
 
   return (
@@ -20,8 +20,8 @@ export function McpTab() {
       <section>
         <SectionHeader title="MCP" description="External clients use one endpoint and one bearer header." />
         <Card className="space-y-4 text-sm">
-          <CopyRow label="Server URL" value={mcpUrl} copyLabel="Copy MCP server URL" onCopy={() => copy(mcpUrl)} />
-          <CopyRow label="Authorization header" value={AUTH_HEADER} copyLabel="Copy authorization header" onCopy={() => copy(AUTH_HEADER)} />
+          <CopyRow label="Server URL" value={mcpUrl} copyLabel="Copy MCP server URL" onCopy={() => { void copy(mcpUrl); }} />
+          <CopyRow label="Authorization header" value={AUTH_HEADER} copyLabel="Copy authorization header" onCopy={() => { void copy(AUTH_HEADER); }} />
           <p className="text-xs leading-5 text-muted">Use this same header for OAuth tokens, user API keys, and agent API keys. Browser session cookies are not accepted on <code className="font-mono">/mcp</code>.</p>
         </Card>
       </section>

@@ -1,10 +1,11 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { downloadFile } from "../../api/files";
 import { getNode, listChildren } from "../../api/nodes";
-import { POLLING } from "../../api/polling";
+import { POLLING, withPollingJitter } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
@@ -29,11 +30,13 @@ export function useTextDocument(node: RestNode) {
 export function useNodeFreshness(node: RestNode) {
   const client = useApiClient();
   const pageVisible = usePageVisible();
+  const refetchInterval = useMemo(() => withPollingJitter(POLLING.openedNodeMs, POLLING.openedNodeJitterMs), []);
   return useQuery({
     queryKey: queryKeys.node(node.space_id, node.id),
     queryFn: () => getNode(client, node.space_id, node.id),
-    enabled: node.kind === "text" && pageVisible,
-    refetchInterval: pageVisible ? POLLING.openedNodeMs : false
+    enabled: pageVisible,
+    refetchInterval: pageVisible ? refetchInterval : false,
+    retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3
   });
 }
 

@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { Button, IconButton } from "../../shared/ui";
-import { useUiStore } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { TextPreview } from "./TextPreview";
@@ -11,12 +10,10 @@ import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { NodeActions } from "./types";
-import { useNodeFreshness, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
-export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu?: (node: RestNode, event: MouseEvent) => void }) {
+export function TextEditorView({ active, node, latestNode, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu?: (node: RestNode, event: MouseEvent) => void }) {
   const textQuery = useTextDocument(node);
-  const freshnessQuery = useNodeFreshness(node);
-  const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState(false);
   const [externalUpdate, setExternalUpdate] = useState<RestNode | null>(null);
@@ -64,11 +61,8 @@ export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClo
   }
 
   useEffect(() => {
-    const latestNode = freshnessQuery.data;
     const latestSha = latestNode?.content_sha256;
     if (!latestNode || !latestSha || !sha) return;
-
-    updateGroupsNode(latestNode);
 
     if (latestSha === sha) {
       if (externalUpdate?.content_sha256 === latestSha) setExternalUpdate(null);
@@ -84,7 +78,7 @@ export function TextEditorView({ active, node, mode, canWriteActiveSpace, canClo
     if (lastAutoReloadSha.current === latestSha) return;
     lastAutoReloadSha.current = latestSha;
     void reloadLatestText();
-  }, [dirty, externalUpdate?.content_sha256, freshnessQuery.data, sha]);
+  }, [dirty, externalUpdate?.content_sha256, latestNode, sha]);
 
   const saveMutation = useSaveTextDocument(
     node,

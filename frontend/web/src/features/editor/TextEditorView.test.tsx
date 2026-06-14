@@ -4,10 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { TextEditorView } from "./TextEditorView";
-import { useNodeFreshness, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 vi.mock("./useEditorQueries", () => ({
-  useNodeFreshness: vi.fn(),
   useTextDocument: vi.fn(),
   useSaveTextDocument: vi.fn()
 }));
@@ -73,7 +72,6 @@ describe("TextEditorView", () => {
       isSuccess: true,
       refetch: vi.fn()
     } as never);
-    vi.mocked(useNodeFreshness).mockReturnValue({ data: node } as never);
     vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: vi.fn(), isPending: false } as never);
   });
 
@@ -107,12 +105,11 @@ describe("TextEditorView", () => {
       isSuccess: true,
       refetch: vi.fn()
     } as never);
-    vi.mocked(useNodeFreshness).mockReturnValue({ data: { ...node, content_sha256: "server-sha" } } as never);
-
     render(
       <TextEditorView
         active
         node={node}
+        latestNode={{ ...node, content_sha256: "server-sha" }}
         mode="edit"
         canWriteActiveSpace
         canClose={false}

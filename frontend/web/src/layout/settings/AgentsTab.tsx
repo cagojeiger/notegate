@@ -13,7 +13,7 @@ import {
   useCreateAgentMutation,
   useDeleteAgentMutation,
   useDisconnectAgentFromSpaceMutation,
-  useSpacesQuery
+  useSettingsSpacesQuery
 } from "./useSettingsQueries";
 import { KeyManager } from "./KeyManager";
 
@@ -97,7 +97,7 @@ function AgentKeyManager({ agentId }: { agentId: string }) {
 }
 
 function AgentSpaceAccess({ agentId }: { agentId: string }) {
-  const spacesQuery = useSpacesQuery(true);
+  const spacesQuery = useSettingsSpacesQuery(true);
   const spaces = (spacesQuery.data?.spaces ?? []).filter(canWriteSpace);
 
   if (spacesQuery.isLoading) return <div className="text-sm text-muted">Loading spaces…</div>;

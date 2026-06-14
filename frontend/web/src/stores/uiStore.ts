@@ -39,7 +39,6 @@ type UiState = {
   mobileAuxOpen: boolean;
   toast: string | null;
   saveState: "idle" | "saving" | "saved" | "error" | "conflict";
-  setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
   setActiveSpaceId: (id: string | null) => void;
   openInActiveGroup: (node: RestNode) => void;
@@ -87,7 +86,6 @@ export const useUiStore = create<UiState>((set) => ({
   mobileAuxOpen: false,
   toast: null,
   saveState: "idle",
-  setTheme: (theme) => set({ theme }),
   toggleTheme: () => set((state) => ({ theme: state.theme === "light" ? "dark" : "light" })),
   setActiveSpaceId: (activeSpaceId) => set({ activeSpaceId }),
   openInActiveGroup: (node) => set((state) => openNodeInActiveGroupState(state, node)),

@@ -5,6 +5,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import type { RestNode, Space } from "../../api/types";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
+import { downloadBlob } from "../../shared/lib/downloadBlob";
 import { useUiStore } from "../../stores/uiStore";
 import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation, useUploadFileMutation } from "./useWorkbenchQueries";
 
@@ -124,12 +125,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   async function downloadFileNode(node: RestNode) {
     if (node.kind !== "file") return;
     const blob = await downloadFile(client, node.space_id, node.id);
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = node.original_filename ?? node.name;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, node.original_filename ?? node.name);
   }
 
   function promptReplaceMetadata() {
