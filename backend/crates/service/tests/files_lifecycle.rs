@@ -488,7 +488,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             .content
             .as_deref()
             .unwrap()
-            .contains("inserted line\nreplacement line\n")
+            .contains("inserted line\nalpha DELTA gammaDELTA\nreplacement line\n")
     );
 
     // --- find by NAME: q='note' matches the text by name ---
@@ -563,7 +563,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     );
     assert_eq!(
         hit.node.text.as_ref().expect("text stats").byte_len,
-        doc_now.byte_len
+        edited_now.byte_len
     );
 
     // --- mv: move /projects/note.md → /archive/note.md (rename parent) ---
