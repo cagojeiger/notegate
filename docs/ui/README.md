@@ -1,8 +1,8 @@
 # UI docs
 
-`docs/ui`는 notegate 대시보드 UI 설계 문서다.
+`docs/ui` is the dashboard UI source of truth.
 
-읽는 순서:
+Read in order:
 
 ```text
 00-overview.md
@@ -10,16 +10,16 @@
 02-layout.md
 03-information.md
 04-flows.md
+05-implementation.md
 06-visual.md
 ```
 
-현재 작성된 문서:
-
-| 문서 | 역할 |
+| Document | Role |
 |---|---|
-| [`00-overview.md`](./00-overview.md) | 전체 방향과 문서 순서 |
-| [`01-glossary.md`](./01-glossary.md) | UI 표준 용어 |
-| [`02-layout.md`](./02-layout.md) | AppShell/Workbench 레이아웃 정본 |
-| [`03-information.md`](./03-information.md) | 영역별 정보 배치 |
-| [`04-flows.md`](./04-flows.md) | REST 계약 기반 핵심 사용자 흐름 |
-| [`06-visual.md`](./06-visual.md) | light/dark visual style guideline |
+| [`00-overview.md`](./00-overview.md) | UI scope and baseline shape |
+| [`01-glossary.md`](./01-glossary.md) | Canonical terms |
+| [`02-layout.md`](./02-layout.md) | Layout regions and responsive rules |
+| [`03-information.md`](./03-information.md) | Backend data to UI mapping |
+| [`04-flows.md`](./04-flows.md) | User actions and state changes |
+| [`05-implementation.md`](./05-implementation.md) | Frontend code and state ownership |
+| [`06-visual.md`](./06-visual.md) | Light/dark visual rules |

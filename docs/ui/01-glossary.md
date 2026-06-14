@@ -1,73 +1,58 @@
 # UI glossary
 
-이 문서는 notegate UI 용어 정본이다. 같은 UI 영역은 항상 같은 이름으로 부른다.
+This document is the canonical terminology for the dashboard UI.
 
 ## Layout terms
 
-```text
-AppRoot
-├─ AuthScreen
-└─ AppShell
-   ├─ TitleBar
-   ├─ Workbench
-   │  ├─ ActivityRail
-   │  ├─ PrimarySidebar
-   │  ├─ EditorArea
-   │  └─ AuxiliarySidebar
-   └─ StatusBar
-```
-
-| 표준명 | 한국어 설명 | 의미 |
-|---|---|---|
-| `AppRoot` | 앱 루트 | 인증 상태에 따라 `AuthScreen` 또는 `AppShell`을 렌더링하는 최상위 entry |
-| `AuthScreen` | 인증 화면 | 로그인, 로그인 성공, 인증 오류를 보여주는 독립 화면. `Workbench`를 포함하지 않는다 |
-| `AppShell` | 앱 셸 | 로그인 이후 대시보드 전체 화면의 최상위 레이아웃 컨테이너 |
-| `TitleBar` | 상단 바 | 앱 전역 action 영역. 제품 context와 레이아웃 제어를 둔다 |
-| `Workbench` | 작업대 | 사용자가 문서를 탐색하고 편집하는 주 작업 영역 |
-| `ActivityRail` | 스페이스 레일 | 좌측의 좁은 전역 rail. Space 목록, Space 추가 진입점, settings 진입점을 둔다 |
-| `PrimarySidebar` | 주 사이드바 | active space의 node tree와 recent list를 표시하는 좌측 탐색 사이드바 |
-| `EditorArea` | 에디터 영역 | 현재 열린 node의 주 작업 영역. 하나 이상의 `EditorGroup`을 포함한다 |
-| `EditorGroup` | 에디터 그룹 | `EditorArea` 안의 독립 pane. 각 group은 열린 node와 preview/edit mode를 따로 가지며 최대 3개까지 나란히 열린다 |
-| `AuxiliarySidebar` | 보조 사이드바 | 우측 보조 영역. Inspector, References 같은 contextual view를 표시한다 |
-| `StatusBar` | 상태 바 | 앱 하단 상태 표시줄. 저장 상태, 현재 space, 향후 runtime 상태 예약 영역을 짧게 표시한다 |
+| Term | Meaning |
+|---|---|
+| `AppRoot` | Top-level app entry. Renders `AuthScreen` or `AppShell`. |
+| `AuthScreen` | Login/session recovery screen. Does not include the workbench. |
+| `AppShell` | Authenticated dashboard frame. Contains `TitleBar`, `Workbench`, and `StatusBar`. |
+| `TitleBar` | Top global bar. Holds product context and layout controls. |
+| `Workbench` | Main authenticated work area. Contains rail, sidebar, editor, and auxiliary area. |
+| `ActivityRail` | Left space rail. Holds spaces, add-space action, and settings entry. |
+| `PrimarySidebar` | Left navigation sidebar for the active space. Holds `FilesSection` and `RecentSection`. |
+| `EditorArea` | Main document/file surface. Holds one to three `EditorGroup`s. |
+| `EditorGroup` | Independent editor pane with its own opened node and preview/edit mode. |
+| `AuxiliarySidebar` | Right contextual sidebar. Holds Inspector and Agent views. |
+| `StatusBar` | Bottom global status strip. Shows short app/session state only. |
 
 ## Structural terms
 
-| 표준명 | 의미 |
+| Term | Meaning |
 |---|---|
-| `SpaceRailList` | `ActivityRail` 안에서 접근 가능한 Space 목록을 보여주는 스크롤 영역 |
-| `SpaceAddButton` | Space 생성 화면으로 진입하는 고정 action. `SpaceRailList` 바로 아래에 둔다 |
-| `RailFooter` | `ActivityRail` 하단의 고정 action 영역. Settings 진입점을 둔다 |
-| `TreeSection` | `PrimarySidebar` 안에서 folder/text/file 계층을 보여주는 section |
-| `RecentSection` | `PrimarySidebar` 안에서 최근 수정된 node를 보여주는 section |
-| `EditorGroupHeader` | 각 `EditorGroup`의 상단 header. node identity와 group action을 담는다 |
-| `EditorViewport` | 각 `EditorGroup`의 실제 preview/editor/file view 영역 |
+| `SpaceRailList` | Scrollable list of accessible spaces inside `ActivityRail`. |
+| `SpaceAddButton` | Always-visible space creation entry directly below `SpaceRailList`. |
+| `RailFooter` | Fixed bottom rail area. Holds Settings. |
+| `FilesSection` | Hierarchical folder/text/file navigation in `PrimarySidebar`. User-facing label: `Files`. |
+| `RecentSection` | Recently updated nodes in `PrimarySidebar`. User-facing label: `Recent`. |
+| `SidebarSectionResizeHandle` | Divider between `FilesSection` and `RecentSection`. Controls their height ratio. |
+| `EditorGroupHeader` | Header for one editor group. Shows node identity and group actions. |
+| `EditorViewport` | Body area inside an editor group. Renders folder, text, file, or empty state. |
 
 ## View terms
 
-| 표준명 | 의미 |
+| Term | Meaning |
 |---|---|
-| `NodeTreeView` | Space 안 folder/text/file tree를 보여주는 view |
-| `InspectorPanel` | 선택된 node의 metadata와 속성을 보여주는 보조 panel |
-| `ReferencesPanel` | 연결 문서, backlink, reference를 보여주는 보조 panel |
-| `OutlineView` | 현재 text의 heading outline을 보여주는 view |
-| `TextEditor` | plain text/markdown 편집기 |
-| `MarkdownPreview` | markdown preview view |
-| `FilePreview` | file metadata 또는 preview view |
+| `InspectorPanel` | Node metadata and properties. |
+| `AgentPanel` | Reserved agent context surface. |
+| `TextPreview` | Read-only text preview surface. |
+| `TextEditor` | Text edit surface. |
+| `MarkdownPreview` | Markdown renderer. |
+| `StructuredPreview` | JSON/JSONL/YAML/TOML tree/source renderer. |
+| `FileDetailView` | File metadata and download surface. |
+| `FolderDetailView` | Folder detail surface. |
 
 ## Naming rules
 
-- layout 이름은 영역의 위치와 책임을 나타낸다.
-- view 이름은 실제로 보여주는 내용을 나타낸다.
-- `PrimarySidebar` 안에 `NodeTreeView`가 들어간다.
-- `AuxiliarySidebar` 안에 `InspectorPanel`, `ReferencesPanel`이 들어간다.
-- `EditorArea` 안에 하나 이상의 `EditorGroup`이 들어가고, 각 `EditorGroup` 안에 `EditorGroupHeader`와 `EditorViewport`가 들어간다.
-- `EditorViewport` 안에는 node 종류와 mode에 따라 `TextEditor`, `MarkdownPreview`, `FilePreview`가 들어간다.
-- 오른쪽 전체 영역은 `AuxiliarySidebar`라고 부른다. `InspectorPanel`은 그 안의 view 중 하나다.
+- Layout names describe where an area lives.
+- View names describe what content they render.
+- Use `FilesSection` for the sidebar file hierarchy. Avoid user-facing `Tree` except for structured data mode labels such as `Tree`/`Source`.
+- Use `AuxiliarySidebar` for the right area. `InspectorPanel` is only one view inside it.
+- Use `EditorGroup` for split panes. Do not call groups tabs or panels.
 
 ## Avoided names
-
-다음 이름은 새 component/state 이름에 사용하지 않는다.
 
 ```text
 LeftPanel
@@ -78,5 +63,8 @@ FilePanel
 MainPanel
 Content
 Body
-Panel  # 단독 사용 금지. InspectorPanel처럼 구체화해서 사용한다.
+Panel      # standalone name; use InspectorPanel/AgentPanel/etc.
+TreeSection
+BottomPanel
+EditorInfoBar
 ```
