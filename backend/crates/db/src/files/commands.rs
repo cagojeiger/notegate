@@ -7,12 +7,13 @@ pub mod checks {
     //! depth bound between the pre-check and the write.
 
     use notegate_core::limits::Limits;
+    use notegate_core::tier::effective_file_tree_limits;
     use notegate_core::{Error, Result};
     use sqlx::PgConnection;
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
-    use crate::to_usize;
+    use crate::{tier_lookup, to_usize};
 
     /// Serialize file-tree mutations in a space. This closes races where two
     /// transactions both observe state below a cap, or one mutation updates a node
@@ -29,6 +30,17 @@ pub mod checks {
             return Err(Error::not_found("space not found"));
         }
         Ok(())
+    }
+
+    /// Compute effective file-tree limits for a live, already-locked space owner.
+    pub async fn effective_limits_for_locked_space(
+        tx: &mut PgConnection,
+        space_id: Uuid,
+        base_limits: Limits,
+    ) -> Result<Limits> {
+        let tier =
+            tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
+        Ok(effective_file_tree_limits(tier, base_limits))
     }
 
     /// A live node's kind + deleted flag, fetched inside a transaction. `None` when
@@ -274,6 +286,7 @@ pub mod create {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
+        let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
         prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
 
         let row = sqlx::query_as::<_, NodeRow>(&format!(
@@ -306,6 +319,7 @@ pub mod create {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
+        let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
         prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
         checks::require_content_budget(&mut tx, space_id, 0, content.byte_len, caps).await?;
 
@@ -358,6 +372,7 @@ pub mod create {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
+        let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
         prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
         checks::require_content_budget(&mut tx, space_id, 0, file.byte_len, caps).await?;
 
@@ -476,6 +491,7 @@ pub mod copy_node {
         } = args;
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
         checks::lock_space(&mut tx, space_id).await?;
+        let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
 
         let source = checks::live_node(&mut tx, space_id, source_node_id)
             .await?
@@ -935,6 +951,7 @@ pub mod move_node {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
+        let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
 
         // The moved node must exist and be live; the root cannot be moved.
         let moved = checks::live_node(&mut tx, space_id, node_id)
@@ -1054,6 +1071,7 @@ pub mod save {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
+        let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
 
         // Current byte length/hash (for budget delta + optimistic guard); the
         // text row is locked so `expected_sha256` is compared atomically with

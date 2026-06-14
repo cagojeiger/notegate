@@ -253,14 +253,13 @@ impl FilesRepo {
         command: &CreateFolder,
         created_by: Uuid,
     ) -> Result<Node> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_folder(
             &self.pool,
             space_id,
             command.parent_node_id,
             &command.name,
             created_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -273,7 +272,6 @@ impl FilesRepo {
         content: &StoredContent,
         created_by: Uuid,
     ) -> Result<(Node, TextObject)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_text(
             &self.pool,
             space_id,
@@ -281,7 +279,7 @@ impl FilesRepo {
             name,
             content,
             created_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -294,7 +292,6 @@ impl FilesRepo {
         file: &StoredFile,
         created_by: Uuid,
     ) -> Result<(Node, FileObject)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_file(
             &self.pool,
             space_id,
@@ -302,7 +299,7 @@ impl FilesRepo {
             name,
             file,
             created_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -315,7 +312,6 @@ impl FilesRepo {
         expected_sha256: Option<&str>,
         updated_by: Uuid,
     ) -> Result<(Node, TextObject)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::save::save_text_content(
             &self.pool,
             space_id,
@@ -323,7 +319,7 @@ impl FilesRepo {
             content,
             expected_sha256,
             updated_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -334,7 +330,6 @@ impl FilesRepo {
         command: &MoveNode,
         updated_by: Uuid,
     ) -> Result<Node> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::move_node::move_node(commands::move_node::MoveNodeArgs {
             pool: &self.pool,
             space_id,
@@ -343,7 +338,7 @@ impl FilesRepo {
             new_name: command.new_name.as_deref(),
             expected_parent_id: command.expected_parent_id,
             updated_by,
-            caps,
+            caps: self.limits,
         })
         .await
     }
@@ -354,7 +349,6 @@ impl FilesRepo {
         command: &CopyNode,
         created_by: Uuid,
     ) -> Result<(Node, CopyCounts)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
             pool: &self.pool,
             space_id,
@@ -363,7 +357,7 @@ impl FilesRepo {
             new_name: &command.new_name,
             recursive: command.recursive,
             created_by,
-            caps,
+            caps: self.limits,
         })
         .await
     }

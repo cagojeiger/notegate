@@ -2,7 +2,7 @@
 
 use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::map_sqlx_error;
@@ -21,6 +21,31 @@ pub(crate) async fn lock_active_user_tier(
     )
     .bind(user_id)
     .fetch_optional(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    tier.as_deref()
+        .map(UserTier::parse_db)
+        .transpose()?
+        .ok_or_else(|| Error::not_found(not_found_message))
+}
+
+/// Lock and load the tier of a live space owner inside a mutation transaction.
+pub(crate) async fn lock_active_space_owner_tier(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    not_found_message: &'static str,
+) -> Result<UserTier> {
+    let tier: Option<String> = sqlx::query_scalar(
+        "SELECT u.tier FROM spaces s \
+         JOIN users u ON u.id = s.owner_user_id \
+         JOIN accounts acc ON acc.id = u.id \
+         WHERE s.id = $1 AND s.deleted_at IS NULL \
+           AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
+         FOR UPDATE OF acc",
+    )
+    .bind(space_id)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
 
