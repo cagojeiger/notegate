@@ -221,9 +221,22 @@ fn push_url_host(hosts: &mut Vec<String>, raw_url: &str) {
     }
 }
 
+fn log_mcp_auth_denied(error: &AuthError, status: StatusCode) {
+    let status = status.as_u16();
+    match error {
+        AuthError::MissingToken => {
+            tracing::debug!(event = "mcp.auth.denied", error = %error, status)
+        }
+        AuthError::Internal => tracing::error!(event = "mcp.auth.denied", error = %error, status),
+        AuthError::InvalidToken | AuthError::NotRegistered | AuthError::Inactive => {
+            tracing::warn!(event = "mcp.auth.denied", error = %error, status);
+        }
+    }
+}
+
 fn mcp_auth_response(state: &AppState, error: AuthError) -> Response {
     let status = status_for_error(&error);
-    tracing::warn!(event = "mcp.auth.denied", error = %error, status = status.as_u16());
+    log_mcp_auth_denied(&error, status);
     let mut response = (status, axum::Json(auth_error_body(state, &error))).into_response();
     if status == StatusCode::UNAUTHORIZED {
         response.headers_mut().insert(

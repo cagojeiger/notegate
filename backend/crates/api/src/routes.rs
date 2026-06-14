@@ -1,11 +1,11 @@
 //! Router assembly and HTTP handlers.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{MatchedPath, State};
 use axum::http::header::{CONTENT_TYPE, HeaderName};
-use axum::http::{HeaderValue, Request, StatusCode};
+use axum::http::{HeaderValue, Method, Request, StatusCode};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::Response;
 use axum::routing::{any, get, post};
@@ -19,8 +19,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::timeout::TimeoutLayer;
-use tower_http::trace::TraceLayer;
-use tracing::{Span, info, info_span};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 
 use crate::auth::bearer::require_bearer;
 use crate::auth::metadata::{
@@ -47,11 +46,7 @@ pub fn app(state: AppState) -> Router {
                 x_request_id.clone(),
                 MakeRequestUuid,
             ))
-            .layer(
-                TraceLayer::new_for_http()
-                    .make_span_with(make_request_span)
-                    .on_response(log_request_end),
-            )
+            .layer(from_fn(log_request))
             .layer(from_fn(add_json_charset))
             .layer(PropagateRequestIdLayer::new(x_request_id)),
     )
@@ -235,31 +230,143 @@ fn is_application_json(value: &HeaderValue) -> bool {
         .unwrap_or(false)
 }
 
-fn log_request_end<B>(response: &axum::http::Response<B>, latency: Duration, _span: &Span) {
-    info!(
-        event = "request.end",
-        status = response.status().as_u16(),
-        latency_ms = latency.as_millis() as u64,
-    );
+const SLOW_REQUEST_LOG_THRESHOLD: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestLogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
 }
 
-fn make_request_span<B>(req: &Request<B>) -> Span {
-    let route = req
+async fn log_request(request: Request<Body>, next: Next) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let route = request
         .extensions()
         .get::<MatchedPath>()
         .map(MatchedPath::as_str)
-        .unwrap_or("");
-    let request_id = req
+        .unwrap_or("")
+        .to_owned();
+    let request_id = request
         .headers()
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    info_span!(
+        .unwrap_or("")
+        .to_owned();
+    let span = info_span!(
         "request",
-        method = %req.method(),
-        route,
-        request_id,
+        method = %method,
+        route = %route,
+        path = %path,
+        request_id = %request_id,
+    );
+
+    async move {
+        let started_at = Instant::now();
+        let response = next.run(request).await;
+        log_request_end(
+            response.status(),
+            started_at.elapsed(),
+            &method,
+            &route,
+            &path,
+        );
+        response
+    }
+    .instrument(span)
+    .await
+}
+
+fn log_request_end(
+    status: StatusCode,
+    latency: Duration,
+    method: &Method,
+    route: &str,
+    path: &str,
+) {
+    let status = status.as_u16();
+    let latency_ms = latency.as_millis() as u64;
+    match classify_request_log(status, latency, method, route, path) {
+        RequestLogLevel::Debug => debug!(event = "request.end", status, latency_ms),
+        RequestLogLevel::Info => info!(event = "request.end", status, latency_ms),
+        RequestLogLevel::Warn => warn!(event = "request.end", status, latency_ms),
+        RequestLogLevel::Error => error!(event = "request.end", status, latency_ms),
+    }
+}
+
+fn classify_request_log(
+    status: u16,
+    latency: Duration,
+    method: &Method,
+    route: &str,
+    path: &str,
+) -> RequestLogLevel {
+    if status >= 500 {
+        return RequestLogLevel::Error;
+    }
+
+    if is_browser_auth_probe(status, method, route, path) {
+        return RequestLogLevel::Debug;
+    }
+
+    if status >= 400 {
+        return RequestLogLevel::Warn;
+    }
+
+    if latency >= SLOW_REQUEST_LOG_THRESHOLD {
+        return RequestLogLevel::Info;
+    }
+
+    if is_control_plane_probe(route, path) {
+        return RequestLogLevel::Debug;
+    }
+
+    if is_mutating_method(method) || is_auth_flow(route, path) || is_mcp_request(route, path) {
+        return RequestLogLevel::Info;
+    }
+
+    if is_static_or_spa_success(status, method, route, path) {
+        return RequestLogLevel::Debug;
+    }
+
+    RequestLogLevel::Debug
+}
+
+fn is_control_plane_probe(route: &str, path: &str) -> bool {
+    matches!(route, "/health" | "/ready") || matches!(path, "/health" | "/ready")
+}
+
+fn is_static_or_spa_success(status: u16, method: &Method, route: &str, path: &str) -> bool {
+    status < 400
+        && method == Method::GET
+        && route.is_empty()
+        && !path.starts_with("/api/")
+        && !path.starts_with("/auth/")
+        && path != "/mcp"
+        && !path.starts_with("/.well-known/")
+}
+
+fn is_mutating_method(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     )
+}
+
+fn is_auth_flow(route: &str, path: &str) -> bool {
+    route.starts_with("/auth/") || path.starts_with("/auth/")
+}
+
+fn is_mcp_request(route: &str, path: &str) -> bool {
+    route == "/mcp" || path == "/mcp"
+}
+
+fn is_browser_auth_probe(status: u16, method: &Method, route: &str, path: &str) -> bool {
+    status == StatusCode::UNAUTHORIZED.as_u16()
+        && method == Method::GET
+        && (route == "/api/v1/me" || path == "/api/v1/me")
 }
 
 #[cfg(test)]
@@ -351,6 +458,138 @@ mod tests {
 
         assert_eq!(first.status(), StatusCode::OK);
         assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn access_log_classification_suppresses_probe_and_normal_get_noise() {
+        assert_eq!(
+            classify_request_log(
+                200,
+                Duration::from_millis(1),
+                &Method::GET,
+                "/health",
+                "/health"
+            ),
+            RequestLogLevel::Debug,
+        );
+        assert_eq!(
+            classify_request_log(
+                200,
+                Duration::from_millis(1),
+                &Method::GET,
+                "/ready",
+                "/ready"
+            ),
+            RequestLogLevel::Debug,
+        );
+        assert_eq!(
+            classify_request_log(
+                200,
+                Duration::from_millis(20),
+                &Method::GET,
+                "/api/v1/spaces",
+                "/api/v1/spaces",
+            ),
+            RequestLogLevel::Debug,
+        );
+        assert_eq!(
+            classify_request_log(
+                200,
+                Duration::from_millis(1),
+                &Method::GET,
+                "",
+                "/assets/app.js"
+            ),
+            RequestLogLevel::Debug,
+        );
+    }
+
+    #[test]
+    fn access_log_classification_keeps_operationally_relevant_requests() {
+        assert_eq!(
+            classify_request_log(
+                201,
+                Duration::from_millis(20),
+                &Method::POST,
+                "/api/v1/spaces",
+                "/api/v1/spaces",
+            ),
+            RequestLogLevel::Info,
+        );
+        assert_eq!(
+            classify_request_log(
+                200,
+                Duration::from_millis(20),
+                &Method::POST,
+                "/mcp",
+                "/mcp"
+            ),
+            RequestLogLevel::Info,
+        );
+        assert_eq!(
+            classify_request_log(
+                307,
+                Duration::from_millis(20),
+                &Method::GET,
+                "/auth/login",
+                "/auth/login",
+            ),
+            RequestLogLevel::Info,
+        );
+        assert_eq!(
+            classify_request_log(
+                307,
+                Duration::from_millis(20),
+                &Method::GET,
+                "",
+                "/auth/login",
+            ),
+            RequestLogLevel::Info,
+        );
+        assert_eq!(
+            classify_request_log(
+                200,
+                Duration::from_secs(2),
+                &Method::GET,
+                "/api/v1/spaces",
+                "/api/v1/spaces",
+            ),
+            RequestLogLevel::Info,
+        );
+    }
+
+    #[test]
+    fn access_log_classification_escalates_failures_but_not_browser_auth_probe() {
+        assert_eq!(
+            classify_request_log(
+                401,
+                Duration::from_millis(1),
+                &Method::GET,
+                "/api/v1/me",
+                "/api/v1/me",
+            ),
+            RequestLogLevel::Debug,
+        );
+        assert_eq!(
+            classify_request_log(
+                404,
+                Duration::from_millis(1),
+                &Method::GET,
+                "/api/v1/spaces/{space_id}",
+                "/api/v1/spaces/missing",
+            ),
+            RequestLogLevel::Warn,
+        );
+        assert_eq!(
+            classify_request_log(
+                500,
+                Duration::from_millis(1),
+                &Method::GET,
+                "/api/v1/spaces",
+                "/api/v1/spaces",
+            ),
+            RequestLogLevel::Error,
+        );
     }
 
     #[tokio::test]
