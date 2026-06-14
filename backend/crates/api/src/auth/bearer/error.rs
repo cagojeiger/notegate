@@ -55,11 +55,7 @@ pub fn auth_error_body(state: &AppState, error: &AuthError) -> serde_json::Value
 pub fn auth_error_response(state: &AppState, error: AuthError) -> Response {
     let status = status_for_error(&error);
     let code = code_for_error(&error);
-    tracing::warn!(
-        event = "auth.denied",
-        error = code,
-        status = status.as_u16()
-    );
+    log_auth_denied(code, status, &error);
     let body = Json(auth_error_body(state, &error));
     let mut response = (status, body).into_response();
     if status == StatusCode::UNAUTHORIZED {
@@ -86,6 +82,17 @@ pub fn status_for_error(error: &AuthError) -> StatusCode {
         AuthError::MissingToken | AuthError::InvalidToken => StatusCode::UNAUTHORIZED,
         AuthError::NotRegistered | AuthError::Inactive => StatusCode::FORBIDDEN,
         AuthError::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+fn log_auth_denied(code: &'static str, status: StatusCode, error: &AuthError) {
+    let status = status.as_u16();
+    match error {
+        AuthError::MissingToken => tracing::debug!(event = "auth.denied", error = code, status),
+        AuthError::Internal => tracing::error!(event = "auth.denied", error = code, status),
+        AuthError::InvalidToken | AuthError::NotRegistered | AuthError::Inactive => {
+            tracing::warn!(event = "auth.denied", error = code, status);
+        }
     }
 }
 
