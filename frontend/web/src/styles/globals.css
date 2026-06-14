@@ -221,6 +221,10 @@ textarea:focus-visible {
   line-height: 1.65;
 }
 
+.ng-code-fallback code {
+  white-space: pre;
+}
+
 .markdown .shiki,
 .markdown .ng-code-fallback {
   margin: 1rem 0;

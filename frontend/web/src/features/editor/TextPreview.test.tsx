@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -9,6 +9,13 @@ describe("TextPreview", () => {
     render(<TextPreview name="note.md" content={"# Hello\n\n- item"} />);
     expect(await screen.findByRole("heading", { name: "Hello" })).toBeInTheDocument();
     expect(screen.getByText("item")).toBeInTheDocument();
+  });
+
+  it("preserves no-language markdown code blocks", async () => {
+    const { container } = render(<TextPreview name="note.md" content={"```\nline 1\nline 2\n```"} />);
+
+    await waitFor(() => expect(container.querySelector("pre.ng-code-fallback")).toBeInTheDocument());
+    expect(container.querySelector("pre.ng-code-fallback")?.textContent).toBe("line 1\nline 2");
   });
 
   it("renders json as a collapsible tree with a source fallback tab", async () => {

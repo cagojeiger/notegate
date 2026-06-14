@@ -9,11 +9,20 @@ const components: Components = {
   pre({ children }) {
     return <>{children}</>;
   },
-  code({ className, children, ...props }) {
+  code({ className, children, node, ...props }) {
     const content = String(children).replace(/\n$/, "");
     const language = /language-(\w+)/.exec(className ?? "")?.[1];
+    const isBlock = Boolean(node?.position && node.position.start.line !== node.position.end.line);
 
     if (!language) {
+      if (isBlock) {
+        return (
+          <pre className="ng-code-fallback" tabIndex={0}>
+            <code>{content}</code>
+          </pre>
+        );
+      }
+
       return <code className={className} {...props}>{children}</code>;
     }
 
