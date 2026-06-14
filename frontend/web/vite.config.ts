@@ -17,6 +17,7 @@ export default defineConfig({
     proxy: {
       "/api": backendProxy,
       "/auth": backendProxy,
+      "/mcp": backendProxy,
       "/.well-known": backendProxy
     }
   }
