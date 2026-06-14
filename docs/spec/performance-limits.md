@@ -5,7 +5,7 @@ Limit은 두 층이다.
 1. **System hard max**: 코드와 DB가 절대 넘기지 않는 제품 상한.
 2. **User tier quota**: user별 실제 사용량 상한. 항상 system hard max 이하이다.
 
-현재 tier는 `tier0`와 `system_max`만 둔다. 신규 user의 기본 tier는 `NOTEGATE_DEFAULT_USER_TIER`로 정하며 값은 `tier0` 또는 `system_max`다. 설정하지 않으면 `system_max`를 사용한다. 운영 배포 전에는 이 값을 `tier0`로 설정한다. 중간 tier는 나중에 추가한다.
+현재 tier는 `tier0`와 `system_max`만 둔다. 신규 user의 기본 tier는 `NOTEGATE_DEFAULT_USER_TIER`로 정하며 값은 `tier0` 또는 `system_max`다. 설정하지 않으면 `system_max`를 사용한다. 운영 배포 전에는 이 값을 `tier0`로 설정한다.
 
 ## HTTP safety limits
 
@@ -37,7 +37,9 @@ oauth_provider_sub_max_chars = 255
 user_display_name_max_chars = 128
 user_email_max_chars = 254
 space_name_max_chars = 63
-space_name_pattern = ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
+space_name_forbidden = '/', ':', control chars, leading/trailing whitespace, '.', '..'
+node_name_max_chars = 128
+node_name_forbidden = '/', control chars, leading/trailing whitespace, '.', '..'
 ```
 
 
@@ -150,6 +152,8 @@ connections_default_limit = 100
 connections_max_limit = 100
 children_default_limit = 100
 children_max_limit = 200
+nodes_default_limit = 50
+nodes_max_limit = 100
 read_default_max_lines = 200
 read_max_lines = 1000
 read_default_max_bytes = 65536          # 64 KiB

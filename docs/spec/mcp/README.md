@@ -6,6 +6,8 @@ MCP는 agent/CLI용 target-first path API다. Tool은 파일 시스템 명령처
 target = space:/absolute/path
 ```
 
+Space name은 Unicode를 허용하지만 `target` 파싱을 위해 `:`는 사용할 수 없다.
+
 노출되는 tool은 다음 6개다.
 
 ```text

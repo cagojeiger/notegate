@@ -311,11 +311,14 @@ mod tests {
             validate_basename("", NodeKind::Text),
             Err(FilesValidationError::Name(ValidationError::Empty))
         );
-        // 128-char folder name is the max; 129 is rejected by the pattern.
-        assert!(validate_basename(&"a".repeat(128), NodeKind::Folder).is_ok());
+        // 128-char folder name is the max; Unicode and internal spaces are allowed.
+        assert!(validate_basename(&"가".repeat(128), NodeKind::Folder).is_ok());
+        assert!(validate_basename("회의 메모.md", NodeKind::Text).is_ok());
         assert_eq!(
-            validate_basename(&"a".repeat(129), NodeKind::Folder),
-            Err(FilesValidationError::Name(ValidationError::Pattern))
+            validate_basename(&"가".repeat(129), NodeKind::Folder),
+            Err(FilesValidationError::Name(ValidationError::TooLong {
+                max: limits::TEXT_NAME_MAX_LEN
+            }))
         );
     }
 
@@ -390,7 +393,7 @@ mod tests {
 
     #[test]
     fn name_error_maps_to_invalid_input() {
-        let err = FilesValidationError::Name(ValidationError::Pattern).into_service_error();
+        let err = FilesValidationError::Name(ValidationError::ContainsSlash).into_service_error();
         assert!(matches!(err, ServiceError::InvalidInput(_)));
     }
 

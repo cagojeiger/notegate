@@ -15,7 +15,7 @@ use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::tier::effective_file_tree_limits;
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
-use notegate_model::{FileObject, Node, Permission, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -24,8 +24,8 @@ use uuid::Uuid;
 use crate::files::{commands, queries};
 use crate::tier_lookup;
 use notegate_model::files::{
-    ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, StoredContent,
-    StoredFile, TextStats,
+    ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, NodeListCursor,
+    NodeListSort, StoredContent, StoredFile, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -56,6 +56,10 @@ impl FilesRepo {
 
     pub async fn node_path(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
         queries::node::node_path(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn ancestor_chain(&self, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
+        queries::node::ancestor_chain(&self.pool, space_id, node_id).await
     }
 
     pub async fn resolve_path(&self, space_id: Uuid, path: &str) -> Result<Option<Uuid>> {
@@ -162,6 +166,32 @@ impl FilesRepo {
         queries::node::paged_children(&self.pool, space_id, parent_node_id, limit, cursor).await
     }
 
+    pub async fn paged_nodes(
+        &self,
+        space_id: Uuid,
+        kind: Option<NodeKind>,
+        sort: NodeListSort,
+        limit: i64,
+        cursor: Option<&NodeListCursor>,
+    ) -> Result<(Vec<Node>, bool)> {
+        let cursor = match cursor {
+            Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
+                Some(queries::node::NodeListDbCursor::UpdatedAtDesc {
+                    updated_at: *updated_at,
+                    id: *id,
+                })
+            }
+            Some(NodeListCursor::NameAsc { name, id, .. }) => {
+                Some(queries::node::NodeListDbCursor::NameAsc {
+                    name: name.as_str(),
+                    id: *id,
+                })
+            }
+            None => None,
+        };
+        queries::node::paged_nodes(&self.pool, space_id, kind, sort, limit, cursor).await
+    }
+
     pub async fn search_node_candidates(
         &self,
         space_id: Uuid,
@@ -223,14 +253,13 @@ impl FilesRepo {
         command: &CreateFolder,
         created_by: Uuid,
     ) -> Result<Node> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_folder(
             &self.pool,
             space_id,
             command.parent_node_id,
             &command.name,
             created_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -243,7 +272,6 @@ impl FilesRepo {
         content: &StoredContent,
         created_by: Uuid,
     ) -> Result<(Node, TextObject)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_text(
             &self.pool,
             space_id,
@@ -251,7 +279,7 @@ impl FilesRepo {
             name,
             content,
             created_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -264,7 +292,6 @@ impl FilesRepo {
         file: &StoredFile,
         created_by: Uuid,
     ) -> Result<(Node, FileObject)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::create::insert_file(
             &self.pool,
             space_id,
@@ -272,7 +299,7 @@ impl FilesRepo {
             name,
             file,
             created_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -285,7 +312,6 @@ impl FilesRepo {
         expected_sha256: Option<&str>,
         updated_by: Uuid,
     ) -> Result<(Node, TextObject)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::save::save_text_content(
             &self.pool,
             space_id,
@@ -293,7 +319,7 @@ impl FilesRepo {
             content,
             expected_sha256,
             updated_by,
-            caps,
+            self.limits,
         )
         .await
     }
@@ -304,7 +330,6 @@ impl FilesRepo {
         command: &MoveNode,
         updated_by: Uuid,
     ) -> Result<Node> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::move_node::move_node(commands::move_node::MoveNodeArgs {
             pool: &self.pool,
             space_id,
@@ -313,7 +338,7 @@ impl FilesRepo {
             new_name: command.new_name.as_deref(),
             expected_parent_id: command.expected_parent_id,
             updated_by,
-            caps,
+            caps: self.limits,
         })
         .await
     }
@@ -324,7 +349,6 @@ impl FilesRepo {
         command: &CopyNode,
         created_by: Uuid,
     ) -> Result<(Node, CopyCounts)> {
-        let caps = self.effective_limits_for_space(space_id).await?;
         commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
             pool: &self.pool,
             space_id,
@@ -333,7 +357,7 @@ impl FilesRepo {
             new_name: &command.new_name,
             recursive: command.recursive,
             created_by,
-            caps,
+            caps: self.limits,
         })
         .await
     }

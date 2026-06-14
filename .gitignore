@@ -16,6 +16,8 @@ config/local.toml
 .omx/
 .codex/
 .sisyphus/
+.sample/
+.playwright-mcp/
 
 # OS
 .DS_Store
@@ -41,3 +43,14 @@ config/local.toml
 frontend/node_modules/
 frontend/dist/
 frontend/.next/
+frontend/**/node_modules/
+frontend/**/dist/
+frontend/**/.vite/
+frontend/**/.turbo/
+frontend/**/*.tsbuildinfo
+
+node_modules/
+
+# Playwright artifacts
+frontend/web/test-results/
+frontend/web/playwright-report/

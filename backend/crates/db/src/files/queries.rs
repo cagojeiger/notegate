@@ -345,8 +345,10 @@ pub mod node {
     //! that walks the parent chain (bounded by `max_path_depth = 7`).
     //! All reads exclude soft-deleted rows unless the function name says otherwise.
 
-    use notegate_core::Result;
-    use notegate_model::Node;
+    use chrono::{DateTime, Utc};
+    use notegate_core::{Error, Result};
+    use notegate_model::files::NodeListSort;
+    use notegate_model::{Node, NodeKind};
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -383,6 +385,35 @@ pub mod node {
     /// terminates well within Postgres limits.
     pub async fn node_path(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
         derive_path(pool, space_id, node_id).await
+    }
+
+    /// Live ancestor chain from root to `node_id`, including the target.
+    ///
+    /// Returns an empty vector when the target is missing or soft-deleted. The
+    /// caller can use the result to reveal a node in a lazily loaded tree.
+    pub async fn ancestor_chain(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
+        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(&format!(
+            "WITH RECURSIVE chain AS ( \
+                SELECT {NODE_COLUMNS}, 0 AS depth \
+                FROM nodes \
+                WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+                UNION ALL \
+                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
+                       n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                       n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
+                FROM nodes n \
+                JOIN chain c ON n.id = c.parent_id \
+                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+            ) \
+            SELECT {NODE_COLUMNS} FROM chain ORDER BY depth DESC"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter().map(NodeRow::into_node).collect()
     }
 
     /// Shared path-derivation CTE used by `node_path` and search result assembly.
@@ -567,6 +598,115 @@ pub mod node {
             .collect::<Result<_>>()?;
         nodes.shrink_to_fit();
         Ok((nodes, has_more))
+    }
+
+    /// A page of live non-root nodes in a space, ordered for list-style views.
+    ///
+    /// This is intentionally space-wide and does not replace `paged_children`,
+    /// which remains the tree/navigation query.
+    pub async fn paged_nodes(
+        pool: &PgPool,
+        space_id: Uuid,
+        kind: Option<NodeKind>,
+        sort: NodeListSort,
+        limit: i64,
+        cursor: Option<NodeListDbCursor<'_>>,
+    ) -> Result<(Vec<Node>, bool)> {
+        let fetch = limit + 1;
+        let kind = kind.map(|kind| kind.as_str().to_owned());
+
+        let rows: Vec<NodeRow> = match (sort, cursor) {
+            (NodeListSort::UpdatedAtDesc, None) => {
+                sqlx::query_as::<_, NodeRow>(&format!(
+                    "SELECT {NODE_COLUMNS} FROM nodes \
+                     WHERE space_id = $1 \
+                       AND deleted_at IS NULL \
+                       AND parent_id IS NOT NULL \
+                       AND ($2::text IS NULL OR kind = $2) \
+                     ORDER BY updated_at DESC, id DESC \
+                     LIMIT $3"
+                ))
+                .bind(space_id)
+                .bind(kind.as_deref())
+                .bind(fetch)
+                .fetch_all(pool)
+                .await
+            }
+            (
+                NodeListSort::UpdatedAtDesc,
+                Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }),
+            ) => {
+                sqlx::query_as::<_, NodeRow>(&format!(
+                    "SELECT {NODE_COLUMNS} FROM nodes \
+                     WHERE space_id = $1 \
+                       AND deleted_at IS NULL \
+                       AND parent_id IS NOT NULL \
+                       AND ($2::text IS NULL OR kind = $2) \
+                       AND (updated_at, id) < ($3, $4) \
+                     ORDER BY updated_at DESC, id DESC \
+                     LIMIT $5"
+                ))
+                .bind(space_id)
+                .bind(kind.as_deref())
+                .bind(updated_at)
+                .bind(id)
+                .bind(fetch)
+                .fetch_all(pool)
+                .await
+            }
+            (NodeListSort::NameAsc, None) => {
+                sqlx::query_as::<_, NodeRow>(&format!(
+                    "SELECT {NODE_COLUMNS} FROM nodes \
+                     WHERE space_id = $1 \
+                       AND deleted_at IS NULL \
+                       AND parent_id IS NOT NULL \
+                       AND ($2::text IS NULL OR kind = $2) \
+                     ORDER BY name, id \
+                     LIMIT $3"
+                ))
+                .bind(space_id)
+                .bind(kind.as_deref())
+                .bind(fetch)
+                .fetch_all(pool)
+                .await
+            }
+            (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { name, id })) => {
+                sqlx::query_as::<_, NodeRow>(&format!(
+                    "SELECT {NODE_COLUMNS} FROM nodes \
+                     WHERE space_id = $1 \
+                       AND deleted_at IS NULL \
+                       AND parent_id IS NOT NULL \
+                       AND ($2::text IS NULL OR kind = $2) \
+                       AND (name, id) > ($3, $4) \
+                     ORDER BY name, id \
+                     LIMIT $5"
+                ))
+                .bind(space_id)
+                .bind(kind.as_deref())
+                .bind(name)
+                .bind(id)
+                .bind(fetch)
+                .fetch_all(pool)
+                .await
+            }
+            _ => return Err(Error::internal("node list cursor sort mismatch")),
+        }
+        .map_err(map_sqlx_error)?;
+
+        let has_more = rows.len() as i64 > limit;
+        let mut nodes: Vec<Node> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(NodeRow::into_node)
+            .collect::<Result<_>>()?;
+        nodes.shrink_to_fit();
+        Ok((nodes, has_more))
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum NodeListDbCursor<'a> {
+        UpdatedAtDesc { updated_at: DateTime<Utc>, id: Uuid },
+        NameAsc { name: &'a str, id: Uuid },
     }
 
     /// The maximum depth of any live descendant relative to `node_id` (0 when there

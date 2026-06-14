@@ -1,0 +1,11 @@
+{
+  "name": "notegate",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "scripts": {
+    "web:dev": "pnpm --filter web dev",
+    "web:build": "pnpm --filter web build",
+    "web:test": "pnpm --filter web test",
+    "web:typecheck": "pnpm --filter web typecheck"
+  }
+}

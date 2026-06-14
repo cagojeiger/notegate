@@ -115,12 +115,31 @@ async fn duplicate_live_sibling_name_is_rejected() -> TestResult {
 }
 
 #[tokio::test]
+async fn unicode_node_names_are_accepted_by_check() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, ws, root) = space_with_root(&db.pool, "unicodenode").await?;
+    insert_child(&db.pool, ws, root, account, "회의 메모.md", "text").await?;
+    insert_child(&db.pool, ws, root, account, ".숨김", "folder").await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn invalid_node_names_are_rejected_by_check() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let (account, ws, root) = space_with_root(&db.pool, "namecheck").await?;
-    for bad in ["has space.md", "..", ".", "a/b.md"] {
+    for bad in [
+        " leading.md",
+        "trailing.md ",
+        "..",
+        ".",
+        "a/b.md",
+        "bad\n.md",
+    ] {
         let res = insert_child(&db.pool, ws, root, account, bad, "text").await;
         assert!(res.is_err(), "node name {bad:?} must be rejected by CHECK");
     }
@@ -182,12 +201,28 @@ async fn space_name_check_and_owner_unique() -> TestResult {
         return Ok(());
     };
     let account = insert_user_account(&db.pool, "wsname", "wsname@example.com").await?;
-    // Invalid space name (space) violates the CHECK.
-    let bad = sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'bad name')")
+    // Unicode and internal spaces are accepted.
+    sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, '개인 노트')")
         .bind(account)
         .execute(&db.pool)
-        .await;
-    assert!(bad.is_err(), "space name with space must be rejected");
+        .await?;
+
+    for bad in [
+        "bad/name",
+        "bad:name",
+        " leading",
+        "trailing ",
+        ".",
+        "..",
+        "bad\nname",
+    ] {
+        let res = sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2)")
+            .bind(account)
+            .bind(bad)
+            .execute(&db.pool)
+            .await;
+        assert!(res.is_err(), "space name {bad:?} must be rejected");
+    }
 
     // Duplicate (owner, name) violates the UNIQUE constraint.
     sqlx::query("INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'personal')")

@@ -5,12 +5,45 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{FileEncryptionMode, FileObject, FileStorageKind, Node, TextObject, TextStorageFormat};
+use crate::{
+    FileEncryptionMode, FileObject, FileStorageKind, Node, NodeKind, TextObject, TextStorageFormat,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListNodesRequest {
+    pub kind: Option<NodeKind>,
+    pub sort: NodeListSort,
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeListSort {
+    UpdatedAtDesc,
+    NameAsc,
+}
+
+impl NodeListSort {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "updated_at_desc" => Some(Self::UpdatedAtDesc),
+            "name_asc" => Some(Self::NameAsc),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UpdatedAtDesc => "updated_at_desc",
+            Self::NameAsc => "name_asc",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,6 +266,21 @@ pub struct ChildrenCursor {
     pub id: Uuid,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "sort", rename_all = "snake_case")]
+pub enum NodeListCursor {
+    UpdatedAtDesc {
+        kind: Option<NodeKind>,
+        updated_at: DateTime<Utc>,
+        id: Uuid,
+    },
+    NameAsc {
+        kind: Option<NodeKind>,
+        name: String,
+        id: Uuid,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenPage {
     pub parent: NodeView,
@@ -240,6 +288,20 @@ pub struct ChildrenPage {
     pub limit: i64,
     pub has_more: bool,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeListPage {
+    pub items: Vec<NodeView>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeReveal {
+    pub ancestors: Vec<NodeView>,
+    pub target: NodeView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

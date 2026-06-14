@@ -39,12 +39,16 @@ pub struct Config {
     #[serde(rename = "public_url")]
     pub notegate_public_url: String,
     /// Public browser OAuth client id registered in authgate.
+    #[serde(default)]
     pub oauth_client_id: String,
     /// Public MCP OAuth client id registered in authgate.
+    #[serde(default)]
     pub mcp_oauth_client_id: String,
     /// Exact redirect URL registered in authgate.
+    #[serde(default)]
     pub oauth_redirect_url: String,
     /// Resource/audience URL for REST and MCP, with trailing slash trimmed.
+    #[serde(default)]
     pub resource_url: String,
     /// Shared JWKS cache TTL.
     #[serde(
@@ -72,6 +76,9 @@ pub struct Config {
     pub browser_session_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
+    /// Optional directory containing the built web dashboard. When set, unknown
+    /// non-API routes fall back to this directory's `index.html`.
+    pub web_dist_dir: Option<String>,
     /// Tier assigned to newly created users.
     #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
     pub default_user_tier: UserTier,
@@ -174,7 +181,16 @@ impl Config {
     fn normalize(&mut self) {
         self.authgate_url = trim_trailing_slashes(&self.authgate_url);
         self.notegate_public_url = trim_trailing_slashes(&self.notegate_public_url);
-        self.resource_url = trim_trailing_slashes(&self.resource_url);
+        self.oauth_redirect_url = if self.oauth_redirect_url.trim().is_empty() {
+            format!("{}/auth/callback", self.notegate_public_url)
+        } else {
+            trim_trailing_slashes(&self.oauth_redirect_url)
+        };
+        self.resource_url = if self.resource_url.trim().is_empty() {
+            format!("{}/mcp", self.notegate_public_url)
+        } else {
+            trim_trailing_slashes(&self.resource_url)
+        };
         self.secure_cookies = secure_cookies_for_redirect(&self.oauth_redirect_url);
     }
 }
@@ -210,8 +226,8 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .try_deserialize::<Config>()
         .map_err(map_config_error)?;
 
-    config.validate().map_err(map_validation_error)?;
     config.normalize();
+    config.validate().map_err(map_validation_error)?;
     Ok(config)
 }
 
@@ -392,6 +408,7 @@ mod tests {
             lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
             openapi_enabled: false,
+            web_dist_dir: None,
             default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
             secure_cookies: false,
@@ -407,6 +424,34 @@ mod tests {
     }
 
     #[test]
+    fn environment_layer_accepts_web_dist_dir() -> crate::Result<()> {
+        let config = load_from_sources(
+            false,
+            test_env(&[
+                ("NOTEGATE_DATABASE_URL", "postgres://env"),
+                ("NOTEGATE_AUTHGATE_URL", "https://auth.env"),
+                ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
+                ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
+                ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
+                ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
+                (
+                    "NOTEGATE_ENC_ROOT_SECRET",
+                    "env-enc-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_LOOKUP_ROOT_KEY_ID", "env-lookup"),
+                (
+                    "NOTEGATE_LOOKUP_ROOT_SECRET",
+                    "env-lookup-root-secret-32-bytes-long",
+                ),
+                ("NOTEGATE_WEB_DIST_DIR", "/app/web"),
+            ]),
+        )?;
+
+        assert_eq!(config.web_dist_dir.as_deref(), Some("/app/web"));
+        Ok(())
+    }
+
+    #[test]
     fn environment_layer_accepts_prefixed_variable_names() -> crate::Result<()> {
         let config = load_from_sources(
             false,
@@ -416,11 +461,6 @@ mod tests {
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
                 ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
-                (
-                    "NOTEGATE_OAUTH_REDIRECT_URL",
-                    "http://localhost:9191/auth/callback",
-                ),
-                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",
@@ -443,6 +483,11 @@ mod tests {
         assert_eq!(config.db_max_connections, 7);
         assert_eq!(config.oauth_client_id, "notegate-web");
         assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
+        assert_eq!(
+            config.oauth_redirect_url,
+            "http://localhost:9191/auth/callback"
+        );
+        assert_eq!(config.resource_url, "http://localhost:9191/mcp");
         assert_eq!(config.default_user_tier, UserTier::Tier0);
         assert_eq!(
             config.jwks_cache_ttl.as_secs(),
@@ -466,11 +511,6 @@ mod tests {
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
                 ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
-                (
-                    "NOTEGATE_OAUTH_REDIRECT_URL",
-                    "http://localhost:9191/auth/callback",
-                ),
-                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",
@@ -503,11 +543,6 @@ mod tests {
                 ("NOTEGATE_PUBLIC_URL", "http://localhost:9191"),
                 ("NOTEGATE_OAUTH_CLIENT_ID", "notegate-web"),
                 ("NOTEGATE_MCP_OAUTH_CLIENT_ID", "notegate-mcp"),
-                (
-                    "NOTEGATE_OAUTH_REDIRECT_URL",
-                    "http://localhost:9191/auth/callback",
-                ),
-                ("NOTEGATE_RESOURCE_URL", "http://localhost:9191/mcp"),
                 ("NOTEGATE_ENC_ROOT_KEY_ID", "env-enc"),
                 (
                     "NOTEGATE_ENC_ROOT_SECRET",

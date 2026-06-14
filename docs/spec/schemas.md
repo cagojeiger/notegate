@@ -92,6 +92,22 @@ type RestNode = {
 
 `byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `storage_kind="object"`는 schema와 DB에는 예약되어 있지만 현재 create path는 `inline_pg`만 생성한다.
 
+## REST node list/reveal envelopes
+
+```ts
+type RestNodeListResponse = {
+  nodes: RestNode[]
+  page: Page
+}
+
+type RestNodeRevealResponse = {
+  ancestors: RestNode[]
+  target: RestNode
+}
+```
+
+`RestNodeRevealResponse.ancestors`는 root부터 target parent까지의 chain이다. Target node는 `target` 필드에만 들어간다.
+
 ## McpNodeSummary
 
 MCP `read`, `search`, `write`, `manage` 결과가 반환하는 path-first node summary다. Content body와 node metadata는 포함하지 않는다.

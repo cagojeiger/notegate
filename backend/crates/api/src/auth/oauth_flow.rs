@@ -9,6 +9,7 @@ use crate::auth::oidc::OidcProvider;
 pub(super) const LOGIN_STATE_COOKIE: &str = "notegate_login_state";
 pub(super) const LOGIN_VERIFIER_COOKIE: &str = "notegate_login_verifier";
 pub(super) const LOGIN_NONCE_COOKIE: &str = "notegate_login_nonce";
+pub(super) const LOGIN_NEXT_COOKIE: &str = "notegate_login_next";
 const FLOW_COOKIE_MAX_AGE_SECS: i64 = 300;
 
 pub(super) struct LoginFlow {
@@ -66,6 +67,7 @@ pub(super) fn clear_flow_cookies(jar: CookieJar, secure: bool) -> CookieJar {
     jar.add(expired_cookie(LOGIN_STATE_COOKIE, secure))
         .add(expired_cookie(LOGIN_VERIFIER_COOKIE, secure))
         .add(expired_cookie(LOGIN_NONCE_COOKIE, secure))
+        .add(expired_cookie(LOGIN_NEXT_COOKIE, secure))
 }
 
 fn expired_cookie(name: &'static str, secure: bool) -> Cookie<'static> {
@@ -86,8 +88,8 @@ mod tests {
     use time::Duration as CookieDuration;
 
     use super::{
-        LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE, clear_flow_cookies,
-        flow_cookie,
+        LOGIN_NEXT_COOKIE, LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE,
+        clear_flow_cookies, flow_cookie,
     };
 
     #[test]
@@ -115,6 +117,7 @@ mod tests {
             LOGIN_STATE_COOKIE,
             LOGIN_VERIFIER_COOKIE,
             LOGIN_NONCE_COOKIE,
+            LOGIN_NEXT_COOKIE,
         ] {
             let cookie = jar.get(name).ok_or("expired cookie missing from jar")?;
             assert_eq!(cookie.value(), "");

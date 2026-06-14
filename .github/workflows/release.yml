@@ -1,12 +1,5 @@
 name: Release
 
-# Release flow:
-# 1. Bump VERSION in a release PR.
-# 2. Merging that PR to main builds/pushes GHCR images, tags vX.Y.Z,
-#    and creates a GitHub Release.
-#
-# amd64 and arm64 are built on native runners and merged into one multi-arch
-# manifest. This mirrors opsgate and avoids slow emulated Rust builds.
 on:
   push:
     branches: [main]
@@ -91,7 +84,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: backend/Dockerfile
+          file: deploy/docker/web.Dockerfile
           platforms: ${{ matrix.platform }}
           cache-from: type=gha,scope=notegate-release-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=notegate-release-${{ matrix.arch }}

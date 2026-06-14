@@ -21,9 +21,10 @@ mod view;
 pub use notegate_model::files::{
     AppendText, ChildrenCursor, ChildrenPage, ChildrenRequest, CopyCounts, CopyNode, CopyResult,
     CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit, EditText, FileContent,
-    FileStats, FileView, LineEdit, MoveNode, NodeView, PatchMode, PatchResult, PatchText,
-    ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent, StoredFile, TextStats,
-    TextView, WriteTarget, WriteText, WriteTextBody,
+    FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor, NodeListPage,
+    NodeListSort, NodeReveal, NodeView, PatchMode, PatchResult, PatchText, ReadContent, ReadResult,
+    ReadText, ReadTextBody, StoredContent, StoredFile, TextStats, TextView, WriteTarget, WriteText,
+    WriteTextBody,
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;

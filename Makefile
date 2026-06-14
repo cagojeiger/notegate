@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build release-check up curl-meta
+.PHONY: fmt check test clippy build frontend-check release-check dev-db web-build up logs curl-meta
 
 fmt:
 	cargo fmt --all --check
@@ -15,11 +15,25 @@ clippy:
 build:
 	cargo build --release --bin notegate-api
 
-release-check: fmt check test clippy build
+frontend-check:
+	pnpm --filter web typecheck
+	pnpm --filter web test
+	pnpm --filter web build
+
+release-check: fmt check test clippy build frontend-check
 	git diff --check
 
+dev-db:
+	docker compose up -d postgres
+
+web-build:
+	docker compose build web
+
 up:
-	docker compose up --build -d
+	docker compose up --build -d --remove-orphans
+
+logs:
+	docker compose logs -f web proxy
 
 curl-meta:
 	curl -fsS http://localhost:9191/health

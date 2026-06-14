@@ -1,0 +1,158 @@
+export type Page = {
+  limit: number;
+  returned: number;
+  has_more: boolean;
+  next_cursor: string | null;
+};
+
+export type Me = {
+  account: {
+    id: string;
+    kind: "user" | "agent";
+    display_name: string;
+  };
+  user?: {
+    email?: string | null;
+  } | null;
+  agent?: {
+    name: string;
+  } | null;
+  capabilities: {
+    can_create_space: boolean;
+    can_manage_agents: boolean;
+  };
+};
+
+export type SpacePermission = "read" | "write";
+
+export type Space = {
+  id: string;
+  name: string;
+  sort_order: number;
+  permission: SpacePermission;
+  root_node_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NodeKind = "folder" | "text" | "file";
+
+export type AccountRef = {
+  id: string;
+  kind: "user" | "agent";
+  display_name: string;
+};
+
+export type RestNode = {
+  id: string;
+  space_id: string;
+  parent_id: string | null;
+  name: string;
+  kind: NodeKind;
+  path: string;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+  has_children: boolean;
+  content_sha256?: string;
+  byte_len?: number;
+  line_count?: number;
+  storage_kind?: "inline_pg" | "object";
+  media_type?: string;
+  original_filename?: string;
+  encryption_mode?: "none" | "client";
+  encryption_metadata?: Record<string, unknown>;
+  created_by: AccountRef;
+  updated_by: AccountRef;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SpacesListResponse = {
+  spaces: Space[];
+  page: Page;
+};
+
+export type RestNodeListResponse = {
+  nodes: RestNode[];
+  page: Page;
+};
+
+export type ChildrenResponse = {
+  parent: {
+    id: string;
+    path: string;
+  };
+  children: RestNode[];
+  page: Page;
+};
+
+export type NodeRevealResponse = {
+  ancestors: RestNode[];
+  target: RestNode;
+};
+
+export type ReadTextResponse = {
+  node: {
+    id: string;
+    path: string;
+  };
+  text:
+    | {
+        node_id: string;
+        storage_format: "plain";
+        content: string;
+        content_sha256: string;
+        byte_len: number;
+        line_count: number;
+        start_line: number;
+        end_line: number;
+        returned_lines: number;
+        truncated: boolean;
+        next_start_line: number | null;
+        updated_by: AccountRef;
+        updated_at: string;
+      }
+    | {
+        node_id: string;
+        storage_format: "encrypted";
+        encrypted_payload: unknown;
+        content_sha256: string;
+        byte_len: number;
+        line_count: number;
+        updated_by: AccountRef;
+        updated_at: string;
+      }
+    | {
+        node_id: string;
+        storage_format: string;
+        unchanged: boolean;
+        content_returned: boolean;
+        content_sha256: string;
+        byte_len: number;
+        line_count: number;
+      };
+};
+
+export type TextResponse = {
+  node: {
+    id: string;
+    path: string;
+  };
+  text: {
+    node_id: string;
+    storage_format: string;
+    content_sha256: string;
+    byte_len: number;
+    line_count: number;
+    updated_by: AccountRef;
+    updated_at: string;
+  };
+};
+
+export type FileResponse = {
+  node: RestNode;
+};
+
+export type MetadataResponse = {
+  metadata: Record<string, unknown>;
+};

@@ -4,8 +4,10 @@ Node API는 Space tree의 node 속성을 다룬다. Content body는 Text/File ca
 
 ```http
 GET    /api/v1/spaces/{space_id}/paths/resolve?path=/notes/state.json
+GET    /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&kind=text&limit=50&cursor=...
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/children?limit=100&cursor=...
+GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
@@ -21,8 +23,10 @@ DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 
 ```ts
 GET /paths/resolve              -> RestNode
+GET /nodes                      -> { nodes: RestNode[], page: Page }
 GET /nodes/{node_id}            -> RestNode
 GET /nodes/{node_id}/children   -> { parent: NodeRef, children: RestNode[], page: Page }
+GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
 POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
 PUT/PATCH /nodes/{id}/metadata  -> RestNode
@@ -31,6 +35,30 @@ DELETE /nodes/{node_id}         -> 204 No Content
 ```
 
 `RestNode`는 UI용 resource shape이므로 metadata, attribution, text/file summary를 포함한다. Text/File content body는 포함하지 않는다.
+
+## List nodes
+
+`GET /nodes`는 tree children API가 아니라 Space 전체 node를 정렬/필터해 반환하는 목록 API다. UI의 최근 수정 목록 같은 list view에서 사용한다.
+
+```ts
+type ListNodesQuery = {
+  kind?: "folder" | "text" | "file"
+  sort?: "updated_at_desc" | "name_asc" // default: updated_at_desc
+  limit?: number
+  cursor?: string
+}
+```
+
+Rules:
+
+- 반환 body는 `{ nodes: RestNode[], page: Page }`다.
+- `sort=updated_at_desc`는 최근 수정 목록의 기본 정렬이다.
+- `sort=name_asc`는 Space 전체 basename 정렬이다. Tree 구조 정렬은 children API가 담당한다.
+- `kind`가 없으면 folder/text/file을 모두 반환한다.
+- Space root node는 목록에서 제외한다. Root는 Space detail의 `root_node_id` 또는 path resolve로 접근한다.
+- Cursor는 opaque string이다. Client는 해석하지 않고 같은 `sort`/`kind` query와 함께 전달한다.
+- Cursor는 생성 당시 `sort`/`kind`에 묶인다. 다른 `sort` 또는 `kind`와 함께 재사용하면 `400 invalid_input`이다.
+- Content body는 반환하지 않는다.
 
 ## Create rules
 
@@ -70,6 +98,24 @@ type MoveNodeBody = {
 - `POST /nodes/{node_id}/move`는 같은 Space 안에서만 parent/name을 변경한다.
 - Folder 삭제는 `recursive=true`가 필요하다.
 - 삭제는 soft delete이며, purge job이 retention 이후 hard delete할 수 있다.
+
+## Reveal node
+
+`GET /nodes/{node_id}/reveal`은 lazy tree UI에서 선택된 node까지 부모 folder들을 펼치기 위한 API다.
+
+```ts
+type RevealResponse = {
+  ancestors: RestNode[] // root부터 target parent까지
+  target: RestNode
+}
+```
+
+Rules:
+
+- `ancestors`는 root node를 포함하고 target node는 포함하지 않는다.
+- `target`은 요청한 live node다.
+- 삭제된 node나 접근 권한이 없는 Space의 node는 반환하지 않는다.
+- FE는 `ancestors` 순서대로 folder를 expand하고 필요한 children page를 로드한 뒤 `target`을 선택한다.
 
 ## Node metadata
 
