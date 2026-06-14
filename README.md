@@ -75,23 +75,23 @@ Services:
 - `web` -> two FE+BE replicas inside the compose network
 - `postgres` -> local database on host port `5433`
 
-The compose stack sets `NOTEGATE_WEB_DIST_DIR=/app/web`, so the web image serves the
+The web image sets `NOTEGATE_WEB_DIST_DIR=/app/web`, so the Rust server serves the
 Vite build copied into `/app/web`.
 
-## Auth/MCP local defaults
+## Auth/MCP settings
 
-Auth/MCP local defaults are configured in `.env.example`:
+Auth/MCP settings are configured from `.env`:
 
 - `NOTEGATE_AUTHGATE_URL=https://authgate.project-jelly.io`
 - `NOTEGATE_PUBLIC_URL=http://localhost:9191`
 - `NOTEGATE_OAUTH_CLIENT_ID=notegate-web`
 - `NOTEGATE_MCP_OAUTH_CLIENT_ID=notegate-mcp`
-- `NOTEGATE_OAUTH_REDIRECT_URL=http://localhost:9191/auth/callback`
-- `NOTEGATE_RESOURCE_URL=http://localhost:9191/mcp`
+- OAuth redirect URL defaults to `${NOTEGATE_PUBLIC_URL}/auth/callback`
+- resource URL defaults to `${NOTEGATE_PUBLIC_URL}/mcp`
 - `NOTEGATE_ENC_ROOT_SECRET` and `NOTEGATE_LOOKUP_ROOT_SECRET` must be at least 32 bytes.
 
 First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login` once to create the
-local notegate user row, then reconnect the MCP client to `NOTEGATE_RESOURCE_URL`.
+local notegate user row, then reconnect the MCP client to `${NOTEGATE_PUBLIC_URL}/mcp`.
 
 On startup, the API idempotently ensures missing active ENC/LOOKUP key epoch rows from
 the configured root key IDs/secrets, then verifies them. If the database already has a
