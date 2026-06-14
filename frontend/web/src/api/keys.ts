@@ -1,4 +1,5 @@
 import type { ApiClient } from "./client";
+import type { Page } from "./types";
 
 export type ApiKeyMetadata = {
   id: string;
@@ -18,7 +19,7 @@ export type MintedKey = { id: string; name: string; token: string; expires_at: s
 
 export type ApiKeyListResponse = {
   keys: ApiKeyMetadata[];
-  page: { limit: number; returned: number; has_more: boolean; next_cursor: string | null };
+  page: Page;
 };
 
 export function listMyKeys(client: ApiClient): Promise<ApiKeyListResponse> {

@@ -21,7 +21,7 @@ describe("createApiClient", () => {
 
   it("normalizes api errors", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: { message: "nope", kind: "forbidden" } }), { status: 403 })
+      new Response(JSON.stringify({ error: "forbidden", kind: "forbidden", message: "nope" }), { status: 403 })
     );
     const client = createApiClient(() => "user-key");
 

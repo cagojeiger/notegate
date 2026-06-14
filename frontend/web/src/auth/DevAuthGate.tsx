@@ -35,7 +35,7 @@ export function DevAuthGate(props: DevAuthGateProps) {
             value={auth.apiKey}
             onChange={(event) => auth.setApiKey(event.target.value)}
             inputClassName="mt-2 bg-bg font-mono text-sm"
-            placeholder="ng_user_..."
+            placeholder="ngk_v1_..."
             autoComplete="off"
           />
           <Button type="submit" className="mt-4 w-full" secondary disabled={!auth.canSubmitApiKey}>Open with API key</Button>

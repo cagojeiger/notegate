@@ -1,6 +1,6 @@
 export type Page = {
   limit: number;
-  count: number;
+  returned: number;
   has_more: boolean;
   next_cursor: string | null;
 };

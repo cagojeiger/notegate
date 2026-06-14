@@ -39,10 +39,10 @@ function mockSettingsApi() {
   });
 }
 
-function renderSettings(activeSpace: Space | null = space) {
+function renderSettings() {
   render(
-    <ApiProvider apiKey="test-key">
-      <SettingsModal activeSpace={activeSpace} onClose={vi.fn()} onSignOut={vi.fn()} />
+    <ApiProvider apiKey="test-key" authCacheKey="test-key:0">
+      <SettingsModal onClose={vi.fn()} onSignOut={vi.fn()} />
     </ApiProvider>
   );
 }

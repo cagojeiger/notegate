@@ -26,9 +26,21 @@ export function App() {
     setSessionRevision((revision) => revision + 1);
   }, []);
 
+  const handleBrowserSessionAuthenticated = useCallback(() => {
+    setSessionRevision((revision) => revision + 1);
+  }, []);
+
+  const authCacheKey = `${apiKey ?? "browser-session"}:${sessionRevision}`;
+
   return (
-    <ApiProvider apiKey={apiKey} onUnauthorized={resetSession}>
-      <AuthBoundary apiKey={apiKey} sessionRevision={sessionRevision} onAuthenticated={handleApiKeyAuthenticated} onSignOut={resetSession} />
+    <ApiProvider apiKey={apiKey} authCacheKey={authCacheKey} onUnauthorized={resetSession}>
+      <AuthBoundary
+        apiKey={apiKey}
+        sessionRevision={sessionRevision}
+        onAuthenticated={handleApiKeyAuthenticated}
+        onBrowserSessionAuthenticated={handleBrowserSessionAuthenticated}
+        onSignOut={resetSession}
+      />
     </ApiProvider>
   );
 }
@@ -37,11 +49,13 @@ function AuthBoundary({
   apiKey,
   sessionRevision,
   onAuthenticated,
+  onBrowserSessionAuthenticated,
   onSignOut
 }: {
   apiKey: string | null;
   sessionRevision: number;
   onAuthenticated: (apiKey: string) => void;
+  onBrowserSessionAuthenticated: () => void;
   onSignOut: () => void;
 }) {
   const meQuery = useSessionQuery(apiKey, sessionRevision);
@@ -62,6 +76,7 @@ function AuthBoundary({
         onAuthenticated={onAuthenticated}
         onSessionAuthenticated={async () => {
           const result = await meQuery.refetch();
+          if (result.isSuccess) onBrowserSessionAuthenticated();
           return result.isSuccess;
         }}
       />

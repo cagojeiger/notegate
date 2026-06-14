@@ -11,7 +11,7 @@ export class ApiError extends Error {
 }
 
 type ErrorLikeBody = {
-  error?: {
+  error?: string | {
     message?: string;
     kind?: string;
   };
@@ -27,7 +27,8 @@ export async function apiErrorFromResponse(response: Response): Promise<ApiError
     body = null;
   }
 
-  const message = body?.error?.message ?? body?.message ?? response.statusText ?? "Request failed";
-  const kind = body?.error?.kind ?? body?.kind ?? null;
+  const nested = typeof body?.error === "object" ? body.error : null;
+  const message = nested?.message ?? body?.message ?? response.statusText ?? "Request failed";
+  const kind = nested?.kind ?? body?.kind ?? (typeof body?.error === "string" ? body.error : null);
   return new ApiError(message, response.status, kind);
 }

@@ -1,10 +1,11 @@
 import type { ApiClient } from "./client";
 import type { ApiKeyListResponse, MintedKey } from "./keys";
+import type { Page } from "./types";
 
 export type Agent = { id: string; name: string; owner_user_id: string };
 export type AgentsListResponse = {
   agents: Agent[];
-  page: { limit: number; returned: number; has_more: boolean; next_cursor: string | null };
+  page: Page;
 };
 
 export function listAgents(client: ApiClient): Promise<AgentsListResponse> {

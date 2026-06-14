@@ -1,4 +1,5 @@
 import type { ApiClient } from "./client";
+import type { Page } from "./types";
 
 export type Permission = "read" | "write";
 
@@ -6,7 +7,7 @@ export type ConnectionAgentRef = { id: string; kind: string; display_name: strin
 export type Connection = { agent: ConnectionAgentRef; permission: string; connected_at: string };
 export type ConnectionListResponse = {
   connections: Connection[];
-  page: { limit: number; returned: number; has_more: boolean; next_cursor: string | null };
+  page: Page;
 };
 
 export function listConnections(client: ApiClient, spaceId: string): Promise<ConnectionListResponse> {

@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-import type { Space } from "../api/types";
 import { Modal, Tabs } from "../shared/ui";
 import { AccountTab } from "./settings/AccountTab";
 import { AgentsTab } from "./settings/AgentsTab";
@@ -12,7 +11,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "agents", label: "Agents" }
 ];
 
-export function SettingsModal({ onClose, onSignOut }: { onClose: () => void; onSignOut: () => void; activeSpace: Space | null }) {
+export function SettingsModal({ onClose, onSignOut }: { onClose: () => void; onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>("account");
   return (
     <Modal title="Settings" onClose={onClose} width="max-w-2xl">

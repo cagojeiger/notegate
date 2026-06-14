@@ -20,7 +20,7 @@ describe("App auth boundary", () => {
   });
 
   it("checks /api/v1/me on mount with the stored API key", async () => {
-    window.sessionStorage.setItem("notegate.devApiKey", "ng_user_test");
+    window.sessionStorage.setItem("notegate.devApiKey", "ngk_v1_test");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(meResponse()), { status: 200 }));
 
     render(<App />);
@@ -35,12 +35,12 @@ describe("App auth boundary", () => {
       })
     );
     const [, init] = fetchMock.mock.calls[0];
-    expect((init?.headers as Headers).get("authorization")).toBe("Bearer ng_user_test");
+    expect((init?.headers as Headers).get("authorization")).toBe("Bearer ngk_v1_test");
   });
 
   it("shows the login gate and clears a stored API key when /me returns 401", async () => {
     window.sessionStorage.setItem("notegate.devApiKey", "expired_key");
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: { message: "unauthorized" } }), { status: 401 }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized", kind: "unauthorized", message: "unauthorized" }), { status: 401 }));
 
     render(<App />);
 

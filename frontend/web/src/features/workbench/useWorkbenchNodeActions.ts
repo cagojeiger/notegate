@@ -48,16 +48,22 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
   function promptCreateNode(kind: "folder" | "text") {
     const parentId = parentForCreate();
     if (!parentId) return;
-    setDialog(createNodeDialog(parentId, kind, (input) => createNodeMutation.mutate(input)));
+    setDialog(createNodeDialog(parentId, kind, async (input) => {
+      await createNodeMutation.mutateAsync(input);
+    }));
   }
 
   function promptCreateInFolder(folder: RestNode, kind: "folder" | "text") {
-    setDialog(createNodeDialog(folder.id, kind, (input) => createNodeMutation.mutate(input)));
+    setDialog(createNodeDialog(folder.id, kind, async (input) => {
+      await createNodeMutation.mutateAsync(input);
+    }));
   }
 
   function uploadInFolder(folder: RestNode, file: File | null) {
     if (!file) return;
-    setDialog(uploadFileDialog(folder.id, file, (input) => uploadFileMutation.mutate(input)));
+    setDialog(uploadFileDialog(folder.id, file, async (input) => {
+      await uploadFileMutation.mutateAsync(input);
+    }));
   }
 
   function collapseTree() {
@@ -66,12 +72,16 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
 
   function promptRenameNode(node: RestNode) {
     if (node.parent_id === null) return;
-    setDialog(renameNodeDialog(node, (renamedNode, name) => updateNodeMutation.mutate({ node: renamedNode, name })));
+    setDialog(renameNodeDialog(node, async (renamedNode, name) => {
+      await updateNodeMutation.mutateAsync({ node: renamedNode, name });
+    }));
   }
 
   function promptMoveNode(node: RestNode) {
     if (node.parent_id === null || !activeSpace) return;
-    setDialog(moveNodeDialog(node, activeSpace, (movedNode, parentId) => moveNodeMutation.mutate({ node: movedNode, parentId }, { onSuccess: () => addExpanded([parentId]) })));
+    setDialog(moveNodeDialog(node, activeSpace, async (movedNode, parentId) => {
+      await moveNodeMutation.mutateAsync({ node: movedNode, parentId }, { onSuccess: () => addExpanded([parentId]) });
+    }));
   }
 
   function moveNodeToFolder(node: RestNode, folder: RestNode) {
@@ -81,19 +91,25 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, setDialog }: 
 
   function confirmDeleteNode(node: RestNode) {
     if (node.parent_id === null) return;
-    setDialog(deleteNodeDialog(node, (deletedNode, recursive) => deleteNodeMutation.mutate({ node: deletedNode, recursive })));
+    setDialog(deleteNodeDialog(node, async (deletedNode, recursive) => {
+      await deleteNodeMutation.mutateAsync({ node: deletedNode, recursive });
+    }));
   }
 
   function handleFileSelected(file: File | null) {
     const parentId = parentForCreate();
     if (!file || !parentId) return;
-    setDialog(uploadFileDialog(parentId, file, (input) => uploadFileMutation.mutate(input)));
+    setDialog(uploadFileDialog(parentId, file, async (input) => {
+      await uploadFileMutation.mutateAsync(input);
+    }));
   }
 
   function promptReplaceMetadata() {
     if (!activeNode) return;
     const node = activeNode;
-    setDialog(metadataDialog(node, (metadataNode, metadata) => replaceMetadataMutation.mutate({ node: metadataNode, metadata })));
+    setDialog(metadataDialog(node, async (metadataNode, metadata) => {
+      await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
+    }));
   }
 
   return {

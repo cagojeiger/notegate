@@ -34,7 +34,9 @@ export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceAction
   }
 
   function promptCreateSpace() {
-    setDialog(newSpaceDialog((name) => createSpaceMutation.mutate(name)));
+    setDialog(newSpaceDialog(async (name) => {
+      await createSpaceMutation.mutateAsync(name);
+    }));
   }
 
   function reorderSpaces(spaces: Space[]) {
@@ -44,13 +46,17 @@ export function useWorkbenchSpaceActions({ activeSpace, setDialog }: SpaceAction
   function promptRenameSpace() {
     if (!activeSpace) return;
     const space = activeSpace;
-    setDialog(renameSpaceDialog(space, (spaceId, name) => updateSpaceMutation.mutate({ spaceId, name })));
+    setDialog(renameSpaceDialog(space, async (spaceId, name) => {
+      await updateSpaceMutation.mutateAsync({ spaceId, name });
+    }));
   }
 
   function confirmDeleteSpace() {
     if (!activeSpace) return;
     const space = activeSpace;
-    setDialog(deleteSpaceDialog(space, (spaceId) => deleteSpaceMutation.mutate(spaceId)));
+    setDialog(deleteSpaceDialog(space, async (spaceId) => {
+      await deleteSpaceMutation.mutateAsync(spaceId);
+    }));
   }
 
   return { selectSpace, reorderSpaces, promptCreateSpace, promptRenameSpace, confirmDeleteSpace };

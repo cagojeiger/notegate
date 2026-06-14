@@ -2,6 +2,7 @@ import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button, Card, EmptyState, Modal } from "../../shared/ui";
+import { dialogErrorMessage } from "./dialogErrors";
 import type { AppDialog } from "./dialogTypes";
 import { useMovePickerChildren } from "./useDialogQueries";
 
@@ -10,6 +11,8 @@ type Crumb = { id: string; name: string };
 export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { kind: "move" }>; onClose: () => void }) {
   const { node, space } = dialog;
   const [stack, setStack] = useState<Crumb[]>([{ id: space.root_node_id, name: "/" }]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const current = stack[stack.length - 1];
   const childrenQuery = useMovePickerChildren(space.id, current.id);
   // Only folders are valid destinations; never let the user descend into the
@@ -19,6 +22,19 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
     [childrenQuery.data, node.id]
   );
   const alreadyHere = node.parent_id === current.id;
+  async function moveHere() {
+    if (alreadyHere || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await dialog.onMove(current.id);
+      onClose();
+    } catch (moveError) {
+      setError(dialogErrorMessage(moveError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
   return (
     <Modal
       title={`Move "${node.name}"`}
@@ -26,7 +42,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
       footer={
         <>
           <Button secondary onClick={onClose}>Cancel</Button>
-          <Button onClick={() => { dialog.onMove(current.id); onClose(); }} disabled={alreadyHere}>Move here</Button>
+          <Button onClick={() => void moveHere()} disabled={alreadyHere || submitting}>Move here</Button>
         </>
       }
     >
@@ -64,6 +80,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
         )}
       </Card>
       <p className="mt-3 text-xs text-muted">Destination: <span className="font-mono text-text">{current.name === "/" ? "/" : current.name}</span>{alreadyHere ? " (already here)" : ""}</p>
+      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
     </Modal>
   );
 }

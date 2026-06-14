@@ -82,7 +82,7 @@ export function AppShell({ onSignOut }: AppShellProps) {
       <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenSettings={() => actions.setSettingsOpen(true)} />
       <StatusBar activeSpace={workbench.activeSpace} />
       <Toast />
-      {workbench.settingsOpen ? <SettingsModal onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} activeSpace={workbench.activeSpace} /> : null}
+      {workbench.settingsOpen ? <SettingsModal onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />
     </div>
   );

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -36,7 +36,21 @@ describe("DialogHost", () => {
     await user.click(create);
 
     expect(onSubmit).toHaveBeenCalledWith("daily.md");
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps prompt dialogs open when submit fails", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockRejectedValue(new Error("name already exists"));
+    const onClose = vi.fn();
+
+    render(<DialogHost dialog={{ kind: "prompt", title: "New text", label: "Name", initial: "", submitLabel: "Create", onSubmit }} onClose={onClose} />);
+
+    await user.type(screen.getByLabelText("Name"), "daily.md");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByText("name already exists")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("calls confirm action then closes", async () => {
@@ -48,7 +62,19 @@ describe("DialogHost", () => {
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps confirm dialogs open when confirm fails", async () => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn().mockRejectedValue(new Error("delete failed"));
+    const onClose = vi.fn();
+
+    render(<DialogHost dialog={{ kind: "confirm", title: "Delete", message: "Delete this node?", danger: true, confirmLabel: "Delete", onConfirm }} onClose={onClose} />);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText("delete failed")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("validates metadata JSON before saving", async () => {
@@ -72,6 +98,6 @@ describe("DialogHost", () => {
     await user.click(save);
 
     expect(onSave).toHaveBeenCalledWith({ title: "updated" });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
