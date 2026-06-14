@@ -70,6 +70,8 @@ describe("SettingsModal", () => {
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.getByText("MCP Connection")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
     expect(screen.getByText("My API Keys")).toBeInTheDocument();
     expect(await screen.findByText("No user API keys.")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "API Keys" })).not.toBeInTheDocument();

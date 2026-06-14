@@ -200,6 +200,7 @@ Account shows:
 
 - current user/account
 - theme control
+- MCP server URL and auth guidance
 - user API keys
 - sign out
 
@@ -214,5 +215,6 @@ Rules:
 
 - User API keys belong in Account.
 - Agent API keys belong under the agent that owns them.
+- MCP connection guidance belongs in Account because it explains how external clients authenticate to this Notegate server.
 - Connections are managed inside the expanded agent, not as a separate top-level tab.
 - `scopes` are not shown because the current backend policy requires empty scopes.
