@@ -47,7 +47,7 @@ services:
     scale: 2
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: deploy/docker/web.Dockerfile
     environment:
       <<: *web-environment
     expose:
