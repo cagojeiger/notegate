@@ -11,6 +11,7 @@ import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { NodeActions } from "./types";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 export function TextEditorView({ active, node, latestNode, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu?: (node: RestNode, event: MouseEvent) => void }) {
   const textQuery = useTextDocument(node);
@@ -170,7 +171,10 @@ function isEncryptedTextContent(text: TextContent | undefined): text is Extract<
 
 function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const gutterRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lineCount = Math.max(1, value.split("\n").length);
+
+  useResetHorizontalScrollOnGrow(textareaRef);
 
   return (
     <div className="flex min-h-0 flex-1 bg-[var(--ng-editor)] font-mono text-sm leading-6 text-text">
@@ -180,6 +184,7 @@ function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (v
         ))}
       </div>
       <textarea
+        ref={textareaRef}
         aria-label="Edit text content"
         wrap="off"
         className="min-h-0 flex-1 resize-none overflow-auto bg-transparent px-5 py-8 font-mono text-sm leading-6 text-text outline-none"

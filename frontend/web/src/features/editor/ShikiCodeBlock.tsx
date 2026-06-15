@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { useResetHorizontalScrollDescendantsOnGrow, useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 const LANGUAGE_ALIASES: Record<string, string> = {
   md: "markdown",
@@ -34,11 +36,25 @@ export function ShikiCodeBlock({ code, language = "text", className = "" }: { co
   }, [code, language]);
 
   if (html && !failed) {
-    return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+    return <HighlightedCodeBlock className={className} html={html} />;
   }
 
+  return <CodeFallback code={code} className={className} />;
+}
+
+function HighlightedCodeBlock({ className, html }: { className: string; html: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useResetHorizontalScrollDescendantsOnGrow(containerRef, ".shiki, .ng-code-fallback");
+
+  return <div ref={containerRef} className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function CodeFallback({ code, className }: { code: string; className: string }) {
+  const preRef = useRef<HTMLPreElement | null>(null);
+  useResetHorizontalScrollOnGrow(preRef);
+
   return (
-    <pre className={`ng-code-fallback ${className}`} tabIndex={0}>
+    <pre ref={preRef} className={`ng-code-fallback ${className}`} tabIndex={0}>
       <code>{code}</code>
     </pre>
   );

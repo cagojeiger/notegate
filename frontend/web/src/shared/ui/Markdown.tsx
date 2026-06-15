@@ -1,9 +1,11 @@
 import type { Components } from "react-markdown";
+import { useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { MermaidBlock } from "../../features/editor/MermaidBlock";
 import { ShikiCodeBlock } from "../../features/editor/ShikiCodeBlock";
+import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHorizontalScrollOnGrow";
 
 const components: Components = {
   pre({ children }) {
@@ -16,11 +18,7 @@ const components: Components = {
 
     if (!language) {
       if (isBlock) {
-        return (
-          <pre className="ng-code-fallback" tabIndex={0}>
-            <code>{content}</code>
-          </pre>
-        );
+        return <CodeFallback content={content} />;
       }
 
       return <code className={className} {...props}>{children}</code>;
@@ -41,5 +39,16 @@ export function Markdown({ content }: { content: string }) {
     <div className="markdown">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{content}</ReactMarkdown>
     </div>
+  );
+}
+
+function CodeFallback({ content }: { content: string }) {
+  const preRef = useRef<HTMLPreElement | null>(null);
+  useResetHorizontalScrollOnGrow(preRef);
+
+  return (
+    <pre ref={preRef} className="ng-code-fallback" tabIndex={0}>
+      <code>{content}</code>
+    </pre>
   );
 }

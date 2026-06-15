@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -126,6 +126,64 @@ describe("TextEditorView", () => {
     expect(screen.getByText("This document changed outside this editor.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reload latest" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Keep editing" })).toBeInTheDocument();
+  });
+
+  it("resets horizontal edit scroll when the editor grows wider", () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "clientWidth");
+    let triggerResize: (() => void) | null = null;
+    let textareaWidth = 320;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) {
+        triggerResize = () => callback([], this as unknown as ResizeObserver);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    } as typeof ResizeObserver;
+    Object.defineProperty(HTMLTextAreaElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => textareaWidth
+    });
+
+    try {
+      vi.mocked(useTextDocument).mockReturnValue({
+        data: { ...partialText, text: { ...partialText.text, content: "long line without wrapping", truncated: false, next_start_line: null } },
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+        refetch: vi.fn()
+      } as never);
+      render(
+        <TextEditorView
+          active
+          node={node}
+          mode="edit"
+          canWriteActiveSpace
+          canClose={false}
+          onClose={vi.fn()}
+          onSetMode={vi.fn()}
+          onRenameNode={vi.fn()}
+          onMoveNode={vi.fn()}
+          onDeleteNode={vi.fn()}
+        />
+      );
+
+      const textarea = screen.getByRole("textbox", { name: /edit text content/i });
+
+      textarea.scrollLeft = 120;
+      textareaWidth = 240;
+      act(() => triggerResize?.());
+      expect(textarea.scrollLeft).toBe(120);
+
+      textareaWidth = 480;
+      act(() => triggerResize?.());
+      expect(textarea.scrollLeft).toBe(0);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+      if (originalClientWidth) Object.defineProperty(HTMLTextAreaElement.prototype, "clientWidth", originalClientWidth);
+      else delete (HTMLTextAreaElement.prototype as unknown as { clientWidth?: number }).clientWidth;
+    }
   });
 
 });
