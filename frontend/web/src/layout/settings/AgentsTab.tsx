@@ -93,7 +93,7 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
 
 function AgentKeyManager({ agentId }: { agentId: string }) {
   const keyManagerProps = useAgentKeyManagerProps(agentId);
-  return <KeyManager {...keyManagerProps} emptyLabel="No keys for this agent." />;
+  return <KeyManager {...keyManagerProps} emptyLabel="No keys for this agent." maxTtlDays={365} />;
 }
 
 function AgentSpaceAccess({ agentId }: { agentId: string }) {

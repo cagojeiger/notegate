@@ -8,25 +8,27 @@ import { Button, Card, EmptyState, IconButton, SelectField, TextField } from "..
 import { useUiStore } from "../../stores/uiStore";
 import { useApiKeysQuery, useCreateApiKeyMutation, useRevokeApiKeyMutation } from "./useSettingsQueries";
 
-// Backend caps API-key lifetime to within 30 days.
-const EXPIRY_OPTIONS = [
-  { label: "7 days", days: 7 },
-  { label: "14 days", days: 14 },
-  { label: "30 days", days: 30 }
-];
+function expiryOptions(maxTtlDays: number) {
+  const presets = maxTtlDays > 30 ? [7, 14, 30, 90, 180, maxTtlDays] : [7, 14, maxTtlDays];
+  return Array.from(new Set(presets.filter((days) => days <= maxTtlDays))).map((days) => ({
+    label: `${days} days`,
+    days
+  }));
+}
 
 // Shared list/create/revoke UI for both user keys (/me/keys) and agent keys.
-export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No active keys." }: {
+export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No active keys.", maxTtlDays = 30 }: {
   queryKey: QueryKey;
   list: () => Promise<ApiKeyListResponse>;
   create: (input: { name: string; expires_at: string }) => Promise<MintedKey>;
   revoke: (id: string) => Promise<void>;
   emptyLabel?: string;
+  maxTtlDays?: number;
 }) {
   const showToast = useUiStore((state) => state.showToast);
   const keysQuery = useApiKeysQuery(queryKey, list);
   const [name, setName] = useState("");
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(Math.min(30, maxTtlDays));
   const [created, setCreated] = useState<MintedKey | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
@@ -36,9 +38,17 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
   });
   const revokeMutation = useRevokeApiKeyMutation(queryKey, revoke, () => setConfirmId(null));
 
+  const canCreate = name.trim().length > 0 && !createMutation.isPending;
+  const options = expiryOptions(maxTtlDays);
+
   function createInput() {
-    // 5-min buffer keeps the 30-day option within the server limit despite clock skew.
+    // 5-min buffer keeps max-duration selections within the server limit despite clock skew.
     return { name: name.trim(), expires_at: new Date(Date.now() + days * 86_400_000 - 300_000).toISOString() };
+  }
+
+  function createKey() {
+    if (!canCreate) return;
+    createMutation.mutate(createInput());
   }
 
   async function copyCreatedToken() {
@@ -67,13 +77,13 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
           className="min-w-0 flex-1"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(createInput()); }}
+          onKeyDown={(e) => { if (e.key === "Enter") createKey(); }}
           placeholder="e.g. cli, ci, claude-test"
         />
-        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-32">
-          {EXPIRY_OPTIONS.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
+        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-36">
+          {options.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
         </SelectField>
-        <Button onClick={() => createMutation.mutate(createInput())} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+        <Button onClick={createKey} disabled={!canCreate}><Plus size={15} /> Create</Button>
       </div>
 
       {keysQuery.isLoading ? (
