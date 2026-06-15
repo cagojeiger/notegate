@@ -11,7 +11,7 @@ export function TitleBar({ activeSpace, theme, primarySidebarOpen, auxiliaryOpen
   const SplitIcon = editorGroupCount >= 3 ? Columns3 : editorGroupCount === 2 ? Columns2 : Square;
   const splitLabel = atMaxGroups ? `Maximum ${MAX_EDITOR_GROUPS} editor groups` : `Split editor (${editorGroupCount}/${MAX_EDITOR_GROUPS})`;
   return (
-    <header className="flex h-12 items-center justify-between border-b border-seam bg-surface px-3">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-seam bg-surface px-3 max-md:h-[calc(3rem+env(safe-area-inset-top))] max-md:pt-[env(safe-area-inset-top)]">
       <div className="flex min-w-0 items-center gap-2">
         <div className="grid size-7 place-items-center rounded-xl bg-text text-sm font-semibold text-bg">N</div>
         <span className="font-semibold tracking-tight">Notegate</span>
