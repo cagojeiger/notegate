@@ -1,4 +1,6 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+
+import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 export function MermaidBlock({ code }: { code: string }) {
   const reactId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
@@ -36,13 +38,20 @@ export function MermaidBlock({ code }: { code: string }) {
   }
 
   if (error) {
-    return (
-      <div className="ng-mermaid-error">
-        <div className="mb-2 font-medium text-danger">Mermaid diagram could not be rendered.</div>
-        <pre>{code}</pre>
-      </div>
-    );
+    return <MermaidError code={code} />;
   }
 
   return <div className="ng-mermaid-loading">Rendering diagram…</div>;
+}
+
+function MermaidError({ code }: { code: string }) {
+  const preRef = useRef<HTMLPreElement | null>(null);
+  useResetHorizontalScrollOnGrow(preRef);
+
+  return (
+    <div className="ng-mermaid-error">
+      <div className="mb-2 font-medium text-danger">Mermaid diagram could not be rendered.</div>
+      <pre ref={preRef}>{code}</pre>
+    </div>
+  );
 }
