@@ -59,4 +59,11 @@ describe("TitleBar", () => {
     expect(split).toBeDisabled();
     expect(props.onAddGroup).not.toHaveBeenCalled();
   });
+
+  it("accounts for mobile top safe area", () => {
+    renderTitleBar();
+
+    expect(document.querySelector("header")).toHaveClass("max-md:h-[calc(3rem+env(safe-area-inset-top))]");
+    expect(document.querySelector("header")).toHaveClass("max-md:pt-[env(safe-area-inset-top)]");
+  });
 });

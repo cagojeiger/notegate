@@ -6,7 +6,7 @@ import type { Space } from "../../api/types";
 // Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 01-layout).
 export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSpace, onCreateSpace, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenSettings: () => void }) {
   return (
-    <nav aria-label="Spaces" className="flex h-14 shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 py-2 md:hidden">
+    <nav aria-label="Spaces" className="flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
       <div className="flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto">
         {spaces.map((space) => (
           <button
