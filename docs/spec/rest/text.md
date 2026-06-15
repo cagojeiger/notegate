@@ -56,6 +56,7 @@ type PatchTextMeta = TextMeta & {
 - plain Text는 `start_line`, `max_lines`, `max_bytes`를 적용해 content slice를 반환한다.
 - encrypted Text는 line slicing을 적용하지 않고 encrypted payload 전체를 반환한다.
 - `if_none_match_sha256`이 저장된 content hash와 일치하면 content body 대신 `unchanged=true` 응답을 반환한다.
+- Markdown Text의 leading YAML frontmatter는 content 그대로 반환한다. 서버는 frontmatter를 Node `metadata`로 해석하지 않는다.
 
 ## PUT/PATCH rules
 
@@ -63,6 +64,7 @@ type PatchTextMeta = TextMeta & {
 - `storage_format`은 `plain` 또는 `encrypted`다. 생략하면 `plain`이다.
 - plain content는 UTF-8이다.
 - `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 service layer의 공통 규칙으로 plain 저장 결과를 문법 검증한다. 검증은 node name extension 기준이며 schema validation은 하지 않는다.
+- `.md`/`.markdown` Text의 leading YAML frontmatter는 Markdown content convention이다. 저장 시 frontmatter를 제거하거나 Node `metadata`에 동기화하지 않는다.
 - encrypted payload는 JSON object이며 서버가 복호화하지 않는다.
 - `PUT`은 plain/encrypted 전체 교체를 수행한다.
 - `PATCH`는 plain Text 전용 string replacement 방식이다. 기본 `mode`는 `unique`이며 각 `old_text`는 정확히 한 번만 매칭되어야 한다. `first`와 `all` mode를 명시할 수 있다.

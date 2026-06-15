@@ -11,6 +11,46 @@ describe("TextPreview", () => {
     expect(screen.getByText("item")).toBeInTheDocument();
   });
 
+  it("renders markdown frontmatter as properties instead of prose", async () => {
+    const { container } = render(
+      <TextPreview
+        name="terra-client.md"
+        content={[
+          "---",
+          "repo: terra-pdf",
+          "category: PDF 처리 · 번역 엔진 (분산)",
+          "visibility: internal",
+          "tags:",
+          "  - pdf",
+          "  - translation",
+          "---",
+          "",
+          "# terra-pdf"
+        ].join("\n")}
+      />
+    );
+
+    const properties = await screen.findByRole("region", { name: "Properties" });
+    expect(properties).toHaveTextContent("repo");
+    expect(properties).toHaveTextContent("terra-pdf");
+    expect(properties).toHaveTextContent("category");
+    expect(properties).toHaveTextContent("PDF 처리 · 번역 엔진 (분산)");
+    expect(properties).toHaveTextContent("tags");
+    expect(properties).toHaveTextContent("pdf, translation");
+    expect(await screen.findByRole("heading", { name: "terra-pdf" })).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("repo: terra-pdf");
+    expect(container).not.toHaveTextContent("---");
+  });
+
+  it("leaves non-object frontmatter as markdown content", async () => {
+    const { container } = render(<TextPreview name="note.md" content={"---\n- one\n---\n\n# Still markdown"} />);
+
+    expect(await screen.findByText("one")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Still markdown" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Properties" })).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".markdown hr")).toHaveLength(2);
+  });
+
   it("preserves no-language markdown code blocks", async () => {
     const { container } = render(<TextPreview name="note.md" content={"```\nline 1\nline 2\n```"} />);
 

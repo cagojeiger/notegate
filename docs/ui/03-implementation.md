@@ -131,7 +131,7 @@ frontend/web/src/design/theme.css
 | TitleBar | 중앙은 비우고 layout/theme controls는 오른쪽에 둔다 |
 | ActivityRail | selected space, add-space, settings 위치를 명확히 둔다 |
 | PrimarySidebar | source-list density, row border 없음, subtle hover/selected |
-| EditorArea | plain text는 메모처럼, markdown/code/mermaid/structured preview 지원 |
+| EditorArea | plain text는 메모처럼, markdown frontmatter/code/mermaid/structured preview 지원 |
 | AuxiliarySidebar | 빈 Inspector도 보여주고 metadata warning은 과하게 강조하지 않는다 |
 
 ## Tests
