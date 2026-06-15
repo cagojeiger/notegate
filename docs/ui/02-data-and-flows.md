@@ -217,6 +217,8 @@ file   -> node detail + file metadata/download
 - text preview가 기본이다.
 - plain text는 단순 메모처럼 보여준다.
 - markdown은 GFM, code highlight, Mermaid를 지원한다.
+- markdown preview는 leading YAML frontmatter object를 Obsidian-style Properties로 표시하고 raw YAML block은 본문 prose로 렌더링하지 않는다.
+- markdown frontmatter는 Text content이며 Inspector metadata와 동기화하지 않는다.
 - JSON/JSONL/YAML/TOML은 Tree/Source view를 제공한다.
 - structured tree는 기본 expanded 상태다.
 - edit mode는 line number를 보여준다.

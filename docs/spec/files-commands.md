@@ -58,6 +58,7 @@ edit   line 기반 insert/replace/delete 적용
 - 여러 patch/edit은 원본 기준으로 검증한 뒤 적용한다.
 - `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 service layer에서 `write`/`append`/`patch`/`edit`의 최종 plain content를 저장하기 전에 문법 검증한다. REST, MCP, future CLI는 이 공통 규칙을 공유한다.
 - 구조화 Text 검증은 file name extension 기준이며 schema validation은 하지 않는다.
+- Markdown Text의 leading YAML frontmatter는 plain Text content의 일부다. MCP/CLI command는 이를 Node metadata로 변환하지 않는다.
 - `expected_sha256`이 주어지면 저장된 content hash와 일치해야 한다.
 
 ## File commands

@@ -7,6 +7,7 @@
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Text content는 plain 또는 client-side encrypted payload로 저장한다.
 - Node metadata는 content가 아니며 암호화 대상이 아니다.
+- Markdown frontmatter는 Text content 안의 YAML block이다. encrypted Text 안에 있으면 content와 함께 client-side encrypted payload에 포함된다.
 
 ## Root key domains
 

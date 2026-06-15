@@ -135,6 +135,7 @@ Rules:
 - `metadata`는 content가 아니며 Text/File 본문 암호화 대상이 아니다.
 - 민감한 값은 `metadata`에 넣지 않는다.
 - `metadata`는 JSON object만 허용한다.
+- Markdown Text의 YAML frontmatter는 문서 content이며 Node `metadata`가 아니다. REST metadata API는 frontmatter를 읽거나 쓰지 않는다.
 
 Update rules:
 
