@@ -5,7 +5,8 @@ use std::sync::Arc;
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
-    AccountRepo, AgentRepo, ApiKeyRepo, ConnectionRepo, FilesRepo, PgPool, SpaceRepo,
+    AccountRepo, AgentRepo, ApiKeyRepo, BrowserSessionRepo, ConnectionRepo, FilesRepo, PgPool,
+    SpaceRepo,
 };
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
@@ -49,6 +50,7 @@ pub struct AppState {
     pub search: Search,
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
+    pub browser_sessions: BrowserSessionRepo,
 }
 
 impl AppState {
@@ -89,6 +91,11 @@ impl AppState {
             pii_crypto.clone(),
             config.default_user_tier,
         );
+        let browser_sessions = BrowserSessionRepo::with_lookup_key(
+            db.clone(),
+            pii_crypto.lookup_key_id(),
+            pii_crypto.version(),
+        );
         Self {
             db,
             config,
@@ -104,6 +111,7 @@ impl AppState {
             files,
             search,
             accounts,
+            browser_sessions,
         }
     }
 }

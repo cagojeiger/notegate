@@ -1,7 +1,6 @@
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::header::{ORIGIN, REFERER};
-use axum::http::{HeaderMap, Method, Request};
+use axum::http::{Method, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use notegate_model::Channel;
@@ -10,6 +9,7 @@ use crate::auth::api_key::verify_api_key;
 use crate::auth::bearer::{
     AuthError, auth_error_response, extract_bearer, extract_cookie_value, verify_bearer,
 };
+use crate::auth::origin::has_trusted_browser_origin;
 use crate::auth::session::{BROWSER_SESSION_COOKIE, verify_browser_session};
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -65,28 +65,4 @@ async fn verify_request_caller(
 
 fn is_unsafe_method(method: &Method) -> bool {
     !matches!(method, &Method::GET | &Method::HEAD | &Method::OPTIONS)
-}
-
-fn has_trusted_browser_origin(headers: &HeaderMap, state: &AppState) -> bool {
-    headers
-        .get(ORIGIN)
-        .and_then(|value| value.to_str().ok())
-        .or_else(|| headers.get(REFERER).and_then(|value| value.to_str().ok()))
-        .is_some_and(|source| {
-            same_origin(source, &state.config.notegate_public_url)
-                || same_origin(source, &state.config.resource_url)
-        })
-}
-
-fn same_origin(source: &str, trusted: &str) -> bool {
-    let Ok(source) = url::Url::parse(source) else {
-        return false;
-    };
-    let Ok(trusted) = url::Url::parse(trusted) else {
-        return false;
-    };
-
-    source.scheme() == trusted.scheme()
-        && source.host_str() == trusted.host_str()
-        && source.port_or_known_default() == trusted.port_or_known_default()
 }

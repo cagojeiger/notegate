@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 use notegate_model::{Caller, Channel};
 use notegate_service::identity::Resolver;
+use uuid::Uuid;
 
 pub use notegate_service::identity::{IdentityError, ResolveAttrs};
 
@@ -21,9 +22,9 @@ pub trait CallerResolver: Send + Sync {
         attrs: ResolveAttrs,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
 
-    fn resolve_browser_session(
+    fn resolve_browser_session_user(
         &self,
-        sub: String,
+        user_id: Uuid,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
 
     fn resolve_api(
@@ -52,11 +53,11 @@ impl CallerResolver for Resolver {
         Box::pin(async move { self.resolve_browser(attrs).await })
     }
 
-    fn resolve_browser_session(
+    fn resolve_browser_session_user(
         &self,
-        sub: String,
+        user_id: Uuid,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        Box::pin(async move { self.resolve_browser_session(&sub).await })
+        Box::pin(async move { self.resolve_browser_session_user(user_id).await })
     }
 
     fn resolve_api(

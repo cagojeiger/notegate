@@ -162,6 +162,7 @@ mod tests {
             lookup_verify_0_key_id: None,
             lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
+            browser_session_max_ttl: Duration::from_secs(30 * 86_400),
             openapi_enabled: false,
             web_dist_dir: None,
             default_user_tier: notegate_core::tier::UserTier::DEFAULT,

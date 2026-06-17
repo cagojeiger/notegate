@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
+import type { Me } from "../api/types";
 import { DevAuthGate } from "../auth/DevAuthGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { clearDevApiKey, readDevApiKey } from "../auth/session";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
+import { Button } from "../shared/ui";
 
 const DEV_API_KEY_FALLBACK_ENABLED =
   import.meta.env.DEV || import.meta.env.MODE === "test" || import.meta.env.VITE_NOTEGATE_ENABLE_DEV_API_KEY === "true";
@@ -65,18 +67,37 @@ function AuthBoundary({
   onSignOut: () => void;
 }) {
   const meQuery = useSessionQuery(apiKey, sessionRevision);
-
-  // react-query keeps the last good `data` on error, so an expired session
-  // surfaces as a 401 error alongside stale data — treat that as logged-out.
-  const unauthorized = meQuery.error instanceof ApiError && meQuery.error.status === 401;
+  const me = meQuery.data;
+  const unauthorized = isUnauthorizedSession(meQuery.error);
+  const authViewState = deriveAuthViewState({
+    error: meQuery.error,
+    isFetched: meQuery.isFetched,
+    isLoading: meQuery.isLoading,
+    session: me
+  });
 
   useEffect(() => {
     if (unauthorized && apiKey) onSignOut();
   }, [apiKey, onSignOut, unauthorized]);
 
-  if (!meQuery.isFetched && meQuery.isLoading) return <FullScreenStatus label="Checking session" />;
+  if (authViewState.kind === "checking") return <FullScreenStatus label="Checking session" />;
 
-  if (!meQuery.data || unauthorized) {
+  if (authViewState.kind === "temporarilyUnavailable") {
+    return (
+      <FullScreenStatus
+        variant="status"
+        label="Authentication temporarily unavailable"
+        detail="Your session was not cleared. Try again once the auth service is reachable."
+        action={
+          <Button onClick={() => void meQuery.refetch()} disabled={meQuery.isFetching}>
+            Retry
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (authViewState.kind === "login") {
     return (
       <DevAuthGate
         devApiKeyFallbackEnabled={devApiKeyFallbackEnabled}
@@ -90,5 +111,37 @@ function AuthBoundary({
     );
   }
 
-  return <AppShell me={meQuery.data} onSignOut={onSignOut} />;
+  return <AppShell me={authViewState.me} onSignOut={onSignOut} />;
+}
+
+type AuthViewState =
+  | { kind: "checking" }
+  | { kind: "temporarilyUnavailable" }
+  | { kind: "login" }
+  | { kind: "authenticated"; me: Me };
+
+function deriveAuthViewState({
+  error,
+  isFetched,
+  isLoading,
+  session
+}: {
+  error: unknown;
+  isFetched: boolean;
+  isLoading: boolean;
+  session: Me | undefined;
+}): AuthViewState {
+  if (!isFetched && isLoading) return { kind: "checking" };
+  if (isUnauthorizedSession(error)) return { kind: "login" };
+  if (!session && isTemporarilyUnavailable(error)) return { kind: "temporarilyUnavailable" };
+  if (!session) return { kind: "login" };
+  return { kind: "authenticated", me: session };
+}
+
+function isUnauthorizedSession(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
+
+function isTemporarilyUnavailable(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 503 || error.kind === "auth_unavailable");
 }

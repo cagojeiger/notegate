@@ -227,6 +227,9 @@ fn log_mcp_auth_denied(error: &AuthError, status: StatusCode) {
         AuthError::MissingToken => {
             tracing::debug!(event = "mcp.auth.denied", error = %error, status)
         }
+        AuthError::Unavailable => {
+            tracing::warn!(event = "mcp.auth.denied", error = %error, status)
+        }
         AuthError::Internal => tracing::error!(event = "mcp.auth.denied", error = %error, status),
         AuthError::InvalidToken | AuthError::NotRegistered | AuthError::Inactive => {
             tracing::warn!(event = "mcp.auth.denied", error = %error, status);

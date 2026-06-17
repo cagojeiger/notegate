@@ -17,6 +17,7 @@ use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo};
 pub use notegate_model::ResolveAttrs;
 use notegate_model::account::AccountKind;
 use notegate_model::{Account, Caller, CallerIdentity, Channel, User};
+use uuid::Uuid;
 
 /// Why caller resolution failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -75,9 +76,17 @@ impl Resolver {
         user_caller(account, user, Channel::Browser)
     }
 
-    /// Resolve a browser session cookie for an already-registered user account.
-    pub async fn resolve_browser_session(&self, sub: &str) -> Result<Caller, IdentityError> {
-        self.resolve_registered_user(sub, Channel::Browser).await
+    /// Resolve a db-backed browser session by its owning user id.
+    pub async fn resolve_browser_session_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Caller, IdentityError> {
+        let resolved = self.users.find_caller_by_account_id(user_id).await?;
+        let (account, user) = resolved.ok_or(IdentityError::NotRegistered)?;
+        if account.kind != AccountKind::User {
+            return Err(IdentityError::Inactive);
+        }
+        user_caller(account, user, Channel::Browser)
     }
 
     /// Resolve a REST bearer for an already-registered user account.

@@ -17,6 +17,7 @@ const SPACE_PURGE_BATCH: i64 = 100;
 const NODE_PURGE_BATCH: i64 = 1_000;
 const ACCOUNT_PURGE_BATCH: i64 = 100;
 const API_KEY_PURGE_BATCH: i64 = 1_000;
+const BROWSER_SESSION_PURGE_BATCH: i64 = 1_000;
 
 #[derive(Debug, Clone)]
 pub struct PurgeRepo {
@@ -49,6 +50,7 @@ impl PurgeRepo {
                 nodes_deleted: 0,
                 accounts_anonymized: 0,
                 api_keys_deleted: 0,
+                browser_sessions_deleted: 0,
             });
         }
 
@@ -163,6 +165,30 @@ impl PurgeRepo {
         .map_err(map_sqlx_error)?
         .get("deleted_count");
 
+        let browser_sessions_deleted: i64 = sqlx::query(
+            "WITH dead AS ( \
+                 SELECT id, LEAST(COALESCE(revoked_at, expires_at), expires_at) AS dead_at \
+                 FROM browser_sessions \
+                 WHERE revoked_at IS NOT NULL OR expires_at <= now() \
+             ), due AS ( \
+                 SELECT id FROM dead \
+                 WHERE dead_at + make_interval(days => $1::int) <= now() \
+                 ORDER BY dead_at, id \
+                 LIMIT $2 \
+             ), deleted AS ( \
+                 DELETE FROM browser_sessions s USING due \
+                 WHERE s.id = due.id \
+                 RETURNING s.id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(i32::try_from(limits::DEAD_API_KEY_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(BROWSER_SESSION_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(PurgeRun {
             lock_acquired: true,
@@ -170,6 +196,7 @@ impl PurgeRepo {
             nodes_deleted: nodes_deleted.max(0) as u64,
             accounts_anonymized: accounts_anonymized.max(0) as u64,
             api_keys_deleted: api_keys_deleted.max(0) as u64,
+            browser_sessions_deleted: browser_sessions_deleted.max(0) as u64,
         })
     }
 }
@@ -181,4 +208,5 @@ pub struct PurgeRun {
     pub nodes_deleted: u64,
     pub accounts_anonymized: u64,
     pub api_keys_deleted: u64,
+    pub browser_sessions_deleted: u64,
 }

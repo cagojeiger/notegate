@@ -1,4 +1,4 @@
-//! PII encryption, lookup hashing, API-key hashing, and session-key derivation.
+//! PII/credential encryption, lookup hashing, API-key hashing, and session-key derivation.
 //!
 //! This module implements the policy in `docs/spec/security.md`: runtime code
 //! reads ENC/LOOKUP root secrets, derives purpose-specific subkeys with HKDF,
@@ -23,15 +23,18 @@ const CRYPTO_VERSION: i32 = 1;
 
 const ENC_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/enc/epoch-verify/v1";
 const PII_FIELD_LABEL: &[u8] = b"notegate/enc/pii-field/v1";
+const BROWSER_REFRESH_TOKEN_FIELD_LABEL: &[u8] = b"notegate/enc/browser-refresh-token-field/v1";
 const LOOKUP_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/lookup/epoch-verify/v1";
 const PROVIDER_SUB_HMAC_LABEL: &[u8] = b"notegate/lookup/provider-sub-hmac/v1";
 const EMAIL_HMAC_LABEL: &[u8] = b"notegate/lookup/email-hmac/v1";
 const API_KEY_HMAC_LABEL: &[u8] = b"notegate/lookup/api-key-hmac/v1";
+const BROWSER_SESSION_HMAC_LABEL: &[u8] = b"notegate/lookup/browser-session-hmac/v1";
 const SESSION_SIGNING_LABEL: &[u8] = b"notegate/lookup/session-signing/v1";
 
 const PROVIDER_SUB_PREFIX: &str = "provider-sub:v1:";
 const EMAIL_PREFIX: &str = "email:v1:";
 const API_KEY_PREFIX: &str = "api-key:v1:";
+const BROWSER_SESSION_PREFIX: &str = "browser-session:v1:";
 const KEY_EPOCH_PREFIX: &str = "key-epoch:v1:";
 
 /// Domain for a registered root key epoch.
@@ -109,9 +112,11 @@ pub struct PiiCrypto {
     enc_epoch_verify_key: [u8; KEY_LEN],
     lookup_epoch_verify_key: [u8; KEY_LEN],
     pii_field_key: [u8; KEY_LEN],
+    browser_refresh_token_field_key: [u8; KEY_LEN],
     provider_sub_hmac_key: [u8; KEY_LEN],
     email_hmac_key: [u8; KEY_LEN],
     api_key_hmac_key: [u8; KEY_LEN],
+    browser_session_hmac_key: [u8; KEY_LEN],
     session_signing_key: [u8; KEY_LEN],
 }
 
@@ -138,9 +143,11 @@ impl PiiCrypto {
             enc_epoch_verify_key: hkdf_key(enc_root, ENC_EPOCH_VERIFY_LABEL)?,
             lookup_epoch_verify_key: hkdf_key(lookup_root, LOOKUP_EPOCH_VERIFY_LABEL)?,
             pii_field_key: hkdf_key(enc_root, PII_FIELD_LABEL)?,
+            browser_refresh_token_field_key: hkdf_key(enc_root, BROWSER_REFRESH_TOKEN_FIELD_LABEL)?,
             provider_sub_hmac_key: hkdf_key(lookup_root, PROVIDER_SUB_HMAC_LABEL)?,
             email_hmac_key: hkdf_key(lookup_root, EMAIL_HMAC_LABEL)?,
             api_key_hmac_key: hkdf_key(lookup_root, API_KEY_HMAC_LABEL)?,
+            browser_session_hmac_key: hkdf_key(lookup_root, BROWSER_SESSION_HMAC_LABEL)?,
             session_signing_key: hkdf_key(lookup_root, SESSION_SIGNING_LABEL)?,
         })
     }
@@ -202,6 +209,39 @@ impl PiiCrypto {
         String::from_utf8(bytes).map_err(|_error| Error::internal("invalid encrypted utf8"))
     }
 
+    pub fn encrypt_browser_refresh_token(
+        &self,
+        session_id: &str,
+        plaintext: &str,
+    ) -> Result<EncryptedField> {
+        encrypt_with_key_and_aad(
+            &self.browser_refresh_token_field_key,
+            plaintext.as_bytes(),
+            &browser_refresh_token_aad(session_id, &self.enc_key_id),
+        )
+    }
+
+    pub fn decrypt_browser_refresh_token(
+        &self,
+        session_id: &str,
+        key_id: &str,
+        version: i32,
+        field: &EncryptedField,
+    ) -> Result<String> {
+        if version != CRYPTO_VERSION {
+            return Err(Error::internal(format!(
+                "refresh token enc version mismatch: stored {version} != current {CRYPTO_VERSION}"
+            )));
+        }
+        let bytes = decrypt_with_key_and_aad(
+            &self.browser_refresh_token_field_key,
+            field,
+            &browser_refresh_token_aad(session_id, key_id),
+        )?;
+        String::from_utf8(bytes)
+            .map_err(|_error| Error::internal("invalid encrypted refresh token utf8"))
+    }
+
     pub fn provider_sub_hash(&self, provider: &str, subject: &str) -> Result<String> {
         hmac_hex(
             &self.provider_sub_hmac_key,
@@ -222,6 +262,13 @@ impl PiiCrypto {
             &format!("{API_KEY_PREFIX}{api_key_id}:{secret}"),
         )
     }
+
+    pub fn browser_session_hash(&self, session_id: &str, secret: &str) -> Result<String> {
+        hmac_hex(
+            &self.browser_session_hmac_key,
+            &format!("{BROWSER_SESSION_PREFIX}{session_id}:{secret}"),
+        )
+    }
 }
 
 pub fn normalize_email(email: &str) -> String {
@@ -234,6 +281,13 @@ fn hkdf_key(root: &[u8], label: &[u8]) -> Result<[u8; KEY_LEN]> {
     hk.expand(label, &mut out)
         .map_err(|_error| Error::internal("hkdf expand failed"))?;
     Ok(out)
+}
+
+fn browser_refresh_token_aad(session_id: &str, key_id: &str) -> Vec<u8> {
+    format!(
+        "app=notegate;field=browser_session.refresh_token;session_id={session_id};key_id={key_id};version={CRYPTO_VERSION}"
+    )
+    .into_bytes()
 }
 
 fn encrypt_with_key_and_aad(
@@ -342,6 +396,40 @@ mod tests {
         assert_ne!(
             crypto.provider_sub_hash("authgate", "same").unwrap(),
             crypto.email_hash("same").unwrap()
+        );
+        assert_ne!(
+            crypto.api_key_hash("key-1", "secret").unwrap(),
+            crypto.browser_session_hash("key-1", "secret").unwrap()
+        );
+    }
+
+    #[test]
+    fn browser_refresh_token_encrypt_decrypt_round_trips() {
+        let crypto = PiiCrypto::test();
+        let encrypted = crypto
+            .encrypt_browser_refresh_token("session-1", "refresh-token")
+            .unwrap();
+        assert_ne!(encrypted.ciphertext, b"refresh-token");
+        assert_eq!(
+            crypto
+                .decrypt_browser_refresh_token(
+                    "session-1",
+                    crypto.enc_key_id(),
+                    crypto.version(),
+                    &encrypted,
+                )
+                .unwrap(),
+            "refresh-token"
+        );
+        assert!(
+            crypto
+                .decrypt_browser_refresh_token(
+                    "session-2",
+                    crypto.enc_key_id(),
+                    crypto.version(),
+                    &encrypted,
+                )
+                .is_err()
         );
     }
 

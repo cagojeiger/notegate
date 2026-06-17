@@ -1,5 +1,5 @@
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
@@ -11,8 +11,12 @@ use crate::auth::oauth_flow::{
     LOGIN_NEXT_COOKIE, LOGIN_NONCE_COOKIE, LOGIN_STATE_COOKIE, LOGIN_VERIFIER_COOKIE,
     clear_flow_cookies, flow_cookie, hardened_cookie, new_login_flow,
 };
+use crate::auth::origin::has_trusted_browser_origin;
 use crate::auth::page::html_page;
-use crate::auth::session::{BROWSER_SESSION_COOKIE, create_browser_session};
+use crate::auth::session::{
+    BROWSER_SESSION_COOKIE, create_browser_session, revoke_browser_session_for_logout,
+};
+use crate::error::ApiError;
 use crate::identity::{IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
@@ -149,7 +153,7 @@ pub async fn callback(
             .into_response();
     };
 
-    let userinfo =
+    let login_userinfo =
         match exchange_code_for_userinfo(&state.oidc, &state.http, code, &verifier, &nonce).await {
             Ok(userinfo) => userinfo,
             Err(error) => {
@@ -166,14 +170,19 @@ pub async fn callback(
             }
         };
     let attrs = ResolveAttrs {
-        sub: userinfo.sub,
-        email: userinfo.email.unwrap_or_default(),
-        name: userinfo.name.unwrap_or_default(),
+        sub: login_userinfo.userinfo.sub,
+        email: login_userinfo.userinfo.email.unwrap_or_default(),
+        name: login_userinfo.userinfo.name.unwrap_or_default(),
     };
-    let session_sub = attrs.sub.clone();
     match state.resolver.resolve_browser(attrs).await {
-        Ok(_caller) => {
-            let session = match create_browser_session(&state, &session_sub) {
+        Ok(caller) => {
+            let session = match create_browser_session(
+                &state,
+                caller.account_id(),
+                &login_userinfo.refresh_token,
+            )
+            .await
+            {
                 Ok(session) => session,
                 Err(error) => {
                     tracing::error!(event = "oauth.session_failed", %error);
@@ -246,7 +255,27 @@ pub async fn success() -> Response {
     .into_response()
 }
 
-pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Response {
+pub async fn logout(State(state): State<AppState>, jar: CookieJar, headers: HeaderMap) -> Response {
+    if !has_trusted_browser_origin(&headers, &state) {
+        return ApiError::forbidden("logout requires same-origin Origin or Referer")
+            .into_response();
+    }
+
+    let refresh_token = revoke_browser_session_for_logout(
+        &state,
+        jar.get(BROWSER_SESSION_COOKIE).map(|cookie| cookie.value()),
+    )
+    .await;
+    let refresh_token = match refresh_token {
+        Ok(refresh_token) => refresh_token,
+        Err(error) => {
+            tracing::error!(event = "oauth.logout_local_revoke_failed", %error);
+            return ApiError::internal("logout failed").into_response();
+        }
+    };
+    if let Some(refresh_token) = refresh_token {
+        revoke_authgate_refresh_token(&state, &refresh_token).await;
+    }
     (
         jar.add(expired_browser_session_cookie(state.config.secure_cookies)),
         Redirect::to("/"),
@@ -266,13 +295,34 @@ fn browser_session_cookie(state: &AppState, value: String) -> Cookie<'static> {
     hardened_cookie(
         BROWSER_SESSION_COOKIE,
         value,
-        state.config.browser_session_ttl.as_secs() as i64,
+        state.config.browser_session_max_ttl.as_secs() as i64,
         state.config.secure_cookies,
     )
 }
 
 fn expired_browser_session_cookie(secure: bool) -> Cookie<'static> {
     hardened_cookie(BROWSER_SESSION_COOKIE, String::new(), 0, secure)
+}
+
+async fn revoke_authgate_refresh_token(state: &AppState, refresh_token: &str) {
+    let revoke_url = format!("{}/oauth/revoke", state.config.authgate_url);
+    let form = [
+        ("token", refresh_token),
+        ("token_type_hint", "refresh_token"),
+        ("client_id", state.config.oauth_client_id.as_str()),
+    ];
+    match state.http.post(revoke_url).form(&form).send().await {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(
+                event = "oauth.refresh_token_revoke_failed",
+                status = response.status().as_u16()
+            );
+        }
+        Err(error) => {
+            tracing::warn!(event = "oauth.refresh_token_revoke_failed", %error);
+        }
+    }
 }
 
 #[cfg(test)]

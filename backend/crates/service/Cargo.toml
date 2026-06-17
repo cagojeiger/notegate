@@ -31,6 +31,7 @@ similar.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+notegate-db = { workspace = true, features = ["test-util"] }
 notegate-service = { path = ".", features = ["test-util"] }
 tokio.workspace = true
 sqlx.workspace = true

@@ -37,7 +37,8 @@ frontend/web/src
 - `/me` 401은 AuthScreen을 렌더링한다.
 - 일반 query/mutation 401은 session reset을 유발한다.
 - logout은 local developer API key fallback을 지운다.
-- browser session refresh token flow는 없다.
+- browser session refresh는 BE가 HttpOnly cookie와 encrypted refresh token으로 처리한다.
+- FE는 refresh token을 저장하지 않고, refresh 불가 상태에서 반환되는 401만 처리한다.
 
 ## React Query
 

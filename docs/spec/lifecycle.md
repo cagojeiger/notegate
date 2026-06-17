@@ -187,3 +187,50 @@ api_keys.revoked_reason=optional_reason
 ```
 
 Rotation은 같은 account에 새 key를 만들고 old key를 같은 transaction에서 `revoked_reason=rotated`로 revoke한다. Old token 원문은 복구하지 않는다.
+
+## Browser session
+
+### 생성
+
+Browser login callback은 authgate authorization-code + PKCE exchange 결과에서 refresh token을 요구한다.
+
+```text
+browser_sessions.user_id=user_id
+browser_sessions.token_hash=HMAC(session token)
+browser_sessions.refresh_token_*=encrypted authgate refresh token
+browser_sessions.validated_until=now()+1h
+browser_sessions.expires_at=now()+30d
+```
+
+- Browser session token 원문은 HttpOnly cookie에만 발급한다.
+- Refresh token은 browser client에 노출하지 않고 서버가 암호화 저장한다.
+- AuthGate는 refresh token의 canonical state를 관리한다. Notegate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
+
+### 갱신
+
+요청의 browser session이 `validated_until`을 넘으면 Notegate는 저장된 refresh token으로 authgate refresh-token grant를 호출한다.
+
+```text
+success:
+  validated_until=now()+1h
+  last_refreshed_at=now()
+  refresh_token_* 교체 -- authgate가 rotated refresh token을 반환한 경우
+
+invalid_grant/sub mismatch:
+  revoked_at=now()
+  revoked_reason='refresh_failed'
+  request returns 401
+
+transient authgate/userinfo failure:
+  refresh_token_* 교체 -- token exchange 후 userinfo가 실패했고 rotated refresh token을 받은 경우
+  refresh_started_at=NULL
+  refresh_claim_id=NULL
+  validated_until unchanged
+  request returns 503
+```
+
+`expires_at`은 absolute lifetime이다. 30일이 지나면 refresh를 시도하지 않고 재로그인을 요구한다.
+
+### Logout/revoke
+
+Logout은 local `browser_sessions` row를 revoke하고 browser session cookie를 만료시킨다. 저장된 refresh token은 authgate revoke endpoint에 best-effort로 revoke 요청한다.
