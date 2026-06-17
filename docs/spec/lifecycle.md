@@ -199,7 +199,7 @@ browser_sessions.user_id=user_id
 browser_sessions.token_hash=HMAC(session token)
 browser_sessions.refresh_token_*=encrypted authgate refresh token
 browser_sessions.validated_until=now()+1h
-browser_sessions.expires_at=now()+15d
+browser_sessions.expires_at=now()+30d
 ```
 
 - Browser session token 원문은 HttpOnly cookie에만 발급한다.
@@ -229,7 +229,7 @@ transient authgate/userinfo failure:
   request returns 503
 ```
 
-`expires_at`은 absolute lifetime이다. 15일이 지나면 refresh를 시도하지 않고 재로그인을 요구한다.
+`expires_at`은 absolute lifetime이다. 30일이 지나면 refresh를 시도하지 않고 재로그인을 요구한다.
 
 ### Logout/revoke
 

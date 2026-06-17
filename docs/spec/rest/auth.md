@@ -55,7 +55,7 @@ request with browser session cookie
    -> transient authgate/userinfo failure: store rotated refresh token if token exchange returned one, clear refresh claim, return 503
 ```
 
-Browser session absolute lifetime은 15일이다. Local validation lease는 1시간이다. 15일이 지나면 refresh token이 authgate에서 아직 유효하더라도 Notegate browser session은 재로그인을 요구한다.
+Browser session absolute lifetime은 30일이다. Local validation lease는 1시간이다. 30일이 지나면 refresh token이 authgate에서 아직 유효하더라도 Notegate browser session은 재로그인을 요구한다.
 
 ## OAuth metadata
 
