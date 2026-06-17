@@ -27,6 +27,22 @@ jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
 
     steps:
       - name: Checkout

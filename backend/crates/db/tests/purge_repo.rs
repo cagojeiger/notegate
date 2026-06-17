@@ -10,7 +10,11 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_db::{ApiKeyRepo, PurgeRepo, api_key_repo::InsertApiKey};
+use notegate_core::security::PiiCrypto;
+use notegate_db::{
+    ApiKeyRepo, BrowserSessionRepo, PurgeRepo, api_key_repo::InsertApiKey,
+    browser_session_repo::InsertBrowserSession,
+};
 use notegate_model::CreateApiKey;
 use sqlx::Row as _;
 use uuid::Uuid;
@@ -160,6 +164,31 @@ async fn seed_key(
     Ok(key.id)
 }
 
+async fn seed_browser_session(
+    repo: &BrowserSessionRepo,
+    crypto: &PiiCrypto,
+    user_id: Uuid,
+    name: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let session_id = Uuid::new_v4();
+    let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
+    let refresh_token = crypto
+        .encrypt_browser_refresh_token(&session_id.to_string(), &format!("refresh-{name}"))?;
+    repo.insert_session(InsertBrowserSession {
+        session_id,
+        user_id,
+        token_prefix: "ngs_v1_test",
+        token_hash: &token_hash,
+        refresh_token: &refresh_token,
+        refresh_token_enc_key_id: crypto.enc_key_id(),
+        refresh_token_enc_version: crypto.version(),
+        validated_until: chrono::Utc::now() + chrono::Duration::hours(1),
+        expires_at: chrono::Utc::now() + chrono::Duration::days(15),
+    })
+    .await?;
+    Ok(session_id)
+}
+
 #[tokio::test]
 async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PURGE_TEST_MUTEX.lock().await;
@@ -209,6 +238,69 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
     assert!(
         remaining.contains(&recent_revoked),
         "recently revoked key is within retention"
+    );
+    assert!(!remaining.contains(&old_revoked));
+    assert!(!remaining.contains(&old_expired));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user =
+        insert_user_account(&db.pool, "session-purger", "session-purger@example.test").await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+
+    let live = seed_browser_session(&repo, &crypto, user, "live").await?;
+    let old_revoked = seed_browser_session(&repo, &crypto, user, "old-revoked").await?;
+    let old_expired = seed_browser_session(&repo, &crypto, user, "old-expired").await?;
+    let recent_revoked = seed_browser_session(&repo, &crypto, user, "recent-revoked").await?;
+
+    sqlx::query(
+        "UPDATE browser_sessions SET revoked_at = now() - interval '40 days', \
+         revoked_reason = 'test' WHERE id = $1",
+    )
+    .bind(old_revoked)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE browser_sessions SET expires_at = now() - interval '40 days', \
+         validated_until = now() - interval '40 days' WHERE id = $1",
+    )
+    .bind(old_expired)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE browser_sessions SET revoked_at = now() - interval '1 day', \
+         revoked_reason = 'test' WHERE id = $1",
+    )
+    .bind(recent_revoked)
+    .execute(&db.pool)
+    .await?;
+
+    let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert!(run.lock_acquired);
+    assert_eq!(
+        run.browser_sessions_deleted, 2,
+        "only the two long-dead sessions purge"
+    );
+
+    let remaining: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM browser_sessions WHERE user_id = $1")
+            .bind(user)
+            .fetch_all(&db.pool)
+            .await?;
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.contains(&live), "live session is retained");
+    assert!(
+        remaining.contains(&recent_revoked),
+        "recently revoked session is within retention"
     );
     assert!(!remaining.contains(&old_revoked));
     assert!(!remaining.contains(&old_expired));

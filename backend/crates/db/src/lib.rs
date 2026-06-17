@@ -11,6 +11,7 @@ use notegate_core::{Error, Result};
 pub mod account_repo;
 pub mod agent_repo;
 pub mod api_key_repo;
+pub mod browser_session_repo;
 pub mod connection_repo;
 pub mod files;
 pub mod files_repo;
@@ -19,11 +20,14 @@ pub mod postgres_pool;
 pub mod purge_repo;
 mod space_permission;
 pub mod spaces_repo;
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_support;
 mod tier_lookup;
 
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
 pub use api_key_repo::ApiKeyRepo;
+pub use browser_session_repo::BrowserSessionRepo;
 pub use connection_repo::ConnectionRepo;
 pub use files_repo::FilesRepo;
 pub use key_epoch_repo::CryptoKeyEpochRepo;

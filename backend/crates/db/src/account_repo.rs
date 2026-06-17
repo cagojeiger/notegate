@@ -304,6 +304,16 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         sqlx::query(
+            "UPDATE browser_sessions \
+             SET revoked_at = now(), revoked_reason = 'account_deleted', updated_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query(
             "UPDATE space_agent_connections \
              SET disconnected_at = now(), disconnected_by_user_id = $3 \
              WHERE disconnected_at IS NULL \

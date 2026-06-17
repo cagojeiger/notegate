@@ -2,9 +2,11 @@
 
 ## 기본 원칙
 
-- Secret, bearer token, OAuth code, PKCE verifier, API key plaintext는 log/error/audit payload에 기록하지 않는다.
+- Secret, bearer token, OAuth code, PKCE verifier, API key plaintext, browser session token, OAuth refresh token은 log/error/audit payload에 기록하지 않는다.
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
+- Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.
+- OAuth refresh token은 browser client에 노출하지 않고 서버에서 암호화 저장한다.
 - Text content는 plain 또는 client-side encrypted payload로 저장한다.
 - Node metadata는 content가 아니며 암호화 대상이 아니다.
 - Markdown frontmatter는 Text content 안의 YAML block이다. encrypted Text 안에 있으면 content와 함께 client-side encrypted payload에 포함된다.
@@ -13,7 +15,7 @@
 
 ```text
 ENC_ROOT     PII 암호화용
-LOOKUP_ROOT  provider/email/API key lookup HMAC와 session signing용
+LOOKUP_ROOT  provider/email/API key/browser session lookup HMAC와 session signing용
 ```
 
 각 root key는 `crypto_key_epochs`에 `key_id`, `domain`, `status`, `verify_tag`, `version`으로 등록한다. 빈 DB에서는 프로세스 시작 시 active epoch row를 생성한다. 이미 active epoch가 존재하면 환경 변수의 active root key와 DB registry가 맞지 않을 때 서버는 시작하지 않는다.
@@ -39,6 +41,22 @@ token_hash      = HMAC(API_KEY_SUBKEY, "api-key:v1:" || key_id || ":" || secret)
 - Plaintext token은 생성/rotation 응답에서 한 번만 반환한다.
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
 - LOOKUP root key 폐기가 필요하면 영향받는 live key를 revoke하고 재발급한다.
+
+## Browser session storage
+
+```text
+session plaintext = ngs_v1_{session_id}_{secret}
+session_hash      = HMAC(SESSION_TOKEN_SUBKEY, "browser-session:v1:" || session_id || ":" || secret)
+refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, authgate_refresh_token, aad)
+```
+
+- Browser session token plaintext는 HttpOnly cookie에만 들어간다.
+- DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
+- AuthGate refresh token은 `browser_sessions.refresh_token_*` 컬럼에 암호화 저장한다.
+- Refresh token은 AuthGate token endpoint에 제출할 때만 복호화한다.
+- Refresh 응답에 새 refresh token이 있으면 기존 encrypted refresh token을 교체한다.
+- Refresh 응답의 subject가 기존 user와 다르면 local browser session을 revoke하고 401로 처리한다.
+- FE는 refresh token과 browser session token 원문을 JavaScript storage에 저장하지 않는다.
 
 ## Text content encryption
 

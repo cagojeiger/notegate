@@ -132,6 +132,43 @@ api_keys.scopes: cardinality(scopes) = 0
 api_keys.revoked_*: revoked_at, revoked_by_user_id, revoked_reason은 모두 NULL이거나 모두 non-NULL
 ```
 
+## Browser session table
+
+```text
+browser_sessions
+  id uuid pk
+  user_id uuid not null references users(id) on delete cascade
+  token_prefix text not null
+  token_hash text not null unique
+  hash_key_id text not null references crypto_key_epochs(key_id)
+  hash_version int not null
+  refresh_token_ciphertext bytea not null
+  refresh_token_nonce bytea not null
+  refresh_token_enc_key_id text not null references crypto_key_epochs(key_id)
+  refresh_token_enc_version int not null
+  validated_until timestamptz not null
+  expires_at timestamptz not null
+  last_used_at timestamptz null
+  last_refreshed_at timestamptz null
+  refresh_started_at timestamptz null
+  refresh_claim_id uuid null
+  revoked_at timestamptz null
+  revoked_reason text null
+  created_at timestamptz
+  updated_at timestamptz
+```
+
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. `refresh_token_*` 필드는 authgate refresh token을 암호화 저장한다. AuthGate가 refresh token의 canonical state를 관리하고, Notegate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
+
+Browser session DB 제약:
+
+```text
+browser_sessions.refresh_token_enc_*: refresh token 암호화 필드는 모두 non-NULL
+browser_sessions.validated_until <= browser_sessions.expires_at
+browser_sessions.refresh_* claim: refresh_started_at과 refresh_claim_id는 둘 다 NULL이거나 둘 다 non-NULL
+browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
+```
+
 ## Space and connection tables
 
 ```text

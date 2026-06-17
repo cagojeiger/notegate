@@ -21,6 +21,7 @@ const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
 const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
+const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 15 * 86_400;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 
 /// Server + database configuration.
@@ -68,12 +69,18 @@ pub struct Config {
     pub lookup_verify_0_key_id: Option<String>,
     /// Optional verify-only LOOKUP root secret for provider subject migration.
     pub lookup_verify_0_secret: Option<SecretString>,
-    /// Browser session cookie TTL.
+    /// Browser session local validation lease.
     #[serde(
         rename = "browser_session_ttl_secs",
         deserialize_with = "duration_from_secs"
     )]
     pub browser_session_ttl: Duration,
+    /// Browser session absolute lifetime.
+    #[serde(
+        rename = "browser_session_max_ttl_secs",
+        deserialize_with = "duration_from_secs"
+    )]
+    pub browser_session_max_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
     /// Optional directory containing the built web dashboard. When set, unknown
@@ -156,6 +163,12 @@ impl Validate for Config {
         if validate_browser_session_ttl(&self.browser_session_ttl).is_err() {
             errors.add("browser_session_ttl", ValidationError::new("range"));
         }
+        if validate_browser_session_max_ttl(&self.browser_session_max_ttl).is_err() {
+            errors.add("browser_session_max_ttl", ValidationError::new("range"));
+        }
+        if self.browser_session_ttl > self.browser_session_max_ttl {
+            errors.add("browser_session_ttl", ValidationError::new("range"));
+        }
         validate_limits(&self.limits, &mut errors);
 
         if errors.is_empty() {
@@ -204,6 +217,11 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .set_default("jwks_cache_ttl_secs", DEFAULT_JWKS_CACHE_TTL_SECS)
         .map_err(map_config_error)?
         .set_default("browser_session_ttl_secs", DEFAULT_BROWSER_SESSION_TTL_SECS)
+        .map_err(map_config_error)?
+        .set_default(
+            "browser_session_max_ttl_secs",
+            DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
+        )
         .map_err(map_config_error)?
         .set_default("openapi_enabled", DEFAULT_OPENAPI_ENABLED)
         .map_err(map_config_error)?;
@@ -282,6 +300,15 @@ fn validate_jwks_cache_ttl(value: &Duration) -> std::result::Result<(), Validati
 fn validate_browser_session_ttl(value: &Duration) -> std::result::Result<(), ValidationError> {
     let seconds = value.as_secs();
     if (60..=86_400).contains(&seconds) {
+        Ok(())
+    } else {
+        Err(ValidationError::new("range"))
+    }
+}
+
+fn validate_browser_session_max_ttl(value: &Duration) -> std::result::Result<(), ValidationError> {
+    let seconds = value.as_secs();
+    if (86_400..=30 * 86_400).contains(&seconds) {
         Ok(())
     } else {
         Err(ValidationError::new("range"))
@@ -407,6 +434,9 @@ mod tests {
             lookup_verify_0_key_id: None,
             lookup_verify_0_secret: None,
             browser_session_ttl: Duration::from_secs(3600),
+            browser_session_max_ttl: Duration::from_secs(
+                super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
+            ),
             openapi_enabled: false,
             web_dist_dir: None,
             default_user_tier: UserTier::DEFAULT,
@@ -496,6 +526,10 @@ mod tests {
         assert_eq!(
             config.browser_session_ttl.as_secs(),
             super::DEFAULT_BROWSER_SESSION_TTL_SECS
+        );
+        assert_eq!(
+            config.browser_session_max_ttl.as_secs(),
+            super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS
         );
         assert_eq!(config.limits, Limits::default());
         Ok(())
@@ -594,6 +628,15 @@ mod tests {
 
         let mut config = valid_config();
         config.browser_session_ttl = Duration::from_secs(1);
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.browser_session_max_ttl = Duration::from_secs(1);
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.browser_session_ttl = Duration::from_secs(86_400);
+        config.browser_session_max_ttl = Duration::from_secs(3600);
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

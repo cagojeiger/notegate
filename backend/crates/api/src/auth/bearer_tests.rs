@@ -16,10 +16,12 @@ use axum::http::header::{CONTENT_TYPE, WWW_AUTHENTICATE};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use notegate_db::{AccountRepo, test_support::TestDb};
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::{Caller, CallerIdentity, Channel, User};
 use serde::Serialize;
 use serde_json::{Value, json};
+use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt as _;
 use uuid::Uuid;
@@ -91,14 +93,14 @@ impl CallerResolver for TestResolver {
         Box::pin(async move { self.resolve(attrs, Channel::Browser) })
     }
 
-    fn resolve_browser_session(
+    fn resolve_browser_session_user(
         &self,
-        sub: String,
+        _user_id: Uuid,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move {
             self.resolve(
                 ResolveAttrs {
-                    sub,
+                    sub: "session-user".to_owned(),
                     email: String::new(),
                     name: String::new(),
                 },
@@ -177,6 +179,14 @@ fn state_with_resource(
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     let pool =
         PgPoolOptions::new().connect_lazy("postgres://notegate:notegate@localhost/notegate")?;
+    state_with_pool(mode, resource_url, pool)
+}
+
+fn state_with_pool(
+    mode: ResolverMode,
+    resource_url: &str,
+    pool: PgPool,
+) -> Result<AppState, Box<dyn std::error::Error>> {
     let config = Arc::new(notegate_core::Config {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
         database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
@@ -199,6 +209,7 @@ fn state_with_resource(
         lookup_verify_0_key_id: None,
         lookup_verify_0_secret: None,
         browser_session_ttl: Duration::from_secs(3600),
+        browser_session_max_ttl: Duration::from_secs(15 * 86_400),
         openapi_enabled: false,
         web_dist_dir: None,
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
@@ -225,6 +236,24 @@ fn state_with_resource(
         )
         .expect("derive test crypto"),
     ))
+}
+
+async fn valid_browser_session(
+    db: &TestDb,
+    state: &AppState,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let (account, _user) = AccountRepo::with_crypto_and_default_user_tier(
+        db.pool.clone(),
+        state.security.clone(),
+        state.config.default_user_tier,
+    )
+    .upsert_user_by_sub(&ResolveAttrs {
+        sub: "session-user".to_owned(),
+        email: "session@example.test".to_owned(),
+        name: "Session User".to_owned(),
+    })
+    .await?;
+    Ok(create_browser_session(state, account.id, "refresh-token").await?)
 }
 
 fn token(
@@ -397,10 +426,35 @@ async fn api_routes_accept_valid_bearer() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[tokio::test]
-async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::error::Error>> {
+async fn api_routes_reject_unknown_browser_session() -> Result<(), Box<dyn std::error::Error>> {
     let state = state(ResolverMode::Registered(true))?;
-    let session = create_browser_session(&state, "sub-cookie")?;
     let app = crate::routes::app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}=unknown"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let session = valid_browser_session(&db, &state).await?;
+    let app = crate::routes::app(state);
+
     let response = app
         .oneshot(
             Request::builder()
@@ -411,14 +465,22 @@ async fn api_routes_accept_valid_browser_session() -> Result<(), Box<dyn std::er
         .await?;
 
     assert_eq!(response.status(), StatusCode::OK);
+    db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn api_cookie_mutation_requires_same_origin_header() -> Result<(), Box<dyn std::error::Error>>
 {
-    let state = state(ResolverMode::Registered(true))?;
-    let session = create_browser_session(&state, "sub-cookie")?;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let session = valid_browser_session(&db, &state).await?;
     let app = crate::routes::app(state);
 
     let response = app
@@ -444,6 +506,8 @@ async fn api_cookie_mutation_requires_same_origin_header() -> Result<(), Box<dyn
         )
         .await?;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_json_error(response, "not_found", "api route not found").await?;
+    db.cleanup().await;
     Ok(())
 }
 
@@ -475,23 +539,44 @@ async fn bearer_mutation_does_not_require_browser_origin() -> Result<(), Box<dyn
 
 #[tokio::test]
 async fn browser_session_resolves_browser_channel() -> Result<(), Box<dyn std::error::Error>> {
-    let state = state(ResolverMode::Registered(true))?;
-    let session = create_browser_session(&state, "sub-cookie")?;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let session = valid_browser_session(&db, &state).await?;
 
     let caller = verify_browser_session(&state, &session).await?;
 
     assert_eq!(caller.channel, Channel::Browser);
     assert!(caller.user().is_some());
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn browser_session_rejects_malformed_token() -> Result<(), Box<dyn std::error::Error>> {
+    let state = state(ResolverMode::Registered(true))?;
+    let err = verify_browser_session(&state, "unknown").await.err();
+
+    assert!(matches!(err, Some(AuthError::InvalidToken)));
     Ok(())
 }
 
 #[tokio::test]
 async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::error::Error>> {
-    let state = state_with_resource(
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
         ResolverMode::Registered(true),
         "https://api.example.test/mcp",
+        db.pool.clone(),
     )?;
-    let session = create_browser_session(&state, "sub-cookie")?;
+    let session = valid_browser_session(&db, &state).await?;
     let app = crate::routes::app(state);
     let response = app
         .oneshot(
@@ -512,6 +597,7 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
     assert!(challenge.contains("resource_metadata="));
     assert!(challenge.contains("/.well-known/oauth-protected-resource/mcp"));
     assert!(challenge.contains("scope=\"openid offline_access\""));
+    db.cleanup().await;
     Ok(())
 }
 
@@ -576,7 +662,7 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
         .await?;
     assert_eq!(logout_get.status(), StatusCode::METHOD_NOT_ALLOWED);
 
-    let logout_post = app
+    let logout_post_without_origin = app
         .clone()
         .oneshot(
             Request::builder()
@@ -585,7 +671,31 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
                 .body(Body::empty())?,
         )
         .await?;
-    assert_eq!(logout_post.status(), StatusCode::SEE_OTHER);
+    assert_eq!(logout_post_without_origin.status(), StatusCode::FORBIDDEN);
+
+    let logout_post_cross_origin = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header("origin", "https://evil.example.test")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(logout_post_cross_origin.status(), StatusCode::FORBIDDEN);
+
+    let logout_post_same_origin = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header("origin", "http://localhost:9191")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(logout_post_same_origin.status(), StatusCode::SEE_OTHER);
 
     for path in [
         "/.well-known/oauth-authorization-server",

@@ -8,5 +8,6 @@ pub mod oauth;
 mod oauth_exchange;
 mod oauth_flow;
 pub mod oidc;
+mod origin;
 pub mod page;
 pub mod session;

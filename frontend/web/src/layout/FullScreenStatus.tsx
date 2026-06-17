@@ -1,12 +1,28 @@
 import { Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
 
-export function FullScreenStatus({ label, detail }: { label: string; detail?: string }) {
+type FullScreenStatusVariant = "loading" | "status";
+
+export function FullScreenStatus({
+  label,
+  detail,
+  action,
+  variant = "loading"
+}: {
+  label: string;
+  detail?: string;
+  action?: ReactNode;
+  variant?: FullScreenStatusVariant;
+}) {
   return (
     <main className="grid h-full place-items-center bg-bg text-text">
       <div className="rounded-2xl border border-border bg-surface p-6 text-center">
-        <Loader2 className="mx-auto mb-3 animate-spin text-primary" size={24} />
+        {variant === "loading" ? (
+          <Loader2 className="mx-auto mb-3 animate-spin text-primary" size={24} />
+        ) : null}
         <div className="font-semibold">{label}</div>
         {detail ? <div className="mt-2 max-w-md text-sm text-muted">{detail}</div> : null}
+        {action ? <div className="mt-4">{action}</div> : null}
       </div>
     </main>
   );

@@ -46,7 +46,7 @@ device flow via authgate    -> user account
 ngk_v1_ API key             -> api_keys.account_id account
 ```
 
-OAuth 계열 인증은 user로 처리한다. API key는 `api_keys.account_id`가 가리키는 account kind로 caller를 결정한다.
+OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser session cookie를 발급하고, BE가 저장한 encrypted authgate refresh token으로 server-side 갱신한다. API key는 `api_keys.account_id`가 가리키는 account kind로 caller를 결정한다.
 
 ## Common invariants
 

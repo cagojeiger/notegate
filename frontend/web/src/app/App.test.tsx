@@ -49,6 +49,25 @@ describe("App auth boundary", () => {
     await waitFor(() => expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull());
   });
 
+  it("keeps a browser session retryable when /me is temporarily unavailable", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "auth_unavailable", kind: "auth_unavailable", message: "auth service temporarily unavailable" }), {
+          status: 503
+        })
+      )
+      .mockResolvedValue(new Response(JSON.stringify(meResponse()), { status: 200 }));
+
+    render(<App />);
+
+    await screen.findByText("Authentication temporarily unavailable");
+    expect(screen.queryByText("Sign in to Notegate")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await screen.findByText("Mock sign out");
+  });
+
   it("switches back to the login gate when the workbench signs out", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(meResponse()), { status: 200 }));
 
