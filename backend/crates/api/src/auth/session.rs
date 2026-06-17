@@ -73,24 +73,36 @@ pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Cal
 pub async fn revoke_browser_session_for_logout(
     state: &AppState,
     token: Option<&str>,
-) -> Option<String> {
-    let token = token?;
-    let parsed = parse_browser_session_token(state, token).ok()?;
+) -> Result<Option<String>, AuthError> {
+    let Some(token) = token else {
+        return Ok(None);
+    };
+    let parsed = match parse_browser_session_token(state, token) {
+        Ok(parsed) => parsed,
+        Err(AuthError::InvalidToken) => return Ok(None),
+        Err(error) => return Err(error),
+    };
     let session = state
         .browser_sessions
         .find_by_token(parsed.session_id, &parsed.token_hash)
         .await
-        .ok()
-        .flatten()?;
-    let refresh_token = decrypt_refresh_token(state, &session).ok();
-    if let Err(error) = state
+        .map_err(|_error| AuthError::Internal)?;
+    let Some(session) = session else {
+        return Ok(None);
+    };
+    let refresh_token = match decrypt_refresh_token(state, &session) {
+        Ok(refresh_token) => Some(refresh_token),
+        Err(error) => {
+            tracing::warn!(event = "browser_session.logout_refresh_token_decrypt_failed", %error);
+            None
+        }
+    };
+    state
         .browser_sessions
         .revoke_session(session.id, LOGOUT_REASON)
         .await
-    {
-        tracing::warn!(event = "browser_session.logout_revoke_failed", %error);
-    }
-    refresh_token
+        .map_err(|_error| AuthError::Internal)?;
+    Ok(refresh_token)
 }
 
 async fn refresh_browser_session(

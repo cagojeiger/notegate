@@ -266,6 +266,13 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar, headers: Head
         jar.get(BROWSER_SESSION_COOKIE).map(|cookie| cookie.value()),
     )
     .await;
+    let refresh_token = match refresh_token {
+        Ok(refresh_token) => refresh_token,
+        Err(error) => {
+            tracing::error!(event = "oauth.logout_local_revoke_failed", %error);
+            return ApiError::internal("logout failed").into_response();
+        }
+    };
     if let Some(refresh_token) = refresh_token {
         revoke_authgate_refresh_token(&state, &refresh_token).await;
     }

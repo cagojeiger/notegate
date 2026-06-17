@@ -12,11 +12,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, to_bytes};
-use axum::http::header::{CONTENT_TYPE, WWW_AUTHENTICATE};
+use axum::http::header::{CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use notegate_db::{AccountRepo, test_support::TestDb};
+use notegate_db::{AccountRepo, browser_session_repo::format_token, test_support::TestDb};
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::{Caller, CallerIdentity, Channel, User};
 use serde::Serialize;
@@ -716,6 +716,41 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
             Some("application/json; charset=utf-8")
         );
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn logout_does_not_expire_cookie_when_local_revoke_fails()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+        db.pool.clone(),
+    )?;
+    db.pool.close().await;
+    let session = format_token(Uuid::new_v4(), "secret");
+    let app = crate::routes::app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header("origin", "http://localhost:9191")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        response.headers().get(SET_COOKIE).is_none(),
+        "local logout failure must not clear the browser cookie"
+    );
+    db.cleanup().await;
     Ok(())
 }
 
