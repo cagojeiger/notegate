@@ -232,10 +232,15 @@ select:focus-visible {
   }
 }
 
-.markdown table {
+.markdown-table-scroll {
   margin: 1em 0;
+  overflow-x: auto;
+}
+
+.markdown table {
   border-collapse: collapse;
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
   font-size: 0.92em;
 }
 
@@ -243,12 +248,20 @@ select:focus-visible {
 .markdown td {
   border: 1px solid var(--ng-border);
   padding: 0.4em 0.7em;
+  overflow-wrap: normal;
   text-align: left;
+  vertical-align: middle;
+  word-break: normal;
 }
 
 .markdown th {
   background: var(--ng-panel);
   font-weight: 600;
+}
+
+.markdown th:not(:last-child),
+.markdown td:not(:last-child) {
+  white-space: nowrap;
 }
 
 .markdown img {

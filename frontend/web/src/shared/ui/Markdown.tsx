@@ -9,6 +9,13 @@ import { ShikiCodeBlock } from "../../features/editor/ShikiCodeBlock";
 import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHorizontalScrollOnGrow";
 
 const components: Components = {
+  table({ children, ...props }) {
+    return (
+      <div className="markdown-table-scroll" tabIndex={0}>
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
   pre({ children }) {
     return <>{children}</>;
   },

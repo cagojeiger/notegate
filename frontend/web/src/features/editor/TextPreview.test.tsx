@@ -11,6 +11,17 @@ describe("TextPreview", () => {
     expect(screen.getByText("item")).toBeInTheDocument();
   });
 
+  it("lets markdown previews use the full editor pane width", async () => {
+    const { container } = render(<TextPreview name="matrix.md" content={"| service | note |\n| --- | --- |\n| task_management | long note |"} />);
+
+    const table = await screen.findByRole("table");
+    expect(table.closest(".markdown-table-scroll")).toBeInTheDocument();
+    const preview = container.querySelector(".markdown")?.parentElement;
+    expect(preview).toHaveClass("w-full", "flex-1");
+    expect(preview?.className).not.toContain("max-w-");
+    expect(preview?.className).not.toContain("mx-auto");
+  });
+
   it("renders markdown frontmatter as properties instead of prose", async () => {
     const { container } = render(
       <TextPreview
