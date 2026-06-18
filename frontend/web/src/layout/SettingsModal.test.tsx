@@ -85,7 +85,7 @@ describe("SettingsModal", () => {
     renderSettings(userMe, onResetSavedWorkspace);
 
     expect(screen.getByText("Saved workspace")).toBeInTheDocument();
-    expect(screen.getByText("Open panes are restored per space on this browser.")).toBeInTheDocument();
+    expect(screen.getByText("Open panes and panel visibility are restored on this browser.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Reset" }));
 

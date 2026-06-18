@@ -4,6 +4,7 @@ import { MAX_EDITOR_GROUPS, resetEditorGroupsState, type EditorGroup, type Edito
 const WORKBENCH_VERSION = 1;
 const WORKBENCH_INDEX_KEY = "notegate.workbench.v1.index";
 const WORKBENCH_SPACE_KEY_PREFIX = "notegate.workbench.v1.space.";
+const WORKBENCH_PANEL_STATE_KEY = "notegate.workbenchPanels.v1";
 const MAX_WORKBENCH_SNAPSHOTS = 20;
 
 type PersistedEditorGroup = {
@@ -24,7 +25,21 @@ type WorkbenchIndex = {
   spaces: { spaceId: string; updatedAt: number }[];
 };
 
-export { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY };
+type WorkbenchPanelState = {
+  primarySidebarOpen: boolean;
+  auxiliaryOpen: boolean;
+};
+
+type PersistedWorkbenchPanelState = WorkbenchPanelState & {
+  version: 1;
+};
+
+const DEFAULT_WORKBENCH_PANEL_STATE: WorkbenchPanelState = {
+  primarySidebarOpen: true,
+  auxiliaryOpen: true
+};
+
+export { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY };
 
 export function workbenchSpaceKey(spaceId: string): string {
   return `${WORKBENCH_SPACE_KEY_PREFIX}${spaceId}`;
@@ -75,6 +90,30 @@ export function persistSpaceWorkbench(spaceId: string, editorGroups: EditorGroup
   }
 }
 
+export function restoreWorkbenchPanelState(): WorkbenchPanelState {
+  if (typeof window === "undefined") return DEFAULT_WORKBENCH_PANEL_STATE;
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(WORKBENCH_PANEL_STATE_KEY) ?? "null");
+    if (!isPersistedWorkbenchPanelState(parsed)) return DEFAULT_WORKBENCH_PANEL_STATE;
+    return {
+      primarySidebarOpen: parsed.primarySidebarOpen,
+      auxiliaryOpen: parsed.auxiliaryOpen
+    };
+  } catch {
+    return DEFAULT_WORKBENCH_PANEL_STATE;
+  }
+}
+
+export function persistWorkbenchPanelState(state: WorkbenchPanelState): void {
+  if (typeof window === "undefined") return;
+  try {
+    const snapshot: PersistedWorkbenchPanelState = { version: WORKBENCH_VERSION, ...state };
+    window.localStorage.setItem(WORKBENCH_PANEL_STATE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Browser storage can be unavailable or full. Panel visibility is best-effort.
+  }
+}
+
 export function clearPersistedSpaceWorkbench(spaceId: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -93,6 +132,7 @@ export function clearPersistedWorkbenches(): void {
       if (key?.startsWith(WORKBENCH_SPACE_KEY_PREFIX)) window.localStorage.removeItem(key);
     }
     window.localStorage.removeItem(WORKBENCH_INDEX_KEY);
+    window.localStorage.removeItem(WORKBENCH_PANEL_STATE_KEY);
   } catch {
     // Browser storage cleanup is best-effort.
   }
@@ -163,6 +203,12 @@ function isPersistedSpaceWorkbench(value: unknown, spaceId: string): value is Pe
   if (!value || typeof value !== "object") return false;
   const snapshot = value as Partial<PersistedSpaceWorkbench>;
   return snapshot.version === WORKBENCH_VERSION && snapshot.spaceId === spaceId && Number.isFinite(snapshot.updatedAt) && Number.isInteger(snapshot.activeGroupIndex) && Array.isArray(snapshot.groups);
+}
+
+function isPersistedWorkbenchPanelState(value: unknown): value is PersistedWorkbenchPanelState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Partial<PersistedWorkbenchPanelState>;
+  return state.version === WORKBENCH_VERSION && typeof state.primarySidebarOpen === "boolean" && typeof state.auxiliaryOpen === "boolean";
 }
 
 function isRestNodeForSpace(value: unknown, spaceId: string): value is RestNode {

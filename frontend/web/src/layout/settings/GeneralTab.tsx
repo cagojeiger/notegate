@@ -6,11 +6,11 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
   return (
     <div className="space-y-4">
       <section>
-        <SectionHeader title="Saved workspace" description="Open panes are restored per space on this browser." />
+        <SectionHeader title="Saved workspace" description="Open panes and panel visibility are restored on this browser." />
         <Card className="flex items-start justify-between gap-4 text-sm">
           <div className="min-w-0">
             <div className="font-medium">Saved open panes</div>
-            <p className="mt-1 max-w-md text-xs leading-5 text-muted">Reset the browser-only pane snapshots used when returning to a space or refreshing Notegate.</p>
+            <p className="mt-1 max-w-md text-xs leading-5 text-muted">Reset the browser-only pane snapshots and panel visibility used when returning to a space or refreshing Notegate.</p>
           </div>
           <Button variant="danger" className="shrink-0" onClick={onResetSavedWorkspace}>
             <RotateCcw size={15} />

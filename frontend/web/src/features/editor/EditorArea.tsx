@@ -12,10 +12,13 @@ import { NodeContextMenu } from "../nodes/NodeContextMenu";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { TextEditorView } from "./TextEditorView";
 import type { NodeActions } from "./types";
+import type { EditorPresentation } from "../../layout/workbenchLayout";
 
 type EditorAreaProps = NodeActions & {
   groups: EditorGroup[];
   activeGroupIndex: number;
+  presentation?: EditorPresentation;
+  visibleGroupCount?: number;
   activeSpace: Space | null;
   onFocusGroup: (index: number) => void;
   onOpenNode: (node: RestNode) => void;
@@ -29,20 +32,23 @@ type EditorAreaProps = NodeActions & {
   canWriteActiveSpace: boolean;
 };
 
-export function EditorArea({ groups, activeGroupIndex, activeSpace, canWriteActiveSpace, onFocusGroup, onOpenNode, onOpenNodeInNewGroup, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
+export function EditorArea({ groups, activeGroupIndex, presentation = "split", visibleGroupCount = groups.length, activeSpace, canWriteActiveSpace, onFocusGroup, onOpenNode, onOpenNodeInNewGroup, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
   const multiple = groups.length > 1;
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; node: RestNode; groupIndex: number } | null>(null);
+  const visibleRange = editorGroupVisibleRange(groups.length, activeGroupIndex, visibleGroupCount);
   return (
     <div className="relative flex min-w-0 flex-1">
       {groups.map((group, index) => {
         const active = index === activeGroupIndex;
+        const outsideVisibleRange = index < visibleRange.start || index >= visibleRange.end;
+        const hidden = presentation === "focused" ? !active : outsideVisibleRange;
         return (
           <section
             key={group.id}
             data-editor-group
             data-active={active ? "true" : "false"}
             onMouseDown={() => onFocusGroup(index)}
-            className={`flex min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
+            className={`${hidden ? "hidden" : "flex"} min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active || presentation === "focused" ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
           >
             <GroupBody
               active={active}
@@ -59,7 +65,6 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, canWriteActi
               onRenameNode={onRenameNode}
               onMoveNode={onMoveNode}
               onDeleteNode={onDeleteNode}
-              onDownloadFile={onDownloadFile}
               onHeaderContextMenu={(node, event) => {
                 event.preventDefault();
                 onFocusGroup(index);
@@ -91,7 +96,14 @@ export function EditorArea({ groups, activeGroupIndex, activeSpace, canWriteActi
   );
 }
 
-function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onDownloadFile, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void; onDownloadFile: (node: RestNode) => void }) {
+function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visibleGroupCount: number): { start: number; end: number } {
+  const total = Math.max(1, totalGroups);
+  const count = Math.max(1, Math.min(total, visibleGroupCount));
+  const start = Math.min(Math.max(0, activeIndex), total - count);
+  return { start, end: start + count };
+}
+
+function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (!node) {
     return (
       <>
@@ -114,7 +126,6 @@ function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canCl
           onRenameNode={onRenameNode}
           onMoveNode={onMoveNode}
           onDeleteNode={onDeleteNode}
-          onDownloadFile={onDownloadFile}
           onHeaderContextMenu={onHeaderContextMenu}
         />
       )}
@@ -122,7 +133,7 @@ function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canCl
   );
 }
 
-function NodeGroupContent({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onDownloadFile, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void; onDownloadFile: (node: RestNode) => void }) {
+function NodeGroupContent({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (node.kind === "text") {
     return <TextEditorView active={active} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} onHeaderContextMenu={onHeaderContextMenu} />;
   }
