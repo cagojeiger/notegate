@@ -35,7 +35,7 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const canManageActiveSpace = canManageSpace(me, activeSpace);
   const showAuxiliary = auxiliaryOpen;
 
-  useWorkbenchPersistence(theme, activeSpace);
+  useWorkbenchPersistence(theme, activeSpace, activeSpaceId);
 
   const { settingsOpen, dialog, actions } = useWorkbenchActions({
     activeSpace,

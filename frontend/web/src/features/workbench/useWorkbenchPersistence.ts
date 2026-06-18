@@ -3,10 +3,13 @@ import { useEffect } from "react";
 import type { Space } from "../../api/types";
 import type { ThemeMode } from "../../design/tokens";
 import { persistLastSpace, persistTheme, useUiStore } from "../../stores/uiStore";
+import { persistSpaceWorkbench } from "../../stores/workbenchStorage";
 
-export function useWorkbenchPersistence(theme: ThemeMode, activeSpace: Space | null) {
+export function useWorkbenchPersistence(theme: ThemeMode, activeSpace: Space | null, activeSpaceId: string | null) {
   const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
   const addExpanded = useUiStore((state) => state.addExpanded);
+  const editorGroups = useUiStore((state) => state.editorGroups);
+  const activeGroupIndex = useUiStore((state) => state.activeGroupIndex);
 
   useEffect(() => {
     persistTheme(theme);
@@ -14,8 +17,13 @@ export function useWorkbenchPersistence(theme: ThemeMode, activeSpace: Space | n
 
   useEffect(() => {
     if (!activeSpace) return;
-    setActiveSpaceId(activeSpace.id);
+    if (activeSpace.id !== activeSpaceId) setActiveSpaceId(activeSpace.id);
     persistLastSpace(activeSpace.id);
     addExpanded([activeSpace.root_node_id]);
-  }, [activeSpace, setActiveSpaceId, addExpanded]);
+  }, [activeSpace, activeSpaceId, setActiveSpaceId, addExpanded]);
+
+  useEffect(() => {
+    if (!activeSpace || activeSpace.id !== activeSpaceId) return;
+    persistSpaceWorkbench(activeSpace.id, editorGroups, activeGroupIndex);
+  }, [activeSpace, activeSpaceId, editorGroups, activeGroupIndex]);
 }

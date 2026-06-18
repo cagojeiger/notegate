@@ -4,6 +4,7 @@ import type { Space } from "../../api/types";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "../../layout/dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
+import { clearPersistedSpaceWorkbench } from "../../stores/workbenchStorage";
 import { useCreateSpaceMutation, useDeleteSpaceMutation, useReorderSpacesMutation, useUpdateSpaceMutation } from "./useWorkbenchQueries";
 
 type SpaceActionsProps = {
@@ -15,23 +16,20 @@ type SpaceActionsProps = {
 
 export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManageActiveSpace, setDialog }: SpaceActionsProps) {
   const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
-  const resetGroups = useUiStore((state) => state.resetGroups);
   const closeMobile = useUiStore((state) => state.closeMobile);
 
   const createSpaceMutation = useCreateSpaceMutation((space) => {
     setActiveSpaceId(space.id);
-    resetGroups();
   });
   const updateSpaceMutation = useUpdateSpaceMutation();
   const reorderSpacesMutation = useReorderSpacesMutation();
-  const deleteSpaceMutation = useDeleteSpaceMutation(() => {
-    resetGroups();
-    setActiveSpaceId(null);
+  const deleteSpaceMutation = useDeleteSpaceMutation((spaceId) => {
+    if (useUiStore.getState().activeSpaceId === spaceId) setActiveSpaceId(null);
+    clearPersistedSpaceWorkbench(spaceId);
   });
 
   function selectSpace(space: Space) {
     setActiveSpaceId(space.id);
-    resetGroups();
     closeMobile();
   }
 

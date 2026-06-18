@@ -4,6 +4,7 @@ import type { Space, RestNode } from "../../api/types";
 import { clearDevApiKey } from "../../auth/session";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { useUiStore } from "../../stores/uiStore";
+import { clearPersistedWorkbenches } from "../../stores/workbenchStorage";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 import { useLogout } from "./useWorkbenchQueries";
 import { useWorkbenchSpaceActions } from "./useWorkbenchSpaceActions";
@@ -34,6 +35,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
   const toggleMobileTree = useUiStore((state) => state.toggleMobileTree);
   const toggleMobileAux = useUiStore((state) => state.toggleMobileAux);
   const closeMobile = useUiStore((state) => state.closeMobile);
+  const showToast = useUiStore((state) => state.showToast);
 
   const spaceActions = useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManageActiveSpace, setDialog });
   const nodeActions = useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog });
@@ -63,6 +65,20 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
     window.addEventListener("pointerup", up);
   }
 
+  function confirmResetSavedWorkspace() {
+    setDialog({
+      kind: "confirm",
+      title: "Reset saved workspace",
+      message: "This clears saved open panes for this browser only. Your notes and spaces will not be deleted.",
+      confirmLabel: "Reset",
+      danger: true,
+      onConfirm: () => {
+        clearPersistedWorkbenches();
+        showToast("Saved workspace reset");
+      }
+    });
+  }
+
   return {
     settingsOpen,
     dialog,
@@ -82,6 +98,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
       ...spaceActions,
       ...nodeActions,
       handleSignOut,
+      confirmResetSavedWorkspace,
       toggleFolder,
       startPrimaryResize
     }

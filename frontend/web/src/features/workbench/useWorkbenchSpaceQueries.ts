@@ -53,13 +53,13 @@ export function useReorderSpacesMutation() {
   });
 }
 
-export function useDeleteSpaceMutation(onDeleted: () => void) {
+export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (spaceId: string) => deleteSpace(client, spaceId),
-    onSuccess: () => {
-      onDeleted();
+    onSuccess: (_data, spaceId) => {
+      onDeleted(spaceId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
     }
   });
