@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import type { Space } from "../../api/types";
+import { canWriteSpace } from "../../auth/permissions";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "../../layout/dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
@@ -10,11 +11,10 @@ import { useCreateSpaceMutation, useDeleteSpaceMutation, useReorderSpacesMutatio
 type SpaceActionsProps = {
   activeSpace: Space | null;
   canCreateSpace: boolean;
-  canManageActiveSpace: boolean;
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;
 };
 
-export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManageActiveSpace, setDialog }: SpaceActionsProps) {
+export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, setDialog }: SpaceActionsProps) {
   const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
   const closeMobile = useUiStore((state) => state.closeMobile);
 
@@ -46,7 +46,7 @@ export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManag
   }
 
   function promptRenameSpace(targetSpace = activeSpace) {
-    if (!targetSpace || !canManageActiveSpace) return;
+    if (!targetSpace || !canManageTargetSpace(targetSpace)) return;
     const space = targetSpace;
     setDialog(renameSpaceDialog(space, async (spaceId, name) => {
       await updateSpaceMutation.mutateAsync({ spaceId, name });
@@ -54,11 +54,15 @@ export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, canManag
   }
 
   function confirmDeleteSpace(targetSpace = activeSpace) {
-    if (!targetSpace || !canManageActiveSpace) return;
+    if (!targetSpace || !canManageTargetSpace(targetSpace)) return;
     const space = targetSpace;
     setDialog(deleteSpaceDialog(space, async (spaceId) => {
       await deleteSpaceMutation.mutateAsync(spaceId);
     }));
+  }
+
+  function canManageTargetSpace(space: Space) {
+    return canCreateSpace && canWriteSpace(space);
   }
 
   return { selectSpace, reorderSpaces, promptCreateSpace, promptRenameSpace, confirmDeleteSpace };

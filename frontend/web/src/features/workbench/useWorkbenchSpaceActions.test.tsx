@@ -18,12 +18,12 @@ vi.mock("./useWorkbenchQueries", () => ({
   useUpdateSpaceMutation: vi.fn(() => ({ mutateAsync: vi.fn() }))
 }));
 
-function space(id: string): Space {
+function space(id: string, permission: Space["permission"] = "write"): Space {
   return {
     id,
     name: id,
     sort_order: 0,
-    permission: "write",
+    permission,
     root_node_id: `${id}-root`,
     created_at: "2026-06-13T00:00:00Z",
     updated_at: "2026-06-13T00:00:00Z"
@@ -67,7 +67,6 @@ describe("useWorkbenchSpaceActions", () => {
       useWorkbenchSpaceActions({
         activeSpace,
         canCreateSpace: true,
-        canManageActiveSpace: true,
         setDialog: (value) => {
           dialog = typeof value === "function" ? value(dialog) : value;
         }
@@ -93,7 +92,6 @@ describe("useWorkbenchSpaceActions", () => {
       useWorkbenchSpaceActions({
         activeSpace,
         canCreateSpace: true,
-        canManageActiveSpace: true,
         setDialog: (value) => {
           dialog = typeof value === "function" ? value(dialog) : value;
         }
@@ -106,6 +104,32 @@ describe("useWorkbenchSpaceActions", () => {
     expect(useUiStore.getState().activeSpaceId).toBeNull();
     expect(useUiStore.getState().editorGroups).toMatchObject([{ node: null, mode: "preview" }]);
     expect(window.localStorage.getItem(workbenchSpaceKey(activeSpace.id))).toBeNull();
+  });
+
+  it("uses the target space permission for inactive space management", async () => {
+    const activeSpace = space("space-a", "read");
+    const writableTarget = space("space-b", "write");
+    const readonlyTarget = space("space-c", "read");
+    let dialog: AppDialog | null = null;
+
+    useUiStore.getState().setActiveSpaceId(activeSpace.id);
+
+    const { result } = renderHook(() =>
+      useWorkbenchSpaceActions({
+        activeSpace,
+        canCreateSpace: true,
+        setDialog: (value) => {
+          dialog = typeof value === "function" ? value(dialog) : value;
+        }
+      })
+    );
+
+    result.current.confirmDeleteSpace(writableTarget);
+    expect(requireConfirmDialog(dialog).message).toContain(writableTarget.name);
+
+    dialog = null;
+    result.current.confirmDeleteSpace(readonlyTarget);
+    expect(dialog).toBeNull();
   });
 });
 

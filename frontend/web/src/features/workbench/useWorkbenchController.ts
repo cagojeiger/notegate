@@ -42,7 +42,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
     activeNode,
     canCreateSpace: canCreateSpaceForCaller,
     canWriteActiveSpace,
-    canManageActiveSpace,
     primaryWidth,
     onSignOut
   });
