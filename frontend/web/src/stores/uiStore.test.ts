@@ -149,6 +149,28 @@ describe("useUiStore", () => {
     expect(state.editorGroups[2]).toMatchObject({ node: null, mode: "preview" });
   });
 
+  it("restores the last active space workbench during store initialization", async () => {
+    const first = node("node-1");
+    const second = node("node-2");
+    window.localStorage.setItem("notegate.theme", "light");
+    window.localStorage.setItem("notegate.lastActiveSpaceId", "space-1");
+    persistSpaceWorkbench("space-1", [
+      { id: 11, node: first, mode: "edit" },
+      { id: 12, node: second, mode: "preview" }
+    ], 0);
+
+    vi.resetModules();
+    const { useUiStore: reloadedStore } = await import("./uiStore");
+
+    const state = reloadedStore.getState();
+    expect(state.activeSpaceId).toBe("space-1");
+    expect(state.activeGroupIndex).toBe(0);
+    expect(state.editorGroups).toHaveLength(2);
+    expect(state.editorGroups[0]).toMatchObject({ id: 0, node: first, mode: "edit" });
+    expect(state.editorGroups[1]).toMatchObject({ id: 1, node: second, mode: "preview" });
+    expect(state.nextGroupId).toBe(2);
+  });
+
   it("can clear a deleted active space snapshot after leaving the space", () => {
     const opened = node("node-1");
 
