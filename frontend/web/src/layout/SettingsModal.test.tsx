@@ -51,10 +51,10 @@ function mockSettingsApi(me: unknown = userMe) {
   });
 }
 
-function renderSettings(me = userMe) {
+function renderSettings(me = userMe, onResetSavedWorkspace = vi.fn()) {
   render(
     <ApiProvider apiKey="test-key" authCacheKey="test-key:0">
-      <SettingsModal me={me} onClose={vi.fn()} onSignOut={vi.fn()} />
+      <SettingsModal me={me} onClose={vi.fn()} onSignOut={vi.fn()} onResetSavedWorkspace={onResetSavedWorkspace} />
     </ApiProvider>
   );
 }
@@ -66,14 +66,30 @@ describe("SettingsModal", () => {
   });
 
   it("keeps user API keys inside the account tab", async () => {
+    const user = userEvent.setup();
     renderSettings();
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByText("My API Keys")).toBeInTheDocument();
     expect(await screen.findByText("No user API keys.")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "API Keys" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+  });
+
+  it("shows browser workspace reset controls in the general tab", async () => {
+    const user = userEvent.setup();
+    const onResetSavedWorkspace = vi.fn();
+    renderSettings(userMe, onResetSavedWorkspace);
+
+    expect(screen.getByText("Saved workspace")).toBeInTheDocument();
+    expect(screen.getByText("Open panes are restored per space on this browser.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(onResetSavedWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("shows the MCP connection cheat sheet in its own tab", async () => {
@@ -110,6 +126,7 @@ describe("SettingsModal", () => {
 
     renderSettings(agentMe);
 
+    await userEvent.setup().click(screen.getByRole("tab", { name: "Account" }));
     expect(await screen.findByText("ci-bot")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
   });

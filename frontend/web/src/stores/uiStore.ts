@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
 import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
+import { persistSpaceWorkbench, restoreSpaceWorkbench } from "./workbenchStorage";
 
 export { MAX_EDITOR_GROUPS };
 export type { EditorGroup };
@@ -21,6 +22,9 @@ function initialActiveSpaceId(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(LAST_SPACE_KEY);
 }
+
+const initialSpaceId = initialActiveSpaceId();
+const initialEditorState = initialSpaceId ? restoreSpaceWorkbench(initialSpaceId, 0) : resetEditorGroupsState({ nextGroupId: 0 });
 type UiState = {
   theme: ThemeMode;
   activeSpaceId: string | null;
@@ -68,12 +72,12 @@ type UiState = {
   setSaveState: (saveState: "idle" | "saving" | "saved" | "error" | "conflict") => void;
 };
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore = create<UiState>((set, get) => ({
   theme: initialTheme(),
-  activeSpaceId: initialActiveSpaceId(),
-  editorGroups: [{ id: 0, node: null, mode: "preview" }],
-  activeGroupIndex: 0,
-  nextGroupId: 1,
+  activeSpaceId: initialSpaceId,
+  editorGroups: initialEditorState.editorGroups,
+  activeGroupIndex: initialEditorState.activeGroupIndex,
+  nextGroupId: initialEditorState.nextGroupId,
   expandedFolderIds: new Set(),
   primarySidebarOpen: true,
   primaryWidth: 300,
@@ -87,7 +91,16 @@ export const useUiStore = create<UiState>((set) => ({
   toast: null,
   saveState: "idle",
   toggleTheme: () => set((state) => ({ theme: state.theme === "light" ? "dark" : "light" })),
-  setActiveSpaceId: (activeSpaceId) => set({ activeSpaceId }),
+  setActiveSpaceId: (activeSpaceId) => {
+    const state = get();
+    if (state.activeSpaceId === activeSpaceId) return;
+    if (state.activeSpaceId) persistSpaceWorkbench(state.activeSpaceId, state.editorGroups, state.activeGroupIndex);
+    if (!activeSpaceId) {
+      set({ activeSpaceId, ...resetEditorGroupsState({ nextGroupId: state.nextGroupId }) });
+      return;
+    }
+    set({ activeSpaceId, ...restoreSpaceWorkbench(activeSpaceId, state.nextGroupId) });
+  },
   openInActiveGroup: (node) => set((state) => openNodeInActiveGroupState(state, node)),
   openInNewGroup: (node) => set((state) => openNodeInNewGroupState(state, node)),
   addGroup: () => set((state) => addEditorGroupState(state)),
