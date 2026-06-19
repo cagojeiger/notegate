@@ -1,5 +1,5 @@
 import type { Components } from "react-markdown";
-import { useRef } from "react";
+import { useRef, type ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parse as parseYaml } from "yaml";
@@ -10,11 +10,7 @@ import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHo
 
 const components: Components = {
   table({ children, ...props }) {
-    return (
-      <div className="markdown-table-scroll" tabIndex={0}>
-        <table {...props}>{children}</table>
-      </div>
-    );
+    return <TableBlock {...props}>{children}</TableBlock>;
   },
   pre({ children }) {
     return <>{children}</>;
@@ -39,6 +35,17 @@ const components: Components = {
     return <ShikiCodeBlock code={content} language={language} />;
   }
 };
+
+function TableBlock({ children, ...props }: ComponentProps<"table">) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useResetHorizontalScrollOnGrow(scrollRef);
+
+  return (
+    <div ref={scrollRef} className="markdown-table-scroll" tabIndex={0}>
+      <table {...props}>{children}</table>
+    </div>
+  );
+}
 
 // Renders optional leading YAML frontmatter as preview-only Properties, then
 // renders the remaining CommonMark + GitHub-flavored markdown. Raw HTML is

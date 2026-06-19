@@ -2,8 +2,9 @@ import { create } from "zustand";
 
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
+import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
 import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
-import { persistSpaceWorkbench, restoreSpaceWorkbench } from "./workbenchStorage";
+import { persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
 
 export { MAX_EDITOR_GROUPS };
 export type { EditorGroup };
@@ -25,6 +26,7 @@ function initialActiveSpaceId(): string | null {
 
 const initialSpaceId = initialActiveSpaceId();
 const initialEditorState = initialSpaceId ? restoreSpaceWorkbench(initialSpaceId, 0) : resetEditorGroupsState({ nextGroupId: 0 });
+const initialPanelState = restoreWorkbenchPanelState();
 type UiState = {
   theme: ThemeMode;
   activeSpaceId: string | null;
@@ -79,13 +81,13 @@ export const useUiStore = create<UiState>((set, get) => ({
   activeGroupIndex: initialEditorState.activeGroupIndex,
   nextGroupId: initialEditorState.nextGroupId,
   expandedFolderIds: new Set(),
-  primarySidebarOpen: true,
-  primaryWidth: 300,
-  treeRatio: 0.67,
+  primarySidebarOpen: initialPanelState.primarySidebarOpen,
+  primaryWidth: WORKBENCH_LAYOUT.defaultPrimaryWidth,
+  treeRatio: WORKBENCH_LAYOUT.defaultTreeRatio,
   treeSectionOpen: true,
   recentSectionOpen: true,
   recentDensity: "list",
-  auxiliaryOpen: true,
+  auxiliaryOpen: initialPanelState.auxiliaryOpen,
   mobileTreeOpen: false,
   mobileAuxOpen: false,
   toast: null,
@@ -124,13 +126,23 @@ export const useUiStore = create<UiState>((set, get) => ({
       return { expandedFolderIds: next };
     }),
   setExpanded: (ids) => set({ expandedFolderIds: new Set(ids) }),
-  togglePrimarySidebar: () => set((state) => ({ primarySidebarOpen: !state.primarySidebarOpen })),
-  setPrimaryWidth: (width) => set({ primaryWidth: Math.max(220, Math.min(520, Math.round(width))) }),
-  setTreeRatio: (ratio) => set({ treeRatio: Math.max(0.2, Math.min(0.82, ratio)) }),
+  togglePrimarySidebar: () =>
+    set((state) => {
+      const primarySidebarOpen = !state.primarySidebarOpen;
+      persistWorkbenchPanelState({ primarySidebarOpen, auxiliaryOpen: state.auxiliaryOpen });
+      return { primarySidebarOpen };
+    }),
+  setPrimaryWidth: (width) => set({ primaryWidth: Math.max(WORKBENCH_LAYOUT.minPrimaryWidth, Math.min(WORKBENCH_LAYOUT.maxPrimaryWidth, Math.round(width))) }),
+  setTreeRatio: (ratio) => set({ treeRatio: Math.max(WORKBENCH_LAYOUT.minTreeRatio, Math.min(WORKBENCH_LAYOUT.maxTreeRatio, ratio)) }),
   toggleTreeSection: () => set((state) => ({ treeSectionOpen: !state.treeSectionOpen })),
   toggleRecentSection: () => set((state) => ({ recentSectionOpen: !state.recentSectionOpen })),
   toggleRecentDensity: () => set((state) => ({ recentDensity: state.recentDensity === "list" ? "compact" : "list" })),
-  toggleAuxiliary: () => set((state) => ({ auxiliaryOpen: !state.auxiliaryOpen })),
+  toggleAuxiliary: () =>
+    set((state) => {
+      const auxiliaryOpen = !state.auxiliaryOpen;
+      persistWorkbenchPanelState({ primarySidebarOpen: state.primarySidebarOpen, auxiliaryOpen });
+      return { auxiliaryOpen };
+    }),
   toggleMobileTree: () => set((state) => ({ mobileTreeOpen: !state.mobileTreeOpen })),
   toggleMobileAux: () => set((state) => ({ mobileAuxOpen: !state.mobileAuxOpen })),
   closeMobile: () => set({ mobileTreeOpen: false, mobileAuxOpen: false }),

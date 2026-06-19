@@ -125,6 +125,23 @@ describe("TextPreview", () => {
       clientWidth.restore();
     }
   });
+
+  it("resets markdown table horizontal scroll when the pane grows wider", async () => {
+    const resizeObserver = installSingleResizeObserverMock();
+    const clientWidth = installClientWidthMock();
+
+    try {
+      const { container } = render(<TextPreview name="matrix.md" content={"| service | note |\n| --- | --- |\n| task_management | long note |"} />);
+      await screen.findByRole("table");
+      const tableScroll = container.querySelector(".markdown-table-scroll") as HTMLElement;
+
+      expect(tableScroll).toBeInTheDocument();
+      expectScrollResetOnGrow(tableScroll, clientWidth, resizeObserver);
+    } finally {
+      resizeObserver.restore();
+      clientWidth.restore();
+    }
+  });
 });
 
 function expectScrollResetOnGrow(element: HTMLElement, clientWidth: ReturnType<typeof installClientWidthMock>, resizeObserver: ReturnType<typeof installSingleResizeObserverMock>) {

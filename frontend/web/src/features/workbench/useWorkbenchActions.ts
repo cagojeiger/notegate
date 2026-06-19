@@ -68,7 +68,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
     setDialog({
       kind: "confirm",
       title: "Reset saved workspace",
-      message: "This clears saved open panes for this browser only. Your notes and spaces will not be deleted.",
+      message: "This clears saved open panes and panel visibility for this browser only. Your notes and spaces will not be deleted.",
       confirmLabel: "Reset",
       danger: true,
       onConfirm: () => {

@@ -1,11 +1,18 @@
 import type { PointerEventHandler, ReactNode } from "react";
 
-export function PrimarySidebarFrame({ isMobile, open, mobileOpen, width, children }: { isMobile: boolean; open: boolean; mobileOpen: boolean; width: number; children: ReactNode }) {
+import { WORKBENCH_LAYOUT, type WorkbenchPanelMode } from "./workbenchLayout";
+
+export function PrimarySidebarFrame({ mode, width, children }: { mode: WorkbenchPanelMode; width: number; children: ReactNode }) {
+  if (mode === "hidden") return null;
+
+  const style = mode === "docked" ? { width } : { width: WORKBENCH_LAYOUT.mobilePrimaryWidthPercent, maxWidth: WORKBENCH_LAYOUT.mobilePrimaryMaxWidth };
+  const className =
+    mode === "docked"
+      ? "min-h-0 flex shrink-0"
+      : "fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] left-0 top-[calc(3rem+env(safe-area-inset-top))] z-40 flex min-h-0 shadow-2xl";
+
   return (
-    <div
-      style={isMobile ? undefined : { width }}
-      className={`min-h-0 max-md:fixed max-md:left-0 max-md:bottom-14 max-md:top-12 max-md:z-40 max-md:flex max-md:w-[85%] max-md:max-w-[320px] max-md:shadow-2xl max-md:transition-transform ${mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"} ${open ? "md:flex md:shrink-0" : "md:hidden"}`}
-    >
+    <div style={style} className={className}>
       {children}
     </div>
   );
@@ -16,17 +23,30 @@ export function PrimarySidebarResizeHandle({ visible, onPointerDown }: { visible
   return <div onPointerDown={onPointerDown} className="hidden w-1 shrink-0 cursor-col-resize bg-seam transition-colors hover:bg-[var(--ng-selection)] md:block" aria-hidden="true" />;
 }
 
-export function AuxiliarySidebarFrame({ open, mobileOpen, children }: { open: boolean; mobileOpen: boolean; children: ReactNode }) {
+export function AuxiliarySidebarFrame({ mode, children }: { mode: WorkbenchPanelMode; children: ReactNode }) {
+  if (mode === "hidden") return null;
+
+  const style = mode === "docked" ? { width: WORKBENCH_LAYOUT.auxiliaryWidth } : undefined;
+  const className =
+    mode === "docked"
+      ? "min-h-0 flex shrink-0"
+      : "fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-40 flex h-[70vh] min-h-0 max-w-none rounded-t-2xl shadow-2xl";
+
   return (
-    <div
-      className={`min-h-0 hidden max-md:fixed max-md:inset-x-0 max-md:bottom-14 max-md:top-auto max-md:z-40 max-md:flex max-md:h-[70vh] max-md:max-w-none max-md:rounded-t-2xl max-md:shadow-2xl max-md:transition-transform ${mobileOpen ? "max-md:translate-y-0" : "max-md:translate-y-[calc(100%+3.5rem)]"} md:max-[1120px]:fixed md:max-[1120px]:right-0 md:max-[1120px]:top-12 md:max-[1120px]:bottom-7 md:max-[1120px]:z-30 md:max-[1120px]:w-[340px] md:max-[1120px]:shadow-2xl ${open ? "md:max-[1120px]:flex min-[1120px]:flex min-[1120px]:w-[320px] min-[1120px]:shrink-0" : "md:max-[1120px]:hidden min-[1120px]:hidden"}`}
-    >
+    <div style={style} className={className}>
       {children}
     </div>
   );
 }
 
-export function MobilePanelOverlay({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export function PanelOverlay({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   if (!visible) return null;
-  return <button type="button" aria-label="Close panel" onClick={onClose} className="fixed inset-x-0 bottom-14 top-12 z-30 bg-black/40 md:hidden" />;
+  return (
+    <button
+      type="button"
+      aria-label="Close panel"
+      onClick={onClose}
+      className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] top-[calc(3rem+env(safe-area-inset-top))] z-30 bg-black/40"
+    />
+  );
 }

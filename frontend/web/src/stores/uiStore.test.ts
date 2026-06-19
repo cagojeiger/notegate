@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../api/types";
+import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
 import { MAX_EDITOR_GROUPS, useUiStore } from "./uiStore";
-import { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, clearPersistedSpaceWorkbench, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
+import { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
 
 function resetStore() {
   useUiStore.setState(useUiStore.getInitialState(), true);
@@ -39,6 +40,14 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().primarySidebarOpen).toBe(true);
     useUiStore.getState().togglePrimarySidebar();
     expect(useUiStore.getState().primarySidebarOpen).toBe(false);
+
+    expect(useUiStore.getState().auxiliaryOpen).toBe(true);
+    useUiStore.getState().toggleAuxiliary();
+    expect(useUiStore.getState().auxiliaryOpen).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(WORKBENCH_PANEL_STATE_KEY) ?? "{}")).toMatchObject({
+      primarySidebarOpen: false,
+      auxiliaryOpen: false
+    });
   });
 
   it("caps editor groups at the product maximum", () => {
@@ -171,6 +180,22 @@ describe("useUiStore", () => {
     expect(state.nextGroupId).toBe(2);
   });
 
+  it("restores saved panel visibility during store initialization", async () => {
+    window.localStorage.setItem("notegate.theme", "light");
+    window.localStorage.setItem(WORKBENCH_PANEL_STATE_KEY, JSON.stringify({
+      version: 1,
+      primarySidebarOpen: true,
+      auxiliaryOpen: false
+    }));
+
+    vi.resetModules();
+    const { useUiStore: reloadedStore } = await import("./uiStore");
+
+    const state = reloadedStore.getState();
+    expect(state.primarySidebarOpen).toBe(true);
+    expect(state.auxiliaryOpen).toBe(false);
+  });
+
   it("can clear a deleted active space snapshot after leaving the space", () => {
     const opened = node("node-1");
 
@@ -180,6 +205,19 @@ describe("useUiStore", () => {
     clearPersistedSpaceWorkbench("space-1");
 
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
+  });
+
+  it("clears saved workspace snapshots and panel visibility together", () => {
+    persistSpaceWorkbench("space-1", [{ id: 1, node: node("node-1"), mode: "preview" }], 0);
+    useUiStore.getState().toggleAuxiliary();
+
+    expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).not.toBeNull();
+    expect(window.localStorage.getItem(WORKBENCH_PANEL_STATE_KEY)).not.toBeNull();
+
+    clearPersistedWorkbenches();
+
+    expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
+    expect(window.localStorage.getItem(WORKBENCH_PANEL_STATE_KEY)).toBeNull();
   });
 
   it("keeps only the most recent persisted space snapshots", () => {
@@ -200,13 +238,13 @@ describe("useUiStore", () => {
 
   it("clamps resizable layout values", () => {
     useUiStore.getState().setPrimaryWidth(100);
-    expect(useUiStore.getState().primaryWidth).toBe(220);
+    expect(useUiStore.getState().primaryWidth).toBe(WORKBENCH_LAYOUT.minPrimaryWidth);
     useUiStore.getState().setPrimaryWidth(900);
-    expect(useUiStore.getState().primaryWidth).toBe(520);
+    expect(useUiStore.getState().primaryWidth).toBe(WORKBENCH_LAYOUT.maxPrimaryWidth);
 
     useUiStore.getState().setTreeRatio(0.05);
-    expect(useUiStore.getState().treeRatio).toBe(0.2);
+    expect(useUiStore.getState().treeRatio).toBe(WORKBENCH_LAYOUT.minTreeRatio);
     useUiStore.getState().setTreeRatio(0.95);
-    expect(useUiStore.getState().treeRatio).toBe(0.82);
+    expect(useUiStore.getState().treeRatio).toBe(WORKBENCH_LAYOUT.maxTreeRatio);
   });
 });
