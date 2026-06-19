@@ -57,8 +57,10 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
               activeSpace={activeSpace}
               canWriteActiveSpace={canWriteActiveSpace}
               canClose={multiple}
+              canOpenInNewGroup={groups.length < MAX_EDITOR_GROUPS}
               onClose={() => onCloseGroup(index)}
               onSetMode={(mode) => onSetGroupMode(index, mode)}
+              onOpenNodeInNewGroup={onOpenNodeInNewGroup}
               onCreateFolder={onCreateFolder}
               onCreateText={onCreateText}
               onFileSelected={onFileSelected}
@@ -103,7 +105,7 @@ function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visib
   return { start, end: start + count };
 }
 
-function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canClose, onClose, onSetMode, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onOpenNodeInNewGroup: (node: RestNode) => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (!node) {
     return (
       <>
@@ -121,8 +123,10 @@ function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canCl
           mode={mode}
           canWriteActiveSpace={canWriteActiveSpace}
           canClose={canClose}
+          canOpenInNewGroup={canOpenInNewGroup}
           onClose={onClose}
           onSetMode={onSetMode}
+          onOpenNodeInNewGroup={onOpenNodeInNewGroup}
           onRenameNode={onRenameNode}
           onMoveNode={onMoveNode}
           onDeleteNode={onDeleteNode}
@@ -133,9 +137,9 @@ function GroupBody({ active, node, mode, activeSpace, canWriteActiveSpace, canCl
   );
 }
 
-function NodeGroupContent({ active, node, mode, canWriteActiveSpace, canClose, onClose, onSetMode, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function NodeGroupContent({ active, node, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & { active: boolean; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onOpenNodeInNewGroup: (node: RestNode) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (node.kind === "text") {
-    return <TextEditorView active={active} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} onHeaderContextMenu={onHeaderContextMenu} />;
+    return <TextEditorView active={active} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
   }
   const Icon = node.kind === "file" ? Database : Folder;
   return (
