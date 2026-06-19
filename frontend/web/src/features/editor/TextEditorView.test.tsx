@@ -1,10 +1,15 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
+import { copyText } from "../../shared/lib/clipboard";
 import { TextEditorView } from "./TextEditorView";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+
+vi.mock("../../shared/lib/clipboard", () => ({
+  copyText: vi.fn()
+}));
 
 vi.mock("./useEditorQueries", () => ({
   useTextDocument: vi.fn(),
@@ -53,9 +58,11 @@ function renderTextEditorView(canWriteActiveSpace = true) {
       node={node}
       mode="preview"
       canWriteActiveSpace={canWriteActiveSpace}
+      canOpenInNewGroup
       canClose={false}
       onClose={vi.fn()}
       onSetMode={vi.fn()}
+      onOpenNodeInNewGroup={vi.fn()}
       onRenameNode={vi.fn()}
       onMoveNode={vi.fn()}
       onDeleteNode={vi.fn()}
@@ -73,12 +80,15 @@ describe("TextEditorView", () => {
       refetch: vi.fn()
     } as never);
     vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: vi.fn(), isPending: false } as never);
+    vi.mocked(copyText).mockReset();
+    vi.mocked(copyText).mockResolvedValue(true);
   });
 
   it("disables editing for truncated text reads", () => {
     renderTextEditorView();
 
     expect(screen.getByText(/Loaded 1000 of 2000 lines/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy content" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
@@ -112,9 +122,11 @@ describe("TextEditorView", () => {
         latestNode={{ ...node, content_sha256: "server-sha" }}
         mode="edit"
         canWriteActiveSpace
+        canOpenInNewGroup
         canClose={false}
         onClose={vi.fn()}
         onSetMode={onSetMode}
+        onOpenNodeInNewGroup={vi.fn()}
         onRenameNode={vi.fn()}
         onMoveNode={vi.fn()}
         onDeleteNode={vi.fn()}
@@ -160,9 +172,11 @@ describe("TextEditorView", () => {
           node={node}
           mode="edit"
           canWriteActiveSpace
+          canOpenInNewGroup
           canClose={false}
           onClose={vi.fn()}
           onSetMode={vi.fn()}
+          onOpenNodeInNewGroup={vi.fn()}
           onRenameNode={vi.fn()}
           onMoveNode={vi.fn()}
           onDeleteNode={vi.fn()}
@@ -184,6 +198,66 @@ describe("TextEditorView", () => {
       if (originalClientWidth) Object.defineProperty(HTMLTextAreaElement.prototype, "clientWidth", originalClientWidth);
       else delete (HTMLTextAreaElement.prototype as unknown as { clientWidth?: number }).clientWidth;
     }
+  });
+
+  it("copies loaded text from the editor header", async () => {
+    const user = userEvent.setup();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "copy me", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    renderTextEditorView();
+
+    await user.click(screen.getByRole("button", { name: "Copy content" }));
+
+    expect(copyText).toHaveBeenCalledWith("copy me");
+  });
+
+  it("shows editor actions from the preview context menu", async () => {
+    const user = userEvent.setup();
+    const onSetMode = vi.fn();
+    const onOpenNodeInNewGroup = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "plain text", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    render(
+      <TextEditorView
+        active
+        node={{ ...node, name: "note.txt" }}
+        mode="preview"
+        canWriteActiveSpace
+        canOpenInNewGroup
+        canClose
+        onClose={vi.fn()}
+        onSetMode={onSetMode}
+        onOpenNodeInNewGroup={onOpenNodeInNewGroup}
+        onRenameNode={vi.fn()}
+        onMoveNode={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByText("plain text"));
+
+    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Copy content" }));
+    expect(copyText).toHaveBeenCalledWith("plain text");
+
+    fireEvent.contextMenu(screen.getByText("plain text"));
+    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Edit" }));
+    expect(onSetMode).toHaveBeenCalledWith("edit");
+
+    fireEvent.contextMenu(screen.getByText("plain text"));
+    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Open in new group" }));
+    expect(onOpenNodeInNewGroup).toHaveBeenCalledWith(expect.objectContaining({ id: node.id }));
   });
 
 });
