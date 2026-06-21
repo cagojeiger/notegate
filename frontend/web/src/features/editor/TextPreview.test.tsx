@@ -1,5 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { StructuredPreview } from "./StructuredPreview";
 import { TextPreview } from "./TextPreview";
@@ -51,6 +51,80 @@ describe("TextPreview", () => {
     expect(await screen.findByRole("heading", { name: "terra-pdf" })).toBeInTheDocument();
     expect(container).not.toHaveTextContent("repo: terra-pdf");
     expect(container).not.toHaveTextContent("---");
+  });
+
+  it("opens conservative markdown node links through the preview callback", async () => {
+    const onOpenInternalLink = vi.fn();
+    render(
+      <TextPreview
+        name="index.md"
+        content={"[Access Control](./Policies/Access%20Control%20Policy.md)"}
+        markdownLinkPolicy={{
+          sourcePath: "/Security and Compliance (원본)/index.md",
+          onOpenInternalLink
+        }}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: "Access Control" }));
+
+    expect(onOpenInternalLink).toHaveBeenCalledWith("/Security and Compliance (원본)/Policies/Access Control Policy.md");
+  });
+
+  it("does not intercept external markdown links", async () => {
+    const onOpenInternalLink = vi.fn();
+    render(<TextPreview name="index.md" content={"[External](https://example.com)"} markdownLinkPolicy={{ sourcePath: "/index.md", onOpenInternalLink }} />);
+    const link = await screen.findByRole("link", { name: "External" });
+    link.addEventListener("click", (event) => event.preventDefault());
+
+    fireEvent.click(link);
+
+    expect(onOpenInternalLink).not.toHaveBeenCalled();
+  });
+
+  it("removes unsafe javascript link hrefs", async () => {
+    const onOpenInternalLink = vi.fn();
+    render(<TextPreview name="index.md" content={"[Unsafe](javascript:alert(1))"} markdownLinkPolicy={{ sourcePath: "/index.md", onOpenInternalLink }} />);
+    const link = (await screen.findByText("Unsafe")).closest("a");
+
+    expect(link).not.toHaveAttribute("href");
+  });
+
+  it("reports invalid internal-looking markdown links without opening them", async () => {
+    const onOpenInternalLink = vi.fn();
+    const onInvalidInternalLink = vi.fn();
+    render(<TextPreview name="index.md" content={"[Broken](./bad%path.md)"} markdownLinkPolicy={{ sourcePath: "/index.md", onOpenInternalLink, onInvalidInternalLink }} />);
+
+    fireEvent.click(await screen.findByRole("link", { name: "Broken" }));
+
+    expect(onOpenInternalLink).not.toHaveBeenCalled();
+    expect(onInvalidInternalLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps invalid internal-looking markdown links inside the app without an invalid handler", async () => {
+    render(<TextPreview name="index.md" content={"[Broken](./bad%path.md)"} markdownLinkPolicy={{ sourcePath: "/index.md", onOpenInternalLink: vi.fn() }} />);
+
+    expect(fireEvent.click(await screen.findByRole("link", { name: "Broken" }))).toBe(false);
+  });
+
+  it("does not intercept modified or non-primary clicks on markdown node links", async () => {
+    const onOpenInternalLink = vi.fn();
+    render(<TextPreview name="index.md" content={"[Target](./target.md)"} markdownLinkPolicy={{ sourcePath: "/index.md", onOpenInternalLink }} />);
+    const link = await screen.findByRole("link", { name: "Target" });
+    const preventNavigation = (event: MouseEvent) => event.preventDefault();
+
+    document.addEventListener("click", preventNavigation);
+    try {
+      fireEvent.click(link, { ctrlKey: true });
+      fireEvent.click(link, { metaKey: true });
+      fireEvent.click(link, { shiftKey: true });
+      fireEvent.click(link, { altKey: true });
+      fireEvent.click(link, { button: 1 });
+    } finally {
+      document.removeEventListener("click", preventNavigation);
+    }
+
+    expect(onOpenInternalLink).not.toHaveBeenCalled();
   });
 
   it("leaves non-object frontmatter as markdown content", async () => {

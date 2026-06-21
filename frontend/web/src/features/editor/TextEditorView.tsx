@@ -11,11 +11,11 @@ import { TextPreview } from "./TextPreview";
 import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
-import type { NodeActions } from "./types";
+import type { EditorNavigationActions, NodeActions } from "./types";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
-export function TextEditorView({ active, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & { active: boolean; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onOpenNodeInNewGroup: (node: RestNode) => void }) {
+export function TextEditorView({ active, groupId, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const textQuery = useTextDocument(node);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -174,7 +174,17 @@ export function TextEditorView({ active, node, latestNode, mode, canWriteActiveS
           {mode === "edit" ? (
             <LineNumberedTextArea value={draft} onChange={setDraft} />
           ) : (
-            <TextPreview name={node.name} content={content} structuredMode={structuredMode} structuredExpansionMode={structuredExpansionMode} />
+            <TextPreview
+              name={node.name}
+              content={content}
+              markdownLinkPolicy={{
+                sourcePath: node.path,
+                onOpenInternalLink: (path) => onOpenMarkdownLink(groupId, node, path),
+                onInvalidInternalLink: () => showToast("Invalid markdown link")
+              }}
+              structuredMode={structuredMode}
+              structuredExpansionMode={structuredExpansionMode}
+            />
           )}
         </div>
       )}

@@ -22,6 +22,7 @@ function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> =
       onFocusGroup={vi.fn()}
       onOpenNode={vi.fn()}
       onOpenNodeInNewGroup={vi.fn()}
+      onOpenMarkdownLink={vi.fn()}
       onCloseGroup={vi.fn()}
       onSetGroupMode={vi.fn()}
       onCreateFolder={vi.fn()}

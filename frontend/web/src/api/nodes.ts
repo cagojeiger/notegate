@@ -26,6 +26,11 @@ export function revealNode(client: ApiClient, spaceId: string, nodeId: string): 
   return client.get<NodeRevealResponse>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/reveal`);
 }
 
+export function resolveNodePath(client: ApiClient, spaceId: string, path: string): Promise<RestNode> {
+  const params = new URLSearchParams({ path });
+  return client.get<RestNode>(`/api/v1/spaces/${spaceId}/paths/resolve?${params}`);
+}
+
 export function createNode(
   client: ApiClient,
   spaceId: string,

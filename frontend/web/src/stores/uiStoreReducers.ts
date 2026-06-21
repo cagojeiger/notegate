@@ -18,6 +18,12 @@ export function openNodeInActiveGroupState(state: EditorGroupState, node: RestNo
   };
 }
 
+export function openNodeInGroupState(state: EditorGroupState, groupId: number, node: RestNode): Pick<EditorGroupState, "editorGroups"> {
+  return {
+    editorGroups: state.editorGroups.map((group) => (group.id === groupId ? { ...group, node, mode: "preview" } : group))
+  };
+}
+
 export function addEditorGroupState(state: EditorGroupState): Partial<EditorGroupState> {
   const active = state.editorGroups[state.activeGroupIndex];
   return appendEditorGroupState(state, active?.node ?? null);

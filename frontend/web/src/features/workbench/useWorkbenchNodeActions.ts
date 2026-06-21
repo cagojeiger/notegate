@@ -2,6 +2,8 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { downloadFile } from "../../api/files";
 import { useApiClient } from "../../api/ApiProvider";
+import { ApiError } from "../../api/errors";
+import { resolveNodePath } from "../../api/nodes";
 import type { RestNode, Space } from "../../api/types";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
@@ -19,12 +21,14 @@ type NodeActionsProps = {
 export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog }: NodeActionsProps) {
   const client = useApiClient();
   const openInActiveGroup = useUiStore((state) => state.openInActiveGroup);
+  const openInGroup = useUiStore((state) => state.openInGroup);
   const openInNewGroup = useUiStore((state) => state.openInNewGroup);
   const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
   const addExpanded = useUiStore((state) => state.addExpanded);
   const setExpanded = useUiStore((state) => state.setExpanded);
   const closeMobile = useUiStore((state) => state.closeMobile);
+  const showToast = useUiStore((state) => state.showToast);
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
     addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
@@ -40,13 +44,49 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   async function openNode(node: RestNode) {
     openInActiveGroup(node);
     closeMobile();
-    await revealNode(node);
+    await revealNodeBestEffort(node);
   }
 
   async function openNodeInNewGroup(node: RestNode) {
     openInNewGroup(node);
     closeMobile();
-    await revealNode(node);
+    await revealNodeBestEffort(node);
+  }
+
+  async function openMarkdownLink(groupId: number, sourceNode: RestNode, path: string) {
+    if (!activeSpace || sourceNode.space_id !== activeSpace.id || !isCurrentMarkdownLinkSource(activeSpace.id, groupId, sourceNode)) return;
+    const spaceId = activeSpace.id;
+
+    let node: RestNode;
+    try {
+      node = await resolveNodePath(client, spaceId, path);
+    } catch (error) {
+      showToast(error instanceof ApiError && error.status === 404 ? "Linked node not found" : "Could not open linked node");
+      return;
+    }
+
+    if (node.space_id !== spaceId) {
+      showToast("Could not open linked node");
+      return;
+    }
+    if (!isCurrentMarkdownLinkSource(spaceId, groupId, sourceNode)) return;
+
+    openInGroup(groupId, node);
+    closeMobile();
+    await revealNodeBestEffort(node);
+  }
+
+  function isCurrentMarkdownLinkSource(spaceId: string, groupId: number, sourceNode: RestNode): boolean {
+    const state = useUiStore.getState();
+    return state.activeSpaceId === spaceId && state.editorGroups.some((group) => group.id === groupId && group.node?.id === sourceNode.id);
+  }
+
+  async function revealNodeBestEffort(node: RestNode) {
+    try {
+      await revealNode(node);
+    } catch {
+      showToast("Opened node, but could not reveal it in the tree");
+    }
   }
 
   async function revealNode(node: RestNode) {
@@ -139,6 +179,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   return {
     openNode,
     openNodeInNewGroup,
+    openMarkdownLink,
     promptCreateNode,
     promptCreateInFolder,
     handleFileSelected,
