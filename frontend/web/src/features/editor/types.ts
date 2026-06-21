@@ -5,3 +5,8 @@ export type NodeActions = {
   onMoveNode: (node: RestNode) => void;
   onDeleteNode: (node: RestNode) => void;
 };
+
+export type EditorNavigationActions = {
+  onOpenNodeInNewGroup: (node: RestNode) => void;
+  onOpenMarkdownLink: (groupId: number, node: RestNode, path: string) => void;
+};

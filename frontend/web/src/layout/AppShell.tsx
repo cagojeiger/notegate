@@ -106,6 +106,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onFocusGroup={actions.focusGroup}
           onOpenNode={(node) => { void openNode(node); }}
           onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
+          onOpenMarkdownLink={(groupId, node, path) => { void actions.openMarkdownLink(groupId, node, path); }}
           onCloseGroup={actions.closeGroup}
           onSetGroupMode={actions.setGroupMode}
           onCreateFolder={() => actions.promptCreateNode("folder")}

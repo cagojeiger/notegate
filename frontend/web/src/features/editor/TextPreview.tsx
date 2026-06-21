@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 
 import { PlainTextPreview } from "./PlainTextPreview";
+import type { MarkdownLinkPolicy } from "../../shared/lib/markdownLinks";
 import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
@@ -8,11 +9,11 @@ import type { StructuredExpansionMode } from "./StructuredTreeView";
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((module) => ({ default: module.MarkdownPreview })));
 const StructuredPreview = lazy(() => import("./StructuredPreview").then((module) => ({ default: module.StructuredPreview })));
 
-export function TextPreview({ name, content, structuredMode = "tree", structuredExpansionMode = "expanded" }: { name: string; content: string; structuredMode?: StructuredPreviewMode; structuredExpansionMode?: StructuredExpansionMode }) {
+export function TextPreview({ name, content, markdownLinkPolicy, structuredMode = "tree", structuredExpansionMode = "expanded" }: { name: string; content: string; markdownLinkPolicy?: MarkdownLinkPolicy; structuredMode?: StructuredPreviewMode; structuredExpansionMode?: StructuredExpansionMode }) {
   const format = inferTextFormat(name);
 
   if (format === "markdown") {
-    return <PreviewSuspense><MarkdownPreview content={content} /></PreviewSuspense>;
+    return <PreviewSuspense><MarkdownPreview content={content} linkPolicy={markdownLinkPolicy} /></PreviewSuspense>;
   }
 
   if (isStructuredFormat(format)) {

@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
 import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
-import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
+import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
 import { persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
 
 export { MAX_EDITOR_GROUPS };
@@ -48,6 +48,7 @@ type UiState = {
   toggleTheme: () => void;
   setActiveSpaceId: (id: string | null) => void;
   openInActiveGroup: (node: RestNode) => void;
+  openInGroup: (groupId: number, node: RestNode) => void;
   openInNewGroup: (node: RestNode) => void;
   addGroup: () => void;
   closeGroup: (index: number) => void;
@@ -104,6 +105,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ activeSpaceId, ...restoreSpaceWorkbench(activeSpaceId, state.nextGroupId) });
   },
   openInActiveGroup: (node) => set((state) => openNodeInActiveGroupState(state, node)),
+  openInGroup: (groupId, node) => set((state) => openNodeInGroupState(state, groupId, node)),
   openInNewGroup: (node) => set((state) => openNodeInNewGroupState(state, node)),
   addGroup: () => set((state) => addEditorGroupState(state)),
   closeGroup: (index) => set((state) => closeEditorGroupState(state, index)),

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
+import { useUiStore } from "../../stores/uiStore";
 import { TextEditorView } from "./TextEditorView";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
@@ -55,6 +56,7 @@ function renderTextEditorView(canWriteActiveSpace = true) {
   render(
     <TextEditorView
       active
+      groupId={0}
       node={node}
       mode="preview"
       canWriteActiveSpace={canWriteActiveSpace}
@@ -63,6 +65,7 @@ function renderTextEditorView(canWriteActiveSpace = true) {
       onClose={vi.fn()}
       onSetMode={vi.fn()}
       onOpenNodeInNewGroup={vi.fn()}
+      onOpenMarkdownLink={vi.fn()}
       onRenameNode={vi.fn()}
       onMoveNode={vi.fn()}
       onDeleteNode={vi.fn()}
@@ -72,6 +75,7 @@ function renderTextEditorView(canWriteActiveSpace = true) {
 
 describe("TextEditorView", () => {
   beforeEach(() => {
+    useUiStore.setState(useUiStore.getInitialState(), true);
     vi.mocked(useTextDocument).mockReturnValue({
       data: partialText,
       isLoading: false,
@@ -118,6 +122,7 @@ describe("TextEditorView", () => {
     render(
       <TextEditorView
         active
+        groupId={0}
         node={node}
         latestNode={{ ...node, content_sha256: "server-sha" }}
         mode="edit"
@@ -127,6 +132,7 @@ describe("TextEditorView", () => {
         onClose={vi.fn()}
         onSetMode={onSetMode}
         onOpenNodeInNewGroup={vi.fn()}
+        onOpenMarkdownLink={vi.fn()}
         onRenameNode={vi.fn()}
         onMoveNode={vi.fn()}
         onDeleteNode={vi.fn()}
@@ -169,6 +175,7 @@ describe("TextEditorView", () => {
       render(
         <TextEditorView
           active
+          groupId={0}
           node={node}
           mode="edit"
           canWriteActiveSpace
@@ -177,6 +184,7 @@ describe("TextEditorView", () => {
           onClose={vi.fn()}
           onSetMode={vi.fn()}
           onOpenNodeInNewGroup={vi.fn()}
+          onOpenMarkdownLink={vi.fn()}
           onRenameNode={vi.fn()}
           onMoveNode={vi.fn()}
           onDeleteNode={vi.fn()}
@@ -217,6 +225,57 @@ describe("TextEditorView", () => {
     expect(copyText).toHaveBeenCalledWith("copy me");
   });
 
+  it("passes the source group and node when opening markdown links", async () => {
+    const onOpenMarkdownLink = vi.fn();
+    const sourceNode = { ...node, path: "/docs/source.md" };
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "[Target](./target.md)", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    render(
+      <TextEditorView
+        active
+        groupId={7}
+        node={sourceNode}
+        mode="preview"
+        canWriteActiveSpace
+        canOpenInNewGroup
+        canClose={false}
+        onClose={vi.fn()}
+        onSetMode={vi.fn()}
+        onOpenNodeInNewGroup={vi.fn()}
+        onOpenMarkdownLink={onOpenMarkdownLink}
+        onRenameNode={vi.fn()}
+        onMoveNode={vi.fn()}
+        onDeleteNode={vi.fn()}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: "Target" }));
+
+    expect(onOpenMarkdownLink).toHaveBeenCalledWith(7, expect.objectContaining({ id: sourceNode.id, path: sourceNode.path }), "/docs/target.md");
+  });
+
+  it("shows a toast for invalid internal-looking markdown links", async () => {
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "[Broken](./bad%path.md)", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    renderTextEditorView();
+
+    fireEvent.click(await screen.findByRole("link", { name: "Broken" }));
+
+    expect(useUiStore.getState().toast).toBe("Invalid markdown link");
+  });
+
   it("shows editor actions from the preview context menu", async () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();
@@ -232,6 +291,7 @@ describe("TextEditorView", () => {
     render(
       <TextEditorView
         active
+        groupId={0}
         node={{ ...node, name: "note.txt" }}
         mode="preview"
         canWriteActiveSpace
@@ -240,6 +300,7 @@ describe("TextEditorView", () => {
         onClose={vi.fn()}
         onSetMode={onSetMode}
         onOpenNodeInNewGroup={onOpenNodeInNewGroup}
+        onOpenMarkdownLink={vi.fn()}
         onRenameNode={vi.fn()}
         onMoveNode={vi.fn()}
         onDeleteNode={vi.fn()}

@@ -1,14 +1,15 @@
 import type { Components } from "react-markdown";
-import { useRef, type ComponentProps } from "react";
+import { useMemo, useRef, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parse as parseYaml } from "yaml";
 
 import { MermaidBlock } from "../../features/editor/MermaidBlock";
 import { ShikiCodeBlock } from "../../features/editor/ShikiCodeBlock";
+import { classifyMarkdownLink, safeMarkdownUrlTransform, type MarkdownLinkPolicy } from "../lib/markdownLinks";
 import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHorizontalScrollOnGrow";
 
-const components: Components = {
+const baseComponents: Components = {
   table({ children, ...props }) {
     return <TableBlock {...props}>{children}</TableBlock>;
   },
@@ -36,6 +37,37 @@ const components: Components = {
   }
 };
 
+function createComponents(linkPolicy: MarkdownLinkPolicy | undefined): Components {
+  return {
+    ...baseComponents,
+    a({ href, children, node: _node, ...props }) {
+      const hrefProps = href ? { href } : {};
+
+      function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+        if (event.defaultPrevented || !isPlainPrimaryClick(event)) return;
+        if (!linkPolicy || !href) return;
+        const linkIntent = classifyMarkdownLink(linkPolicy.sourcePath, href);
+
+        if (linkIntent.kind === "internal") {
+          event.preventDefault();
+          void linkPolicy.onOpenInternalLink(linkIntent.path);
+          return;
+        }
+        if (linkIntent.kind === "invalid") {
+          event.preventDefault();
+          linkPolicy.onInvalidInternalLink?.();
+        }
+      }
+
+      return <a {...props} {...hrefProps} onClick={handleClick}>{children}</a>;
+    }
+  };
+}
+
+function isPlainPrimaryClick(event: MouseEvent<HTMLAnchorElement>): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 function TableBlock({ children, ...props }: ComponentProps<"table">) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useResetHorizontalScrollOnGrow(scrollRef);
@@ -50,13 +82,14 @@ function TableBlock({ children, ...props }: ComponentProps<"table">) {
 // Renders optional leading YAML frontmatter as preview-only Properties, then
 // renders the remaining CommonMark + GitHub-flavored markdown. Raw HTML is
 // intentionally not enabled (no rehype-raw), so embedded HTML is escaped.
-export function Markdown({ content }: { content: string }) {
+export function Markdown({ content, linkPolicy }: { content: string; linkPolicy?: MarkdownLinkPolicy }) {
   const document = parseMarkdownDocument(content);
+  const components = useMemo(() => createComponents(linkPolicy), [linkPolicy]);
 
   return (
     <div className="markdown">
       <FrontmatterProperties properties={document.frontmatter} />
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{document.body}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={safeMarkdownUrlTransform}>{document.body}</ReactMarkdown>
     </div>
   );
 }
