@@ -90,6 +90,89 @@ describe("TextPreview", () => {
     expect(link).not.toHaveAttribute("href");
   });
 
+  it("renders external markdown images without internal resolution", async () => {
+    const loadInternalImage = vi.fn();
+    render(
+      <TextPreview
+        name="index.md"
+        content={"![Logo](https://example.com/logo.png)"}
+        markdownImagePolicy={{ sourcePath: "/index.md", loadInternalImage }}
+      />
+    );
+
+    const image = await screen.findByRole("img", { name: "Logo" });
+    expect(image).toHaveAttribute("src", "https://example.com/logo.png");
+    expect(loadInternalImage).not.toHaveBeenCalled();
+  });
+
+  it("resolves and renders internal markdown image files", async () => {
+    const objectUrls = installObjectUrlMock();
+    const loadInternalImage = vi.fn().mockResolvedValue({ status: "loaded", blob: new Blob(["image"], { type: "image/png" }) });
+
+    try {
+      const view = render(
+        <TextPreview
+          name="index.md"
+          content={"![Logo](./Assets/logo.png)"}
+          markdownImagePolicy={{ sourcePath: "/Docs/index.md", loadInternalImage }}
+        />
+      );
+
+      const image = await screen.findByRole("img", { name: "Logo" });
+      expect(image).toHaveAttribute("src", "blob:notegate-test");
+      expect(loadInternalImage).toHaveBeenCalledWith("/Docs/Assets/logo.png");
+
+      view.unmount();
+      expect(objectUrls.revokeObjectURL).toHaveBeenCalledWith("blob:notegate-test");
+    } finally {
+      objectUrls.restore();
+    }
+  });
+
+  it("keeps invalid internal-looking markdown images inside the preview", async () => {
+    const loadInternalImage = vi.fn();
+    render(
+      <TextPreview
+        name="index.md"
+        content={"![Broken](./bad%path.png)"}
+        markdownImagePolicy={{ sourcePath: "/index.md", loadInternalImage }}
+      />
+    );
+
+    expect(await screen.findByText("Invalid image link: Broken")).toBeInTheDocument();
+    expect(loadInternalImage).not.toHaveBeenCalled();
+  });
+
+  it("shows a placeholder when an internal markdown image cannot be resolved", async () => {
+    const loadInternalImage = vi.fn().mockResolvedValue({ status: "not-found" });
+    render(
+      <TextPreview
+        name="index.md"
+        content={"![Missing](./missing.png)"}
+        markdownImagePolicy={{ sourcePath: "/index.md", loadInternalImage }}
+      />
+    );
+
+    expect(await screen.findByText("Image not found: Missing")).toBeInTheDocument();
+  });
+
+  it("does not render disallowed markdown image protocols", async () => {
+    const loadInternalImage = vi.fn();
+    render(
+      <TextPreview
+        name="index.md"
+        content={"![Unsafe](javascript:alert(1))\n![Mail](mailto:hello@example.com)"}
+        markdownImagePolicy={{ sourcePath: "/index.md", loadInternalImage }}
+      />
+    );
+
+    expect(await screen.findByText("Image unavailable: Unsafe")).toBeInTheDocument();
+    expect(await screen.findByText("Image unavailable: Mail")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Unsafe" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Mail" })).not.toBeInTheDocument();
+    expect(loadInternalImage).not.toHaveBeenCalled();
+  });
+
   it("reports invalid internal-looking markdown links without opening them", async () => {
     const onOpenInternalLink = vi.fn();
     const onInvalidInternalLink = vi.fn();
@@ -267,6 +350,27 @@ function installSingleResizeObserverMock() {
     restore: () => {
       if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
       else delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    }
+  };
+}
+
+function installObjectUrlMock() {
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const createObjectURL = vi.fn().mockReturnValue("blob:notegate-test");
+  const revokeObjectURL = vi.fn();
+
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+
+  return {
+    createObjectURL,
+    revokeObjectURL,
+    restore: () => {
+      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectURL });
+      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectURL });
+      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
     }
   };
 }

@@ -1,5 +1,5 @@
 import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -12,11 +12,12 @@ import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { EditorNavigationActions, NodeActions } from "./types";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useMarkdownImageLoader, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 export function TextEditorView({ active, groupId, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const textQuery = useTextDocument(node);
+  const loadMarkdownImage = useMarkdownImageLoader(node);
   const [draft, setDraft] = useState("");
   const [conflict, setConflict] = useState(false);
   const [externalUpdate, setExternalUpdate] = useState<RestNode | null>(null);
@@ -38,6 +39,21 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   const structured = isStructuredFormat(format);
   const prevMode = useRef<"preview" | "edit">(mode);
   const showToast = useUiStore((state) => state.showToast);
+  const markdownLinkPolicy = useMemo(
+    () => ({
+      sourcePath: node.path,
+      onOpenInternalLink: (path: string) => onOpenMarkdownLink(groupId, node, path),
+      onInvalidInternalLink: () => showToast("Invalid markdown link")
+    }),
+    [groupId, node, onOpenMarkdownLink, showToast]
+  );
+  const markdownImagePolicy = useMemo(
+    () => ({
+      sourcePath: node.path,
+      loadInternalImage: loadMarkdownImage
+    }),
+    [loadMarkdownImage, node.path]
+  );
 
   useEffect(() => {
     setStructuredMode("tree");
@@ -177,11 +193,8 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
             <TextPreview
               name={node.name}
               content={content}
-              markdownLinkPolicy={{
-                sourcePath: node.path,
-                onOpenInternalLink: (path) => onOpenMarkdownLink(groupId, node, path),
-                onInvalidInternalLink: () => showToast("Invalid markdown link")
-              }}
+              markdownLinkPolicy={markdownLinkPolicy}
+              markdownImagePolicy={markdownImagePolicy}
               structuredMode={structuredMode}
               structuredExpansionMode={structuredExpansionMode}
             />

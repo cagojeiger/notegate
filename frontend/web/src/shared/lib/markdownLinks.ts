@@ -1,33 +1,62 @@
+import { defaultUrlTransform } from "react-markdown";
+
 const SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/;
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(["http", "https", "mailto", "tel"]);
+const SAFE_MARKDOWN_IMAGE_PROTOCOLS = new Set(["http", "https"]);
 
 export type MarkdownInternalLinkHandler = (path: string) => void | Promise<void>;
 export type MarkdownInvalidInternalLinkHandler = () => void;
 export type MarkdownLinkIntent = { kind: "external" } | { kind: "internal"; path: string } | { kind: "invalid" };
+export type MarkdownImageLoadResult = { status: "loaded"; blob: Blob } | { status: "not-found" | "unsupported" | "error" };
 export type MarkdownLinkPolicy = {
   sourcePath: string;
   onOpenInternalLink: MarkdownInternalLinkHandler;
   onInvalidInternalLink?: MarkdownInvalidInternalLinkHandler;
 };
+export type MarkdownImagePolicy = {
+  sourcePath: string;
+  loadInternalImage: (path: string) => Promise<MarkdownImageLoadResult>;
+};
 
-export function safeMarkdownUrlTransform(value: string): string {
+export function safeMarkdownUrlTransform(value: string, key?: string, node?: { tagName?: string }): string {
+  if (key === "src" && node?.tagName === "img") {
+    return safeMarkdownImageUrlTransform(value);
+  }
+  return safeMarkdownLinkUrlTransform(value);
+}
+
+function safeMarkdownLinkUrlTransform(value: string): string {
+  const protocol = markdownUrlProtocol(value);
+  if (protocol && !SAFE_MARKDOWN_URL_PROTOCOLS.has(protocol)) return "";
+  if (protocol === "tel") return value;
+  return defaultUrlTransform(value);
+}
+
+function safeMarkdownImageUrlTransform(value: string): string {
+  if (value.startsWith("//")) return "";
+  const protocol = markdownUrlProtocol(value);
+  if (protocol && !SAFE_MARKDOWN_IMAGE_PROTOCOLS.has(protocol)) return "";
+  return defaultUrlTransform(value);
+}
+
+function markdownUrlProtocol(value: string): string | null {
   const colon = value.indexOf(":");
+  if (colon === -1) return null;
+
   const questionMark = value.indexOf("?");
   const hash = value.indexOf("#");
   const slash = value.indexOf("/");
 
   if (
-    colon === -1 ||
     (slash !== -1 && colon > slash) ||
     (questionMark !== -1 && colon > questionMark) ||
-    (hash !== -1 && colon > hash) ||
-    SAFE_MARKDOWN_URL_PROTOCOLS.has(value.slice(0, colon).toLowerCase())
+    (hash !== -1 && colon > hash)
   ) {
-    return value;
+    return null;
   }
 
-  return "";
+  return value.slice(0, colon).toLowerCase();
 }
 
 export function classifyMarkdownLink(sourcePath: string, href: string): MarkdownLinkIntent {

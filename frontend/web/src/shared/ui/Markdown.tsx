@@ -1,12 +1,12 @@
 import type { Components } from "react-markdown";
-import { useMemo, useRef, type ComponentProps, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parse as parseYaml } from "yaml";
 
 import { MermaidBlock } from "../../features/editor/MermaidBlock";
 import { ShikiCodeBlock } from "../../features/editor/ShikiCodeBlock";
-import { classifyMarkdownLink, safeMarkdownUrlTransform, type MarkdownLinkPolicy } from "../lib/markdownLinks";
+import { classifyMarkdownLink, safeMarkdownUrlTransform, type MarkdownImagePolicy, type MarkdownLinkPolicy } from "../lib/markdownLinks";
 import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHorizontalScrollOnGrow";
 
 const baseComponents: Components = {
@@ -37,7 +37,7 @@ const baseComponents: Components = {
   }
 };
 
-function createComponents(linkPolicy: MarkdownLinkPolicy | undefined): Components {
+function createComponents(linkPolicy: MarkdownLinkPolicy | undefined, imagePolicy: MarkdownImagePolicy | undefined): Components {
   return {
     ...baseComponents,
     a({ href, children, node: _node, ...props }) {
@@ -60,6 +60,9 @@ function createComponents(linkPolicy: MarkdownLinkPolicy | undefined): Component
       }
 
       return <a {...props} {...hrefProps} onClick={handleClick}>{children}</a>;
+    },
+    img({ src, alt, node: _node, ...props }) {
+      return <MarkdownImage {...props} src={src} alt={alt} imagePolicy={imagePolicy} />;
     }
   };
 }
@@ -82,9 +85,9 @@ function TableBlock({ children, ...props }: ComponentProps<"table">) {
 // Renders optional leading YAML frontmatter as preview-only Properties, then
 // renders the remaining CommonMark + GitHub-flavored markdown. Raw HTML is
 // intentionally not enabled (no rehype-raw), so embedded HTML is escaped.
-export function Markdown({ content, linkPolicy }: { content: string; linkPolicy?: MarkdownLinkPolicy }) {
+export function Markdown({ content, linkPolicy, imagePolicy }: { content: string; linkPolicy?: MarkdownLinkPolicy; imagePolicy?: MarkdownImagePolicy }) {
   const document = parseMarkdownDocument(content);
-  const components = useMemo(() => createComponents(linkPolicy), [linkPolicy]);
+  const components = useMemo(() => createComponents(linkPolicy, imagePolicy), [linkPolicy, imagePolicy]);
 
   return (
     <div className="markdown">
@@ -92,6 +95,64 @@ export function Markdown({ content, linkPolicy }: { content: string; linkPolicy?
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={safeMarkdownUrlTransform}>{document.body}</ReactMarkdown>
     </div>
   );
+}
+
+type MarkdownImageState =
+  | { status: "idle" }
+  | { status: "loading"; path: string }
+  | { status: "loaded"; path: string; url: string }
+  | { status: "not-found" | "unsupported" | "error"; path: string };
+
+function MarkdownImage({ src, alt, imagePolicy, ...props }: ComponentProps<"img"> & { imagePolicy?: MarkdownImagePolicy }) {
+  const [state, setState] = useState<MarkdownImageState>({ status: "idle" });
+  const imageIntent = useMemo(() => {
+    if (!src || !imagePolicy) return { kind: "external" as const };
+    return classifyMarkdownLink(imagePolicy.sourcePath, src);
+  }, [imagePolicy, src]);
+
+  useEffect(() => {
+    if (imageIntent.kind !== "internal" || !imagePolicy) {
+      setState({ status: "idle" });
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+    const path = imageIntent.path;
+    setState({ status: "loading", path });
+
+    void imagePolicy.loadInternalImage(path)
+      .then((result) => {
+        if (!active) return;
+        if (result.status === "loaded") {
+          objectUrl = URL.createObjectURL(result.blob);
+          setState({ status: "loaded", path, url: objectUrl });
+          return;
+        }
+        setState({ status: result.status, path });
+      })
+      .catch(() => {
+        if (active) setState({ status: "error", path });
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageIntent, imagePolicy]);
+
+  if (!src) return <ImageFallback alt={alt} message="Image unavailable" />;
+  if (!imagePolicy || imageIntent.kind === "external") return <img {...props} src={src} alt={alt ?? ""} loading="lazy" decoding="async" />;
+  if (imageIntent.kind === "invalid") return <ImageFallback alt={alt} message="Invalid image link" />;
+  if (state.status === "loaded" && state.path === imageIntent.path) return <img {...props} src={state.url} alt={alt ?? ""} loading="lazy" decoding="async" />;
+  if (state.status === "not-found" && state.path === imageIntent.path) return <ImageFallback alt={alt} message="Image not found" />;
+  if (state.status === "unsupported" && state.path === imageIntent.path) return <ImageFallback alt={alt} message="Image cannot be displayed" />;
+  if (state.status === "error" && state.path === imageIntent.path) return <ImageFallback alt={alt} message="Could not load image" />;
+  return <ImageFallback alt={alt} message="Loading image..." />;
+}
+
+function ImageFallback({ alt, message }: { alt?: string; message: string }) {
+  return <span className="markdown-image-fallback">{alt ? `${message}: ${alt}` : message}</span>;
 }
 
 function FrontmatterProperties({ properties }: { properties: Record<string, unknown> | null }) {

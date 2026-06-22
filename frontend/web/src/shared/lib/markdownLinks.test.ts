@@ -15,6 +15,21 @@ describe("safeMarkdownUrlTransform", () => {
     expect(safeMarkdownUrlTransform("javascript:alert(1)")).toBe("");
     expect(safeMarkdownUrlTransform("data:text/html,<script>alert(1)</script>")).toBe("");
     expect(safeMarkdownUrlTransform("blob:https://example.com/id")).toBe("");
+    expect(safeMarkdownUrlTransform("irc://example.com/channel")).toBe("");
+    expect(safeMarkdownUrlTransform("xmpp:hello@example.com")).toBe("");
+  });
+
+  it("allows only http, https, and internal paths for markdown images", () => {
+    const imageNode = { tagName: "img" };
+
+    expect(safeMarkdownUrlTransform("https://example.com/logo.png", "src", imageNode)).toBe("https://example.com/logo.png");
+    expect(safeMarkdownUrlTransform("http://example.com/logo.png", "src", imageNode)).toBe("http://example.com/logo.png");
+    expect(safeMarkdownUrlTransform("./logo.png", "src", imageNode)).toBe("./logo.png");
+    expect(safeMarkdownUrlTransform("/assets/logo.png", "src", imageNode)).toBe("/assets/logo.png");
+    expect(safeMarkdownUrlTransform("mailto:hello@example.com", "src", imageNode)).toBe("");
+    expect(safeMarkdownUrlTransform("tel:+15551234567", "src", imageNode)).toBe("");
+    expect(safeMarkdownUrlTransform("//example.com/logo.png", "src", imageNode)).toBe("");
+    expect(safeMarkdownUrlTransform("data:image/png;base64,abc", "src", imageNode)).toBe("");
   });
 });
 
