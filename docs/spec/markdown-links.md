@@ -44,3 +44,26 @@ Resolve에 실패하면 현재 문서는 그대로 유지하고 client는 비파
 Plain click에서 내부 path 후보이지만 invalid인 링크는 browser navigation으로 넘기지 않는다. 현재 문서를 유지하고 `Invalid markdown link` toast를 표시한다.
 
 Modifier click 또는 non-primary click은 client가 가로채지 않고 browser 기본 동작에 맡긴다.
+
+## 이미지 링크
+
+Markdown image도 같은 path 해석 규칙을 사용한다.
+
+```text
+![same folder](image.png)          -> 현재 문서의 폴더 기준 상대 경로
+![child](./Assets/diagram.png)     -> 현재 문서의 폴더 기준 상대 경로
+![parent](../Assets/logo.png)      -> 현재 문서의 폴더 기준 상대 경로
+![root](/Assets/logo.png)          -> 활성 Space root 기준 절대 경로
+![web](https://example.com/a.png)  -> 외부 URL, node resolve 대상 아님
+```
+
+규칙:
+
+- 표준 Markdown image syntax인 `![alt](path)`만 정의한다.
+- 내부 image path는 link path와 동일하게 normalize하고 REST path endpoint로 resolve한다.
+- Resolve된 node가 `file`이고 `media_type`이 `image/*`이며 client-encrypted file이 아닐 때만 preview 안에 image로 표시한다.
+- Resolve 실패, invalid path, file이 아닌 node, image가 아닌 file, client-encrypted file은 현재 문서를 유지하고 preview 안에 비파괴적인 placeholder를 표시한다.
+- 외부 `http:`, `https:` image는 browser 기본 image loading으로 유지한다.
+- `javascript:`, `data:`, `blob:` 등 allowlist에 없는 protocol과 protocol-relative URL(`//example.com/a.png`)은 rendered `src`를 제거하고 image로 load하지 않는다.
+
+Obsidian wikilink embed syntax인 `![[image.png]]`, width syntax인 `![[image.png|300]]`, vault-wide filename lookup, attachment folder 자동 탐색은 이 문서에서 정의하지 않는다.

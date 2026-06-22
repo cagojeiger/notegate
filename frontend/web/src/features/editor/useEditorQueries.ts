@@ -1,14 +1,15 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { downloadFile } from "../../api/files";
-import { getNode, listChildren } from "../../api/nodes";
+import { getNode, listChildren, resolveNodePath } from "../../api/nodes";
 import { POLLING, withPollingJitter } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
+import type { MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
 import { usePageVisible } from "../../shared/hooks/usePageVisible";
 import { useUiStore } from "../../stores/uiStore";
 
@@ -20,6 +21,42 @@ export function useFolderChildrenStat(node: RestNode) {
 export function useFileDownload(node: RestNode) {
   const client = useApiClient();
   return async () => downloadFile(client, node.space_id, node.id);
+}
+
+export function useMarkdownImageLoader(sourceNode: RestNode) {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+
+  return useCallback(async (path: string): Promise<MarkdownImageLoadResult> => {
+    let imageNode: RestNode;
+    try {
+      imageNode = await queryClient.fetchQuery({
+        queryKey: queryKeys.markdownImageNode(sourceNode.space_id, path),
+        queryFn: () => resolveNodePath(client, sourceNode.space_id, path),
+        retry: false,
+        staleTime: 5_000
+      });
+    } catch (error) {
+      return { status: error instanceof ApiError && error.status === 404 ? "not-found" : "error" };
+    }
+
+    if (!isRenderableMarkdownImage(sourceNode, imageNode)) {
+      return { status: "unsupported" };
+    }
+
+    try {
+      const contentVersion = imageNode.content_sha256 ?? imageNode.updated_at;
+      const blob = await queryClient.fetchQuery({
+        queryKey: queryKeys.markdownImageBlob(imageNode.space_id, imageNode.id, contentVersion),
+        queryFn: () => downloadFile(client, imageNode.space_id, imageNode.id),
+        retry: false,
+        staleTime: Infinity
+      });
+      return { status: "loaded", blob };
+    } catch {
+      return { status: "error" };
+    }
+  }, [client, queryClient, sourceNode.space_id]);
 }
 
 export function useTextDocument(node: RestNode) {
@@ -75,4 +112,13 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
       }
     }
   });
+}
+
+function isRenderableMarkdownImage(sourceNode: RestNode, imageNode: RestNode): boolean {
+  return (
+    imageNode.space_id === sourceNode.space_id &&
+    imageNode.kind === "file" &&
+    imageNode.encryption_mode !== "client" &&
+    imageNode.media_type?.toLowerCase().startsWith("image/") === true
+  );
 }

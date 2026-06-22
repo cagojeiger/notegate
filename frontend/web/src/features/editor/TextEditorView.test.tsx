@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,7 +6,7 @@ import type { ReadTextResponse, RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
 import { TextEditorView } from "./TextEditorView";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useMarkdownImageLoader, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 vi.mock("../../shared/lib/clipboard", () => ({
   copyText: vi.fn()
@@ -14,7 +14,8 @@ vi.mock("../../shared/lib/clipboard", () => ({
 
 vi.mock("./useEditorQueries", () => ({
   useTextDocument: vi.fn(),
-  useSaveTextDocument: vi.fn()
+  useSaveTextDocument: vi.fn(),
+  useMarkdownImageLoader: vi.fn()
 }));
 
 const node: RestNode = {
@@ -84,6 +85,8 @@ describe("TextEditorView", () => {
       refetch: vi.fn()
     } as never);
     vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: vi.fn(), isPending: false } as never);
+    vi.mocked(useMarkdownImageLoader).mockReset();
+    vi.mocked(useMarkdownImageLoader).mockReturnValue(vi.fn().mockResolvedValue({ status: "error" }));
     vi.mocked(copyText).mockReset();
     vi.mocked(copyText).mockResolvedValue(true);
   });
@@ -276,6 +279,66 @@ describe("TextEditorView", () => {
     expect(useUiStore.getState().toast).toBe("Invalid markdown link");
   });
 
+  it("passes markdown image links through the editor image loader", async () => {
+    const objectUrls = installObjectUrlMock();
+    const loadMarkdownImage = vi.fn().mockResolvedValue({ status: "loaded", blob: new Blob(["image"], { type: "image/png" }) });
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "![Diagram](./assets/diagram.png)", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    vi.mocked(useMarkdownImageLoader).mockReturnValue(loadMarkdownImage);
+    const sourceNode = { ...node, path: "/docs/source.md" };
+    const viewProps = {
+      active: true,
+      groupId: 0,
+      node: sourceNode,
+      mode: "preview" as const,
+      canWriteActiveSpace: true,
+      canOpenInNewGroup: true,
+      canClose: false,
+      onClose: vi.fn(),
+      onSetMode: vi.fn(),
+      onOpenNodeInNewGroup: vi.fn(),
+      onOpenMarkdownLink: vi.fn(),
+      onRenameNode: vi.fn(),
+      onMoveNode: vi.fn(),
+      onDeleteNode: vi.fn()
+    };
+
+    try {
+      const view = render(<TextEditorView {...viewProps} />);
+
+      expect(await screen.findByRole("img", { name: "Diagram" })).toHaveAttribute("src", "blob:notegate-editor-test");
+      expect(useMarkdownImageLoader).toHaveBeenCalledWith(expect.objectContaining({ id: sourceNode.id, path: sourceNode.path }));
+      expect(loadMarkdownImage).toHaveBeenCalledWith("/docs/assets/diagram.png");
+      expect(loadMarkdownImage).toHaveBeenCalledTimes(1);
+
+      view.rerender(<TextEditorView {...viewProps} />);
+      await waitFor(() => expect(loadMarkdownImage).toHaveBeenCalledTimes(1));
+      view.unmount();
+    } finally {
+      objectUrls.restore();
+    }
+  });
+
+  it("shows a placeholder for unsupported markdown images", async () => {
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "![Not image](./note.md)", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    vi.mocked(useMarkdownImageLoader).mockReturnValue(vi.fn().mockResolvedValue({ status: "unsupported" }));
+
+    renderTextEditorView();
+
+    expect(await screen.findByText("Image cannot be displayed: Not image")).toBeInTheDocument();
+  });
+
   it("shows editor actions from the preview context menu", async () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();
@@ -322,3 +385,24 @@ describe("TextEditorView", () => {
   });
 
 });
+
+function installObjectUrlMock() {
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const createObjectURL = vi.fn().mockReturnValue("blob:notegate-editor-test");
+  const revokeObjectURL = vi.fn();
+
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+
+  return {
+    createObjectURL,
+    revokeObjectURL,
+    restore: () => {
+      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectURL });
+      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectURL });
+      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+    }
+  };
+}

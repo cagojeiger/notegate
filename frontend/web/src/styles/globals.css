@@ -266,6 +266,17 @@ select:focus-visible {
   border-radius: 8px;
 }
 
+.markdown-image-fallback {
+  display: inline-flex;
+  max-width: 100%;
+  border: 1px solid var(--ng-border);
+  border-radius: 8px;
+  background: var(--ng-panel);
+  color: var(--ng-muted);
+  font-size: 0.9em;
+  padding: 0.35em 0.6em;
+}
+
 .shiki {
   margin: 0;
   padding: 1rem;

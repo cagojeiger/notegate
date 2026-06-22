@@ -10,5 +10,7 @@ export const queryKeys = {
   node: (spaceId: string, nodeId: string) => ["spaces", spaceId, "nodes", nodeId] as const,
   text: (spaceId: string, nodeId: string) => ["spaces", spaceId, "text", nodeId] as const,
   metadata: (spaceId: string, nodeId: string) => ["spaces", spaceId, "metadata", nodeId] as const,
-  file: (spaceId: string, nodeId: string) => ["spaces", spaceId, "file", nodeId] as const
+  file: (spaceId: string, nodeId: string) => ["spaces", spaceId, "file", nodeId] as const,
+  markdownImageNode: (spaceId: string, path: string) => ["spaces", spaceId, "markdown-image-node", path] as const,
+  markdownImageBlob: (spaceId: string, nodeId: string, contentVersion: string) => ["spaces", spaceId, "markdown-image-blob", nodeId, contentVersion] as const
 };
