@@ -228,6 +228,54 @@ describe("TextEditorView", () => {
     expect(copyText).toHaveBeenCalledWith("copy me");
   });
 
+  it("uses save and cancel actions while editing text", async () => {
+    const user = userEvent.setup();
+    const onSetMode = vi.fn();
+    const save = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "original", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: save, isPending: false } as never);
+    const props = {
+      active: true,
+      groupId: 0,
+      node,
+      canWriteActiveSpace: true,
+      canOpenInNewGroup: true,
+      canClose: false,
+      onClose: vi.fn(),
+      onSetMode,
+      onOpenNodeInNewGroup: vi.fn(),
+      onOpenMarkdownLink: vi.fn(),
+      onRenameNode: vi.fn(),
+      onMoveNode: vi.fn(),
+      onDeleteNode: vi.fn()
+    };
+    const view = render(<TextEditorView {...props} mode="preview" />);
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(onSetMode).toHaveBeenCalledWith("edit");
+
+    view.rerender(<TextEditorView {...props} mode="edit" />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /edit text content/i })).toHaveValue("original"));
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel edit" })).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: /edit text content/i }), " changed");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(save).toHaveBeenCalledWith(false);
+
+    await user.click(screen.getByRole("button", { name: "Cancel edit" }));
+    expect(onSetMode).toHaveBeenLastCalledWith("preview");
+    expect(useUiStore.getState().toast).toBe("Edit canceled");
+  });
+
   it("passes the source group and node when opening markdown links", async () => {
     const onOpenMarkdownLink = vi.fn();
     const sourceNode = { ...node, path: "/docs/source.md" };
@@ -382,6 +430,49 @@ describe("TextEditorView", () => {
     fireEvent.contextMenu(screen.getByText("plain text"));
     await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Open in new group" }));
     expect(onOpenNodeInNewGroup).toHaveBeenCalledWith(expect.objectContaining({ id: node.id }));
+  });
+
+  it("shows save and cancel actions from the edit context menu", async () => {
+    const user = userEvent.setup();
+    const onSetMode = vi.fn();
+    const save = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "original", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: save, isPending: false } as never);
+    const props = {
+      active: true,
+      groupId: 0,
+      node,
+      canWriteActiveSpace: true,
+      canOpenInNewGroup: true,
+      canClose: false,
+      onClose: vi.fn(),
+      onSetMode,
+      onOpenNodeInNewGroup: vi.fn(),
+      onOpenMarkdownLink: vi.fn(),
+      onRenameNode: vi.fn(),
+      onMoveNode: vi.fn(),
+      onDeleteNode: vi.fn()
+    };
+    const view = render(<TextEditorView {...props} mode="preview" />);
+
+    view.rerender(<TextEditorView {...props} mode="edit" />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /edit text content/i })).toHaveValue("original"));
+    await user.type(screen.getByRole("textbox", { name: /edit text content/i }), " changed");
+
+    fireEvent.contextMenu(screen.getByText("large.md"));
+    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Save" }));
+    expect(save).toHaveBeenCalledWith(false);
+
+    fireEvent.contextMenu(screen.getByText("large.md"));
+    await user.click(within(screen.getByRole("menu")).getByRole("button", { name: "Cancel edit" }));
+    expect(onSetMode).toHaveBeenLastCalledWith("preview");
+    expect(useUiStore.getState().toast).toBe("Edit canceled");
   });
 
 });
