@@ -38,6 +38,7 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   const format = inferTextFormat(node.name);
   const structured = isStructuredFormat(format);
   const prevMode = useRef<"preview" | "edit">(mode);
+  const draftInitializedForNode = useRef<string | null>(null);
   const showToast = useUiStore((state) => state.showToast);
   const markdownLinkPolicy = useMemo(
     () => ({
@@ -65,10 +66,13 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   }, [node.id]);
 
   useEffect(() => {
-    // Load the editor draft from the loaded content when entering edit mode.
-    if (mode === "edit" && canEditText && prevMode.current !== "edit") setDraft(content);
+    // Load the editor draft when entering or restoring edit mode.
+    if (mode === "edit" && canEditText && (prevMode.current !== "edit" || draftInitializedForNode.current !== node.id)) {
+      setDraft(content);
+      draftInitializedForNode.current = node.id;
+    }
     prevMode.current = mode;
-  }, [mode, content, canEditText]);
+  }, [mode, content, canEditText, node.id]);
 
   useEffect(() => {
     if (mode === "edit" && textQuery.isSuccess && !canEditText) onSetMode("preview");
@@ -194,7 +198,7 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
       ) : encrypted ? (
         <div className="p-10 text-muted">Encrypted text cannot be previewed by the server.</div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col" onContextMenu={mode === "preview" ? openEditorMenu : undefined}>
+        <div className="flex min-h-0 flex-1 flex-col" onContextMenu={openEditorMenu}>
           {partialText ? (
             <div className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               Loaded {partialText.returned_lines} of {partialText.line_count} lines. Editing is disabled until the full document is available.
@@ -375,6 +379,7 @@ function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (v
         ref={textareaRef}
         aria-label="Edit text content"
         wrap="off"
+        onContextMenu={(event) => event.stopPropagation()}
         className="min-h-0 flex-1 resize-none overflow-auto bg-transparent px-5 py-8 font-mono text-sm leading-6 text-text outline-none"
         value={value}
         onChange={(event) => onChange(event.target.value)}
