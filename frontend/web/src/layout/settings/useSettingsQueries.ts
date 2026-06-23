@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey } from "../../api/agents";
-import { connectAgent, disconnectAgent, listConnections, type Permission } from "../../api/connections";
+import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey, type Agent } from "../../api/agents";
+import { connectAgent, disconnectAgent, listConnections, type Connection, type ConnectionListResponse, type Permission } from "../../api/connections";
 import { createMyKey, listMyKeys, revokeMyKey, type ApiKeyListResponse, type MintedKey } from "../../api/keys";
 import { queryKeys } from "../../api/queryKeys";
 import { listSpaces } from "../../api/spaces";
@@ -46,23 +46,76 @@ export function useConnectionsQuery(spaceId: string) {
   return useQuery({ queryKey: queryKeys.connections(spaceId), queryFn: () => listConnections(client, spaceId), enabled: !!spaceId });
 }
 
+export type AgentSpaceAccessValue = Permission | "none";
 
-export function useConnectAgentToSpaceMutation() {
+type AgentSpaceAccessInput = {
+  access: AgentSpaceAccessValue;
+  agent: Pick<Agent, "id" | "name">;
+  spaceId: string;
+};
+
+export function useSetAgentSpaceAccessMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ spaceId, agentId, permission }: { spaceId: string; agentId: string; permission: Permission }) => connectAgent(client, spaceId, agentId, permission),
-    onSuccess: (_connection, variables) => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(variables.spaceId) })
+    mutationFn: async ({ access, agent, spaceId }: AgentSpaceAccessInput) => {
+      if (access === "none") {
+        await disconnectAgent(client, spaceId, agent.id);
+        return null;
+      }
+      return connectAgent(client, spaceId, agent.id, access);
+    },
+    onMutate: async (variables) => {
+      const queryKey = queryKeys.connections(variables.spaceId);
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<ConnectionListResponse>(queryKey);
+      queryClient.setQueryData<ConnectionListResponse>(queryKey, (current) => setAgentSpaceAccessInCache(current, variables));
+      return { previous, queryKey };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(context.queryKey, context.previous);
+    },
+    onSuccess: (connection, variables) => {
+      if (!connection) return;
+      queryClient.setQueryData<ConnectionListResponse>(queryKeys.connections(variables.spaceId), (current) => setAgentSpaceAccessInCache(current, variables, connection));
+    },
+    onSettled: (_connection, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.connections(variables.spaceId) });
+    }
   });
 }
 
-export function useDisconnectAgentFromSpaceMutation() {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ spaceId, agentId }: { spaceId: string; agentId: string }) => disconnectAgent(client, spaceId, agentId),
-    onSuccess: (_result, variables) => void queryClient.invalidateQueries({ queryKey: queryKeys.connections(variables.spaceId) })
-  });
+function setAgentSpaceAccessInCache(
+  previous: ConnectionListResponse | undefined,
+  { access, agent }: AgentSpaceAccessInput,
+  serverConnection?: Connection
+): ConnectionListResponse | undefined {
+  if (!previous) return previous;
+
+  if (access === "none") {
+    return {
+      ...previous,
+      connections: previous.connections.filter((item) => item.agent.id !== agent.id)
+    };
+  }
+
+  const existingIndex = previous.connections.findIndex((item) => item.agent.id === agent.id);
+  const nextConnection = serverConnection ?? {
+    agent: existingIndex >= 0 ? previous.connections[existingIndex].agent : { id: agent.id, kind: "agent", display_name: agent.name },
+    connected_at: existingIndex >= 0 ? previous.connections[existingIndex].connected_at : new Date().toISOString(),
+    permission: access
+  };
+
+  if (existingIndex < 0) {
+    return {
+      ...previous,
+      connections: [...previous.connections, nextConnection]
+    };
+  }
+
+  const connections = [...previous.connections];
+  connections[existingIndex] = nextConnection;
+  return { ...previous, connections };
 }
 
 export function useApiKeysQuery(queryKey: QueryKey, list: () => Promise<ApiKeyListResponse>) {

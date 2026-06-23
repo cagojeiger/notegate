@@ -1,18 +1,18 @@
 import { Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import type { Permission } from "../../api/connections";
+import type { Agent } from "../../api/agents";
 import type { Space } from "../../api/types";
 import { canWriteSpace } from "../../auth/permissions";
-import { Badge, Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
+import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
 import {
+  type AgentSpaceAccessValue,
   useAgentKeyManagerProps,
   useAgentsQuery,
-  useConnectAgentToSpaceMutation,
   useConnectionsQuery,
   useCreateAgentMutation,
   useDeleteAgentMutation,
-  useDisconnectAgentFromSpaceMutation,
+  useSetAgentSpaceAccessMutation,
   useSettingsSpacesQuery
 } from "./useSettingsQueries";
 import { KeyManager } from "./KeyManager";
@@ -78,8 +78,8 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
                     <AgentKeyManager agentId={agent.id} />
                   </section>
                   <section>
-                    <SectionHeader title="Space Access" description="Connect this agent to spaces." />
-                    <AgentSpaceAccess agentId={agent.id} />
+                    <SectionHeader title="Space permissions" description="Choose which spaces this agent can access." />
+                    <AgentSpaceAccess agent={agent} />
                   </section>
                 </div>
               ) : null}
@@ -96,7 +96,7 @@ function AgentKeyManager({ agentId }: { agentId: string }) {
   return <KeyManager {...keyManagerProps} emptyLabel="No keys for this agent." maxTtlDays={365} />;
 }
 
-function AgentSpaceAccess({ agentId }: { agentId: string }) {
+function AgentSpaceAccess({ agent }: { agent: Agent }) {
   const spacesQuery = useSettingsSpacesQuery(true);
   const spaces = (spacesQuery.data?.spaces ?? []).filter(canWriteSpace);
 
@@ -104,41 +104,50 @@ function AgentSpaceAccess({ agentId }: { agentId: string }) {
   if (spaces.length === 0) return <EmptyState>No writable spaces.</EmptyState>;
 
   return (
-    <Card as="ul" padding="none" className="max-h-72 divide-y divide-seam overflow-y-auto">
-      {spaces.map((space) => <SpaceAccessRow key={space.id} space={space} agentId={agentId} />)}
-    </Card>
+    <ul className="max-h-72 divide-y divide-seam overflow-y-auto rounded-xl border border-border bg-surface">
+      {spaces.map((space) => <SpaceAccessRow key={space.id} space={space} agent={agent} />)}
+    </ul>
   );
 }
 
-function SpaceAccessRow({ space, agentId }: { space: Space; agentId: string }) {
-  const connectionsQuery = useConnectionsQuery(space.id);
-  const connectMutation = useConnectAgentToSpaceMutation();
-  const disconnectMutation = useDisconnectAgentFromSpaceMutation();
-  const connection = connectionsQuery.data?.connections.find((item) => item.agent.id === agentId);
-  const busy = connectMutation.isPending || disconnectMutation.isPending;
+const ACCESS_LABELS: Record<AgentSpaceAccessValue, string> = {
+  none: "No access",
+  read: "Read only",
+  write: "Read & write"
+};
 
-  const connect = (permission: Permission) => connectMutation.mutate({ spaceId: space.id, agentId, permission });
+function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
+  const connectionsQuery = useConnectionsQuery(space.id);
+  const setAccessMutation = useSetAgentSpaceAccessMutation();
+  const connection = connectionsQuery.data?.connections.find((item) => item.agent.id === agent.id);
+  const access: AgentSpaceAccessValue = connection?.permission ?? "none";
+
+  const updateAccess = (nextAccess: AgentSpaceAccessValue) => {
+    if (nextAccess === access) return;
+    if (nextAccess === "none" && !connection) return;
+    setAccessMutation.mutate({ spaceId: space.id, agent, access: nextAccess });
+  };
 
   return (
-    <li className="flex items-center gap-3 px-4 py-3 text-sm">
+    <li className="flex items-center gap-3 px-4 py-3 text-sm max-sm:flex-col max-sm:items-stretch">
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{space.name}</div>
-        <div className="text-xs text-muted">{connection ? "Connected" : "Not connected"}</div>
+        <div className="text-xs text-muted">{ACCESS_LABELS[access]}</div>
       </div>
       {connectionsQuery.isLoading ? (
         <span className="text-xs text-muted">Loading…</span>
-      ) : connection ? (
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge>{connection.permission}</Badge>
-          <Button size="sm" secondary disabled={busy || connection.permission === "read"} onClick={() => connect("read")}>Read</Button>
-          <Button size="sm" secondary disabled={busy || connection.permission === "write"} onClick={() => connect("write")}>Write</Button>
-          <Button size="sm" secondary disabled={busy} onClick={() => disconnectMutation.mutate({ spaceId: space.id, agentId })}>Disconnect</Button>
-        </div>
       ) : (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" secondary disabled={busy} onClick={() => connect("read")}>Connect read</Button>
-          <Button size="sm" secondary disabled={busy} onClick={() => connect("write")}>Connect write</Button>
-        </div>
+        <select
+          aria-label={`${space.name} permission`}
+          className="h-9 w-36 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text outline-none transition focus:shadow-[var(--ng-focus-shadow)] disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
+          value={access}
+          disabled={setAccessMutation.isPending}
+          onChange={(event) => updateAccess(event.currentTarget.value as AgentSpaceAccessValue)}
+        >
+          <option value="none">{ACCESS_LABELS.none}</option>
+          <option value="read">{ACCESS_LABELS.read}</option>
+          <option value="write">{ACCESS_LABELS.write}</option>
+        </select>
       )}
     </li>
   );
