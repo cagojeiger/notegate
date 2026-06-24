@@ -1,4 +1,4 @@
-import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Trash2, X } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
@@ -38,6 +38,7 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   const format = inferTextFormat(node.name);
   const structured = isStructuredFormat(format);
   const prevMode = useRef<"preview" | "edit">(mode);
+  const draftInitializedForNode = useRef<string | null>(null);
   const showToast = useUiStore((state) => state.showToast);
   const markdownLinkPolicy = useMemo(
     () => ({
@@ -65,10 +66,13 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   }, [node.id]);
 
   useEffect(() => {
-    // Load the editor draft from the loaded content when entering edit mode.
-    if (mode === "edit" && canEditText && prevMode.current !== "edit") setDraft(content);
+    // Load the editor draft when entering or restoring edit mode.
+    if (mode === "edit" && canEditText && (prevMode.current !== "edit" || draftInitializedForNode.current !== node.id)) {
+      setDraft(content);
+      draftInitializedForNode.current = node.id;
+    }
     prevMode.current = mode;
-  }, [mode, content, canEditText]);
+  }, [mode, content, canEditText, node.id]);
 
   useEffect(() => {
     if (mode === "edit" && textQuery.isSuccess && !canEditText) onSetMode("preview");
@@ -87,6 +91,24 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
 
   async function copyPath() {
     showToast((await copyText(node.path)) ? "Path copied" : "Could not copy path");
+  }
+
+  function saveDraft() {
+    saveMutation.mutate(false);
+  }
+
+  function editText() {
+    onSetMode("edit");
+  }
+
+  function cancelEdit() {
+    if (dirty) {
+      setDraft(content);
+      showToast("Edit canceled");
+    }
+    setConflict(false);
+    setExternalUpdate(null);
+    onSetMode("preview");
   }
 
   async function reloadLatestText() {
@@ -127,6 +149,7 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
     },
     () => setConflict(true)
   );
+  const canSave = mode === "edit" && dirty && !saveMutation.isPending;
   const titleActions = mode === "preview" && structured && !encrypted ? (
     <>
       <IconButton label="Expand all" size="sm" onClick={() => setStructuredExpansionMode("expanded")} disabled={structuredMode !== "tree"}>
@@ -148,8 +171,20 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
       <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
         <Copy size={15} />
       </IconButton>
-      {mode === "edit" ? <Button size="xs" onClick={() => saveMutation.mutate(false)} disabled={saveMutation.isPending || !dirty}>Save</Button> : null}
-      <Button size="xs" secondary onClick={() => onSetMode(mode === "edit" ? "preview" : "edit")} disabled={mode === "preview" && !canEditText}>{mode === "edit" ? "Preview" : "Edit"}</Button>
+      {mode === "edit" ? (
+        <>
+          <IconButton label="Save" size="sm" onClick={saveDraft} disabled={!canSave}>
+            <Save size={15} />
+          </IconButton>
+          <IconButton label="Cancel edit" size="sm" onClick={cancelEdit}>
+            <Undo2 size={15} />
+          </IconButton>
+        </>
+      ) : (
+        <IconButton label="Edit" size="sm" onClick={editText} disabled={!canEditText}>
+          <Pencil size={15} />
+        </IconButton>
+      )}
       <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />
     </>
   );
@@ -163,7 +198,7 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
       ) : encrypted ? (
         <div className="p-10 text-muted">Encrypted text cannot be previewed by the server.</div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col" onContextMenu={mode === "preview" ? openEditorMenu : undefined}>
+        <div className="flex min-h-0 flex-1 flex-col" onContextMenu={openEditorMenu}>
           {partialText ? (
             <div className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               Loaded {partialText.returned_lines} of {partialText.line_count} lines. Editing is disabled until the full document is available.
@@ -208,12 +243,15 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
           mode={mode}
           canCopyContent={canCopyContent}
           canEditText={canEditText}
+          canSave={canSave}
           canMutateNode={node.parent_id !== null && canWriteActiveSpace}
           canOpenInNewGroup={canOpenInNewGroup}
           canCloseGroup={canClose}
           onClose={() => setEditorMenu(null)}
           onCopyContent={() => { void copyContent(); }}
-          onToggleMode={() => onSetMode(mode === "edit" ? "preview" : "edit")}
+          onEditText={editText}
+          onSaveDraft={saveDraft}
+          onCancelEdit={cancelEdit}
           onOpenInNewGroup={() => onOpenNodeInNewGroup(node)}
           onCopyPath={() => { void copyPath(); }}
           onCloseGroup={onClose}
@@ -232,12 +270,15 @@ function EditorContextMenu({
   mode,
   canCopyContent,
   canEditText,
+  canSave,
   canMutateNode,
   canOpenInNewGroup,
   canCloseGroup,
   onClose,
   onCopyContent,
-  onToggleMode,
+  onEditText,
+  onSaveDraft,
+  onCancelEdit,
   onOpenInNewGroup,
   onCopyPath,
   onCloseGroup,
@@ -250,12 +291,15 @@ function EditorContextMenu({
   mode: "preview" | "edit";
   canCopyContent: boolean;
   canEditText: boolean;
+  canSave: boolean;
   canMutateNode: boolean;
   canOpenInNewGroup: boolean;
   canCloseGroup: boolean;
   onClose: () => void;
   onCopyContent: () => void;
-  onToggleMode: () => void;
+  onEditText: () => void;
+  onSaveDraft: () => void;
+  onCancelEdit: () => void;
   onOpenInNewGroup: () => void;
   onCopyPath: () => void;
   onCloseGroup: () => void;
@@ -264,7 +308,7 @@ function EditorContextMenu({
   onDeleteNode: () => void;
 }) {
   const menuWidth = 208;
-  const menuHeight = 296;
+  const menuHeight = mode === "edit" ? 332 : 296;
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -281,16 +325,20 @@ function EditorContextMenu({
 
   const left = Math.max(8, Math.min(menu.x, window.innerWidth - menuWidth - 8));
   const top = Math.max(8, Math.min(menu.y, window.innerHeight - menuHeight - 8));
-  const toggleLabel = mode === "edit" ? "Preview" : "Edit";
-  const toggleDisabled = mode === "preview" && !canEditText;
-
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
       <Card className="fixed z-50 w-52 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
         <div className="truncate px-3 py-1 text-xs text-muted">{node.name}</div>
         <MenuButton onClick={() => run(onCopyContent)} disabled={!canCopyContent}><Copy size={14} /> Copy content</MenuButton>
-        <MenuButton onClick={() => run(onToggleMode)} disabled={toggleDisabled}>{toggleLabel}</MenuButton>
+        {mode === "edit" ? (
+          <>
+            <MenuButton onClick={() => run(onSaveDraft)} disabled={!canSave}><Save size={14} /> Save</MenuButton>
+            <MenuButton onClick={() => run(onCancelEdit)}><Undo2 size={14} /> Cancel edit</MenuButton>
+          </>
+        ) : (
+          <MenuButton onClick={() => run(onEditText)} disabled={!canEditText}><Pencil size={14} /> Edit</MenuButton>
+        )}
         <MenuButton onClick={() => run(onOpenInNewGroup)} disabled={!canOpenInNewGroup}><PanelRightOpen size={14} /> Open in new group</MenuButton>
         <MenuButton onClick={() => run(onCopyPath)}><Copy size={14} /> Copy path</MenuButton>
         {canCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}
@@ -331,6 +379,7 @@ function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (v
         ref={textareaRef}
         aria-label="Edit text content"
         wrap="off"
+        onContextMenu={(event) => event.stopPropagation()}
         className="min-h-0 flex-1 resize-none overflow-auto bg-transparent px-5 py-8 font-mono text-sm leading-6 text-text outline-none"
         value={value}
         onChange={(event) => onChange(event.target.value)}
