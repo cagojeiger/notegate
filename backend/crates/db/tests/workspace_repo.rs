@@ -190,6 +190,50 @@ async fn list_spaces_uses_manual_order_name_id_cursor() -> Result<(), Box<dyn st
 }
 
 #[tokio::test]
+async fn space_name_suggestion_lookup_is_case_insensitive_only()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = create_user(&db, "owner-space-suggest@example.com").await?;
+    let other = create_user(&db, "other-space-suggest@example.com").await?;
+    let repo = SpaceRepo::new(db.pool.clone());
+
+    repo.create_space(
+        owner,
+        &CreateSpace {
+            name: "Beringlab".to_owned(),
+        },
+    )
+    .await?;
+
+    let exact = repo
+        .list_space_views_by_name_for(owner, "beringlab", 10)
+        .await?;
+    assert!(exact.is_empty(), "exact lookup must remain case-sensitive");
+
+    let suggestions = repo
+        .list_space_views_by_name_case_insensitive_for(owner, "beringlab", 10)
+        .await?;
+    let names: Vec<_> = suggestions
+        .iter()
+        .map(|view| view.space.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["Beringlab"]);
+
+    let inaccessible = repo
+        .list_space_views_by_name_case_insensitive_for(other, "beringlab", 10)
+        .await?;
+    assert!(
+        inaccessible.is_empty(),
+        "suggestions must only include caller-accessible spaces"
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn tier0_limits_owner_to_one_space() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());

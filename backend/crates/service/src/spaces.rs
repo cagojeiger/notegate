@@ -125,6 +125,20 @@ impl SpaceService {
             .await?)
     }
 
+    pub async fn find_visible_by_name_case_insensitive(
+        &self,
+        caller_account_id: Uuid,
+        name: &str,
+        limit: i64,
+    ) -> ServiceResult<Vec<SpaceView>> {
+        validate_space_name(name)?;
+        let limit = clamp_limit(Some(limit), 1, limits::SPACES_MAX_LIMIT);
+        Ok(self
+            .store
+            .list_space_views_by_name_case_insensitive_for(caller_account_id, name, limit)
+            .await?)
+    }
+
     pub async fn update(
         &self,
         caller_kind: AccountKind,

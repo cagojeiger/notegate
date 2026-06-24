@@ -12,6 +12,8 @@
 - MCP는 space create/delete/rename을 제공하지 않는다.
 - `run_sequence`는 여러 command를 순서대로 실행할 때만 사용한다. rollback은 제공하지 않는다.
 - 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 여러 tool의 필드를 담는 공통 상위 타입이지만, 여기에 없는 필드도 거부한다.
+- `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
+- Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
 
 ## `me`
 
@@ -36,7 +38,7 @@ type ReadInput = {
 }
 ```
 
-- `op=spaces`: 접근 가능한 Space 목록을 반환한다. `name`이 있으면 exact name으로 조회한다.
+- `op=spaces`: 접근 가능한 Space 목록을 반환한다. `name`이 있으면 exact, case-sensitive name으로 조회한다.
 - `op=ls`: `target` folder의 direct children을 반환한다.
 - `op=tree`: `target` folder의 subtree를 DFS pre-order로 반환한다. `depth` 생략 시 5를 사용한다.
 - `op=stat`: Folder/Text/File node summary를 반환한다.
@@ -73,6 +75,7 @@ type SearchInput = {
 
 - `op=find`: node name을 검색한다. `match`는 `contains`(기본), `regex`, `glob`이다.
 - `op=grep`: plain Text content를 검색한다. `match`는 `literal`(기본), `regex`이다.
+- `find`와 `grep` match는 Space 내부에서 대소문자를 구분하지 않는다.
 - `include`/`exclude`는 결과 path에 적용하는 glob list다.
 - `grep lines=none`은 line 정보를 반환하지 않는다. `first`는 첫 matching line number, `all`은 모든 matching line number를 반환한다. snippet은 반환하지 않는다.
 - File, encrypted Text, metadata는 `grep` 대상이 아니다.
