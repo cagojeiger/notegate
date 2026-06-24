@@ -119,8 +119,8 @@ fn pick_space(accessible: Vec<SpaceView>, name: &str) -> Result<SpaceView, Error
             let suggestions: Vec<SpaceView> = accessible
                 .iter()
                 .filter(|view| view.space.name.to_lowercase() == needle)
-                .cloned()
                 .take(SPACE_SUGGESTION_LIMIT as usize)
+                .cloned()
                 .collect();
             Err(space_not_found_error(name, &suggestions))
         }
