@@ -34,7 +34,7 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -78,7 +78,7 @@ impl McpServer {
 
     #[tool(
         name = "read",
-        description = "Read Notegate spaces, folders, nodes, and plain text. Read-only. Use op=spaces/ls/tree/stat/read.",
+        description = "Read Notegate spaces, folders, nodes, and plain text. Read-only. Use op=spaces/ls/tree/stat/read. Space name filters are exact and case-sensitive.",
         annotations(title = "Read Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -92,7 +92,7 @@ impl McpServer {
 
     #[tool(
         name = "search",
-        description = "Search Notegate node names and plain text. Read-only. Use op=find or op=grep.",
+        description = "Search Notegate node names and plain text. Read-only. Use op=find or op=grep. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
         annotations(title = "Search Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]

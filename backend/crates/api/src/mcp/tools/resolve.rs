@@ -22,6 +22,8 @@ use notegate_service::spaces::SpaceView;
 
 use crate::state::AppState;
 
+const SPACE_SUGGESTION_LIMIT: i64 = 5;
+
 /// The request-scoped authenticated caller, inserted by the MCP auth wrapper.
 pub fn caller(parts: &Parts) -> Result<&Caller, ErrorData> {
     parts
@@ -84,10 +86,18 @@ async fn select_space(
         .await
         .map_err(service_error)?;
     match matches.len() {
-        0 => Err(ErrorData::invalid_params(
-            format!("no accessible space named '{name}'"),
-            error_meta("not_found"),
-        )),
+        0 => {
+            let suggestions = state
+                .spaces
+                .find_visible_by_name_case_insensitive(
+                    caller.account_id(),
+                    name,
+                    SPACE_SUGGESTION_LIMIT,
+                )
+                .await
+                .map_err(service_error)?;
+            Err(space_not_found_error(name, &suggestions))
+        }
         1 => Ok(matches.remove(0)),
         _ => Err(ambiguity_error(name, &matches)),
     }
@@ -99,17 +109,46 @@ async fn select_space(
 fn pick_space(accessible: Vec<SpaceView>, name: &str) -> Result<SpaceView, ErrorData> {
     validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
     let mut matches: Vec<SpaceView> = accessible
-        .into_iter()
+        .iter()
         .filter(|view| view.space.name == name)
+        .cloned()
         .collect();
     match matches.len() {
-        0 => Err(ErrorData::invalid_params(
-            format!("no accessible space named '{name}'"),
-            error_meta("not_found"),
-        )),
+        0 => {
+            let needle = name.to_lowercase();
+            let suggestions: Vec<SpaceView> = accessible
+                .iter()
+                .filter(|view| view.space.name.to_lowercase() == needle)
+                .cloned()
+                .take(SPACE_SUGGESTION_LIMIT as usize)
+                .collect();
+            Err(space_not_found_error(name, &suggestions))
+        }
         1 => Ok(matches.remove(0)),
         _ => Err(ambiguity_error(name, &matches)),
     }
+}
+
+fn space_not_found_error(name: &str, suggestions: &[SpaceView]) -> ErrorData {
+    let suggestions: Vec<_> = suggestions
+        .iter()
+        .map(|view| view.space.name.as_str())
+        .collect();
+    let mut message = format!("no accessible space named '{name}'");
+    if let [suggestion] = suggestions.as_slice() {
+        message.push_str(&format!("; did you mean '{suggestion}'?"));
+    }
+    ErrorData::invalid_params(
+        message,
+        Some(json!({
+            "kind": "not_found",
+            "code": "not_found",
+            "resource": "space",
+            "space": name,
+            "suggestions": suggestions,
+            "hint": "use read op=spaces to inspect accessible spaces and use the exact space name",
+        })),
+    )
 }
 
 /// Build the ambiguity error for a name that resolves to multiple accessible
@@ -255,9 +294,15 @@ mod tests {
     )]
     use super::*;
     use chrono::Utc;
-    use notegate_model::{Permission, Space};
+    use notegate_core::Config;
+    use notegate_core::security::PiiCrypto;
+    use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo, SpaceRepo, test_support::TestDb};
+    use notegate_model::{CallerIdentity, Channel, CreateSpace, Permission, ResolveAttrs, Space};
     use notegate_service::files::parse_target;
     use rmcp::model::ErrorCode;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     fn view(name: &str, owner: Uuid) -> SpaceView {
         SpaceView {
@@ -275,6 +320,74 @@ mod tests {
             permission: Permission::Read,
             root_node_id: Uuid::new_v4(),
         }
+    }
+
+    fn test_state(pool: notegate_db::PgPool) -> Result<AppState, Box<dyn std::error::Error>> {
+        let config = Arc::new(Config {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
+            database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
+            db_max_connections: 1,
+            authgate_url: "https://auth.example.test".to_owned(),
+            notegate_public_url: "http://localhost:9191".to_owned(),
+            oauth_client_id: "notegate-web".to_owned(),
+            mcp_oauth_client_id: "notegate-mcp".to_owned(),
+            oauth_redirect_url: "http://localhost:9191/auth/callback".to_owned(),
+            resource_url: "https://api.example.test".to_owned(),
+            jwks_cache_ttl: Duration::from_secs(300),
+            enc_root_key_id: "test-enc".to_owned(),
+            enc_root_secret: secrecy::SecretString::from(
+                "test-enc-root-secret-32-bytes-long".to_owned(),
+            ),
+            lookup_root_key_id: "test-lookup".to_owned(),
+            lookup_root_secret: secrecy::SecretString::from(
+                "test-lookup-root-secret-32-bytes-long".to_owned(),
+            ),
+            lookup_verify_0_key_id: None,
+            lookup_verify_0_secret: None,
+            browser_session_ttl: Duration::from_secs(3600),
+            browser_session_max_ttl: Duration::from_secs(30 * 86_400),
+            openapi_enabled: false,
+            web_dist_dir: None,
+            default_user_tier: notegate_core::tier::UserTier::DEFAULT,
+            limits: notegate_core::limits::Limits::default(),
+            secure_cookies: false,
+        });
+        let crypto = PiiCrypto::from_root_secrets(
+            config.enc_root_key_id.clone(),
+            &config.enc_root_secret,
+            config.lookup_root_key_id.clone(),
+            &config.lookup_root_secret,
+        )?;
+        let account_repo = AccountRepo::with_crypto_and_default_user_tier(
+            pool.clone(),
+            crypto.clone(),
+            config.default_user_tier,
+        );
+        let api_key_repo =
+            ApiKeyRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
+        let resolver = notegate_service::identity::Resolver::new(
+            account_repo,
+            AgentRepo::new(pool.clone()),
+            api_key_repo,
+            crypto.clone(),
+        );
+        let jwt = Arc::new(crate::auth::jwt::JwtAuthority::from_url(
+            &config,
+            "https://auth.example.test/keys".to_owned(),
+        ));
+        let oidc = Arc::new(crate::auth::oidc::OidcProvider::new(
+            &config,
+            reqwest::Client::new(),
+        ));
+        Ok(AppState::new(
+            pool,
+            config,
+            jwt,
+            oidc,
+            Arc::new(resolver),
+            reqwest::Client::new(),
+            crypto,
+        ))
     }
 
     #[test]
@@ -373,6 +486,81 @@ mod tests {
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
         let data = error.data.expect("missing name carries not_found data");
         assert_eq!(data["kind"], "not_found");
+        assert_eq!(data["code"], "not_found");
+        assert_eq!(data["resource"], "space");
+        assert_eq!(data["suggestions"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn wrong_case_space_name_suggests_exact_name_without_resolving() {
+        let accessible = vec![view("Beringlab", Uuid::new_v4())];
+        let error = pick_space(accessible, "beringlab").unwrap_err();
+        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        assert!(
+            error.message.contains("did you mean 'Beringlab'?"),
+            "error message should include the exact space-name suggestion: {}",
+            error.message
+        );
+        let data = error.data.expect("wrong-case name carries suggestion data");
+        assert_eq!(data["kind"], "not_found");
+        assert_eq!(data["code"], "not_found");
+        assert_eq!(data["resource"], "space");
+        assert_eq!(data["space"], "beringlab");
+        assert_eq!(data["suggestions"], json!(["Beringlab"]));
+    }
+
+    #[tokio::test]
+    async fn resolve_target_wrong_case_space_name_suggests_exact_name_from_state()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = test_state(db.pool.clone())?;
+        let (account, user) = state
+            .accounts
+            .upsert_user_by_sub(&ResolveAttrs {
+                sub: "space-suggest-user".to_owned(),
+                email: "space-suggest@example.test".to_owned(),
+                name: "Space Suggest".to_owned(),
+            })
+            .await?;
+        SpaceRepo::new(db.pool.clone())
+            .create_space(
+                account.id,
+                &CreateSpace {
+                    name: "Beringlab".to_owned(),
+                },
+            )
+            .await?;
+        let caller = Caller {
+            account,
+            identity: CallerIdentity::User(user),
+            channel: Channel::Mcp,
+        };
+
+        let error = resolve_target(&state, &caller, "beringlab:/")
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("did you mean 'Beringlab'?"),
+            "wrong-case target should suggest the exact space name: {}",
+            error.message
+        );
+        let data = error
+            .data
+            .expect("wrong-case target carries suggestion data");
+        assert_eq!(data["kind"], "not_found");
+        assert_eq!(data["code"], "not_found");
+        assert_eq!(data["resource"], "space");
+        assert_eq!(data["space"], "beringlab");
+        assert_eq!(data["suggestions"], json!(["Beringlab"]));
+
+        let (resolved, path) = resolve_target(&state, &caller, "Beringlab:/").await?;
+        assert_eq!(resolved.name(), "Beringlab");
+        assert_eq!(path, "/");
+
+        db.cleanup().await;
+        Ok(())
     }
 
     #[test]

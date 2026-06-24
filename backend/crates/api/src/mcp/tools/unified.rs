@@ -21,7 +21,7 @@ pub struct ReadInput {
     /// Single target in `<space>:/absolute/path` form.
     #[serde(default)]
     pub target: Option<String>,
-    /// Optional exact space name filter for `op=spaces`.
+    /// Optional exact, case-sensitive space name filter for `op=spaces`.
     #[serde(default)]
     pub name: Option<String>,
     /// Tree depth for `op=tree`.
@@ -52,14 +52,14 @@ pub struct ReadInput {
 pub struct SearchInput {
     /// Operation: find/grep.
     pub op: String,
-    /// Scope target in `<space>:/absolute/path` form.
+    /// Scope target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
     pub target: String,
-    /// Search query.
+    /// Search query. `find` and `grep` matching inside the resolved space is case-insensitive.
     pub q: String,
     /// Node kind filter for `op=find`: folder/text/file.
     #[serde(default)]
     pub kind: Option<String>,
-    /// Match mode. `find`: contains/regex/glob. `grep`: literal/regex.
+    /// Match mode. `find`: contains/regex/glob. `grep`: literal/regex. All modes are case-insensitive.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
     /// Grep line detail: none/first/all.
@@ -141,7 +141,7 @@ pub struct SequenceCommand {
     /// Operation to perform within the selected tool.
     pub op: String,
 
-    /// Single target in `<space>:/absolute/path` form.
+    /// Single target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
     #[serde(default)]
     pub target: Option<String>,
     /// Source target for `mv` and `cp`.
@@ -151,16 +151,16 @@ pub struct SequenceCommand {
     #[serde(default)]
     pub destination: Option<String>,
 
-    /// Optional exact space name filter for `read op=spaces`.
+    /// Optional exact, case-sensitive space name filter for `read op=spaces`.
     #[serde(default)]
     pub name: Option<String>,
-    /// Search query for `find` and `grep`.
+    /// Search query for `find` and `grep`. Matching inside the resolved space is case-insensitive.
     #[serde(default)]
     pub q: Option<String>,
     /// Node kind filter: `folder`, `text`, or `file`.
     #[serde(default)]
     pub kind: Option<String>,
-    /// Match mode. `find`: contains/regex/glob. `grep`: literal/regex.
+    /// Match mode. `find`: contains/regex/glob. `grep`: literal/regex. All modes are case-insensitive.
     #[serde(default, rename = "match")]
     pub match_mode: Option<String>,
     /// Grep line detail: none/first/all.
