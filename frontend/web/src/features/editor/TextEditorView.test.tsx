@@ -42,12 +42,12 @@ const partialText: ReadTextResponse = {
     content: "# Large note",
     content_sha256: "sha",
     byte_len: 300_000,
-    line_count: 2_000,
-    start_line: 0,
-    end_line: 999,
-    returned_lines: 1_000,
+    line_count: 5_001,
+    start_line: 1,
+    end_line: 5_000,
+    returned_lines: 5_000,
     truncated: true,
-    next_start_line: 1_000,
+    next_start_line: 5_001,
     updated_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_at: "2026-06-13T00:00:00Z"
   }
@@ -94,7 +94,7 @@ describe("TextEditorView", () => {
   it("disables editing for truncated text reads", () => {
     renderTextEditorView();
 
-    expect(screen.getByText(/Loaded 1000 of 2000 lines/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loaded 5000 of 5001 lines/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy content" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });

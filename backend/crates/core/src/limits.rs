@@ -146,18 +146,18 @@ pub const SEARCH_GLOB_PATTERN_MAX_CHARS: usize = 256;
 /// Default maximum lines returned by `read`/`open`.
 pub const READ_DEFAULT_MAX_LINES: i64 = 200;
 /// Maximum lines returned by `read`/`open`.
-pub const READ_MAX_LINES: i64 = 1_000;
+pub const READ_MAX_LINES: i64 = 5_000;
 /// Default maximum bytes returned by `read`/`open` (64 KiB).
 pub const READ_DEFAULT_MAX_BYTES: usize = 65_536;
-/// Maximum bytes returned by `read`/`open` (256 KiB).
-pub const READ_MAX_BYTES: usize = 262_144;
+/// Maximum bytes returned by `read`/`open` (1 MiB).
+pub const READ_MAX_BYTES: usize = 1_048_576;
 
 // --- Text creation and write limits ---
 
 /// Maximum bytes per text (1 MiB).
 pub const TEXT_MAX_BYTES: usize = 1_048_576;
 /// Maximum lines per text.
-pub const TEXT_MAX_LINES: usize = 2_000;
+pub const TEXT_MAX_LINES: usize = 5_000;
 
 // --- Subtree mutation limits ---
 
