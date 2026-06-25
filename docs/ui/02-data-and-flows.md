@@ -19,19 +19,26 @@
 | 상태 | 소유자 | 저장 |
 |---|---|---|
 | 서버 자원 | React Query | cache only |
-| active space id | UI store | local storage 가능 |
-| editor groups | UI store | session only |
-| opened node snapshot | UI store | session only |
-| sidebar size/visibility | UI store | local storage 가능 |
-| theme | UI store | local storage 가능 |
+| active space id | UI store | local storage |
+| editor groups, active group, mode | UI store | space별 local storage snapshot |
+| opened node snapshot | UI store | space별 local storage snapshot |
+| primary/aux sidebar visibility | UI store | local storage |
+| primary sidebar width | UI store | session only |
+| Files/Recent ratio, section open, density | UI store | session only |
+| expanded folders | UI/component state | session only |
+| theme | UI store | local storage |
 | text draft | draft/component state | session only |
 | hover/menu/drag/scroll | component state | 저장 안 함 |
 
 규칙:
 
 - 서버 collection은 UI store에 복제하지 않는다.
-- EditorGroup은 현재 열린 node snapshot만 보관할 수 있다.
+- EditorGroup은 열린 pane 복원을 위해 현재 열린 node snapshot만 보관할 수 있다.
 - text body와 file content는 UI store에 보관하지 않는다.
+- space별 workbench snapshot은 browser-local best-effort 상태다. 계정/서버 정본이 아니며 다른 브라우저로 동기화하지 않는다.
+- workbench snapshot은 최근 20개 space까지만 유지한다. 손상됐거나 현재 space와 맞지 않는 snapshot은 폐기한다.
+- space 전환 시 현재 space snapshot을 저장하고, 선택한 space snapshot이 있으면 복원한다. 없으면 빈 editor group으로 시작한다.
+- Settings의 Saved workspace reset은 browser에 저장된 pane snapshot과 panel visibility만 지운다. note, file, space, 서버 자원은 삭제하지 않는다.
 - cursor와 scroll position은 reload 후 복원하지 않는다.
 
 ## Auth
@@ -81,9 +88,10 @@ Browser session refresh는 server-side flow다. FE는 refresh token을 저장하
 
 ```text
 click space
+-> persist previous space workbench snapshot
 -> set activeSpaceId
+-> restore selected space workbench snapshot or empty editor groups
 -> persist lastActiveSpaceId
--> reset editor groups
 -> close mobile sheets
 ```
 
@@ -124,7 +132,7 @@ explicit delete
 데이터:
 
 ```text
-GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children
+GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?limit=100&cursor=...
 GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 ```
 
@@ -137,28 +145,37 @@ GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 - sibling manual reorder는 하지 않는다.
 - root/empty/folder context에서 create/upload를 제공한다.
 
+### Files load more
+
+```text
+expand root/folder
+-> fetch first children page for that folder
+-> scroll near folder page end
+-> fetch next cursor page for that folder
+-> append visible child rows
+```
+
+규칙:
+
+- children pagination은 folder별로 독립적이다.
+- root와 각 expanded folder는 같은 children API cursor를 사용한다.
+- 자동 load-more는 visible sentinel이 viewport 근처에 들어올 때 수행한다.
+
 ### RecentSection
 
 데이터:
 
 ```text
-GET /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&limit=...&cursor=...
+GET /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&limit=50
 ```
 
 규칙:
 
 - Recent는 항상 PrimarySidebar에 있다.
 - generic node-list API를 사용한다.
+- 현재 UI는 첫 page만 표시한다.
 - row 선택 시 node를 열고 Files reveal을 시도한다.
 - reveal 실패는 open을 막지 않는다.
-
-### Load more
-
-```text
-scroll near end
--> fetch next cursor page
--> append visible rows
-```
 
 ## Node actions
 
@@ -291,8 +308,12 @@ Expand all / Collapse all
 Tabs:
 
 ```text
-Account | Agents | MCP
+General | Account | Agents | MCP
 ```
+
+General:
+
+- saved workspace reset.
 
 Account:
 
@@ -319,6 +340,7 @@ MCP:
 - agent API key는 해당 agent 아래에 둔다.
 - connections는 펼친 agent 안에서 관리한다.
 - `scopes`는 현재 정책상 표시하지 않는다.
+- Agents tab은 agent 관리 권한이 있는 caller에게만 표시한다.
 
 ## Context menus
 

@@ -91,7 +91,8 @@ EditorArea
 
 규칙:
 
-- desktop은 최대 3개 group.
+- non-mobile은 최대 3개 group을 split으로 표시한다.
+- mobile은 focused presentation을 사용하고 한 번에 1개 group만 표시한다.
 - 새 group은 활성 group 오른쪽에 추가된다.
 - 3개일 때 분할 버튼은 disabled 상태다.
 - 빈 group도 active 상태가 보여야 한다.
@@ -108,8 +109,8 @@ EditorArea
 규칙:
 
 - node가 없어도 빈 Inspector를 보여준다.
-- desktop은 inline.
-- tablet/mobile은 overlay/sheet.
+- desktop/tablet은 inline docked panel이다.
+- mobile은 overlay/sheet다.
 - agent 관리는 Settings에서 한다.
 
 ## StatusBar
@@ -133,6 +134,6 @@ node 상세 정보는 Inspector가 담당한다.
 
 | 화면 | 규칙 |
 |---|---|
-| Desktop | 전체 workbench, 최대 3 editor groups |
-| Tablet | sidebars는 overlay 가능 |
-| Mobile | editor 우선, sidebars는 sheet, group은 하나씩 표시 |
+| Desktop | docked sidebars, split editor, 최대 3 editor groups |
+| Tablet | desktop과 같은 non-mobile workbench path, docked sidebars, split editor |
+| Mobile | editor 우선, sidebars는 overlay/sheet, group은 하나씩 표시 |
