@@ -16,6 +16,8 @@ frontend/web/src
 
 ## State ownership
 
+이 표는 runtime owner만 정의한다. Browser persistence 여부와 수명은 `02-data-and-flows.md`의 상태 분류가 정본이다.
+
 | State | Owner |
 |---|---|
 | `/api/v1/me` | React Query |
@@ -84,6 +86,11 @@ Zustand가 소유하지 않는 것:
 - text body.
 - file content.
 - API key secret.
+
+규칙:
+
+- 일부 Zustand state는 browser-local storage helper를 통해 저장한다.
+- 저장 수명과 reset 범위는 이 문서에 중복 정의하지 않고 `02-data-and-flows.md`의 상태 분류를 따른다.
 
 ## Visual source
 
