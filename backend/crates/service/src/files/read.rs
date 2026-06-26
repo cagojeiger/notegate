@@ -514,4 +514,24 @@ mod tests {
         assert!(content.truncated);
         assert_eq!(content.next_start_line, Some(2));
     }
+
+    #[test]
+    fn slice_clamps_to_read_line_limit() {
+        let mut source = String::new();
+        for _ in 0..=limits::READ_MAX_LINES {
+            source.push_str("x\n");
+        }
+
+        let content = slice_text(
+            &source,
+            Some(1),
+            Some(limits::READ_MAX_LINES + 100),
+            Some(limits::READ_MAX_BYTES),
+        )
+        .expect("slice");
+
+        assert_eq!(content.returned_lines, limits::READ_MAX_LINES);
+        assert!(content.truncated);
+        assert_eq!(content.next_start_line, Some(limits::READ_MAX_LINES + 1));
+    }
 }

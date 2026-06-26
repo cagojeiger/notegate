@@ -169,11 +169,11 @@ async fn text_byte_and_line_bounds_are_enforced() -> TestResult {
     .await;
     assert!(over_bytes.is_err(), "byte_len 1048577 must violate CHECK");
 
-    // line_count upper bound = 2000; the boundary value 1048576/2000 is accepted.
+    // line_count upper bound = 5000; the boundary value 1048576/5000 is accepted.
     let at_boundary = sqlx::query(
         "INSERT INTO text_objects \
          (node_id, space_id, content_text, content_sha256, byte_len, line_count, media_type, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, '', $3, 1048576, 2000, 'text/plain', $4, $4)",
+         VALUES ($1, $2, '', $3, 1048576, 5000, 'text/plain', $4, $4)",
     )
     .bind(node)
     .bind(ws)
@@ -183,14 +183,14 @@ async fn text_byte_and_line_bounds_are_enforced() -> TestResult {
     .await;
     assert!(
         at_boundary.is_ok(),
-        "byte_len 1048576 / line_count 2000 must be accepted"
+        "byte_len 1048576 / line_count 5000 must be accepted"
     );
 
-    let over_lines = sqlx::query("UPDATE text_objects SET line_count = 2001 WHERE node_id = $1")
+    let over_lines = sqlx::query("UPDATE text_objects SET line_count = 5001 WHERE node_id = $1")
         .bind(node)
         .execute(&db.pool)
         .await;
-    assert!(over_lines.is_err(), "line_count 2001 must violate CHECK");
+    assert!(over_lines.is_err(), "line_count 5001 must violate CHECK");
     db.cleanup().await;
     Ok(())
 }

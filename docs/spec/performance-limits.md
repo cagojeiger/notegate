@@ -82,7 +82,7 @@ Space-level limits
 Node/content-level limits
   node_name_max_chars = 128
   text_max_bytes = 1048576               # 1 MiB per text object
-  text_max_lines = 2000                  # lines per text object
+  text_max_lines = 5000                  # lines per text object
   file_inline_pg_max_bytes = 262144      # 현재 inline_pg로 저장 가능한 file bytes 상한
   file_max_bytes = 104857600             # 100 MiB per file product hard max
   node_metadata_max_bytes = 16384        # 16 KiB per node metadata object
@@ -155,9 +155,9 @@ children_max_limit = 200
 nodes_default_limit = 50
 nodes_max_limit = 100
 read_default_max_lines = 200
-read_max_lines = 1000
+read_max_lines = 5000
 read_default_max_bytes = 65536          # 64 KiB
-read_max_bytes = 262144                 # 256 KiB
+read_max_bytes = 1048576                # 1 MiB
 find_default_limit = 50
 grep_default_limit = 20
 search_max_limit = 100

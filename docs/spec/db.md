@@ -237,7 +237,7 @@ text_objects
   encrypted_payload jsonb null
   content_sha256 text not null
   byte_len bigint not null check 0..1048576
-  line_count int not null check 0..2000
+  line_count int not null check 0..5000
   media_type text not null
   encoding text not null default 'utf-8' check = 'utf-8'
   created_by_account_id uuid not null references accounts(id)
@@ -303,7 +303,7 @@ Text 저장 invariant:
 storage_format='plain'     -> content_text IS NOT NULL, encrypted_payload IS NULL
 storage_format='encrypted' -> content_text IS NULL, encrypted_payload IS NOT NULL, encrypted_payload는 JSON object
 byte_len                  -> 0..1048576
-line_count                -> 0..2000
+line_count                -> 0..5000
 encoding                  -> 'utf-8'만 허용
 ```
 
