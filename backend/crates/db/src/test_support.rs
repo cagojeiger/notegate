@@ -16,6 +16,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0005_unicode_names.sql"),
     include_str!("../migrations/0006_browser_sessions.sql"),
     include_str!("../migrations/0007_expand_text_line_limit.sql"),
+    include_str!("../migrations/0008_recent_nodes_index.sql"),
 ];
 
 /// A throwaway schema-isolated database for one test.
