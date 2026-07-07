@@ -10,6 +10,9 @@ accounts
 users
 agents
 api_keys
+browser_sessions
+audit_events
+content_events
 spaces
 space_agent_connections
 nodes
@@ -167,6 +170,70 @@ browser_sessions.refresh_token_enc_*: refresh token 암호화 필드는 모두 n
 browser_sessions.validated_until <= browser_sessions.expires_at
 browser_sessions.refresh_* claim: refresh_started_at과 refresh_claim_id는 둘 다 NULL이거나 둘 다 non-NULL
 browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
+```
+
+## Event history tables
+
+Event history table은 현재 상태의 source of truth가 아니다. 성공한 domain mutation의 append-only snapshot history다. Event target id는 product row를 직접 소유하지 않는 identifier snapshot이며 cascading foreign key로 다루지 않는다. `resource_type`/`resource_id`는 event의 primary target이고, secondary target id는 `metadata`에 둔다.
+
+```text
+audit_events
+  id bigserial pk
+  event_id uuid not null unique
+  occurred_at timestamptz not null default now()
+  owner_user_id uuid null
+  actor_account_id uuid null
+  source text not null check ('rest','mcp','system')
+  op_type text not null
+  resource_type text null
+  resource_id uuid null
+  metadata jsonb not null default '{}'
+  schema_version int not null default 1
+```
+
+`audit_events`는 account, credential, permission, agent, space 관리 변경을 기록한다. 기본 retention은 1 year다.
+
+```text
+content_events
+  id bigserial pk
+  event_id uuid not null unique
+  occurred_at timestamptz not null default now()
+  owner_user_id uuid null
+  actor_account_id uuid null
+  source text not null check ('rest','mcp','system')
+  op_type text not null
+  space_id uuid not null
+  resource_type text not null default 'node'
+  resource_id uuid null
+  metadata jsonb not null default '{}'
+  schema_version int not null default 1
+```
+
+`content_events`는 file-tree와 content domain 변경을 기록한다. 기본 retention은 3 months다. Text content, file bytes, API key plaintext/hash, browser session token, OAuth refresh token, email, display name은 event payload에 저장하지 않는다.
+
+Event history DB 제약:
+
+```text
+source: 'rest', 'mcp', 'system'
+metadata: JSON object
+schema_version: >= 1
+event_id: stream 안에서 unique
+occurred_at: DB timestamp 기준
+```
+
+권장 index:
+
+```text
+audit_events_owner_time_idx(owner_user_id, occurred_at desc, id desc)
+audit_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
+audit_events_resource_time_idx(resource_type, resource_id, occurred_at desc, id desc)
+audit_events_retention_idx(occurred_at)
+
+content_events_owner_time_idx(owner_user_id, occurred_at desc, id desc)
+content_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
+content_events_space_time_idx(space_id, occurred_at desc, id desc)
+content_events_resource_time_idx(resource_type, resource_id, occurred_at desc, id desc)
+content_events_retention_idx(occurred_at)
 ```
 
 ## Space and connection tables

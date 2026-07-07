@@ -14,7 +14,7 @@ content_events
   file-tree와 content domain operation 이력
 ```
 
-두 stream은 audit review, incident investigation, 향후 activity view, 향후 usage projection을 지원한다. 현재 state의 source of truth는 아니다.
+두 stream은 audit review, incident investigation, agent 변경 검토, 향후 activity view, 향후 usage projection을 지원한다. 현재 state의 source of truth는 아니다.
 
 ## Non-goals
 
@@ -30,6 +30,8 @@ content_events
 - State change와 같은 DB transaction 안에서 event row를 insert한다.
 - Event row는 append-only로 다룬다.
 - Resource identifier는 snapshot으로 저장한다. Event row는 이후 product row purge/anonymization 뒤에도 남아야 하므로 target column은 cascading foreign key가 아니라 identifier로 취급한다.
+- 자주 필터링하거나 pagination에 쓰는 값만 column으로 둔다. Event별 세부 값은 `metadata`에 둔다.
+- `resource_type`/`resource_id`는 event의 primary target이다. Secondary target id는 `metadata`에 둔다.
 - `metadata`는 allowlist 기반이고 작아야 한다.
 - Secret, token material, raw content, user PII를 저장하지 않는다.
 
@@ -124,7 +126,7 @@ Audit metadata에는 API key token plaintext, token hash, user email, user displ
 
 ## Content events
 
-Content event는 file-tree와 content-domain mutation을 기록한다. Volume, retention, 향후 replay/projection 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
+Content event는 file-tree와 content-domain mutation을 기록한다. Volume, retention, agent 변경 검토, 향후 projection 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
 
 초기 content event type:
 
@@ -153,6 +155,7 @@ Content event는 text body, file bytes, full node metadata를 저장하지 않�
 
 ```text
 node_kind: "folder" | "text" | "file"
+api_key_id: uuid
 parent_node_id_before: uuid
 parent_node_id_after: uuid
 name_changed: bool
@@ -190,15 +193,12 @@ audit_events
   occurred_at timestamptz not null default now()
 
   actor_account_id uuid null
-  actor_kind text null check ('user','agent','system')
   owner_user_id uuid null
   source text not null check ('rest','mcp','system')
   op_type text not null
 
-  account_id uuid null
-  space_id uuid null
-  agent_id uuid null
-  api_key_id uuid null
+  resource_type text null
+  resource_id uuid null
 
   metadata jsonb not null default '{}'
   schema_version integer not null default 1
@@ -209,9 +209,8 @@ audit_events
 ```text
 audit_events_owner_time_idx(owner_user_id, occurred_at desc, id desc)
 audit_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
-audit_events_space_time_idx(space_id, occurred_at desc, id desc)
-audit_events_agent_time_idx(agent_id, occurred_at desc, id desc)
-audit_events_api_key_time_idx(api_key_id, occurred_at desc, id desc)
+audit_events_resource_time_idx(resource_type, resource_id, occurred_at desc, id desc)
+audit_events_retention_idx(occurred_at)
 ```
 
 ### `content_events`
@@ -223,19 +222,13 @@ content_events
   occurred_at timestamptz not null default now()
 
   actor_account_id uuid null
-  actor_kind text null check ('user','agent','system')
   owner_user_id uuid null
   source text not null check ('rest','mcp','system')
   op_type text not null
 
   space_id uuid not null
-  node_id uuid null
-  node_kind text null check ('folder','text','file')
-  parent_node_id uuid null
-
-  delta_nodes bigint not null default 0
-  delta_text_bytes bigint not null default 0
-  delta_file_bytes bigint not null default 0
+  resource_type text not null default 'node'
+  resource_id uuid null
 
   metadata jsonb not null default '{}'
   schema_version integer not null default 1
@@ -245,11 +238,15 @@ content_events
 
 ```text
 content_events_owner_time_idx(owner_user_id, occurred_at desc, id desc)
+content_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
 content_events_space_time_idx(space_id, occurred_at desc, id desc)
-content_events_node_time_idx(node_id, occurred_at desc, id desc)
+content_events_resource_time_idx(resource_type, resource_id, occurred_at desc, id desc)
+content_events_retention_idx(occurred_at)
 ```
 
-`delta_*` column은 향후 usage projection을 위한 값이다. Content event emission이 시작되면 content event 계약의 일부로 본다. Delta가 없는 event type은 `0`을 사용한다.
+Agent나 API key 기준 검토는 `actor_account_id`와 metadata의 `api_key_id`로 시작한다. 특정 API key 기준 조회가 주요 workflow가 되면 `api_key_id`를 column/index로 승격할 수 있다.
+
+향후 usage projection이 content event에 의존하게 되면 typed delta column을 추가하거나 projection 전용 table을 둔다. 초기 event history schema는 usage 집계를 위해 column을 미리 늘리지 않는다.
 
 ## Retention and deletion
 
