@@ -21,6 +21,7 @@ struct AuditRow {
     op_type: String,
     owner_user_id: Option<Uuid>,
     actor_account_id: Option<Uuid>,
+    source: String,
     resource_type: String,
     resource_id: Option<Uuid>,
     metadata: Value,
@@ -28,7 +29,7 @@ struct AuditRow {
 
 async fn audit_rows(pool: &sqlx::PgPool) -> Result<Vec<AuditRow>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT op_type, owner_user_id, actor_account_id, resource_type, resource_id, metadata \
+        "SELECT op_type, owner_user_id, actor_account_id, source, resource_type, resource_id, metadata \
          FROM audit_events ORDER BY id",
     )
     .fetch_all(pool)
@@ -79,6 +80,7 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
     for row in &rows {
         assert_eq!(row.owner_user_id, Some(owner));
         assert_eq!(row.actor_account_id, Some(owner));
+        assert_eq!(row.source, "rest");
         assert_eq!(row.resource_type, "space");
         assert_eq!(row.resource_id, Some(space.id));
     }
@@ -165,6 +167,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
         .expect("agent key audit event");
     assert_eq!(key_event.owner_user_id, Some(owner));
     assert_eq!(key_event.actor_account_id, Some(owner));
+    assert_eq!(key_event.source, "rest");
     assert_eq!(key_event.resource_type, "api_key");
     assert_eq!(key_event.resource_id, Some(key_id));
 
@@ -256,8 +259,13 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
         ]
     );
     assert_eq!(
-        rows[1].metadata["rotated_from_key_id"],
-        serde_json::json!(first_key)
+        rows[1].resource_id,
+        Some(first_key),
+        "rotate event should be indexed under the old key"
+    );
+    assert_eq!(
+        rows[1].metadata["created_key_id"],
+        serde_json::json!(rotated_key)
     );
     assert_eq!(rows[2].metadata["reason"], serde_json::json!("manual"));
     assert_eq!(rows[3].metadata["revoked_api_keys"], serde_json::json!(0));

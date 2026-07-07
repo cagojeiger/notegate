@@ -119,8 +119,8 @@ space.update
 connection.upsert
   permission: "read" | "write"
 
-agent_key.rotate
-  rotated_from_key_id: uuid
+*.rotate
+  created_key_id: uuid
 
 *.revoke
   reason: sanitized enum/string when already part of the domain model
@@ -143,9 +143,14 @@ agent.*
   resource_type: "agent"
   resource_id: agent_account_id
 
-user_key.* | agent_key.*
+user_key.create | user_key.revoke | agent_key.create | agent_key.revoke
   resource_type: "api_key"
   resource_id: api_key_id
+
+user_key.rotate | agent_key.rotate
+  resource_type: "api_key"
+  resource_id: old api_key_id
+  metadata.created_key_id: new api_key_id
 
 connection.upsert | connection.disconnect
   resource_type: "space"

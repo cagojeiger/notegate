@@ -327,8 +327,8 @@ impl ApiKeyRepo {
                 source: SOURCE_REST,
                 op_type: audit_context.rotate_op_type(),
                 resource_type: "api_key",
-                resource_id: Some(args.key_id),
-                metadata: json!({ "rotated_from_key_id": old_key_id }),
+                resource_id: Some(old_key_id),
+                metadata: json!({ "created_key_id": args.key_id }),
             },
         )
         .await?;
