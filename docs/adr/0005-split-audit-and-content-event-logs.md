@@ -26,6 +26,8 @@ content_events = file-tree와 content domain 변경
 
 두 stream은 commit에 성공한 domain mutation만 기록한다. Request logging, access log, security-denial log, content versioning을 대체하지 않는다.
 
+Implementation은 audit_events부터 시작하고, content_events는 file-tree activity가 필요해지는 후속 PR에서 추가할 수 있다.
+
 Event row는 append-only다. Product code는 일반 동작에서 event row를 update/delete하지 않는다. 잘못된 row가 생기면 기존 row를 조용히 수정하지 않고 명시적인 repair/reconciliation으로 처리한다.
 
 ## Consequences

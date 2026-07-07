@@ -1,9 +1,11 @@
 //! Space lifecycle persistence.
 
+use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
 use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
+use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -149,6 +151,20 @@ impl SpaceRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(owner_user_id),
+                actor_account_id: Some(owner_user_id),
+                source: SOURCE_REST,
+                op_type: "space.create",
+                resource_type: "space",
+                resource_id: Some(row.id),
+                metadata: json!({}),
+            },
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
@@ -319,6 +335,7 @@ impl SpaceRepo {
         name: Option<&str>,
         sort_order: Option<i32>,
     ) -> Result<Space> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
             "UPDATE spaces \
              SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), updated_at = now() \
@@ -328,10 +345,33 @@ impl SpaceRepo {
         .bind(owner_user_id)
         .bind(name)
         .bind(sort_order)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(map_constraint_error)?
         .ok_or_else(|| Error::not_found("space not found"))?;
+
+        let mut changed_fields = Vec::new();
+        if name.is_some() {
+            changed_fields.push("name");
+        }
+        if sort_order.is_some() {
+            changed_fields.push("sort_order");
+        }
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(owner_user_id),
+                actor_account_id: Some(owner_user_id),
+                source: SOURCE_REST,
+                op_type: "space.update",
+                resource_type: "space",
+                resource_id: Some(space_id),
+                metadata: json!({ "changed_fields": changed_fields }),
+            },
+        )
+        .await?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
     }
 
@@ -341,6 +381,7 @@ impl SpaceRepo {
         owner_user_id: Uuid,
         deleted_by_user_id: Uuid,
     ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE spaces \
              SET deleted_at = now(), deleted_by_user_id = $3, \
@@ -351,12 +392,28 @@ impl SpaceRepo {
         .bind(owner_user_id)
         .bind(deleted_by_user_id)
         .bind(i32::try_from(limits::DELETED_SPACE_RETENTION_DAYS).unwrap_or(i32::MAX))
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
         if result.rows_affected() == 0 {
             return Err(Error::not_found("space not found"));
         }
+
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(owner_user_id),
+                actor_account_id: Some(deleted_by_user_id),
+                source: SOURCE_REST,
+                op_type: "space.delete",
+                resource_type: "space",
+                resource_id: Some(space_id),
+                metadata: json!({}),
+            },
+        )
+        .await?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
 

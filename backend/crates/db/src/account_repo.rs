@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
@@ -15,6 +16,7 @@ use notegate_core::{Error, Result, limits};
 use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
+use serde_json::json;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -279,7 +281,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let deactivated_agents = sqlx::query(
             "UPDATE accounts \
              SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
              WHERE id = ANY($1) AND kind = 'agent' AND deleted_at IS NULL",
@@ -290,7 +292,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let revoked_api_keys = sqlx::query(
             "UPDATE api_keys \
              SET revoked_at = now(), revoked_by_user_id = $2 \
              WHERE revoked_at IS NULL \
@@ -303,7 +305,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let revoked_browser_sessions = sqlx::query(
             "UPDATE browser_sessions \
              SET revoked_at = now(), revoked_reason = 'account_deleted', updated_at = now() \
              WHERE user_id = $1 AND revoked_at IS NULL",
@@ -313,7 +315,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let disconnected_connections = sqlx::query(
             "UPDATE space_agent_connections \
              SET disconnected_at = now(), disconnected_by_user_id = $3 \
              WHERE disconnected_at IS NULL \
@@ -338,6 +340,25 @@ impl AccountRepo {
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(account_id),
+                actor_account_id: Some(deleted_by),
+                source: SOURCE_REST,
+                op_type: "account.delete",
+                resource_type: "account",
+                resource_id: Some(account_id),
+                metadata: json!({
+                    "deactivated_agents": deactivated_agents.rows_affected(),
+                    "revoked_api_keys": revoked_api_keys.rows_affected(),
+                    "revoked_browser_sessions": revoked_browser_sessions.rows_affected(),
+                    "disconnected_connections": disconnected_connections.rows_affected(),
+                }),
+            },
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())

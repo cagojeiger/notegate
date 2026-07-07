@@ -11,7 +11,6 @@ users
 agents
 api_keys
 audit_events
-content_events
 spaces
 space_agent_connections
 nodes
@@ -173,7 +172,7 @@ browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
 
 ## Event history tables
 
-Event history table은 현재 상태의 source of truth가 아니다. 성공한 domain mutation의 append-only snapshot history다. Actor, owner, target id는 product row를 직접 소유하지 않는 identifier snapshot이며 cascading foreign key로 다루지 않는다. `actor_account_id`는 mutation caller이고, `owner_user_id`는 event가 속한 user-owned product scope다. Audit event의 primary target은 `resource_type`/`resource_id`이고, content event의 primary target은 `node_id`다. Secondary target id는 `metadata`에 둔다.
+Event history table은 현재 상태의 source of truth가 아니다. 성공한 domain mutation의 append-only snapshot history다. Actor, owner, target id는 product row를 직접 소유하지 않는 identifier snapshot이며 cascading foreign key로 다루지 않는다. `actor_account_id`는 mutation caller이고, `owner_user_id`는 event가 속한 user-owned product scope다. Audit event의 primary target은 `resource_type`/`resource_id`다. Secondary target id는 `metadata`에 둔다.
 
 ```text
 audit_events
@@ -188,22 +187,7 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, credential, permission, agent, space 관리 변경을 기록한다. 기본 retention은 1 year다.
-
-```text
-content_events
-  id bigserial pk
-  occurred_at timestamptz not null default now()
-  owner_user_id uuid null
-  actor_account_id uuid null
-  source text not null check ('rest','mcp','system')
-  op_type text not null
-  space_id uuid not null
-  node_id uuid not null
-  metadata jsonb not null default '{}'
-```
-
-`content_events`는 file-tree와 content domain 변경을 기록한다. 기본 retention은 3 months다. Text content, file bytes, API key plaintext/hash, browser session token, OAuth refresh token, email, display name은 event payload에 저장하지 않는다.
+`audit_events`는 account, credential, permission, agent, space 관리 변경을 기록한다. 기본 retention은 1 year다. Text content, file bytes, API key plaintext/hash, browser session token, OAuth refresh token, email, display name은 event payload에 저장하지 않는다.
 
 Event history DB 제약:
 
@@ -221,11 +205,6 @@ audit_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
 audit_events_resource_time_idx(resource_type, resource_id, occurred_at desc, id desc)
 audit_events_retention_idx(occurred_at)
 
-content_events_owner_time_idx(owner_user_id, occurred_at desc, id desc)
-content_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
-content_events_space_time_idx(space_id, occurred_at desc, id desc)
-content_events_node_time_idx(node_id, occurred_at desc, id desc)
-content_events_retention_idx(occurred_at)
 ```
 
 ## Space and connection tables

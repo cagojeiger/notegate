@@ -1,9 +1,11 @@
 //! Unified API-key persistence for user and agent accounts.
 
+use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
 use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
+use serde_json::json;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -218,6 +220,21 @@ impl ApiKeyRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let audit_context = audit_context_for_key_account(&mut tx, args.account_id).await?;
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(audit_context.owner_user_id),
+                actor_account_id: Some(args.created_by),
+                source: SOURCE_REST,
+                op_type: audit_context.create_op_type(),
+                resource_type: "api_key",
+                resource_id: Some(args.key_id),
+                metadata: json!({}),
+            },
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(ApiKey::from(row))
     }
@@ -301,6 +318,21 @@ impl ApiKeyRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let audit_context = audit_context_for_key_account(&mut tx, args.account_id).await?;
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(audit_context.owner_user_id),
+                actor_account_id: Some(revoked_by),
+                source: SOURCE_REST,
+                op_type: audit_context.rotate_op_type(),
+                resource_type: "api_key",
+                resource_id: Some(args.key_id),
+                metadata: json!({ "rotated_from_key_id": old_key_id }),
+            },
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(ApiKey::from(row))
     }
@@ -312,6 +344,7 @@ impl ApiKeyRepo {
         revoked_by: Uuid,
         reason: Option<&str>,
     ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE api_keys \
              SET revoked_at = now(), revoked_by_user_id = $3, revoked_reason = $4 \
@@ -321,13 +354,105 @@ impl ApiKeyRepo {
         .bind(account_id)
         .bind(revoked_by)
         .bind(reason)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
         if result.rows_affected() == 0 {
             return Err(Error::not_found("api key not found"));
         }
+
+        let audit_context = audit_context_for_key_account(&mut tx, account_id).await?;
+        let metadata = match reason {
+            Some(reason) => json!({ "reason": reason }),
+            None => json!({}),
+        };
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(audit_context.owner_user_id),
+                actor_account_id: Some(revoked_by),
+                source: SOURCE_REST,
+                op_type: audit_context.revoke_op_type(),
+                resource_type: "api_key",
+                resource_id: Some(key_id),
+                metadata,
+            },
+        )
+        .await?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ApiKeyAuditKind {
+    User,
+    Agent,
+}
+
+#[derive(Debug)]
+struct ApiKeyAuditContext {
+    owner_user_id: Uuid,
+    kind: ApiKeyAuditKind,
+}
+
+impl ApiKeyAuditContext {
+    fn create_op_type(&self) -> &'static str {
+        match self.kind {
+            ApiKeyAuditKind::User => "user_key.create",
+            ApiKeyAuditKind::Agent => "agent_key.create",
+        }
+    }
+
+    fn rotate_op_type(&self) -> &'static str {
+        match self.kind {
+            ApiKeyAuditKind::User => "user_key.rotate",
+            ApiKeyAuditKind::Agent => "agent_key.rotate",
+        }
+    }
+
+    fn revoke_op_type(&self) -> &'static str {
+        match self.kind {
+            ApiKeyAuditKind::User => "user_key.revoke",
+            ApiKeyAuditKind::Agent => "agent_key.revoke",
+        }
+    }
+}
+
+async fn audit_context_for_key_account(
+    tx: &mut sqlx::PgConnection,
+    account_id: Uuid,
+) -> Result<ApiKeyAuditContext> {
+    let row: Option<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT acc.kind, a.owner_user_id \
+         FROM accounts acc \
+         LEFT JOIN agents a ON a.id = acc.id \
+         WHERE acc.id = $1",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    let Some((kind, agent_owner_user_id)) = row else {
+        return Err(Error::not_found("account not found"));
+    };
+
+    match kind.as_str() {
+        "user" => Ok(ApiKeyAuditContext {
+            owner_user_id: account_id,
+            kind: ApiKeyAuditKind::User,
+        }),
+        "agent" => {
+            let owner_user_id = agent_owner_user_id
+                .ok_or_else(|| Error::internal("agent account missing owner user"))?;
+            Ok(ApiKeyAuditContext {
+                owner_user_id,
+                kind: ApiKeyAuditKind::Agent,
+            })
+        }
+        other => Err(Error::internal(format!("unknown account kind: {other}"))),
     }
 }
 

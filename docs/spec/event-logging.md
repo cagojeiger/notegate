@@ -4,14 +4,14 @@
 
 ## Purpose
 
-Notegate는 두 append-only event stream을 둔다.
+Notegate는 audit event stream을 먼저 구현한다. Content event stream은 같은 원칙을 따르는 후속 범위다.
 
 ```text
 audit_events
   security, credential, permission, account, agent, space 관리 이력
 
 content_events
-  file-tree와 content domain operation 이력
+  file-tree와 content domain operation 이력 -- deferred
 ```
 
 두 stream은 audit review, incident investigation, agent 변경 검토, activity view의 기반이다. 현재 state의 source of truth는 아니다.
@@ -46,7 +46,6 @@ Event capture는 domain mutation의 일부다.
 
 ```text
 audit_events insert 실패   => 원래 audit 대상 mutation도 실패
-content_events insert 실패 => 원래 content 대상 mutation도 실패
 ```
 
 이 보장은 operation history가 현재 domain state와 어긋나지 않게 하기 위한 기본 계약이다.
@@ -220,7 +219,7 @@ recursive node.delete
 
 ## Storage shape
 
-Schema는 별도 physical table을 사용한다. 두 stream은 다음 조회 축만 column으로 둔다.
+Schema는 별도 physical table을 사용한다. 첫 구현의 `audit_events`는 다음 조회 축만 column으로 둔다.
 
 ```text
 common
@@ -235,10 +234,6 @@ common
 audit_events
   resource_type
   resource_id
-
-content_events
-  space_id
-  node_id
 ```
 
 권장 index와 column type은 `docs/spec/db.md`의 Event history tables가 정본이다.
@@ -249,7 +244,7 @@ content_events
 
 ```text
 audit_events: 1 year
-content_events: 3 months
+content_events: 3 months -- deferred
 ```
 
 Event row는 identifier를 보존하되 embedded PII를 피하도록 설계한다. User anonymization 이후에도 attribution shell은 유지하되 개인 정보를 노출하지 않는 것이 목표다.

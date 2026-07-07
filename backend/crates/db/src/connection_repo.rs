@@ -4,10 +4,12 @@
 //! space. Users do not appear in this table: the space owner always has write
 //! permission through `spaces.owner_user_id`.
 
+use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
 use crate::{map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{ConnectAgent, Permission, SpaceAgentConnection};
+use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -159,6 +161,23 @@ impl ConnectionRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        insert_audit_event(
+            &mut tx,
+            AuditEvent {
+                owner_user_id: Some(connected_by_user_id),
+                actor_account_id: Some(connected_by_user_id),
+                source: SOURCE_REST,
+                op_type: "connection.upsert",
+                resource_type: "space",
+                resource_id: Some(command.space_id),
+                metadata: json!({
+                    "agent_id": command.agent_id,
+                    "permission": command.permission.as_str(),
+                }),
+            },
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         row.into_connection()
     }
@@ -173,7 +192,7 @@ impl ConnectionRepo {
         lock_owned_space(&mut tx, space_id, disconnected_by_user_id).await?;
         lock_owned_live_agent(&mut tx, agent_id, disconnected_by_user_id).await?;
 
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE space_agent_connections \
              SET disconnected_at = now(), disconnected_by_user_id = $3 \
              WHERE space_id = $1 AND agent_id = $2 AND disconnected_at IS NULL",
@@ -184,6 +203,22 @@ impl ConnectionRepo {
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        if result.rows_affected() > 0 {
+            insert_audit_event(
+                &mut tx,
+                AuditEvent {
+                    owner_user_id: Some(disconnected_by_user_id),
+                    actor_account_id: Some(disconnected_by_user_id),
+                    source: SOURCE_REST,
+                    op_type: "connection.disconnect",
+                    resource_type: "space",
+                    resource_id: Some(space_id),
+                    metadata: json!({ "agent_id": agent_id }),
+                },
+            )
+            .await?;
+        }
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
