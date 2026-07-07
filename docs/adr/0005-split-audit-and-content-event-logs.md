@@ -2,7 +2,7 @@
 
 ## Context
 
-notegate는 보안 리뷰, 사고 조사, 향후 usage/activity 기능을 위해 durable한 작업 이력이 필요하다. 기존 테이블은 현재 상태와 `created_at`, `updated_at`, `deleted_at`, `revoked_at`, `disconnected_at` 같은 lifecycle marker를 보존하지만 append-only operation history를 제공하지 않는다.
+notegate는 보안 리뷰, 사고 조사, agent 변경 검토와 activity 기능을 위해 durable한 작업 이력이 필요하다. 기존 테이블은 현재 상태와 `created_at`, `updated_at`, `deleted_at`, `revoked_at`, `disconnected_at` 같은 lifecycle marker를 보존하지만 append-only operation history를 제공하지 않는다.
 
 로그 도메인에는 서로 다른 통제 목적이 있다.
 
@@ -11,7 +11,7 @@ security/permission management history
 content/file-tree operation history
 ```
 
-두 영역을 하나의 stream에 섞으면 저빈도 compliance evidence와 고빈도 product activity가 섞인다. 그러면 retention, 접근 제어, payload 정책, 향후 replay/projection을 분리해서 판단하기 어려워진다.
+두 영역을 하나의 stream에 섞으면 저빈도 compliance evidence와 고빈도 product activity가 섞인다. 그러면 retention, 접근 제어, payload 정책, 조회 방식을 분리해서 판단하기 어려워진다.
 
 ## Decision
 
@@ -31,7 +31,7 @@ Event row는 append-only다. Product code는 일반 동작에서 event row를 up
 ## Consequences
 
 - Audit review는 text/file edit에 묻히지 않고 access boundary와 credential 변경에 집중할 수 있다.
-- Content event는 agent 변경 검토, activity history, 향후 usage projection으로 확장할 수 있다.
+- Content event는 agent 변경 검토와 activity history에 집중할 수 있다.
 - Domain mutation code는 state change와 같은 DB transaction 안에서 event row를 insert해야 한다.
 - Event payload는 allowlist 기반이어야 한다. Raw request body, secret, token, text content, file bytes, user PII는 어느 stream에도 저장하지 않는다.
-- 두 domain을 모두 건드리는 mutation은 향후 각 stream에 event를 하나씩 남길 수 있다. 초기 설계는 명확한 audit/projection 필요가 없으면 mutation마다 primary stream 하나를 선호한다.
+- 두 domain을 모두 건드리는 mutation은 향후 각 stream에 event를 하나씩 남길 수 있다. 초기 설계는 명확한 audit 또는 content history 필요가 없으면 mutation마다 primary stream 하나를 선호한다.
