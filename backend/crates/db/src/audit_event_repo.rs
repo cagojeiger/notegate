@@ -3,8 +3,6 @@ use notegate_core::Result;
 use serde_json::Value;
 use uuid::Uuid;
 
-pub(crate) const SOURCE_REST: &str = "rest";
-
 #[derive(Debug)]
 pub(crate) struct AuditEvent {
     pub owner_user_id: Option<Uuid>,

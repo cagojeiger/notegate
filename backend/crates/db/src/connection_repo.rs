@@ -4,12 +4,12 @@
 //! space. Users do not appear in this table: the space owner always has write
 //! permission through `spaces.owner_user_id`.
 
-use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
+use crate::audit_event_repo::insert_audit_event;
+use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{ConnectAgent, Permission, SpaceAgentConnection};
-use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -161,20 +161,16 @@ impl ConnectionRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let audit_ctx = AuditContext::rest(connected_by_user_id);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(connected_by_user_id),
-                actor_account_id: Some(connected_by_user_id),
-                source: SOURCE_REST,
-                op_type: "connection.upsert",
-                resource_type: "space",
-                resource_id: Some(command.space_id),
-                metadata: json!({
-                    "agent_id": command.agent_id,
-                    "permission": command.permission.as_str(),
-                }),
-            },
+            audit_events::connection_upserted(
+                audit_ctx,
+                connected_by_user_id,
+                command.space_id,
+                command.agent_id,
+                command.permission.as_str(),
+            ),
         )
         .await?;
 
@@ -205,17 +201,15 @@ impl ConnectionRepo {
         .map_err(map_sqlx_error)?;
 
         if result.rows_affected() > 0 {
+            let audit_ctx = AuditContext::rest(disconnected_by_user_id);
             insert_audit_event(
                 &mut tx,
-                AuditEvent {
-                    owner_user_id: Some(disconnected_by_user_id),
-                    actor_account_id: Some(disconnected_by_user_id),
-                    source: SOURCE_REST,
-                    op_type: "connection.disconnect",
-                    resource_type: "space",
-                    resource_id: Some(space_id),
-                    metadata: json!({ "agent_id": agent_id }),
-                },
+                audit_events::connection_disconnected(
+                    audit_ctx,
+                    disconnected_by_user_id,
+                    space_id,
+                    agent_id,
+                ),
             )
             .await?;
         }

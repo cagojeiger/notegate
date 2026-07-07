@@ -12,6 +12,7 @@ pub mod account_repo;
 pub mod agent_repo;
 pub mod api_key_repo;
 mod audit_event_repo;
+mod audit_events;
 pub mod browser_session_repo;
 pub mod connection_repo;
 pub mod files;

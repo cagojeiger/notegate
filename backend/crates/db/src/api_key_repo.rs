@@ -1,11 +1,11 @@
 //! Unified API-key persistence for user and agent accounts.
 
-use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
+use crate::audit_event_repo::insert_audit_event;
+use crate::audit_events::{self, ApiKeyAuditKind, AuditContext};
 use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
-use serde_json::json;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -221,17 +221,15 @@ impl ApiKeyRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_context = audit_context_for_key_account(&mut tx, args.account_id).await?;
+        let audit_ctx = AuditContext::rest(args.created_by);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(audit_context.owner_user_id),
-                actor_account_id: Some(args.created_by),
-                source: SOURCE_REST,
-                op_type: audit_context.create_op_type(),
-                resource_type: "api_key",
-                resource_id: Some(args.key_id),
-                metadata: json!({}),
-            },
+            audit_events::api_key_created(
+                audit_ctx,
+                audit_context.owner_user_id,
+                args.key_id,
+                audit_context.kind,
+            ),
         )
         .await?;
 
@@ -319,17 +317,16 @@ impl ApiKeyRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_context = audit_context_for_key_account(&mut tx, args.account_id).await?;
+        let audit_ctx = AuditContext::rest(revoked_by);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(audit_context.owner_user_id),
-                actor_account_id: Some(revoked_by),
-                source: SOURCE_REST,
-                op_type: audit_context.rotate_op_type(),
-                resource_type: "api_key",
-                resource_id: Some(old_key_id),
-                metadata: json!({ "created_key_id": args.key_id }),
-            },
+            audit_events::api_key_rotated(
+                audit_ctx,
+                audit_context.owner_user_id,
+                old_key_id,
+                args.key_id,
+                audit_context.kind,
+            ),
         )
         .await?;
 
@@ -362,21 +359,16 @@ impl ApiKeyRepo {
         }
 
         let audit_context = audit_context_for_key_account(&mut tx, account_id).await?;
-        let metadata = match reason {
-            Some(reason) => json!({ "reason": reason }),
-            None => json!({}),
-        };
+        let audit_ctx = AuditContext::rest(revoked_by);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(audit_context.owner_user_id),
-                actor_account_id: Some(revoked_by),
-                source: SOURCE_REST,
-                op_type: audit_context.revoke_op_type(),
-                resource_type: "api_key",
-                resource_id: Some(key_id),
-                metadata,
-            },
+            audit_events::api_key_revoked(
+                audit_ctx,
+                audit_context.owner_user_id,
+                key_id,
+                reason,
+                audit_context.kind,
+            ),
         )
         .await?;
 
@@ -385,39 +377,10 @@ impl ApiKeyRepo {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ApiKeyAuditKind {
-    User,
-    Agent,
-}
-
 #[derive(Debug)]
 struct ApiKeyAuditContext {
     owner_user_id: Uuid,
     kind: ApiKeyAuditKind,
-}
-
-impl ApiKeyAuditContext {
-    fn create_op_type(&self) -> &'static str {
-        match self.kind {
-            ApiKeyAuditKind::User => "user_key.create",
-            ApiKeyAuditKind::Agent => "agent_key.create",
-        }
-    }
-
-    fn rotate_op_type(&self) -> &'static str {
-        match self.kind {
-            ApiKeyAuditKind::User => "user_key.rotate",
-            ApiKeyAuditKind::Agent => "agent_key.rotate",
-        }
-    }
-
-    fn revoke_op_type(&self) -> &'static str {
-        match self.kind {
-            ApiKeyAuditKind::User => "user_key.revoke",
-            ApiKeyAuditKind::Agent => "agent_key.revoke",
-        }
-    }
 }
 
 async fn audit_context_for_key_account(

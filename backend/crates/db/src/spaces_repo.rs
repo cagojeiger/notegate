@@ -1,11 +1,11 @@
 //! Space lifecycle persistence.
 
-use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
+use crate::audit_event_repo::insert_audit_event;
+use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
-use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -152,17 +152,10 @@ impl SpaceRepo {
         .await
         .map_err(map_constraint_error)?;
 
+        let audit_ctx = AuditContext::rest(owner_user_id);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(owner_user_id),
-                actor_account_id: Some(owner_user_id),
-                source: SOURCE_REST,
-                op_type: "space.create",
-                resource_type: "space",
-                resource_id: Some(row.id),
-                metadata: json!({}),
-            },
+            audit_events::space_created(audit_ctx, owner_user_id, row.id),
         )
         .await?;
 
@@ -357,17 +350,10 @@ impl SpaceRepo {
         if sort_order.is_some() {
             changed_fields.push("sort_order");
         }
+        let audit_ctx = AuditContext::rest(owner_user_id);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(owner_user_id),
-                actor_account_id: Some(owner_user_id),
-                source: SOURCE_REST,
-                op_type: "space.update",
-                resource_type: "space",
-                resource_id: Some(space_id),
-                metadata: json!({ "changed_fields": changed_fields }),
-            },
+            audit_events::space_updated(audit_ctx, owner_user_id, space_id, changed_fields),
         )
         .await?;
 
@@ -399,17 +385,10 @@ impl SpaceRepo {
             return Err(Error::not_found("space not found"));
         }
 
+        let audit_ctx = AuditContext::rest(deleted_by_user_id);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(owner_user_id),
-                actor_account_id: Some(deleted_by_user_id),
-                source: SOURCE_REST,
-                op_type: "space.delete",
-                resource_type: "space",
-                resource_id: Some(space_id),
-                metadata: json!({}),
-            },
+            audit_events::space_deleted(audit_ctx, owner_user_id, space_id),
         )
         .await?;
 

@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 
-use crate::audit_event_repo::{AuditEvent, SOURCE_REST, insert_audit_event};
+use crate::audit_event_repo::insert_audit_event;
+use crate::audit_events::{self, AccountDeleteCounts, AuditContext};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
@@ -16,7 +17,6 @@ use notegate_core::{Error, Result, limits};
 use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
-use serde_json::json;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -341,22 +341,19 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let audit_ctx = AuditContext::rest(deleted_by);
         insert_audit_event(
             &mut tx,
-            AuditEvent {
-                owner_user_id: Some(account_id),
-                actor_account_id: Some(deleted_by),
-                source: SOURCE_REST,
-                op_type: "account.delete",
-                resource_type: "account",
-                resource_id: Some(account_id),
-                metadata: json!({
-                    "deactivated_agents": deactivated_agents.rows_affected(),
-                    "revoked_api_keys": revoked_api_keys.rows_affected(),
-                    "revoked_browser_sessions": revoked_browser_sessions.rows_affected(),
-                    "disconnected_connections": disconnected_connections.rows_affected(),
-                }),
-            },
+            audit_events::account_deleted(
+                audit_ctx,
+                account_id,
+                AccountDeleteCounts {
+                    deactivated_agents: deactivated_agents.rows_affected(),
+                    revoked_api_keys: revoked_api_keys.rows_affected(),
+                    revoked_browser_sessions: revoked_browser_sessions.rows_affected(),
+                    disconnected_connections: disconnected_connections.rows_affected(),
+                },
+            ),
         )
         .await?;
 
