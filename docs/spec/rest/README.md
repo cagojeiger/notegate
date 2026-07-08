@@ -7,7 +7,7 @@ REST는 브라우저/UI용 resource API다. UI가 선택한 `space_id`, `node_id
 | Category | Scope | Path | Doc |
 |---|---:|---|---|
 | Identity | global | `/api/v1/me` | `identity.md` |
-| Events | global | `/api/v1/me/events` | `events.md` |
+| Events | global | `/api/v1/me/audit-events` | `events.md` |
 | Spaces | global | `/api/v1/spaces` | `spaces.md` |
 | Agents | global | `/api/v1/agents` | `agents.md` |
 | Connections | space | `/api/v1/spaces/{space_id}/agents` | `connections.md` |

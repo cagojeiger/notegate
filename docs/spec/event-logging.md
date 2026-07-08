@@ -18,7 +18,7 @@ content_events
 
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
-Event 조회는 REST로 제공한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, content event 조회는 space scope endpoint로 후속 범위에서 정의한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
 
 ## Common rules
 

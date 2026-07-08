@@ -98,7 +98,7 @@ pub(crate) struct ApiKeyMetadataListResponse {
     pub page: crate::page::Page,
 }
 
-/// Audit event history entry returned by `GET /api/v1/me/events`.
+/// Audit event history entry returned by `GET /api/v1/me/audit-events`.
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AuditEventOut {
     pub id: i64,

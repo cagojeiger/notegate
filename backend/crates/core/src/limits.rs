@@ -195,7 +195,7 @@ pub const AGENTS_MAX_LIMIT: i64 = 100;
 pub const API_KEYS_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /*/keys` page size.
 pub const API_KEYS_MAX_LIMIT: i64 = 100;
-/// Default `GET /me/events` page size.
+/// Default `GET /me/audit-events` page size.
 pub const AUDIT_EVENTS_DEFAULT_LIMIT: i64 = 50;
-/// Maximum `GET /me/events` page size.
+/// Maximum `GET /me/audit-events` page size.
 pub const AUDIT_EVENTS_MAX_LIMIT: i64 = 100;

@@ -32,7 +32,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/me", get(get_me).delete(delete_me))
         .route("/v1/me/keys", get(list_keys).post(create_key))
         .route("/v1/me/keys/{key_id}", post(rotate_key).delete(revoke_key))
-        .route("/v1/me/events", get(list_events))
+        .route("/v1/me/audit-events", get(list_audit_events))
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,7 +110,7 @@ pub(crate) async fn list_keys(
 
 #[utoipa::path(
     get,
-    path = "/api/v1/me/events",
+    path = "/api/v1/me/audit-events",
     tag = "identity",
     params(
         ("limit" = Option<i64>, Query, description = "Page size"),
@@ -119,7 +119,7 @@ pub(crate) async fn list_keys(
     responses((status = 200, description = "List current user audit event history", body = AuditEventListResponse)),
     security(("bearer_auth" = []))
 )]
-pub(crate) async fn list_events(
+pub(crate) async fn list_audit_events(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListEventsQuery>,

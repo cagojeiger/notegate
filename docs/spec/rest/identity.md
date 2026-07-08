@@ -50,4 +50,4 @@ User caller만 가능하다.
 
 ## Current user event history
 
-`GET /api/v1/me/events`는 caller의 audit event 이력을 반환한다. 계약은 `events.md`에 둔다.
+`GET /api/v1/me/audit-events`는 caller의 audit event 이력을 반환한다. 계약은 `events.md`에 둔다.
