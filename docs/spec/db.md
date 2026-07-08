@@ -177,7 +177,7 @@ Event history table은 현재 상태의 source of truth가 아니다. 성공한 
 ```text
 audit_events
   id bigserial pk
-  occurred_at timestamptz not null default now()
+  created_at timestamptz not null default now()
   owner_user_id uuid null
   actor_account_id uuid null
   source text not null check ('rest','mcp','system')
@@ -194,16 +194,16 @@ Event history DB 제약:
 ```text
 source: 'rest', 'mcp', 'system'
 metadata: JSON object
-occurred_at: DB timestamp 기준
+created_at: DB timestamp 기준
 ```
 
 권장 index:
 
 ```text
-audit_events_owner_time_idx(owner_user_id, occurred_at desc, id desc)
-audit_events_actor_time_idx(actor_account_id, occurred_at desc, id desc)
-audit_events_resource_time_idx(resource_type, resource_id, occurred_at desc, id desc)
-audit_events_retention_idx(occurred_at)
+audit_events_owner_time_idx(owner_user_id, created_at desc, id desc)
+audit_events_actor_time_idx(actor_account_id, created_at desc, id desc)
+audit_events_resource_time_idx(resource_type, resource_id, created_at desc, id desc)
+audit_events_retention_idx(created_at)
 
 ```
 

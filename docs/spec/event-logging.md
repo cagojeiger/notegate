@@ -200,7 +200,7 @@ Schema는 별도 physical table을 사용한다. 첫 구현의 `audit_events`는
 ```text
 common
   id
-  occurred_at
+  created_at
   owner_user_id
   actor_account_id
   source

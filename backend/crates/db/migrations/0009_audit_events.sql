@@ -1,6 +1,6 @@
 CREATE TABLE audit_events (
   id bigserial PRIMARY KEY,
-  occurred_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now(),
   owner_user_id uuid NULL,
   actor_account_id uuid NULL,
   source text NOT NULL CHECK (source IN ('rest', 'mcp', 'system')),
@@ -12,13 +12,13 @@ CREATE TABLE audit_events (
 );
 
 CREATE INDEX audit_events_owner_time_idx
-  ON audit_events (owner_user_id, occurred_at DESC, id DESC);
+  ON audit_events (owner_user_id, created_at DESC, id DESC);
 
 CREATE INDEX audit_events_actor_time_idx
-  ON audit_events (actor_account_id, occurred_at DESC, id DESC);
+  ON audit_events (actor_account_id, created_at DESC, id DESC);
 
 CREATE INDEX audit_events_resource_time_idx
-  ON audit_events (resource_type, resource_id, occurred_at DESC, id DESC);
+  ON audit_events (resource_type, resource_id, created_at DESC, id DESC);
 
 CREATE INDEX audit_events_retention_idx
-  ON audit_events (occurred_at);
+  ON audit_events (created_at);

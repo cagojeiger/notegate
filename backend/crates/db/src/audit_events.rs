@@ -1,7 +1,10 @@
-use crate::audit_event_repo::AuditEvent;
+use crate::audit_event_repo::NewAuditEvent;
 use serde_json::json;
 use uuid::Uuid;
 
+/// Audited management mutations are reachable only through REST today, so
+/// `Rest` is the only variant; `mcp`/`system` in the DB CHECK are reserved for
+/// future streams and workers.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum AuditSource {
     Rest,
@@ -44,7 +47,11 @@ pub(crate) struct AccountDeleteCounts {
     pub disconnected_connections: u64,
 }
 
-pub(crate) fn space_created(ctx: AuditContext, owner_user_id: Uuid, space_id: Uuid) -> AuditEvent {
+pub(crate) fn space_created(
+    ctx: AuditContext,
+    owner_user_id: Uuid,
+    space_id: Uuid,
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -60,7 +67,7 @@ pub(crate) fn space_updated(
     owner_user_id: Uuid,
     space_id: Uuid,
     changed_fields: Vec<&'static str>,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -71,7 +78,11 @@ pub(crate) fn space_updated(
     )
 }
 
-pub(crate) fn space_deleted(ctx: AuditContext, owner_user_id: Uuid, space_id: Uuid) -> AuditEvent {
+pub(crate) fn space_deleted(
+    ctx: AuditContext,
+    owner_user_id: Uuid,
+    space_id: Uuid,
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -82,7 +93,11 @@ pub(crate) fn space_deleted(ctx: AuditContext, owner_user_id: Uuid, space_id: Uu
     )
 }
 
-pub(crate) fn agent_created(ctx: AuditContext, owner_user_id: Uuid, agent_id: Uuid) -> AuditEvent {
+pub(crate) fn agent_created(
+    ctx: AuditContext,
+    owner_user_id: Uuid,
+    agent_id: Uuid,
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -99,7 +114,7 @@ pub(crate) fn agent_deleted(
     agent_id: Uuid,
     revoked_agent_keys: u64,
     disconnected_connections: u64,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -119,7 +134,7 @@ pub(crate) fn connection_upserted(
     space_id: Uuid,
     agent_id: Uuid,
     permission: &str,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -138,7 +153,7 @@ pub(crate) fn connection_disconnected(
     owner_user_id: Uuid,
     space_id: Uuid,
     agent_id: Uuid,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -154,7 +169,7 @@ pub(crate) fn api_key_created(
     owner_user_id: Uuid,
     key_id: Uuid,
     kind: ApiKeyAuditKind,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -171,7 +186,7 @@ pub(crate) fn api_key_rotated(
     old_key_id: Uuid,
     new_key_id: Uuid,
     kind: ApiKeyAuditKind,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         owner_user_id,
@@ -188,7 +203,7 @@ pub(crate) fn api_key_revoked(
     key_id: Uuid,
     reason: Option<&str>,
     kind: ApiKeyAuditKind,
-) -> AuditEvent {
+) -> NewAuditEvent {
     let metadata = match reason {
         Some(reason) => json!({ "reason": reason }),
         None => json!({}),
@@ -207,7 +222,7 @@ pub(crate) fn account_deleted(
     ctx: AuditContext,
     account_id: Uuid,
     counts: AccountDeleteCounts,
-) -> AuditEvent {
+) -> NewAuditEvent {
     event(
         ctx,
         account_id,
@@ -253,8 +268,8 @@ fn event(
     resource_type: &'static str,
     resource_id: Option<Uuid>,
     metadata: serde_json::Value,
-) -> AuditEvent {
-    AuditEvent {
+) -> NewAuditEvent {
+    NewAuditEvent {
         owner_user_id: Some(owner_user_id),
         actor_account_id: Some(ctx.actor_account_id),
         source: ctx.source.as_str(),

@@ -16,22 +16,22 @@ use notegate_model::AuditEventCursor;
 use uuid::Uuid;
 
 /// Insert one audit event row directly, bypassing the (crate-private) capture
-/// path so the test can control `occurred_at` ordering deterministically.
+/// path so the test can control `created_at` ordering deterministically.
 async fn insert_event(
     pool: &sqlx::PgPool,
     owner_user_id: Uuid,
     op_type: &str,
-    occurred_at: DateTime<Utc>,
+    created_at: DateTime<Utc>,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "INSERT INTO audit_events \
-         (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id, occurred_at, metadata) \
+         (owner_user_id, actor_account_id, source, op_type, resource_type, resource_id, created_at, metadata) \
          VALUES ($1, $1, 'rest', $2, 'space', gen_random_uuid(), $3, '{}'::jsonb) \
          RETURNING id",
     )
     .bind(owner_user_id)
     .bind(op_type)
-    .bind(occurred_at)
+    .bind(created_at)
     .fetch_one(pool)
     .await
 }
@@ -54,7 +54,7 @@ async fn list_by_owner_returns_newest_first() -> Result<(), Box<dyn std::error::
     assert_eq!(
         op_types,
         vec!["space.delete", "space.update", "space.create"],
-        "newest occurred_at first"
+        "newest created_at first"
     );
 
     db.cleanup().await;
@@ -92,7 +92,7 @@ async fn list_by_owner_pages_by_cursor_without_gaps_or_duplicates()
     );
 
     let cursor = AuditEventCursor {
-        occurred_at: first_page.last().expect("last item").occurred_at,
+        created_at: first_page.last().expect("last item").created_at,
         id: first_page.last().expect("last item").id,
     };
     let second_page = repo.list_by_owner(owner, 2, Some(&cursor)).await?;
@@ -103,7 +103,7 @@ async fn list_by_owner_pages_by_cursor_without_gaps_or_duplicates()
     );
 
     let cursor2 = AuditEventCursor {
-        occurred_at: second_page.last().expect("last item").occurred_at,
+        created_at: second_page.last().expect("last item").created_at,
         id: second_page.last().expect("last item").id,
     };
     let third_page = repo.list_by_owner(owner, 2, Some(&cursor2)).await?;

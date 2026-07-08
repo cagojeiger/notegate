@@ -6,8 +6,9 @@ use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
+/// Write-side row for capture; the read shape is `notegate_model::AuditEvent`.
 #[derive(Debug)]
-pub(crate) struct AuditEvent {
+pub(crate) struct NewAuditEvent {
     pub owner_user_id: Option<Uuid>,
     pub actor_account_id: Option<Uuid>,
     pub source: &'static str,
@@ -19,7 +20,7 @@ pub(crate) struct AuditEvent {
 
 pub(crate) async fn insert_audit_event(
     tx: &mut sqlx::PgConnection,
-    event: AuditEvent,
+    event: NewAuditEvent,
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO audit_events \
@@ -52,7 +53,7 @@ impl AuditEventRepo {
     }
 
     /// List audit events owned by `owner_user_id`, newest first. Matches the
-    /// `audit_events_owner_time_idx (owner_user_id, occurred_at DESC, id DESC)` order.
+    /// `audit_events_owner_time_idx (owner_user_id, created_at DESC, id DESC)` order.
     pub async fn list_by_owner(
         &self,
         owner_user_id: Uuid,
@@ -64,7 +65,7 @@ impl AuditEventRepo {
                 sqlx::query_as::<_, AuditEventRow>(&format!(
                     "SELECT {AUDIT_EVENT_COLUMNS} FROM audit_events \
                      WHERE owner_user_id = $1 \
-                     ORDER BY occurred_at DESC, id DESC LIMIT $2"
+                     ORDER BY created_at DESC, id DESC LIMIT $2"
                 ))
                 .bind(owner_user_id)
                 .bind(limit)
@@ -75,11 +76,11 @@ impl AuditEventRepo {
                 sqlx::query_as::<_, AuditEventRow>(&format!(
                     "SELECT {AUDIT_EVENT_COLUMNS} FROM audit_events \
                      WHERE owner_user_id = $1 \
-                       AND (occurred_at, id) < ($2, $3) \
-                     ORDER BY occurred_at DESC, id DESC LIMIT $4"
+                       AND (created_at, id) < ($2, $3) \
+                     ORDER BY created_at DESC, id DESC LIMIT $4"
                 ))
                 .bind(owner_user_id)
-                .bind(cursor.occurred_at)
+                .bind(cursor.created_at)
                 .bind(cursor.id)
                 .bind(limit)
                 .fetch_all(&self.pool)
@@ -97,7 +98,7 @@ impl AuditEventRepo {
 #[derive(Debug, FromRow)]
 struct AuditEventRow {
     id: i64,
-    occurred_at: DateTime<Utc>,
+    created_at: DateTime<Utc>,
     actor_account_id: Option<Uuid>,
     source: String,
     op_type: String,
@@ -110,7 +111,7 @@ impl From<AuditEventRow> for notegate_model::AuditEvent {
     fn from(row: AuditEventRow) -> Self {
         Self {
             id: row.id,
-            occurred_at: row.occurred_at,
+            created_at: row.created_at,
             actor_account_id: row.actor_account_id,
             source: row.source,
             op_type: row.op_type,
@@ -122,4 +123,4 @@ impl From<AuditEventRow> for notegate_model::AuditEvent {
 }
 
 const AUDIT_EVENT_COLUMNS: &str =
-    "id, occurred_at, actor_account_id, source, op_type, resource_type, resource_id, metadata";
+    "id, created_at, actor_account_id, source, op_type, resource_type, resource_id, metadata";

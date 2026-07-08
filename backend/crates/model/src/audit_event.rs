@@ -9,7 +9,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditEvent {
     pub id: i64,
-    pub occurred_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
     pub actor_account_id: Option<Uuid>,
     pub source: String,
     pub op_type: String,
@@ -25,10 +25,10 @@ pub struct ListAuditEvents {
     pub cursor: Option<String>,
 }
 
-/// Keyset cursor for audit event list order `(occurred_at DESC, id DESC)`.
+/// Keyset cursor for audit event list order `(created_at DESC, id DESC)`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AuditEventCursor {
-    pub occurred_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
     pub id: i64,
 }
 

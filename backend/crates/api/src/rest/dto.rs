@@ -102,7 +102,7 @@ pub(crate) struct ApiKeyMetadataListResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AuditEventOut {
     pub id: i64,
-    pub occurred_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
     pub actor_account_id: Option<Uuid>,
     pub source: String,
     pub op_type: String,
@@ -115,7 +115,7 @@ impl From<&AuditEvent> for AuditEventOut {
     fn from(event: &AuditEvent) -> Self {
         Self {
             id: event.id,
-            occurred_at: event.occurred_at,
+            created_at: event.created_at,
             actor_account_id: event.actor_account_id,
             source: event.source.clone(),
             op_type: event.op_type.clone(),

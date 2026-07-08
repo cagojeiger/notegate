@@ -35,7 +35,7 @@ pub async fn list_audit_event_page(
         items
             .last()
             .map(|event| AuditEventCursor {
-                occurred_at: event.occurred_at,
+                created_at: event.created_at,
                 id: event.id,
             })
             .map(|cursor| cursor::encode(&cursor))
