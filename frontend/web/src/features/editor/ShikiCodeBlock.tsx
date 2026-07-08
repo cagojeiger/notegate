@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { normalizeCodeLanguage } from "./codeBlockLanguage";
 import { useResetHorizontalScrollDescendantsOnGrow, useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
-
-const LANGUAGE_ALIASES: Record<string, string> = {
-  md: "markdown",
-  yml: "yaml",
-  text: "text",
-  txt: "text"
-};
 
 export function ShikiCodeBlock({ code, language = "text", className = "" }: { code: string; language?: string; className?: string }) {
   const [html, setHtml] = useState<string | null>(null);
@@ -21,8 +15,7 @@ export function ShikiCodeBlock({ code, language = "text", className = "" }: { co
     async function highlight() {
       try {
         const { highlightCode } = await import("./highlightCode");
-        const normalizedLanguage = LANGUAGE_ALIASES[language.toLowerCase()] ?? language.toLowerCase();
-        const nextHtml = await highlightCode(code, normalizedLanguage);
+        const nextHtml = await highlightCode(code, normalizeCodeLanguage(language));
         if (active) setHtml(nextHtml);
       } catch {
         if (active) setFailed(true);
@@ -35,10 +28,7 @@ export function ShikiCodeBlock({ code, language = "text", className = "" }: { co
     };
   }, [code, language]);
 
-  if (html && !failed) {
-    return <HighlightedCodeBlock className={className} html={html} />;
-  }
-
+  if (html && !failed) return <HighlightedCodeBlock className={className} html={html} />;
   return <CodeFallback code={code} className={className} />;
 }
 

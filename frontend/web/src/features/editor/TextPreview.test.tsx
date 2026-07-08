@@ -1,10 +1,21 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { copyText } from "../../shared/lib/clipboard";
 import { StructuredPreview } from "./StructuredPreview";
 import { TextPreview } from "./TextPreview";
 
+vi.mock("../../shared/lib/clipboard", () => ({
+  copyText: vi.fn()
+}));
+
 describe("TextPreview", () => {
+  beforeEach(() => {
+    vi.mocked(copyText).mockReset();
+    vi.mocked(copyText).mockResolvedValue(true);
+  });
+
   it("renders markdown as prose", async () => {
     render(<TextPreview name="note.md" content={"# Hello\n\n- item"} />);
     expect(await screen.findByRole("heading", { name: "Hello" })).toBeInTheDocument();
@@ -224,6 +235,39 @@ describe("TextPreview", () => {
 
     await waitFor(() => expect(container.querySelector("pre.ng-code-fallback")).toBeInTheDocument());
     expect(container.querySelector("pre.ng-code-fallback")?.textContent).toBe("line 1\nline 2");
+    expect(screen.getByText("Code")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeInTheDocument();
+  });
+
+  it("copies fenced markdown code block contents", async () => {
+    const user = userEvent.setup();
+    render(<TextPreview name="note.md" content={"```sh\npnpm web:test\n```"} />);
+
+    await user.click(await screen.findByRole("button", { name: "Copy code" }));
+
+    expect(screen.getByText("Shell")).toBeInTheDocument();
+    expect(copyText).toHaveBeenCalledWith("pnpm web:test");
+    expect(screen.getByRole("button", { name: "Copied code" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Copied code");
+  });
+
+  it("supports markdown code block language ids with symbols", async () => {
+    const user = userEvent.setup();
+    render(<TextPreview name="note.md" content={"```c++\nint main() {}\n```"} />);
+
+    await user.click(await screen.findByRole("button", { name: "Copy code" }));
+
+    expect(screen.getByText("c++")).toBeInTheDocument();
+    expect(copyText).toHaveBeenCalledWith("int main() {}");
+  });
+
+  it("adds copy chrome to indented markdown code blocks", async () => {
+    const { container } = render(<TextPreview name="note.md" content={"    line 1"} />);
+
+    await waitFor(() => expect(container.querySelector("pre.ng-code-fallback")).toBeInTheDocument());
+    expect(container.querySelector("pre.ng-code-fallback")?.textContent).toBe("line 1");
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeInTheDocument();
   });
 
   it("renders plain text without a nested code-block card", () => {
@@ -245,6 +289,7 @@ describe("TextPreview", () => {
     render(<StructuredPreview format="json" content={'{"server":{"port":9191}}'} mode="source" />);
 
     await waitFor(() => expect(screen.getAllByText((_, element) => element?.textContent === '{"server":{"port":9191}}').length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: "Copy code" })).not.toBeInTheDocument();
   });
 
   it("shows parse errors for invalid structured text", async () => {

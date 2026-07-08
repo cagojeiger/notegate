@@ -4,42 +4,84 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parse as parseYaml } from "yaml";
 
+import { formatCodeBlockLabel } from "../../features/editor/codeBlockLanguage";
 import { MermaidBlock } from "../../features/editor/MermaidBlock";
 import { ShikiCodeBlock } from "../../features/editor/ShikiCodeBlock";
+import { CopyableCodeBlock } from "./CopyableCodeBlock";
 import { classifyMarkdownLink, safeMarkdownUrlTransform, type MarkdownImagePolicy, type MarkdownLinkPolicy } from "../lib/markdownLinks";
 import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHorizontalScrollOnGrow";
 
-const baseComponents: Components = {
-  table({ children, ...props }) {
-    return <TableBlock {...props}>{children}</TableBlock>;
-  },
-  pre({ children }) {
-    return <>{children}</>;
-  },
-  code({ className, children, node, ...props }) {
-    const content = String(children).replace(/\n$/, "");
-    const language = /language-(\w+)/.exec(className ?? "")?.[1];
-    const isBlock = Boolean(node?.position && node.position.start.line !== node.position.end.line);
-
-    if (!language) {
-      if (isBlock) {
-        return <CodeFallback content={content} />;
-      }
-
-      return <code className={className} {...props}>{children}</code>;
-    }
-
-    if (language.toLowerCase() === "mermaid") {
-      return <MermaidBlock code={content} />;
-    }
-
-    return <ShikiCodeBlock code={content} language={language} />;
-  }
+type HastElementNode = {
+  type?: string;
+  tagName?: string;
+  properties?: {
+    className?: string | string[];
+  };
+  children?: Array<HastElementNode | { type?: string; value?: string }>;
 };
+
+type MarkdownCodeBlock = {
+  content: string;
+  language: string | null;
+};
+
+function createBaseComponents(): Components {
+  return {
+    table({ children, ...props }) {
+      return <TableBlock {...props}>{children}</TableBlock>;
+    },
+    pre: MarkdownPre
+  };
+}
+
+function MarkdownPre({ children, node, ...props }: ComponentProps<"pre"> & { node?: unknown }) {
+  const codeBlock = readMarkdownCodeBlock(node);
+
+  if (!codeBlock) return <pre {...props}>{children}</pre>;
+
+  const { content, language } = codeBlock;
+
+  if (language?.toLowerCase() === "mermaid") {
+    return <MermaidBlock code={content} />;
+  }
+
+  const label = language ? formatCodeBlockLabel(language) : "Code";
+  const code = language ? <ShikiCodeBlock code={content} language={language} /> : <CodeFallback content={content} />;
+
+  return (
+    <CopyableCodeBlock code={content} label={label}>
+      {code}
+    </CopyableCodeBlock>
+  );
+}
+
+function readMarkdownCodeBlock(node: unknown): MarkdownCodeBlock | null {
+  if (!isHastElement(node) || node.tagName !== "pre") return null;
+
+  const codeNode = node.children?.find((child): child is HastElementNode => isHastElement(child) && child.tagName === "code");
+  const textNode = codeNode?.children?.[0];
+  const content = textNode && "value" in textNode && typeof textNode.value === "string" ? textNode.value.replace(/\n$/, "") : null;
+  if (!codeNode || content === null) return null;
+
+  return {
+    content,
+    language: readLanguageClass(codeNode.properties?.className)
+  };
+}
+
+function isHastElement(node: unknown): node is HastElementNode {
+  return Boolean(node && typeof node === "object" && (node as HastElementNode).type === "element");
+}
+
+function readLanguageClass(className: string | string[] | undefined): string | null {
+  const classNames = Array.isArray(className) ? className : typeof className === "string" ? className.split(/\s+/) : [];
+  const languageClass = classNames.find((name) => name.startsWith("language-"));
+  return languageClass ? languageClass.slice("language-".length) : null;
+}
 
 function createComponents(linkPolicy: MarkdownLinkPolicy | undefined, imagePolicy: MarkdownImagePolicy | undefined): Components {
   return {
-    ...baseComponents,
+    ...createBaseComponents(),
     a({ href, children, node: _node, ...props }) {
       const hrefProps = href ? { href } : {};
 
