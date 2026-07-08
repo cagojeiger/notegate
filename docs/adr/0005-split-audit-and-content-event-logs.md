@@ -18,7 +18,7 @@ content/file-tree 작업 이력
 두 append-only event stream을 사용한다.
 
 ```text
-audit_events   = account, credential, permission, agent, space 관리 변경
+audit_events   = account, credential, agent, space, connection 관리 변경
 content_events = file-tree와 content domain 변경
 ```
 

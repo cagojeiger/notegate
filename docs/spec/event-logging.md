@@ -18,6 +18,8 @@ content_events
 
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
+Event 조회는 REST로 제공한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+
 ## Common rules
 
 - Commit에 성공한 domain mutation만 기록한다.
@@ -57,7 +59,7 @@ system
 
 ## Audit events
 
-Audit event는 account, space, agent, connection, API key 관리 변경을 기록한다.
+Audit event는 account, credential, agent, space, connection 관리 변경을 기록한다.
 
 초기 audit event type:
 
