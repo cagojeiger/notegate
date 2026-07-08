@@ -1,28 +1,22 @@
 # Event logging spec
 
-이 문서는 Notegate의 durable operation history 계약을 정의한다. 무엇을 기록하는지, 어떤 payload를 허용하는지, 어떤 조회 축을 지원하는지를 정한다. DB schema 정본은 `docs/spec/db.md`에 둔다. Repository-level transaction wiring, helper API, rollout 순서는 구현 detail로 둔다.
+이 문서는 Notegate의 durable operation history 계약을 정의한다. 무엇을 기록하는지, payload에 무엇을 담는지, 어떤 조회 축을 지원하는지를 정한다. DB schema 정본은 `docs/spec/db.md`, payload 보안 원칙은 `docs/spec/security.md`가 정본이다. Repository-level transaction wiring, helper API, rollout 순서는 구현 detail로 둔다.
 
 ## Purpose
+
+Event log는 self-review를 위한 이력이다. 사용자는 자기 계정과 space에 어떤 관리 변경이 있었는지 확인하고, agent owner는 agent가 수행한 작업을 되돌아본다.
 
 Notegate는 audit event stream을 먼저 구현한다. Content event stream은 같은 원칙을 따르는 후속 범위다.
 
 ```text
 audit_events
-  security, credential, permission, account, agent, space 관리 이력
+  account, credential, agent, space, connection 관리 이력
 
 content_events
   file-tree와 content domain operation 이력 -- deferred
 ```
 
-두 stream은 audit review, incident investigation, agent 변경 검토, activity view의 기반이다. 현재 state의 source of truth는 아니다.
-
-## Non-goals
-
-- Notegate state 전체 event sourcing.
-- Text 또는 file content version history.
-- Request/latency logging.
-- 첫 범위에서 failed login, validation failure, permission denied, brute-force security event 수집.
-- Raw request/response payload 저장.
+두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
 ## Common rules
 
@@ -36,9 +30,8 @@ content_events
 - Audit event의 primary target은 `resource_type`/`resource_id`다.
 - Content event의 primary target은 `node_id`다.
 - Secondary target id는 `metadata`에 둔다.
-- `metadata`는 allowlist 기반이고 작아야 한다.
+- `metadata`는 operation별 allowlist를 따르며, identifier, enum, count 같은 작은 structural fact만 담는다.
 - `metadata` 변경은 additive만 허용한다. Reader는 모르는 key를 무시하고, 기존 key의 의미를 바꾸는 변경은 새 `op_type`으로 기록한다.
-- Secret, token material, raw content, user PII를 저장하지 않는다.
 
 ## Capture guarantee
 
@@ -49,24 +42,6 @@ audit_events insert 실패   => 원래 audit 대상 mutation도 실패
 ```
 
 이 보장은 operation history가 현재 domain state와 어긋나지 않게 하기 위한 기본 계약이다.
-
-Event payload에 절대 저장하지 않는 값:
-
-```text
-secret values
-bearer tokens
-OAuth codes
-PKCE verifiers
-API key plaintext
-API key hashes
-browser session tokens
-OAuth refresh tokens
-auth headers
-text content
-file bytes
-user email
-user display name
-```
 
 ## Event sources
 
@@ -82,7 +57,7 @@ system
 
 ## Audit events
 
-Audit event는 access boundary, credential, security-relevant management state 변경을 기록한다.
+Audit event는 account, space, agent, connection, API key 관리 변경을 기록한다.
 
 초기 audit event type:
 
@@ -108,8 +83,6 @@ connection.upsert
 connection.disconnect
 ```
 
-Audit event는 read, search, browser session refresh, health probe, static web request를 기록하지 않는다.
-
 Audit event metadata는 operation별 allowlist를 따른다. 예:
 
 ```text
@@ -125,8 +98,6 @@ connection.upsert
 *.revoke
   reason: sanitized enum/string when already part of the domain model
 ```
-
-Audit metadata에는 API key token plaintext, token hash, user email, user display name, raw request body를 포함하지 않는다.
 
 Audit event target mapping:
 
@@ -160,7 +131,7 @@ connection.upsert | connection.disconnect
 
 ## Content events
 
-Content event는 file-tree와 content-domain mutation을 기록한다. Volume, retention, agent 변경 검토 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
+Content event는 file-tree와 content-domain mutation을 기록한다. Volume, retention, agent 작업 검토 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
 
 초기 content event type:
 
@@ -183,9 +154,7 @@ node.copy
 node.delete
 ```
 
-Content event는 text body, file bytes, full node metadata를 저장하지 않는다. 제한된 structural fact와 metric만 저장할 수 있다.
-
-허용 가능한 content metadata 예:
+Content event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
 
 ```text
 node_kind: "folder" | "text" | "file"
@@ -252,6 +221,4 @@ audit_events: 1 year
 content_events: 3 months -- deferred
 ```
 
-Event row는 identifier를 보존하되 embedded PII를 피하도록 설계한다. User anonymization 이후에도 attribution shell은 유지하되 개인 정보를 노출하지 않는 것이 목표다.
-
-향후 policy가 event anonymization을 요구하면, event metadata에 PII를 추가하지 않고 actor/owner identifier를 policy에 맞게 clear 또는 replace한다.
+User anonymization 이후에도 attribution shell은 유지한다. 향후 policy가 event anonymization을 요구하면 actor/owner identifier를 policy에 맞게 clear 또는 replace한다.

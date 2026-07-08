@@ -187,7 +187,7 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, credential, permission, agent, space 관리 변경을 기록한다. 기본 retention은 1 year다. Text content, file bytes, API key plaintext/hash, browser session token, OAuth refresh token, email, display name은 event payload에 저장하지 않는다.
+`audit_events`는 account, credential, agent, space, connection 관리 변경을 기록한다. 기본 retention은 1 year다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 Event history DB 제약:
 
