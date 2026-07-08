@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use notegate_model::{Caller, CreateApiKey, ListApiKeys};
+use notegate_model::{Caller, CreateApiKey, ListApiKeys, ListAuditEvents};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -21,7 +21,10 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
-use crate::rest::dto::{ApiKeyMetadataListResponse, ApiKeyMetadataOut, CreateApiKeyBody};
+use crate::rest::dto::{
+    ApiKeyMetadataListResponse, ApiKeyMetadataOut, AuditEventListResponse, AuditEventOut,
+    CreateApiKeyBody,
+};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -29,10 +32,17 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/me", get(get_me).delete(delete_me))
         .route("/v1/me/keys", get(list_keys).post(create_key))
         .route("/v1/me/keys/{key_id}", post(rotate_key).delete(revoke_key))
+        .route("/v1/me/events", get(list_events))
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ListKeysQuery {
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListEventsQuery {
     limit: Option<i64>,
     cursor: Option<String>,
 }
@@ -89,6 +99,45 @@ pub(crate) async fn list_keys(
     let keys = page.items.iter().map(ApiKeyMetadataOut::from).collect();
     Ok(Json(ApiKeyMetadataListResponse {
         keys,
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/events",
+    tag = "identity",
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List current user audit event history", body = AuditEventListResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn list_events(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<ListEventsQuery>,
+) -> Result<Json<AuditEventListResponse>, ApiError> {
+    let page = state
+        .account_lifecycle
+        .list_audit_events(
+            caller.account.kind,
+            caller.account_id(),
+            ListAuditEvents {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let events = page.items.iter().map(AuditEventOut::from).collect();
+    Ok(Json(AuditEventListResponse {
+        events,
         page: Page::new(
             page.limit,
             page.items.len(),
