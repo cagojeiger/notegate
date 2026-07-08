@@ -6,19 +6,19 @@
 
 Event log는 self-review를 위한 이력이다. 사용자는 자기 계정과 space에 어떤 관리 변경이 있었는지 확인하고, agent owner는 agent가 수행한 작업을 되돌아본다.
 
-Notegate는 audit event stream을 먼저 구현한다. Content event stream은 같은 원칙을 따르는 후속 범위다.
+Notegate는 audit event stream을 먼저 구현한다. Node event stream은 같은 원칙을 따르는 후속 범위다.
 
 ```text
 audit_events
   account, credential, agent, space, connection 관리 이력
 
-content_events
-  file-tree와 content domain operation 이력 -- deferred
+node_events
+  file-tree node operation 이력 -- deferred
 ```
 
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
-Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, content event 조회는 space scope endpoint로 후속 범위에서 정의한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, node event는 space scope의 `node-events` endpoint로 후속 범위에서 정의한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
 
 ## Common rules
 
@@ -30,7 +30,7 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - `owner_user_id`는 event가 속한 user-owned product scope다. Agent 작업이면 agent owner user를 기록한다.
 - 자주 필터링하거나 pagination에 쓰는 값만 column으로 둔다. Event별 세부 값은 `metadata`에 둔다.
 - Audit event의 primary target은 `resource_type`/`resource_id`다.
-- Content event의 primary target은 `node_id`다.
+- Node event의 primary target은 `node_id`다.
 - Secondary target id는 `metadata`에 둔다.
 - `metadata`는 operation별 allowlist를 따르며, identifier, enum, count 같은 작은 structural fact만 담는다.
 - `metadata` 변경은 additive만 허용한다. Reader는 모르는 key를 무시하고, 기존 key의 의미를 바꾸는 변경은 새 `op_type`으로 기록한다.
@@ -131,11 +131,11 @@ connection.upsert | connection.disconnect
   metadata.agent_id: agent_account_id
 ```
 
-## Content events
+## Node events
 
-Content event는 file-tree와 content-domain mutation을 기록한다. Volume, retention, agent 작업 검토 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
+Node event는 file-tree node mutation을 기록한다. Volume, retention, agent 작업 검토 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
 
-초기 content event type:
+초기 node event type:
 
 ```text
 node.folder.create
@@ -156,7 +156,7 @@ node.copy
 node.delete
 ```
 
-Content event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
+Node event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
 
 ```text
 node_kind: "folder" | "text" | "file"
@@ -177,7 +177,7 @@ line_count_after: integer
 
 Agent나 API key 기준 검토는 `actor_account_id`와 metadata의 `api_key_id`로 시작한다. 특정 API key 기준 조회가 주요 workflow가 되면 `api_key_id`를 column/index로 승격할 수 있다.
 
-Content event target mapping:
+Node event target mapping:
 
 ```text
 node.*
@@ -220,7 +220,7 @@ audit_events
 
 ```text
 audit_events: 1 year
-content_events: 3 months -- deferred
+node_events: 3 months -- deferred
 ```
 
 User anonymization 이후에도 attribution shell은 유지한다. 향후 policy가 event anonymization을 요구하면 actor/owner identifier를 policy에 맞게 clear 또는 replace한다.
