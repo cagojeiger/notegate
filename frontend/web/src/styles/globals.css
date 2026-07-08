@@ -324,6 +324,77 @@ select:focus-visible {
   white-space: pre;
 }
 
+.ng-code-copy {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--ng-border);
+  border-radius: 14px;
+  background: var(--ng-surface);
+}
+
+.markdown .ng-code-copy {
+  margin: 1rem 0;
+}
+
+.markdown .ng-code-copy .shiki,
+.markdown .ng-code-copy .ng-code-fallback {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.ng-code-copy-header {
+  display: flex;
+  min-height: 2.35rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--ng-border);
+  background: var(--ng-panel);
+  padding: 0.3rem 0.45rem 0.3rem 0.85rem;
+}
+
+.ng-code-copy-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--ng-muted);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ng-code-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.ng-code-copy-button {
+  height: 1.8rem;
+  flex: 0 0 auto;
+  gap: 0.35rem;
+  border-radius: 8px;
+  color: var(--ng-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0 0.55rem;
+}
+
+.ng-code-copy[data-copy-status="copied"] .ng-code-copy-button {
+  color: var(--ng-success);
+}
+
+.ng-code-copy[data-copy-status="failed"] .ng-code-copy-button {
+  color: var(--ng-danger);
+}
+
 .markdown .shiki,
 .markdown .ng-code-fallback {
   margin: 1rem 0;
