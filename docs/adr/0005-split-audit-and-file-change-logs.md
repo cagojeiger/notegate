@@ -1,4 +1,4 @@
-# ADR 0005: Audit log와 node event log 분리
+# ADR 0005: Audit log와 file change log 분리
 
 ## Context
 
@@ -8,32 +8,32 @@ notegate는 사용자가 자기 계정과 space의 관리 변경을 확인하고
 
 ```text
 account/credential/space 관리 이력
-file-tree node 작업 이력
+file/folder/content 변경 이력
 ```
 
-두 영역을 하나의 stream에 섞으면 저빈도 관리 이력과 고빈도 node 활동이 섞인다. 그러면 retention, payload 정책, 조회 방식을 분리해서 판단하기 어려워진다.
+두 영역을 하나의 stream에 섞으면 저빈도 관리 이력과 고빈도 파일 변경 이력이 섞인다. 그러면 retention, payload 정책, 조회 방식을 분리해서 판단하기 어려워진다.
 
 ## Decision
 
 두 append-only event stream을 사용한다.
 
 ```text
-audit_events   = account, credential, agent, space, connection 관리 변경
-node_events    = file-tree node 변경
+audit_events       = account, credential, agent, space, connection 관리 변경
+file_change_events = file/folder/content 변경
 ```
 
 두 stream 모두 현재 product state의 source of truth가 아니다. Source of truth는 `accounts`, `users`, `agents`, `api_keys`, `spaces`, `space_agent_connections`, `nodes`, `text_objects`, `file_objects` 같은 normalized domain table이다.
 
 두 stream은 commit에 성공한 domain mutation만 기록한다.
 
-Implementation은 audit_events부터 시작하고, node_events는 file-tree activity가 필요해지는 후속 PR에서 추가할 수 있다.
+Implementation은 audit_events와 file_change_events를 별도 table/API로 둔다.
 
 Event row는 append-only다. Product code는 일반 동작에서 event row를 update/delete하지 않는다. 잘못된 row가 생기면 기존 row를 조용히 수정하지 않고 명시적인 repair/reconciliation으로 처리한다.
 
 ## Consequences
 
 - 관리 이력 검토는 text/file edit에 묻히지 않고 account와 credential 변경에 집중할 수 있다.
-- Node event는 agent 작업 검토와 activity history에 집중할 수 있다.
+- File change event는 agent 작업 검토와 activity history에 집중할 수 있다.
 - Domain mutation code는 state change와 같은 DB transaction 안에서 event row를 insert해야 한다.
 - Event payload는 allowlist 기반이어야 한다. Payload 보안 원칙은 `docs/spec/security.md`를 따른다.
-- 두 domain을 모두 건드리는 mutation은 향후 각 stream에 event를 하나씩 남길 수 있다. 초기 설계는 명확한 audit 또는 node history 필요가 없으면 mutation마다 primary stream 하나를 선호한다.
+- 두 domain을 모두 건드리는 mutation은 향후 각 stream에 event를 하나씩 남길 수 있다. 초기 설계는 명확한 audit 또는 file change history 필요가 없으면 mutation마다 primary stream 하나를 선호한다.

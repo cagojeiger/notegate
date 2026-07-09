@@ -91,6 +91,25 @@ impl ConnectionRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         lock_owned_space(&mut tx, command.space_id, connected_by_user_id).await?;
         lock_owned_live_agent(&mut tx, command.agent_id, connected_by_user_id).await?;
+
+        let existing = sqlx::query_as::<_, ConnectionRow>(&format!(
+            "SELECT {CONNECTION_COLUMNS} FROM space_agent_connections \
+             WHERE space_id = $1 AND agent_id = $2 \
+             FOR UPDATE"
+        ))
+        .bind(command.space_id)
+        .bind(command.agent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if let Some(row) = existing
+            && row.disconnected_at.is_none()
+            && row.permission == command.permission.as_str()
+        {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return row.into_connection();
+        }
+
         let owner_tier = tier_lookup::lock_active_user_tier(
             &mut tx,
             connected_by_user_id,

@@ -10,8 +10,12 @@
 mod common;
 
 use common::{TestDb, insert_user_account, set_user_tier};
+use notegate_core::security::PiiCrypto;
 use notegate_db::api_key_repo::InsertApiKey;
-use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo, ConnectionRepo, SpaceRepo};
+use notegate_db::browser_session_repo::InsertBrowserSession;
+use notegate_db::{
+    AccountRepo, AgentRepo, ApiKeyRepo, BrowserSessionRepo, ConnectionRepo, SpaceRepo,
+};
 use notegate_model::{ConnectAgent, CreateAgent, CreateApiKey, CreateSpace, Permission};
 use serde_json::Value;
 use uuid::Uuid;
@@ -52,6 +56,31 @@ async fn insert_agent(
         .id)
 }
 
+async fn insert_browser_session(
+    repo: &BrowserSessionRepo,
+    crypto: &PiiCrypto,
+    user_id: Uuid,
+    name: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let session_id = Uuid::new_v4();
+    let token_hash = crypto.browser_session_hash(&session_id.to_string(), name)?;
+    let refresh_token = crypto
+        .encrypt_browser_refresh_token(&session_id.to_string(), &format!("refresh-{name}"))?;
+    repo.insert_session(InsertBrowserSession {
+        session_id,
+        user_id,
+        token_prefix: "ngs_v1_test",
+        token_hash: &token_hash,
+        refresh_token: &refresh_token,
+        refresh_token_enc_key_id: crypto.enc_key_id(),
+        refresh_token_enc_version: crypto.version(),
+        validated_until: chrono::Utc::now() + chrono::Duration::hours(1),
+        expires_at: chrono::Utc::now() + chrono::Duration::days(15),
+    })
+    .await?;
+    Ok(session_id)
+}
+
 #[tokio::test]
 async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -68,8 +97,15 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
             },
         )
         .await?;
-    repo.update_space(space.id, owner, Some("audit-renamed"), Some(2000))
+    let updated = repo
+        .update_space(space.id, owner, Some("audit-renamed"), Some(2000))
         .await?;
+    let no_op_same_values = repo
+        .update_space(space.id, owner, Some("audit-renamed"), Some(2000))
+        .await?;
+    assert_eq!(no_op_same_values.updated_at, updated.updated_at);
+    let no_op_empty_update = repo.update_space(space.id, owner, None, None).await?;
+    assert_eq!(no_op_empty_update.updated_at, updated.updated_at);
     repo.delete_space(space.id, owner, owner).await?;
 
     let rows = audit_rows(&db.pool).await?;
@@ -87,6 +123,116 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
     assert_eq!(
         rows[1].metadata["changed_fields"],
         serde_json::json!(["name", "sort_order"])
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_delete_audit_records_nonzero_cascade_counts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(
+        &db.pool,
+        "audit-delete-cascade",
+        "audit-delete-cascade@example.test",
+    )
+    .await?;
+    set_user_tier(&db.pool, user, "system_max").await?;
+
+    let agents = AgentRepo::new(db.pool.clone());
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let connections = ConnectionRepo::new(db.pool.clone());
+    let api_keys = ApiKeyRepo::new(db.pool.clone());
+    let browser_sessions = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+
+    let agent = insert_agent(&agents, user, "delete-cascade-bot").await?;
+    let space = spaces
+        .create_space(
+            user,
+            &CreateSpace {
+                name: "delete-cascade-space".to_owned(),
+            },
+        )
+        .await?;
+    connections
+        .upsert_connection(
+            &ConnectAgent {
+                space_id: space.id,
+                agent_id: agent,
+                permission: Permission::Read,
+            },
+            user,
+        )
+        .await?;
+    spaces.delete_space(space.id, user, user).await?;
+
+    api_keys
+        .insert_key_with_cap(
+            InsertApiKey {
+                key_id: Uuid::new_v4(),
+                account_id: user,
+                command: &CreateApiKey {
+                    name: "live-user-key".to_owned(),
+                    scopes: Vec::new(),
+                    expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+                },
+                token_prefix: "ngk_v1_user",
+                token_hash: "hash-user-delete-cascade",
+                created_by: user,
+                rotated_from_key_id: None,
+            },
+            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+        )
+        .await?;
+    api_keys
+        .insert_key_with_cap(
+            InsertApiKey {
+                key_id: Uuid::new_v4(),
+                account_id: agent,
+                command: &CreateApiKey {
+                    name: "live-agent-key".to_owned(),
+                    scopes: Vec::new(),
+                    expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+                },
+                token_prefix: "ngk_v1_agent",
+                token_hash: "hash-agent-delete-cascade",
+                created_by: user,
+                rotated_from_key_id: None,
+            },
+            notegate_core::limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
+        )
+        .await?;
+    insert_browser_session(&browser_sessions, &crypto, user, "delete-cascade").await?;
+
+    AccountRepo::new(db.pool.clone())
+        .soft_delete_user(user, user)
+        .await?;
+
+    let rows = audit_rows(&db.pool).await?;
+    let delete_event = rows
+        .iter()
+        .find(|row| row.op_type == "account.delete")
+        .expect("account delete audit event");
+    assert_eq!(
+        delete_event.metadata["deactivated_agents"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        delete_event.metadata["revoked_api_keys"],
+        serde_json::json!(2)
+    );
+    assert_eq!(
+        delete_event.metadata["revoked_browser_sessions"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        delete_event.metadata["disconnected_connections"],
+        serde_json::json!(1)
     );
 
     db.cleanup().await;
@@ -112,7 +258,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
     .bind(owner)
     .fetch_one(&db.pool)
     .await?;
-    connections
+    let connection = connections
         .upsert_connection(
             &ConnectAgent {
                 space_id,
@@ -122,6 +268,17 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
             owner,
         )
         .await?;
+    let no_op_connection = connections
+        .upsert_connection(
+            &ConnectAgent {
+                space_id,
+                agent_id: agent,
+                permission: Permission::Write,
+            },
+            owner,
+        )
+        .await?;
+    assert_eq!(no_op_connection.connected_at, connection.connected_at);
     connections.disconnect(space_id, agent, owner).await?;
 
     let key_id = Uuid::new_v4();

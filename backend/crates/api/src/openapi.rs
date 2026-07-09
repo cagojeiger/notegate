@@ -36,6 +36,7 @@ use crate::state::AppState;
         rest::spaces::delete,
         rest::nodes::resolve_path,
         rest::nodes::list,
+        rest::nodes::list_file_change_events,
         rest::nodes::create,
         rest::nodes::get_node,
         rest::nodes::reveal,
@@ -277,6 +278,12 @@ mod tests {
         );
         assert_query_params(
             &value,
+            "/api/v1/spaces/{space_id}/file-change-events",
+            "get",
+            &["node_id", "limit", "cursor"],
+        );
+        assert_query_params(
+            &value,
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "get",
             &["limit", "cursor"],
@@ -423,6 +430,7 @@ mod tests {
             "/api/v1/spaces/{space_id}",
             "/api/v1/spaces/{space_id}/paths/resolve",
             "/api/v1/spaces/{space_id}/nodes",
+            "/api/v1/spaces/{space_id}/file-change-events",
             "/api/v1/spaces/{space_id}/nodes/{node_id}",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
@@ -478,6 +486,7 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/text/{node_id}",
             "GET /api/v1/spaces/{space_id}/files/{node_id}",
             "GET /api/v1/spaces/{space_id}/files/{node_id}/content",
+            "GET /api/v1/spaces/{space_id}/file-change-events",
             "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",

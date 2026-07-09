@@ -13,6 +13,7 @@ pub mod policy;
 pub mod target;
 pub mod validation;
 
+mod events;
 mod format;
 mod mutate;
 mod read;
@@ -25,6 +26,9 @@ pub use notegate_model::files::{
     NodeListSort, NodeReveal, NodeView, PatchMode, PatchResult, PatchText, ReadContent, ReadResult,
     ReadText, ReadTextBody, StoredContent, StoredFile, TextStats, TextView, WriteTarget, WriteText,
     WriteTextBody,
+};
+pub use notegate_model::{
+    FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, ListFileChangeEvents,
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;

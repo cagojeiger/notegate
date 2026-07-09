@@ -11,6 +11,7 @@ users
 agents
 api_keys
 audit_events
+file_change_events
 spaces
 space_agent_connections
 nodes
@@ -172,7 +173,7 @@ browser_sessions.revoked_reason: revoked_at이 NULL이면 NULL
 
 ## Event history tables
 
-Event history table은 현재 상태의 source of truth가 아니다. 성공한 domain mutation의 append-only snapshot history다. Actor, owner, target id는 product row를 직접 소유하지 않는 identifier snapshot이며 cascading foreign key로 다루지 않는다. `actor_account_id`는 mutation caller이고, `owner_user_id`는 event가 속한 user-owned product scope다. Audit event의 primary target은 `resource_type`/`resource_id`다. Secondary target id는 `metadata`에 둔다.
+Event history table은 현재 상태의 source of truth가 아니다. 성공한 domain mutation의 append-only snapshot history다. Actor, owner, target id는 product row를 직접 소유하지 않는 identifier snapshot이며 cascading foreign key로 다루지 않는다. `actor_account_id`는 mutation caller이고, `owner_user_id`는 audit event가 속한 user-owned product scope다. Audit event의 primary target은 `resource_type`/`resource_id`이고, file change event의 primary target은 `space_id`/`node_id`다. Secondary target id는 `metadata`에 둔다.
 
 ```text
 audit_events
@@ -187,12 +188,25 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, credential, agent, space, connection 관리 변경을 기록한다. 기본 retention은 1 year다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`audit_events`는 account, credential, agent, space, connection 관리 변경을 기록한다. Retention policy는 1 year이며, 현재 schema는 purge 구현을 위한 `created_at` index까지만 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+
+```text
+file_change_events
+  id bigserial pk
+  created_at timestamptz not null default now()
+  space_id uuid not null
+  node_id uuid null
+  actor_account_id uuid null
+  op_type text not null
+  metadata jsonb not null default '{}'
+```
+
+`file_change_events`는 space 안의 파일/폴더/문서 변경을 기록한다. Retention policy는 3 months이며, space 전체 조회와 node별 조회를 위해 별도 index를 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 Event history DB 제약:
 
 ```text
-source: 'rest', 'mcp', 'system'
+audit_events.source: 'rest', 'mcp', 'system'
 metadata: JSON object
 created_at: DB timestamp 기준
 ```
@@ -205,6 +219,10 @@ audit_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 audit_events_resource_time_idx(resource_type, resource_id, created_at desc, id desc)
 audit_events_retention_idx(created_at)
 
+file_change_events_space_time_idx(space_id, created_at desc, id desc)
+file_change_events_node_time_idx(space_id, node_id, created_at desc, id desc)
+file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
+file_change_events_retention_idx(created_at)
 ```
 
 ## Space and connection tables

@@ -164,7 +164,7 @@ fn require_user(kind: AccountKind) -> ServiceResult<()> {
         Ok(())
     } else {
         Err(ServiceError::Forbidden(
-            "only user accounts may manage user API keys".to_owned(),
+            "only user accounts may access this endpoint".to_owned(),
         ))
     }
 }

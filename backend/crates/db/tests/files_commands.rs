@@ -15,7 +15,7 @@ mod common;
 
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, SpaceRepo};
+use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind};
 use notegate_model::files::{CreateFolder, MoveNode, StoredContent, WriteTextBody};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -101,8 +101,15 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
             .await,
     );
     assert_not_found(
-        repo.save_text_content(ws, doc_node.id, &content(), None, account)
-            .await,
+        repo.save_text_content(
+            ws,
+            doc_node.id,
+            &content(),
+            None,
+            account,
+            TextMutationKind::Write,
+        )
+        .await,
     );
     assert_not_found(
         repo.move_node(
@@ -121,7 +128,7 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
         repo.update_node_metadata(ws, folder.id, Some("renamed"), None, account)
             .await,
     );
-    assert_not_found(repo.soft_delete_node(ws, folder.id, account).await);
+    assert_not_found(repo.soft_delete_node(ws, folder.id, account, false).await);
 
     db.cleanup().await;
     Ok(())

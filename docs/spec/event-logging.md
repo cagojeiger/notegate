@@ -4,21 +4,21 @@
 
 ## Purpose
 
-Event log는 self-review를 위한 이력이다. 사용자는 자기 계정과 space에 어떤 관리 변경이 있었는지 확인하고, agent owner는 agent가 수행한 작업을 되돌아본다.
+Event log는 B2C product self-review를 위한 변경 이력이다. 사용자는 자기 계정과 space에 어떤 관리 변경과 파일 변경이 있었는지 확인하고, agent owner는 agent가 수행한 변경을 되돌아본다. Tamper-evident compliance audit log나 금융권 수준의 forensic log는 이 문서의 범위가 아니다.
 
-Notegate는 audit event stream을 먼저 구현한다. Node event stream은 같은 원칙을 따르는 후속 범위다.
+Notegate는 관리 변경과 파일트리 변경을 별도 stream으로 기록한다.
 
 ```text
 audit_events
   account, credential, agent, space, connection 관리 이력
 
-node_events
-  file-tree node operation 이력 -- deferred
+file_change_events
+  file-tree/file content change 이력
 ```
 
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
-Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, node event는 space scope의 `node-events` endpoint로 후속 범위에서 정의한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, file change event는 `GET /api/v1/spaces/{space_id}/file-change-events`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
 
 ## Common rules
 
@@ -30,7 +30,7 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 - `owner_user_id`는 event가 속한 user-owned product scope다. Agent 작업이면 agent owner user를 기록한다.
 - 자주 필터링하거나 pagination에 쓰는 값만 column으로 둔다. Event별 세부 값은 `metadata`에 둔다.
 - Audit event의 primary target은 `resource_type`/`resource_id`다.
-- Node event의 primary target은 `node_id`다.
+- File change event의 primary target은 `node_id`다.
 - Secondary target id는 `metadata`에 둔다.
 - `metadata`는 operation별 allowlist를 따르며, identifier, enum, count 같은 작은 structural fact만 담는다.
 - `metadata` 변경은 additive만 허용한다. Reader는 모르는 key를 무시하고, 기존 key의 의미를 바꾸는 변경은 새 `op_type`으로 기록한다.
@@ -40,14 +40,15 @@ Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-event
 Event capture는 domain mutation의 일부다.
 
 ```text
-audit_events insert 실패   => 원래 audit 대상 mutation도 실패
+audit_events insert 실패 => 원래 audit 대상 mutation도 실패
+file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 ```
 
 이 보장은 operation history가 현재 domain state와 어긋나지 않게 하기 위한 기본 계약이다.
 
-## Event sources
+## Audit event sources
 
-`source`는 mutation을 발생시킨 product surface를 나타낸다.
+Audit event의 `source`는 mutation을 발생시킨 product surface를 나타낸다.
 
 ```text
 rest
@@ -131,36 +132,35 @@ connection.upsert | connection.disconnect
   metadata.agent_id: agent_account_id
 ```
 
-## Node events
+## File change events
 
-Node event는 file-tree node mutation을 기록한다. Volume, retention, agent 작업 검토 요구가 audit event와 다르기 때문에 별도 stream으로 둔다.
+File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Transport surface(REST/MCP/Browser), API key id, request id, IP, user agent 같은 request/security context는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
 
-초기 node event type:
+초기 file change event type:
 
 ```text
-node.folder.create
-node.text.create
-node.file.create
+folder.create
+text.create
+file.create
 
-node.text.write
-node.text.append
-node.text.patch
-node.text.edit
+text.write
+text.append
+text.patch
+text.edit
 
-node.metadata.replace
-node.metadata.patch
+metadata.replace
+metadata.patch
 
-node.move
-node.update
-node.copy
-node.delete
+item.move
+item.update
+item.copy
+item.delete
 ```
 
-Node event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
+File change event metadata는 제한된 structural fact와 metric만 담는다. 허용 가능한 예:
 
 ```text
-node_kind: "folder" | "text" | "file"
-api_key_id: uuid
+item_kind: "folder" | "text" | "file"
 copied_from_node_id: uuid
 parent_node_id_before: uuid
 parent_node_id_after: uuid
@@ -175,27 +175,27 @@ line_count_before: integer
 line_count_after: integer
 ```
 
-Agent나 API key 기준 검토는 `actor_account_id`와 metadata의 `api_key_id`로 시작한다. 특정 API key 기준 조회가 주요 workflow가 되면 `api_key_id`를 column/index로 승격할 수 있다.
+Agent 기준 검토는 `actor_account_id`에서 시작한다. API key 단위 추적은 현재 file change history 범위에 포함하지 않는다.
 
-Node event target mapping:
+File change event target mapping:
 
 ```text
-node.*
+folder.create | text.create | file.create | text.* | metadata.* | item.*
   space_id: space_id
   node_id: target node_id
 
-node.copy
+item.copy
   node_id: new node_id
   metadata.copied_from_node_id: source node_id
 
-recursive node.delete
+recursive item.delete
   node_id: root deleted node_id
   metadata.deleted_nodes: deleted node count
 ```
 
 ## Storage shape
 
-Schema는 별도 physical table을 사용한다. 첫 구현의 `audit_events`는 다음 조회 축만 column으로 둔다.
+Schema는 별도 physical table을 사용한다. `audit_events`는 다음 조회 축을 column으로 둔다.
 
 ```text
 common
@@ -212,15 +212,30 @@ audit_events
   resource_id
 ```
 
+`file_change_events`는 space/node 기준 조회 축만 column으로 둔다.
+
+```text
+file_change_events
+  id
+  created_at
+  space_id
+  node_id
+  actor_account_id
+  op_type
+  metadata
+```
+
 권장 index와 column type은 `docs/spec/db.md`의 Event history tables가 정본이다.
 
 ## Retention and deletion
 
-기본 retention:
+Retention policy:
 
 ```text
 audit_events: 1 year
-node_events: 3 months -- deferred
+file_change_events: 3 months
 ```
+
+현재 migration은 retention 조회/삭제를 위한 `created_at` index만 둔다. 실제 삭제 enforcement는 purge 작업 범위에서 구현한다.
 
 User anonymization 이후에도 attribution shell은 유지한다. 향후 policy가 event anonymization을 요구하면 actor/owner identifier를 policy에 맞게 clear 또는 replace한다.

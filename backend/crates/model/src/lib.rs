@@ -4,6 +4,7 @@ pub mod account;
 pub mod agent;
 pub mod api_key;
 pub mod audit_event;
+pub mod file_change_event;
 pub mod files;
 pub mod identity;
 pub mod node;
@@ -16,6 +17,9 @@ pub use account::{Account, AccountKind, AccountRef};
 pub use agent::{Agent, AgentPage, CreateAgent, CreateAgentApiKey, ListAgents};
 pub use api_key::{ApiKey, ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 pub use audit_event::{AuditEvent, AuditEventCursor, AuditEventPage, ListAuditEvents};
+pub use file_change_event::{
+    FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, ListFileChangeEvents,
+};
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use node::{Node, NodeKind};
 pub use space::{

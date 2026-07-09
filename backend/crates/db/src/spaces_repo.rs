@@ -329,6 +329,25 @@ impl SpaceRepo {
         sort_order: Option<i32>,
     ) -> Result<Space> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let current = sqlx::query_as::<_, SpaceRow>(&format!(
+            "SELECT {SPACE_COLUMNS} FROM spaces \
+             WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL \
+             FOR UPDATE"
+        ))
+        .bind(space_id)
+        .bind(owner_user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .ok_or_else(|| Error::not_found("space not found"))?;
+
+        let name_changed = name.is_some_and(|value| value != current.name);
+        let sort_order_changed = sort_order.is_some_and(|value| value != current.sort_order);
+        if !name_changed && !sort_order_changed {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(Space::from(current));
+        }
+
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
             "UPDATE spaces \
              SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), updated_at = now() \
@@ -344,10 +363,10 @@ impl SpaceRepo {
         .ok_or_else(|| Error::not_found("space not found"))?;
 
         let mut changed_fields = Vec::new();
-        if name.is_some() {
+        if name_changed {
             changed_fields.push("name");
         }
-        if sort_order.is_some() {
+        if sort_order_changed {
             changed_fields.push("sort_order");
         }
         let audit_ctx = AuditContext::rest(owner_user_id);

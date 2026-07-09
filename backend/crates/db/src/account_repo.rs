@@ -317,11 +317,10 @@ impl AccountRepo {
 
         let disconnected_connections = sqlx::query(
             "UPDATE space_agent_connections \
-             SET disconnected_at = now(), disconnected_by_user_id = $3 \
+             SET disconnected_at = now(), disconnected_by_user_id = $2 \
              WHERE disconnected_at IS NULL \
-               AND agent_id = ANY($2)",
+               AND agent_id = ANY($1)",
         )
-        .bind(account_id)
         .bind(&owned_agents)
         .bind(deleted_by)
         .execute(&mut *tx)
