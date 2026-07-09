@@ -1,3 +1,6 @@
+//! Thin `record` helper used by other repositories to log REST-driven
+//! mutations to `audit_events` without repeating row-construction boilerplate.
+
 use crate::audit_event_repo::{NewAuditEvent, insert_audit_event};
 use notegate_core::Result;
 use serde_json::Value;

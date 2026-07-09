@@ -1,11 +1,11 @@
 CREATE TABLE file_change_events (
-  id bigserial PRIMARY KEY,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  space_id uuid NOT NULL,
-  node_id uuid NULL,
-  actor_account_id uuid NULL,
-  op_type text NOT NULL,
-  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  space_id UUID NOT NULL,
+  node_id UUID NULL,
+  actor_account_id UUID NULL,
+  op_type TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT file_change_events_metadata_object CHECK (jsonb_typeof(metadata) = 'object')
 );
 

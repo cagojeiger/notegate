@@ -1,3 +1,6 @@
+//! File-change event persistence: insert plus space/node-scoped listing for
+//! event history.
+
 use crate::event_history_query::{EventCursorPosition, UuidFilter, list_event_rows};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
@@ -7,6 +10,7 @@ use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
+/// Write-side row for capture; the read shape is `notegate_model::FileChangeEvent`.
 #[derive(Debug)]
 pub(crate) struct NewFileChangeEvent {
     pub space_id: Uuid,
@@ -16,6 +20,7 @@ pub(crate) struct NewFileChangeEvent {
     pub metadata: Value,
 }
 
+/// Insert one file-change event row.
 pub(crate) async fn insert_file_change_event(
     tx: &mut sqlx::PgConnection,
     event: NewFileChangeEvent,
@@ -36,6 +41,9 @@ pub(crate) async fn insert_file_change_event(
     Ok(())
 }
 
+/// List file-change events for `space_id` (optionally scoped to `node_id`),
+/// newest first. Matches the `file_change_events_space_time_idx` /
+/// `file_change_events_node_time_idx` order.
 pub(crate) async fn list_file_change_events(
     pool: &PgPool,
     space_id: Uuid,

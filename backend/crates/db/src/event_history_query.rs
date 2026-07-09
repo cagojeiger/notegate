@@ -1,3 +1,7 @@
+//! Shared keyset-paginated list query behind `audit_event_repo` and
+//! `file_change_event_repo`, so cursor and column-filter logic cannot drift
+//! between the two.
+
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::Result;

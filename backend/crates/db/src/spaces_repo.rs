@@ -124,7 +124,7 @@ impl SpaceRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let owned = usize::try_from(owned).map_err(|_| Error::internal("negative space count"))?;
+        let owned = crate::to_usize(owned, "space")?;
         if owned >= quota.spaces_per_user {
             return Err(Error::conflict(format!(
                 "owner already has the maximum of {} spaces for tier {}",

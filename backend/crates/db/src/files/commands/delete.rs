@@ -51,8 +51,7 @@ pub async fn soft_delete_node(
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    let subtree =
-        usize::try_from(subtree).map_err(|_error| Error::internal("negative subtree count"))?;
+    let subtree = crate::to_usize(subtree, "subtree")?;
     if subtree > limits::SUBTREE_DELETE_MAX_NODES {
         return Err(Error::conflict(format!(
             "subtree of {subtree} nodes exceeds the synchronous delete limit of {}",

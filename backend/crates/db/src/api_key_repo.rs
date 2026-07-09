@@ -133,7 +133,7 @@ impl ApiKeyRepo {
         .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        usize::try_from(count).map_err(|_error| Error::internal("negative key count"))
+        crate::to_usize(count, "key")
     }
 
     /// Insert a key without enforcing the per-account live-key cap.
@@ -191,8 +191,7 @@ impl ApiKeyRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let live =
-            usize::try_from(live_count).map_err(|_error| Error::internal("negative key count"))?;
+        let live = crate::to_usize(live_count, "key")?;
         if live >= max_live_keys {
             return Err(Error::conflict(format!(
                 "account already has the maximum of {max_live_keys} live API keys"
@@ -275,8 +274,7 @@ impl ApiKeyRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let live_without_old = usize::try_from(live_without_old)
-            .map_err(|_error| Error::internal("negative key count"))?;
+        let live_without_old = crate::to_usize(live_without_old, "key")?;
         if live_without_old >= max_live_keys {
             return Err(Error::conflict(format!(
                 "account already has the maximum of {max_live_keys} live API keys"
