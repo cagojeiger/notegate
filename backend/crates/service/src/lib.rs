@@ -7,7 +7,6 @@
 pub mod accounts;
 pub mod agents;
 pub mod api_keys;
-pub mod audit_events;
 pub mod connections;
 pub mod cursor;
 pub mod error;

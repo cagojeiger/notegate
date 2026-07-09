@@ -1,38 +1,28 @@
 //! Account lifecycle operations for the current caller.
 
 use notegate_core::{limits, security::PiiCrypto};
-use notegate_db::{AccountRepo, ApiKeyRepo, AuditEventRepo};
+use notegate_db::{AccountRepo, ApiKeyRepo};
 use notegate_model::account::AccountKind;
-use notegate_model::{
-    ApiKeyPage, AuditEventPage, CreateApiKey, ListApiKeys, ListAuditEvents, MintedApiKey,
-};
+use notegate_model::{ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 use uuid::Uuid;
 
 use crate::api_keys::{
     ApiKeyPolicy, create_key_for_account, list_key_page, rotate_key_for_account,
 };
-use crate::audit_events::list_audit_event_page;
 use crate::{ServiceError, ServiceResult};
 
 #[derive(Debug, Clone)]
 pub struct AccountService {
     store: AccountRepo,
     api_keys: ApiKeyRepo,
-    audit_events: AuditEventRepo,
     crypto: PiiCrypto,
 }
 
 impl AccountService {
-    pub fn with_api_keys(
-        store: AccountRepo,
-        api_keys: ApiKeyRepo,
-        audit_events: AuditEventRepo,
-        crypto: PiiCrypto,
-    ) -> Self {
+    pub fn with_api_keys(store: AccountRepo, api_keys: ApiKeyRepo, crypto: PiiCrypto) -> Self {
         Self {
             store,
             api_keys,
-            audit_events,
             crypto,
         }
     }
@@ -78,17 +68,6 @@ impl AccountService {
     ) -> ServiceResult<ApiKeyPage> {
         require_user(caller_kind)?;
         list_key_page(&self.api_keys, caller_account_id, request).await
-    }
-
-    /// List the caller's own audit event history (self-review). User callers only.
-    pub async fn list_audit_events(
-        &self,
-        caller_kind: AccountKind,
-        caller_account_id: Uuid,
-        request: ListAuditEvents,
-    ) -> ServiceResult<AuditEventPage> {
-        require_user(caller_kind)?;
-        list_audit_event_page(&self.audit_events, caller_account_id, request).await
     }
 
     pub async fn create_key(

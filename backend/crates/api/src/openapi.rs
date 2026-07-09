@@ -27,7 +27,6 @@ use crate::state::AppState;
         rest::me::create_key,
         rest::me::rotate_key,
         rest::me::revoke_key,
-        rest::me::list_audit_events,
         rest::me::delete_me,
         rest::spaces::list,
         rest::spaces::create,
@@ -247,12 +246,6 @@ mod tests {
         assert_query_params(&value, "/api/v1/me/keys", "get", &["limit", "cursor"]);
         assert_query_params(
             &value,
-            "/api/v1/me/audit-events",
-            "get",
-            &["limit", "cursor"],
-        );
-        assert_query_params(
-            &value,
             "/api/v1/agents/{agent_id}/keys",
             "get",
             &["limit", "cursor"],
@@ -418,7 +411,6 @@ mod tests {
             "/api/v1/me",
             "/api/v1/me/keys",
             "/api/v1/me/keys/{key_id}",
-            "/api/v1/me/audit-events",
             "/api/v1/spaces",
             "/api/v1/spaces/{space_id}",
             "/api/v1/spaces/{space_id}/paths/resolve",
@@ -470,7 +462,6 @@ mod tests {
             "GET /api/v1/agents/{agent_id}/keys",
             "DELETE /api/v1/me",
             "GET /api/v1/me",
-            "GET /api/v1/me/audit-events",
             "GET /api/v1/me/keys",
             "GET /api/v1/spaces",
             "GET /api/v1/spaces/{space_id}",

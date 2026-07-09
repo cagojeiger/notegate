@@ -1,7 +1,5 @@
 //! Space lifecycle persistence.
 
-use crate::audit_event_repo::insert_audit_event;
-use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
@@ -151,13 +149,6 @@ impl SpaceRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
-
-        let audit_ctx = AuditContext::rest(owner_user_id);
-        insert_audit_event(
-            &mut tx,
-            audit_events::space_created(audit_ctx, owner_user_id, row.id),
-        )
-        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
@@ -328,7 +319,6 @@ impl SpaceRepo {
         name: Option<&str>,
         sort_order: Option<i32>,
     ) -> Result<Space> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
             "UPDATE spaces \
              SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), updated_at = now() \
@@ -338,26 +328,10 @@ impl SpaceRepo {
         .bind(owner_user_id)
         .bind(name)
         .bind(sort_order)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&self.pool)
         .await
         .map_err(map_constraint_error)?
         .ok_or_else(|| Error::not_found("space not found"))?;
-
-        let mut changed_fields = Vec::new();
-        if name.is_some() {
-            changed_fields.push("name");
-        }
-        if sort_order.is_some() {
-            changed_fields.push("sort_order");
-        }
-        let audit_ctx = AuditContext::rest(owner_user_id);
-        insert_audit_event(
-            &mut tx,
-            audit_events::space_updated(audit_ctx, owner_user_id, space_id, changed_fields),
-        )
-        .await?;
-
-        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
     }
 
@@ -367,7 +341,6 @@ impl SpaceRepo {
         owner_user_id: Uuid,
         deleted_by_user_id: Uuid,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE spaces \
              SET deleted_at = now(), deleted_by_user_id = $3, \
@@ -378,21 +351,12 @@ impl SpaceRepo {
         .bind(owner_user_id)
         .bind(deleted_by_user_id)
         .bind(i32::try_from(limits::DELETED_SPACE_RETENTION_DAYS).unwrap_or(i32::MAX))
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
         if result.rows_affected() == 0 {
             return Err(Error::not_found("space not found"));
         }
-
-        let audit_ctx = AuditContext::rest(deleted_by_user_id);
-        insert_audit_event(
-            &mut tx,
-            audit_events::space_deleted(audit_ctx, owner_user_id, space_id),
-        )
-        .await?;
-
-        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
     }
 
