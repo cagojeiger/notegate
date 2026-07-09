@@ -1,44 +1,47 @@
 use crate::file_change_event_repo::{NewFileChangeEvent, insert_file_change_event};
 use notegate_core::Result;
 use notegate_model::files::{CopyCounts, StoredContent};
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+pub(crate) struct ItemCreatedEvent<'a> {
+    pub actor_account_id: Uuid,
+    pub space_id: Uuid,
+    pub node_id: Uuid,
+    pub parent_node_id: Uuid,
+    pub item_kind: &'a str,
+    pub byte_len_after: Option<i64>,
+    pub line_count_after: Option<i32>,
+}
+
 pub(crate) async fn record_item_created(
     tx: &mut PgConnection,
-    actor_account_id: Uuid,
-    space_id: Uuid,
-    node_id: Uuid,
-    parent_node_id: Uuid,
-    item_kind: &str,
-    byte_len_after: Option<i64>,
-    line_count_after: Option<i32>,
+    input: ItemCreatedEvent<'_>,
 ) -> Result<()> {
-    let mut metadata = json!({
-        "item_kind": item_kind,
-        "parent_node_id": parent_node_id,
-    });
-    if let Some(byte_len) = byte_len_after {
-        metadata["byte_len_after"] = json!(byte_len);
+    let mut metadata = Map::new();
+    metadata.insert("item_kind".to_owned(), json!(input.item_kind));
+    metadata.insert("parent_node_id".to_owned(), json!(input.parent_node_id));
+    if let Some(byte_len) = input.byte_len_after {
+        metadata.insert("byte_len_after".to_owned(), json!(byte_len));
     }
-    if let Some(line_count) = line_count_after {
-        metadata["line_count_after"] = json!(line_count);
+    if let Some(line_count) = input.line_count_after {
+        metadata.insert("line_count_after".to_owned(), json!(line_count));
     }
 
     insert_file_change_event(
         tx,
         event(
-            actor_account_id,
-            space_id,
-            Some(node_id),
-            match item_kind {
+            input.actor_account_id,
+            input.space_id,
+            Some(input.node_id),
+            match input.item_kind {
                 "folder" => "folder.create",
                 "text" => "text.create",
                 "file" => "file.create",
                 _ => "item.create",
             },
-            metadata,
+            Value::Object(metadata),
         ),
     )
     .await
@@ -119,60 +122,68 @@ pub(crate) async fn record_item_updated(
     .await
 }
 
+pub(crate) struct ItemMovedEvent<'a> {
+    pub actor_account_id: Uuid,
+    pub space_id: Uuid,
+    pub node_id: Uuid,
+    pub item_kind: &'a str,
+    pub parent_node_id_before: Option<Uuid>,
+    pub parent_node_id_after: Uuid,
+    pub name_changed: bool,
+}
+
 pub(crate) async fn record_item_moved(
     tx: &mut PgConnection,
-    actor_account_id: Uuid,
-    space_id: Uuid,
-    node_id: Uuid,
-    item_kind: &str,
-    parent_node_id_before: Option<Uuid>,
-    parent_node_id_after: Uuid,
-    name_changed: bool,
+    input: ItemMovedEvent<'_>,
 ) -> Result<()> {
     insert_file_change_event(
         tx,
         event(
-            actor_account_id,
-            space_id,
-            Some(node_id),
+            input.actor_account_id,
+            input.space_id,
+            Some(input.node_id),
             "item.move",
             json!({
-                "item_kind": item_kind,
-                "parent_node_id_before": parent_node_id_before,
-                "parent_node_id_after": parent_node_id_after,
-                "name_changed": name_changed,
+                "item_kind": input.item_kind,
+                "parent_node_id_before": input.parent_node_id_before,
+                "parent_node_id_after": input.parent_node_id_after,
+                "name_changed": input.name_changed,
             }),
         ),
     )
     .await
 }
 
+pub(crate) struct ItemCopiedEvent<'a> {
+    pub actor_account_id: Uuid,
+    pub space_id: Uuid,
+    pub new_node_id: Uuid,
+    pub item_kind: &'a str,
+    pub source_node_id: Uuid,
+    pub parent_node_id_after: Uuid,
+    pub copied: CopyCounts,
+    pub recursive: bool,
+}
+
 pub(crate) async fn record_item_copied(
     tx: &mut PgConnection,
-    actor_account_id: Uuid,
-    space_id: Uuid,
-    new_node_id: Uuid,
-    item_kind: &str,
-    source_node_id: Uuid,
-    parent_node_id_after: Uuid,
-    copied: CopyCounts,
-    recursive: bool,
+    input: ItemCopiedEvent<'_>,
 ) -> Result<()> {
     insert_file_change_event(
         tx,
         event(
-            actor_account_id,
-            space_id,
-            Some(new_node_id),
+            input.actor_account_id,
+            input.space_id,
+            Some(input.new_node_id),
             "item.copy",
             json!({
-                "item_kind": item_kind,
-                "copied_from_node_id": source_node_id,
-                "parent_node_id_after": parent_node_id_after,
-                "copied_nodes": copied.nodes,
-                "copied_texts": copied.texts,
-                "copied_files": copied.files,
-                "recursive": recursive,
+                "item_kind": input.item_kind,
+                "copied_from_node_id": input.source_node_id,
+                "parent_node_id_after": input.parent_node_id_after,
+                "copied_nodes": input.copied.nodes,
+                "copied_texts": input.copied.texts,
+                "copied_files": input.copied.files,
+                "recursive": input.recursive,
             }),
         ),
     )
@@ -229,7 +240,7 @@ fn event(
     space_id: Uuid,
     node_id: Option<Uuid>,
     op_type: &'static str,
-    metadata: serde_json::Value,
+    metadata: Value,
 ) -> NewFileChangeEvent {
     NewFileChangeEvent {
         space_id,

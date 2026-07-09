@@ -303,7 +303,16 @@ pub mod create {
         .map_err(map_constraint_error)?;
 
         file_change_events::record_item_created(
-            &mut tx, created_by, space_id, row.id, parent_id, "folder", None, None,
+            &mut tx,
+            file_change_events::ItemCreatedEvent {
+                actor_account_id: created_by,
+                space_id,
+                node_id: row.id,
+                parent_node_id: parent_id,
+                item_kind: "folder",
+                byte_len_after: None,
+                line_count_after: None,
+            },
         )
         .await?;
 
@@ -363,13 +372,15 @@ pub mod create {
 
         file_change_events::record_item_created(
             &mut tx,
-            created_by,
-            space_id,
-            node_row.id,
-            parent_id,
-            "text",
-            Some(content.byte_len),
-            Some(content.line_count),
+            file_change_events::ItemCreatedEvent {
+                actor_account_id: created_by,
+                space_id,
+                node_id: node_row.id,
+                parent_node_id: parent_id,
+                item_kind: "text",
+                byte_len_after: Some(content.byte_len),
+                line_count_after: Some(content.line_count),
+            },
         )
         .await?;
 
@@ -435,13 +446,15 @@ pub mod create {
 
         file_change_events::record_item_created(
             &mut tx,
-            created_by,
-            space_id,
-            node_row.id,
-            parent_id,
-            "file",
-            Some(file.byte_len),
-            None,
+            file_change_events::ItemCreatedEvent {
+                actor_account_id: created_by,
+                space_id,
+                node_id: node_row.id,
+                parent_node_id: parent_id,
+                item_kind: "file",
+                byte_len_after: Some(file.byte_len),
+                line_count_after: None,
+            },
         )
         .await?;
 
@@ -597,14 +610,16 @@ pub mod copy_node {
 
         file_change_events::record_item_copied(
             &mut tx,
-            created_by,
-            space_id,
-            copied_root.id,
-            &source_kind,
-            source_node_id,
-            new_parent_id,
-            counts,
-            recursive,
+            file_change_events::ItemCopiedEvent {
+                actor_account_id: created_by,
+                space_id,
+                new_node_id: copied_root.id,
+                item_kind: &source_kind,
+                source_node_id,
+                parent_node_id_after: new_parent_id,
+                copied: counts,
+                recursive,
+            },
         )
         .await?;
 
@@ -1096,13 +1111,15 @@ pub mod move_node {
 
         file_change_events::record_item_moved(
             &mut tx,
-            updated_by,
-            space_id,
-            node_id,
-            &moved_kind,
-            current_parent_id,
-            new_parent_id,
-            final_name != current_name,
+            file_change_events::ItemMovedEvent {
+                actor_account_id: updated_by,
+                space_id,
+                node_id,
+                item_kind: &moved_kind,
+                parent_node_id_before: current_parent_id,
+                parent_node_id_after: new_parent_id,
+                name_changed: final_name != current_name,
+            },
         )
         .await?;
 
@@ -1130,18 +1147,31 @@ pub mod save {
     use super::{checks, stored_text_parts};
     use crate::file_change_events::{self, ContentMetrics};
 
+    pub struct SaveTextContentArgs<'a> {
+        pub pool: &'a PgPool,
+        pub space_id: Uuid,
+        pub node_id: Uuid,
+        pub content: &'a StoredContent,
+        pub expected_sha256: Option<&'a str>,
+        pub updated_by: Uuid,
+        pub event_op_type: &'static str,
+        pub caps: Limits,
+    }
+
     /// Replace a live text's content + metrics, attributing the update to
     /// `updated_by` on both the text and its node.
-    pub async fn save_text_content(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-        content: &StoredContent,
-        expected_sha256: Option<&str>,
-        updated_by: Uuid,
-        event_op_type: &'static str,
-        caps: Limits,
-    ) -> Result<(Node, TextObject)> {
+    pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, TextObject)> {
+        let SaveTextContentArgs {
+            pool,
+            space_id,
+            node_id,
+            content,
+            expected_sha256,
+            updated_by,
+            event_op_type,
+            caps,
+        } = args;
+
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;

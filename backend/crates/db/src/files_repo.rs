@@ -361,16 +361,16 @@ impl FilesRepo {
         updated_by: Uuid,
         mutation_kind: TextMutationKind,
     ) -> Result<(Node, TextObject)> {
-        commands::save::save_text_content(
-            &self.pool,
+        commands::save::save_text_content(commands::save::SaveTextContentArgs {
+            pool: &self.pool,
             space_id,
             node_id,
             content,
             expected_sha256,
             updated_by,
-            mutation_kind.op_type(),
-            self.limits,
-        )
+            event_op_type: mutation_kind.op_type(),
+            caps: self.limits,
+        })
         .await
     }
 
