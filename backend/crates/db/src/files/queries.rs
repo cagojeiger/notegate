@@ -615,81 +615,49 @@ pub mod node {
         let fetch = limit + 1;
         let kind = kind.map(|kind| kind.as_str().to_owned());
 
-        let rows: Vec<NodeRow> = match (sort, cursor) {
-            (NodeListSort::UpdatedAtDesc, None) => {
-                sqlx::query_as::<_, NodeRow>(&format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 \
-                       AND deleted_at IS NULL \
-                       AND parent_id IS NOT NULL \
-                       AND ($2::text IS NULL OR kind = $2) \
-                     ORDER BY updated_at DESC, id DESC \
-                     LIMIT $3"
-                ))
-                .bind(space_id)
-                .bind(kind.as_deref())
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
+        let order_by = match sort {
+            NodeListSort::UpdatedAtDesc => "updated_at DESC, id DESC",
+            NodeListSort::NameAsc => "name, id",
+        };
+        let cursor_predicate = match (sort, cursor) {
+            (NodeListSort::UpdatedAtDesc, None) | (NodeListSort::NameAsc, None) => "",
+            (NodeListSort::UpdatedAtDesc, Some(NodeListDbCursor::UpdatedAtDesc { .. })) => {
+                "AND (updated_at, id) < ($3, $4) "
             }
-            (
-                NodeListSort::UpdatedAtDesc,
-                Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }),
-            ) => {
-                sqlx::query_as::<_, NodeRow>(&format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 \
-                       AND deleted_at IS NULL \
-                       AND parent_id IS NOT NULL \
-                       AND ($2::text IS NULL OR kind = $2) \
-                       AND (updated_at, id) < ($3, $4) \
-                     ORDER BY updated_at DESC, id DESC \
-                     LIMIT $5"
-                ))
-                .bind(space_id)
-                .bind(kind.as_deref())
-                .bind(updated_at)
-                .bind(id)
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
-            }
-            (NodeListSort::NameAsc, None) => {
-                sqlx::query_as::<_, NodeRow>(&format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 \
-                       AND deleted_at IS NULL \
-                       AND parent_id IS NOT NULL \
-                       AND ($2::text IS NULL OR kind = $2) \
-                     ORDER BY name, id \
-                     LIMIT $3"
-                ))
-                .bind(space_id)
-                .bind(kind.as_deref())
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
-            }
-            (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { name, id })) => {
-                sqlx::query_as::<_, NodeRow>(&format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes \
-                     WHERE space_id = $1 \
-                       AND deleted_at IS NULL \
-                       AND parent_id IS NOT NULL \
-                       AND ($2::text IS NULL OR kind = $2) \
-                       AND (name, id) > ($3, $4) \
-                     ORDER BY name, id \
-                     LIMIT $5"
-                ))
-                .bind(space_id)
-                .bind(kind.as_deref())
-                .bind(name)
-                .bind(id)
-                .bind(fetch)
-                .fetch_all(pool)
-                .await
+            (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { .. })) => {
+                "AND (name, id) > ($3, $4) "
             }
             _ => return Err(Error::internal("node list cursor sort mismatch")),
+        };
+        let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
+
+        let sql = format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+             WHERE space_id = $1 \
+               AND deleted_at IS NULL \
+               AND parent_id IS NOT NULL \
+               AND ($2::text IS NULL OR kind = $2) \
+               {cursor_predicate}\
+             ORDER BY {order_by} \
+             LIMIT {limit_placeholder}"
+        );
+        let query = sqlx::query_as::<_, NodeRow>(&sql)
+            .bind(space_id)
+            .bind(kind.as_deref());
+
+        let rows: Vec<NodeRow> = match cursor {
+            None => query.bind(fetch).fetch_all(pool).await,
+            Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {
+                query
+                    .bind(updated_at)
+                    .bind(id)
+                    .bind(fetch)
+                    .fetch_all(pool)
+                    .await
+            }
+            Some(NodeListDbCursor::NameAsc { name, id }) => {
+                query.bind(name).bind(id).bind(fetch).fetch_all(pool).await
+            }
         }
         .map_err(map_sqlx_error)?;
 

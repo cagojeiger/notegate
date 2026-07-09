@@ -205,12 +205,18 @@ impl SpaceRepo {
         row.map(SpaceViewRow::into_view).transpose()
     }
 
-    pub async fn list_space_views_by_name_for(
+    async fn list_space_views_by_name(
         &self,
         account_id: Uuid,
         name: &str,
         limit: i64,
+        case_insensitive: bool,
     ) -> Result<Vec<SpaceView>> {
+        let name_predicate = if case_insensitive {
+            "lower(s.name) = lower($2)"
+        } else {
+            "s.name = $2"
+        };
         let rows = sqlx::query_as::<_, SpaceViewRow>(&format!(
             "SELECT * FROM ( \
                  SELECT {USER_SPACE_VIEW_COLUMNS} \
@@ -218,7 +224,7 @@ impl SpaceRepo {
                  JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   AND s.name = $2 \
+                   AND {name_predicate} \
                  UNION ALL \
                  SELECT {AGENT_SPACE_VIEW_COLUMNS} \
                  FROM accounts acc \
@@ -226,7 +232,7 @@ impl SpaceRepo {
                  JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'agent' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   AND s.name = $2 \
+                   AND {name_predicate} \
              ) visible_spaces \
              ORDER BY sort_order, name, id LIMIT $3"
         ))
@@ -239,38 +245,24 @@ impl SpaceRepo {
         rows.into_iter().map(SpaceViewRow::into_view).collect()
     }
 
+    pub async fn list_space_views_by_name_for(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        limit: i64,
+    ) -> Result<Vec<SpaceView>> {
+        self.list_space_views_by_name(account_id, name, limit, false)
+            .await
+    }
+
     pub async fn list_space_views_by_name_case_insensitive_for(
         &self,
         account_id: Uuid,
         name: &str,
         limit: i64,
     ) -> Result<Vec<SpaceView>> {
-        let rows = sqlx::query_as::<_, SpaceViewRow>(&format!(
-            "SELECT * FROM ( \
-                 SELECT {USER_SPACE_VIEW_COLUMNS} \
-                 FROM accounts acc \
-                 JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
-                 JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
-                 WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   AND lower(s.name) = lower($2) \
-                 UNION ALL \
-                 SELECT {AGENT_SPACE_VIEW_COLUMNS} \
-                 FROM accounts acc \
-                 JOIN space_agent_connections c ON c.agent_id = acc.id AND c.disconnected_at IS NULL \
-                 JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
-                 JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
-                 WHERE acc.id = $1 AND acc.kind = 'agent' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   AND lower(s.name) = lower($2) \
-             ) visible_spaces \
-             ORDER BY sort_order, name, id LIMIT $3"
-        ))
-        .bind(account_id)
-        .bind(name)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        rows.into_iter().map(SpaceViewRow::into_view).collect()
+        self.list_space_views_by_name(account_id, name, limit, true)
+            .await
     }
 
     pub async fn list_space_views_for(

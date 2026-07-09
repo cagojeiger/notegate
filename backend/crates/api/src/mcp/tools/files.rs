@@ -5,8 +5,8 @@ use notegate_model::{NodeKind, TextStorageFormat};
 use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, EditText,
-    LineEdit, MoveNode, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
-    WriteTextBody,
+    LineEdit, MoveNode, NodeView, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget,
+    WriteText, WriteTextBody,
 };
 use notegate_service::search::TreeRequest;
 use rmcp::{ErrorData, Json};
@@ -339,6 +339,48 @@ pub async fn read(
     Ok(Json(body))
 }
 
+/// Resolve `path` to an existing node's write target, or a create target under
+/// its parent when it does not exist and `create` is set. Shared by `write`
+/// and `append`, which only differ in what they do with the existing view.
+async fn resolve_write_target(
+    state: &AppState,
+    account_id: uuid::Uuid,
+    space_id: uuid::Uuid,
+    path: &str,
+    create: bool,
+) -> Result<(WriteTarget, Option<NodeView>), ErrorData> {
+    let existing = match state.files.resolve_path(account_id, space_id, path).await {
+        Ok(view) => Some(view),
+        Err(ServiceError::NotFound(_)) => None,
+        Err(error) => return Err(service_error(error)),
+    };
+
+    let target = match &existing {
+        Some(view) => WriteTarget::Existing {
+            node_id: view.node.id,
+        },
+        None => {
+            if !create {
+                return Err(service_error(ServiceError::NotFound(
+                    "text does not exist; pass create=true to create it".to_owned(),
+                )));
+            }
+            let (parent_path, name) = split_parent_name(path)?;
+            let parent = state
+                .files
+                .resolve_path(account_id, space_id, &parent_path)
+                .await
+                .map_err(service_error)?;
+            WriteTarget::Create {
+                parent_node_id: parent.node.id,
+                name,
+            }
+        }
+    };
+
+    Ok((target, existing))
+}
+
 pub async fn write(
     state: &AppState,
     parts: &Parts,
@@ -352,38 +394,12 @@ pub async fn write(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let existing = match state.files.resolve_path(account_id, space_id, &path).await {
-        Ok(view) => Some(view),
-        Err(ServiceError::NotFound(_)) => None,
-        Err(error) => return Err(service_error(error)),
-    };
+    let (target, existing) =
+        resolve_write_target(state, account_id, space_id, &path, create).await?;
 
     if let Some(view) = &existing {
         ensure_mcp_plain_text(state, account_id, space_id, view.node.id).await?;
     }
-
-    let target = match existing {
-        Some(view) => WriteTarget::Existing {
-            node_id: view.node.id,
-        },
-        None => {
-            if !create {
-                return Err(service_error(ServiceError::NotFound(
-                    "text does not exist; pass create=true to create it".to_owned(),
-                )));
-            }
-            let (parent_path, name) = split_parent_name(&path)?;
-            let parent = state
-                .files
-                .resolve_path(account_id, space_id, &parent_path)
-                .await
-                .map_err(service_error)?;
-            WriteTarget::Create {
-                parent_node_id: parent.node.id,
-                name,
-            }
-        }
-    };
 
     let view = state
         .files
@@ -422,34 +438,8 @@ pub async fn append(
     let account_id = caller.account_id();
     let space_id = resolved.space_id();
 
-    let existing = match state.files.resolve_path(account_id, space_id, &path).await {
-        Ok(view) => Some(view),
-        Err(ServiceError::NotFound(_)) => None,
-        Err(error) => return Err(service_error(error)),
-    };
-
-    let target = match existing {
-        Some(view) => WriteTarget::Existing {
-            node_id: view.node.id,
-        },
-        None => {
-            if !create {
-                return Err(service_error(ServiceError::NotFound(
-                    "text does not exist; pass create=true to create it".to_owned(),
-                )));
-            }
-            let (parent_path, name) = split_parent_name(&path)?;
-            let parent = state
-                .files
-                .resolve_path(account_id, space_id, &parent_path)
-                .await
-                .map_err(service_error)?;
-            WriteTarget::Create {
-                parent_node_id: parent.node.id,
-                name,
-            }
-        }
-    };
+    let (target, _existing) =
+        resolve_write_target(state, account_id, space_id, &path, create).await?;
 
     let view = state
         .files
