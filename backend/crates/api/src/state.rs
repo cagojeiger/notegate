@@ -5,8 +5,8 @@ use std::sync::Arc;
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
-    AccountRepo, AgentRepo, ApiKeyRepo, BrowserSessionRepo, ConnectionRepo, FilesRepo, PgPool,
-    SpaceRepo,
+    AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BrowserSessionRepo, ConnectionRepo,
+    FilesRepo, PgPool, SpaceRepo,
 };
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
@@ -77,6 +77,7 @@ impl AppState {
                 config.default_user_tier,
             ),
             api_key_repo.clone(),
+            AuditEventRepo::new(db.clone()),
             pii_crypto.clone(),
         );
         let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
