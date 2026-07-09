@@ -8,21 +8,11 @@
 //! single `account.delete` audit event recording the row counts touched.
 
 use crate::account_repo::SOLE_OWNED_SPACES_FROM_WHERE;
-use crate::audit_events::{self, AuditContext};
+use crate::audit_events::{self, AccountDeleteCounts, AuditContext};
 use crate::map_sqlx_error;
 use notegate_core::{Error, Result};
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
-
-/// Row-affected counts from the cascade, recorded on the `account.delete`
-/// audit event.
-struct AccountDeleteCounts {
-    deactivated_agents: u64,
-    revoked_api_keys: u64,
-    revoked_browser_sessions: u64,
-    disconnected_connections: u64,
-}
 
 /// Soft-delete a user account (ADR 0004). Mark it deleted and tear down owned
 /// agents, keys, and access, but do not delete spaces. If the user still owns
@@ -151,21 +141,7 @@ pub(crate) async fn soft_delete_user(
     };
 
     let audit_ctx = AuditContext::rest(deleted_by);
-    audit_events::record(
-        &mut tx,
-        audit_ctx,
-        account_id,
-        "account.delete",
-        "account",
-        Some(account_id),
-        json!({
-            "deactivated_agents": counts.deactivated_agents,
-            "revoked_api_keys": counts.revoked_api_keys,
-            "revoked_browser_sessions": counts.revoked_browser_sessions,
-            "disconnected_connections": counts.disconnected_connections,
-        }),
-    )
-    .await?;
+    audit_events::account_deleted(&mut tx, audit_ctx, account_id, counts).await?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
     Ok(())
