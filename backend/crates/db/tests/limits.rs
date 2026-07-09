@@ -6,34 +6,11 @@
 
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, insert_user_account, space_with_root};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
-
-/// Create an owner account + space; return (account_id, space_id, root_node_id).
-async fn space_with_root(
-    pool: &PgPool,
-    sub: &str,
-) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
-    let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
-    let space: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (owner_user_id, name) \
-         VALUES ($1, $2) RETURNING id",
-    )
-    .bind(account)
-    .bind(format!("ws-{sub}"))
-    .fetch_one(pool)
-    .await?;
-    // The AFTER INSERT trigger creates the canonical root node.
-    let root: Uuid =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
-            .bind(space)
-            .fetch_one(pool)
-            .await?;
-    Ok((account, space, root))
-}
 
 async fn insert_child(
     pool: &PgPool,

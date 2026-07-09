@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
 use notegate_model::FileEncryptionMode;
@@ -17,26 +17,6 @@ use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, StoredFile, WriteTextBody,
 };
 use serde_json::json;
-use uuid::Uuid;
-
-async fn space_with_root(
-    pool: &sqlx::PgPool,
-    sub: &str,
-) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
-    let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
-    let space: Uuid =
-        sqlx::query_scalar("INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2) RETURNING id")
-            .bind(account)
-            .bind(format!("ws-{sub}"))
-            .fetch_one(pool)
-            .await?;
-    let root: Uuid =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
-            .bind(space)
-            .fetch_one(pool)
-            .await?;
-    Ok((account, space, root))
-}
 
 fn text(content: &str) -> StoredContent {
     StoredContent {

@@ -17,6 +17,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::Extension;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
+use axum::response::Response;
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{AccountRepo, SpaceRepo, test_support::TestDb};
@@ -185,14 +186,7 @@ pub(super) async fn json_request(
                 .body(Body::from(body.to_string()))?,
         )
         .await?;
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes)?
-    };
-    Ok((status, value))
+    decode_response(response).await
 }
 
 pub(super) async fn get_json(
@@ -202,9 +196,7 @@ pub(super) async fn get_json(
     let response = app
         .oneshot(Request::builder().uri(uri).body(Body::empty())?)
         .await?;
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
-    Ok((status, serde_json::from_slice(&bytes)?))
+    decode_response(response).await
 }
 
 pub(super) async fn empty_request(
@@ -220,14 +212,7 @@ pub(super) async fn empty_request(
                 .body(Body::empty())?,
         )
         .await?;
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await?;
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes)?
-    };
-    Ok((status, value))
+    decode_response(response).await
 }
 
 pub(super) async fn upload_file(
@@ -264,7 +249,18 @@ pub(super) async fn upload_file(
                 .body(Body::from(body))?,
         )
         .await?;
+    decode_response(response).await
+}
+
+async fn decode_response(
+    response: Response,
+) -> Result<(StatusCode, Value), Box<dyn std::error::Error>> {
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await?;
-    Ok((status, serde_json::from_slice(&bytes)?))
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)?
+    };
+    Ok((status, value))
 }

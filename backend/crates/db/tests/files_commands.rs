@@ -13,37 +13,16 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind};
 use notegate_model::files::{CreateFolder, MoveNode, StoredContent, WriteTextBody};
-use sqlx::PgPool;
-use uuid::Uuid;
 
 fn assert_not_found<T: std::fmt::Debug>(result: Result<T, Error>) {
     match result {
         Err(Error::NotFound(_)) => {}
         other => panic!("expected NotFound, got {other:?}"),
     }
-}
-
-async fn space_with_root(
-    pool: &PgPool,
-    sub: &str,
-) -> Result<(Uuid, Uuid, Uuid), Box<dyn std::error::Error>> {
-    let account = insert_user_account(pool, sub, &format!("{sub}@example.com")).await?;
-    let space: Uuid =
-        sqlx::query_scalar("INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2) RETURNING id")
-            .bind(account)
-            .bind(format!("ws-{sub}"))
-            .fetch_one(pool)
-            .await?;
-    let root: Uuid =
-        sqlx::query_scalar("SELECT id FROM nodes WHERE space_id = $1 AND parent_id IS NULL")
-            .bind(space)
-            .fetch_one(pool)
-            .await?;
-    Ok((account, space, root))
 }
 
 fn content() -> StoredContent {
