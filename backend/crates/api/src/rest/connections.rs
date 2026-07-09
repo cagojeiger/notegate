@@ -114,12 +114,7 @@ pub(crate) async fn list(
         .collect();
     Ok(Json(ConnectionListResponse {
         connections,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 

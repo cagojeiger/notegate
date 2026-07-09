@@ -21,18 +21,24 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::{NodeOut, NodeRef, attribution_ids, parse_kind};
+use crate::rest::dto::{
+    FileChangeEventListResponse, FileChangeEventOut, NodeOut, NodeRef, attribution_ids, parse_kind,
+};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    ChildrenRequest, CreateFolder, CreateText, DeleteNode, ListNodesRequest, MoveNode,
-    NodeListSort, WriteTarget, WriteText, WriteTextBody,
+    ChildrenRequest, CreateFolder, CreateText, DeleteNode, ListFileChangeEvents, ListNodesRequest,
+    MoveNode, NodeListSort, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/spaces/{space_id}/paths/resolve", get(resolve_path))
         .route("/v1/spaces/{space_id}/nodes", get(list).post(create))
+        .route(
+            "/v1/spaces/{space_id}/file-change-events",
+            get(list_file_change_events),
+        )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}",
             get(get_node).patch(update).delete(delete),
@@ -85,6 +91,52 @@ pub(crate) async fn resolve_path(
         .find_account_refs(&attribution_ids([&view]))
         .await?;
     Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListFileChangeEventsQuery {
+    node_id: Option<Uuid>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/file-change-events",
+    tag = "events",
+    params(
+        ("space_id" = Uuid, Path),
+        ("node_id" = Option<Uuid>, Query, description = "Optional node id filter"),
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List file change event history in a space", body = FileChangeEventListResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn list_file_change_events(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+    Query(query): Query<ListFileChangeEventsQuery>,
+) -> Result<Json<FileChangeEventListResponse>, ApiError> {
+    let page = state
+        .files
+        .list_file_change_events(
+            caller.account_id(),
+            space_id,
+            ListFileChangeEvents {
+                node_id: query.node_id,
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let events = page.items.iter().map(FileChangeEventOut::from).collect();
+
+    Ok(Json(FileChangeEventListResponse {
+        events,
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
+    }))
 }
 
 #[utoipa::path(
@@ -173,12 +225,7 @@ pub(crate) async fn list(
 
     Ok(Json(NodesListResponse {
         nodes,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 
@@ -243,12 +290,7 @@ pub(crate) async fn children(
     Ok(Json(ChildrenResponse {
         parent: NodeRef::from(&page.parent),
         children,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 
@@ -593,3 +635,7 @@ pub(crate) async fn delete(
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[cfg(test)]
+#[path = "nodes_event_tests/mod.rs"]
+mod event_tests;

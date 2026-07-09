@@ -1,4 +1,5 @@
 use notegate_core::limits;
+use notegate_db::{MetadataMutationKind, TextMutationKind};
 use notegate_model::NodeKind;
 use serde_json::Value;
 use uuid::Uuid;
@@ -164,6 +165,7 @@ impl FilesService {
                         &stored,
                         command.expected_sha256.as_deref(),
                         caller_account_id,
+                        TextMutationKind::Write,
                     )
                     .await?;
                 self.text_view(space_id, node, text).await
@@ -243,6 +245,7 @@ impl FilesService {
                         &stored,
                         Some(&previous_sha256),
                         caller_account_id,
+                        TextMutationKind::Append,
                     )
                     .await?;
                 self.text_view(space_id, node, text).await
@@ -327,6 +330,7 @@ impl FilesService {
                 &stored,
                 Some(save_guard),
                 caller_account_id,
+                TextMutationKind::Patch,
             )
             .await?;
         let view = self.text_view(space_id, node, text).await?;
@@ -392,6 +396,7 @@ impl FilesService {
                 &stored,
                 Some(save_guard),
                 caller_account_id,
+                TextMutationKind::Edit,
             )
             .await?;
         let view = self.text_view(space_id, node, text).await?;
@@ -457,7 +462,13 @@ impl FilesService {
 
         let updated = self
             .store
-            .replace_node_metadata(space_id, node_id, &metadata, caller_account_id)
+            .replace_node_metadata(
+                space_id,
+                node_id,
+                &metadata,
+                caller_account_id,
+                MetadataMutationKind::Replace,
+            )
             .await?;
         self.node_view(space_id, updated).await
     }
@@ -484,7 +495,13 @@ impl FilesService {
 
         let updated = self
             .store
-            .replace_node_metadata(space_id, node_id, &metadata, caller_account_id)
+            .replace_node_metadata(
+                space_id,
+                node_id,
+                &metadata,
+                caller_account_id,
+                MetadataMutationKind::Patch,
+            )
             .await?;
         self.node_view(space_id, updated).await
     }
@@ -683,7 +700,7 @@ impl FilesService {
         let path = self.path_of(space_id, node.id).await?;
         let purge_after = self
             .store
-            .soft_delete_node(space_id, node.id, caller_account_id)
+            .soft_delete_node(space_id, node.id, caller_account_id, command.recursive)
             .await?;
 
         Ok(DeleteResult {

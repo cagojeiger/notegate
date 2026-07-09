@@ -23,8 +23,9 @@ use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::{FileEncryptionMode, NodeKind};
 use notegate_service::files::{
     AppendText, ChildrenCursor, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
-    EditText, FilesService, LineEdit, ListNodesRequest, MoveNode, NodeListSort, PatchMode,
-    PatchText, ReadText, ReadTextBody, WriteTarget, WriteText, WriteTextBody,
+    EditText, FilesService, LineEdit, ListFileChangeEvents, ListNodesRequest, MoveNode,
+    NodeListSort, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
+    WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -50,6 +51,125 @@ async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uui
         .expect("root id query")
         .expect("root id present");
     (ws.id, root)
+}
+
+#[tokio::test]
+async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+
+    let owner = insert_user_account(&db.pool, "event-owner", "event@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "events").await;
+
+    files
+        .create_folder(
+            owner,
+            ws,
+            CreateFolder {
+                parent_node_id: root,
+                name: "docs".to_owned(),
+            },
+        )
+        .await?;
+    let text = files
+        .create_text(
+            owner,
+            ws,
+            CreateText {
+                parent_node_id: root,
+                name: "note.md".to_owned(),
+            },
+        )
+        .await?;
+    let text_id = text.node.node.id;
+    files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Existing { node_id: text_id },
+                body: WriteTextBody::Plain("hello".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+
+    let first_page = files
+        .list_file_change_events(
+            owner,
+            ws,
+            ListFileChangeEvents {
+                node_id: None,
+                limit: Some(2),
+                cursor: None,
+            },
+        )
+        .await?;
+    let first_ops: Vec<_> = first_page
+        .items
+        .iter()
+        .map(|event| event.op_type.as_str())
+        .collect();
+    assert_eq!(first_ops, vec!["text.write", "text.create"]);
+    assert!(first_page.has_more);
+
+    let second_page = files
+        .list_file_change_events(
+            owner,
+            ws,
+            ListFileChangeEvents {
+                node_id: None,
+                limit: Some(2),
+                cursor: first_page.next_cursor,
+            },
+        )
+        .await?;
+    let second_ops: Vec<_> = second_page
+        .items
+        .iter()
+        .map(|event| event.op_type.as_str())
+        .collect();
+    assert_eq!(second_ops, vec!["folder.create"]);
+    assert!(!second_page.has_more);
+
+    let text_events = files
+        .list_file_change_events(
+            owner,
+            ws,
+            ListFileChangeEvents {
+                node_id: Some(text_id),
+                limit: Some(10),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(text_events.items.len(), 2);
+    assert!(
+        text_events
+            .items
+            .iter()
+            .all(|event| event.node_id == Some(text_id))
+    );
+
+    let err = files
+        .list_file_change_events(
+            owner,
+            ws,
+            ListFileChangeEvents {
+                node_id: None,
+                limit: None,
+                cursor: Some("not-a-cursor".to_owned()),
+            },
+        )
+        .await
+        .expect_err("invalid cursor should be rejected");
+    assert!(err.to_string().contains("invalid cursor"));
+
+    db.cleanup().await;
+    Ok(())
 }
 
 /// The full lifecycle: create ws → mkdir → touch → write → read → patch →
@@ -926,7 +1046,7 @@ async fn repo_soft_delete_root_is_conflict() -> Result<(), Box<dyn std::error::E
     let (ws, root) = setup_space(&ws_repo, owner, "rootguard").await;
 
     let err = repo
-        .soft_delete_node(ws, root, owner)
+        .soft_delete_node(ws, root, owner, false)
         .await
         .expect_err("root delete must be rejected cleanly");
     assert!(

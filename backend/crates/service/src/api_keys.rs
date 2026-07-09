@@ -7,8 +7,8 @@ use notegate_db::{ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::{ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, MintedApiKey};
 use uuid::Uuid;
 
-use crate::pagination::clamp_limit;
-use crate::{ServiceError, ServiceResult, cursor};
+use crate::pagination::paginate_keyset;
+use crate::{ServiceError, ServiceResult};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ApiKeyPolicy {
@@ -21,37 +21,22 @@ pub async fn list_key_page(
     account_id: Uuid,
     request: ListApiKeys,
 ) -> ServiceResult<ApiKeyPage> {
-    let limit = clamp_limit(
+    let (items, limit, has_more, next_cursor) = paginate_keyset(
         request.limit,
         limits::API_KEYS_DEFAULT_LIMIT,
         limits::API_KEYS_MAX_LIMIT,
-    );
-    let cursor = match request.cursor.as_deref() {
-        None => None,
-        Some(raw) => Some(
-            cursor::decode::<ApiKeyCursor>(raw)
-                .map_err(|_error| ServiceError::InvalidInput("invalid cursor".to_owned()))?,
-        ),
-    };
-
-    let mut items = api_keys
-        .list_by_account(account_id, limit + 1, cursor.as_ref())
-        .await?;
-    let has_more = items.len() as i64 > limit;
-    items.truncate(limit as usize);
-    let next_cursor = if has_more {
-        items
-            .last()
-            .map(|key| ApiKeyCursor {
-                created_at: key.created_at,
-                id: key.id,
-            })
-            .map(|cursor| cursor::encode(&cursor))
-            .transpose()
-            .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
-    } else {
-        None
-    };
+        request.cursor.as_deref(),
+        |limit, cursor: Option<ApiKeyCursor>| async move {
+            Ok(api_keys
+                .list_by_account(account_id, limit, cursor.as_ref())
+                .await?)
+        },
+        |key| ApiKeyCursor {
+            created_at: key.created_at,
+            id: key.id,
+        },
+    )
+    .await?;
 
     Ok(ApiKeyPage {
         items,

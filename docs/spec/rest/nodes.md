@@ -5,6 +5,7 @@ Node API는 Space tree의 node 속성을 다룬다. Content body는 Text/File ca
 ```http
 GET    /api/v1/spaces/{space_id}/paths/resolve?path=/notes/state.json
 GET    /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&kind=text&limit=50&cursor=...
+GET    /api/v1/spaces/{space_id}/file-change-events?node_id=...&limit=50&cursor=...
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/children?limit=100&cursor=...
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
@@ -24,6 +25,7 @@ DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```ts
 GET /paths/resolve              -> RestNode
 GET /nodes                      -> { nodes: RestNode[], page: Page }
+GET /file-change-events         -> { events: FileChangeEvent[], page: Page }
 GET /nodes/{node_id}            -> RestNode
 GET /nodes/{node_id}/children   -> { parent: NodeRef, children: RestNode[], page: Page }
 GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
@@ -59,6 +61,17 @@ Rules:
 - Cursor는 opaque string이다. Client는 해석하지 않고 같은 `sort`/`kind` query와 함께 전달한다.
 - Cursor는 생성 당시 `sort`/`kind`에 묶인다. 다른 `sort` 또는 `kind`와 함께 재사용하면 `400 invalid_input`이다.
 - Content body는 반환하지 않는다.
+
+## List file change events
+
+`GET /file-change-events`는 Space의 파일/폴더/문서 변경 이력을 최신순으로 반환한다. 자세한 response shape와 metadata 규칙은 `events.md`를 따른다.
+
+Rules:
+
+- Space read/stat 권한이 필요하다.
+- `node_id` query를 주면 특정 node 이력만 반환한다.
+- 삭제된 node의 이력도 `node_id`로 조회할 수 있다.
+- Cursor는 opaque string이다.
 
 ## Create rules
 

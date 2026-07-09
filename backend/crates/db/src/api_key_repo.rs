@@ -1,9 +1,11 @@
 //! Unified API-key persistence for user and agent accounts.
 
+use crate::audit_events::{self, AuditContext};
 use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
+use serde_json::json;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -218,6 +220,19 @@ impl ApiKeyRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let audit_context = audit_context_for_key_account(&mut tx, args.account_id).await?;
+        let audit_ctx = AuditContext::rest(args.created_by);
+        audit_events::record(
+            &mut tx,
+            audit_ctx,
+            audit_context.owner_user_id,
+            audit_context.create_op_type,
+            "api_key",
+            Some(args.key_id),
+            json!({}),
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(ApiKey::from(row))
     }
@@ -301,6 +316,19 @@ impl ApiKeyRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let audit_context = audit_context_for_key_account(&mut tx, args.account_id).await?;
+        let audit_ctx = AuditContext::rest(revoked_by);
+        audit_events::record(
+            &mut tx,
+            audit_ctx,
+            audit_context.owner_user_id,
+            audit_context.rotate_op_type,
+            "api_key",
+            Some(old_key_id),
+            json!({ "created_key_id": args.key_id }),
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(ApiKey::from(row))
     }
@@ -312,6 +340,7 @@ impl ApiKeyRepo {
         revoked_by: Uuid,
         reason: Option<&str>,
     ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let result = sqlx::query(
             "UPDATE api_keys \
              SET revoked_at = now(), revoked_by_user_id = $3, revoked_reason = $4 \
@@ -321,13 +350,79 @@ impl ApiKeyRepo {
         .bind(account_id)
         .bind(revoked_by)
         .bind(reason)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
         if result.rows_affected() == 0 {
             return Err(Error::not_found("api key not found"));
         }
+
+        let audit_context = audit_context_for_key_account(&mut tx, account_id).await?;
+        let audit_ctx = AuditContext::rest(revoked_by);
+        let metadata = reason
+            .map(|reason| json!({ "reason": reason }))
+            .unwrap_or_else(|| json!({}));
+        audit_events::record(
+            &mut tx,
+            audit_ctx,
+            audit_context.owner_user_id,
+            audit_context.revoke_op_type,
+            "api_key",
+            Some(key_id),
+            metadata,
+        )
+        .await?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ApiKeyAuditContext {
+    owner_user_id: Uuid,
+    create_op_type: &'static str,
+    rotate_op_type: &'static str,
+    revoke_op_type: &'static str,
+}
+
+async fn audit_context_for_key_account(
+    tx: &mut sqlx::PgConnection,
+    account_id: Uuid,
+) -> Result<ApiKeyAuditContext> {
+    let row: Option<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT acc.kind, a.owner_user_id \
+         FROM accounts acc \
+         LEFT JOIN agents a ON a.id = acc.id \
+         WHERE acc.id = $1",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    let Some((kind, agent_owner_user_id)) = row else {
+        return Err(Error::not_found("account not found"));
+    };
+
+    match kind.as_str() {
+        "user" => Ok(ApiKeyAuditContext {
+            owner_user_id: account_id,
+            create_op_type: "user_key.create",
+            rotate_op_type: "user_key.rotate",
+            revoke_op_type: "user_key.revoke",
+        }),
+        "agent" => {
+            let owner_user_id = agent_owner_user_id
+                .ok_or_else(|| Error::internal("agent account missing owner user"))?;
+            Ok(ApiKeyAuditContext {
+                owner_user_id,
+                create_op_type: "agent_key.create",
+                rotate_op_type: "agent_key.rotate",
+                revoke_op_type: "agent_key.revoke",
+            })
+        }
+        other => Err(Error::internal(format!("unknown account kind: {other}"))),
     }
 }
 

@@ -13,8 +13,8 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use notegate_model::{AccountRef as ModelAccountRef, ApiKey, NodeKind};
-use notegate_service::files::NodeView;
+use notegate_model::{AccountRef as ModelAccountRef, ApiKey, AuditEvent, NodeKind};
+use notegate_service::files::{FileChangeEvent, NodeView};
 use notegate_service::spaces::SpaceView;
 
 /// A lightweight account reference: `{id, kind, display_name}`.
@@ -95,6 +95,72 @@ impl From<&ApiKey> for ApiKeyMetadataOut {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ApiKeyMetadataListResponse {
     pub keys: Vec<ApiKeyMetadataOut>,
+    pub page: crate::page::Page,
+}
+
+/// Audit event history entry returned by `GET /api/v1/me/audit-events`.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct AuditEventOut {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+    pub actor_account_id: Option<Uuid>,
+    pub source: String,
+    pub op_type: String,
+    pub resource_type: String,
+    pub resource_id: Option<Uuid>,
+    pub metadata: Value,
+}
+
+impl From<&AuditEvent> for AuditEventOut {
+    fn from(event: &AuditEvent) -> Self {
+        Self {
+            id: event.id,
+            created_at: event.created_at,
+            actor_account_id: event.actor_account_id,
+            source: event.source.clone(),
+            op_type: event.op_type.clone(),
+            resource_type: event.resource_type.clone(),
+            resource_id: event.resource_id,
+            metadata: event.metadata.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct AuditEventListResponse {
+    pub events: Vec<AuditEventOut>,
+    pub page: crate::page::Page,
+}
+
+/// File change event history entry returned by `GET /api/v1/spaces/{space_id}/file-change-events`.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct FileChangeEventOut {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+    pub space_id: Uuid,
+    pub node_id: Option<Uuid>,
+    pub actor_account_id: Option<Uuid>,
+    pub op_type: String,
+    pub metadata: Value,
+}
+
+impl From<&FileChangeEvent> for FileChangeEventOut {
+    fn from(event: &FileChangeEvent) -> Self {
+        Self {
+            id: event.id,
+            created_at: event.created_at,
+            space_id: event.space_id,
+            node_id: event.node_id,
+            actor_account_id: event.actor_account_id,
+            op_type: event.op_type.clone(),
+            metadata: event.metadata.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct FileChangeEventListResponse {
+    pub events: Vec<FileChangeEventOut>,
     pub page: crate::page::Page,
 }
 

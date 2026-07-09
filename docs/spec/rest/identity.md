@@ -47,3 +47,7 @@ User caller만 가능하다.
 - `expires_at`은 필수이며 최대 TTL은 30일이다.
 - `scopes`는 빈 배열만 허용한다.
 - User account당 live key 최대 2개다.
+
+## Current user event history
+
+`GET /api/v1/me/audit-events`는 caller의 audit event 이력을 반환한다. 계약은 `events.md`에 둔다.

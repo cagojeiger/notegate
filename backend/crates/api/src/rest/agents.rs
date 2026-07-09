@@ -118,12 +118,7 @@ pub(crate) async fn list(
     let agents = page.items.iter().map(AgentOut::from).collect();
     Ok(Json(AgentsListResponse {
         agents,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 
@@ -204,12 +199,7 @@ pub(crate) async fn list_keys(
     let keys = page.items.iter().map(ApiKeyMetadataOut::from).collect();
     Ok(Json(ApiKeyMetadataListResponse {
         keys,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 

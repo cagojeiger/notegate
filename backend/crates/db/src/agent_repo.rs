@@ -5,12 +5,14 @@
 //! `agents` row in one transaction, attributing `owner_user_id` to the caller. API
 //! keys are persisted by `ApiKeyRepo`, not this aggregate repository.
 
+use crate::audit_events::{self, AuditContext};
 use crate::{active_account_predicate, map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::Agent;
+use serde_json::json;
 
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
@@ -82,6 +84,20 @@ impl AgentRepo {
     pub async fn delete_agent(&self, agent_id: Uuid, deleted_by: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
+        let owner_user_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT a.owner_user_id FROM agents a \
+             JOIN accounts acc ON acc.id = a.id \
+             WHERE a.id = $1 AND acc.kind = 'agent' AND acc.deleted_at IS NULL \
+             FOR UPDATE OF acc",
+        )
+        .bind(agent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        let Some(owner_user_id) = owner_user_id else {
+            return Err(Error::not_found("agent not found"));
+        };
+
         let result = sqlx::query(
             "UPDATE accounts \
              SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
@@ -96,7 +112,7 @@ impl AgentRepo {
             return Err(Error::not_found("agent not found"));
         }
 
-        sqlx::query(
+        let revoked_keys = sqlx::query(
             "UPDATE api_keys SET revoked_at = now(), revoked_by_user_id = $2 \
              WHERE account_id = $1 AND revoked_at IS NULL",
         )
@@ -106,7 +122,7 @@ impl AgentRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let disconnected_connections = sqlx::query(
             "UPDATE space_agent_connections SET disconnected_at = now(), disconnected_by_user_id = $2 \
              WHERE agent_id = $1 AND disconnected_at IS NULL",
         )
@@ -115,6 +131,21 @@ impl AgentRepo {
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        let audit_ctx = AuditContext::rest(deleted_by);
+        audit_events::record(
+            &mut tx,
+            audit_ctx,
+            owner_user_id,
+            "agent.delete",
+            "agent",
+            Some(agent_id),
+            json!({
+                "revoked_agent_keys": revoked_keys.rows_affected(),
+                "disconnected_connections": disconnected_connections.rows_affected(),
+            }),
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
@@ -169,6 +200,18 @@ impl AgentRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        let audit_ctx = AuditContext::rest(owner_user_id);
+        audit_events::record(
+            &mut tx,
+            audit_ctx,
+            owner_user_id,
+            "agent.create",
+            "agent",
+            Some(row.id),
+            json!({}),
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Agent::from(row))

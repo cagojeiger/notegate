@@ -27,6 +27,7 @@ use crate::state::AppState;
         rest::me::create_key,
         rest::me::rotate_key,
         rest::me::revoke_key,
+        rest::me::list_audit_events,
         rest::me::delete_me,
         rest::spaces::list,
         rest::spaces::create,
@@ -35,6 +36,7 @@ use crate::state::AppState;
         rest::spaces::delete,
         rest::nodes::resolve_path,
         rest::nodes::list,
+        rest::nodes::list_file_change_events,
         rest::nodes::create,
         rest::nodes::get_node,
         rest::nodes::reveal,
@@ -66,6 +68,7 @@ use crate::state::AppState;
     modifiers(&SecurityAddon),
     tags(
         (name = "identity", description = "Current caller identity"),
+        (name = "events", description = "Audit and file change event history"),
         (name = "spaces", description = "Space lifecycle"),
         (name = "nodes", description = "Folder/text tree metadata"),
         (name = "text", description = "Text content read/write/patch"),
@@ -246,6 +249,12 @@ mod tests {
         assert_query_params(&value, "/api/v1/me/keys", "get", &["limit", "cursor"]);
         assert_query_params(
             &value,
+            "/api/v1/me/audit-events",
+            "get",
+            &["limit", "cursor"],
+        );
+        assert_query_params(
+            &value,
             "/api/v1/agents/{agent_id}/keys",
             "get",
             &["limit", "cursor"],
@@ -267,6 +276,12 @@ mod tests {
             "/api/v1/spaces/{space_id}/nodes",
             "get",
             &["kind", "sort", "limit", "cursor"],
+        );
+        assert_query_params(
+            &value,
+            "/api/v1/spaces/{space_id}/file-change-events",
+            "get",
+            &["node_id", "limit", "cursor"],
         );
         assert_query_params(
             &value,
@@ -411,10 +426,12 @@ mod tests {
             "/api/v1/me",
             "/api/v1/me/keys",
             "/api/v1/me/keys/{key_id}",
+            "/api/v1/me/audit-events",
             "/api/v1/spaces",
             "/api/v1/spaces/{space_id}",
             "/api/v1/spaces/{space_id}/paths/resolve",
             "/api/v1/spaces/{space_id}/nodes",
+            "/api/v1/spaces/{space_id}/file-change-events",
             "/api/v1/spaces/{space_id}/nodes/{node_id}",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
@@ -462,6 +479,7 @@ mod tests {
             "GET /api/v1/agents/{agent_id}/keys",
             "DELETE /api/v1/me",
             "GET /api/v1/me",
+            "GET /api/v1/me/audit-events",
             "GET /api/v1/me/keys",
             "GET /api/v1/spaces",
             "GET /api/v1/spaces/{space_id}",
@@ -469,6 +487,7 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/text/{node_id}",
             "GET /api/v1/spaces/{space_id}/files/{node_id}",
             "GET /api/v1/spaces/{space_id}/files/{node_id}/content",
+            "GET /api/v1/spaces/{space_id}/file-change-events",
             "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",

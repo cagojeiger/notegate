@@ -10,9 +10,8 @@ use notegate_model::{AccountKind, Permission};
 pub use notegate_model::{CreateSpace, ListSpaces, SpaceCursor, SpacePage, SpaceView, UpdateSpace};
 use uuid::Uuid;
 
-use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
-use crate::pagination::clamp_limit;
+use crate::pagination::{clamp_limit, paginate_keyset};
 
 #[derive(Debug, Clone)]
 pub struct SpaceService {
@@ -58,39 +57,24 @@ impl SpaceService {
         caller_account_id: Uuid,
         request: ListSpaces,
     ) -> ServiceResult<SpacePage> {
-        let limit = clamp_limit(
+        let (items, limit, has_more, next_cursor) = paginate_keyset(
             request.limit,
             limits::SPACES_DEFAULT_LIMIT,
             limits::SPACES_MAX_LIMIT,
-        );
-        let cursor = match request.cursor.as_deref() {
-            None => None,
-            Some(raw) => Some(
-                cursor::decode::<SpaceCursor>(raw)
-                    .map_err(|_error| ServiceError::InvalidInput("invalid cursor".to_owned()))?,
-            ),
-        };
-
-        let mut items = self
-            .store
-            .list_space_views_for(caller_account_id, limit + 1, cursor.as_ref())
-            .await?;
-        let has_more = items.len() as i64 > limit;
-        items.truncate(limit as usize);
-        let next_cursor = if has_more {
-            items
-                .last()
-                .map(|view| SpaceCursor {
-                    sort_order: view.space.sort_order,
-                    name: view.space.name.clone(),
-                    id: view.space.id,
-                })
-                .map(|cursor| cursor::encode(&cursor))
-                .transpose()
-                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
-        } else {
-            None
-        };
+            request.cursor.as_deref(),
+            |limit, cursor: Option<SpaceCursor>| async move {
+                Ok(self
+                    .store
+                    .list_space_views_for(caller_account_id, limit, cursor.as_ref())
+                    .await?)
+            },
+            |view| SpaceCursor {
+                sort_order: view.space.sort_order,
+                name: view.space.name.clone(),
+                id: view.space.id,
+            },
+        )
+        .await?;
 
         Ok(SpacePage {
             items,

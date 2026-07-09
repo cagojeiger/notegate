@@ -21,6 +21,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::file_change_event_repo;
 use crate::files::{commands, queries};
 use crate::tier_lookup;
 use notegate_model::files::{
@@ -32,6 +33,40 @@ use notegate_model::files::{
 pub struct FilesRepo {
     pool: PgPool,
     limits: Limits,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TextMutationKind {
+    Write,
+    Append,
+    Patch,
+    Edit,
+}
+
+impl TextMutationKind {
+    pub(crate) fn op_type(self) -> &'static str {
+        match self {
+            TextMutationKind::Write => "text.write",
+            TextMutationKind::Append => "text.append",
+            TextMutationKind::Patch => "text.patch",
+            TextMutationKind::Edit => "text.edit",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MetadataMutationKind {
+    Replace,
+    Patch,
+}
+
+impl MetadataMutationKind {
+    pub(crate) fn op_type(self) -> &'static str {
+        match self {
+            MetadataMutationKind::Replace => "metadata.replace",
+            MetadataMutationKind::Patch => "metadata.patch",
+        }
+    }
 }
 
 impl FilesRepo {
@@ -192,6 +227,19 @@ impl FilesRepo {
         queries::node::paged_nodes(&self.pool, space_id, kind, sort, limit, cursor).await
     }
 
+    pub async fn list_file_change_events(
+        &self,
+        space_id: Uuid,
+        node_id: Option<Uuid>,
+        limit: i64,
+        cursor: Option<&notegate_model::FileChangeEventCursor>,
+    ) -> Result<Vec<notegate_model::FileChangeEvent>> {
+        file_change_event_repo::list_file_change_events(
+            &self.pool, space_id, node_id, limit, cursor,
+        )
+        .await
+    }
+
     pub async fn search_node_candidates(
         &self,
         space_id: Uuid,
@@ -311,16 +359,18 @@ impl FilesRepo {
         content: &StoredContent,
         expected_sha256: Option<&str>,
         updated_by: Uuid,
+        mutation_kind: TextMutationKind,
     ) -> Result<(Node, TextObject)> {
-        commands::save::save_text_content(
-            &self.pool,
+        commands::save::save_text_content(commands::save::SaveTextContentArgs {
+            pool: &self.pool,
             space_id,
             node_id,
             content,
             expected_sha256,
             updated_by,
-            self.limits,
-        )
+            event_op_type: mutation_kind.op_type(),
+            caps: self.limits,
+        })
         .await
     }
 
@@ -387,9 +437,17 @@ impl FilesRepo {
         node_id: Uuid,
         metadata: &Value,
         updated_by: Uuid,
+        mutation_kind: MetadataMutationKind,
     ) -> Result<Node> {
-        commands::update::replace_node_metadata(&self.pool, space_id, node_id, metadata, updated_by)
-            .await
+        commands::update::replace_node_metadata(
+            &self.pool,
+            space_id,
+            node_id,
+            metadata,
+            updated_by,
+            mutation_kind.op_type(),
+        )
+        .await
     }
 
     pub async fn soft_delete_node(
@@ -397,8 +455,10 @@ impl FilesRepo {
         space_id: Uuid,
         node_id: Uuid,
         deleted_by: Uuid,
+        recursive: bool,
     ) -> Result<DateTime<Utc>> {
-        commands::delete::soft_delete_node(&self.pool, space_id, node_id, deleted_by).await
+        commands::delete::soft_delete_node(&self.pool, space_id, node_id, deleted_by, recursive)
+            .await
     }
 }
 
