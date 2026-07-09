@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+use crate::audit_event_repo::insert_audit_event;
+use crate::audit_events::{self, AccountDeleteCounts, AuditContext};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
@@ -279,7 +281,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let deactivated_agents = sqlx::query(
             "UPDATE accounts \
              SET is_active = false, deleted_at = now(), deleted_by_account_id = $2, updated_at = now() \
              WHERE id = ANY($1) AND kind = 'agent' AND deleted_at IS NULL",
@@ -290,7 +292,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let revoked_api_keys = sqlx::query(
             "UPDATE api_keys \
              SET revoked_at = now(), revoked_by_user_id = $2 \
              WHERE revoked_at IS NULL \
@@ -303,7 +305,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let revoked_browser_sessions = sqlx::query(
             "UPDATE browser_sessions \
              SET revoked_at = now(), revoked_reason = 'account_deleted', updated_at = now() \
              WHERE user_id = $1 AND revoked_at IS NULL",
@@ -313,13 +315,12 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        sqlx::query(
+        let disconnected_connections = sqlx::query(
             "UPDATE space_agent_connections \
-             SET disconnected_at = now(), disconnected_by_user_id = $3 \
+             SET disconnected_at = now(), disconnected_by_user_id = $2 \
              WHERE disconnected_at IS NULL \
-               AND agent_id = ANY($2)",
+               AND agent_id = ANY($1)",
         )
-        .bind(account_id)
         .bind(&owned_agents)
         .bind(deleted_by)
         .execute(&mut *tx)
@@ -338,6 +339,22 @@ impl AccountRepo {
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        let audit_ctx = AuditContext::rest(deleted_by);
+        insert_audit_event(
+            &mut tx,
+            audit_events::account_deleted(
+                audit_ctx,
+                account_id,
+                AccountDeleteCounts {
+                    deactivated_agents: deactivated_agents.rows_affected(),
+                    revoked_api_keys: revoked_api_keys.rows_affected(),
+                    revoked_browser_sessions: revoked_browser_sessions.rows_affected(),
+                    disconnected_connections: disconnected_connections.rows_affected(),
+                },
+            ),
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())

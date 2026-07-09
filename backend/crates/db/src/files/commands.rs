@@ -273,6 +273,7 @@ pub mod create {
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
     use super::{checks, stored_text_parts};
+    use crate::file_change_events;
 
     /// Insert a folder under `parent_id`, attributing it to `created_by`.
     pub async fn insert_folder(
@@ -300,6 +301,20 @@ pub mod create {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+        file_change_events::record_item_created(
+            &mut tx,
+            file_change_events::ItemCreatedEvent {
+                actor_account_id: created_by,
+                space_id,
+                node_id: row.id,
+                parent_node_id: parent_id,
+                item_kind: "folder",
+                byte_len_after: None,
+                line_count_after: None,
+            },
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         row.into_node()
@@ -354,6 +369,20 @@ pub mod create {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+        file_change_events::record_item_created(
+            &mut tx,
+            file_change_events::ItemCreatedEvent {
+                actor_account_id: created_by,
+                space_id,
+                node_id: node_row.id,
+                parent_node_id: parent_id,
+                item_kind: "text",
+                byte_len_after: Some(content.byte_len),
+                line_count_after: Some(content.line_count),
+            },
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok((node_row.into_node()?, doc_row.into_text()?))
@@ -415,6 +444,20 @@ pub mod create {
         .await
         .map_err(map_constraint_error)?;
 
+        file_change_events::record_item_created(
+            &mut tx,
+            file_change_events::ItemCreatedEvent {
+                actor_account_id: created_by,
+                space_id,
+                node_id: node_row.id,
+                parent_node_id: parent_id,
+                item_kind: "file",
+                byte_len_after: Some(file.byte_len),
+                line_count_after: None,
+            },
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok((node_row.into_node()?, file_row.into_file()?))
     }
@@ -465,6 +508,7 @@ pub mod copy_node {
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
     use super::checks;
+    use crate::file_change_events;
     use crate::to_usize;
 
     pub struct CopyNodeArgs<'a> {
@@ -502,6 +546,7 @@ pub mod copy_node {
         if source.kind == "folder" && !recursive {
             return Err(Error::conflict("folder copy requires recursive=true"));
         }
+        let source_kind = source.kind.clone();
 
         checks::require_live_folder(&mut tx, space_id, new_parent_id).await?;
         checks::require_sibling_unique(&mut tx, space_id, new_parent_id, new_name, None).await?;
@@ -560,12 +605,26 @@ pub mod copy_node {
                 copied_root = Some(node);
             }
         }
+        let copied_root =
+            copied_root.ok_or_else(|| Error::internal("copy produced no root node"))?;
+
+        file_change_events::record_item_copied(
+            &mut tx,
+            file_change_events::ItemCopiedEvent {
+                actor_account_id: created_by,
+                space_id,
+                new_node_id: copied_root.id,
+                item_kind: &source_kind,
+                source_node_id,
+                parent_node_id_after: new_parent_id,
+                copied: counts,
+                recursive,
+            },
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok((
-            copied_root.ok_or_else(|| Error::internal("copy produced no root node"))?,
-            counts,
-        ))
+        Ok((copied_root, counts))
     }
 
     #[derive(Debug, FromRow)]
@@ -828,6 +887,7 @@ pub mod delete {
 
     use super::super::error::map_sqlx_error;
     use super::checks;
+    use crate::file_change_events;
 
     /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
     pub async fn soft_delete_node(
@@ -835,6 +895,7 @@ pub mod delete {
         space_id: Uuid,
         node_id: Uuid,
         deleted_by: Uuid,
+        recursive: bool,
     ) -> Result<DateTime<Utc>> {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -899,6 +960,11 @@ pub mod delete {
         .await
         .map_err(map_sqlx_error)?;
 
+        file_change_events::record_item_deleted(
+            &mut tx, deleted_by, space_id, node_id, &node.kind, subtree, recursive,
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(purge_after)
     }
@@ -923,6 +989,7 @@ pub mod move_node {
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{NODE_COLUMNS, NodeRow};
     use super::checks;
+    use crate::file_change_events;
 
     pub struct MoveNodeArgs<'a> {
         pub pool: &'a PgPool,
@@ -954,27 +1021,35 @@ pub mod move_node {
         let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
 
         // The moved node must exist and be live; the root cannot be moved.
-        let moved = checks::live_node(&mut tx, space_id, node_id)
-            .await?
-            .ok_or_else(|| Error::not_found("node not found"))?;
-        if moved.parent_id.is_none() {
+        let moved_row = sqlx::query_as::<_, NodeRow>(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+         FOR UPDATE"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .ok_or_else(|| Error::not_found("node not found"))?;
+        let current_parent_id = moved_row.parent_id;
+        let current_name = moved_row.name.clone();
+        let moved_kind = moved_row.kind.clone();
+        if current_parent_id.is_none() {
             return Err(Error::conflict("cannot move the root node"));
         }
         if let Some(expected_parent_id) = expected_parent_id
-            && moved.parent_id != Some(expected_parent_id)
+            && current_parent_id != Some(expected_parent_id)
         {
             return Err(Error::conflict(
                 "expected_parent_id does not match the node's current parent; refresh and retry",
             ));
         }
-        let current_name: String =
-            sqlx::query_scalar("SELECT name FROM nodes WHERE space_id = $1 AND id = $2")
-                .bind(space_id)
-                .bind(node_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(map_sqlx_error)?;
         let final_name = new_name.unwrap_or(&current_name);
+        if current_parent_id == Some(new_parent_id) && final_name == current_name {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return moved_row.into_node();
+        }
 
         // Destination must be a live folder.
         checks::require_live_folder(&mut tx, space_id, new_parent_id).await?;
@@ -1017,7 +1092,7 @@ pub mod move_node {
         }
 
         // Destination fanout, only when actually changing parent.
-        if moved.parent_id != Some(new_parent_id) {
+        if current_parent_id != Some(new_parent_id) {
             checks::require_fanout(&mut tx, space_id, new_parent_id, caps).await?;
         }
 
@@ -1033,6 +1108,20 @@ pub mod move_node {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+        file_change_events::record_item_moved(
+            &mut tx,
+            file_change_events::ItemMovedEvent {
+                actor_account_id: updated_by,
+                space_id,
+                node_id,
+                item_kind: &moved_kind,
+                parent_node_id_before: current_parent_id,
+                parent_node_id_after: new_parent_id,
+                name_changed: final_name != current_name,
+            },
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         row.into_node()
@@ -1056,18 +1145,33 @@ pub mod save {
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
     use super::{checks, stored_text_parts};
+    use crate::file_change_events::{self, ContentMetrics};
+
+    pub struct SaveTextContentArgs<'a> {
+        pub pool: &'a PgPool,
+        pub space_id: Uuid,
+        pub node_id: Uuid,
+        pub content: &'a StoredContent,
+        pub expected_sha256: Option<&'a str>,
+        pub updated_by: Uuid,
+        pub event_op_type: &'static str,
+        pub caps: Limits,
+    }
 
     /// Replace a live text's content + metrics, attributing the update to
     /// `updated_by` on both the text and its node.
-    pub async fn save_text_content(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-        content: &StoredContent,
-        expected_sha256: Option<&str>,
-        updated_by: Uuid,
-        caps: Limits,
-    ) -> Result<(Node, TextObject)> {
+    pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, TextObject)> {
+        let SaveTextContentArgs {
+            pool,
+            space_id,
+            node_id,
+            content,
+            expected_sha256,
+            updated_by,
+            event_op_type,
+            caps,
+        } = args;
+
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
@@ -1076,32 +1180,58 @@ pub mod save {
         // Current byte length/hash (for budget delta + optimistic guard); the
         // text row is locked so `expected_sha256` is compared atomically with
         // the following update.
-        let previous: Option<(i64, String)> = sqlx::query_as(
-            "SELECT d.byte_len::bigint, d.content_sha256 FROM text_objects d \
-         JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
-         WHERE d.space_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL \
-         FOR UPDATE OF d",
-        )
+        let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+         FOR UPDATE"
+        ))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(map_sqlx_error)?;
+        .map_err(map_sqlx_error)?
+        .ok_or_else(|| Error::not_found("text not found"))?;
 
-        let (previous_bytes, previous_sha256) =
-            previous.ok_or_else(|| Error::not_found("text not found"))?;
+        let current_text = sqlx::query_as::<_, TextRow>(&format!(
+            "SELECT {TEXT_COLUMNS} FROM text_objects \
+         WHERE space_id = $1 AND node_id = $2 \
+         FOR UPDATE"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .ok_or_else(|| Error::not_found("text not found"))?;
         if let Some(expected) = expected_sha256
-            && expected != previous_sha256
+            && expected != current_text.content_sha256
         {
             return Err(Error::conflict(
                 "expected_sha256 does not match the current text; read it again",
             ));
         }
 
-        checks::require_content_budget(&mut tx, space_id, previous_bytes, content.byte_len, caps)
-            .await?;
-
         let (storage_format, content_text, encrypted_payload) = stored_text_parts(content);
+        let content_changed = current_text.storage_format != storage_format
+            || current_text.content.as_deref() != content_text
+            || current_text.encrypted_payload.as_ref() != encrypted_payload
+            || current_text.content_sha256 != content.content_sha256
+            || current_text.byte_len != content.byte_len
+            || current_text.line_count != content.line_count;
+        if !content_changed {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok((node_row.into_node()?, current_text.into_text()?));
+        }
+
+        checks::require_content_budget(
+            &mut tx,
+            space_id,
+            current_text.byte_len,
+            content.byte_len,
+            caps,
+        )
+        .await?;
+
         let doc_row = sqlx::query_as::<_, TextRow>(&format!(
             "UPDATE text_objects \
          SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
@@ -1133,6 +1263,17 @@ pub mod save {
         .await
         .map_err(map_sqlx_error)?;
 
+        file_change_events::record_text_changed(
+            &mut tx,
+            updated_by,
+            space_id,
+            node_id,
+            event_op_type,
+            ContentMetrics::new(current_text.byte_len, current_text.line_count),
+            ContentMetrics::from_text(content),
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok((node_row.into_node()?, doc_row.into_text()?))
     }
@@ -1157,6 +1298,7 @@ pub mod update {
     use super::super::error::{map_constraint_error, map_sqlx_error};
     use super::super::rows::{NODE_COLUMNS, NodeRow};
     use super::checks;
+    use crate::file_change_events;
 
     /// Update `node_id`'s `name` and/or `sort_order` in place, attributing the change
     /// to `updated_by`. `None` fields are left unchanged.
@@ -1172,13 +1314,35 @@ pub mod update {
 
         checks::lock_space(&mut tx, space_id).await?;
 
-        let node = checks::live_node(&mut tx, space_id, node_id)
-            .await?
-            .ok_or_else(|| Error::not_found("node not found"))?;
+        let current = sqlx::query_as::<_, NodeRow>(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+         FOR UPDATE"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .ok_or_else(|| Error::not_found("node not found"))?;
+        let node_kind = current.kind.clone();
+        let parent_id = current.parent_id;
+        let current_name = current.name.clone();
+        let current_sort_order = current.sort_order;
 
-        if let Some(name) = new_name {
+        let name_changed = new_name.is_some_and(|name| name != current_name);
+        let sort_order_changed =
+            new_sort_order.is_some_and(|sort_order| sort_order != current_sort_order);
+        if !name_changed && !sort_order_changed {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return current.into_node();
+        }
+
+        if let Some(name) = new_name
+            && name_changed
+        {
             // The root node (no parent) cannot be renamed.
-            let Some(parent_id) = node.parent_id else {
+            let Some(parent_id) = parent_id else {
                 return Err(Error::conflict("cannot rename the root node"));
             };
             checks::require_sibling_unique(&mut tx, space_id, parent_id, name, Some(node_id))
@@ -1202,6 +1366,17 @@ pub mod update {
         .map_err(map_constraint_error)?
         .ok_or_else(|| Error::not_found("node not found"))?;
 
+        file_change_events::record_item_updated(
+            &mut tx,
+            updated_by,
+            space_id,
+            node_id,
+            &node_kind,
+            name_changed,
+            sort_order_changed,
+        )
+        .await?;
+
         tx.commit().await.map_err(map_sqlx_error)?;
         row.into_node()
     }
@@ -1213,13 +1388,27 @@ pub mod update {
         node_id: Uuid,
         metadata: &Value,
         updated_by: Uuid,
+        event_op_type: &'static str,
     ) -> Result<Node> {
         let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
         checks::lock_space(&mut tx, space_id).await?;
-        checks::live_node(&mut tx, space_id, node_id)
-            .await?
-            .ok_or_else(|| Error::not_found("node not found"))?;
+        let current = sqlx::query_as::<_, NodeRow>(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+         FOR UPDATE"
+        ))
+        .bind(space_id)
+        .bind(node_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .ok_or_else(|| Error::not_found("node not found"))?;
+        let node_kind = current.kind.clone();
+        if current.metadata == *metadata {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return current.into_node();
+        }
 
         let row = sqlx::query_as::<_, NodeRow>(&format!(
             "UPDATE nodes \
@@ -1234,6 +1423,16 @@ pub mod update {
         .await
         .map_err(map_constraint_error)?
         .ok_or_else(|| Error::not_found("node not found"))?;
+
+        file_change_events::record_metadata_changed(
+            &mut tx,
+            updated_by,
+            space_id,
+            node_id,
+            &node_kind,
+            event_op_type,
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         row.into_node()

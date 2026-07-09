@@ -13,6 +13,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use notegate_model::{Caller, NodeKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,14 +26,18 @@ use crate::rest::dto::{NodeOut, NodeRef, attribution_ids, parse_kind};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    ChildrenRequest, CreateFolder, CreateText, DeleteNode, ListNodesRequest, MoveNode,
-    NodeListSort, WriteTarget, WriteText, WriteTextBody,
+    ChildrenRequest, CreateFolder, CreateText, DeleteNode, FileChangeEvent, ListFileChangeEvents,
+    ListNodesRequest, MoveNode, NodeListSort, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/spaces/{space_id}/paths/resolve", get(resolve_path))
         .route("/v1/spaces/{space_id}/nodes", get(list).post(create))
+        .route(
+            "/v1/spaces/{space_id}/file-change-events",
+            get(list_file_change_events),
+        )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}",
             get(get_node).patch(update).delete(delete),
@@ -85,6 +90,89 @@ pub(crate) async fn resolve_path(
         .find_account_refs(&attribution_ids([&view]))
         .await?;
     Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListFileChangeEventsQuery {
+    node_id: Option<Uuid>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+/// File change event history entry returned by `GET /api/v1/spaces/{space_id}/file-change-events`.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct FileChangeEventOut {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+    pub space_id: Uuid,
+    pub node_id: Option<Uuid>,
+    pub actor_account_id: Option<Uuid>,
+    pub op_type: String,
+    pub metadata: Value,
+}
+
+impl From<&FileChangeEvent> for FileChangeEventOut {
+    fn from(event: &FileChangeEvent) -> Self {
+        Self {
+            id: event.id,
+            created_at: event.created_at,
+            space_id: event.space_id,
+            node_id: event.node_id,
+            actor_account_id: event.actor_account_id,
+            op_type: event.op_type.clone(),
+            metadata: event.metadata.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct FileChangeEventListResponse {
+    events: Vec<FileChangeEventOut>,
+    page: Page,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/file-change-events",
+    tag = "nodes",
+    params(
+        ("space_id" = Uuid, Path),
+        ("node_id" = Option<Uuid>, Query, description = "Optional node id filter"),
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List file change event history in a space", body = FileChangeEventListResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn list_file_change_events(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+    Query(query): Query<ListFileChangeEventsQuery>,
+) -> Result<Json<FileChangeEventListResponse>, ApiError> {
+    let page = state
+        .files
+        .list_file_change_events(
+            caller.account_id(),
+            space_id,
+            ListFileChangeEvents {
+                node_id: query.node_id,
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let events = page.items.iter().map(FileChangeEventOut::from).collect();
+
+    Ok(Json(FileChangeEventListResponse {
+        events,
+        page: Page::new(
+            page.limit,
+            page.items.len(),
+            page.has_more,
+            page.next_cursor,
+        ),
+    }))
 }
 
 #[utoipa::path(
@@ -593,3 +681,7 @@ pub(crate) async fn delete(
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[cfg(test)]
+#[path = "nodes_event_tests.rs"]
+mod event_tests;
