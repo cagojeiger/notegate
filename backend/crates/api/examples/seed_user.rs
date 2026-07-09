@@ -5,9 +5,7 @@
 
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
-use notegate_db::{
-    AccountRepo, ApiKeyRepo, AuditEventRepo, CryptoKeyEpochRepo, connect, run_migrations,
-};
+use notegate_db::{AccountRepo, ApiKeyRepo, CryptoKeyEpochRepo, connect, run_migrations};
 use notegate_model::account::AccountKind;
 use notegate_model::{CreateApiKey, ResolveAttrs};
 use notegate_service::accounts::AccountService;
@@ -43,12 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let api_key_repo =
         ApiKeyRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
-    let svc = AccountService::with_api_keys(
-        account_repo,
-        api_key_repo,
-        AuditEventRepo::new(pool.clone()),
-        crypto,
-    );
+    let svc = AccountService::with_api_keys(account_repo, api_key_repo, crypto);
     let minted = svc
         .create_key(
             AccountKind::User,

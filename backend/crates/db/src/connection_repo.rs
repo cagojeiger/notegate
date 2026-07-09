@@ -4,8 +4,6 @@
 //! space. Users do not appear in this table: the space owner always has write
 //! permission through `spaces.owner_user_id`.
 
-use crate::audit_event_repo::insert_audit_event;
-use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
@@ -161,19 +159,6 @@ impl ConnectionRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        let audit_ctx = AuditContext::rest(connected_by_user_id);
-        insert_audit_event(
-            &mut tx,
-            audit_events::connection_upserted(
-                audit_ctx,
-                connected_by_user_id,
-                command.space_id,
-                command.agent_id,
-                command.permission.as_str(),
-            ),
-        )
-        .await?;
-
         tx.commit().await.map_err(map_sqlx_error)?;
         row.into_connection()
     }
@@ -188,7 +173,7 @@ impl ConnectionRepo {
         lock_owned_space(&mut tx, space_id, disconnected_by_user_id).await?;
         lock_owned_live_agent(&mut tx, agent_id, disconnected_by_user_id).await?;
 
-        let result = sqlx::query(
+        sqlx::query(
             "UPDATE space_agent_connections \
              SET disconnected_at = now(), disconnected_by_user_id = $3 \
              WHERE space_id = $1 AND agent_id = $2 AND disconnected_at IS NULL",
@@ -199,20 +184,6 @@ impl ConnectionRepo {
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-
-        if result.rows_affected() > 0 {
-            let audit_ctx = AuditContext::rest(disconnected_by_user_id);
-            insert_audit_event(
-                &mut tx,
-                audit_events::connection_disconnected(
-                    audit_ctx,
-                    disconnected_by_user_id,
-                    space_id,
-                    agent_id,
-                ),
-            )
-            .await?;
-        }
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())
