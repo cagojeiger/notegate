@@ -13,7 +13,6 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{DateTime, Utc};
 use notegate_model::{Caller, NodeKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,12 +21,14 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::page::Page;
-use crate::rest::dto::{NodeOut, NodeRef, attribution_ids, parse_kind};
+use crate::rest::dto::{
+    FileChangeEventListResponse, FileChangeEventOut, NodeOut, NodeRef, attribution_ids, parse_kind,
+};
 use crate::state::AppState;
 
 use notegate_service::files::{
-    ChildrenRequest, CreateFolder, CreateText, DeleteNode, FileChangeEvent, ListFileChangeEvents,
-    ListNodesRequest, MoveNode, NodeListSort, WriteTarget, WriteText, WriteTextBody,
+    ChildrenRequest, CreateFolder, CreateText, DeleteNode, ListFileChangeEvents, ListNodesRequest,
+    MoveNode, NodeListSort, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -99,38 +100,6 @@ pub(crate) struct ListFileChangeEventsQuery {
     cursor: Option<String>,
 }
 
-/// File change event history entry returned by `GET /api/v1/spaces/{space_id}/file-change-events`.
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct FileChangeEventOut {
-    pub id: i64,
-    pub created_at: DateTime<Utc>,
-    pub space_id: Uuid,
-    pub node_id: Option<Uuid>,
-    pub actor_account_id: Option<Uuid>,
-    pub op_type: String,
-    pub metadata: Value,
-}
-
-impl From<&FileChangeEvent> for FileChangeEventOut {
-    fn from(event: &FileChangeEvent) -> Self {
-        Self {
-            id: event.id,
-            created_at: event.created_at,
-            space_id: event.space_id,
-            node_id: event.node_id,
-            actor_account_id: event.actor_account_id,
-            op_type: event.op_type.clone(),
-            metadata: event.metadata.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct FileChangeEventListResponse {
-    events: Vec<FileChangeEventOut>,
-    page: Page,
-}
-
 #[utoipa::path(
     get,
     path = "/api/v1/spaces/{space_id}/file-change-events",
@@ -166,12 +135,7 @@ pub(crate) async fn list_file_change_events(
 
     Ok(Json(FileChangeEventListResponse {
         events,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 
@@ -261,12 +225,7 @@ pub(crate) async fn list(
 
     Ok(Json(NodesListResponse {
         nodes,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 
@@ -331,12 +290,7 @@ pub(crate) async fn children(
     Ok(Json(ChildrenResponse {
         parent: NodeRef::from(&page.parent),
         children,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 
@@ -683,5 +637,5 @@ pub(crate) async fn delete(
 }
 
 #[cfg(test)]
-#[path = "nodes_event_tests.rs"]
+#[path = "nodes_event_tests/mod.rs"]
 mod event_tests;

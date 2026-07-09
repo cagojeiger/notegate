@@ -5,7 +5,6 @@
 //! `agents` row in one transaction, attributing `owner_user_id` to the caller. API
 //! keys are persisted by `ApiKeyRepo`, not this aggregate repository.
 
-use crate::audit_event_repo::insert_audit_event;
 use crate::audit_events::{self, AuditContext};
 use crate::{active_account_predicate, map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
@@ -13,6 +12,7 @@ use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::Agent;
+use serde_json::json;
 
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
@@ -133,15 +133,17 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_ctx = AuditContext::rest(deleted_by);
-        insert_audit_event(
+        audit_events::record(
             &mut tx,
-            audit_events::agent_deleted(
-                audit_ctx,
-                owner_user_id,
-                agent_id,
-                revoked_keys.rows_affected(),
-                disconnected_connections.rows_affected(),
-            ),
+            audit_ctx,
+            owner_user_id,
+            "agent.delete",
+            "agent",
+            Some(agent_id),
+            json!({
+                "revoked_agent_keys": revoked_keys.rows_affected(),
+                "disconnected_connections": disconnected_connections.rows_affected(),
+            }),
         )
         .await?;
 
@@ -200,9 +202,14 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_ctx = AuditContext::rest(owner_user_id);
-        insert_audit_event(
+        audit_events::record(
             &mut tx,
-            audit_events::agent_created(audit_ctx, owner_user_id, row.id),
+            audit_ctx,
+            owner_user_id,
+            "agent.create",
+            "agent",
+            Some(row.id),
+            json!({}),
         )
         .await?;
 

@@ -4,6 +4,10 @@
 //! limits, decode incoming cursors into server-owned positions, and encode
 //! outgoing cursors back to opaque strings.
 
+use std::future::Future;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use crate::cursor;
@@ -56,6 +60,40 @@ pub(crate) fn paginate_by_id<T>(
         None
     };
     Ok((window, has_more, next_cursor))
+}
+
+/// Page a database-backed keyset query that returns `limit + 1` rows.
+pub(crate) async fn paginate_keyset<T, C, F, Fut>(
+    requested_limit: Option<i64>,
+    default_limit: i64,
+    max_limit: i64,
+    raw_cursor: Option<&str>,
+    fetch: F,
+    cursor_of: impl Fn(&T) -> C,
+) -> ServiceResult<(Vec<T>, i64, bool, Option<String>)>
+where
+    C: Serialize + DeserializeOwned,
+    F: FnOnce(i64, Option<C>) -> Fut,
+    Fut: Future<Output = ServiceResult<Vec<T>>>,
+{
+    let limit = clamp_limit(requested_limit, default_limit, max_limit);
+    let cursor = raw_cursor.map(cursor::decode::<C>).transpose()?;
+
+    let mut items = fetch(limit + 1, cursor).await?;
+    let has_more = items.len() as i64 > limit;
+    items.truncate(limit as usize);
+    let next_cursor = if has_more {
+        items
+            .last()
+            .map(cursor_of)
+            .map(|cursor| cursor::encode(&cursor))
+            .transpose()
+            .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
+    } else {
+        None
+    };
+
+    Ok((items, limit, has_more, next_cursor))
 }
 
 #[cfg(test)]

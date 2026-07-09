@@ -1,11 +1,11 @@
 //! Space lifecycle persistence.
 
-use crate::audit_event_repo::insert_audit_event;
 use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
+use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -153,9 +153,14 @@ impl SpaceRepo {
         .map_err(map_constraint_error)?;
 
         let audit_ctx = AuditContext::rest(owner_user_id);
-        insert_audit_event(
+        audit_events::record(
             &mut tx,
-            audit_events::space_created(audit_ctx, owner_user_id, row.id),
+            audit_ctx,
+            owner_user_id,
+            "space.create",
+            "space",
+            Some(row.id),
+            json!({}),
         )
         .await?;
 
@@ -370,9 +375,14 @@ impl SpaceRepo {
             changed_fields.push("sort_order");
         }
         let audit_ctx = AuditContext::rest(owner_user_id);
-        insert_audit_event(
+        audit_events::record(
             &mut tx,
-            audit_events::space_updated(audit_ctx, owner_user_id, space_id, changed_fields),
+            audit_ctx,
+            owner_user_id,
+            "space.update",
+            "space",
+            Some(space_id),
+            json!({ "changed_fields": changed_fields }),
         )
         .await?;
 
@@ -405,9 +415,14 @@ impl SpaceRepo {
         }
 
         let audit_ctx = AuditContext::rest(deleted_by_user_id);
-        insert_audit_event(
+        audit_events::record(
             &mut tx,
-            audit_events::space_deleted(audit_ctx, owner_user_id, space_id),
+            audit_ctx,
+            owner_user_id,
+            "space.delete",
+            "space",
+            Some(space_id),
+            json!({}),
         )
         .await?;
 

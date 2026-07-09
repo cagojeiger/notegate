@@ -82,12 +82,7 @@ pub(crate) async fn list(
     let spaces = page.items.iter().map(SpaceOut::from).collect();
     Ok(Json(SpacesListResponse {
         spaces,
-        page: Page::new(
-            page.limit,
-            page.items.len(),
-            page.has_more,
-            page.next_cursor,
-        ),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
 }
 

@@ -26,4 +26,13 @@ impl Page {
             next_cursor,
         }
     }
+
+    pub fn from_items<T>(
+        limit: i64,
+        items: &[T],
+        has_more: bool,
+        next_cursor: Option<String>,
+    ) -> Self {
+        Self::new(limit, items.len(), has_more, next_cursor)
+    }
 }

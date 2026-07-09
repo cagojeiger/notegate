@@ -5,45 +5,30 @@ use notegate_db::AuditEventRepo;
 use notegate_model::{AuditEventCursor, AuditEventPage, ListAuditEvents};
 use uuid::Uuid;
 
-use crate::pagination::clamp_limit;
-use crate::{ServiceError, ServiceResult, cursor};
+use crate::ServiceResult;
+use crate::pagination::paginate_keyset;
 
 pub async fn list_audit_event_page(
     audit_events: &AuditEventRepo,
     owner_user_id: Uuid,
     request: ListAuditEvents,
 ) -> ServiceResult<AuditEventPage> {
-    let limit = clamp_limit(
+    let (items, limit, has_more, next_cursor) = paginate_keyset(
         request.limit,
         limits::AUDIT_EVENTS_DEFAULT_LIMIT,
         limits::AUDIT_EVENTS_MAX_LIMIT,
-    );
-    let cursor = match request.cursor.as_deref() {
-        None => None,
-        Some(raw) => Some(
-            cursor::decode::<AuditEventCursor>(raw)
-                .map_err(|_error| ServiceError::InvalidInput("invalid cursor".to_owned()))?,
-        ),
-    };
-
-    let mut items = audit_events
-        .list_by_owner(owner_user_id, limit + 1, cursor.as_ref())
-        .await?;
-    let has_more = items.len() as i64 > limit;
-    items.truncate(limit as usize);
-    let next_cursor = if has_more {
-        items
-            .last()
-            .map(|event| AuditEventCursor {
-                created_at: event.created_at,
-                id: event.id,
-            })
-            .map(|cursor| cursor::encode(&cursor))
-            .transpose()
-            .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
-    } else {
-        None
-    };
+        request.cursor.as_deref(),
+        |limit, cursor: Option<AuditEventCursor>| async move {
+            Ok(audit_events
+                .list_by_owner(owner_user_id, limit, cursor.as_ref())
+                .await?)
+        },
+        |event| AuditEventCursor {
+            created_at: event.created_at,
+            id: event.id,
+        },
+    )
+    .await?;
 
     Ok(AuditEventPage {
         items,

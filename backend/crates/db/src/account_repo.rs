@@ -7,8 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::audit_event_repo::insert_audit_event;
-use crate::audit_events::{self, AccountDeleteCounts, AuditContext};
+use crate::audit_events::{self, AuditContext};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
@@ -17,6 +16,7 @@ use notegate_core::{Error, Result, limits};
 use notegate_model::ResolveAttrs;
 use notegate_model::account::{Account, AccountKind, AccountRef};
 use notegate_model::user::User;
+use serde_json::json;
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
 
@@ -341,18 +341,19 @@ impl AccountRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_ctx = AuditContext::rest(deleted_by);
-        insert_audit_event(
+        audit_events::record(
             &mut tx,
-            audit_events::account_deleted(
-                audit_ctx,
-                account_id,
-                AccountDeleteCounts {
-                    deactivated_agents: deactivated_agents.rows_affected(),
-                    revoked_api_keys: revoked_api_keys.rows_affected(),
-                    revoked_browser_sessions: revoked_browser_sessions.rows_affected(),
-                    disconnected_connections: disconnected_connections.rows_affected(),
-                },
-            ),
+            audit_ctx,
+            account_id,
+            "account.delete",
+            "account",
+            Some(account_id),
+            json!({
+                "deactivated_agents": deactivated_agents.rows_affected(),
+                "revoked_api_keys": revoked_api_keys.rows_affected(),
+                "revoked_browser_sessions": revoked_browser_sessions.rows_affected(),
+                "disconnected_connections": disconnected_connections.rows_affected(),
+            }),
         )
         .await?;
 

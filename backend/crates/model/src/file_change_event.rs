@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::EventCursor;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileChangeEvent {
     pub id: i64,
@@ -23,11 +25,7 @@ pub struct ListFileChangeEvents {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct FileChangeEventCursor {
-    pub created_at: DateTime<Utc>,
-    pub id: i64,
-}
+pub type FileChangeEventCursor = EventCursor;
 
 #[derive(Debug, Clone)]
 pub struct FileChangeEventPage {

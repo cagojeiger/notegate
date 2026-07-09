@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::EventCursor;
+
 /// One audit event row, scoped to the caller's own `owner_user_id` at read time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditEvent {
@@ -25,12 +27,7 @@ pub struct ListAuditEvents {
     pub cursor: Option<String>,
 }
 
-/// Keyset cursor for audit event list order `(created_at DESC, id DESC)`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AuditEventCursor {
-    pub created_at: DateTime<Utc>,
-    pub id: i64,
-}
+pub type AuditEventCursor = EventCursor;
 
 #[derive(Debug, Clone)]
 pub struct AuditEventPage {
