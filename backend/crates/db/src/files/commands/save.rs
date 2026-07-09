@@ -8,7 +8,6 @@ use notegate_core::limits::Limits;
 use notegate_core::{Error, Result};
 use notegate_model::files::StoredContent;
 use notegate_model::{Node, TextObject};
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -16,6 +15,7 @@ use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::{checks, stored_text_parts};
 use crate::file_change_events;
+use crate::files_repo::TextMutationKind;
 
 pub struct SaveTextContentArgs<'a> {
     pub pool: &'a PgPool,
@@ -24,7 +24,7 @@ pub struct SaveTextContentArgs<'a> {
     pub content: &'a StoredContent,
     pub expected_sha256: Option<&'a str>,
     pub updated_by: Uuid,
-    pub event_op_type: &'static str,
+    pub mutation_kind: TextMutationKind,
     pub caps: Limits,
 }
 
@@ -38,7 +38,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         content,
         expected_sha256,
         updated_by,
-        event_op_type,
+        mutation_kind,
         caps,
     } = args;
 
@@ -133,18 +133,15 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .await
     .map_err(map_sqlx_error)?;
 
-    file_change_events::record(
+    file_change_events::text_saved(
         &mut tx,
         file_change_events::context(updated_by, space_id),
-        Some(node_id),
-        event_op_type,
-        json!({
-            "item_kind": "text",
-            "byte_len_before": current_text.byte_len,
-            "byte_len_after": content.byte_len,
-            "line_count_before": current_text.line_count,
-            "line_count_after": content.line_count,
-        }),
+        node_id,
+        mutation_kind,
+        current_text.byte_len,
+        content.byte_len,
+        current_text.line_count,
+        content.line_count,
     )
     .await?;
 

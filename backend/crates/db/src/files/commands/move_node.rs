@@ -10,7 +10,6 @@
 use notegate_core::limits::{self, Limits};
 use notegate_core::{Error, Result};
 use notegate_model::Node;
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -137,17 +136,14 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         .await
         .map_err(map_constraint_error)?;
 
-    file_change_events::record(
+    file_change_events::node_moved(
         &mut tx,
         file_change_events::context(updated_by, space_id),
-        Some(node_id),
-        "item.move",
-        json!({
-            "item_kind": moved_kind,
-            "parent_node_id_before": current_parent_id,
-            "parent_node_id_after": new_parent_id,
-            "name_changed": final_name != current_name,
-        }),
+        node_id,
+        &moved_kind,
+        current_parent_id,
+        new_parent_id,
+        final_name != current_name,
     )
     .await?;
 
