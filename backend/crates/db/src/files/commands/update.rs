@@ -10,7 +10,6 @@
 use notegate_core::{Error, Result};
 use notegate_model::Node;
 use serde_json::Value;
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -18,6 +17,7 @@ use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{NODE_COLUMNS, NodeRow};
 use super::checks;
 use crate::file_change_events;
+use crate::files_repo::MetadataMutationKind;
 
 /// Update `node_id`'s `name` and/or `sort_order` in place, attributing the change
 /// to `updated_by`. `None` fields are left unchanged.
@@ -87,16 +87,13 @@ pub async fn update_node_metadata(
     .map_err(map_constraint_error)?
     .ok_or_else(|| Error::not_found("node not found"))?;
 
-    file_change_events::record(
+    file_change_events::node_updated(
         &mut tx,
         file_change_events::context(updated_by, space_id),
-        Some(node_id),
-        "item.update",
-        json!({
-            "item_kind": node_kind,
-            "name_changed": name_changed,
-            "sort_order_changed": sort_order_changed,
-        }),
+        node_id,
+        &node_kind,
+        name_changed,
+        sort_order_changed,
     )
     .await?;
 
@@ -111,7 +108,7 @@ pub async fn replace_node_metadata(
     node_id: Uuid,
     metadata: &Value,
     updated_by: Uuid,
-    event_op_type: &'static str,
+    mutation_kind: MetadataMutationKind,
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -147,12 +144,12 @@ pub async fn replace_node_metadata(
     .map_err(map_constraint_error)?
     .ok_or_else(|| Error::not_found("node not found"))?;
 
-    file_change_events::record(
+    file_change_events::node_metadata_replaced(
         &mut tx,
         file_change_events::context(updated_by, space_id),
-        Some(node_id),
-        event_op_type,
-        json!({ "item_kind": node_kind }),
+        node_id,
+        mutation_kind,
+        &node_kind,
     )
     .await?;
 

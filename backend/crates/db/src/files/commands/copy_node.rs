@@ -11,7 +11,6 @@ use notegate_core::{Error, Result};
 use notegate_model::files::CopyCounts;
 use notegate_model::{FileStorageKind, Node};
 use serde_json::Value;
-use serde_json::json;
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
@@ -116,20 +115,15 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     }
     let copied_root = copied_root.ok_or_else(|| Error::internal("copy produced no root node"))?;
 
-    file_change_events::record(
+    file_change_events::node_copied(
         &mut tx,
         file_change_events::context(created_by, space_id),
-        Some(copied_root.id),
-        "item.copy",
-        json!({
-            "item_kind": source_kind,
-            "copied_from_node_id": source_node_id,
-            "parent_node_id_after": new_parent_id,
-            "copied_nodes": counts.nodes,
-            "copied_texts": counts.texts,
-            "copied_files": counts.files,
-            "recursive": recursive,
-        }),
+        copied_root.id,
+        &source_kind,
+        source_node_id,
+        new_parent_id,
+        counts,
+        recursive,
     )
     .await?;
 

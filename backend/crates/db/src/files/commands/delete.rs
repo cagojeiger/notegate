@@ -8,7 +8,6 @@
 
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -86,16 +85,13 @@ pub async fn soft_delete_node(
     .await
     .map_err(map_sqlx_error)?;
 
-    file_change_events::record(
+    file_change_events::node_deleted(
         &mut tx,
         file_change_events::context(deleted_by, space_id),
-        Some(node_id),
-        "item.delete",
-        json!({
-            "item_kind": node.kind,
-            "deleted_nodes": subtree,
-            "recursive": recursive,
-        }),
+        node_id,
+        &node.kind,
+        subtree,
+        recursive,
     )
     .await?;
 
