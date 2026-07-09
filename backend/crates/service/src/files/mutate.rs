@@ -47,6 +47,63 @@ impl FilesService {
         })
     }
 
+    /// Create a folder and any missing ancestor folders (`mkdir -p`). Each
+    /// path segment is resolved in turn: an existing folder is descended
+    /// into, an existing non-folder is a conflict, and a missing segment is
+    /// created. Returns the final folder's view and the paths that were
+    /// actually created (already-existing ancestors are not included).
+    pub async fn create_folder_recursive(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        path: &str,
+    ) -> ServiceResult<(NodeView, Vec<String>)> {
+        let mut current = self.resolve_path(caller_account_id, space_id, "/").await?;
+        let mut current_path = "/".to_owned();
+        let mut created_paths = Vec::new();
+
+        for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+            let next_path = if current_path == "/" {
+                format!("/{segment}")
+            } else {
+                format!("{current_path}/{segment}")
+            };
+
+            match self
+                .resolve_path(caller_account_id, space_id, &next_path)
+                .await
+            {
+                Ok(existing) if existing.node.kind == NodeKind::Folder => {
+                    current = existing;
+                    current_path = next_path;
+                }
+                Ok(_existing) => {
+                    return Err(ServiceError::Conflict(format!(
+                        "path component '{next_path}' exists and is not a folder"
+                    )));
+                }
+                Err(ServiceError::NotFound(_)) => {
+                    let created = self
+                        .create_folder(
+                            caller_account_id,
+                            space_id,
+                            CreateFolder {
+                                parent_node_id: current.node.id,
+                                name: segment.to_owned(),
+                            },
+                        )
+                        .await?;
+                    created_paths.push(created.path.clone());
+                    current = created;
+                    current_path = next_path;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Ok((current, created_paths))
+    }
+
     /// Create an empty text (`touch`). Requires write permission.
     pub async fn create_text(
         &self,
