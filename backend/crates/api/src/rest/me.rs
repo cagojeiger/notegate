@@ -106,7 +106,7 @@ pub(crate) async fn list_keys(
 #[utoipa::path(
     get,
     path = "/api/v1/me/audit-events",
-    tag = "identity",
+    tag = "events",
     params(
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),

@@ -68,6 +68,7 @@ use crate::state::AppState;
     modifiers(&SecurityAddon),
     tags(
         (name = "identity", description = "Current caller identity"),
+        (name = "events", description = "Audit and file change event history"),
         (name = "spaces", description = "Space lifecycle"),
         (name = "nodes", description = "Folder/text tree metadata"),
         (name = "text", description = "Text content read/write/patch"),

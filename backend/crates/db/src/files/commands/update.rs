@@ -49,6 +49,10 @@ pub async fn update_node_metadata(
     let current_name = current.name.clone();
     let current_sort_order = current.sort_order;
 
+    if new_name.is_some() && parent_id.is_none() {
+        return Err(Error::conflict("cannot rename the root node"));
+    }
+
     let name_changed = new_name.is_some_and(|name| name != current_name);
     let sort_order_changed =
         new_sort_order.is_some_and(|sort_order| sort_order != current_sort_order);
@@ -60,7 +64,6 @@ pub async fn update_node_metadata(
     if let Some(name) = new_name
         && name_changed
     {
-        // The root node (no parent) cannot be renamed.
         let Some(parent_id) = parent_id else {
             return Err(Error::conflict("cannot rename the root node"));
         };

@@ -10,6 +10,7 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
+use notegate_core::Error;
 use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
@@ -66,11 +67,14 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     let (account, space_id, root_id) = space_with_root(&db.pool, "file-change-events").await?;
     let repo = FilesRepo::new(db.pool.clone());
 
-    let root_before = repo.find_node(space_id, root_id).await?.expect("root");
-    let root_after = repo
+    let root_rename = repo
         .update_node_metadata(space_id, root_id, Some("/"), None, account)
-        .await?;
-    assert_eq!(root_after.updated_at, root_before.updated_at);
+        .await
+        .expect_err("root rename should be rejected even when the name is unchanged");
+    assert!(matches!(
+        root_rename,
+        Error::Conflict(ref message) if message == "cannot rename the root node"
+    ));
 
     let folder = repo
         .insert_folder(

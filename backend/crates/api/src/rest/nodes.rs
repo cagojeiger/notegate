@@ -103,7 +103,7 @@ pub(crate) struct ListFileChangeEventsQuery {
 #[utoipa::path(
     get,
     path = "/api/v1/spaces/{space_id}/file-change-events",
-    tag = "nodes",
+    tag = "events",
     params(
         ("space_id" = Uuid, Path),
         ("node_id" = Option<Uuid>, Query, description = "Optional node id filter"),

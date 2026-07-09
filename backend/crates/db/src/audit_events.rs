@@ -7,11 +7,15 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AuditContext {
     actor_account_id: Uuid,
+    source: &'static str,
 }
 
 impl AuditContext {
     pub(crate) fn rest(actor_account_id: Uuid) -> Self {
-        Self { actor_account_id }
+        Self {
+            actor_account_id,
+            source: "rest",
+        }
     }
 }
 
@@ -29,7 +33,7 @@ pub(crate) async fn record(
         NewAuditEvent {
             owner_user_id: Some(owner_user_id),
             actor_account_id: Some(ctx.actor_account_id),
-            source: "rest",
+            source: ctx.source,
             op_type,
             resource_type,
             resource_id,
