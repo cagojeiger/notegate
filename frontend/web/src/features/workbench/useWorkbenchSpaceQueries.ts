@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { queryKeys } from "../../api/queryKeys";
+import { invalidateAuditEvents } from "../../api/queryInvalidation";
 import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
 import type { Space, SpacesListResponse } from "../../api/types";
 import { buildSpaceSortOrderUpdates } from "../spaces/spaceReorder";
@@ -18,6 +19,7 @@ export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
     mutationFn: (name: string) => createSpace(client, name),
     onSuccess: (space) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateAuditEvents(queryClient);
       onCreated(space);
     }
   });
@@ -28,7 +30,10 @@ export function useUpdateSpaceMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ spaceId, name, sort_order }: { spaceId: string; name?: string; sort_order?: number }) => updateSpace(client, spaceId, { name, sort_order }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.spaces })
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateAuditEvents(queryClient);
+    }
   });
 }
 
@@ -49,7 +54,10 @@ export function useReorderSpacesMutation() {
     onError: (_error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.spaces, context.previous);
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.spaces })
+    onSettled: (_data, error) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      if (!error) invalidateAuditEvents(queryClient);
+    }
   });
 }
 
@@ -61,6 +69,7 @@ export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
     onSuccess: (_data, spaceId) => {
       onDeleted(spaceId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateAuditEvents(queryClient);
     }
   });
 }

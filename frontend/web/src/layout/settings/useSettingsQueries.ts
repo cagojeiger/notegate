@@ -4,6 +4,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey, type Agent } from "../../api/agents";
 import { connectAgent, disconnectAgent, listConnections, type Connection, type ConnectionListResponse, type Permission } from "../../api/connections";
 import { createMyKey, listMyKeys, revokeMyKey, type ApiKeyListResponse, type MintedKey } from "../../api/keys";
+import { invalidateAuditEvents } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { listSpaces } from "../../api/spaces";
 
@@ -25,6 +26,7 @@ export function useCreateAgentMutation(onCreated: () => void) {
     onSuccess: () => {
       onCreated();
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+      invalidateAuditEvents(queryClient);
     }
   });
 }
@@ -37,6 +39,7 @@ export function useDeleteAgentMutation(onDeleted: () => void) {
     onSuccess: () => {
       onDeleted();
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+      invalidateAuditEvents(queryClient);
     }
   });
 }
@@ -79,8 +82,9 @@ export function useSetAgentSpaceAccessMutation() {
       if (!connection) return;
       queryClient.setQueryData<ConnectionListResponse>(queryKeys.connections(variables.spaceId), (current) => setAgentSpaceAccessInCache(current, variables, connection));
     },
-    onSettled: (_connection, _error, variables) => {
+    onSettled: (_connection, error, variables) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.connections(variables.spaceId) });
+      if (!error) invalidateAuditEvents(queryClient);
     }
   });
 }
@@ -129,6 +133,7 @@ export function useCreateApiKeyMutation(queryKey: QueryKey, create: (input: { na
     onSuccess: (key) => {
       onCreated(key);
       void queryClient.invalidateQueries({ queryKey });
+      invalidateAuditEvents(queryClient);
     }
   });
 }
@@ -140,6 +145,7 @@ export function useRevokeApiKeyMutation(queryKey: QueryKey, revoke: (id: string)
     onSuccess: () => {
       onRevoked();
       void queryClient.invalidateQueries({ queryKey });
+      invalidateAuditEvents(queryClient);
     }
   });
 }
