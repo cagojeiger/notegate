@@ -368,7 +368,7 @@ impl FilesRepo {
             content,
             expected_sha256,
             updated_by,
-            event_op_type: mutation_kind.op_type(),
+            mutation_kind,
             caps: self.limits,
         })
         .await
@@ -445,7 +445,7 @@ impl FilesRepo {
             node_id,
             metadata,
             updated_by,
-            mutation_kind.op_type(),
+            mutation_kind,
         )
         .await
     }

@@ -9,7 +9,6 @@ use notegate_core::limits::{self, Limits};
 use notegate_core::{Error, Result};
 use notegate_model::files::{StoredContent, StoredFile};
 use notegate_model::{FileObject, Node, TextObject};
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -45,15 +44,11 @@ pub async fn insert_folder(
         .await
         .map_err(map_constraint_error)?;
 
-    file_change_events::record(
+    file_change_events::folder_created(
         &mut tx,
         file_change_events::context(created_by, space_id),
-        Some(row.id),
-        "folder.create",
-        json!({
-            "item_kind": "folder",
-            "parent_node_id": parent_id,
-        }),
+        row.id,
+        parent_id,
     )
     .await?;
 
@@ -111,17 +106,13 @@ pub async fn insert_text(
         .await
         .map_err(map_constraint_error)?;
 
-    file_change_events::record(
+    file_change_events::text_created(
         &mut tx,
         file_change_events::context(created_by, space_id),
-        Some(node_row.id),
-        "text.create",
-        json!({
-            "item_kind": "text",
-            "parent_node_id": parent_id,
-            "byte_len_after": content.byte_len,
-            "line_count_after": content.line_count,
-        }),
+        node_row.id,
+        parent_id,
+        content.byte_len,
+        content.line_count,
     )
     .await?;
 
@@ -183,16 +174,12 @@ pub async fn insert_file(
         .await
         .map_err(map_constraint_error)?;
 
-    file_change_events::record(
+    file_change_events::file_created(
         &mut tx,
         file_change_events::context(created_by, space_id),
-        Some(node_row.id),
-        "file.create",
-        json!({
-            "item_kind": "file",
-            "parent_node_id": parent_id,
-            "byte_len_after": file.byte_len,
-        }),
+        node_row.id,
+        parent_id,
+        file.byte_len,
     )
     .await?;
 
