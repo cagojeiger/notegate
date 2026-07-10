@@ -8,6 +8,7 @@
 
 use notegate_core::{Error, Result};
 
+mod account_delete;
 pub mod account_repo;
 pub mod agent_repo;
 pub mod api_key_repo;
