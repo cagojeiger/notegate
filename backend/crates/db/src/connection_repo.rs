@@ -9,7 +9,6 @@ use crate::{map_sqlx_error, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{ConnectAgent, Permission, SpaceAgentConnection};
-use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -179,17 +178,13 @@ impl ConnectionRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_ctx = AuditContext::rest(connected_by_user_id);
-        audit_events::record(
+        audit_events::connection_upserted(
             &mut tx,
             audit_ctx,
             connected_by_user_id,
-            "connection.upsert",
-            "space",
-            Some(command.space_id),
-            json!({
-                "agent_id": command.agent_id,
-                "permission": command.permission.as_str(),
-            }),
+            command.space_id,
+            command.agent_id,
+            command.permission.as_str(),
         )
         .await?;
 
@@ -221,14 +216,12 @@ impl ConnectionRepo {
 
         if result.rows_affected() > 0 {
             let audit_ctx = AuditContext::rest(disconnected_by_user_id);
-            audit_events::record(
+            audit_events::connection_disconnected(
                 &mut tx,
                 audit_ctx,
                 disconnected_by_user_id,
-                "connection.disconnect",
-                "space",
-                Some(space_id),
-                json!({ "agent_id": agent_id }),
+                space_id,
+                agent_id,
             )
             .await?;
         }

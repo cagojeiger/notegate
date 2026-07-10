@@ -5,7 +5,6 @@ use crate::{map_sqlx_error, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
-use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -153,16 +152,7 @@ impl SpaceRepo {
         .map_err(map_constraint_error)?;
 
         let audit_ctx = AuditContext::rest(owner_user_id);
-        audit_events::record(
-            &mut tx,
-            audit_ctx,
-            owner_user_id,
-            "space.create",
-            "space",
-            Some(row.id),
-            json!({}),
-        )
-        .await?;
+        audit_events::space_created(&mut tx, audit_ctx, owner_user_id, row.id).await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
@@ -367,16 +357,8 @@ impl SpaceRepo {
             changed_fields.push("sort_order");
         }
         let audit_ctx = AuditContext::rest(owner_user_id);
-        audit_events::record(
-            &mut tx,
-            audit_ctx,
-            owner_user_id,
-            "space.update",
-            "space",
-            Some(space_id),
-            json!({ "changed_fields": changed_fields }),
-        )
-        .await?;
+        audit_events::space_updated(&mut tx, audit_ctx, owner_user_id, space_id, &changed_fields)
+            .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
@@ -407,16 +389,7 @@ impl SpaceRepo {
         }
 
         let audit_ctx = AuditContext::rest(deleted_by_user_id);
-        audit_events::record(
-            &mut tx,
-            audit_ctx,
-            owner_user_id,
-            "space.delete",
-            "space",
-            Some(space_id),
-            json!({}),
-        )
-        .await?;
+        audit_events::space_deleted(&mut tx, audit_ctx, owner_user_id, space_id).await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(())

@@ -12,7 +12,6 @@ use notegate_core::{Error, Result, limits};
 use notegate_model::CreateAgent;
 use notegate_model::account::{Account, AccountKind};
 use notegate_model::agent::Agent;
-use serde_json::json;
 
 use sqlx::{FromRow, PgPool, Row as _};
 use uuid::Uuid;
@@ -133,17 +132,13 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_ctx = AuditContext::rest(deleted_by);
-        audit_events::record(
+        audit_events::agent_deleted(
             &mut tx,
             audit_ctx,
             owner_user_id,
-            "agent.delete",
-            "agent",
-            Some(agent_id),
-            json!({
-                "revoked_agent_keys": revoked_keys.rows_affected(),
-                "disconnected_connections": disconnected_connections.rows_affected(),
-            }),
+            agent_id,
+            revoked_keys.rows_affected(),
+            disconnected_connections.rows_affected(),
         )
         .await?;
 
@@ -201,16 +196,7 @@ impl AgentRepo {
         .map_err(map_sqlx_error)?;
 
         let audit_ctx = AuditContext::rest(owner_user_id);
-        audit_events::record(
-            &mut tx,
-            audit_ctx,
-            owner_user_id,
-            "agent.create",
-            "agent",
-            Some(row.id),
-            json!({}),
-        )
-        .await?;
+        audit_events::agent_created(&mut tx, audit_ctx, owner_user_id, row.id).await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Agent::from(row))
