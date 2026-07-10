@@ -161,6 +161,7 @@ File change event metadata는 제한된 structural fact와 metric만 담는다. 
 
 ```text
 item_kind: "folder" | "text" | "file"
+parent_node_id: uuid
 copied_from_node_id: uuid
 parent_node_id_before: uuid
 parent_node_id_after: uuid
@@ -168,6 +169,8 @@ name_changed: bool
 sort_order_changed: bool
 recursive: bool
 copied_nodes: integer
+copied_texts: integer
+copied_files: integer
 deleted_nodes: integer
 byte_len_before: integer
 byte_len_after: integer

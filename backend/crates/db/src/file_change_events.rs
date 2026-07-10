@@ -1,3 +1,6 @@
+//! Thin `record` helper used by the file-tree commands to log mutations to
+//! `file_change_events` without repeating row-construction boilerplate.
+
 use crate::file_change_event_repo::{NewFileChangeEvent, insert_file_change_event};
 use notegate_core::Result;
 use serde_json::Value;

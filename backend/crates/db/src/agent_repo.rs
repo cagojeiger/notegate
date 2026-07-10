@@ -174,8 +174,7 @@ impl AgentRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let active =
-            usize::try_from(active).map_err(|_error| Error::internal("negative agent count"))?;
+        let active = crate::to_usize(active, "agent")?;
         if active >= quota.agents_per_user {
             return Err(Error::conflict(format!(
                 "creator already has the maximum of {} active agents for tier {}",
@@ -242,7 +241,7 @@ impl AgentRepo {
         .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        usize::try_from(count).map_err(|_error| Error::internal("negative agent count"))
+        crate::to_usize(count, "agent")
     }
 
     pub async fn find_active_agent_by_creator(

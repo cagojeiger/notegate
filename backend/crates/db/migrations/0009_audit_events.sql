@@ -1,13 +1,13 @@
 CREATE TABLE audit_events (
-  id bigserial PRIMARY KEY,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  owner_user_id uuid NULL,
-  actor_account_id uuid NULL,
-  source text NOT NULL CHECK (source IN ('rest', 'mcp', 'system')),
-  op_type text NOT NULL,
-  resource_type text NOT NULL,
-  resource_id uuid NULL,
-  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  owner_user_id UUID NULL,
+  actor_account_id UUID NULL,
+  source TEXT NOT NULL CHECK (source IN ('rest', 'mcp', 'system')),
+  op_type TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id UUID NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   CONSTRAINT audit_events_metadata_object CHECK (jsonb_typeof(metadata) = 'object')
 );
 

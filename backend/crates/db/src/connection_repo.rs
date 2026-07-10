@@ -130,8 +130,7 @@ impl ConnectionRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let active_connections = usize::try_from(active_connections)
-            .map_err(|_| Error::internal("negative connection count"))?;
+        let active_connections = crate::to_usize(active_connections, "connection")?;
         if active_connections >= quota.connections_per_space {
             return Err(Error::conflict(format!(
                 "space already has the maximum of {} active agent connections for tier {}",
@@ -150,8 +149,7 @@ impl ConnectionRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let connected_spaces = usize::try_from(connected_spaces)
-            .map_err(|_| Error::internal("negative connected space count"))?;
+        let connected_spaces = crate::to_usize(connected_spaces, "connected space")?;
         if connected_spaces >= quota.connected_spaces_per_agent {
             return Err(Error::conflict(format!(
                 "agent is already connected to the maximum of {} spaces for tier {}",

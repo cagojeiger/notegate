@@ -1,3 +1,6 @@
+//! Audit event persistence: insert plus self-review reads scoped to the
+//! caller's own `owner_user_id`.
+
 use crate::event_history_query::{EventCursorPosition, UuidFilter, list_event_rows};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
