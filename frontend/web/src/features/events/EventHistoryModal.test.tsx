@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
-import type { Space } from "../../api/types";
+import type { RestNode, Space } from "../../api/types";
 import { EventHistoryModal } from "./EventHistoryModal";
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };
@@ -37,6 +37,27 @@ describe("EventHistoryModal", () => {
 
     await screen.findByText("No file change events.");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/audit-events"))).toBe(false);
+  });
+
+  it("does not call the audit endpoint when the account loses audit access", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ events: [], page }));
+    const { rerender } = render(
+      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await screen.findByText("No audit events.");
+    fetchMock.mockClear();
+
+    rerender(
+      <ApiProvider apiKey="agent-key" authCacheKey="agent-key:1">
+        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents={false} onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await screen.findByText("No file change events.");
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/audit-events"))).toBe(false);
   });
 
@@ -75,7 +96,7 @@ describe("EventHistoryModal", () => {
       const path = String(input);
       if (path.includes("/api/v1/spaces/space-1/file-change-events") && path.includes("cursor=file-cursor-1")) {
         return jsonResponse({
-          events: [fileChangeEvent(2, "node.move")],
+          events: [fileChangeEvent(2, "item.move")],
           page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
         });
       }
@@ -98,10 +119,65 @@ describe("EventHistoryModal", () => {
     await screen.findByText("text.write");
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
-    expect(await screen.findByText("node.move")).toBeInTheDocument();
+    expect(await screen.findByText("item.move")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/spaces/space-1/file-change-events?limit=50&cursor=file-cursor-1");
   });
+
+  it("filters file changes by the active node", async () => {
+    const user = userEvent.setup();
+    const activeNode = textNode("node-1", space.id);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
+
+    render(
+      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+        <EventHistoryModal activeSpace={space} activeNode={activeNode} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: "File changes" }));
+    await user.click(screen.getByRole("button", { name: "Node" }));
+
+    expect(screen.getByText(activeNode.path)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+        "/api/v1/spaces/space-1/file-change-events?limit=50&node_id=node-1"
+      );
+    });
+  });
+
+  it("does not offer node scope for a node from another space", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
+
+    render(
+      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+        <EventHistoryModal activeSpace={space} activeNode={textNode("node-2", "space-2")} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: "File changes" }));
+
+    expect(screen.getByRole("button", { name: "Node" })).toBeDisabled();
+  });
 });
+
+function textNode(id: string, spaceId: string): RestNode {
+  return {
+    id,
+    space_id: spaceId,
+    parent_id: `${spaceId}-root`,
+    name: `${id}.md`,
+    kind: "text",
+    path: `/${id}.md`,
+    sort_order: 0,
+    metadata: {},
+    has_children: false,
+    created_by: { id: "account-1", kind: "user", display_name: "User" },
+    updated_by: { id: "account-1", kind: "user", display_name: "User" },
+    created_at: "2026-07-10T02:00:00Z",
+    updated_at: "2026-07-10T02:12:00Z"
+  };
+}
 
 function auditEvent(id: number, op_type: string) {
   return {

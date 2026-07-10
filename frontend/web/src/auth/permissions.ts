@@ -17,6 +17,10 @@ export function canManageAgents(me: Me | null | undefined): boolean {
   return capabilitiesFor(me).can_manage_agents;
 }
 
+export function canViewAuditEvents(me: Me | null | undefined): boolean {
+  return me?.account.kind === "user";
+}
+
 export function canWriteSpace(space: Space | null | undefined): boolean {
   return space?.permission === "write";
 }

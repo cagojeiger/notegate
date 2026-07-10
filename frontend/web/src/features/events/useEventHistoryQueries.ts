@@ -4,18 +4,17 @@ import { useApiClient } from "../../api/ApiProvider";
 import { listAuditEvents, listFileChangeEvents } from "../../api/events";
 import { queryKeys } from "../../api/queryKeys";
 
-export function useAuditEventsQuery(enabled: boolean) {
+export function useAuditEventsQuery() {
   const client = useApiClient();
   return useInfiniteQuery({
     queryKey: queryKeys.auditEvents,
     queryFn: ({ pageParam }) => listAuditEvents(client, pageParam),
     initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined),
-    enabled
+    getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined)
   });
 }
 
-export function useFileChangeEventsQuery(spaceId: string | null, nodeId: string | null, enabled: boolean) {
+export function useFileChangeEventsQuery(spaceId: string | null, nodeId: string | null) {
   const client = useApiClient();
   return useInfiniteQuery({
     queryKey: spaceId ? queryKeys.fileChangeEvents(spaceId, nodeId) : queryKeys.fileChangeEvents("none", nodeId),
@@ -25,6 +24,6 @@ export function useFileChangeEventsQuery(spaceId: string | null, nodeId: string 
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined),
-    enabled: enabled && Boolean(spaceId)
+    enabled: Boolean(spaceId)
   });
 }

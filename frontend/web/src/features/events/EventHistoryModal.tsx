@@ -19,41 +19,25 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function EventHistoryModal({ activeSpace, activeNode, canViewAuditEvents, onClose }: { activeSpace: Space | null; activeNode: RestNode | null; canViewAuditEvents: boolean; onClose: () => void }) {
   const [tab, setTab] = useState<Tab>(canViewAuditEvents ? "audit" : "files");
-  const [fileScope, setFileScope] = useState<FileScope>("space");
   const tabs = useMemo(() => TABS.filter((item) => item.id !== "audit" || canViewAuditEvents), [canViewAuditEvents]);
-  const activeNodeInSpace = activeSpace && activeNode?.space_id === activeSpace.id ? activeNode : null;
-  const selectedNodeId = fileScope === "node" ? activeNodeInSpace?.id ?? null : null;
-  const auditQuery = useAuditEventsQuery(canViewAuditEvents && tab === "audit");
-  const fileQuery = useFileChangeEventsQuery(activeSpace?.id ?? null, selectedNodeId, tab === "files");
 
   useEffect(() => {
     if (!canViewAuditEvents && tab === "audit") setTab("files");
   }, [canViewAuditEvents, tab]);
 
-  useEffect(() => {
-    if (fileScope === "node" && !activeNodeInSpace) setFileScope("space");
-  }, [activeNodeInSpace, fileScope]);
-
   return (
     <Modal title="History" onClose={onClose} width="max-w-5xl">
       <Tabs items={tabs} value={tab} onChange={setTab} label="History sections" />
       <div className="min-h-[34rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1">
-        {tab === "audit" ? <AuditEventsPanel query={auditQuery} /> : null}
-        {tab === "files" ? (
-          <FileChangeEventsPanel
-            query={fileQuery}
-            activeSpace={activeSpace}
-            activeNode={activeNodeInSpace}
-            fileScope={fileScope}
-            onFileScopeChange={setFileScope}
-          />
-        ) : null}
+        {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
+        {tab === "files" ? <FileChangeEventsPanel activeSpace={activeSpace} activeNode={activeNode} /> : null}
       </div>
     </Modal>
   );
 }
 
-function AuditEventsPanel({ query }: { query: EventHistoryQuery<AuditEventListResponse> }) {
+function AuditEventsPanel() {
+  const query = useAuditEventsQuery();
   const events = useMemo(() => query.data?.pages.flatMap((page) => page.events) ?? [], [query.data]);
   return (
     <section className="space-y-3">
@@ -83,19 +67,22 @@ function AuditEventsPanel({ query }: { query: EventHistoryQuery<AuditEventListRe
 }
 
 function FileChangeEventsPanel({
-  query,
   activeSpace,
-  activeNode,
-  fileScope,
-  onFileScopeChange
+  activeNode
 }: {
-  query: EventHistoryQuery<FileChangeEventListResponse>;
   activeSpace: Space | null;
   activeNode: RestNode | null;
-  fileScope: FileScope;
-  onFileScopeChange: (scope: FileScope) => void;
 }) {
+  const [fileScope, setFileScope] = useState<FileScope>("space");
+  const activeNodeInSpace = activeSpace && activeNode?.space_id === activeSpace.id ? activeNode : null;
+  const selectedNodeId = fileScope === "node" ? activeNodeInSpace?.id ?? null : null;
+  const query = useFileChangeEventsQuery(activeSpace?.id ?? null, selectedNodeId);
   const events = useMemo(() => query.data?.pages.flatMap((page) => page.events) ?? [], [query.data]);
+
+  useEffect(() => {
+    if (fileScope === "node" && !activeNodeInSpace) setFileScope("space");
+  }, [activeNodeInSpace, fileScope]);
+
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -108,15 +95,15 @@ function FileChangeEventsPanel({
             <button
               type="button"
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${fileScope === "space" ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
-              onClick={() => onFileScopeChange("space")}
+              onClick={() => setFileScope("space")}
             >
               Space
             </button>
             <button
               type="button"
               className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${fileScope === "node" ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} disabled:cursor-not-allowed disabled:opacity-50`}
-              onClick={() => onFileScopeChange("node")}
-              disabled={!activeNode}
+              onClick={() => setFileScope("node")}
+              disabled={!activeNodeInSpace}
             >
               Node
             </button>
@@ -126,7 +113,7 @@ function FileChangeEventsPanel({
           </Button>
         </div>
       </div>
-      {activeNode && fileScope === "node" ? <div className="truncate rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted">{activeNode.path}</div> : null}
+      {activeNodeInSpace && fileScope === "node" ? <div className="truncate rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted">{activeNodeInSpace.path}</div> : null}
       {!activeSpace ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} emptyLabel="No file change events." />}
       {events.length > 0 ? (
         <ol className="divide-y divide-seam rounded-xl border border-border bg-surface">

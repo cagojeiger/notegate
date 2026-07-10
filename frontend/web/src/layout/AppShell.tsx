@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Me, RestNode, Space } from "../api/types";
+import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
 import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
@@ -139,7 +140,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />
       <StatusBar activeSpace={workbench.activeSpace} />
       <Toast />
-      {historyScope ? <EventHistoryModal activeSpace={historyScope.activeSpace} activeNode={historyScope.activeNode} canViewAuditEvents={me.account.kind === "user"} onClose={() => setHistoryScope(null)} /> : null}
+      {historyScope ? <EventHistoryModal activeSpace={historyScope.activeSpace} activeNode={historyScope.activeNode} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
       {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />
     </div>
