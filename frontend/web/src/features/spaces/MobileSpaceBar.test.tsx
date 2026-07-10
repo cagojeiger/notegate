@@ -31,6 +31,7 @@ describe("MobileSpaceBar", () => {
     const user = userEvent.setup();
     const onSelectSpace = vi.fn();
     const onCreateSpace = vi.fn();
+    const onOpenHistory = vi.fn();
     const onOpenSettings = vi.fn();
 
     render(
@@ -40,16 +41,19 @@ describe("MobileSpaceBar", () => {
         canCreateSpace
         onSelectSpace={onSelectSpace}
         onCreateSpace={onCreateSpace}
+        onOpenHistory={onOpenHistory}
         onOpenSettings={onOpenSettings}
       />
     );
 
     await user.click(screen.getByTitle("Work"));
     await user.click(screen.getByRole("button", { name: "Add space" }));
+    await user.click(screen.getByRole("button", { name: "History" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
     expect(onSelectSpace).toHaveBeenCalledWith(spaces[1]);
     expect(onCreateSpace).toHaveBeenCalledTimes(1);
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -61,6 +65,7 @@ describe("MobileSpaceBar", () => {
         canCreateSpace
         onSelectSpace={vi.fn()}
         onCreateSpace={vi.fn()}
+        onOpenHistory={vi.fn()}
         onOpenSettings={vi.fn()}
       />
     );

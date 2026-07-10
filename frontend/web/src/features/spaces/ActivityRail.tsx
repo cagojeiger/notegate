@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { Copy, History, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -24,10 +24,11 @@ type ActivityRailProps = {
   onCreateSpace: () => void;
   onRenameSpace: (space: Space) => void;
   onDeleteSpace: (space: Space) => void;
+  onOpenHistory: () => void;
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenHistory, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
@@ -97,7 +98,10 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
           </button>
         ) : null}
       </div>
-      <div className="border-t border-seam p-2">
+      <div className="space-y-1 border-t border-seam p-2">
+        <button onClick={onOpenHistory} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="History">
+          <History size={16} />
+        </button>
         <button onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="Settings">
           <Settings size={16} />
         </button>

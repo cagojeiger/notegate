@@ -156,3 +156,34 @@ export type FileResponse = {
 export type MetadataResponse = {
   metadata: Record<string, unknown>;
 };
+
+export type AuditEvent = {
+  id: number;
+  created_at: string;
+  actor_account_id: string | null;
+  source: string;
+  op_type: string;
+  resource_type: string;
+  resource_id: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type AuditEventListResponse = {
+  events: AuditEvent[];
+  page: Page;
+};
+
+export type FileChangeEvent = {
+  id: number;
+  created_at: string;
+  space_id: string;
+  node_id: string | null;
+  actor_account_id: string | null;
+  op_type: string;
+  metadata: Record<string, unknown>;
+};
+
+export type FileChangeEventListResponse = {
+  events: FileChangeEvent[];
+  page: Page;
+};
