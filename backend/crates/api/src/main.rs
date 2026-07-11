@@ -19,6 +19,7 @@ mod purge_worker;
 mod rest;
 mod routes;
 mod state;
+mod usage_reconcile_worker;
 
 use state::AppState;
 
@@ -100,6 +101,9 @@ async fn main() -> anyhow::Result<()> {
 
     let purge_shutdown_token = CancellationToken::new();
     let purge_worker = purge_worker::spawn(pool.clone(), purge_shutdown_token.clone());
+    let usage_reconcile_shutdown_token = CancellationToken::new();
+    let usage_reconcile_worker =
+        usage_reconcile_worker::spawn(pool.clone(), usage_reconcile_shutdown_token.clone());
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -118,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
     purge_shutdown_token.cancel();
+    usage_reconcile_shutdown_token.cancel();
 
     let server_result = match server_result {
         Some(result) => result,
@@ -126,6 +131,9 @@ async fn main() -> anyhow::Result<()> {
 
     if let Err(error) = purge_worker.await {
         tracing::error!(event = "purge_worker.join_failed", %error);
+    }
+    if let Err(error) = usage_reconcile_worker.await {
+        tracing::error!(event = "usage_reconcile_worker.join_failed", %error);
     }
 
     // Drain the connection pool before exiting so in-flight queries finish.

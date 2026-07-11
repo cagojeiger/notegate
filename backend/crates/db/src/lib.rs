@@ -26,6 +26,7 @@ pub mod postgres_pool;
 pub mod purge_repo;
 mod space_permission;
 mod space_usage;
+pub mod space_usage_repo;
 pub mod spaces_repo;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_support;
@@ -41,6 +42,7 @@ pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use postgres_pool::connect;
 pub use purge_repo::{PurgeRepo, PurgeRun};
+pub use space_usage_repo::{SpaceUsageRepo, UsageCounts, UsageReconcileRun};
 pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;
 

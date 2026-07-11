@@ -19,6 +19,9 @@ pub enum ServiceError {
     /// The operation conflicts with current state or a limit.
     #[error("{0}")]
     Conflict(String),
+    /// A Space mutation must be retried after usage reconciliation finishes.
+    #[error("space usage recalculation is in progress")]
+    UsageRecalculationInProgress { retry_after_seconds: u64 },
     /// An internal/storage failure.
     #[error("{0}")]
     Internal(String),
@@ -33,6 +36,11 @@ impl From<CoreError> for ServiceError {
             CoreError::NotFound(message) => Self::NotFound(message),
             CoreError::Validation(message) => Self::InvalidInput(message),
             CoreError::Conflict(message) => Self::Conflict(message),
+            CoreError::UsageRecalculationInProgress {
+                retry_after_seconds,
+            } => Self::UsageRecalculationInProgress {
+                retry_after_seconds,
+            },
             CoreError::Internal(message) => Self::Internal(message),
         }
     }

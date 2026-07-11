@@ -11,12 +11,14 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
-use crate::{tier_lookup, to_usize};
+use crate::{space_usage, tier_lookup, to_usize};
 
-/// Serialize file-tree mutations in a space. This closes races where two
-/// transactions both observe state below a cap, or one mutation updates a node
-/// while another concurrently moves/deletes it.
+/// Exclude reconciliation, then serialize file-tree mutations in a Space.
+/// This closes quota races and keeps reconciliation from observing a partial
+/// mutation without making ordinary writes wait for maintenance.
 pub async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
+    space_usage::acquire_mutation_gate(tx, space_id).await?;
+
     let found: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
             .bind(space_id)
