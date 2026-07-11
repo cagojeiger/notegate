@@ -16,5 +16,6 @@ pub mod identity;
 mod pagination;
 pub mod search;
 pub mod spaces;
+pub mod usage;
 
 pub use error::{ServiceError, ServiceResult};

@@ -1,13 +1,14 @@
-//! Spaces category: list / create / get / update / delete.
+//! Spaces category: lifecycle and manual usage reconciliation requests.
 //!
 //! `GET /api/v1/spaces` (paginated, default 50, max 100), `POST` to create,
-//! and `GET`/`PATCH`/`DELETE /{space_id}`. Each handler resolves the caller
+//! `GET`/`PATCH`/`DELETE /{space_id}`, and queued usage reconciliation. Each
+//! handler resolves the caller
 //! from the auth middleware and delegates to the space service, which owns
 //! authorization (no live permission ⇒ 404, insufficient permission ⇒ 403).
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::Caller;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}",
             get(get_one).patch(update).delete(delete),
+        )
+        .route(
+            "/v1/spaces/{space_id}/usage/reconcile",
+            post(request_usage_reconciliation),
         )
 }
 
@@ -51,6 +56,11 @@ pub(crate) struct CreateBody {
 pub(crate) struct UpdateBody {
     name: Option<String>,
     sort_order: Option<i32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ReconciliationQueuedResponse {
+    status: &'static str,
 }
 
 #[utoipa::path(
@@ -175,4 +185,27 @@ pub(crate) async fn delete(
         .delete(caller.account.kind, caller.account_id(), space_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/spaces/{space_id}/usage/reconcile",
+    tag = "spaces",
+    params(("space_id" = Uuid, Path, description = "Space id")),
+    responses((status = 202, description = "Queue usage reconciliation", body = ReconciliationQueuedResponse)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn request_usage_reconciliation(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<ReconciliationQueuedResponse>), ApiError> {
+    state
+        .usage
+        .request_space_reconciliation(caller.account.kind, caller.account_id(), space_id)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ReconciliationQueuedResponse { status: "queued" }),
+    ))
 }

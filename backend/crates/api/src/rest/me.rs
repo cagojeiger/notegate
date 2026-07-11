@@ -1,4 +1,4 @@
-//! Identity category: `GET /api/v1/me` and `DELETE /api/v1/me`.
+//! Identity category: current caller, user usage, keys, events, and deletion.
 //!
 //! `GET` returns the authenticated account, optional user/agent detail, and
 //! global non-space capabilities via the shared [`build_me`] builder, kept
@@ -14,6 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_model::{Caller, CreateApiKey, ListApiKeys, ListAuditEvents};
+use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -30,6 +31,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/me", get(get_me).delete(delete_me))
+        .route("/v1/me/usage", get(get_usage))
         .route("/v1/me/keys", get(list_keys).post(create_key))
         .route("/v1/me/keys/{key_id}", post(rotate_key).delete(revoke_key))
         .route("/v1/me/audit-events", get(list_audit_events))
@@ -58,6 +60,68 @@ pub(crate) struct CreatedUserApiKeyOut {
     token: String,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct QuotaUsageOut {
+    used: usize,
+    limit: usize,
+}
+
+impl From<QuotaUsage> for QuotaUsageOut {
+    fn from(value: QuotaUsage) -> Self {
+        Self {
+            used: value.used,
+            limit: value.limit,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct AccountUsageOut {
+    spaces: QuotaUsageOut,
+    agents: QuotaUsageOut,
+    api_keys: QuotaUsageOut,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct SpaceUsageOut {
+    id: Uuid,
+    name: String,
+    nodes: QuotaUsageOut,
+    content_bytes: QuotaUsageOut,
+    agent_connections: QuotaUsageOut,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CurrentUserUsageOut {
+    tier: String,
+    account: AccountUsageOut,
+    spaces: Vec<SpaceUsageOut>,
+}
+
+impl From<CurrentUserUsage> for CurrentUserUsageOut {
+    fn from(value: CurrentUserUsage) -> Self {
+        Self {
+            tier: value.tier.as_str().to_owned(),
+            account: AccountUsageOut {
+                spaces: value.account.spaces.into(),
+                agents: value.account.agents.into(),
+                api_keys: value.account.api_keys.into(),
+            },
+            spaces: value
+                .spaces
+                .into_iter()
+                .map(|space| SpaceUsageOut {
+                    id: space.id,
+                    name: space.name,
+                    nodes: space.nodes.into(),
+                    content_bytes: space.content_bytes.into(),
+                    agent_connections: space.agent_connections.into(),
+                })
+                .collect(),
+        }
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/me",
@@ -67,6 +131,24 @@ pub(crate) struct CreatedUserApiKeyOut {
 )]
 pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutput> {
     Json(build_me(&caller))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/usage",
+    tag = "identity",
+    responses((status = 200, description = "Get current user quota and usage", body = CurrentUserUsageOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn get_usage(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+) -> Result<Json<CurrentUserUsageOut>, ApiError> {
+    let usage = state
+        .usage
+        .current_user(caller.account.kind, caller.account_id())
+        .await?;
+    Ok(Json(usage.into()))
 }
 
 #[utoipa::path(

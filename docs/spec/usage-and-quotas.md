@@ -110,7 +110,7 @@ worker tick
 POST /api/v1/spaces/{space_id}/usage/reconcile
 ```
 
-요청은 cooldown과 중복 요청을 검사한 뒤 `next_reconcile_at=now()`로 앞당기고 `202 Accepted`를 반환한다. HTTP 요청 안에서 COUNT/SUM을 실행하지 않는다. Agent는 요청할 수 없다.
+요청은 중복 요청과 최근 reconciliation 완료 후 1시간 cooldown을 검사한 뒤 `next_reconcile_at=now()`로 앞당기고 `202 Accepted`를 반환한다. HTTP 요청 안에서 COUNT/SUM을 실행하지 않는다. Agent는 요청할 수 없다.
 
 ## Full recalculation
 

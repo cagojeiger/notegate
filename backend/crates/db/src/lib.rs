@@ -31,6 +31,7 @@ pub mod spaces_repo;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_support;
 mod tier_lookup;
+pub mod usage_repo;
 
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
@@ -45,6 +46,7 @@ pub use purge_repo::{PurgeRepo, PurgeRun};
 pub use space_usage_repo::{SpaceUsageRepo, UsageCounts, UsageReconcileRun};
 pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;
+pub use usage_repo::{SpaceUsageSnapshot, UsageRepo, UserUsageSnapshot};
 
 /// Generic internal mapping for any repository query failure. Shared by every
 /// repo so the mapping never drifts; detail is logged, not surfaced.
