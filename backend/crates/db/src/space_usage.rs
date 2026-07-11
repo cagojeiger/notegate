@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::map_sqlx_error;
 
 const SPACE_GATE_NAMESPACE: u64 = 0x4e47_5350_4143_4501;
+const FULL_RECONCILIATION_GATE_KEY: i64 = 0x4e47_5553_4147_4502;
 const MUTATION_RETRY_AFTER_SECONDS: u64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +27,7 @@ impl UsageDelta {
 
 /// Acquire the shared side of the Space reconciliation gate without waiting.
 pub(crate) async fn acquire_mutation_gate(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
-    if try_advisory_gate(tx, space_id, true).await? {
+    if try_full_reconciliation_gate(tx, true).await? && try_space_gate(tx, space_id, true).await? {
         return Ok(());
     }
 
@@ -40,10 +41,31 @@ pub(crate) async fn try_acquire_reconciliation_gate(
     tx: &mut PgConnection,
     space_id: Uuid,
 ) -> Result<bool> {
-    try_advisory_gate(tx, space_id, false).await
+    if !try_full_reconciliation_gate(tx, true).await? {
+        return Ok(false);
+    }
+    try_space_gate(tx, space_id, false).await
 }
 
-async fn try_advisory_gate(tx: &mut PgConnection, space_id: Uuid, shared: bool) -> Result<bool> {
+/// Try to block every file-tree mutation for an atomic full recalculation.
+pub(crate) async fn try_acquire_full_reconciliation_gate(tx: &mut PgConnection) -> Result<bool> {
+    try_full_reconciliation_gate(tx, false).await
+}
+
+async fn try_full_reconciliation_gate(tx: &mut PgConnection, shared: bool) -> Result<bool> {
+    let query = if shared {
+        "SELECT pg_try_advisory_xact_lock_shared($1)"
+    } else {
+        "SELECT pg_try_advisory_xact_lock($1)"
+    };
+    sqlx::query_scalar(query)
+        .bind(FULL_RECONCILIATION_GATE_KEY)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)
+}
+
+async fn try_space_gate(tx: &mut PgConnection, space_id: Uuid, shared: bool) -> Result<bool> {
     let query = if shared {
         "SELECT pg_try_advisory_xact_lock_shared($1)"
     } else {

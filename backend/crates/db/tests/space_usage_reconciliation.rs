@@ -12,11 +12,14 @@ mod common;
 use chrono::{Duration, Utc};
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, SpaceUsageRepo, UsageCounts, UsageReconcileRun};
+use notegate_db::{
+    FilesRepo, FullUsageReconcileRun, SpaceUsageRepo, UsageCounts, UsageReconcileRun,
+};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use uuid::Uuid;
 
 const RECONCILE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5553_4147_4501;
+const FULL_RECONCILIATION_GATE_KEY: i64 = 0x4e47_5553_4147_4502;
 const SPACE_GATE_NAMESPACE: u64 = 0x4e47_5350_4143_4501;
 static RECONCILIATION_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -112,6 +115,88 @@ async fn reconciliation_repairs_drift_and_schedules_the_next_run()
         UsageReconcileRun::Idle
     );
 
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn full_recalculation_repairs_every_live_space_atomically()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (first_account, first_space, first_root) =
+        space_with_root(&db.pool, "full-reconcile-first").await?;
+    let (_, second_space, _) = space_with_root(&db.pool, "full-reconcile-second").await?;
+    FilesRepo::new(db.pool.clone())
+        .insert_text(
+            first_space,
+            first_root,
+            "note.md",
+            &text("hello"),
+            first_account,
+        )
+        .await?;
+    sqlx::query(
+        "UPDATE space_usage SET live_node_count = 99, live_content_bytes = 999, \
+         reconciled_at = now() - interval '30 days'",
+    )
+    .execute(&db.pool)
+    .await?;
+
+    assert_eq!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .run_full_recalculation()
+            .await?,
+        FullUsageReconcileRun::Recalculated {
+            spaces_recalculated: 2
+        }
+    );
+
+    let first: (i64, i64, bool) = sqlx::query_as(
+        "SELECT live_node_count, live_content_bytes, next_reconcile_at > now() \
+         FROM space_usage WHERE space_id = $1",
+    )
+    .bind(first_space)
+    .fetch_one(&db.pool)
+    .await?;
+    let second: (i64, i64, bool) = sqlx::query_as(
+        "SELECT live_node_count, live_content_bytes, next_reconcile_at > now() \
+         FROM space_usage WHERE space_id = $1",
+    )
+    .bind(second_space)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(first, (2, 5, true));
+    assert_eq!(second, (1, 0, true));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn full_recalculation_skips_while_mutations_are_active()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    space_with_root(&db.pool, "full-reconcile-busy").await?;
+    let mut mutation_tx = db.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
+        .bind(FULL_RECONCILIATION_GATE_KEY)
+        .execute(&mut *mutation_tx)
+        .await?;
+
+    assert_eq!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .run_full_recalculation()
+            .await?,
+        FullUsageReconcileRun::MutationsActive
+    );
+
+    mutation_tx.commit().await?;
     db.cleanup().await;
     Ok(())
 }
@@ -230,6 +315,44 @@ async fn exclusive_reconciliation_gate_rejects_then_releases_mutations()
     reconciliation_tx.commit().await?;
     repo.insert_folder(space_id, &command, account).await?;
     assert_eq!(repo.count_live_nodes(space_id).await?, 2);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn full_recalculation_gate_rejects_then_releases_mutations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "full-reconcile-mutation").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let command = CreateFolder {
+        parent_node_id: root_id,
+        name: "blocked".to_owned(),
+    };
+
+    let mut reconciliation_tx = db.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(FULL_RECONCILIATION_GATE_KEY)
+        .execute(&mut *reconciliation_tx)
+        .await?;
+
+    let error = repo
+        .insert_folder(space_id, &command, account)
+        .await
+        .expect_err("mutation must fail while full recalculation holds the gate");
+    assert!(matches!(
+        error,
+        Error::UsageRecalculationInProgress {
+            retry_after_seconds: 5
+        }
+    ));
+
+    reconciliation_tx.commit().await?;
+    repo.insert_folder(space_id, &command, account).await?;
 
     db.cleanup().await;
     Ok(())
