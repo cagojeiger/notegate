@@ -158,6 +158,8 @@ nodes.purge_after=now()+retention
 
 Folder recursive delete는 subtree node를 같은 transaction에서 soft delete한다.
 
+Node/Text/File mutation은 같은 transaction에서 Space usage counter를 갱신한다. 생성, 내용 변경, 복사, 이동, soft delete별 증감 규칙은 `usage-and-quotas.md`를 따른다.
+
 ## API key
 
 ### 생성

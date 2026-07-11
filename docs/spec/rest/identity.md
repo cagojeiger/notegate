@@ -29,6 +29,36 @@ Agent caller:
 
 `DELETE /api/v1/me`는 user caller만 가능하다. Live owned space가 있으면 거부한다. 성공하면 owned agents를 deactivate하고, user/agent API key를 revoke하고, owned agent connection을 disconnect한 뒤 user account를 soft-delete한다.
 
+## Current user usage
+
+```http
+GET /api/v1/me/usage
+```
+
+User caller만 가능하다. 현재 tier quota와 live usage를 반환한다. User당 live Space가 최대 20개이므로 pagination하지 않는다.
+
+```json
+{
+  "tier": "tier0",
+  "account": {
+    "spaces": {"used": 1, "limit": 1},
+    "agents": {"used": 2, "limit": 3},
+    "api_keys": {"used": 1, "limit": 2}
+  },
+  "spaces": [
+    {
+      "id": "space-id",
+      "name": "Daily",
+      "nodes": {"used": 320, "limit": 2000},
+      "content_bytes": {"used": 48120320, "limit": 134217728},
+      "agent_connections": {"used": 2, "limit": 5}
+    }
+  ]
+}
+```
+
+사용량의 계산 기준과 전체 재계산 중 read-only 동작은 `../usage-and-quotas.md`를 따른다.
+
 ## Current user API keys
 
 ```http

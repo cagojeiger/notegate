@@ -13,7 +13,7 @@ MCP tools = agent가 쓰기 쉬운 space name + path 기반 command/search API
 
 ```text
 Auth        /auth/*, /.well-known/*
-Identity    /api/v1/me, /api/v1/me/keys
+Identity    /api/v1/me, /api/v1/me/keys, /api/v1/me/usage
 Spaces      /api/v1/spaces
 Nodes       /api/v1/spaces/{space_id}/nodes
 Text        /api/v1/spaces/{space_id}/text
