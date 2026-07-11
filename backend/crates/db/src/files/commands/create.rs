@@ -32,6 +32,7 @@ pub async fn insert_folder(
     checks::lock_space(&mut tx, space_id).await?;
     let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
+    space_usage::apply_quota_delta(&mut tx, space_id, UsageDelta::new(1, 0), caps).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -44,8 +45,6 @@ pub async fn insert_folder(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
-
-    space_usage::apply_shadow_delta(&mut tx, space_id, UsageDelta::new(1, 0)).await?;
 
     file_change_events::folder_created(
         &mut tx,
@@ -75,7 +74,13 @@ pub async fn insert_text(
     checks::lock_space(&mut tx, space_id).await?;
     let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    checks::require_content_budget(&mut tx, space_id, 0, content.byte_len, caps).await?;
+    space_usage::apply_quota_delta(
+        &mut tx,
+        space_id,
+        UsageDelta::new(1, content.byte_len),
+        caps,
+    )
+    .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -109,9 +114,6 @@ pub async fn insert_text(
         .await
         .map_err(map_constraint_error)?;
 
-    space_usage::apply_shadow_delta(&mut tx, space_id, UsageDelta::new(1, content.byte_len))
-        .await?;
-
     file_change_events::text_created(
         &mut tx,
         file_change_events::context(created_by, space_id),
@@ -141,7 +143,8 @@ pub async fn insert_file(
     checks::lock_space(&mut tx, space_id).await?;
     let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    checks::require_content_budget(&mut tx, space_id, 0, file.byte_len, caps).await?;
+    space_usage::apply_quota_delta(&mut tx, space_id, UsageDelta::new(1, file.byte_len), caps)
+        .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -180,8 +183,6 @@ pub async fn insert_file(
         .await
         .map_err(map_constraint_error)?;
 
-    space_usage::apply_shadow_delta(&mut tx, space_id, UsageDelta::new(1, file.byte_len)).await?;
-
     file_change_events::file_created(
         &mut tx,
         file_change_events::context(created_by, space_id),
@@ -196,7 +197,7 @@ pub async fn insert_file(
 }
 
 /// Shared in-tx create pre-checks: parent live folder, depth, sibling-unique,
-/// fanout, and space node budget.
+/// and fanout.
 async fn prepare_create(
     tx: &mut sqlx::PgConnection,
     space_id: Uuid,
@@ -216,6 +217,5 @@ async fn prepare_create(
 
     checks::require_sibling_unique(tx, space_id, parent_id, name, None).await?;
     checks::require_fanout(tx, space_id, parent_id, caps).await?;
-    checks::require_node_budget(tx, space_id, caps).await?;
     Ok(())
 }

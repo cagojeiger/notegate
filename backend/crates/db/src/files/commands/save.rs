@@ -94,11 +94,10 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         return Ok((node_row.into_node()?, current_text.into_text()?));
     }
 
-    checks::require_content_budget(
+    space_usage::apply_quota_delta(
         &mut tx,
         space_id,
-        current_text.byte_len,
-        content.byte_len,
+        UsageDelta::new(0, content.byte_len - current_text.byte_len),
         caps,
     )
     .await?;
@@ -133,13 +132,6 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-
-    space_usage::apply_shadow_delta(
-        &mut tx,
-        space_id,
-        UsageDelta::new(0, content.byte_len - current_text.byte_len),
-    )
-    .await?;
 
     file_change_events::text_saved(
         &mut tx,

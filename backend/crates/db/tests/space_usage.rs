@@ -1,4 +1,4 @@
-//! Integration tests for transactional Space usage shadow counters.
+//! Integration tests for transactional Space usage counters.
 
 #![allow(
     clippy::unwrap_used,
@@ -10,7 +10,9 @@
 mod common;
 
 use common::{TestDb, space_with_root};
-use notegate_db::{FilesRepo, TextMutationKind};
+use notegate_core::Error;
+use notegate_core::limits::Limits;
+use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileRun};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, StoredFile, WriteTextBody,
@@ -62,7 +64,7 @@ async fn assert_usage(
 }
 
 #[tokio::test]
-async fn shadow_usage_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -147,7 +149,147 @@ async fn shadow_usage_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
-async fn shadow_usage_drift_does_not_block_file_mutation() -> Result<(), Box<dyn std::error::Error>>
+async fn usage_counter_enforces_node_and_content_limits() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "space-usage-limits").await?;
+    let repo = FilesRepo::with_limits(
+        db.pool.clone(),
+        Limits {
+            space_max_nodes: 3,
+            space_max_content_bytes: 5,
+            folder_max_children: 10,
+        },
+    );
+    let folder = repo
+        .insert_folder(
+            space_id,
+            &CreateFolder {
+                parent_node_id: root_id,
+                name: "docs".to_owned(),
+            },
+            account,
+        )
+        .await?;
+    let (text_node, _) = repo
+        .insert_text(space_id, root_id, "note.md", &text("hello"), account)
+        .await?;
+    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
+
+    let node_error = repo
+        .insert_folder(
+            space_id,
+            &CreateFolder {
+                parent_node_id: root_id,
+                name: "overflow".to_owned(),
+            },
+            account,
+        )
+        .await
+        .expect_err("node quota must be enforced from the counter");
+    assert!(matches!(
+        node_error,
+        Error::Conflict(message) if message.contains("maximum of 3 live nodes")
+    ));
+
+    let content_error = repo
+        .save_text_content(
+            space_id,
+            text_node.id,
+            &text("hello!"),
+            None,
+            account,
+            TextMutationKind::Write,
+        )
+        .await
+        .expect_err("content quota must roll back the save");
+    assert!(matches!(
+        content_error,
+        Error::Conflict(message) if message.contains("maximum of 5 bytes")
+    ));
+    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
+
+    repo.soft_delete_node(space_id, folder.id, account, false)
+        .await?;
+    let file_error = repo
+        .insert_file(space_id, root_id, "blocked.bin", &file(b"x"), account)
+        .await
+        .expect_err("content quota must roll back the file create");
+    assert!(matches!(file_error, Error::Conflict(_)));
+    assert_usage(&db.pool, &repo, space_id, (2, 5)).await?;
+
+    repo.save_text_content(
+        space_id,
+        text_node.id,
+        &text("hey"),
+        None,
+        account,
+        TextMutationKind::Write,
+    )
+    .await?;
+    repo.insert_file(space_id, root_id, "asset.bin", &file(b"ab"), account)
+        .await?;
+    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn subtree_copy_checks_its_full_delta_against_the_counter()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "space-usage-copy-limit").await?;
+    let repo = FilesRepo::with_limits(
+        db.pool.clone(),
+        Limits {
+            space_max_nodes: 10,
+            space_max_content_bytes: 9,
+            folder_max_children: 10,
+        },
+    );
+    let folder = repo
+        .insert_folder(
+            space_id,
+            &CreateFolder {
+                parent_node_id: root_id,
+                name: "docs".to_owned(),
+            },
+            account,
+        )
+        .await?;
+    repo.insert_text(space_id, folder.id, "note.md", &text("hello"), account)
+        .await?;
+
+    let error = repo
+        .copy_node(
+            space_id,
+            &CopyNode {
+                node_id: folder.id,
+                new_parent_node_id: root_id,
+                new_name: "docs-copy".to_owned(),
+                recursive: true,
+            },
+            account,
+        )
+        .await
+        .expect_err("copy must reserve the complete subtree usage before inserting");
+    assert!(matches!(
+        error,
+        Error::Conflict(message) if message.contains("maximum of 9 bytes")
+    ));
+    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn usage_drift_rolls_back_mutation_until_reconciled() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -170,6 +312,32 @@ async fn shadow_usage_drift_does_not_block_file_mutation() -> Result<(), Box<dyn
         .execute(&db.pool)
         .await?;
 
+    let error = repo
+        .soft_delete_node(space_id, folder.id, account, false)
+        .await
+        .expect_err("counter underflow must reject the source mutation");
+    assert!(matches!(
+        error,
+        Error::Internal(message) if message == "space usage counter underflow"
+    ));
+    let folder_is_live: bool =
+        sqlx::query_scalar("SELECT deleted_at IS NULL FROM nodes WHERE space_id = $1 AND id = $2")
+            .bind(space_id)
+            .bind(folder.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(folder_is_live);
+
+    sqlx::query("UPDATE space_usage SET next_reconcile_at = now() WHERE space_id = $1")
+        .bind(space_id)
+        .execute(&db.pool)
+        .await?;
+    assert!(matches!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .run_reconciliation_once()
+            .await?,
+        UsageReconcileRun::Reconciled { space_id: id, .. } if id == space_id
+    ));
     repo.soft_delete_node(space_id, folder.id, account, false)
         .await?;
     assert_usage(&db.pool, &repo, space_id, (1, 0)).await?;

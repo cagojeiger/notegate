@@ -1,8 +1,8 @@
 //! In-transaction invariant re-enforcement shared by the mutating commands.
 //!
-//! The service pre-checks these for precise errors; the DB re-checks them inside
-//! the mutation's transaction so a concurrent writer cannot slip past a count or
-//! depth bound between the pre-check and the write.
+//! The DB enforces these inside the mutation transaction so a concurrent writer
+//! cannot slip past a structural bound between validation and the write. Space
+//! node/content quota is enforced by the locked counter in `space_usage`.
 
 use notegate_core::limits::Limits;
 use notegate_core::tier::effective_file_tree_limits;
@@ -146,64 +146,6 @@ pub async fn require_fanout(
         return Err(Error::conflict(format!(
             "folder already has the maximum of {} children",
             caps.folder_max_children
-        )));
-    }
-    Ok(())
-}
-
-/// Enforce the space live-node cap.
-pub async fn require_node_budget(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    caps: Limits,
-) -> Result<()> {
-    let nodes: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM nodes WHERE space_id = $1 AND deleted_at IS NULL")
-            .bind(space_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-    if to_usize(nodes, "node")? >= caps.space_max_nodes {
-        return Err(Error::conflict(format!(
-            "space already has the maximum of {} nodes",
-            caps.space_max_nodes
-        )));
-    }
-    Ok(())
-}
-
-/// Enforce the space total live content-byte budget for a mutation that
-/// replaces `previous_bytes` with `new_bytes` (use `previous_bytes = 0` on
-/// create). Errors when the resulting total would exceed the cap.
-pub async fn require_content_budget(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    previous_bytes: i64,
-    new_bytes: i64,
-    caps: Limits,
-) -> Result<()> {
-    let total: i64 = sqlx::query_scalar(
-        "SELECT \
-                COALESCE(( \
-                    SELECT sum(t.byte_len) FROM text_objects t \
-                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint + \
-                COALESCE(( \
-                    SELECT sum(f.byte_len) FROM file_objects f \
-                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint",
-    )
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    let projected = total - previous_bytes + new_bytes;
-    if projected > caps.space_max_content_bytes as i64 {
-        return Err(Error::conflict(format!(
-            "space content would exceed the maximum of {} bytes; delete, move, or split content",
-            caps.space_max_content_bytes
         )));
     }
     Ok(())

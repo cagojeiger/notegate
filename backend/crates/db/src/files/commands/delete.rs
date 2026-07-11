@@ -72,6 +72,12 @@ pub async fn soft_delete_node(
             limits::SUBTREE_DELETE_MAX_NODES
         )));
     }
+    space_usage::release_usage(
+        &mut tx,
+        space_id,
+        UsageDelta::new(-subtree_usage.nodes, -subtree_usage.content_bytes),
+    )
+    .await?;
 
     let purge_after: DateTime<Utc> =
         sqlx::query_scalar("SELECT now() + ($1::bigint * interval '1 day')")
@@ -99,13 +105,6 @@ pub async fn soft_delete_node(
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-
-    space_usage::apply_shadow_delta(
-        &mut tx,
-        space_id,
-        UsageDelta::new(-subtree_usage.nodes, -subtree_usage.content_bytes),
-    )
-    .await?;
 
     file_change_events::node_deleted(
         &mut tx,

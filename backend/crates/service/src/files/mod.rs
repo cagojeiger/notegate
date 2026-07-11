@@ -52,10 +52,8 @@ use crate::error::{ServiceError, ServiceResult};
 ///    forbidden (`403`, via [`policy::require`]).
 /// 2. Validates input format (name, `.md`, depth, path length, text size)
 ///    with the pure [`validation`] functions.
-/// 3. Pre-checks capacity limits (fanout, node/text counts, total bytes,
-///    subtree-delete size) using counts read from the store, returning a typed
-///    conflict. The DB layer re-enforces these in-transaction for race safety;
-///    the service pre-check keeps the logic testable and the errors precise.
+/// 3. Pre-checks cheap structural limits such as fanout and subtree size. The DB
+///    layer atomically enforces Space node/content quota from the usage counter.
 /// 4. Calls the store mutation, attributing it to the caller.
 ///
 /// Paths are never stored on a node — the display path is derived from parents;
@@ -134,8 +132,7 @@ impl FilesService {
 
     /// Shared create pre-checks for mkdir/touch/write-create: parent is a live
     /// folder, no sibling-name conflict, resulting depth + path length within
-    /// limits, parent fanout and space node count within limits. Returns the
-    /// parent's derived path.
+    /// limits and parent fanout within limits. Returns the parent's derived path.
     pub(super) async fn prepare_create(
         &self,
         space_id: Uuid,
@@ -173,9 +170,6 @@ impl FilesService {
             .count_live_children(space_id, parent_node_id)
             .await?;
         validation::validate_fanout(children, caps)?;
-
-        let nodes = self.store.count_live_nodes(space_id).await?;
-        validation::validate_space_node_count(nodes, caps)?;
 
         Ok(parent_path)
     }
