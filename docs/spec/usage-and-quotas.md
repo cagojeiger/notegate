@@ -119,6 +119,8 @@ POST /api/v1/spaces/{space_id}/usage/reconcile
 
 요청은 중복 요청과 최근 reconciliation 완료 후 1시간 cooldown을 검사한 뒤 `next_reconcile_at=now()`로 앞당기고 `202 Accepted`를 반환한다. HTTP 요청 안에서 COUNT/SUM을 실행하지 않는다. Agent는 요청할 수 없다.
 
+`GET /api/v1/me/usage`의 Space별 `reconciliation.pending`은 재계산이 due 상태인지 나타내고, `reconciled_at`은 마지막 성공 시각이다. Client는 POST 이후 Usage를 다시 조회해 `pending=false`와 갱신된 `reconciled_at`을 확인한다.
+
 ## Full recalculation
 
 전체 재계산은 초기 backfill 또는 심각한 장애 복구를 위한 maintenance 작업이다. 정상 startup, 정기 schedule, 사용자 요청에서는 실행하지 않는다. Startup invariant 검사에서 누락 counter를 발견하면 listener를 열기 전에 자동 실행하고, operator는 다음 명령으로 migration을 확인한 뒤 명시적으로 실행할 수 있다.

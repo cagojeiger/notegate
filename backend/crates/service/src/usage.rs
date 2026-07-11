@@ -1,5 +1,6 @@
 //! User-facing quota and usage views.
 
+use chrono::{DateTime, Utc};
 use notegate_core::limits::{self, Limits};
 use notegate_core::tier::{UserTier, effective_file_tree_limits};
 use notegate_db::{UsageRepo, UserUsageSnapshot};
@@ -70,6 +71,13 @@ pub struct SpaceUsage {
     pub nodes: QuotaUsage,
     pub content_bytes: QuotaUsage,
     pub agent_connections: QuotaUsage,
+    pub reconciliation: SpaceReconciliation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpaceReconciliation {
+    pub pending: bool,
+    pub reconciled_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +108,10 @@ fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUs
             agent_connections: QuotaUsage {
                 used: space.live_agent_connections,
                 limit: quota.connections_per_space,
+            },
+            reconciliation: SpaceReconciliation {
+                pending: space.reconciliation_pending,
+                reconciled_at: space.reconciled_at,
             },
         })
         .collect();
@@ -144,6 +156,7 @@ mod tests {
     #[test]
     fn usage_combines_tier_and_runtime_limits() {
         let space_id = Uuid::new_v4();
+        let reconciled_at = Utc::now();
         let usage = build_usage(
             UserUsageSnapshot {
                 tier: UserTier::Tier0,
@@ -155,6 +168,8 @@ mod tests {
                     live_nodes: 7,
                     live_content_bytes: 512,
                     live_agent_connections: 2,
+                    reconciled_at,
+                    reconciliation_pending: true,
                 }],
             },
             Limits {
@@ -181,6 +196,8 @@ mod tests {
             usage.spaces[0].agent_connections,
             QuotaUsage { used: 2, limit: 5 }
         );
+        assert!(usage.spaces[0].reconciliation.pending);
+        assert_eq!(usage.spaces[0].reconciliation.reconciled_at, reconciled_at);
     }
 
     #[test]

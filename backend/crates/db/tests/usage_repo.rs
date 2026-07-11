@@ -9,6 +9,7 @@
 )]
 mod common;
 
+use chrono::{DateTime, Utc};
 use common::{TestDb, insert_user_account, set_user_tier, space_with_root};
 use notegate_core::Error;
 use notegate_core::tier::UserTier;
@@ -23,12 +24,12 @@ async fn current_user_usage_reads_counters_and_live_related_resources()
     };
     let (user_id, space_id, _) = space_with_root(&db.pool, "usage-view").await?;
     set_user_tier(&db.pool, user_id, "tier0").await?;
-    sqlx::query(
+    let reconciled_at: DateTime<Utc> = sqlx::query_scalar(
         "UPDATE space_usage SET live_node_count = 7, live_content_bytes = 123 \
-         WHERE space_id = $1",
+         WHERE space_id = $1 RETURNING reconciled_at",
     )
     .bind(space_id)
-    .execute(&db.pool)
+    .fetch_one(&db.pool)
     .await?;
 
     let live_agent_id: Uuid =
@@ -97,6 +98,8 @@ async fn current_user_usage_reads_counters_and_live_related_resources()
     assert_eq!(space.live_nodes, 7);
     assert_eq!(space.live_content_bytes, 123);
     assert_eq!(space.live_agent_connections, 1);
+    assert_eq!(space.reconciled_at, reconciled_at);
+    assert!(!space.reconciliation_pending);
 
     db.cleanup().await;
     Ok(())
@@ -135,6 +138,12 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
     .fetch_one(&db.pool)
     .await?;
     assert!(queued);
+
+    let snapshot = UsageRepo::new(db.pool.clone())
+        .current_user_usage(owner_user_id)
+        .await?
+        .expect("live user usage");
+    assert!(snapshot.spaces[0].reconciliation_pending);
 
     db.cleanup().await;
     Ok(())

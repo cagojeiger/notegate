@@ -44,6 +44,7 @@ impl UsageRepo {
 
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
             "SELECT s.id, s.name, su.live_node_count, su.live_content_bytes, \
+                    su.reconciled_at, su.next_reconcile_at <= now() AS reconciliation_pending, \
                     (SELECT count(*) FROM space_agent_connections c \
                      JOIN accounts agent_acc ON agent_acc.id = c.agent_id \
                      WHERE c.space_id = s.id AND c.disconnected_at IS NULL \
@@ -140,24 +141,25 @@ pub struct SpaceUsageSnapshot {
     pub live_nodes: usize,
     pub live_content_bytes: usize,
     pub live_agent_connections: usize,
+    pub reconciled_at: DateTime<Utc>,
+    pub reconciliation_pending: bool,
 }
 
 impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
     type Error = Error;
 
     fn try_from(row: SpaceUsageRow) -> Result<Self> {
-        let live_node_count = row
-            .live_node_count
-            .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
-        let live_content_bytes = row
-            .live_content_bytes
-            .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
+        let missing_counter = || Error::internal("live space is missing its usage counter");
+        let live_node_count = row.live_node_count.ok_or_else(missing_counter)?;
+        let live_content_bytes = row.live_content_bytes.ok_or_else(missing_counter)?;
         Ok(Self {
             id: row.id,
             name: row.name,
             live_nodes: to_usize(live_node_count, "node")?,
             live_content_bytes: to_usize(live_content_bytes, "content byte")?,
             live_agent_connections: to_usize(row.live_agent_connections, "connection")?,
+            reconciled_at: row.reconciled_at.ok_or_else(missing_counter)?,
+            reconciliation_pending: row.reconciliation_pending.ok_or_else(missing_counter)?,
         })
     }
 }
@@ -175,6 +177,8 @@ struct SpaceUsageRow {
     name: String,
     live_node_count: Option<i64>,
     live_content_bytes: Option<i64>,
+    reconciled_at: Option<DateTime<Utc>>,
+    reconciliation_pending: Option<bool>,
     live_agent_connections: i64,
 }
 

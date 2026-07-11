@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_model::{Caller, CreateApiKey, ListApiKeys, ListAuditEvents};
-use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
+use notegate_service::usage::{CurrentUserUsage, QuotaUsage, SpaceReconciliation};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -83,12 +83,28 @@ pub(crate) struct AccountUsageOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct SpaceReconciliationOut {
+    pending: bool,
+    reconciled_at: DateTime<Utc>,
+}
+
+impl From<SpaceReconciliation> for SpaceReconciliationOut {
+    fn from(value: SpaceReconciliation) -> Self {
+        Self {
+            pending: value.pending,
+            reconciled_at: value.reconciled_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct SpaceUsageOut {
     id: Uuid,
     name: String,
     nodes: QuotaUsageOut,
     content_bytes: QuotaUsageOut,
     agent_connections: QuotaUsageOut,
+    reconciliation: SpaceReconciliationOut,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -116,6 +132,7 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
                     nodes: space.nodes.into(),
                     content_bytes: space.content_bytes.into(),
                     agent_connections: space.agent_connections.into(),
+                    reconciliation: space.reconciliation.into(),
                 })
                 .collect(),
         }
