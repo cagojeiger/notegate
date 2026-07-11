@@ -45,8 +45,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
 
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     // Current byte length/hash (for budget delta + optimistic guard); the
     // text row is locked so `expected_sha256` is compared atomically with

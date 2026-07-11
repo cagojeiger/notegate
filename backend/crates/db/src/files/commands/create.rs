@@ -29,8 +29,7 @@ pub async fn insert_folder(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
     space_usage::apply_quota_delta(&mut tx, space_id, UsageDelta::new(1, 0), caps).await?;
 
@@ -71,8 +70,7 @@ pub async fn insert_text(
 ) -> Result<(Node, TextObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
     space_usage::apply_quota_delta(
         &mut tx,
@@ -140,8 +138,7 @@ pub async fn insert_file(
 ) -> Result<(Node, FileObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
     space_usage::apply_quota_delta(&mut tx, space_id, UsageDelta::new(1, file.byte_len), caps)
         .await?;

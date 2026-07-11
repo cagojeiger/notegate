@@ -69,8 +69,8 @@ File-tree mutation은 Space를 잠근 transaction 안에서 변경 후 예상 co
 ```text
 acquire shared full-recalculation gate
   -> acquire shared Space reconciliation gate
-  -> lock Space
   -> resolve and lock the owner tier quota
+  -> lock Space
   -> lock space_usage
   -> validate current counter + delta
   -> reserve the delta in space_usage

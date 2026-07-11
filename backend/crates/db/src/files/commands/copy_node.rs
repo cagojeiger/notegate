@@ -43,8 +43,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         caps,
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     let source = checks::live_node(&mut tx, space_id, source_node_id)
         .await?

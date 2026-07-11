@@ -18,7 +18,22 @@ use crate::{space_usage, tier_lookup, to_usize};
 /// mutation without making ordinary writes wait for maintenance.
 pub async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
     space_usage::acquire_mutation_gate(tx, space_id).await?;
+    lock_live_space(tx, space_id).await
+}
 
+/// Lock quota dependencies in account-deletion order: owner, Space, usage.
+pub async fn lock_space_with_limits(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    base_limits: Limits,
+) -> Result<Limits> {
+    space_usage::acquire_mutation_gate(tx, space_id).await?;
+    let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
+    lock_live_space(tx, space_id).await?;
+    Ok(effective_file_tree_limits(tier, base_limits))
+}
+
+async fn lock_live_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
     let found: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
             .bind(space_id)
@@ -29,16 +44,6 @@ pub async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
         return Err(Error::not_found("space not found"));
     }
     Ok(())
-}
-
-/// Compute effective file-tree limits for a live, already-locked space owner.
-pub async fn effective_limits_for_locked_space(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    base_limits: Limits,
-) -> Result<Limits> {
-    let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
-    Ok(effective_file_tree_limits(tier, base_limits))
 }
 
 /// A live node's kind + deleted flag, fetched inside a transaction. `None` when
