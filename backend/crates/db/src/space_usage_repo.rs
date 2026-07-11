@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{map_sqlx_error, space_usage};
 
-const RECONCILE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5553_4147_4501;
+const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
 const DUE_CANDIDATE_LIMIT: i64 = 64;
 const BUSY_RETRY_INTERVAL: &str = "5 minutes";
 const LOCK_TIMEOUT: &str = "5s";
@@ -227,11 +227,7 @@ async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &
 }
 
 async fn try_acquire_worker_lock(tx: &mut sqlx::PgConnection) -> Result<bool> {
-    sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
-        .bind(RECONCILE_ADVISORY_LOCK_KEY)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)
+    space_usage::try_schema_advisory_lock(tx, RECONCILE_ADVISORY_LOCK_SEED, false).await
 }
 
 async fn due_candidates(tx: &mut sqlx::PgConnection) -> Result<Vec<DueSpace>> {

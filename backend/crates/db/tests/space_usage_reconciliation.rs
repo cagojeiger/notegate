@@ -18,8 +18,8 @@ use notegate_db::{
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use uuid::Uuid;
 
-const RECONCILE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5553_4147_4501;
-const FULL_RECONCILIATION_GATE_KEY: i64 = 0x4e47_5553_4147_4502;
+const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
+const FULL_RECONCILIATION_GATE_SEED: i64 = 0x4e47_5553_4147_4502;
 const SPACE_GATE_NAMESPACE: u64 = 0x4e47_5350_4143_4501;
 static RECONCILIATION_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -32,10 +32,24 @@ fn text(content: &str) -> StoredContent {
     }
 }
 
-fn space_gate_key(space_id: Uuid) -> i64 {
+fn space_gate_seed(space_id: Uuid) -> i64 {
     let value = space_id.as_u128();
     let folded = (value as u64) ^ ((value >> 64) as u64) ^ SPACE_GATE_NAMESPACE;
     i64::from_ne_bytes(folded.to_ne_bytes())
+}
+
+async fn acquire_gate(
+    tx: &mut sqlx::PgConnection,
+    seed: i64,
+    shared: bool,
+) -> Result<(), sqlx::Error> {
+    let query = if shared {
+        "SELECT pg_advisory_xact_lock_shared(hashtextextended(current_schema(), $1))"
+    } else {
+        "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), $1))"
+    };
+    sqlx::query(query).bind(seed).execute(tx).await?;
+    Ok(())
 }
 
 async fn mark_due(pool: &sqlx::PgPool, space_id: Uuid, age: Duration) -> Result<(), sqlx::Error> {
@@ -184,10 +198,7 @@ async fn full_recalculation_skips_while_mutations_are_active()
     };
     space_with_root(&db.pool, "full-reconcile-busy").await?;
     let mut mutation_tx = db.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
-        .bind(FULL_RECONCILIATION_GATE_KEY)
-        .execute(&mut *mutation_tx)
-        .await?;
+    acquire_gate(&mut mutation_tx, FULL_RECONCILIATION_GATE_SEED, true).await?;
 
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
@@ -212,10 +223,7 @@ async fn reconciliation_skips_when_another_worker_holds_the_database_lock()
     mark_due(&db.pool, space_id, Duration::hours(1)).await?;
 
     let mut lock_tx = db.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(RECONCILE_ADVISORY_LOCK_KEY)
-        .execute(&mut *lock_tx)
-        .await?;
+    acquire_gate(&mut lock_tx, RECONCILE_ADVISORY_LOCK_SEED, false).await?;
 
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
@@ -261,10 +269,7 @@ async fn reconciliation_skips_busy_spaces_without_starving_the_next_candidate()
 
     let mut mutation_tx = db.pool.begin().await?;
     for space_id in &busy_space_ids {
-        sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
-            .bind(space_gate_key(*space_id))
-            .execute(&mut *mutation_tx)
-            .await?;
+        acquire_gate(&mut mutation_tx, space_gate_seed(*space_id), true).await?;
     }
 
     let run = SpaceUsageRepo::new(db.pool.clone())
@@ -333,10 +338,7 @@ async fn exclusive_reconciliation_gate_rejects_then_releases_mutations()
     };
 
     let mut reconciliation_tx = db.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(space_gate_key(space_id))
-        .execute(&mut *reconciliation_tx)
-        .await?;
+    acquire_gate(&mut reconciliation_tx, space_gate_seed(space_id), false).await?;
 
     let error = repo
         .insert_folder(space_id, &command, account)
@@ -386,10 +388,7 @@ async fn full_recalculation_gate_rejects_then_releases_mutations()
     };
 
     let mut reconciliation_tx = db.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(FULL_RECONCILIATION_GATE_KEY)
-        .execute(&mut *reconciliation_tx)
-        .await?;
+    acquire_gate(&mut reconciliation_tx, FULL_RECONCILIATION_GATE_SEED, false).await?;
 
     let error = repo
         .insert_folder(space_id, &command, account)
