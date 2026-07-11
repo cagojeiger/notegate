@@ -236,15 +236,36 @@ async fn reconciliation_skips_busy_spaces_without_starving_the_next_candidate()
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (_, busy_space_id, _) = space_with_root(&db.pool, "reconcile-busy").await?;
-    let (_, next_space_id, _) = space_with_root(&db.pool, "reconcile-next").await?;
-    mark_due(&db.pool, busy_space_id, Duration::hours(2)).await?;
+    let (owner_user_id, busy_space_id, _) = space_with_root(&db.pool, "reconcile-busy-0").await?;
+    let mut busy_space_ids = vec![busy_space_id];
+    for index in 1..64 {
+        let space_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2) RETURNING id",
+        )
+        .bind(owner_user_id)
+        .bind(format!("reconcile-busy-{index}"))
+        .fetch_one(&db.pool)
+        .await?;
+        busy_space_ids.push(space_id);
+    }
+    let next_space_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'reconcile-next') RETURNING id",
+    )
+    .bind(owner_user_id)
+    .fetch_one(&db.pool)
+    .await?;
+    for space_id in &busy_space_ids {
+        mark_due(&db.pool, *space_id, Duration::hours(2)).await?;
+    }
+    mark_due(&db.pool, next_space_id, Duration::hours(1)).await?;
 
     let mut mutation_tx = db.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
-        .bind(space_gate_key(busy_space_id))
-        .execute(&mut *mutation_tx)
-        .await?;
+    for space_id in &busy_space_ids {
+        sqlx::query("SELECT pg_advisory_xact_lock_shared($1)")
+            .bind(space_gate_key(*space_id))
+            .execute(&mut *mutation_tx)
+            .await?;
+    }
 
     let run = SpaceUsageRepo::new(db.pool.clone())
         .run_reconciliation_once()
@@ -253,12 +274,22 @@ async fn reconciliation_skips_busy_spaces_without_starving_the_next_candidate()
         run,
         UsageReconcileRun::SpacesBusy {
             oldest_space_id,
-            candidates_checked: 1,
+            candidates_checked: 64,
+            candidates_deferred: 64,
             ..
         } if oldest_space_id == busy_space_id
     ));
 
-    mark_due(&db.pool, next_space_id, Duration::hours(1)).await?;
+    let (pending, attempted): (bool, bool) = sqlx::query_as(
+        "SELECT next_reconcile_at <= now(), last_reconcile_attempt_at IS NOT NULL \
+         FROM space_usage WHERE space_id = $1",
+    )
+    .bind(busy_space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(pending);
+    assert!(attempted);
+
     let run = SpaceUsageRepo::new(db.pool.clone())
         .run_reconciliation_once()
         .await?;
@@ -268,6 +299,13 @@ async fn reconciliation_skips_busy_spaces_without_starving_the_next_candidate()
     ));
 
     mutation_tx.commit().await?;
+    sqlx::query(
+        "UPDATE space_usage SET last_reconcile_attempt_at = now() - interval '6 minutes' \
+         WHERE space_id = $1",
+    )
+    .bind(busy_space_id)
+    .execute(&db.pool)
+    .await?;
     let run = SpaceUsageRepo::new(db.pool.clone())
         .run_reconciliation_once()
         .await?;

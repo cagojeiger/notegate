@@ -42,6 +42,7 @@ space_usage
   live_node_count
   live_content_bytes
   reconciled_at
+  last_reconcile_attempt_at
   next_reconcile_at
 ```
 
@@ -105,6 +106,7 @@ worker tick
 - File-tree mutation은 shared gate, reconciler는 exclusive gate를 사용한다. Shared gate 획득에 실패한 mutation은 DB connection을 점유하며 기다리지 않고 임시 오류를 반환한다.
 - 재계산 중 해당 Space의 read는 허용하고 mutation만 일시적으로 거부한다. 다른 Space는 영향받지 않는다.
 - 실패하면 counter를 rollback하고 해당 Space를 나중에 재시도한다.
+- 조회한 due 후보가 모두 mutation 중이면 잠기지 않은 schedule row에 `last_reconcile_attempt_at`을 기록한다. 해당 후보는 5분 동안 선택에서 제외하지만 `next_reconcile_at`은 변경하지 않아 사용자에게는 계속 pending으로 보인다. 이 persisted retry backoff로 오래된 busy 후보가 뒤쪽 due Space를 막지 않게 한다.
 - Space별 재계산 statement timeout은 30초, row lock timeout은 5초다. Timeout은 transaction 전체를 rollback하며 다음 tick에서 재시도한다.
 - 운영은 가장 오래 지연된 `next_reconcile_at`을 reconciliation lag로 관찰한다. Lag가 지속적으로 증가할 때만 worker 병렬화를 검토한다.
 - 프로세스 종료 시 새 reconciliation 실행을 시작하지 않는다. 이미 시작한 실행은 transaction이 commit 또는 rollback될 때까지 기다리고, worker 종료 후 DB pool을 닫는다. 배포 환경의 강제 종료 유예시간은 HTTP와 worker drain을 포함하도록 90초 이상으로 설정한다.

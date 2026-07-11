@@ -9,6 +9,7 @@ use crate::{map_sqlx_error, space_usage};
 
 const RECONCILE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5553_4147_4501;
 const DUE_CANDIDATE_LIMIT: i64 = 64;
+const BUSY_RETRY_INTERVAL: &str = "5 minutes";
 const LOCK_TIMEOUT: &str = "5s";
 const RECONCILE_STATEMENT_TIMEOUT: &str = "30s";
 const FULL_RECALCULATION_STATEMENT_TIMEOUT: &str = "5min";
@@ -95,11 +96,13 @@ impl SpaceUsageRepo {
             }
         }
         let Some(candidate) = selected else {
+            let candidates_deferred = defer_busy_candidates(&mut tx, &candidates).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(UsageReconcileRun::SpacesBusy {
                 oldest_space_id: oldest.space_id,
                 oldest_due_at: oldest.due_at,
                 candidates_checked: candidates.len(),
+                candidates_deferred,
             });
         };
 
@@ -132,6 +135,7 @@ impl SpaceUsageRepo {
         let next_reconcile_at: DateTime<Utc> = sqlx::query_scalar(
             "UPDATE space_usage \
              SET live_node_count = $2, live_content_bytes = $3, reconciled_at = now(), \
+                 last_reconcile_attempt_at = now(), \
                  next_reconcile_at = now() + interval '7 days' \
                      + ((random() - 0.5) * interval '24 hours') \
              WHERE space_id = $1 \
@@ -174,13 +178,15 @@ impl SpaceUsageRepo {
 
         let result = sqlx::query(
             "INSERT INTO space_usage (\
-                 space_id, live_node_count, live_content_bytes, reconciled_at, next_reconcile_at\
+                 space_id, live_node_count, live_content_bytes, reconciled_at, \
+                 last_reconcile_attempt_at, next_reconcile_at\
              ) \
              SELECT \
                  s.id, \
                  count(n.id) FILTER (WHERE n.deleted_at IS NULL)::bigint, \
                  COALESCE(sum(t.byte_len) FILTER (WHERE n.deleted_at IS NULL), 0)::bigint + \
                  COALESCE(sum(f.byte_len) FILTER (WHERE n.deleted_at IS NULL), 0)::bigint, \
+                 now(), \
                  now(), \
                  now() + interval '7 days' + ((random() - 0.5) * interval '24 hours') \
              FROM spaces s \
@@ -193,6 +199,7 @@ impl SpaceUsageRepo {
              SET live_node_count = EXCLUDED.live_node_count, \
                  live_content_bytes = EXCLUDED.live_content_bytes, \
                  reconciled_at = EXCLUDED.reconciled_at, \
+                 last_reconcile_attempt_at = EXCLUDED.last_reconcile_attempt_at, \
                  next_reconcile_at = EXCLUDED.next_reconcile_at",
         )
         .execute(&mut *tx)
@@ -233,13 +240,40 @@ async fn due_candidates(tx: &mut sqlx::PgConnection) -> Result<Vec<DueSpace>> {
          FROM space_usage su \
          JOIN spaces s ON s.id = su.space_id \
          WHERE s.deleted_at IS NULL AND su.next_reconcile_at <= now() \
+           AND (su.last_reconcile_attempt_at IS NULL \
+                OR su.last_reconcile_attempt_at <= now() - $2::interval) \
          ORDER BY su.next_reconcile_at, su.space_id \
          LIMIT $1",
     )
     .bind(DUE_CANDIDATE_LIMIT)
+    .bind(BUSY_RETRY_INTERVAL)
     .fetch_all(&mut *tx)
     .await
     .map_err(map_sqlx_error)
+}
+
+async fn defer_busy_candidates(
+    tx: &mut sqlx::PgConnection,
+    candidates: &[DueSpace],
+) -> Result<u64> {
+    let space_ids = candidates
+        .iter()
+        .map(|candidate| candidate.space_id)
+        .collect::<Vec<_>>();
+    let result = sqlx::query(
+        "WITH unlocked AS MATERIALIZED ( \
+             SELECT space_id FROM space_usage \
+             WHERE space_id = ANY($1) AND next_reconcile_at <= now() \
+             FOR UPDATE SKIP LOCKED \
+         ) \
+         UPDATE space_usage su SET last_reconcile_attempt_at = now() \
+         FROM unlocked WHERE su.space_id = unlocked.space_id",
+    )
+    .bind(&space_ids)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(result.rows_affected())
 }
 
 async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<UsageCounts> {
@@ -283,6 +317,7 @@ pub enum UsageReconcileRun {
         oldest_space_id: Uuid,
         oldest_due_at: DateTime<Utc>,
         candidates_checked: usize,
+        candidates_deferred: u64,
     },
     Reconciled {
         space_id: Uuid,

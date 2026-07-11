@@ -116,12 +116,16 @@ impl UsageRepo {
             ));
         }
 
-        sqlx::query("UPDATE space_usage SET next_reconcile_at = $2 WHERE space_id = $1")
-            .bind(space_id)
-            .bind(state.requested_at)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "UPDATE space_usage \
+             SET next_reconcile_at = $2, last_reconcile_attempt_at = NULL \
+             WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .bind(state.requested_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         tx.commit().await.map_err(map_sqlx_error)
     }
 }

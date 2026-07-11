@@ -5,6 +5,7 @@ CREATE TABLE space_usage (
     live_node_count BIGINT NOT NULL DEFAULT 1 CHECK (live_node_count >= 1),
     live_content_bytes BIGINT NOT NULL DEFAULT 0 CHECK (live_content_bytes >= 0),
     reconciled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_reconcile_attempt_at TIMESTAMPTZ,
     next_reconcile_at TIMESTAMPTZ NOT NULL DEFAULT now() + (random() * interval '7 days')
 );
 CREATE INDEX space_usage_reconcile_due_idx ON space_usage(next_reconcile_at);

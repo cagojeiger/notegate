@@ -132,7 +132,8 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
     }
 
     let queued: bool = sqlx::query_scalar(
-        "SELECT next_reconcile_at <= now() FROM space_usage WHERE space_id = $1",
+        "SELECT next_reconcile_at <= now() AND last_reconcile_attempt_at IS NULL \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -213,6 +214,7 @@ async fn make_reconciliation_requestable(
     sqlx::query(
         "UPDATE space_usage \
          SET reconciled_at = now() - interval '2 hours', \
+             last_reconcile_attempt_at = now(), \
              next_reconcile_at = now() + interval '1 day' \
          WHERE space_id = $1",
     )

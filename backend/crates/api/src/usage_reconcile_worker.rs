@@ -42,12 +42,14 @@ async fn run_once(pool: &PgPool) {
             oldest_space_id,
             oldest_due_at,
             candidates_checked,
+            candidates_deferred,
         }) => {
             tracing::debug!(
                 event = "usage_reconcile_worker.skipped",
                 reason = "space_gates_busy",
                 %oldest_space_id,
                 candidates_checked,
+                candidates_deferred,
                 lag_seconds = Utc::now()
                     .signed_duration_since(oldest_due_at)
                     .num_seconds()
