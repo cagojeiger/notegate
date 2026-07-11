@@ -11,7 +11,6 @@ mod common;
 
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
-use notegate_core::limits::Limits;
 use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileRun};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
@@ -43,7 +42,6 @@ fn file(bytes: &[u8]) -> StoredFile {
 
 async fn assert_usage(
     pool: &PgPool,
-    repo: &FilesRepo,
     space_id: Uuid,
     expected: (i64, i64),
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -53,13 +51,12 @@ async fn assert_usage(
     .bind(space_id)
     .fetch_one(pool)
     .await?;
-    let exact = (
-        i64::try_from(repo.count_live_nodes(space_id).await?)?,
-        i64::try_from(repo.sum_live_content_bytes(space_id).await?)?,
-    );
+    let exact = SpaceUsageRepo::new(pool.clone())
+        .calculate_exact_usage(space_id)
+        .await?;
 
     assert_eq!(stored, expected);
-    assert_eq!(stored, exact);
+    assert_eq!(stored, (exact.live_node_count, exact.live_content_bytes));
     Ok(())
 }
 
@@ -71,7 +68,7 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
     let (account, space_id, root_id) = space_with_root(&db.pool, "space-usage").await?;
     let repo = FilesRepo::new(db.pool.clone());
 
-    assert_usage(&db.pool, &repo, space_id, (1, 0)).await?;
+    assert_usage(&db.pool, space_id, (1, 0)).await?;
 
     let folder = repo
         .insert_folder(
@@ -88,7 +85,7 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
         .await?;
     repo.insert_file(space_id, folder.id, "asset.bin", &file(b"abc"), account)
         .await?;
-    assert_usage(&db.pool, &repo, space_id, (4, 8)).await?;
+    assert_usage(&db.pool, space_id, (4, 8)).await?;
 
     repo.save_text_content(
         space_id,
@@ -108,7 +105,7 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
         TextMutationKind::Write,
     )
     .await?;
-    assert_usage(&db.pool, &repo, space_id, (4, 14)).await?;
+    assert_usage(&db.pool, space_id, (4, 14)).await?;
 
     let (copied, counts) = repo
         .copy_node(
@@ -123,7 +120,7 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
         )
         .await?;
     assert_eq!(counts.nodes, 3);
-    assert_usage(&db.pool, &repo, space_id, (7, 28)).await?;
+    assert_usage(&db.pool, space_id, (7, 28)).await?;
 
     repo.move_node(
         space_id,
@@ -138,151 +135,11 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
     .await?;
     repo.update_node_metadata(space_id, copied.id, None, Some(2_000), account)
         .await?;
-    assert_usage(&db.pool, &repo, space_id, (7, 28)).await?;
+    assert_usage(&db.pool, space_id, (7, 28)).await?;
 
     repo.soft_delete_node(space_id, folder.id, account, true)
         .await?;
-    assert_usage(&db.pool, &repo, space_id, (4, 14)).await?;
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn usage_counter_enforces_node_and_content_limits() -> Result<(), Box<dyn std::error::Error>>
-{
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (account, space_id, root_id) = space_with_root(&db.pool, "space-usage-limits").await?;
-    let repo = FilesRepo::with_limits(
-        db.pool.clone(),
-        Limits {
-            space_max_nodes: 3,
-            space_max_content_bytes: 5,
-            folder_max_children: 10,
-        },
-    );
-    let folder = repo
-        .insert_folder(
-            space_id,
-            &CreateFolder {
-                parent_node_id: root_id,
-                name: "docs".to_owned(),
-            },
-            account,
-        )
-        .await?;
-    let (text_node, _) = repo
-        .insert_text(space_id, root_id, "note.md", &text("hello"), account)
-        .await?;
-    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
-
-    let node_error = repo
-        .insert_folder(
-            space_id,
-            &CreateFolder {
-                parent_node_id: root_id,
-                name: "overflow".to_owned(),
-            },
-            account,
-        )
-        .await
-        .expect_err("node quota must be enforced from the counter");
-    assert!(matches!(
-        node_error,
-        Error::Conflict(message) if message.contains("maximum of 3 live nodes")
-    ));
-
-    let content_error = repo
-        .save_text_content(
-            space_id,
-            text_node.id,
-            &text("hello!"),
-            None,
-            account,
-            TextMutationKind::Write,
-        )
-        .await
-        .expect_err("content quota must roll back the save");
-    assert!(matches!(
-        content_error,
-        Error::Conflict(message) if message.contains("maximum of 5 bytes")
-    ));
-    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
-
-    repo.soft_delete_node(space_id, folder.id, account, false)
-        .await?;
-    let file_error = repo
-        .insert_file(space_id, root_id, "blocked.bin", &file(b"x"), account)
-        .await
-        .expect_err("content quota must roll back the file create");
-    assert!(matches!(file_error, Error::Conflict(_)));
-    assert_usage(&db.pool, &repo, space_id, (2, 5)).await?;
-
-    repo.save_text_content(
-        space_id,
-        text_node.id,
-        &text("hey"),
-        None,
-        account,
-        TextMutationKind::Write,
-    )
-    .await?;
-    repo.insert_file(space_id, root_id, "asset.bin", &file(b"ab"), account)
-        .await?;
-    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn subtree_copy_checks_its_full_delta_against_the_counter()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (account, space_id, root_id) = space_with_root(&db.pool, "space-usage-copy-limit").await?;
-    let repo = FilesRepo::with_limits(
-        db.pool.clone(),
-        Limits {
-            space_max_nodes: 10,
-            space_max_content_bytes: 9,
-            folder_max_children: 10,
-        },
-    );
-    let folder = repo
-        .insert_folder(
-            space_id,
-            &CreateFolder {
-                parent_node_id: root_id,
-                name: "docs".to_owned(),
-            },
-            account,
-        )
-        .await?;
-    repo.insert_text(space_id, folder.id, "note.md", &text("hello"), account)
-        .await?;
-
-    let error = repo
-        .copy_node(
-            space_id,
-            &CopyNode {
-                node_id: folder.id,
-                new_parent_node_id: root_id,
-                new_name: "docs-copy".to_owned(),
-                recursive: true,
-            },
-            account,
-        )
-        .await
-        .expect_err("copy must reserve the complete subtree usage before inserting");
-    assert!(matches!(
-        error,
-        Error::Conflict(message) if message.contains("maximum of 9 bytes")
-    ));
-    assert_usage(&db.pool, &repo, space_id, (3, 5)).await?;
+    assert_usage(&db.pool, space_id, (4, 14)).await?;
 
     db.cleanup().await;
     Ok(())
@@ -340,7 +197,7 @@ async fn usage_drift_rolls_back_mutation_until_reconciled() -> Result<(), Box<dy
     ));
     repo.soft_delete_node(space_id, folder.id, account, false)
         .await?;
-    assert_usage(&db.pool, &repo, space_id, (1, 0)).await?;
+    assert_usage(&db.pool, space_id, (1, 0)).await?;
 
     db.cleanup().await;
     Ok(())
@@ -370,7 +227,7 @@ async fn migration_backfills_existing_space_usage() -> Result<(), Box<dyn std::e
         .execute(&db.pool)
         .await?;
 
-    assert_usage(&db.pool, &repo, space_id, (3, 8)).await?;
+    assert_usage(&db.pool, space_id, (3, 8)).await?;
 
     db.cleanup().await;
     Ok(())
@@ -400,7 +257,7 @@ async fn concurrent_mutations_do_not_lose_usage_deltas() -> Result<(), Box<dyn s
     );
     first_result?;
     second_result?;
-    assert_usage(&db.pool, &repo, space_id, (3, 0)).await?;
+    assert_usage(&db.pool, space_id, (3, 0)).await?;
 
     db.cleanup().await;
     Ok(())

@@ -310,11 +310,24 @@ async fn exclusive_reconciliation_gate_rejects_then_releases_mutations()
             retry_after_seconds: 5
         }
     ));
-    assert_eq!(repo.count_live_nodes(space_id).await?, 1);
+    let usage_repo = SpaceUsageRepo::new(db.pool.clone());
+    assert_eq!(
+        usage_repo
+            .calculate_exact_usage(space_id)
+            .await?
+            .live_node_count,
+        1
+    );
 
     reconciliation_tx.commit().await?;
     repo.insert_folder(space_id, &command, account).await?;
-    assert_eq!(repo.count_live_nodes(space_id).await?, 2);
+    assert_eq!(
+        usage_repo
+            .calculate_exact_usage(space_id)
+            .await?
+            .live_node_count,
+        2
+    );
 
     db.cleanup().await;
     Ok(())

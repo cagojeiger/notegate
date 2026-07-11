@@ -252,7 +252,7 @@ space_usage
   next_reconcile_at timestamptz not null
 ```
 
-`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 transactionally maintained counter와 reconciliation schedule을 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. `space_usage_reconcile_due_idx(next_reconcile_at)`로 due Space를 선택한다. 정확한 계산 기준은 `usage-and-quotas.md`를 따른다.
+`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 authoritative counter와 reconciliation schedule을 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. `space_usage_reconcile_due_idx(next_reconcile_at)`로 due Space를 선택한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
 
 ```text
 space_agent_connections

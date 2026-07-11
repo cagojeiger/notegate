@@ -67,15 +67,18 @@ No-op 변경              nodes  0       bytes  0
 File-tree mutation은 Space를 잠근 transaction 안에서 변경 후 예상 counter를 계산한다. 예상 값이 effective tier quota를 넘으면 원본과 counter를 변경하지 않고 `409 conflict`로 거부한다.
 
 ```text
-acquire shared Space reconciliation gate
+acquire shared full-recalculation gate
+  -> acquire shared Space reconciliation gate
   -> lock Space
+  -> resolve and lock the owner tier quota
   -> lock space_usage
-  -> resolve effective tier quota
   -> validate current counter + delta
+  -> reserve the delta in space_usage
   -> mutate source rows
-  -> update counter
   -> commit
 ```
+
+한도를 초과한 상태에서도 사용량을 줄이는 save/delete는 허용한다. 증가하는 metric만 effective quota와 비교한다. Counter row 누락, underflow, overflow는 원본 변경을 rollback하는 internal error다. Reconciliation 또는 전체 재계산으로 counter를 복구한 뒤 mutation을 재시도한다.
 
 ## Distributed reconciliation
 
@@ -100,6 +103,7 @@ worker tick
 - File-tree mutation은 shared gate, reconciler는 exclusive gate를 사용한다. Shared gate 획득에 실패한 mutation은 DB connection을 점유하며 기다리지 않고 임시 오류를 반환한다.
 - 재계산 중 해당 Space의 read는 허용하고 mutation만 일시적으로 거부한다. 다른 Space는 영향받지 않는다.
 - 실패하면 counter를 rollback하고 해당 Space를 나중에 재시도한다.
+- Space별 재계산 statement timeout은 30초, row lock timeout은 5초다. Timeout은 transaction 전체를 rollback하며 다음 tick에서 재시도한다.
 - 운영은 가장 오래 지연된 `next_reconcile_at`을 reconciliation lag로 관찰한다. Lag가 지속적으로 증가할 때만 worker 병렬화를 검토한다.
 
 ## Manual reconciliation
@@ -114,7 +118,15 @@ POST /api/v1/spaces/{space_id}/usage/reconcile
 
 ## Full recalculation
 
-전체 재계산은 초기 backfill 또는 심각한 장애 복구를 위한 관리자 작업이다. 정기 schedule이나 사용자 요청으로 실행하지 않는다. 전체 재계산 중 read는 허용하고 product mutation은 retry 가능한 임시 오류로 거부한다. Counter 교체, `reconciled_at` 갱신, 다음 실행 시각 분산은 하나의 DB transaction으로 commit하거나 모두 rollback한다.
+전체 재계산은 초기 backfill 또는 심각한 장애 복구를 위한 관리자 작업이다. 정기 schedule이나 사용자 요청으로 실행하지 않는다. 다음 명령은 migration을 확인한 뒤 전체 재계산을 실행한다.
+
+```sh
+cargo run -p notegate-api --example recalculate_usage
+```
+
+명령은 worker lock 또는 진행 중인 mutation 때문에 gate를 얻지 못하면 1초 간격으로 최대 30번 재시도한다. Gate를 얻으면 read는 허용하고 file-tree mutation은 retry 가능한 임시 오류로 거부한다. Counter 교체, `reconciled_at` 갱신, 다음 실행 시각 분산은 하나의 DB transaction으로 commit하거나 모두 rollback한다. 전체 재계산 statement timeout은 5분, row lock timeout은 5초다.
+
+`space_usage`를 처음 배포할 때 이전 버전 API는 counter와 maintenance gate를 갱신하지 못한다. 따라서 이전 버전 writer를 모두 중지하고, 새 코드로 migration과 전체 재계산을 완료한 다음 새 API를 시작한다. 이전 버전과 authoritative counter 버전을 동시에 writer로 운영하지 않는다.
 
 ## Maintenance error
 

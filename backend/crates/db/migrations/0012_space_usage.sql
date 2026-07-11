@@ -1,4 +1,4 @@
--- Shadow counters for Space-scoped node and content usage.
+-- Authoritative counters for Space-scoped node and content usage.
 
 CREATE TABLE space_usage (
     space_id UUID PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,

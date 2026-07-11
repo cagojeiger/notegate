@@ -9,6 +9,9 @@ use crate::{map_sqlx_error, space_usage};
 
 const RECONCILE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5553_4147_4501;
 const DUE_CANDIDATE_LIMIT: i64 = 64;
+const LOCK_TIMEOUT: &str = "5s";
+const RECONCILE_STATEMENT_TIMEOUT: &str = "30s";
+const FULL_RECALCULATION_STATEMENT_TIMEOUT: &str = "5min";
 
 #[derive(Debug, Clone)]
 pub struct SpaceUsageRepo {
@@ -20,12 +23,20 @@ impl SpaceUsageRepo {
         Self { pool }
     }
 
+    /// Calculate source-of-truth usage for diagnostics and reconciliation.
+    /// Quota checks must use the locked counter instead of this full scan.
+    pub async fn calculate_exact_usage(&self, space_id: Uuid) -> Result<UsageCounts> {
+        let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
+        exact_usage(&mut connection, space_id).await
+    }
+
     /// Reconcile at most one due Space.
     ///
     /// A database-wide advisory lock elects one active worker. Due candidates
     /// whose Space gate is busy are skipped without waiting.
     pub async fn run_reconciliation_once(&self) -> Result<UsageReconcileRun> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        configure_transaction(&mut tx, RECONCILE_STATEMENT_TIMEOUT).await?;
 
         if !try_acquire_worker_lock(&mut tx).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
@@ -112,6 +123,7 @@ impl SpaceUsageRepo {
     /// reads remain available throughout the run.
     pub async fn run_full_recalculation(&self) -> Result<FullUsageReconcileRun> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        configure_transaction(&mut tx, FULL_RECALCULATION_STATEMENT_TIMEOUT).await?;
 
         if !try_acquire_worker_lock(&mut tx).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
@@ -154,6 +166,19 @@ impl SpaceUsageRepo {
             spaces_recalculated: result.rows_affected(),
         })
     }
+}
+
+async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &str) -> Result<()> {
+    sqlx::query(
+        "SELECT set_config('lock_timeout', $1, true), \
+                set_config('statement_timeout', $2, true)",
+    )
+    .bind(LOCK_TIMEOUT)
+    .bind(statement_timeout)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
 }
 
 async fn try_acquire_worker_lock(tx: &mut sqlx::PgConnection) -> Result<bool> {

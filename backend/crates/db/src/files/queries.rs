@@ -1,36 +1,4 @@
 //! Read queries for the file tree.
-pub mod quota {
-    //! Space-level quota reads shared by service and in-transaction guards.
-
-    use notegate_core::Result;
-    use sqlx::PgPool;
-    use uuid::Uuid;
-
-    use super::super::error::map_sqlx_error;
-    use crate::to_usize;
-
-    /// Sum of live Text and File bytes in a space.
-    pub async fn sum_live_content_bytes(pool: &PgPool, space_id: Uuid) -> Result<usize> {
-        let total: i64 = sqlx::query_scalar(
-            "SELECT \
-                COALESCE(( \
-                    SELECT sum(t.byte_len) FROM text_objects t \
-                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint + \
-                COALESCE(( \
-                    SELECT sum(f.byte_len) FROM file_objects f \
-                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint",
-        )
-        .bind(space_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(total, "content byte")
-    }
-}
 
 pub mod text {
     //! Text reads: load live text content and metrics.
@@ -532,18 +500,6 @@ pub mod node {
         .await
         .map_err(map_sqlx_error)?;
         row.map(NodeRow::into_node).transpose()
-    }
-
-    /// Count of live nodes in a space.
-    pub async fn count_live_nodes(pool: &PgPool, space_id: Uuid) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM nodes WHERE space_id = $1 AND deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(count, "node")
     }
 
     /// A page of live direct children, keyset-ordered by `(sort_order, name, id)`.

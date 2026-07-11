@@ -28,6 +28,7 @@ User caller만 가능하다. 생성 side effect:
 ```text
 spaces(owner_user_id=caller, sort_order=max(owner live sort_order)+1000)
 root node '/'
+space_usage(live_node_count=1, live_content_bytes=0)
 ```
 
 즉 새 space는 기본적으로 현재 목록의 마지막에 추가된다.
