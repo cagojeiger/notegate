@@ -20,6 +20,7 @@ mod purge_worker;
 mod rest;
 mod routes;
 mod state;
+mod usage_bootstrap;
 mod usage_reconcile_worker;
 
 use state::AppState;
@@ -43,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = notegate_db::connect(&config).await?;
     notegate_db::run_migrations(&pool).await?;
+    usage_bootstrap::ensure(&pool).await?;
     info!(
         event = "db.ready",
         max_connections = config.db_max_connections

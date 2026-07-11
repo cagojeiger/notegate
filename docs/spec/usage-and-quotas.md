@@ -47,6 +47,8 @@ space_usage
 
 Space 생성은 root node와 `space_usage(nodes=1, bytes=0)`를 같은 transaction에서 만든다. 이후 counter도 원본 변경과 같은 transaction에서 갱신한다. 원본 테이블은 reconciliation 기준이고 counter는 일반 쿼터 검사와 Usage 조회에 사용한다. Event log는 Usage 계산에 사용하지 않는다.
 
+API startup은 migration 이후 `space_usage` 테이블과 Space 생성 trigger를 검증한다. Live Space에 counter row가 누락되어 있으면 listener를 열기 전에 DB 전역 worker lock과 full-recalculation gate를 사용해 전체 재계산을 한 번 실행한다. 정상 상태에서는 전체 재계산을 실행하지 않는다. 스키마 자체가 누락된 경우 application code로 다시 만들지 않고 startup과 readiness를 실패시킨다.
+
 ```text
 Space 생성              nodes +1       bytes  0
 Folder 생성             nodes +1       bytes  0
@@ -119,7 +121,7 @@ POST /api/v1/spaces/{space_id}/usage/reconcile
 
 ## Full recalculation
 
-전체 재계산은 초기 backfill 또는 심각한 장애 복구를 위한 관리자 작업이다. 정기 schedule이나 사용자 요청으로 실행하지 않는다. 다음 명령은 migration을 확인한 뒤 전체 재계산을 실행한다.
+전체 재계산은 초기 backfill 또는 심각한 장애 복구를 위한 maintenance 작업이다. 정상 startup, 정기 schedule, 사용자 요청에서는 실행하지 않는다. Startup invariant 검사에서 누락 counter를 발견하면 listener를 열기 전에 자동 실행하고, operator는 다음 명령으로 migration을 확인한 뒤 명시적으로 실행할 수 있다.
 
 ```sh
 cargo run -p notegate-api --example recalculate_usage

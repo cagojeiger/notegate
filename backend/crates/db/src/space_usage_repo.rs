@@ -1,7 +1,7 @@
 //! Exact reconciliation for transactionally maintained Space usage counters.
 
 use chrono::{DateTime, Utc};
-use notegate_core::Result;
+use notegate_core::{Error, Result};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -21,6 +21,44 @@ pub struct SpaceUsageRepo {
 impl SpaceUsageRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Require the usage table and Space creation trigger installed by migration 0012.
+    pub async fn require_schema(&self) -> Result<()> {
+        let installed: bool = sqlx::query_scalar(
+            "SELECT to_regclass('space_usage') IS NOT NULL \
+                    AND EXISTS ( \
+                        SELECT 1 FROM pg_trigger \
+                        WHERE tgrelid = to_regclass('spaces') \
+                          AND tgname = 'spaces_create_usage' \
+                          AND NOT tgisinternal \
+                    )",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        if !installed {
+            return Err(Error::internal(
+                "required space usage schema is not installed",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return whether any live Space is missing its authoritative counter row.
+    pub async fn has_missing_live_counters(&self) -> Result<bool> {
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM spaces s \
+                 WHERE s.deleted_at IS NULL \
+                   AND NOT EXISTS ( \
+                       SELECT 1 FROM space_usage su WHERE su.space_id = s.id \
+                   ) \
+             )",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)
     }
 
     /// Calculate source-of-truth usage for diagnostics and reconciliation.

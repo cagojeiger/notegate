@@ -81,10 +81,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
 
 /// Verify the database is usable by the API process.
 ///
-/// This checks both connectivity and that every embedded migration has a
-/// successful row with the expected checksum. Startup already runs migrations;
-/// readiness repeats a cheap validation so load balancers do not route traffic
-/// to a process connected to the wrong or reset database.
+/// This checks connectivity, embedded migration checksums, and the critical
+/// usage schema. Startup already runs migrations; readiness repeats a cheap
+/// validation so load balancers do not route traffic to a process connected to
+/// the wrong, reset, or structurally damaged database.
 pub async fn check_readiness(pool: &PgPool) -> Result<()> {
     sqlx::query("SELECT 1")
         .execute(pool)
@@ -118,6 +118,8 @@ pub async fn check_readiness(pool: &PgPool) -> Result<()> {
             )));
         }
     }
+
+    SpaceUsageRepo::new(pool.clone()).require_schema().await?;
 
     Ok(())
 }

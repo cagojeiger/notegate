@@ -43,6 +43,48 @@ async fn readiness_rejects_missing_migration_row() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
+async fn readiness_rejects_missing_space_usage_table() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    sqlx::query("DROP TABLE space_usage")
+        .execute(&db.pool)
+        .await?;
+
+    let err = notegate_db::check_readiness(&db.pool)
+        .await
+        .expect_err("missing usage table is not ready");
+    assert!(
+        err.to_string()
+            .contains("required space usage schema is not installed")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn readiness_rejects_missing_space_usage_trigger() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    sqlx::query("DROP TRIGGER spaces_create_usage ON spaces")
+        .execute(&db.pool)
+        .await?;
+
+    let err = notegate_db::check_readiness(&db.pool)
+        .await
+        .expect_err("missing usage trigger is not ready");
+    assert!(
+        err.to_string()
+            .contains("required space usage schema is not installed")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn crypto_key_epoch_ensure_and_verify() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
