@@ -5,29 +5,21 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use notegate_db::{PgPool, SpaceUsageRepo, UsageReconcileRun};
 use tokio::task::JoinHandle;
-use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
+
+use crate::periodic_worker;
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn spawn(pool: PgPool, shutdown: CancellationToken) -> JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(event = "usage_reconcile_worker.started");
-        run_once(&pool).await;
-
-        let mut ticker = interval(RECONCILE_INTERVAL);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        ticker.tick().await;
-
-        loop {
-            tokio::select! {
-                () = shutdown.cancelled() => {
-                    tracing::info!(event = "usage_reconcile_worker.stopped");
-                    return;
-                }
-                _ = ticker.tick() => run_once(&pool).await,
-            }
-        }
+        periodic_worker::run(RECONCILE_INTERVAL, shutdown, || {
+            let pool = pool.clone();
+            async move { run_once(&pool).await }
+        })
+        .await;
+        tracing::info!(event = "usage_reconcile_worker.stopped");
     })
 }
 

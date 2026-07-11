@@ -15,6 +15,7 @@ mod identity;
 mod mcp;
 mod openapi;
 mod page;
+mod periodic_worker;
 mod purge_worker;
 mod rest;
 mod routes;
@@ -99,11 +100,10 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     info!(event = "server.listening", addr = %bind_addr);
 
-    let purge_shutdown_token = CancellationToken::new();
-    let purge_worker = purge_worker::spawn(pool.clone(), purge_shutdown_token.clone());
-    let usage_reconcile_shutdown_token = CancellationToken::new();
+    let background_shutdown_token = CancellationToken::new();
+    let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
     let usage_reconcile_worker =
-        usage_reconcile_worker::spawn(pool.clone(), usage_reconcile_shutdown_token.clone());
+        usage_reconcile_worker::spawn(pool.clone(), background_shutdown_token.clone());
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -121,8 +121,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
-    purge_shutdown_token.cancel();
-    usage_reconcile_shutdown_token.cancel();
+    background_shutdown_token.cancel();
 
     let server_result = match server_result {
         Some(result) => result,
@@ -136,7 +135,8 @@ async fn main() -> anyhow::Result<()> {
         tracing::error!(event = "usage_reconcile_worker.join_failed", %error);
     }
 
-    // Drain the connection pool before exiting so in-flight queries finish.
+    // Workers drain their current transaction before returning. Close the pool
+    // only after every worker has joined so no background query is interrupted.
     pool.close().await;
     info!(event = "shutdown.complete");
 

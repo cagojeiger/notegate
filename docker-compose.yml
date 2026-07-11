@@ -35,6 +35,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 90s
     restart: unless-stopped
 
   proxy:
