@@ -16,6 +16,7 @@ use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::TextMutationKind;
+use crate::space_usage::{self, UsageDelta};
 
 pub struct SaveTextContentArgs<'a> {
     pub pool: &'a PgPool,
@@ -132,6 +133,13 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
+
+    space_usage::apply_shadow_delta(
+        &mut tx,
+        space_id,
+        UsageDelta::new(0, content.byte_len - current_text.byte_len),
+    )
+    .await?;
 
     file_change_events::text_saved(
         &mut tx,

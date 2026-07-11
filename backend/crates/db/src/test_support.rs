@@ -20,6 +20,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0009_audit_events.sql"),
     include_str!("../migrations/0010_file_change_events.sql"),
     include_str!("../migrations/0011_nodes_name_sort_index.sql"),
+    include_str!("../migrations/0012_space_usage.sql"),
 ];
 
 /// A throwaway schema-isolated database for one test.

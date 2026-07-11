@@ -16,6 +16,7 @@ use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::{checks, stored_text_parts};
 use crate::file_change_events;
+use crate::space_usage::{self, UsageDelta};
 
 /// Insert a folder under `parent_id`, attributing it to `created_by`.
 pub async fn insert_folder(
@@ -43,6 +44,8 @@ pub async fn insert_folder(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+    space_usage::apply_shadow_delta(&mut tx, space_id, UsageDelta::new(1, 0)).await?;
 
     file_change_events::folder_created(
         &mut tx,
@@ -105,6 +108,9 @@ pub async fn insert_text(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+    space_usage::apply_shadow_delta(&mut tx, space_id, UsageDelta::new(1, content.byte_len))
+        .await?;
 
     file_change_events::text_created(
         &mut tx,
@@ -173,6 +179,8 @@ pub async fn insert_file(
         .execute(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
+
+    space_usage::apply_shadow_delta(&mut tx, space_id, UsageDelta::new(1, file.byte_len)).await?;
 
     file_change_events::file_created(
         &mut tx,

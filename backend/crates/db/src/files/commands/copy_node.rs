@@ -18,6 +18,7 @@ use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::checks;
 use crate::file_change_events;
+use crate::space_usage::{self, UsageDelta};
 use crate::to_usize;
 
 pub struct CopyNodeArgs<'a> {
@@ -114,6 +115,15 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         }
     }
     let copied_root = copied_root.ok_or_else(|| Error::internal("copy produced no root node"))?;
+
+    let copied_nodes = i64::try_from(counts.nodes)
+        .map_err(|_error| Error::internal("copied node count exceeds bigint"))?;
+    space_usage::apply_shadow_delta(
+        &mut tx,
+        space_id,
+        UsageDelta::new(copied_nodes, content_bytes),
+    )
+    .await?;
 
     file_change_events::node_copied(
         &mut tx,

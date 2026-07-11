@@ -25,6 +25,7 @@ pub mod key_epoch_repo;
 pub mod postgres_pool;
 pub mod purge_repo;
 mod space_permission;
+mod space_usage;
 pub mod spaces_repo;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_support;
