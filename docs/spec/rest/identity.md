@@ -57,7 +57,7 @@ User caller만 가능하다. 현재 tier quota와 live usage를 반환한다. Us
 }
 ```
 
-사용량의 계산 기준과 전체 재계산 중 read-only 동작은 `../usage-and-quotas.md`를 따른다.
+사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
 
 ## Current user API keys
 

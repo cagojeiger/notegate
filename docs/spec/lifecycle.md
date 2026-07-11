@@ -75,6 +75,7 @@ User caller만 space를 생성한다.
 ```text
 spaces(owner_user_id=user, sort_order=0)
 root node '/'
+space_usage(live_node_count=1, live_content_bytes=0)
 ```
 
 - Space는 owner user의 live space 한도를 넘을 수 없다.
@@ -95,6 +96,7 @@ spaces.purge_after=now()+retention
 
 - 내부 nodes/text/file/connection은 즉시 hard delete하지 않는다.
 - 연결 row는 즉시 disconnect하지 않는다. 삭제된 space는 live 조회와 권한 확인에서 제외되어 agent 접근이 차단된다.
+- `space_usage`는 purge까지 유지하지만 Usage 조회와 reconciliation 대상에서는 제외한다.
 - Live 조회는 deleted space를 제외한다.
 - `purge_after` 이후 background purge가 cascade hard delete할 수 있다.
 
@@ -158,7 +160,7 @@ nodes.purge_after=now()+retention
 
 Folder recursive delete는 subtree node를 같은 transaction에서 soft delete한다.
 
-Node/Text/File mutation은 같은 transaction에서 Space usage counter를 갱신한다. 생성, 내용 변경, 복사, 이동, soft delete별 증감 규칙은 `usage-and-quotas.md`를 따른다.
+Node/Text/File mutation은 같은 transaction에서 `space_usage` counter를 갱신한다. 생성, 내용 변경, 복사, 이동, soft delete별 증감 규칙은 `usage-and-quotas.md`를 따른다.
 
 ## API key
 

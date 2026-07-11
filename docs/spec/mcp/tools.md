@@ -14,7 +14,7 @@
 - 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 여러 tool의 필드를 담는 공통 상위 타입이지만, 여기에 없는 필드도 거부한다.
 - `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
 - Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
-- Usage 전체 재계산 중 read tool은 정상 동작하고 mutation tool은 `data.kind=usage_recalculation_in_progress`, `retryable=true`, `retry_after_seconds`를 포함한 JSON-RPC server error를 반환한다. 상세 계약은 `../usage-and-quotas.md`를 따른다.
+- Space reconciliation 중 해당 Space의 read tool은 정상 동작하고 mutation tool은 `data.kind=usage_recalculation_in_progress`, `retryable=true`, `retry_after_seconds`를 포함한 JSON-RPC server error를 반환한다. 관리자 전체 재계산 중에는 모든 product mutation에 같은 오류를 적용한다. 상세 계약은 `../usage-and-quotas.md`를 따른다.
 
 ## `me`
 

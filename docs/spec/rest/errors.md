@@ -23,7 +23,7 @@ internal_error -> 500 redacted internal error
 usage_recalculation_in_progress -> 503 temporary read-only maintenance
 ```
 
-Retry 가능한 임시 오류는 `retryable`, `retry_after_seconds`를 추가하고 HTTP `Retry-After` header를 함께 반환할 수 있다. Usage 전체 재계산 응답은 `../usage-and-quotas.md`를 따른다.
+Retry 가능한 임시 오류는 `retryable`, `retry_after_seconds`를 추가하고 HTTP `Retry-After` header를 함께 반환할 수 있다. Usage reconciliation 응답은 `../usage-and-quotas.md`를 따른다.
 
 Auth middleware 오류도 같은 기본 shape을 사용한다. `not_registered`는 client onboarding을 위해 `login_url`과 `mcp_url`을 추가로 포함한다.
 
