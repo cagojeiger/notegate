@@ -13,6 +13,7 @@ api_keys
 audit_events
 file_change_events
 spaces
+space_usage
 space_agent_connections
 nodes
 text_objects
@@ -243,6 +244,17 @@ spaces
 Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 
 ```text
+space_usage
+  space_id uuid pk references spaces(id) on delete cascade
+  live_node_count bigint not null default 1 check >= 1
+  live_content_bytes bigint not null default 0 check >= 0
+  reconciled_at timestamptz not null
+  next_reconcile_at timestamptz not null
+```
+
+`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 transactionally maintained counter와 reconciliation schedule을 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. `space_usage_reconcile_due_idx(next_reconcile_at)`로 due Space를 선택한다. 정확한 계산 기준은 `usage-and-quotas.md`를 따른다.
+
+```text
 space_agent_connections
   space_id uuid not null references spaces(id) on delete cascade
   agent_id uuid not null references agents(id) on delete cascade
@@ -326,7 +338,7 @@ file_inline_contents
 
 `File`은 공통 metadata와 실제 bytes를 분리한다. 현재 content 저장 방식은 `storage_kind='inline_pg'`이며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. 262144 bytes 초과 file은 제품 상한 `file_max_bytes` 안에 있어도 아직 저장하지 않는다.
 
-Space content quota는 live Text bytes와 live File bytes의 합으로 계산한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
+Space content quota는 `space_usage.live_content_bytes`로 검사한다. Counter는 live Text bytes와 live File bytes의 합이며, Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 
 ```text
 storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL, byte_len <= 262144

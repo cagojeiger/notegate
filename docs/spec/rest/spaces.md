@@ -63,3 +63,11 @@ DELETE /api/v1/spaces/{space_id}
 ```
 
 Owner user만 가능하다. Space는 soft delete 후 purge 대상이 된다.
+
+## Request usage reconciliation
+
+```http
+POST /api/v1/spaces/{space_id}/usage/reconcile
+```
+
+Owner user만 가능하다. 요청은 해당 Space의 `next_reconcile_at`을 현재 시각으로 앞당기고 `202 Accepted`와 `{"status":"queued"}`를 반환한다. 같은 Space의 중복 요청과 cooldown 위반은 거부한다. 실제 COUNT/SUM은 background reconciler가 순차적으로 실행한다.
