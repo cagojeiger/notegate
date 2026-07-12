@@ -1,60 +1,54 @@
-//! Startup validation and repair for authoritative Space usage counters.
+//! Startup validation and operator repair for authoritative Space usage counters.
 
 use std::time::Duration;
 
 use notegate_core::{Error, Result};
-use notegate_db::{FullUsageReconcileRun, PgPool, SpaceUsageRepo};
+use notegate_db::{FullUsageReconcileExecution, PgPool, SpaceUsageRepo};
 
-// A peer may hold the worker lock for the full five-minute recalculation timeout.
-const MAX_ATTEMPTS: usize = 330;
+const OPERATOR_MAX_POLLS: usize = 30;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Ensure every live Space has a counter before the API starts accepting traffic.
 pub async fn ensure(pool: &PgPool) -> Result<()> {
     let repo = SpaceUsageRepo::new(pool.clone());
     repo.require_schema().await?;
-    if !repo.has_missing_live_counters().await? {
-        return Ok(());
+    if repo.has_missing_live_counters().await? {
+        return Err(Error::internal(
+            "live space is missing its usage counter; run the operator recalculation",
+        ));
     }
+    Ok(())
+}
 
-    tracing::warn!(event = "usage_bootstrap.missing_counters");
-    for attempt in 1..=MAX_ATTEMPTS {
-        if !repo.has_missing_live_counters().await? {
-            tracing::info!(event = "usage_bootstrap.repaired_by_peer");
-            return Ok(());
-        }
-
-        match repo.run_full_recalculation().await? {
-            FullUsageReconcileRun::Recalculated {
+/// Rebuild every live Space counter for an explicit operator maintenance run.
+pub async fn recalculate_all(pool: &PgPool) -> Result<u64> {
+    let repo = SpaceUsageRepo::new(pool.clone());
+    repo.require_schema().await?;
+    for poll in 1..=OPERATOR_MAX_POLLS {
+        match repo.execute_full_recalculation().await? {
+            FullUsageReconcileExecution::Recalculated {
                 spaces_recalculated,
-            } => {
-                if repo.has_missing_live_counters().await? {
-                    return Err(Error::internal(
-                        "usage bootstrap completed with missing counters",
-                    ));
-                }
-                tracing::info!(event = "usage_bootstrap.recalculated", spaces_recalculated);
-                return Ok(());
-            }
-            FullUsageReconcileRun::WorkerLockHeld | FullUsageReconcileRun::MutationsActive
-                if attempt < MAX_ATTEMPTS =>
+            } => return Ok(spaces_recalculated),
+            FullUsageReconcileExecution::WorkerLockHeld
+            | FullUsageReconcileExecution::MutationsActive
+                if poll < OPERATOR_MAX_POLLS =>
             {
                 tokio::time::sleep(RETRY_DELAY).await;
             }
-            FullUsageReconcileRun::WorkerLockHeld => {
+            FullUsageReconcileExecution::WorkerLockHeld => {
                 return Err(Error::internal(
-                    "usage bootstrap remained blocked by another reconciliation worker",
+                    "usage reconciliation remained busy; retry later",
                 ));
             }
-            FullUsageReconcileRun::MutationsActive => {
+            FullUsageReconcileExecution::MutationsActive => {
                 return Err(Error::internal(
-                    "usage bootstrap remained blocked by active file mutations",
+                    "file-tree mutations remained active; retry later",
                 ));
             }
         }
     }
 
-    Err(Error::internal("usage bootstrap did not complete"))
+    Err(Error::internal("full usage recalculation did not complete"))
 }
 
 #[cfg(test)]
@@ -82,7 +76,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_repairs_missing_live_space_counters()
+    async fn ensure_rejects_missing_live_space_counters()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let Some(db) = TestDb::setup().await? else {
             return Ok(());
@@ -93,15 +87,11 @@ mod tests {
             .execute(&db.pool)
             .await?;
 
-        ensure(&db.pool).await?;
-
-        let usage: (i64, i64) = sqlx::query_as(
-            "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
-        )
-        .bind(space_id)
-        .fetch_one(&db.pool)
-        .await?;
-        assert_eq!(usage, (1, 0));
+        let error = match ensure(&db.pool).await {
+            Ok(()) => return Err("missing counters must block startup".into()),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("operator recalculation"));
         db.cleanup().await;
         Ok(())
     }

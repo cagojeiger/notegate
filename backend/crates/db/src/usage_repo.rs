@@ -6,7 +6,7 @@ use notegate_core::{Error, Result};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::{active_account_predicate, map_sqlx_error, to_usize};
+use crate::{active_account_predicate, map_sqlx_error, space_usage, to_usize};
 
 const MANUAL_RECONCILE_COOLDOWN_SECONDS: i64 = 60 * 60;
 
@@ -44,7 +44,10 @@ impl UsageRepo {
 
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
             "SELECT s.id, s.name, su.live_node_count, su.live_content_bytes, \
-                    su.reconciled_at, su.next_reconcile_at <= now() AS reconciliation_pending, \
+                    su.reconciled_at, \
+                    EXISTS ( \
+                        SELECT 1 FROM space_usage_reconcile_jobs j WHERE j.space_id = s.id \
+                    ) AS reconciliation_pending, \
                     (SELECT count(*) FROM space_agent_connections c \
                      JOIN accounts agent_acc ON agent_acc.id = c.agent_id \
                      WHERE c.space_id = s.id AND c.disconnected_at IS NULL \
@@ -78,6 +81,7 @@ impl UsageRepo {
         space_id: Uuid,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        space_usage::acquire_maintenance_gate(&mut tx).await?;
         // Match file mutations and the reconciler: Space row before usage row.
         let live_space: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM spaces \
@@ -94,7 +98,10 @@ impl UsageRepo {
         }
 
         let state = sqlx::query_as::<_, ReconcileRequestRow>(
-            "SELECT su.reconciled_at, su.next_reconcile_at, now() AS requested_at \
+            "SELECT su.reconciled_at, now() AS requested_at, \
+                    EXISTS ( \
+                        SELECT 1 FROM space_usage_reconcile_jobs j WHERE j.space_id = su.space_id \
+                    ) AS pending \
              FROM space_usage su WHERE su.space_id = $1 FOR UPDATE",
         )
         .bind(space_id)
@@ -103,7 +110,7 @@ impl UsageRepo {
         .map_err(map_sqlx_error)?
         .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
 
-        if state.next_reconcile_at <= state.requested_at {
+        if state.pending {
             return Err(Error::conflict(
                 "space usage reconciliation is already queued",
             ));
@@ -116,16 +123,11 @@ impl UsageRepo {
             ));
         }
 
-        sqlx::query(
-            "UPDATE space_usage \
-             SET next_reconcile_at = $2, last_reconcile_attempt_at = NULL \
-             WHERE space_id = $1",
-        )
-        .bind(space_id)
-        .bind(state.requested_at)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
+        sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
+            .bind(space_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
         tx.commit().await.map_err(map_sqlx_error)
     }
 }
@@ -189,6 +191,6 @@ struct SpaceUsageRow {
 #[derive(Debug, FromRow)]
 struct ReconcileRequestRow {
     reconciled_at: DateTime<Utc>,
-    next_reconcile_at: DateTime<Utc>,
     requested_at: DateTime<Utc>,
+    pending: bool,
 }

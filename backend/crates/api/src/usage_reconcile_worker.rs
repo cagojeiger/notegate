@@ -2,8 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
-use notegate_db::{PgPool, SpaceUsageRepo, UsageReconcileRun};
+use notegate_db::{PgPool, SpaceUsageRepo, UsageReconcileExecution};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -16,67 +15,84 @@ pub fn spawn(pool: PgPool, shutdown: CancellationToken) -> JoinHandle<()> {
         tracing::info!(event = "usage_reconcile_worker.started");
         periodic_worker::run(RECONCILE_INTERVAL, shutdown, || {
             let pool = pool.clone();
-            async move { run_once(&pool).await }
+            async move { execute_once(&pool).await }
         })
         .await;
         tracing::info!(event = "usage_reconcile_worker.stopped");
     })
 }
 
-async fn run_once(pool: &PgPool) {
+async fn execute_once(pool: &PgPool) {
     let started = Instant::now();
     match SpaceUsageRepo::new(pool.clone())
-        .run_reconciliation_once()
+        .execute_next_reconciliation()
         .await
     {
-        Ok(UsageReconcileRun::LockHeld) => {
+        Ok(UsageReconcileExecution::WorkerLockHeld) => {
             tracing::debug!(
                 event = "usage_reconcile_worker.skipped",
                 reason = "worker_lock_held"
             );
         }
-        Ok(UsageReconcileRun::Idle) => {
+        Ok(UsageReconcileExecution::Idle) => {
             tracing::debug!(event = "usage_reconcile_worker.idle");
         }
-        Ok(UsageReconcileRun::SpacesBusy {
-            oldest_space_id,
-            oldest_due_at,
-            candidates_checked,
-            candidates_deferred,
+        Ok(UsageReconcileExecution::Deferred {
+            job_id,
+            space_id,
+            run_after,
         }) => {
             tracing::debug!(
-                event = "usage_reconcile_worker.skipped",
-                reason = "space_gates_busy",
-                %oldest_space_id,
-                candidates_checked,
-                candidates_deferred,
-                lag_seconds = Utc::now()
-                    .signed_duration_since(oldest_due_at)
-                    .num_seconds()
-                    .max(0),
+                event = "usage_reconcile_worker.execution",
+                outcome = "deferred",
+                %job_id,
+                %space_id,
+                %run_after,
+                duration_ms = started.elapsed().as_millis(),
             );
         }
-        Ok(UsageReconcileRun::Reconciled {
+        Ok(UsageReconcileExecution::Cancelled { job_id, space_id }) => {
+            tracing::info!(
+                event = "usage_reconcile_worker.execution",
+                outcome = "cancelled",
+                %job_id,
+                %space_id,
+                duration_ms = started.elapsed().as_millis(),
+            );
+        }
+        Ok(UsageReconcileExecution::Succeeded {
+            job_id,
             space_id,
-            due_at,
             previous,
             actual,
-            next_reconcile_at,
         }) => {
             tracing::info!(
-                event = "usage_reconcile_worker.run",
+                event = "usage_reconcile_worker.execution",
+                outcome = "succeeded",
+                %job_id,
                 %space_id,
                 changed = previous != actual,
                 previous_nodes = previous.live_node_count,
                 actual_nodes = actual.live_node_count,
                 previous_content_bytes = previous.live_content_bytes,
                 actual_content_bytes = actual.live_content_bytes,
-                lag_seconds = Utc::now()
-                    .signed_duration_since(due_at)
-                    .num_seconds()
-                    .max(0),
-                %next_reconcile_at,
                 duration_ms = started.elapsed().as_millis(),
+            );
+        }
+        Ok(UsageReconcileExecution::Failed {
+            job_id,
+            space_id,
+            run_after,
+            error,
+        }) => {
+            tracing::error!(
+                event = "usage_reconcile_worker.execution",
+                outcome = "failed",
+                %job_id,
+                %space_id,
+                %run_after,
+                duration_ms = started.elapsed().as_millis(),
+                %error,
             );
         }
         Err(error) => {

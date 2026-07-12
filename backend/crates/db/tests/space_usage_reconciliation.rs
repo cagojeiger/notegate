@@ -1,4 +1,4 @@
-//! Integration tests for distributed Space usage reconciliation and mutation gates.
+//! Integration tests for queued Space usage reconciliation and mutation gates.
 
 #![allow(
     clippy::unwrap_used,
@@ -9,13 +9,14 @@
 )]
 mod common;
 
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_db::{
-    FilesRepo, FullUsageReconcileRun, SpaceUsageRepo, UsageCounts, UsageReconcileRun,
+    FilesRepo, FullUsageReconcileExecution, SpaceUsageRepo, UsageCounts, UsageReconcileExecution,
 };
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
@@ -52,17 +53,17 @@ async fn acquire_gate(
     Ok(())
 }
 
-async fn mark_due(pool: &sqlx::PgPool, space_id: Uuid, age: Duration) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE space_usage SET next_reconcile_at = now() - $2 WHERE space_id = $1")
-        .bind(space_id)
-        .bind(age)
-        .execute(pool)
-        .await?;
-    Ok(())
+async fn queue_job(pool: &sqlx::PgPool, space_id: Uuid) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1) RETURNING job_id",
+    )
+    .bind(space_id)
+    .fetch_one(pool)
+    .await
 }
 
 #[tokio::test]
-async fn reconciliation_repairs_drift_and_schedules_the_next_run()
+async fn reconciliation_repairs_drift_and_records_execution()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
@@ -75,45 +76,32 @@ async fn reconciliation_repairs_drift_and_schedules_the_next_run()
     sqlx::query(
         "UPDATE space_usage \
          SET live_node_count = 99, live_content_bytes = 999, \
-             reconciled_at = now() - interval '30 days', \
-             next_reconcile_at = now() - interval '1 hour' \
+             reconciled_at = now() - interval '30 days' \
          WHERE space_id = $1",
     )
     .bind(space_id)
     .execute(&db.pool)
     .await?;
+    let job_id = queue_job(&db.pool, space_id).await?;
 
-    let started_at = Utc::now();
-    let run = SpaceUsageRepo::new(db.pool.clone())
-        .run_reconciliation_once()
+    let execution = SpaceUsageRepo::new(db.pool.clone())
+        .execute_next_reconciliation()
         .await?;
-    let UsageReconcileRun::Reconciled {
-        space_id: reconciled_space_id,
-        previous,
-        actual,
-        next_reconcile_at,
-        ..
-    } = run
-    else {
-        panic!("expected reconciliation, got {run:?}");
-    };
-    assert_eq!(reconciled_space_id, space_id);
     assert_eq!(
-        previous,
-        UsageCounts {
-            live_node_count: 99,
-            live_content_bytes: 999,
+        execution,
+        UsageReconcileExecution::Succeeded {
+            job_id,
+            space_id,
+            previous: UsageCounts {
+                live_node_count: 99,
+                live_content_bytes: 999,
+            },
+            actual: UsageCounts {
+                live_node_count: 2,
+                live_content_bytes: 5,
+            },
         }
     );
-    assert_eq!(
-        actual,
-        UsageCounts {
-            live_node_count: 2,
-            live_content_bytes: 5,
-        }
-    );
-    assert!(next_reconcile_at > started_at + Duration::days(6));
-    assert!(next_reconcile_at < Utc::now() + Duration::days(8));
 
     let stored: (i64, i64) = sqlx::query_as(
         "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
@@ -122,11 +110,19 @@ async fn reconciliation_repairs_drift_and_schedules_the_next_run()
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(stored, (2, 5));
+    let (outcome, metadata): (String, Value) = sqlx::query_as(
+        "SELECT outcome, metadata FROM space_usage_reconcile_executions WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(outcome, "succeeded");
+    assert_eq!(metadata["actual_nodes"], json!(2));
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
-            .run_reconciliation_once()
+            .execute_next_reconciliation()
             .await?,
-        UsageReconcileRun::Idle
+        UsageReconcileExecution::Idle
     );
 
     db.cleanup().await;
@@ -158,32 +154,46 @@ async fn full_recalculation_repairs_every_live_space_atomically()
     )
     .execute(&db.pool)
     .await?;
+    let queued_job_id = queue_job(&db.pool, first_space).await?;
 
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
-            .run_full_recalculation()
+            .execute_full_recalculation()
             .await?,
-        FullUsageReconcileRun::Recalculated {
+        FullUsageReconcileExecution::Recalculated {
             spaces_recalculated: 2
         }
     );
 
-    let first: (i64, i64, bool) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes, next_reconcile_at > now() \
-         FROM space_usage WHERE space_id = $1",
+    let first: (i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
     )
     .bind(first_space)
     .fetch_one(&db.pool)
     .await?;
-    let second: (i64, i64, bool) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes, next_reconcile_at > now() \
-         FROM space_usage WHERE space_id = $1",
+    let second: (i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
     )
     .bind(second_space)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(first, (2, 5, true));
-    assert_eq!(second, (1, 0, true));
+    assert_eq!(first, (2, 5));
+    assert_eq!(second, (1, 0));
+    let queued_jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM space_usage_reconcile_jobs")
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(queued_jobs, 0);
+    let (outcome, reason): (String, String) = sqlx::query_as(
+        "SELECT outcome, metadata->>'reason' \
+         FROM space_usage_reconcile_executions WHERE job_id = $1",
+    )
+    .bind(queued_job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        (outcome.as_str(), reason.as_str()),
+        ("succeeded", "full_recalculation")
+    );
 
     db.cleanup().await;
     Ok(())
@@ -202,9 +212,9 @@ async fn full_recalculation_skips_while_mutations_are_active()
 
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
-            .run_full_recalculation()
+            .execute_full_recalculation()
             .await?,
-        FullUsageReconcileRun::MutationsActive
+        FullUsageReconcileExecution::MutationsActive
     );
 
     mutation_tx.commit().await?;
@@ -220,16 +230,16 @@ async fn reconciliation_skips_when_another_worker_holds_the_database_lock()
         return Ok(());
     };
     let (_, space_id, _) = space_with_root(&db.pool, "reconcile-worker-lock").await?;
-    mark_due(&db.pool, space_id, Duration::hours(1)).await?;
+    queue_job(&db.pool, space_id).await?;
 
     let mut lock_tx = db.pool.begin().await?;
     acquire_gate(&mut lock_tx, RECONCILE_ADVISORY_LOCK_SEED, false).await?;
 
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
-            .run_reconciliation_once()
+            .execute_next_reconciliation()
             .await?,
-        UsageReconcileRun::LockHeld
+        UsageReconcileExecution::WorkerLockHeld
     );
 
     lock_tx.commit().await?;
@@ -238,86 +248,144 @@ async fn reconciliation_skips_when_another_worker_holds_the_database_lock()
 }
 
 #[tokio::test]
-async fn reconciliation_skips_busy_spaces_without_starving_the_next_candidate()
+async fn busy_job_is_deferred_without_blocking_the_next_job()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let (owner_user_id, busy_space_id, _) = space_with_root(&db.pool, "reconcile-busy-0").await?;
-    let mut busy_space_ids = vec![busy_space_id];
-    for index in 1..64 {
-        let space_id: Uuid = sqlx::query_scalar(
-            "INSERT INTO spaces (owner_user_id, name) VALUES ($1, $2) RETURNING id",
-        )
-        .bind(owner_user_id)
-        .bind(format!("reconcile-busy-{index}"))
-        .fetch_one(&db.pool)
-        .await?;
-        busy_space_ids.push(space_id);
-    }
-    let next_space_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'reconcile-next') RETURNING id",
-    )
-    .bind(owner_user_id)
-    .fetch_one(&db.pool)
-    .await?;
-    for space_id in &busy_space_ids {
-        mark_due(&db.pool, *space_id, Duration::hours(2)).await?;
-    }
-    mark_due(&db.pool, next_space_id, Duration::hours(1)).await?;
-
-    let mut mutation_tx = db.pool.begin().await?;
-    for space_id in &busy_space_ids {
-        acquire_gate(&mut mutation_tx, space_gate_seed(*space_id), true).await?;
-    }
-
-    let run = SpaceUsageRepo::new(db.pool.clone())
-        .run_reconciliation_once()
-        .await?;
-    assert!(matches!(
-        run,
-        UsageReconcileRun::SpacesBusy {
-            oldest_space_id,
-            candidates_checked: 64,
-            candidates_deferred: 64,
-            ..
-        } if oldest_space_id == busy_space_id
-    ));
-
-    let (pending, attempted): (bool, bool) = sqlx::query_as(
-        "SELECT next_reconcile_at <= now(), last_reconcile_attempt_at IS NOT NULL \
-         FROM space_usage WHERE space_id = $1",
+    let (_, busy_space_id, _) = space_with_root(&db.pool, "reconcile-busy").await?;
+    let (_, next_space_id, _) = space_with_root(&db.pool, "reconcile-next").await?;
+    let busy_job_id = queue_job(&db.pool, busy_space_id).await?;
+    let next_job_id = queue_job(&db.pool, next_space_id).await?;
+    sqlx::query(
+        "UPDATE space_usage_reconcile_jobs \
+         SET run_after = CASE space_id \
+             WHEN $1 THEN now() - interval '2 hours' \
+             ELSE now() - interval '1 hour' END \
+         WHERE space_id IN ($1, $2)",
     )
     .bind(busy_space_id)
-    .fetch_one(&db.pool)
+    .bind(next_space_id)
+    .execute(&db.pool)
     .await?;
-    assert!(pending);
-    assert!(attempted);
 
-    let run = SpaceUsageRepo::new(db.pool.clone())
-        .run_reconciliation_once()
+    let mut mutation_tx = db.pool.begin().await?;
+    acquire_gate(&mut mutation_tx, space_gate_seed(busy_space_id), true).await?;
+
+    let execution = SpaceUsageRepo::new(db.pool.clone())
+        .execute_next_reconciliation()
         .await?;
     assert!(matches!(
-        run,
-        UsageReconcileRun::Reconciled { space_id, .. } if space_id == next_space_id
+        execution,
+        UsageReconcileExecution::Deferred { job_id, space_id, run_after }
+            if job_id == busy_job_id && space_id == busy_space_id && run_after > Utc::now()
+    ));
+    let (outcome, retry_count): (String, i32) = sqlx::query_as(
+        "SELECT e.outcome, j.retry_count \
+         FROM space_usage_reconcile_executions e \
+         JOIN space_usage_reconcile_jobs j ON j.job_id = e.job_id \
+         WHERE e.job_id = $1",
+    )
+    .bind(busy_job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!((outcome.as_str(), retry_count), ("deferred", 0));
+
+    assert!(matches!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .execute_next_reconciliation()
+            .await?,
+        UsageReconcileExecution::Succeeded { job_id, space_id, .. }
+            if job_id == next_job_id && space_id == next_space_id
     ));
 
     mutation_tx.commit().await?;
-    sqlx::query(
-        "UPDATE space_usage SET last_reconcile_attempt_at = now() - interval '6 minutes' \
-         WHERE space_id = $1",
-    )
-    .bind(busy_space_id)
-    .execute(&db.pool)
-    .await?;
-    let run = SpaceUsageRepo::new(db.pool.clone())
-        .run_reconciliation_once()
+    sqlx::query("UPDATE space_usage_reconcile_jobs SET run_after = now() WHERE job_id = $1")
+        .bind(busy_job_id)
+        .execute(&db.pool)
         .await?;
     assert!(matches!(
-        run,
-        UsageReconcileRun::Reconciled { space_id, .. } if space_id == busy_space_id
+        SpaceUsageRepo::new(db.pool.clone())
+            .execute_next_reconciliation()
+            .await?,
+        UsageReconcileExecution::Succeeded { job_id, space_id, .. }
+            if job_id == busy_job_id && space_id == busy_space_id
     ));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_execution_is_recorded_and_retried_later() -> Result<(), Box<dyn std::error::Error>>
+{
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (_, space_id, _) = space_with_root(&db.pool, "reconcile-failure").await?;
+    let job_id = queue_job(&db.pool, space_id).await?;
+    sqlx::query("DELETE FROM space_usage WHERE space_id = $1")
+        .bind(space_id)
+        .execute(&db.pool)
+        .await?;
+
+    let execution = SpaceUsageRepo::new(db.pool.clone())
+        .execute_next_reconciliation()
+        .await?;
+    assert!(matches!(
+        execution,
+        UsageReconcileExecution::Failed { job_id: id, space_id: failed_space, run_after, ref error }
+            if id == job_id && failed_space == space_id && run_after > Utc::now()
+                && error.contains("missing its usage counter")
+    ));
+    let (retry_count, outcome, has_error): (i32, String, bool) = sqlx::query_as(
+        "SELECT j.retry_count, e.outcome, e.error_message IS NOT NULL \
+         FROM space_usage_reconcile_jobs j \
+         JOIN space_usage_reconcile_executions e ON e.job_id = j.job_id \
+         WHERE j.job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        (retry_count, outcome.as_str(), has_error),
+        (1, "failed", true)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn expired_execution_history_is_removed() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (_, space_id, _) = space_with_root(&db.pool, "reconcile-retention").await?;
+    sqlx::query(
+        "INSERT INTO space_usage_reconcile_executions ( \
+             job_id, space_id, started_at, finished_at, outcome \
+         ) VALUES (gen_random_uuid(), $1, now() - interval '4 months', \
+                   now() - interval '4 months', 'succeeded')",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+
+    assert_eq!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .execute_next_reconciliation()
+            .await?,
+        UsageReconcileExecution::Idle
+    );
+    let executions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM space_usage_reconcile_executions")
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(executions, 0);
 
     db.cleanup().await;
     Ok(())

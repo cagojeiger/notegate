@@ -71,4 +71,4 @@ Owner user만 가능하다. Space는 soft delete 후 purge 대상이 된다.
 POST /api/v1/spaces/{space_id}/usage/reconcile
 ```
 
-Owner user만 가능하다. 요청은 해당 Space의 `next_reconcile_at`을 현재 시각으로 앞당기고 `202 Accepted`와 `{"status":"queued"}`를 반환한다. 같은 Space의 중복 요청과 최근 reconciliation 완료 후 1시간 cooldown 위반은 거부한다. 실제 COUNT/SUM은 background reconciler가 순차적으로 실행한다.
+Owner user만 가능하다. 요청은 해당 Space의 reconciliation job을 만들고 `202 Accepted`와 `{"status":"queued"}`를 반환한다. 같은 Space의 중복 요청과 최근 reconciliation 완료 후 1시간 cooldown 위반은 거부한다. 실제 COUNT/SUM은 background worker가 순차적으로 실행한다.

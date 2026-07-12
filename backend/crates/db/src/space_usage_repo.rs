@@ -2,14 +2,14 @@
 
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
+use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::{map_sqlx_error, space_usage};
 
 const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
-const DUE_CANDIDATE_LIMIT: i64 = 64;
-const BUSY_RETRY_INTERVAL: &str = "5 minutes";
+const RETRY_INTERVAL: &str = "5 minutes";
 const LOCK_TIMEOUT: &str = "5s";
 const RECONCILE_STATEMENT_TIMEOUT: &str = "30s";
 const FULL_RECALCULATION_STATEMENT_TIMEOUT: &str = "5min";
@@ -24,15 +24,35 @@ impl SpaceUsageRepo {
         Self { pool }
     }
 
-    /// Require the usage table and Space creation trigger installed by migration 0012.
+    /// Require the usage tables and active Space creation trigger from migration 0012.
     pub async fn require_schema(&self) -> Result<()> {
         let installed: bool = sqlx::query_scalar(
-            "SELECT to_regclass('space_usage') IS NOT NULL \
+            "SELECT EXISTS ( \
+                        SELECT 1 FROM pg_class c \
+                        JOIN pg_namespace n ON n.oid = c.relnamespace \
+                        WHERE n.nspname = current_schema() \
+                          AND c.relname = 'space_usage' AND c.relkind = 'r' \
+                    ) \
                     AND EXISTS ( \
-                        SELECT 1 FROM pg_trigger \
-                        WHERE tgrelid = to_regclass('spaces') \
-                          AND tgname = 'spaces_create_usage' \
-                          AND NOT tgisinternal \
+                        SELECT 1 FROM pg_class c \
+                        JOIN pg_namespace n ON n.oid = c.relnamespace \
+                        WHERE n.nspname = current_schema() \
+                          AND c.relname = 'space_usage_reconcile_jobs' AND c.relkind = 'r' \
+                    ) \
+                    AND EXISTS ( \
+                        SELECT 1 FROM pg_class c \
+                        JOIN pg_namespace n ON n.oid = c.relnamespace \
+                        WHERE n.nspname = current_schema() \
+                          AND c.relname = 'space_usage_reconcile_executions' AND c.relkind = 'r' \
+                    ) \
+                    AND EXISTS ( \
+                        SELECT 1 FROM pg_trigger t \
+                        JOIN pg_class c ON c.oid = t.tgrelid \
+                        JOIN pg_namespace n ON n.oid = c.relnamespace \
+                        WHERE n.nspname = current_schema() AND c.relname = 'spaces' \
+                          AND t.tgname = 'spaces_create_usage' \
+                          AND NOT t.tgisinternal \
+                          AND t.tgenabled IN ('O', 'A') \
                     )",
         )
         .fetch_one(&self.pool)
@@ -69,126 +89,71 @@ impl SpaceUsageRepo {
         exact_usage(&mut connection, space_id).await
     }
 
-    /// Reconcile at most one due Space.
-    ///
-    /// A database-wide advisory lock elects one active worker. Due candidates
-    /// whose Space gate is busy are skipped without waiting.
-    pub async fn run_reconciliation_once(&self) -> Result<UsageReconcileRun> {
+    /// Execute at most one queued Space reconciliation.
+    pub async fn execute_next_reconciliation(&self) -> Result<UsageReconcileExecution> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         configure_transaction(&mut tx, RECONCILE_STATEMENT_TIMEOUT).await?;
 
         if !try_acquire_worker_lock(&mut tx).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(UsageReconcileRun::LockHeld);
+            return Ok(UsageReconcileExecution::WorkerLockHeld);
         }
+        delete_expired_executions(&mut tx).await?;
 
-        let candidates = due_candidates(&mut tx).await?;
-        let Some(oldest) = candidates.first().cloned() else {
+        let Some(job) = next_job(&mut tx).await? else {
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(UsageReconcileRun::Idle);
+            return Ok(UsageReconcileExecution::Idle);
         };
 
-        let mut selected = None;
-        for candidate in &candidates {
-            if space_usage::try_acquire_reconciliation_gate(&mut tx, candidate.space_id).await? {
-                selected = Some(candidate.clone());
-                break;
+        sqlx::query("SAVEPOINT usage_reconcile_job")
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        let execution = match execute_job(&mut tx, &job).await {
+            Ok(execution) => execution,
+            Err(error) => {
+                let error_message = error.to_string();
+                sqlx::query("ROLLBACK TO SAVEPOINT usage_reconcile_job")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_sqlx_error)?;
+                let run_after = record_failed_execution(&mut tx, &job, &error_message).await?;
+                UsageReconcileExecution::Failed {
+                    job_id: job.job_id,
+                    space_id: job.space_id,
+                    run_after,
+                    error: error_message,
+                }
             }
-        }
-        let Some(candidate) = selected else {
-            let candidates_deferred = defer_busy_candidates(&mut tx, &candidates).await?;
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(UsageReconcileRun::SpacesBusy {
-                oldest_space_id: oldest.space_id,
-                oldest_due_at: oldest.due_at,
-                candidates_checked: candidates.len(),
-                candidates_deferred,
-            });
         };
-
-        let live_space: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
-        )
-        .bind(candidate.space_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if live_space.is_none() {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(UsageReconcileRun::Idle);
-        }
-
-        let Some(previous) = sqlx::query_as::<_, UsageCounts>(
-            "SELECT live_node_count, live_content_bytes \
-             FROM space_usage WHERE space_id = $1 FOR UPDATE",
-        )
-        .bind(candidate.space_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-        else {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(UsageReconcileRun::Idle);
-        };
-
-        let actual = exact_usage(&mut tx, candidate.space_id).await?;
-        let next_reconcile_at: DateTime<Utc> = sqlx::query_scalar(
-            "UPDATE space_usage \
-             SET live_node_count = $2, live_content_bytes = $3, reconciled_at = now(), \
-                 last_reconcile_attempt_at = now(), \
-                 next_reconcile_at = now() + interval '7 days' \
-                     + ((random() - 0.5) * interval '24 hours') \
-             WHERE space_id = $1 \
-             RETURNING next_reconcile_at",
-        )
-        .bind(candidate.space_id)
-        .bind(actual.live_node_count)
-        .bind(actual.live_content_bytes)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(UsageReconcileRun::Reconciled {
-            space_id: candidate.space_id,
-            due_at: candidate.due_at,
-            previous,
-            actual,
-            next_reconcile_at,
-        })
+        Ok(execution)
     }
 
     /// Rebuild every live Space counter in one maintenance transaction.
-    ///
-    /// The worker lock excludes scheduled reconciliation. The global exclusive
-    /// gate rejects new file-tree mutations while the source rows are scanned;
-    /// reads remain available throughout the run.
-    pub async fn run_full_recalculation(&self) -> Result<FullUsageReconcileRun> {
+    pub async fn execute_full_recalculation(&self) -> Result<FullUsageReconcileExecution> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         configure_transaction(&mut tx, FULL_RECALCULATION_STATEMENT_TIMEOUT).await?;
 
         if !try_acquire_worker_lock(&mut tx).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(FullUsageReconcileRun::WorkerLockHeld);
+            return Ok(FullUsageReconcileExecution::WorkerLockHeld);
         }
         if !space_usage::try_acquire_full_reconciliation_gate(&mut tx).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(FullUsageReconcileRun::MutationsActive);
+            return Ok(FullUsageReconcileExecution::MutationsActive);
         }
 
         let result = sqlx::query(
-            "INSERT INTO space_usage (\
-                 space_id, live_node_count, live_content_bytes, reconciled_at, \
-                 last_reconcile_attempt_at, next_reconcile_at\
+            "INSERT INTO space_usage ( \
+                 space_id, live_node_count, live_content_bytes, reconciled_at \
              ) \
              SELECT \
                  s.id, \
                  count(n.id) FILTER (WHERE n.deleted_at IS NULL)::bigint, \
                  COALESCE(sum(t.byte_len) FILTER (WHERE n.deleted_at IS NULL), 0)::bigint + \
                  COALESCE(sum(f.byte_len) FILTER (WHERE n.deleted_at IS NULL), 0)::bigint, \
-                 now(), \
-                 now(), \
-                 now() + interval '7 days' + ((random() - 0.5) * interval '24 hours') \
+                 now() \
              FROM spaces s \
              LEFT JOIN nodes n ON n.space_id = s.id \
              LEFT JOIN text_objects t ON t.space_id = n.space_id AND t.node_id = n.id \
@@ -198,19 +163,197 @@ impl SpaceUsageRepo {
              ON CONFLICT (space_id) DO UPDATE \
              SET live_node_count = EXCLUDED.live_node_count, \
                  live_content_bytes = EXCLUDED.live_content_bytes, \
-                 reconciled_at = EXCLUDED.reconciled_at, \
-                 last_reconcile_attempt_at = EXCLUDED.last_reconcile_attempt_at, \
-                 next_reconcile_at = EXCLUDED.next_reconcile_at",
+                 reconciled_at = EXCLUDED.reconciled_at",
         )
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO space_usage_reconcile_executions ( \
+                 job_id, space_id, started_at, outcome, metadata \
+             ) \
+             SELECT job_id, space_id, now(), 'succeeded', \
+                    jsonb_build_object('reason', 'full_recalculation') \
+             FROM space_usage_reconcile_jobs",
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        sqlx::query("DELETE FROM space_usage_reconcile_jobs")
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(FullUsageReconcileRun::Recalculated {
+        Ok(FullUsageReconcileExecution::Recalculated {
             spaces_recalculated: result.rows_affected(),
         })
     }
+}
+
+async fn execute_job(
+    tx: &mut sqlx::PgConnection,
+    job: &QueuedJob,
+) -> Result<UsageReconcileExecution> {
+    if !space_usage::try_acquire_reconciliation_gate(tx, job.space_id).await? {
+        let run_after: DateTime<Utc> = sqlx::query_scalar(
+            "UPDATE space_usage_reconcile_jobs \
+             SET run_after = now() + $2::interval \
+             WHERE job_id = $1 RETURNING run_after",
+        )
+        .bind(job.job_id)
+        .bind(RETRY_INTERVAL)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        insert_execution(tx, job, "deferred", None, json!({"reason": "space_busy"})).await?;
+        return Ok(UsageReconcileExecution::Deferred {
+            job_id: job.job_id,
+            space_id: job.space_id,
+            run_after,
+        });
+    }
+
+    let live_space: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
+            .bind(job.space_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+    if live_space.is_none() {
+        sqlx::query("DELETE FROM space_usage_reconcile_jobs WHERE job_id = $1")
+            .bind(job.job_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        insert_execution(
+            tx,
+            job,
+            "cancelled",
+            None,
+            json!({"reason": "space_deleted"}),
+        )
+        .await?;
+        return Ok(UsageReconcileExecution::Cancelled {
+            job_id: job.job_id,
+            space_id: job.space_id,
+        });
+    }
+
+    let previous = sqlx::query_as::<_, UsageCounts>(
+        "SELECT live_node_count, live_content_bytes \
+         FROM space_usage WHERE space_id = $1 FOR UPDATE",
+    )
+    .bind(job.space_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
+    let actual = exact_usage(tx, job.space_id).await?;
+
+    sqlx::query(
+        "UPDATE space_usage \
+         SET live_node_count = $2, live_content_bytes = $3, reconciled_at = now() \
+         WHERE space_id = $1",
+    )
+    .bind(job.space_id)
+    .bind(actual.live_node_count)
+    .bind(actual.live_content_bytes)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    insert_execution(
+        tx,
+        job,
+        "succeeded",
+        None,
+        json!({
+            "previous_nodes": previous.live_node_count,
+            "actual_nodes": actual.live_node_count,
+            "previous_content_bytes": previous.live_content_bytes,
+            "actual_content_bytes": actual.live_content_bytes,
+        }),
+    )
+    .await?;
+    sqlx::query("DELETE FROM space_usage_reconcile_jobs WHERE job_id = $1")
+        .bind(job.job_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+    Ok(UsageReconcileExecution::Succeeded {
+        job_id: job.job_id,
+        space_id: job.space_id,
+        previous,
+        actual,
+    })
+}
+
+async fn record_failed_execution(
+    tx: &mut sqlx::PgConnection,
+    job: &QueuedJob,
+    error_message: &str,
+) -> Result<DateTime<Utc>> {
+    let run_after: DateTime<Utc> = sqlx::query_scalar(
+        "UPDATE space_usage_reconcile_jobs \
+         SET retry_count = retry_count + 1, run_after = now() + $2::interval \
+         WHERE job_id = $1 RETURNING run_after",
+    )
+    .bind(job.job_id)
+    .bind(RETRY_INTERVAL)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    insert_execution(tx, job, "failed", Some(error_message), json!({})).await?;
+    Ok(run_after)
+}
+
+async fn insert_execution(
+    tx: &mut sqlx::PgConnection,
+    job: &QueuedJob,
+    outcome: &str,
+    error_message: Option<&str>,
+    metadata: Value,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO space_usage_reconcile_executions ( \
+             job_id, space_id, started_at, outcome, error_message, metadata \
+         ) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(job.job_id)
+    .bind(job.space_id)
+    .bind(job.started_at)
+    .bind(outcome)
+    .bind(error_message)
+    .bind(metadata)
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
+async fn next_job(tx: &mut sqlx::PgConnection) -> Result<Option<QueuedJob>> {
+    sqlx::query_as(
+        "SELECT job_id, space_id, now() AS started_at \
+         FROM space_usage_reconcile_jobs \
+         WHERE run_after <= now() \
+         ORDER BY run_after, requested_at, job_id \
+         LIMIT 1 FOR UPDATE SKIP LOCKED",
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)
+}
+
+async fn delete_expired_executions(tx: &mut sqlx::PgConnection) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM space_usage_reconcile_executions \
+         WHERE finished_at < now() - interval '3 months'",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
 }
 
 async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &str) -> Result<()> {
@@ -228,48 +371,6 @@ async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &
 
 async fn try_acquire_worker_lock(tx: &mut sqlx::PgConnection) -> Result<bool> {
     space_usage::try_schema_advisory_lock(tx, RECONCILE_ADVISORY_LOCK_SEED, false).await
-}
-
-async fn due_candidates(tx: &mut sqlx::PgConnection) -> Result<Vec<DueSpace>> {
-    sqlx::query_as(
-        "SELECT su.space_id, su.next_reconcile_at AS due_at \
-         FROM space_usage su \
-         JOIN spaces s ON s.id = su.space_id \
-         WHERE s.deleted_at IS NULL AND su.next_reconcile_at <= now() \
-           AND (su.last_reconcile_attempt_at IS NULL \
-                OR su.last_reconcile_attempt_at <= now() - $2::interval) \
-         ORDER BY su.next_reconcile_at, su.space_id \
-         LIMIT $1",
-    )
-    .bind(DUE_CANDIDATE_LIMIT)
-    .bind(BUSY_RETRY_INTERVAL)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)
-}
-
-async fn defer_busy_candidates(
-    tx: &mut sqlx::PgConnection,
-    candidates: &[DueSpace],
-) -> Result<u64> {
-    let space_ids = candidates
-        .iter()
-        .map(|candidate| candidate.space_id)
-        .collect::<Vec<_>>();
-    let result = sqlx::query(
-        "WITH unlocked AS MATERIALIZED ( \
-             SELECT space_id FROM space_usage \
-             WHERE space_id = ANY($1) AND next_reconcile_at <= now() \
-             FOR UPDATE SKIP LOCKED \
-         ) \
-         UPDATE space_usage su SET last_reconcile_attempt_at = now() \
-         FROM unlocked WHERE su.space_id = unlocked.space_id",
-    )
-    .bind(&space_ids)
-    .execute(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(result.rows_affected())
 }
 
 async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<UsageCounts> {
@@ -294,9 +395,10 @@ async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<Usag
 }
 
 #[derive(Debug, Clone, FromRow, PartialEq, Eq)]
-struct DueSpace {
+struct QueuedJob {
+    job_id: Uuid,
     space_id: Uuid,
-    due_at: DateTime<Utc>,
+    started_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, FromRow, PartialEq, Eq)]
@@ -306,26 +408,34 @@ pub struct UsageCounts {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UsageReconcileRun {
-    LockHeld,
+pub enum UsageReconcileExecution {
+    WorkerLockHeld,
     Idle,
-    SpacesBusy {
-        oldest_space_id: Uuid,
-        oldest_due_at: DateTime<Utc>,
-        candidates_checked: usize,
-        candidates_deferred: u64,
-    },
-    Reconciled {
+    Deferred {
+        job_id: Uuid,
         space_id: Uuid,
-        due_at: DateTime<Utc>,
+        run_after: DateTime<Utc>,
+    },
+    Cancelled {
+        job_id: Uuid,
+        space_id: Uuid,
+    },
+    Succeeded {
+        job_id: Uuid,
+        space_id: Uuid,
         previous: UsageCounts,
         actual: UsageCounts,
-        next_reconcile_at: DateTime<Utc>,
+    },
+    Failed {
+        job_id: Uuid,
+        space_id: Uuid,
+        run_after: DateTime<Utc>,
+        error: String,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FullUsageReconcileRun {
+pub enum FullUsageReconcileExecution {
     WorkerLockHeld,
     MutationsActive,
     Recalculated { spaces_recalculated: u64 },

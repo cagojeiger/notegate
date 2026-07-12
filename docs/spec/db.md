@@ -14,6 +14,8 @@ audit_events
 file_change_events
 spaces
 space_usage
+space_usage_reconcile_jobs
+space_usage_reconcile_executions
 space_agent_connections
 nodes
 text_objects
@@ -249,11 +251,34 @@ space_usage
   live_node_count bigint not null default 1 check >= 1
   live_content_bytes bigint not null default 0 check >= 0
   reconciled_at timestamptz not null
-  last_reconcile_attempt_at timestamptz null
-  next_reconcile_at timestamptz not null
 ```
 
-`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 authoritative counter, 마지막 reconciliation 시도 시각, reconciliation schedule을 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. `space_usage_reconcile_due_idx(next_reconcile_at)`로 due Space를 선택한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
+`space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 authoritative counter를 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
+
+```text
+space_usage_reconcile_jobs
+  job_id uuid pk
+  space_id uuid unique references spaces(id) on delete cascade
+  requested_at timestamptz not null
+  run_after timestamptz not null
+  retry_count integer not null default 0 check >= 0
+```
+
+`space_usage_reconcile_jobs`는 수동 요청으로 생성된 활성 작업만 보관한다. `space_id` unique 제약으로 같은 Space의 중복 작업을 막는다. 성공 또는 취소 시 행을 삭제하고, 지연 또는 실패 시 `run_after`를 갱신한다. 전체 재계산은 기존 job을 성공 execution으로 마감한 뒤 삭제한다. `retry_count`는 실패에만 증가한다.
+
+```text
+space_usage_reconcile_executions
+  execution_id uuid pk
+  job_id uuid not null
+  space_id uuid not null
+  started_at timestamptz not null
+  finished_at timestamptz not null
+  outcome text check ('succeeded','deferred','failed','cancelled')
+  error_message text null
+  metadata jsonb not null default '{}'
+```
+
+`space_usage_reconcile_executions`는 worker 처리 1회를 append-only로 기록한다. Job은 완료 후 삭제하므로 `job_id`에 FK를 두지 않는다. 실패한 execution만 `error_message`를 가지며, 3개월이 지난 행은 worker가 정리한다.
 
 ```text
 space_agent_connections

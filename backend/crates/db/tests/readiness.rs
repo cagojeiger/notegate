@@ -47,7 +47,7 @@ async fn readiness_rejects_missing_space_usage_table() -> Result<(), Box<dyn std
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    sqlx::query("DROP TABLE space_usage")
+    sqlx::query("DROP TABLE space_usage CASCADE")
         .execute(&db.pool)
         .await?;
 
@@ -75,6 +75,28 @@ async fn readiness_rejects_missing_space_usage_trigger() -> Result<(), Box<dyn s
     let err = notegate_db::check_readiness(&db.pool)
         .await
         .expect_err("missing usage trigger is not ready");
+    assert!(
+        err.to_string()
+            .contains("required space usage schema is not installed")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn readiness_rejects_disabled_space_usage_trigger() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    sqlx::query("ALTER TABLE spaces DISABLE TRIGGER spaces_create_usage")
+        .execute(&db.pool)
+        .await?;
+
+    let err = notegate_db::check_readiness(&db.pool)
+        .await
+        .expect_err("disabled usage trigger is not ready");
     assert!(
         err.to_string()
             .contains("required space usage schema is not installed")

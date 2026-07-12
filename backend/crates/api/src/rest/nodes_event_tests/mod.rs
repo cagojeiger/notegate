@@ -6,15 +6,13 @@
     clippy::unwrap_in_result
 )]
 
-mod support;
-
 use axum::http::StatusCode;
 use notegate_db::{AccountRepo, test_support::TestDb};
 use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
 use serde_json::json;
 use uuid::Uuid;
 
-use support::{
+use crate::rest::test_support::{
     caller_and_space, empty_request, get_json, json_request, rest_app, state, upload_file,
 };
 

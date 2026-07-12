@@ -11,7 +11,7 @@ mod common;
 
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileRun};
+use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, StoredFile, WriteTextBody,
@@ -185,15 +185,15 @@ async fn usage_drift_rolls_back_mutation_until_reconciled() -> Result<(), Box<dy
             .await?;
     assert!(folder_is_live);
 
-    sqlx::query("UPDATE space_usage SET next_reconcile_at = now() WHERE space_id = $1")
+    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
         .bind(space_id)
         .execute(&db.pool)
         .await?;
     assert!(matches!(
         SpaceUsageRepo::new(db.pool.clone())
-            .run_reconciliation_once()
+            .execute_next_reconciliation()
             .await?,
-        UsageReconcileRun::Reconciled { space_id: id, .. } if id == space_id
+        UsageReconcileExecution::Succeeded { space_id: id, .. } if id == space_id
     ));
     repo.soft_delete_node(space_id, folder.id, account, false)
         .await?;
@@ -218,6 +218,8 @@ async fn migration_backfills_existing_space_usage() -> Result<(), Box<dyn std::e
     sqlx::raw_sql(
         "DROP TRIGGER spaces_create_usage ON spaces; \
          DROP FUNCTION create_space_usage(); \
+         DROP TABLE space_usage_reconcile_executions; \
+         DROP TABLE space_usage_reconcile_jobs; \
          DROP TABLE space_usage; \
          DROP INDEX agents_owner_user_idx;",
     )

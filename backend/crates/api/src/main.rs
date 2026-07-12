@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", openapi::json_pretty()?);
         return Ok(());
     }
+    let recalculate_usage = std::env::args().any(|arg| arg == "--recalculate-usage");
 
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
@@ -44,6 +45,12 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = notegate_db::connect(&config).await?;
     notegate_db::run_migrations(&pool).await?;
+    if recalculate_usage {
+        let spaces_recalculated = usage_bootstrap::recalculate_all(&pool).await?;
+        println!("recalculated {spaces_recalculated} spaces");
+        pool.close().await;
+        return Ok(());
+    }
     usage_bootstrap::ensure(&pool).await?;
     info!(
         event = "db.ready",

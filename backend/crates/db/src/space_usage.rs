@@ -28,13 +28,23 @@ impl UsageDelta {
 
 /// Acquire the shared side of the Space reconciliation gate without waiting.
 pub(crate) async fn acquire_mutation_gate(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
-    if try_full_reconciliation_gate(tx, true).await? && try_space_gate(tx, space_id, true).await? {
+    acquire_maintenance_gate(tx).await?;
+    if !try_space_gate(tx, space_id, true).await? {
+        return Err(recalculation_in_progress());
+    }
+    Ok(())
+}
+
+/// Exclude full recalculation while a request queues or mutates usage state.
+pub(crate) async fn acquire_maintenance_gate(tx: &mut PgConnection) -> Result<()> {
+    if try_full_reconciliation_gate(tx, true).await? {
         return Ok(());
     }
+    Err(recalculation_in_progress())
+}
 
-    Err(notegate_core::Error::usage_recalculation_in_progress(
-        MUTATION_RETRY_AFTER_SECONDS,
-    ))
+fn recalculation_in_progress() -> Error {
+    Error::usage_recalculation_in_progress(MUTATION_RETRY_AFTER_SECONDS)
 }
 
 /// Try to acquire exclusive reconciliation access for one Space.

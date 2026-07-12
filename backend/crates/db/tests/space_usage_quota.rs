@@ -12,7 +12,7 @@ mod common;
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_core::limits::Limits;
-use notegate_db::{FilesRepo, FullUsageReconcileRun, SpaceUsageRepo, TextMutationKind};
+use notegate_db::{FilesRepo, FullUsageReconcileExecution, SpaceUsageRepo, TextMutationKind};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{CopyNode, CreateFolder, StoredContent, StoredFile, WriteTextBody};
 use sqlx::PgPool;
@@ -376,17 +376,17 @@ async fn missing_counter_rolls_back_mutation_and_full_recalculation_repairs_it()
     );
 
     let usage_repo = SpaceUsageRepo::new(db.pool.clone());
-    let mut recalculation = FullUsageReconcileRun::MutationsActive;
+    let mut recalculation = FullUsageReconcileExecution::MutationsActive;
     for _ in 0..20 {
-        recalculation = usage_repo.run_full_recalculation().await?;
-        if recalculation != FullUsageReconcileRun::MutationsActive {
+        recalculation = usage_repo.execute_full_recalculation().await?;
+        if recalculation != FullUsageReconcileExecution::MutationsActive {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     assert_eq!(
         recalculation,
-        FullUsageReconcileRun::Recalculated {
+        FullUsageReconcileExecution::Recalculated {
             spaces_recalculated: 1
         }
     );
