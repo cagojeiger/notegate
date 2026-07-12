@@ -123,9 +123,9 @@ worker tick
 - 재계산 중 해당 Space의 read는 허용하고 mutation만 일시적으로 거부한다. 다른 Space는 영향받지 않는다.
 - Space gate가 busy이면 `deferred` execution을 기록하고 `run_after`를 5분 뒤로 옮긴다. `retry_count`는 증가시키지 않는다.
 - 실행 실패는 savepoint까지 rollback한 뒤 `failed` execution과 error를 같은 worker transaction에 기록한다. `retry_count`를 증가시키고 5분 뒤 재시도한다.
-- 성공, 지연, 실패, 취소 execution은 append-only로 기록하고 3개월이 지난 행은 worker가 정리한다.
+- 성공, 지연, 실패, 취소 execution은 append-only로 기록한다. Worker lock을 획득한 프로세스가 transaction timeout 안에서 3개월이 지난 행을 정리한다.
 - Space별 재계산 statement timeout은 30초, row lock timeout은 5초다.
-- 프로세스 종료 시 새 reconciliation 실행을 시작하지 않는다. 이미 시작한 실행은 transaction이 commit 또는 rollback될 때까지 기다리고, worker 종료 후 DB pool을 닫는다. 배포 환경의 강제 종료 유예시간은 HTTP와 worker drain을 포함하도록 90초 이상으로 설정한다.
+- 프로세스 종료 시 현재 reconciliation transaction만 commit 또는 rollback까지 완료하고, queue에 남은 job은 시작하지 않는다. 대기 job은 다음 worker가 이어서 처리한다. Worker 종료 후 DB pool을 닫고, 배포 환경의 강제 종료 유예시간은 HTTP와 현재 transaction drain을 포함하도록 90초 이상으로 설정한다.
 
 ## Manual reconciliation
 
@@ -149,7 +149,7 @@ notegate-api --recalculate-usage
 
 저장소에서 실행할 때는 `cargo run -p notegate-api -- --recalculate-usage`를 사용한다.
 
-명령은 모든 live Space의 reconciliation job을 한 번에 등록한 뒤(`ON CONFLICT`로 기존 job은 즉시 실행 가능하게만 갱신) queue가 빌 때까지 job을 하나씩 실행한다. Space 하나를 재계산하는 동안 그 Space의 mutation만 잠시 거부되고, 나머지 Space와 read는 영향받지 않으므로 서비스 운영 중에도 실행할 수 있다. 다른 worker가 lock을 쥐고 있으면 1초 간격으로 최대 30번 재시도하고, busy로 지연되거나 실패한 Space가 있으면 해당 Space를 명시한 오류로 종료한다(background worker가 이어서 재시도한다). 누락된 counter row는 job 실행이 다시 생성한다.
+명령은 모든 live Space의 reconciliation job을 한 번에 등록한 뒤(`ON CONFLICT`로 기존 job은 즉시 실행 가능하게만 갱신) queue가 빌 때까지 job을 하나씩 실행한다. Space 하나를 재계산하는 동안 그 Space의 mutation만 잠시 거부되고, 나머지 Space와 read는 영향받지 않으므로 서비스 운영 중에도 실행할 수 있다. 다른 worker가 lock을 쥐고 있으면 1초 간격으로 최대 30번 재시도한다. Ready job이 없어도 deferred/failed job이 queue에 남아 있으면 성공으로 처리하지 않는다. Busy로 지연되거나 실패한 Space가 있으면 오류로 종료하고 background worker가 이어서 재시도한다. 누락된 counter row는 job 실행이 다시 생성한다.
 
 `space_usage`를 처음 배포할 때 이전 버전 API는 counter를 갱신하지 못하고 Space reconciliation gate도 지키지 않는다. 따라서 이전 버전 writer에 종료 신호를 보낸 뒤 진행 중인 요청과 worker transaction이 drain되어 모든 프로세스가 종료된 것을 확인한다. 그 다음 새 코드로 migration을 완료하고 새 API를 시작한다. Migration이 counter를 backfill하므로 별도 재계산 없이 시작할 수 있다. 이전 버전과 authoritative counter 버전을 동시에 writer로 운영하지 않는다.
 

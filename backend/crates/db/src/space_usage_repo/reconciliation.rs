@@ -54,17 +54,26 @@ impl SpaceUsageRepo {
         Ok(execution)
     }
 
-    /// Remove execution history past the retention window. Called once per
-    /// worker tick, not per job, so a bulk drain does not repeat it.
-    pub async fn delete_expired_executions(&self) -> Result<()> {
+    /// Remove execution history past the retention window when this process
+    /// acquires the reconciliation worker lock. Returns `false` when another
+    /// worker is active.
+    pub async fn try_delete_expired_executions(&self) -> Result<bool> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        configure_transaction(&mut tx, STATEMENT_TIMEOUT).await?;
+        if !try_acquire_worker_lock(&mut tx).await? {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(false);
+        }
+
         sqlx::query(
             "DELETE FROM space_usage_reconcile_executions \
              WHERE finished_at < now() - interval '3 months'",
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(())
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(true)
     }
 }
 

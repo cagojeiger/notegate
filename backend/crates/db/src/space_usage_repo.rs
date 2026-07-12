@@ -103,6 +103,15 @@ impl SpaceUsageRepo {
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected())
     }
+
+    /// Return whether any reconciliation job is still queued, including jobs
+    /// deferred to a future `run_after` time.
+    pub async fn has_pending_reconciliations(&self) -> Result<bool> {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM space_usage_reconcile_jobs)")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx_error)
+    }
 }
 
 async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &str) -> Result<()> {

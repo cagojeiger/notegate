@@ -413,9 +413,24 @@ async fn expired_execution_history_is_removed() -> Result<(), Box<dyn std::error
     .execute(&db.pool)
     .await?;
 
-    SpaceUsageRepo::new(db.pool.clone())
-        .delete_expired_executions()
+    let mut worker_tx = db.pool.begin().await?;
+    acquire_gate(&mut worker_tx, RECONCILE_ADVISORY_LOCK_SEED, false).await?;
+    assert!(
+        !SpaceUsageRepo::new(db.pool.clone())
+            .try_delete_expired_executions()
+            .await?
+    );
+    let retained: i64 = sqlx::query_scalar("SELECT count(*) FROM space_usage_reconcile_executions")
+        .fetch_one(&db.pool)
         .await?;
+    assert_eq!(retained, 1);
+    worker_tx.commit().await?;
+
+    assert!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .try_delete_expired_executions()
+            .await?
+    );
     let executions: i64 =
         sqlx::query_scalar("SELECT count(*) FROM space_usage_reconcile_executions")
             .fetch_one(&db.pool)
