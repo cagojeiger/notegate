@@ -27,6 +27,9 @@ pub fn spawn(pool: PgPool, shutdown: CancellationToken) -> JoinHandle<()> {
 /// loop always terminates.
 async fn execute_once(pool: &PgPool) {
     let repo = SpaceUsageRepo::new(pool.clone());
+    if let Err(error) = repo.delete_expired_executions().await {
+        tracing::error!(event = "usage_reconcile_worker.retention_failed", %error);
+    }
     loop {
         let started = Instant::now();
         match repo.execute_next_reconciliation().await {

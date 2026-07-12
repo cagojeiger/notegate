@@ -23,7 +23,6 @@ impl SpaceUsageRepo {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(UsageReconcileExecution::WorkerLockHeld);
         }
-        delete_expired_executions(&mut tx).await?;
 
         let Some(job) = next_job(&mut tx).await? else {
             tx.commit().await.map_err(map_sqlx_error)?;
@@ -53,6 +52,19 @@ impl SpaceUsageRepo {
         };
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(execution)
+    }
+
+    /// Remove execution history past the retention window. Called once per
+    /// worker tick, not per job, so a bulk drain does not repeat it.
+    pub async fn delete_expired_executions(&self) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM space_usage_reconcile_executions \
+             WHERE finished_at < now() - interval '3 months'",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
     }
 }
 
@@ -213,17 +225,6 @@ async fn next_job(tx: &mut sqlx::PgConnection) -> Result<Option<QueuedJob>> {
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)
-}
-
-async fn delete_expired_executions(tx: &mut sqlx::PgConnection) -> Result<()> {
-    sqlx::query(
-        "DELETE FROM space_usage_reconcile_executions \
-         WHERE finished_at < now() - interval '3 months'",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    Ok(())
 }
 
 #[derive(Debug, Clone, FromRow, PartialEq, Eq)]

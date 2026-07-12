@@ -412,12 +412,9 @@ async fn expired_execution_history_is_removed() -> Result<(), Box<dyn std::error
     .execute(&db.pool)
     .await?;
 
-    assert_eq!(
-        SpaceUsageRepo::new(db.pool.clone())
-            .execute_next_reconciliation()
-            .await?,
-        UsageReconcileExecution::Idle
-    );
+    SpaceUsageRepo::new(db.pool.clone())
+        .delete_expired_executions()
+        .await?;
     let executions: i64 =
         sqlx::query_scalar("SELECT count(*) FROM space_usage_reconcile_executions")
             .fetch_one(&db.pool)
