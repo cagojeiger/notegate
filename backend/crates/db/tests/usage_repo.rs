@@ -16,7 +16,6 @@ use notegate_core::tier::UserTier;
 use notegate_db::UsageRepo;
 use uuid::Uuid;
 
-
 #[tokio::test]
 async fn current_user_usage_reads_counters_and_live_related_resources()
 -> Result<(), Box<dyn std::error::Error>> {

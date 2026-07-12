@@ -383,11 +383,12 @@ async fn missing_counter_is_recreated_by_reconciliation() -> Result<(), Box<dyn 
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(stored, (1, 0));
-    let metadata: Value =
-        sqlx::query_scalar("SELECT metadata FROM space_usage_reconcile_executions WHERE job_id = $1")
-            .bind(job_id)
-            .fetch_one(&db.pool)
-            .await?;
+    let metadata: Value = sqlx::query_scalar(
+        "SELECT metadata FROM space_usage_reconcile_executions WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(&db.pool)
+    .await?;
     assert_eq!(metadata["previous_nodes"], Value::Null);
     assert_eq!(metadata["actual_nodes"], json!(1));
 
@@ -474,4 +475,3 @@ async fn exclusive_reconciliation_gate_rejects_then_releases_mutations()
     db.cleanup().await;
     Ok(())
 }
-
