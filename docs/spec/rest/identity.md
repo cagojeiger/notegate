@@ -51,7 +51,11 @@ User caller만 가능하다. 현재 tier quota와 live usage를 반환한다. Us
       "name": "Daily",
       "nodes": {"used": 320, "limit": 2000},
       "content_bytes": {"used": 48120320, "limit": 134217728},
-      "agent_connections": {"used": 2, "limit": 5}
+      "agent_connections": {"used": 2, "limit": 5},
+      "reconciliation": {
+        "pending": false,
+        "reconciled_at": "2026-07-11T10:00:00Z"
+      }
     }
   ]
 }

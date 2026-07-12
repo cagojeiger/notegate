@@ -23,6 +23,7 @@ use crate::state::AppState;
 #[openapi(
     paths(
         rest::me::get_me,
+        rest::me::get_usage,
         rest::me::list_keys,
         rest::me::create_key,
         rest::me::rotate_key,
@@ -34,6 +35,7 @@ use crate::state::AppState;
         rest::spaces::get_one,
         rest::spaces::update,
         rest::spaces::delete,
+        rest::spaces::request_usage_reconciliation,
         rest::nodes::resolve_path,
         rest::nodes::list,
         rest::nodes::list_file_change_events,
@@ -236,6 +238,26 @@ mod tests {
         assert_eq!(
             response_ref(&value, "/api/v1/agents", "get", "200"),
             "#/components/schemas/AgentsListResponse"
+        );
+    }
+
+    #[test]
+    fn openapi_includes_usage_routes() {
+        let doc = ApiDoc::openapi();
+        let value = serde_json::to_value(doc).expect("serializes openapi");
+
+        assert_eq!(
+            response_ref(&value, "/api/v1/me/usage", "get", "200"),
+            "#/components/schemas/CurrentUserUsageOut"
+        );
+        assert_eq!(
+            response_ref(
+                &value,
+                "/api/v1/spaces/{space_id}/usage/reconcile",
+                "post",
+                "202"
+            ),
+            "#/components/schemas/ReconciliationQueuedResponse"
         );
     }
 
@@ -481,6 +503,7 @@ mod tests {
             "GET /api/v1/me",
             "GET /api/v1/me/audit-events",
             "GET /api/v1/me/keys",
+            "GET /api/v1/me/usage",
             "GET /api/v1/spaces",
             "GET /api/v1/spaces/{space_id}",
             "GET /api/v1/spaces/{space_id}/agents",
@@ -507,6 +530,7 @@ mod tests {
             "POST /api/v1/spaces/{space_id}/files",
             "POST /api/v1/spaces/{space_id}/nodes",
             "POST /api/v1/spaces/{space_id}/nodes/{node_id}/move",
+            "POST /api/v1/spaces/{space_id}/usage/reconcile",
             "PUT /api/v1/spaces/{space_id}/agents/{agent_id}",
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
             "PUT /api/v1/spaces/{space_id}/text/{node_id}",

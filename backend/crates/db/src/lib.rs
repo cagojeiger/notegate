@@ -25,10 +25,13 @@ pub mod key_epoch_repo;
 pub mod postgres_pool;
 pub mod purge_repo;
 mod space_permission;
+mod space_usage;
+pub mod space_usage_repo;
 pub mod spaces_repo;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_support;
 mod tier_lookup;
+pub mod usage_repo;
 
 pub use account_repo::AccountRepo;
 pub use agent_repo::AgentRepo;
@@ -40,8 +43,10 @@ pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use postgres_pool::connect;
 pub use purge_repo::{PurgeRepo, PurgeRun};
+pub use space_usage_repo::{SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
 pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;
+pub use usage_repo::{SpaceUsageSnapshot, UsageRepo, UserUsageSnapshot};
 
 /// Generic internal mapping for any repository query failure. Shared by every
 /// repo so the mapping never drifts; detail is logged, not surfaced.
@@ -76,10 +81,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
 
 /// Verify the database is usable by the API process.
 ///
-/// This checks both connectivity and that every embedded migration has a
-/// successful row with the expected checksum. Startup already runs migrations;
-/// readiness repeats a cheap validation so load balancers do not route traffic
-/// to a process connected to the wrong or reset database.
+/// This checks connectivity, embedded migration checksums, and the critical
+/// usage schema. Startup already runs migrations; readiness repeats a cheap
+/// validation so load balancers do not route traffic to a process connected to
+/// the wrong, reset, or structurally damaged database.
 pub async fn check_readiness(pool: &PgPool) -> Result<()> {
     sqlx::query("SELECT 1")
         .execute(pool)
@@ -113,6 +118,8 @@ pub async fn check_readiness(pool: &PgPool) -> Result<()> {
             )));
         }
     }
+
+    SpaceUsageRepo::new(pool.clone()).require_schema().await?;
 
     Ok(())
 }

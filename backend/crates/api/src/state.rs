@@ -6,7 +6,7 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BrowserSessionRepo, ConnectionRepo,
-    FilesRepo, PgPool, SpaceRepo,
+    FilesRepo, PgPool, SpaceRepo, UsageRepo,
 };
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
@@ -14,6 +14,7 @@ use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
 use notegate_service::search::SearchService;
 use notegate_service::spaces::SpaceService;
+use notegate_service::usage::UsageService;
 
 use crate::identity::CallerResolver;
 
@@ -32,6 +33,8 @@ pub type Agents = AgentService;
 pub type Files = FilesService;
 /// Search service over the db-backed [`FilesRepo`].
 pub type Search = SearchService;
+/// User-facing account and Space usage service.
+pub type Usage = UsageService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -48,6 +51,7 @@ pub struct AppState {
     pub agents: Agents,
     pub files: Files,
     pub search: Search,
+    pub usage: Usage,
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
@@ -87,6 +91,7 @@ impl AppState {
         let files_repo = FilesRepo::with_limits(db.clone(), config.limits);
         let files = FilesService::new(files_repo.clone());
         let search = SearchService::new(files_repo);
+        let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
         let accounts = AccountRepo::with_crypto_and_default_user_tier(
             db.clone(),
             pii_crypto.clone(),
@@ -111,6 +116,7 @@ impl AppState {
             agents,
             files,
             search,
+            usage,
             accounts,
             browser_sessions,
         }

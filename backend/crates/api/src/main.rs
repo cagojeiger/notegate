@@ -15,10 +15,13 @@ mod identity;
 mod mcp;
 mod openapi;
 mod page;
+mod periodic_worker;
 mod purge_worker;
 mod rest;
 mod routes;
 mod state;
+mod usage_bootstrap;
+mod usage_reconcile_worker;
 
 use state::AppState;
 
@@ -28,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", openapi::json_pretty()?);
         return Ok(());
     }
+    let recalculate_usage = std::env::args().any(|arg| arg == "--recalculate-usage");
 
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
@@ -41,6 +45,13 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = notegate_db::connect(&config).await?;
     notegate_db::run_migrations(&pool).await?;
+    if recalculate_usage {
+        let spaces_recalculated = usage_bootstrap::recalculate_all(&pool).await?;
+        println!("recalculated {spaces_recalculated} spaces");
+        pool.close().await;
+        return Ok(());
+    }
+    usage_bootstrap::ensure(&pool).await?;
     info!(
         event = "db.ready",
         max_connections = config.db_max_connections
@@ -98,8 +109,10 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(bind_addr).await?;
     info!(event = "server.listening", addr = %bind_addr);
 
-    let purge_shutdown_token = CancellationToken::new();
-    let purge_worker = purge_worker::spawn(pool.clone(), purge_shutdown_token.clone());
+    let background_shutdown_token = CancellationToken::new();
+    let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
+    let usage_reconcile_worker =
+        usage_reconcile_worker::spawn(pool.clone(), background_shutdown_token.clone());
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -117,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
-    purge_shutdown_token.cancel();
+    background_shutdown_token.cancel();
 
     let server_result = match server_result {
         Some(result) => result,
@@ -127,8 +140,12 @@ async fn main() -> anyhow::Result<()> {
     if let Err(error) = purge_worker.await {
         tracing::error!(event = "purge_worker.join_failed", %error);
     }
+    if let Err(error) = usage_reconcile_worker.await {
+        tracing::error!(event = "usage_reconcile_worker.join_failed", %error);
+    }
 
-    // Drain the connection pool before exiting so in-flight queries finish.
+    // Workers drain their current transaction before returning. Close the pool
+    // only after every worker has joined so no background query is interrupted.
     pool.close().await;
     info!(event = "shutdown.complete");
 

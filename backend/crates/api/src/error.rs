@@ -1,7 +1,7 @@
 //! HTTP error type. Domain/db/service errors map into this on their way out.
 
 use axum::Json;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header::RETRY_AFTER};
 use axum::response::{IntoResponse, Response};
 use notegate_core::Error as CoreError;
 use notegate_service::ServiceError;
@@ -14,6 +14,7 @@ pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    retry_after_seconds: Option<u64>,
 }
 
 /// Common REST error response body. Runtime construction happens in [`ApiError::into_response`].
@@ -30,6 +31,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            retry_after_seconds: None,
         }
     }
 
@@ -53,6 +55,15 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, "conflict", message)
     }
 
+    pub fn usage_recalculation_in_progress(retry_after_seconds: u64) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "usage_recalculation_in_progress",
+            message: "space usage is being recalculated; retry shortly".to_owned(),
+            retry_after_seconds: Some(retry_after_seconds),
+        }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
     }
@@ -67,6 +78,9 @@ impl From<ServiceError> for ApiError {
             ServiceError::InvalidInput(message) => Self::invalid_field(message),
             ServiceError::Forbidden(message) => Self::forbidden(message),
             ServiceError::Conflict(message) => Self::conflict(message),
+            ServiceError::UsageRecalculationInProgress {
+                retry_after_seconds,
+            } => Self::usage_recalculation_in_progress(retry_after_seconds),
             ServiceError::Internal(message) => {
                 tracing::error!(event = "error.internal", detail = %message);
                 Self::internal("internal server error")
@@ -83,6 +97,9 @@ impl From<CoreError> for ApiError {
             CoreError::NotFound(msg) => Self::not_found(msg),
             CoreError::Validation(msg) => Self::invalid_field(msg),
             CoreError::Conflict(msg) => Self::conflict(msg),
+            CoreError::UsageRecalculationInProgress {
+                retry_after_seconds,
+            } => Self::usage_recalculation_in_progress(retry_after_seconds),
             CoreError::Internal(msg) => {
                 tracing::error!(event = "error.internal", detail = %msg);
                 Self::internal("internal server error")
@@ -93,7 +110,7 @@ impl From<CoreError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
+        let mut response = (
             self.status,
             Json(json!({
                 "error": self.code,
@@ -101,7 +118,13 @@ impl IntoResponse for ApiError {
                 "message": self.message,
             })),
         )
-            .into_response()
+            .into_response();
+        if let Some(seconds) = self.retry_after_seconds
+            && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+        {
+            response.headers_mut().insert(RETRY_AFTER, value);
+        }
+        response
     }
 }
 
@@ -157,5 +180,23 @@ mod tests {
             assert_eq!(api_error.code, code);
             assert_eq!(api_error.message, message);
         }
+    }
+
+    #[test]
+    fn usage_recalculation_maps_to_retryable_service_unavailable() {
+        let error = ApiError::from(ServiceError::UsageRecalculationInProgress {
+            retry_after_seconds: 5,
+        });
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "usage_recalculation_in_progress");
+
+        let response = error.into_response();
+        assert_eq!(
+            response
+                .headers()
+                .get(RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("5")
+        );
     }
 }

@@ -155,10 +155,6 @@ impl FilesService {
             .prepare_create(space_id, command.parent_node_id, &command.name)
             .await?;
 
-        let caps = self.effective_limits(space_id).await?;
-        let total = self.store.sum_live_content_bytes(space_id).await?;
-        validation::validate_space_content_bytes(total, 0, byte_len, caps)?;
-
         let stored = content::compute_file(
             command.bytes,
             command.media_type,
@@ -205,15 +201,6 @@ impl FilesService {
                 check_expected_sha(command.expected_sha256.as_deref(), &text.content_sha256)?;
                 validate_stored_text_format(&node.name, &stored)?;
 
-                let caps = self.effective_limits(space_id).await?;
-                let total = self.store.sum_live_content_bytes(space_id).await?;
-                validation::validate_space_content_bytes(
-                    total,
-                    text.byte_len.max(0) as usize,
-                    stored.byte_len as usize,
-                    caps,
-                )?;
-
                 let (node, text) = self
                     .store
                     .save_text_content(
@@ -240,11 +227,6 @@ impl FilesService {
                 validation::validate_basename(&name, NodeKind::Text)?;
                 validate_stored_text_format(&name, &stored)?;
                 self.prepare_create(space_id, parent_node_id, &name).await?;
-
-                // New text consumes the shared live content byte budget.
-                let caps = self.effective_limits(space_id).await?;
-                let total = self.store.sum_live_content_bytes(space_id).await?;
-                validation::validate_space_content_bytes(total, 0, stored.byte_len as usize, caps)?;
 
                 let (node, text) = self
                     .store
@@ -283,15 +265,6 @@ impl FilesService {
                 validate_structured_text(&node.name, &content)?;
                 let metrics = content::compute(&content);
                 validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
-
-                let caps = self.effective_limits(space_id).await?;
-                let total = self.store.sum_live_content_bytes(space_id).await?;
-                validation::validate_space_content_bytes(
-                    total,
-                    text.byte_len.max(0) as usize,
-                    metrics.byte_len,
-                    caps,
-                )?;
 
                 let stored = metrics.into_stored_plain(content);
                 let (node, text) = self
@@ -365,15 +338,6 @@ impl FilesService {
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
-        let caps = self.effective_limits(space_id).await?;
-        let total = self.store.sum_live_content_bytes(space_id).await?;
-        validation::validate_space_content_bytes(
-            total,
-            text.byte_len.max(0) as usize,
-            metrics.byte_len,
-            caps,
-        )?;
-
         let stored = metrics.into_stored_plain(applied.content);
         let save_guard = command
             .expected_sha256
@@ -430,15 +394,6 @@ impl FilesService {
         validate_structured_text(&node.name, &applied.content)?;
         let metrics = content::compute(&applied.content);
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
-
-        let caps = self.effective_limits(space_id).await?;
-        let total = self.store.sum_live_content_bytes(space_id).await?;
-        validation::validate_space_content_bytes(
-            total,
-            text.byte_len.max(0) as usize,
-            metrics.byte_len,
-            caps,
-        )?;
 
         let stored = metrics.into_stored_plain(applied.content);
         let save_guard = command

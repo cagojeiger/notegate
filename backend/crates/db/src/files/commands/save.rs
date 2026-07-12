@@ -16,6 +16,7 @@ use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::TextMutationKind;
+use crate::space_usage::{self, UsageDelta};
 
 pub struct SaveTextContentArgs<'a> {
     pub pool: &'a PgPool,
@@ -44,8 +45,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
 
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     // Current byte length/hash (for budget delta + optimistic guard); the
     // text row is locked so `expected_sha256` is compared atomically with
@@ -93,11 +93,10 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         return Ok((node_row.into_node()?, current_text.into_text()?));
     }
 
-    checks::require_content_budget(
+    space_usage::apply_quota_delta(
         &mut tx,
-        space_id,
-        current_text.byte_len,
-        content.byte_len,
+        &gate,
+        UsageDelta::new(0, content.byte_len - current_text.byte_len),
         caps,
     )
     .await?;

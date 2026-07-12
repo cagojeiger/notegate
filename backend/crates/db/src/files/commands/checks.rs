@@ -1,8 +1,8 @@
 //! In-transaction invariant re-enforcement shared by the mutating commands.
 //!
-//! The service pre-checks these for precise errors; the DB re-checks them inside
-//! the mutation's transaction so a concurrent writer cannot slip past a count or
-//! depth bound between the pre-check and the write.
+//! The DB enforces these inside the mutation transaction so a concurrent writer
+//! cannot slip past a structural bound between validation and the write. Space
+//! node/content quota is enforced by the locked counter in `space_usage`.
 
 use notegate_core::limits::Limits;
 use notegate_core::tier::effective_file_tree_limits;
@@ -11,12 +11,31 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
+use crate::space_usage::{self, MutationGate};
 use crate::{tier_lookup, to_usize};
 
-/// Serialize file-tree mutations in a space. This closes races where two
-/// transactions both observe state below a cap, or one mutation updates a node
-/// while another concurrently moves/deletes it.
-pub async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
+/// Exclude reconciliation, then serialize file-tree mutations in a Space.
+/// This closes quota races and keeps reconciliation from observing a partial
+/// mutation without making ordinary writes wait for maintenance.
+pub(crate) async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<MutationGate> {
+    let gate = space_usage::acquire_mutation_gate(tx, space_id).await?;
+    lock_live_space(tx, space_id).await?;
+    Ok(gate)
+}
+
+/// Lock quota dependencies in account-deletion order: owner, Space, usage.
+pub(crate) async fn lock_space_with_limits(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    base_limits: Limits,
+) -> Result<(MutationGate, Limits)> {
+    let gate = space_usage::acquire_mutation_gate(tx, space_id).await?;
+    let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
+    lock_live_space(tx, space_id).await?;
+    Ok((gate, effective_file_tree_limits(tier, base_limits)))
+}
+
+async fn lock_live_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
     let found: Option<Uuid> =
         sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE")
             .bind(space_id)
@@ -27,16 +46,6 @@ pub async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
         return Err(Error::not_found("space not found"));
     }
     Ok(())
-}
-
-/// Compute effective file-tree limits for a live, already-locked space owner.
-pub async fn effective_limits_for_locked_space(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    base_limits: Limits,
-) -> Result<Limits> {
-    let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
-    Ok(effective_file_tree_limits(tier, base_limits))
 }
 
 /// A live node's kind + deleted flag, fetched inside a transaction. `None` when
@@ -144,64 +153,6 @@ pub async fn require_fanout(
         return Err(Error::conflict(format!(
             "folder already has the maximum of {} children",
             caps.folder_max_children
-        )));
-    }
-    Ok(())
-}
-
-/// Enforce the space live-node cap.
-pub async fn require_node_budget(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    caps: Limits,
-) -> Result<()> {
-    let nodes: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM nodes WHERE space_id = $1 AND deleted_at IS NULL")
-            .bind(space_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-    if to_usize(nodes, "node")? >= caps.space_max_nodes {
-        return Err(Error::conflict(format!(
-            "space already has the maximum of {} nodes",
-            caps.space_max_nodes
-        )));
-    }
-    Ok(())
-}
-
-/// Enforce the space total live content-byte budget for a mutation that
-/// replaces `previous_bytes` with `new_bytes` (use `previous_bytes = 0` on
-/// create). Errors when the resulting total would exceed the cap.
-pub async fn require_content_budget(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    previous_bytes: i64,
-    new_bytes: i64,
-    caps: Limits,
-) -> Result<()> {
-    let total: i64 = sqlx::query_scalar(
-        "SELECT \
-                COALESCE(( \
-                    SELECT sum(t.byte_len) FROM text_objects t \
-                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint + \
-                COALESCE(( \
-                    SELECT sum(f.byte_len) FROM file_objects f \
-                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint",
-    )
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    let projected = total - previous_bytes + new_bytes;
-    if projected > caps.space_max_content_bytes as i64 {
-        return Err(Error::conflict(format!(
-            "space content would exceed the maximum of {} bytes; delete, move, or split content",
-            caps.space_max_content_bytes
         )));
     }
     Ok(())

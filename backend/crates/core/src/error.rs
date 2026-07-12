@@ -21,6 +21,10 @@ pub enum Error {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    /// A Space mutation must wait for usage reconciliation to finish.
+    #[error("space usage recalculation is in progress")]
+    UsageRecalculationInProgress { retry_after_seconds: u64 },
+
     /// A dependency (db, external service) failed.
     #[error("internal error: {0}")]
     Internal(String),
@@ -37,6 +41,12 @@ impl Error {
 
     pub fn conflict(msg: impl fmt::Display) -> Self {
         Self::Conflict(msg.to_string())
+    }
+
+    pub fn usage_recalculation_in_progress(retry_after_seconds: u64) -> Self {
+        Self::UsageRecalculationInProgress {
+            retry_after_seconds,
+        }
     }
 
     pub fn internal(msg: impl fmt::Display) -> Self {

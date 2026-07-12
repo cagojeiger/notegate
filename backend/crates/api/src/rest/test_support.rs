@@ -134,16 +134,16 @@ pub(super) async fn caller_and_space(
         state.config.default_user_tier,
     )
     .upsert_user_by_sub(&ResolveAttrs {
-        sub: "rest-events-owner".to_owned(),
-        email: "rest-events@example.test".to_owned(),
-        name: "REST Events Owner".to_owned(),
+        sub: "rest-test-owner".to_owned(),
+        email: "rest-test-owner@example.test".to_owned(),
+        name: "REST Test Owner".to_owned(),
     })
     .await?;
     let space = SpaceRepo::new(state.db.clone())
         .create_space(
             account.id,
             &CreateSpace {
-                name: "rest-events".to_owned(),
+                name: "rest-test".to_owned(),
             },
         )
         .await?;
@@ -164,9 +164,13 @@ pub(super) async fn caller_and_space(
 
 pub(super) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router {
     Router::new()
-        .merge(super::super::routes())
+        .merge(crate::rest::me::routes())
+        .merge(crate::rest::spaces::routes())
+        .merge(crate::rest::nodes::routes())
         .merge(crate::rest::text::routes())
         .merge(crate::rest::files::routes())
+        .merge(crate::rest::connections::routes())
+        .merge(crate::rest::agents::routes())
         .layer(Extension(caller))
         .with_state(state)
 }
@@ -177,7 +181,17 @@ pub(super) async fn json_request(
     uri: String,
     body: Value,
 ) -> Result<(StatusCode, Value), Box<dyn std::error::Error>> {
-    let response = app
+    let response = json_response(app, method, uri, body).await?;
+    decode_response(response).await
+}
+
+pub(super) async fn json_response(
+    app: Router,
+    method: &str,
+    uri: String,
+    body: Value,
+) -> Result<Response, Box<dyn std::error::Error>> {
+    Ok(app
         .oneshot(
             Request::builder()
                 .method(method)
@@ -185,8 +199,7 @@ pub(super) async fn json_request(
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(body.to_string()))?,
         )
-        .await?;
-    decode_response(response).await
+        .await?)
 }
 
 pub(super) async fn get_json(
@@ -252,7 +265,7 @@ pub(super) async fn upload_file(
     decode_response(response).await
 }
 
-async fn decode_response(
+pub(super) async fn decode_response(
     response: Response,
 ) -> Result<(StatusCode, Value), Box<dyn std::error::Error>> {
     let status = response.status();

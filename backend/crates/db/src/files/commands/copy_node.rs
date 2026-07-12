@@ -18,7 +18,7 @@ use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::checks;
 use crate::file_change_events;
-use crate::to_usize;
+use crate::space_usage::{self, UsageDelta};
 
 pub struct CopyNodeArgs<'a> {
     pub pool: &'a PgPool,
@@ -43,8 +43,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         caps,
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-    checks::lock_space(&mut tx, space_id).await?;
-    let caps = checks::effective_limits_for_locked_space(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     let source = checks::live_node(&mut tx, space_id, source_node_id)
         .await?
@@ -85,7 +84,15 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         files: snapshot.iter().filter(|node| node.kind == "file").count(),
     };
     let content_bytes = copied_content_bytes(&mut tx, space_id, source_node_id).await?;
-    require_copy_budgets(&mut tx, space_id, counts, content_bytes, caps).await?;
+    let copied_nodes = i64::try_from(counts.nodes)
+        .map_err(|_error| Error::internal("copied node count exceeds bigint"))?;
+    space_usage::apply_quota_delta(
+        &mut tx,
+        &gate,
+        UsageDelta::new(copied_nodes, content_bytes),
+        caps,
+    )
+    .await?;
 
     let mut id_map = HashMap::with_capacity(snapshot.len());
     let mut copied_root = None;
@@ -187,52 +194,6 @@ async fn copied_content_bytes(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)
-}
-
-async fn require_copy_budgets(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    copied: CopyCounts,
-    copied_content_bytes: i64,
-    caps: Limits,
-) -> Result<()> {
-    let live_nodes: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM nodes WHERE space_id = $1 AND deleted_at IS NULL")
-            .bind(space_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-    if to_usize(live_nodes, "node")?.saturating_add(copied.nodes) > caps.space_max_nodes {
-        return Err(Error::conflict(format!(
-            "copy would exceed the space node limit of {}",
-            caps.space_max_nodes
-        )));
-    }
-
-    let live_content_bytes: i64 = sqlx::query_scalar(
-        "SELECT \
-                COALESCE(( \
-                    SELECT sum(t.byte_len) FROM text_objects t \
-                    JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-                    WHERE t.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint + \
-                COALESCE(( \
-                    SELECT sum(f.byte_len) FROM file_objects f \
-                    JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-                    WHERE f.space_id = $1 AND n.deleted_at IS NULL \
-                ), 0)::bigint",
-    )
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    if live_content_bytes + copied_content_bytes > caps.space_max_content_bytes as i64 {
-        return Err(Error::conflict(format!(
-            "copy would exceed the space content byte budget of {}",
-            caps.space_max_content_bytes
-        )));
-    }
-    Ok(())
 }
 
 async fn insert_copied_node(

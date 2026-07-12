@@ -126,14 +126,6 @@ impl FilesRepo {
         queries::node::find_live_child_by_name(&self.pool, space_id, parent_node_id, name).await
     }
 
-    pub async fn count_live_nodes(&self, space_id: Uuid) -> Result<usize> {
-        queries::node::count_live_nodes(&self.pool, space_id).await
-    }
-
-    pub async fn sum_live_content_bytes(&self, space_id: Uuid) -> Result<usize> {
-        queries::quota::sum_live_content_bytes(&self.pool, space_id).await
-    }
-
     pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
         queries::text::text_stats(&self.pool, space_id, node_id).await
     }

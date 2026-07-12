@@ -23,6 +23,7 @@ use notegate_service::spaces::SpaceView;
 use crate::state::AppState;
 
 const SPACE_SUGGESTION_LIMIT: i64 = 5;
+const TEMPORARY_UNAVAILABLE_ERROR_CODE: rmcp::model::ErrorCode = rmcp::model::ErrorCode(-32001);
 
 /// The request-scoped authenticated caller, inserted by the MCP auth wrapper.
 pub fn caller(parts: &Parts) -> Result<&Caller, ErrorData> {
@@ -192,6 +193,18 @@ pub fn service_error(error: ServiceError) -> ErrorData {
         ServiceError::Conflict(message) => {
             ErrorData::invalid_request(Cow::Owned(message), error_meta("conflict"))
         }
+        ServiceError::UsageRecalculationInProgress {
+            retry_after_seconds,
+        } => ErrorData::new(
+            TEMPORARY_UNAVAILABLE_ERROR_CODE,
+            "space usage is being recalculated; retry shortly",
+            Some(json!({
+                "kind": "usage_recalculation_in_progress",
+                "code": "usage_recalculation_in_progress",
+                "retryable": true,
+                "retry_after_seconds": retry_after_seconds,
+            })),
+        ),
         ServiceError::Internal(message) => {
             tracing::error!(event = "mcp.error.internal", detail = %message);
             ErrorData::internal_error("internal server error", error_meta("internal_error"))
@@ -453,6 +466,18 @@ mod tests {
         let internal_data = internal.data.expect("internal_error carries data");
         assert_eq!(internal_data["kind"], "internal_error");
         assert_eq!(internal_data["code"], "internal_error");
+    }
+
+    #[test]
+    fn usage_recalculation_is_a_retryable_server_error() {
+        let error = service_error(ServiceError::UsageRecalculationInProgress {
+            retry_after_seconds: 5,
+        });
+        assert_eq!(error.code, TEMPORARY_UNAVAILABLE_ERROR_CODE);
+        let data = error.data.expect("temporary error carries retry metadata");
+        assert_eq!(data["kind"], "usage_recalculation_in_progress");
+        assert_eq!(data["retryable"], true);
+        assert_eq!(data["retry_after_seconds"], 5);
     }
 
     #[test]
