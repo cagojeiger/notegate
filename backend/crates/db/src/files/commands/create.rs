@@ -29,9 +29,9 @@ pub async fn insert_folder(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, space_id, UsageDelta::new(1, 0), caps).await?;
+    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::new(1, 0), caps).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -70,15 +70,10 @@ pub async fn insert_text(
 ) -> Result<(Node, TextObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(
-        &mut tx,
-        space_id,
-        UsageDelta::new(1, content.byte_len),
-        caps,
-    )
-    .await?;
+    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::new(1, content.byte_len), caps)
+        .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -138,9 +133,9 @@ pub async fn insert_file(
 ) -> Result<(Node, FileObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, space_id, UsageDelta::new(1, file.byte_len), caps)
+    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::new(1, file.byte_len), caps)
         .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(

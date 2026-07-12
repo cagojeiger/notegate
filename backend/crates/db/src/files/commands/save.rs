@@ -45,7 +45,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
 
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     // Current byte length/hash (for budget delta + optimistic guard); the
     // text row is locked so `expected_sha256` is compared atomically with
@@ -95,7 +95,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
 
     space_usage::apply_quota_delta(
         &mut tx,
-        space_id,
+        &gate,
         UsageDelta::new(0, content.byte_len - current_text.byte_len),
         caps,
     )

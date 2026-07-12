@@ -10,12 +10,19 @@ use axum::http::{StatusCode, header::RETRY_AFTER};
 use notegate_db::{AgentRepo, test_support::TestDb};
 use notegate_model::{Caller, CallerIdentity, Channel, CreateAgent, ResolveAttrs};
 use serde_json::json;
+use uuid::Uuid;
 
 use super::test_support::{
     caller_and_space, decode_response, empty_request, get_json, json_response, rest_app, state,
 };
 
-const FULL_RECONCILIATION_GATE_SEED: i64 = 0x4e47_5553_4147_4502;
+const SPACE_GATE_NAMESPACE: u64 = 0x4e47_5350_4143_4501;
+
+fn space_gate_seed(space_id: Uuid) -> i64 {
+    let value = space_id.as_u128();
+    let folded = (value as u64) ^ ((value >> 64) as u64) ^ SPACE_GATE_NAMESPACE;
+    i64::from_ne_bytes(folded.to_ne_bytes())
+}
 
 #[tokio::test]
 async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dyn std::error::Error>>
@@ -141,7 +148,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     let gate_acquired: bool = sqlx::query_scalar(
         "SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(), $1))",
     )
-    .bind(FULL_RECONCILIATION_GATE_SEED)
+    .bind(space_gate_seed(space_id))
     .fetch_one(&mut *maintenance_tx)
     .await?;
     assert!(gate_acquired);

@@ -43,9 +43,7 @@ pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use postgres_pool::connect;
 pub use purge_repo::{PurgeRepo, PurgeRun};
-pub use space_usage_repo::{
-    FullUsageReconcileExecution, SpaceUsageRepo, UsageCounts, UsageReconcileExecution,
-};
+pub use space_usage_repo::{SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
 pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;
 pub use usage_repo::{SpaceUsageSnapshot, UsageRepo, UserUsageSnapshot};

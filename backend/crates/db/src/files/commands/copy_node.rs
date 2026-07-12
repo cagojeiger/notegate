@@ -43,7 +43,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         caps,
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     let source = checks::live_node(&mut tx, space_id, source_node_id)
         .await?
@@ -88,7 +88,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         .map_err(|_error| Error::internal("copied node count exceeds bigint"))?;
     space_usage::apply_quota_delta(
         &mut tx,
-        space_id,
+        &gate,
         UsageDelta::new(copied_nodes, content_bytes),
         caps,
     )

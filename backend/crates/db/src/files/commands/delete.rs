@@ -32,7 +32,7 @@ pub async fn soft_delete_node(
 ) -> Result<DateTime<Utc>> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    checks::lock_space(&mut tx, space_id).await?;
+    let gate = checks::lock_space(&mut tx, space_id).await?;
 
     let node = checks::live_node(&mut tx, space_id, node_id)
         .await?
@@ -74,7 +74,7 @@ pub async fn soft_delete_node(
     }
     space_usage::release_usage(
         &mut tx,
-        space_id,
+        &gate,
         UsageDelta::new(-subtree_usage.nodes, -subtree_usage.content_bytes),
     )
     .await?;

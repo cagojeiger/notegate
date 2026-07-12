@@ -6,7 +6,7 @@ use notegate_core::{Error, Result};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::{active_account_predicate, map_sqlx_error, space_usage, to_usize};
+use crate::{active_account_predicate, map_sqlx_error, to_usize};
 
 const MANUAL_RECONCILE_COOLDOWN_SECONDS: i64 = 60 * 60;
 
@@ -81,7 +81,6 @@ impl UsageRepo {
         space_id: Uuid,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        space_usage::acquire_maintenance_gate(&mut tx).await?;
         // Match file mutations and the reconciler: Space row before usage row.
         let live_space: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM spaces \

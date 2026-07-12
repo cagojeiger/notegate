@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use notegate_core::{Error, Result};
+use notegate_core::Result;
 use serde_json::{Value, json};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -105,6 +105,8 @@ async fn execute_job(
         });
     }
 
+    // A missing counter row is repaired here: reconciliation is the recovery
+    // path for a Space whose counter was lost, so upsert instead of update.
     let previous = sqlx::query_as::<_, UsageCounts>(
         "SELECT live_node_count, live_content_bytes \
          FROM space_usage WHERE space_id = $1 FOR UPDATE",
@@ -112,14 +114,17 @@ async fn execute_job(
     .bind(job.space_id)
     .fetch_optional(&mut *tx)
     .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
+    .map_err(map_sqlx_error)?;
     let actual = exact_usage(tx, job.space_id).await?;
 
     sqlx::query(
-        "UPDATE space_usage \
-         SET live_node_count = $2, live_content_bytes = $3, reconciled_at = now() \
-         WHERE space_id = $1",
+        "INSERT INTO space_usage ( \
+             space_id, live_node_count, live_content_bytes, reconciled_at \
+         ) VALUES ($1, $2, $3, now()) \
+         ON CONFLICT (space_id) DO UPDATE \
+         SET live_node_count = EXCLUDED.live_node_count, \
+             live_content_bytes = EXCLUDED.live_content_bytes, \
+             reconciled_at = EXCLUDED.reconciled_at",
     )
     .bind(job.space_id)
     .bind(actual.live_node_count)
@@ -133,9 +138,9 @@ async fn execute_job(
         "succeeded",
         None,
         json!({
-            "previous_nodes": previous.live_node_count,
+            "previous_nodes": previous.map(|counts| counts.live_node_count),
             "actual_nodes": actual.live_node_count,
-            "previous_content_bytes": previous.live_content_bytes,
+            "previous_content_bytes": previous.map(|counts| counts.live_content_bytes),
             "actual_content_bytes": actual.live_content_bytes,
         }),
     )
@@ -244,7 +249,8 @@ pub enum UsageReconcileExecution {
     Succeeded {
         job_id: Uuid,
         space_id: Uuid,
-        previous: UsageCounts,
+        /// `None` when the counter row was missing and had to be recreated.
+        previous: Option<UsageCounts>,
         actual: UsageCounts,
     },
     Failed {

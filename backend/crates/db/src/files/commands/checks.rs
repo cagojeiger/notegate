@@ -11,26 +11,28 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::super::error::map_sqlx_error;
-use crate::{space_usage, tier_lookup, to_usize};
+use crate::space_usage::{self, MutationGate};
+use crate::{tier_lookup, to_usize};
 
 /// Exclude reconciliation, then serialize file-tree mutations in a Space.
 /// This closes quota races and keeps reconciliation from observing a partial
 /// mutation without making ordinary writes wait for maintenance.
-pub async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
-    space_usage::acquire_mutation_gate(tx, space_id).await?;
-    lock_live_space(tx, space_id).await
+pub(crate) async fn lock_space(tx: &mut PgConnection, space_id: Uuid) -> Result<MutationGate> {
+    let gate = space_usage::acquire_mutation_gate(tx, space_id).await?;
+    lock_live_space(tx, space_id).await?;
+    Ok(gate)
 }
 
 /// Lock quota dependencies in account-deletion order: owner, Space, usage.
-pub async fn lock_space_with_limits(
+pub(crate) async fn lock_space_with_limits(
     tx: &mut PgConnection,
     space_id: Uuid,
     base_limits: Limits,
-) -> Result<Limits> {
-    space_usage::acquire_mutation_gate(tx, space_id).await?;
+) -> Result<(MutationGate, Limits)> {
+    let gate = space_usage::acquire_mutation_gate(tx, space_id).await?;
     let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
     lock_live_space(tx, space_id).await?;
-    Ok(effective_file_tree_limits(tier, base_limits))
+    Ok((gate, effective_file_tree_limits(tier, base_limits)))
 }
 
 async fn lock_live_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {

@@ -1,6 +1,5 @@
 //! Exact reconciliation for transactionally maintained Space usage counters.
 
-mod maintenance;
 mod reconciliation;
 
 use notegate_core::{Error, Result};
@@ -9,7 +8,6 @@ use uuid::Uuid;
 
 use crate::{map_sqlx_error, space_usage};
 
-pub use maintenance::FullUsageReconcileExecution;
 pub use reconciliation::UsageReconcileExecution;
 
 const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
@@ -89,6 +87,22 @@ impl SpaceUsageRepo {
         let mut connection = self.pool.acquire().await.map_err(map_sqlx_error)?;
         exact_usage(&mut connection, space_id).await
     }
+
+    /// Queue reconciliation for every live Space (operator full recalculation).
+    /// Existing jobs become runnable immediately so a deferred or failed Space
+    /// is retried now. Each Space is then reconciled one at a time, so no
+    /// global write pause is needed.
+    pub async fn enqueue_all_live_spaces(&self) -> Result<u64> {
+        let result = sqlx::query(
+            "INSERT INTO space_usage_reconcile_jobs (space_id) \
+             SELECT id FROM spaces WHERE deleted_at IS NULL \
+             ON CONFLICT (space_id) DO UPDATE SET run_after = now()",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(result.rows_affected())
+    }
 }
 
 async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &str) -> Result<()> {
@@ -108,25 +122,31 @@ async fn try_acquire_worker_lock(tx: &mut sqlx::PgConnection) -> Result<bool> {
     space_usage::try_schema_advisory_lock(tx, RECONCILE_ADVISORY_LOCK_SEED, false).await
 }
 
-async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<UsageCounts> {
-    sqlx::query_as(
-        "SELECT \
-             (SELECT count(*) FROM nodes \
-              WHERE space_id = $1 AND deleted_at IS NULL) AS live_node_count, \
-             COALESCE(( \
-                 SELECT sum(t.byte_len) FROM text_objects t \
-                 JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
-                 WHERE t.space_id = $1 AND n.deleted_at IS NULL \
-             ), 0)::bigint + COALESCE(( \
-                 SELECT sum(f.byte_len) FROM file_objects f \
-                 JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
-                 WHERE f.space_id = $1 AND n.deleted_at IS NULL \
-             ), 0)::bigint AS live_content_bytes",
+/// SELECT columns computing live usage for the Space referenced by `space_ref`.
+/// The single formulation of what counts toward usage; per-space
+/// reconciliation and the full recalculation must not drift apart.
+fn live_usage_columns(space_ref: &str) -> String {
+    format!(
+        "(SELECT count(*) FROM nodes n \
+          WHERE n.space_id = {space_ref} AND n.deleted_at IS NULL) AS live_node_count, \
+         COALESCE(( \
+             SELECT sum(t.byte_len) FROM text_objects t \
+             JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
+             WHERE t.space_id = {space_ref} AND n.deleted_at IS NULL \
+         ), 0)::bigint + COALESCE(( \
+             SELECT sum(f.byte_len) FROM file_objects f \
+             JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+             WHERE f.space_id = {space_ref} AND n.deleted_at IS NULL \
+         ), 0)::bigint AS live_content_bytes"
     )
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)
+}
+
+async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<UsageCounts> {
+    sqlx::query_as(&format!("SELECT {}", live_usage_columns("$1")))
+        .bind(space_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)
 }
 
 #[derive(Debug, Clone, Copy, FromRow, PartialEq, Eq)]

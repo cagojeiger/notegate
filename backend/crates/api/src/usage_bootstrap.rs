@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use notegate_core::{Error, Result};
-use notegate_db::{FullUsageReconcileExecution, PgPool, SpaceUsageRepo};
+use notegate_db::{PgPool, SpaceUsageRepo, UsageReconcileExecution};
 
 const OPERATOR_MAX_POLLS: usize = 30;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
@@ -20,35 +20,48 @@ pub async fn ensure(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
-/// Rebuild every live Space counter for an explicit operator maintenance run.
+/// Queue every live Space and drain the reconciliation queue, one Space at a
+/// time, for an explicit operator maintenance run. Ordinary writes keep
+/// working; only the Space currently being reconciled is briefly rejected.
 pub async fn recalculate_all(pool: &PgPool) -> Result<u64> {
     let repo = SpaceUsageRepo::new(pool.clone());
     repo.require_schema().await?;
-    for poll in 1..=OPERATOR_MAX_POLLS {
-        match repo.execute_full_recalculation().await? {
-            FullUsageReconcileExecution::Recalculated {
-                spaces_recalculated,
-            } => return Ok(spaces_recalculated),
-            FullUsageReconcileExecution::WorkerLockHeld
-            | FullUsageReconcileExecution::MutationsActive
-                if poll < OPERATOR_MAX_POLLS =>
-            {
+    repo.enqueue_all_live_spaces().await?;
+
+    let mut reconciled = 0u64;
+    let mut busy_polls = 0usize;
+    loop {
+        match repo.execute_next_reconciliation().await? {
+            UsageReconcileExecution::Succeeded { .. } => {
+                busy_polls = 0;
+                reconciled += 1;
+            }
+            UsageReconcileExecution::Cancelled { .. } => busy_polls = 0,
+            UsageReconcileExecution::Idle => return Ok(reconciled),
+            UsageReconcileExecution::WorkerLockHeld if busy_polls < OPERATOR_MAX_POLLS => {
+                busy_polls += 1;
                 tokio::time::sleep(RETRY_DELAY).await;
             }
-            FullUsageReconcileExecution::WorkerLockHeld => {
+            UsageReconcileExecution::WorkerLockHeld => {
                 return Err(Error::internal(
                     "usage reconciliation remained busy; retry later",
                 ));
             }
-            FullUsageReconcileExecution::MutationsActive => {
-                return Err(Error::internal(
-                    "file-tree mutations remained active; retry later",
-                ));
+            UsageReconcileExecution::Deferred { space_id, .. } => {
+                return Err(Error::internal(format!(
+                    "space {space_id} stayed busy; the background worker retries it, \
+                     or re-run this command later"
+                )));
+            }
+            UsageReconcileExecution::Failed {
+                space_id, error, ..
+            } => {
+                return Err(Error::internal(format!(
+                    "space {space_id} reconciliation failed: {error}"
+                )));
             }
         }
     }
-
-    Err(Error::internal("full usage recalculation did not complete"))
 }
 
 #[cfg(test)]

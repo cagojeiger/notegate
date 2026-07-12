@@ -12,15 +12,12 @@ mod common;
 use chrono::Utc;
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
-use notegate_db::{
-    FilesRepo, FullUsageReconcileExecution, SpaceUsageRepo, UsageCounts, UsageReconcileExecution,
-};
+use notegate_db::{FilesRepo, SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
-const FULL_RECONCILIATION_GATE_SEED: i64 = 0x4e47_5553_4147_4502;
 const SPACE_GATE_NAMESPACE: u64 = 0x4e47_5350_4143_4501;
 static RECONCILIATION_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -92,10 +89,10 @@ async fn reconciliation_repairs_drift_and_records_execution()
         UsageReconcileExecution::Succeeded {
             job_id,
             space_id,
-            previous: UsageCounts {
+            previous: Some(UsageCounts {
                 live_node_count: 99,
                 live_content_bytes: 999,
-            },
+            }),
             actual: UsageCounts {
                 live_node_count: 2,
                 live_content_bytes: 5,
@@ -130,8 +127,7 @@ async fn reconciliation_repairs_drift_and_records_execution()
 }
 
 #[tokio::test]
-async fn full_recalculation_repairs_every_live_space_atomically()
--> Result<(), Box<dyn std::error::Error>> {
+async fn bulk_enqueue_reconciles_every_live_space() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -154,16 +150,31 @@ async fn full_recalculation_repairs_every_live_space_atomically()
     )
     .execute(&db.pool)
     .await?;
+    // A pre-existing deferred job must become runnable again, not duplicate.
     let queued_job_id = queue_job(&db.pool, first_space).await?;
+    sqlx::query(
+        "UPDATE space_usage_reconcile_jobs SET run_after = now() + interval '5 minutes' \
+         WHERE job_id = $1",
+    )
+    .bind(queued_job_id)
+    .execute(&db.pool)
+    .await?;
 
-    assert_eq!(
-        SpaceUsageRepo::new(db.pool.clone())
-            .execute_full_recalculation()
-            .await?,
-        FullUsageReconcileExecution::Recalculated {
-            spaces_recalculated: 2
+    let repo = SpaceUsageRepo::new(db.pool.clone());
+    assert_eq!(repo.enqueue_all_live_spaces().await?, 2);
+
+    let mut reconciled = Vec::new();
+    loop {
+        match repo.execute_next_reconciliation().await? {
+            UsageReconcileExecution::Succeeded { space_id, .. } => reconciled.push(space_id),
+            UsageReconcileExecution::Idle => break,
+            other => panic!("unexpected execution during drain: {other:?}"),
         }
-    );
+    }
+    reconciled.sort();
+    let mut expected = vec![first_space, second_space];
+    expected.sort();
+    assert_eq!(reconciled, expected);
 
     let first: (i64, i64) = sqlx::query_as(
         "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
@@ -183,41 +194,16 @@ async fn full_recalculation_repairs_every_live_space_atomically()
         .fetch_one(&db.pool)
         .await?;
     assert_eq!(queued_jobs, 0);
-    let (outcome, reason): (String, String) = sqlx::query_as(
-        "SELECT outcome, metadata->>'reason' \
-         FROM space_usage_reconcile_executions WHERE job_id = $1",
+    let (outcome, metadata): (String, Value) = sqlx::query_as(
+        "SELECT outcome, metadata FROM space_usage_reconcile_executions WHERE job_id = $1",
     )
     .bind(queued_job_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(
-        (outcome.as_str(), reason.as_str()),
-        ("succeeded", "full_recalculation")
-    );
+    assert_eq!(outcome, "succeeded");
+    assert_eq!(metadata["previous_nodes"], json!(99));
+    assert_eq!(metadata["actual_nodes"], json!(2));
 
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn full_recalculation_skips_while_mutations_are_active()
--> Result<(), Box<dyn std::error::Error>> {
-    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    space_with_root(&db.pool, "full-reconcile-busy").await?;
-    let mut mutation_tx = db.pool.begin().await?;
-    acquire_gate(&mut mutation_tx, FULL_RECONCILIATION_GATE_SEED, true).await?;
-
-    assert_eq!(
-        SpaceUsageRepo::new(db.pool.clone())
-            .execute_full_recalculation()
-            .await?,
-        FullUsageReconcileExecution::MutationsActive
-    );
-
-    mutation_tx.commit().await?;
     db.cleanup().await;
     Ok(())
 }
@@ -326,7 +312,9 @@ async fn failed_execution_is_recorded_and_retried_later() -> Result<(), Box<dyn 
     };
     let (_, space_id, _) = space_with_root(&db.pool, "reconcile-failure").await?;
     let job_id = queue_job(&db.pool, space_id).await?;
-    sqlx::query("DELETE FROM space_usage WHERE space_id = $1")
+    // A live Space without any live node is corrupt: the exact count of 0
+    // violates the counter CHECK, so the execution must fail loudly.
+    sqlx::query("DELETE FROM nodes WHERE space_id = $1")
         .bind(space_id)
         .execute(&db.pool)
         .await?;
@@ -338,7 +326,7 @@ async fn failed_execution_is_recorded_and_retried_later() -> Result<(), Box<dyn 
         execution,
         UsageReconcileExecution::Failed { job_id: id, space_id: failed_space, run_after, ref error }
             if id == job_id && failed_space == space_id && run_after > Utc::now()
-                && error.contains("missing its usage counter")
+                && error.contains("database query failed")
     ));
     let (retry_count, outcome, has_error): (i32, String, bool) = sqlx::query_as(
         "SELECT j.retry_count, e.outcome, e.error_message IS NOT NULL \
@@ -353,6 +341,55 @@ async fn failed_execution_is_recorded_and_retried_later() -> Result<(), Box<dyn 
         (retry_count, outcome.as_str(), has_error),
         (1, "failed", true)
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn missing_counter_is_recreated_by_reconciliation() -> Result<(), Box<dyn std::error::Error>>
+{
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (_, space_id, _) = space_with_root(&db.pool, "reconcile-missing-counter").await?;
+    let job_id = queue_job(&db.pool, space_id).await?;
+    sqlx::query("DELETE FROM space_usage WHERE space_id = $1")
+        .bind(space_id)
+        .execute(&db.pool)
+        .await?;
+
+    let execution = SpaceUsageRepo::new(db.pool.clone())
+        .execute_next_reconciliation()
+        .await?;
+    assert_eq!(
+        execution,
+        UsageReconcileExecution::Succeeded {
+            job_id,
+            space_id,
+            previous: None,
+            actual: UsageCounts {
+                live_node_count: 1,
+                live_content_bytes: 0,
+            },
+        }
+    );
+
+    let stored: (i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(stored, (1, 0));
+    let metadata: Value =
+        sqlx::query_scalar("SELECT metadata FROM space_usage_reconcile_executions WHERE job_id = $1")
+            .bind(job_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(metadata["previous_nodes"], Value::Null);
+    assert_eq!(metadata["actual_nodes"], json!(1));
 
     db.cleanup().await;
     Ok(())
@@ -441,37 +478,3 @@ async fn exclusive_reconciliation_gate_rejects_then_releases_mutations()
     Ok(())
 }
 
-#[tokio::test]
-async fn full_recalculation_gate_rejects_then_releases_mutations()
--> Result<(), Box<dyn std::error::Error>> {
-    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (account, space_id, root_id) = space_with_root(&db.pool, "full-reconcile-mutation").await?;
-    let repo = FilesRepo::new(db.pool.clone());
-    let command = CreateFolder {
-        parent_node_id: root_id,
-        name: "blocked".to_owned(),
-    };
-
-    let mut reconciliation_tx = db.pool.begin().await?;
-    acquire_gate(&mut reconciliation_tx, FULL_RECONCILIATION_GATE_SEED, false).await?;
-
-    let error = repo
-        .insert_folder(space_id, &command, account)
-        .await
-        .expect_err("mutation must fail while full recalculation holds the gate");
-    assert!(matches!(
-        error,
-        Error::UsageRecalculationInProgress {
-            retry_after_seconds: 5
-        }
-    ));
-
-    reconciliation_tx.commit().await?;
-    repo.insert_folder(space_id, &command, account).await?;
-
-    db.cleanup().await;
-    Ok(())
-}

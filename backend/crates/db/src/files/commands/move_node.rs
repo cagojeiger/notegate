@@ -44,7 +44,7 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let caps = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let (_gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     // The moved node must exist and be live; the root cannot be moved.
     let moved_row = sqlx::query_as::<_, NodeRow>(&format!(

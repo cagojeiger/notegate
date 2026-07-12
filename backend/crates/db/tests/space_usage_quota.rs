@@ -12,7 +12,7 @@ mod common;
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_core::limits::Limits;
-use notegate_db::{FilesRepo, FullUsageReconcileExecution, SpaceUsageRepo, TextMutationKind};
+use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{CopyNode, CreateFolder, StoredContent, StoredFile, WriteTextBody};
 use sqlx::PgPool;
@@ -341,7 +341,7 @@ async fn quota_reducing_mutations_remain_available_above_the_limit() -> TestResu
 }
 
 #[tokio::test]
-async fn missing_counter_rolls_back_mutation_and_full_recalculation_repairs_it() -> TestResult {
+async fn missing_counter_rolls_back_mutation_and_reconciliation_repairs_it() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -376,20 +376,12 @@ async fn missing_counter_rolls_back_mutation_and_full_recalculation_repairs_it()
     );
 
     let usage_repo = SpaceUsageRepo::new(db.pool.clone());
-    let mut recalculation = FullUsageReconcileExecution::MutationsActive;
-    for _ in 0..20 {
-        recalculation = usage_repo.execute_full_recalculation().await?;
-        if recalculation != FullUsageReconcileExecution::MutationsActive {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    assert_eq!(
-        recalculation,
-        FullUsageReconcileExecution::Recalculated {
-            spaces_recalculated: 1
-        }
-    );
+    assert_eq!(usage_repo.enqueue_all_live_spaces().await?, 1);
+    assert!(matches!(
+        usage_repo.execute_next_reconciliation().await?,
+        UsageReconcileExecution::Succeeded { space_id: repaired, previous: None, .. }
+            if repaired == space_id
+    ));
     repo.insert_folder(
         space_id,
         &CreateFolder {

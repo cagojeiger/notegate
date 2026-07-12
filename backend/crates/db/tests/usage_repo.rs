@@ -16,7 +16,6 @@ use notegate_core::tier::UserTier;
 use notegate_db::UsageRepo;
 use uuid::Uuid;
 
-const FULL_RECONCILIATION_GATE_SEED: i64 = 0x4e47_5553_4147_4502;
 
 #[tokio::test]
 async fn current_user_usage_reads_counters_and_live_related_resources()
@@ -206,41 +205,6 @@ async fn reconciliation_request_enforces_owner_and_cooldown()
         .expect_err("recent reconciliation must enforce cooldown");
     assert!(matches!(error, Error::Conflict(_)));
 
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn reconciliation_request_is_rejected_during_full_recalculation()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (owner_user_id, space_id, _) =
-        space_with_root(&db.pool, "usage-request-maintenance").await?;
-    make_reconciliation_requestable(&db.pool, space_id).await?;
-
-    let mut maintenance_tx = db.pool.begin().await?;
-    let gate_acquired: bool = sqlx::query_scalar(
-        "SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(), $1))",
-    )
-    .bind(FULL_RECONCILIATION_GATE_SEED)
-    .fetch_one(&mut *maintenance_tx)
-    .await?;
-    assert!(gate_acquired);
-
-    let error = UsageRepo::new(db.pool.clone())
-        .request_space_reconciliation(owner_user_id, space_id)
-        .await
-        .expect_err("maintenance must reject new reconciliation jobs");
-    assert!(matches!(
-        error,
-        Error::UsageRecalculationInProgress {
-            retry_after_seconds: 5
-        }
-    ));
-
-    maintenance_tx.commit().await?;
     db.cleanup().await;
     Ok(())
 }

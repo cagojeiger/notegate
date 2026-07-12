@@ -1,4 +1,9 @@
 //! Transactional quota enforcement and updates for Space usage counters.
+//!
+//! Lock order for every path that touches a Space's counters: per-Space
+//! gate → space owner (accounts row) → spaces row → space_usage row.
+//! [`MutationGate`] witnesses the gate step, so counter mutations cannot
+//! compile without it.
 
 use notegate_core::limits::Limits;
 use notegate_core::{Error, Result};
@@ -8,7 +13,6 @@ use uuid::Uuid;
 use crate::map_sqlx_error;
 
 const SPACE_GATE_NAMESPACE: u64 = 0x4e47_5350_4143_4501;
-const FULL_RECONCILIATION_GATE_SEED: i64 = 0x4e47_5553_4147_4502;
 const MUTATION_RETRY_AFTER_SECONDS: u64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,21 +30,23 @@ impl UsageDelta {
     }
 }
 
+/// Proof that the reconciliation gate is held for one Space's mutation.
+/// Only [`acquire_mutation_gate`] constructs it, so counter mutations cannot
+/// run without the gate and always target the gated Space.
+#[derive(Debug)]
+pub(crate) struct MutationGate {
+    space_id: Uuid,
+}
+
 /// Acquire the shared side of the Space reconciliation gate without waiting.
-pub(crate) async fn acquire_mutation_gate(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
-    acquire_maintenance_gate(tx).await?;
+pub(crate) async fn acquire_mutation_gate(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+) -> Result<MutationGate> {
     if !try_space_gate(tx, space_id, true).await? {
         return Err(recalculation_in_progress());
     }
-    Ok(())
-}
-
-/// Exclude full recalculation while a request queues or mutates usage state.
-pub(crate) async fn acquire_maintenance_gate(tx: &mut PgConnection) -> Result<()> {
-    if try_full_reconciliation_gate(tx, true).await? {
-        return Ok(());
-    }
-    Err(recalculation_in_progress())
+    Ok(MutationGate { space_id })
 }
 
 fn recalculation_in_progress() -> Error {
@@ -52,19 +58,7 @@ pub(crate) async fn try_acquire_reconciliation_gate(
     tx: &mut PgConnection,
     space_id: Uuid,
 ) -> Result<bool> {
-    if !try_full_reconciliation_gate(tx, true).await? {
-        return Ok(false);
-    }
     try_space_gate(tx, space_id, false).await
-}
-
-/// Try to block every file-tree mutation for an atomic full recalculation.
-pub(crate) async fn try_acquire_full_reconciliation_gate(tx: &mut PgConnection) -> Result<bool> {
-    try_full_reconciliation_gate(tx, false).await
-}
-
-async fn try_full_reconciliation_gate(tx: &mut PgConnection, shared: bool) -> Result<bool> {
-    try_schema_advisory_lock(tx, FULL_RECONCILIATION_GATE_SEED, shared).await
 }
 
 async fn try_space_gate(tx: &mut PgConnection, space_id: Uuid, shared: bool) -> Result<bool> {
@@ -101,23 +95,23 @@ fn space_gate_seed(space_id: Uuid) -> i64 {
 /// Validate a quota-affecting delta and reserve it before source rows change.
 pub(crate) async fn apply_quota_delta(
     tx: &mut PgConnection,
-    space_id: Uuid,
+    gate: &MutationGate,
     delta: UsageDelta,
     limits: Limits,
 ) -> Result<()> {
-    apply_delta(tx, space_id, delta, Some(limits)).await
+    apply_delta(tx, gate.space_id, delta, Some(limits)).await
 }
 
 /// Release usage for a soft delete without blocking cleanup of over-limit data.
 pub(crate) async fn release_usage(
     tx: &mut PgConnection,
-    space_id: Uuid,
+    gate: &MutationGate,
     delta: UsageDelta,
 ) -> Result<()> {
     if delta.nodes > 0 || delta.content_bytes > 0 {
         return Err(Error::internal("usage release delta must not be positive"));
     }
-    apply_delta(tx, space_id, delta, None).await
+    apply_delta(tx, gate.space_id, delta, None).await
 }
 
 async fn apply_delta(
