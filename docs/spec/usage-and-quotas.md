@@ -85,8 +85,7 @@ No-op 변경              nodes  0       bytes  0
 File-tree mutation은 Space를 잠근 transaction 안에서 변경 후 예상 counter를 계산한다. 예상 값이 effective tier quota를 넘으면 원본과 counter를 변경하지 않고 `409 conflict`로 거부한다.
 
 ```text
-acquire shared full-recalculation gate
-  -> acquire shared Space reconciliation gate
+acquire shared Space reconciliation gate
   -> resolve and lock the owner tier quota
   -> lock Space
   -> lock space_usage
@@ -96,11 +95,11 @@ acquire shared full-recalculation gate
   -> commit
 ```
 
-한도를 초과한 상태에서도 사용량을 줄이는 save/delete는 허용한다. 증가하는 metric만 effective quota와 비교한다. Counter row 누락, underflow, overflow는 원본 변경을 rollback하는 internal error다. Reconciliation 또는 전체 재계산으로 counter를 복구한 뒤 mutation을 재시도한다.
+한도를 초과한 상태에서도 사용량을 줄이는 save/delete는 허용한다. 증가하는 metric만 effective quota와 비교한다. Counter row 누락, underflow, overflow는 원본 변경을 rollback하는 internal error다. 해당 Space의 reconciliation으로 counter를 복구한 뒤 mutation을 재시도한다.
 
 ## Reconciliation worker
 
-정기 자동 재계산은 하지 않는다. Worker는 수동 요청으로 생성된 job만 처리한다. DB 전체에서 활성 worker는 하나이며, 한 번에 job 하나를 실행한다.
+정기 자동 재계산은 하지 않는다. Worker는 수동 요청 또는 operator 전체 재계산으로 생성된 job만 처리한다. DB 전체에서 활성 worker는 하나이며, job 하나를 transaction 하나로 실행한다. Tick마다 ready job이 남지 않을 때까지 연속으로 실행한다.
 
 ```text
 worker tick
@@ -109,11 +108,12 @@ worker tick
   -> defer job for 5 minutes when the gate is busy
   -> lock the Space and space_usage
   -> COUNT/SUM live source rows
-  -> replace counters when different
+  -> upsert counters (a missing counter row is recreated)
   -> set reconciled_at = now()
   -> append succeeded execution
   -> delete job
   -> commit
+  -> repeat until no ready job remains
 ```
 
 - Worker는 transaction-scoped advisory lock으로 하나만 활성화한다.
@@ -149,9 +149,9 @@ notegate-api --recalculate-usage
 
 저장소에서 실행할 때는 `cargo run -p notegate-api -- --recalculate-usage`를 사용한다.
 
-명령은 worker lock 또는 진행 중인 mutation 때문에 gate를 얻지 못하면 1초 간격으로 최대 30번 재시도한다. Gate를 얻으면 read는 허용하고 file-tree mutation과 새 reconciliation 요청은 retry 가능한 임시 오류로 거부한다. Counter 교체와 `reconciled_at` 갱신 후 기존 활성 job은 `reason=full_recalculation`인 성공 execution으로 마감한다. 이 변경은 하나의 DB transaction으로 commit하거나 모두 rollback한다. 전체 재계산 statement timeout은 5분, row lock timeout은 5초다.
+명령은 모든 live Space의 reconciliation job을 한 번에 등록한 뒤(`ON CONFLICT`로 기존 job은 즉시 실행 가능하게만 갱신) queue가 빌 때까지 job을 하나씩 실행한다. Space 하나를 재계산하는 동안 그 Space의 mutation만 잠시 거부되고, 나머지 Space와 read는 영향받지 않으므로 서비스 운영 중에도 실행할 수 있다. 다른 worker가 lock을 쥐고 있으면 1초 간격으로 최대 30번 재시도하고, busy로 지연되거나 실패한 Space가 있으면 해당 Space를 명시한 오류로 종료한다(background worker가 이어서 재시도한다). 누락된 counter row는 job 실행이 다시 생성한다.
 
-`space_usage`를 처음 배포할 때 이전 버전 API는 counter와 maintenance gate를 갱신하지 못한다. 따라서 이전 버전 writer에 종료 신호를 보낸 뒤 진행 중인 요청과 worker transaction이 drain되어 모든 프로세스가 종료된 것을 확인한다. 그 다음 새 코드로 migration과 전체 재계산을 완료하고 새 API를 시작한다. 이전 버전과 authoritative counter 버전을 동시에 writer로 운영하지 않는다.
+`space_usage`를 처음 배포할 때 이전 버전 API는 counter를 갱신하지 못하고 Space reconciliation gate도 지키지 않는다. 따라서 이전 버전 writer에 종료 신호를 보낸 뒤 진행 중인 요청과 worker transaction이 drain되어 모든 프로세스가 종료된 것을 확인한다. 그 다음 새 코드로 migration을 완료하고 새 API를 시작한다. Migration이 counter를 backfill하므로 별도 재계산 없이 시작할 수 있다. 이전 버전과 authoritative counter 버전을 동시에 writer로 운영하지 않는다.
 
 ## Maintenance error
 
