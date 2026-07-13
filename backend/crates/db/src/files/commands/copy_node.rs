@@ -83,13 +83,13 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         texts: snapshot.iter().filter(|node| node.kind == "text").count(),
         files: snapshot.iter().filter(|node| node.kind == "file").count(),
     };
-    let content_bytes = copied_content_bytes(&mut tx, space_id, source_node_id).await?;
+    let (text_bytes, file_bytes) = copied_bytes(&mut tx, space_id, source_node_id).await?;
     let copied_nodes = i64::try_from(counts.nodes)
         .map_err(|_error| Error::internal("copied node count exceeds bigint"))?;
     space_usage::apply_quota_delta(
         &mut tx,
         &gate,
-        UsageDelta::new(copied_nodes, content_bytes),
+        UsageDelta::subtree(copied_nodes, text_bytes, file_bytes),
         caps,
     )
     .await?;
@@ -173,12 +173,12 @@ async fn load_subtree(
     .map_err(map_sqlx_error)
 }
 
-async fn copied_content_bytes(
+async fn copied_bytes(
     tx: &mut PgConnection,
     space_id: Uuid,
     source_node_id: Uuid,
-) -> Result<i64> {
-    sqlx::query_scalar(
+) -> Result<(i64, i64)> {
+    sqlx::query_as(
             "WITH RECURSIVE subtree AS ( \
                 SELECT id FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
@@ -186,7 +186,7 @@ async fn copied_content_bytes(
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
              SELECT \
-                COALESCE((SELECT sum(t.byte_len) FROM text_objects t JOIN subtree s ON s.id = t.node_id WHERE t.space_id = $1), 0)::bigint + \
+                COALESCE((SELECT sum(t.byte_len) FROM text_objects t JOIN subtree s ON s.id = t.node_id WHERE t.space_id = $1), 0)::bigint, \
                 COALESCE((SELECT sum(f.byte_len) FROM file_objects f JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1), 0)::bigint",
         )
         .bind(space_id)

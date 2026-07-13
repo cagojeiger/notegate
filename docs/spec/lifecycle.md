@@ -75,7 +75,7 @@ User caller만 space를 생성한다.
 ```text
 spaces(owner_user_id=user, sort_order=0)
 root node '/'
-space_usage(live_node_count=1, live_content_bytes=0)
+space_usage(live_node_count=1, live_text_bytes=0, live_file_bytes=0)
 ```
 
 - Space는 owner user의 live space 한도를 넘을 수 없다.

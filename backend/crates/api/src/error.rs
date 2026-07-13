@@ -64,6 +64,22 @@ impl ApiError {
         }
     }
 
+    pub fn usage_reconciliation_pending() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "usage_reconciliation_pending",
+            "space usage reconciliation is already queued",
+        )
+    }
+
+    pub fn usage_reconciliation_cooldown() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "usage_reconciliation_cooldown",
+            "space usage was reconciled recently; try again later",
+        )
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
     }

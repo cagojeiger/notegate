@@ -12,8 +12,9 @@ mod common;
 use chrono::Utc;
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
-use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
+use notegate_db::{FilesRepo, SpaceRepo, SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
+use notegate_model::FileEncryptionMode;
+use notegate_model::files::{CreateFolder, StoredContent, StoredFile, WriteTextBody};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -27,6 +28,18 @@ fn text(content: &str) -> StoredContent {
         content_sha256: "0".repeat(64),
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
+    }
+}
+
+fn file(bytes: &[u8]) -> StoredFile {
+    StoredFile {
+        bytes: bytes.to_vec(),
+        content_sha256: "f".repeat(64),
+        byte_len: bytes.len() as i64,
+        media_type: "application/octet-stream".to_owned(),
+        original_filename: Some("asset.bin".to_owned()),
+        encryption_mode: FileEncryptionMode::None,
+        encryption_metadata: None,
     }
 }
 
@@ -67,12 +80,16 @@ async fn reconciliation_repairs_drift_and_records_execution()
         return Ok(());
     };
     let (account, space_id, root_id) = space_with_root(&db.pool, "reconcile-drift").await?;
-    FilesRepo::new(db.pool.clone())
+    let files = FilesRepo::new(db.pool.clone());
+    files
         .insert_text(space_id, root_id, "note.md", &text("hello"), account)
+        .await?;
+    files
+        .insert_file(space_id, root_id, "asset.bin", &file(b"abc"), account)
         .await?;
     sqlx::query(
         "UPDATE space_usage \
-         SET live_node_count = 99, live_content_bytes = 999, \
+         SET live_node_count = 99, live_text_bytes = 999, live_file_bytes = 888, \
              reconciled_at = now() - interval '30 days' \
          WHERE space_id = $1",
     )
@@ -91,22 +108,25 @@ async fn reconciliation_repairs_drift_and_records_execution()
             space_id,
             previous: Some(UsageCounts {
                 live_node_count: 99,
-                live_content_bytes: 999,
+                live_text_bytes: 999,
+                live_file_bytes: 888,
             }),
             actual: UsageCounts {
-                live_node_count: 2,
-                live_content_bytes: 5,
+                live_node_count: 3,
+                live_text_bytes: 5,
+                live_file_bytes: 3,
             },
         }
     );
 
-    let stored: (i64, i64) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+    let stored: (i64, i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(stored, (2, 5));
+    assert_eq!(stored, (3, 5, 3));
     let (outcome, metadata): (String, Value) = sqlx::query_as(
         "SELECT outcome, metadata FROM space_usage_reconcile_executions WHERE job_id = $1",
     )
@@ -114,13 +134,55 @@ async fn reconciliation_repairs_drift_and_records_execution()
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(outcome, "succeeded");
-    assert_eq!(metadata["actual_nodes"], json!(2));
+    assert_eq!(metadata["actual_nodes"], json!(3));
+    assert_eq!(metadata["actual_text_bytes"], json!(5));
+    assert_eq!(metadata["actual_file_bytes"], json!(3));
     assert_eq!(
         SpaceUsageRepo::new(db.pool.clone())
             .execute_next_reconciliation()
             .await?,
         UsageReconcileExecution::Idle
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reconciliation_cancels_a_job_for_a_deleted_space() -> Result<(), Box<dyn std::error::Error>>
+{
+    let _guard = RECONCILIATION_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, _) = space_with_root(&db.pool, "reconcile-deleted").await?;
+    let job_id = queue_job(&db.pool, space_id).await?;
+    SpaceRepo::new(db.pool.clone())
+        .delete_space(space_id, account, account)
+        .await?;
+
+    assert_eq!(
+        SpaceUsageRepo::new(db.pool.clone())
+            .execute_next_reconciliation()
+            .await?,
+        UsageReconcileExecution::Cancelled { job_id, space_id }
+    );
+
+    let job_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM space_usage_reconcile_jobs WHERE job_id = $1)",
+    )
+    .bind(job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(!job_exists);
+    let (outcome, metadata): (String, Value) = sqlx::query_as(
+        "SELECT outcome, metadata FROM space_usage_reconcile_executions WHERE job_id = $1",
+    )
+    .bind(job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(outcome, "cancelled");
+    assert_eq!(metadata["reason"], json!("space_deleted"));
 
     db.cleanup().await;
     Ok(())
@@ -145,7 +207,8 @@ async fn bulk_enqueue_reconciles_every_live_space() -> Result<(), Box<dyn std::e
         )
         .await?;
     sqlx::query(
-        "UPDATE space_usage SET live_node_count = 99, live_content_bytes = 999, \
+        "UPDATE space_usage \
+         SET live_node_count = 99, live_text_bytes = 999, live_file_bytes = 888, \
          reconciled_at = now() - interval '30 days'",
     )
     .execute(&db.pool)
@@ -176,20 +239,22 @@ async fn bulk_enqueue_reconciles_every_live_space() -> Result<(), Box<dyn std::e
     expected.sort();
     assert_eq!(reconciled, expected);
 
-    let first: (i64, i64) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+    let first: (i64, i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(first_space)
     .fetch_one(&db.pool)
     .await?;
-    let second: (i64, i64) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+    let second: (i64, i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(second_space)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(first, (2, 5));
-    assert_eq!(second, (1, 0));
+    assert_eq!(first, (2, 5, 0));
+    assert_eq!(second, (1, 0, 0));
     let queued_jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM space_usage_reconcile_jobs")
         .fetch_one(&db.pool)
         .await?;
@@ -371,18 +436,20 @@ async fn missing_counter_is_recreated_by_reconciliation() -> Result<(), Box<dyn 
             previous: None,
             actual: UsageCounts {
                 live_node_count: 1,
-                live_content_bytes: 0,
+                live_text_bytes: 0,
+                live_file_bytes: 0,
             },
         }
     );
 
-    let stored: (i64, i64) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+    let stored: (i64, i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(stored, (1, 0));
+    assert_eq!(stored, (1, 0, 0));
     let metadata: Value = sqlx::query_scalar(
         "SELECT metadata FROM space_usage_reconcile_executions WHERE job_id = $1",
     )

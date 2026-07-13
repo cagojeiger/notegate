@@ -1,5 +1,6 @@
 export const queryKeys = {
   me: ["me"] as const,
+  usage: ["me", "usage"] as const,
   auditEvents: ["me", "audit-events"] as const,
   myKeys: ["me", "keys"] as const,
   agents: ["agents"] as const,

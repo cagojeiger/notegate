@@ -129,7 +129,7 @@ async fn execute_job(
     // A missing counter row is repaired here: reconciliation is the recovery
     // path for a Space whose counter was lost, so upsert instead of update.
     let previous = sqlx::query_as::<_, UsageCounts>(
-        "SELECT live_node_count, live_content_bytes \
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
          FROM space_usage WHERE space_id = $1 FOR UPDATE",
     )
     .bind(job.space_id)
@@ -140,16 +140,18 @@ async fn execute_job(
 
     sqlx::query(
         "INSERT INTO space_usage ( \
-             space_id, live_node_count, live_content_bytes, reconciled_at \
-         ) VALUES ($1, $2, $3, now()) \
+             space_id, live_node_count, live_text_bytes, live_file_bytes, reconciled_at \
+         ) VALUES ($1, $2, $3, $4, now()) \
          ON CONFLICT (space_id) DO UPDATE \
          SET live_node_count = EXCLUDED.live_node_count, \
-             live_content_bytes = EXCLUDED.live_content_bytes, \
+             live_text_bytes = EXCLUDED.live_text_bytes, \
+             live_file_bytes = EXCLUDED.live_file_bytes, \
              reconciled_at = EXCLUDED.reconciled_at",
     )
     .bind(job.space_id)
     .bind(actual.live_node_count)
-    .bind(actual.live_content_bytes)
+    .bind(actual.live_text_bytes)
+    .bind(actual.live_file_bytes)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
@@ -161,8 +163,10 @@ async fn execute_job(
         json!({
             "previous_nodes": previous.map(|counts| counts.live_node_count),
             "actual_nodes": actual.live_node_count,
-            "previous_content_bytes": previous.map(|counts| counts.live_content_bytes),
-            "actual_content_bytes": actual.live_content_bytes,
+            "previous_text_bytes": previous.map(|counts| counts.live_text_bytes),
+            "actual_text_bytes": actual.live_text_bytes,
+            "previous_file_bytes": previous.map(|counts| counts.live_file_bytes),
+            "actual_file_bytes": actual.live_file_bytes,
         }),
     )
     .await?;

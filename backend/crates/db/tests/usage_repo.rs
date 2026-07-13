@@ -9,79 +9,25 @@
 )]
 mod common;
 
-use chrono::{DateTime, Utc};
 use common::{TestDb, insert_user_account, set_user_tier, space_with_root};
 use notegate_core::Error;
 use notegate_core::tier::UserTier;
-use notegate_db::UsageRepo;
+use notegate_db::{UsageReconciliationOutcome, UsageRepo};
 use uuid::Uuid;
 
 #[tokio::test]
-async fn current_user_usage_reads_counters_and_live_related_resources()
--> Result<(), Box<dyn std::error::Error>> {
+async fn current_user_usage_reads_space_counters() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let (user_id, space_id, _) = space_with_root(&db.pool, "usage-view").await?;
     set_user_tier(&db.pool, user_id, "tier0").await?;
-    let reconciled_at: DateTime<Utc> = sqlx::query_scalar(
-        "UPDATE space_usage SET live_node_count = 7, live_content_bytes = 123 \
-         WHERE space_id = $1 RETURNING reconciled_at",
+    sqlx::query(
+        "UPDATE space_usage \
+         SET live_node_count = 7, live_text_bytes = 123, live_file_bytes = 45 \
+         WHERE space_id = $1",
     )
     .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
-
-    let live_agent_id: Uuid =
-        sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
-            .fetch_one(&db.pool)
-            .await?;
-    sqlx::query("INSERT INTO agents (id, owner_user_id, name) VALUES ($1, $2, 'live-agent')")
-        .bind(live_agent_id)
-        .bind(user_id)
-        .execute(&db.pool)
-        .await?;
-    sqlx::query(
-        "INSERT INTO space_agent_connections \
-         (space_id, agent_id, permission, connected_by_user_id) \
-         VALUES ($1, $2, 'write', $3)",
-    )
-    .bind(space_id)
-    .bind(live_agent_id)
-    .bind(user_id)
-    .execute(&db.pool)
-    .await?;
-
-    let inactive_agent_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO accounts (kind, is_active) VALUES ('agent', false) RETURNING id",
-    )
-    .fetch_one(&db.pool)
-    .await?;
-    sqlx::query("INSERT INTO agents (id, owner_user_id, name) VALUES ($1, $2, 'inactive-agent')")
-        .bind(inactive_agent_id)
-        .bind(user_id)
-        .execute(&db.pool)
-        .await?;
-
-    sqlx::query(
-        "INSERT INTO api_keys \
-         (account_id, created_by_user_id, name, token_prefix, token_hash, hash_key_id, expires_at) \
-         VALUES \
-         ($1, $1, 'live', 'ngk_live', $2, 'test-lookup', now() + interval '1 day'), \
-         ($1, $1, 'expired', 'ngk_expired', $3, 'test-lookup', now() - interval '1 day'), \
-         ($1, $1, 'revoked', 'ngk_revoked', $4, 'test-lookup', now() + interval '1 day')",
-    )
-    .bind(user_id)
-    .bind(format!("live-{space_id}"))
-    .bind(format!("expired-{space_id}"))
-    .bind(format!("revoked-{space_id}"))
-    .execute(&db.pool)
-    .await?;
-    sqlx::query(
-        "UPDATE api_keys SET revoked_at = now(), revoked_reason = 'test' \
-         WHERE account_id = $1 AND name = 'revoked'",
-    )
-    .bind(user_id)
     .execute(&db.pool)
     .await?;
 
@@ -90,15 +36,12 @@ async fn current_user_usage_reads_counters_and_live_related_resources()
         .await?
         .expect("live user usage");
     assert_eq!(snapshot.tier, UserTier::Tier0);
-    assert_eq!(snapshot.live_agents, 1);
-    assert_eq!(snapshot.live_api_keys, 1);
     assert_eq!(snapshot.spaces.len(), 1);
     let space = &snapshot.spaces[0];
     assert_eq!(space.id, space_id);
     assert_eq!(space.live_nodes, 7);
-    assert_eq!(space.live_content_bytes, 123);
-    assert_eq!(space.live_agent_connections, 1);
-    assert_eq!(space.reconciled_at, reconciled_at);
+    assert_eq!(space.live_text_bytes, 123);
+    assert_eq!(space.live_file_bytes, 45);
     assert!(!space.reconciliation_pending);
 
     db.cleanup().await;
@@ -120,16 +63,21 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
         first.request_space_reconciliation(owner_user_id, space_id),
         second.request_space_reconciliation(owner_user_id, space_id),
     );
+    let outcomes = [first_result?, second_result?];
     assert_eq!(
-        usize::from(first_result.is_ok()) + usize::from(second_result.is_ok()),
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == UsageReconciliationOutcome::Queued)
+            .count(),
         1
     );
-    for error in [first_result, second_result]
-        .into_iter()
-        .filter_map(Result::err)
-    {
-        assert!(matches!(error, Error::Conflict(_)));
-    }
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == UsageReconciliationOutcome::AlreadyQueued)
+            .count(),
+        1
+    );
 
     let queued: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
@@ -198,12 +146,43 @@ async fn reconciliation_request_enforces_owner_and_cooldown()
     .bind(space_id)
     .execute(&db.pool)
     .await?;
-    let error = repo
+    let outcome = repo
         .request_space_reconciliation(owner_user_id, space_id)
-        .await
-        .expect_err("recent reconciliation must enforce cooldown");
-    assert!(matches!(error, Error::Conflict(_)));
+        .await?;
+    assert_eq!(outcome, UsageReconciliationOutcome::Cooldown);
 
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reconciliation_request_bounds_space_lock_waits() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (owner_user_id, space_id, _) = space_with_root(&db.pool, "usage-request-lock").await?;
+    let mut lock_tx = db.pool.begin().await?;
+    sqlx::query("SELECT id FROM spaces WHERE id = $1 FOR UPDATE")
+        .bind(space_id)
+        .execute(&mut *lock_tx)
+        .await?;
+
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        UsageRepo::new(db.pool.clone()).request_space_reconciliation(owner_user_id, space_id),
+    )
+    .await
+    .expect("request must return before the HTTP timeout")
+    .expect_err("locked Space must return a retryable error");
+    assert!(matches!(
+        error,
+        Error::UsageRecalculationInProgress {
+            retry_after_seconds: 2
+        }
+    ));
+
+    lock_tx.rollback().await?;
     db.cleanup().await;
     Ok(())
 }

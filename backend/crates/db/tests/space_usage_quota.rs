@@ -41,9 +41,10 @@ fn file(bytes: &[u8]) -> StoredFile {
     }
 }
 
-async fn assert_usage(pool: &PgPool, space_id: Uuid, expected: (i64, i64)) -> TestResult {
-    let stored: (i64, i64) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+async fn assert_usage(pool: &PgPool, space_id: Uuid, expected: (i64, i64, i64)) -> TestResult {
+    let stored: (i64, i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(pool)
@@ -52,12 +53,19 @@ async fn assert_usage(pool: &PgPool, space_id: Uuid, expected: (i64, i64)) -> Te
         .calculate_exact_usage(space_id)
         .await?;
     assert_eq!(stored, expected);
-    assert_eq!(stored, (exact.live_node_count, exact.live_content_bytes));
+    assert_eq!(
+        stored,
+        (
+            exact.live_node_count,
+            exact.live_text_bytes,
+            exact.live_file_bytes,
+        )
+    );
     Ok(())
 }
 
 #[tokio::test]
-async fn counter_enforces_node_and_content_limits() -> TestResult {
+async fn counter_enforces_independent_node_text_and_file_limits() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -65,8 +73,9 @@ async fn counter_enforces_node_and_content_limits() -> TestResult {
     let repo = FilesRepo::with_limits(
         db.pool.clone(),
         Limits {
-            space_max_nodes: 3,
-            space_max_content_bytes: 5,
+            space_max_nodes: 4,
+            space_max_text_bytes: 5,
+            space_max_file_bytes: 2,
             folder_max_children: 10,
         },
     );
@@ -83,7 +92,9 @@ async fn counter_enforces_node_and_content_limits() -> TestResult {
     let (text_node, _) = repo
         .insert_text(space_id, root_id, "note.md", &text("hello"), account)
         .await?;
-    assert_usage(&db.pool, space_id, (3, 5)).await?;
+    repo.insert_file(space_id, root_id, "asset.bin", &file(b"ab"), account)
+        .await?;
+    assert_usage(&db.pool, space_id, (4, 5, 2)).await?;
 
     let node_error = repo
         .insert_folder(
@@ -98,7 +109,7 @@ async fn counter_enforces_node_and_content_limits() -> TestResult {
         .expect_err("node quota must be enforced from the counter");
     assert!(matches!(
         node_error,
-        Error::Conflict(message) if message.contains("maximum of 3 live nodes")
+        Error::Conflict(message) if message.contains("maximum of 4 live nodes")
     ));
 
     let content_error = repo
@@ -111,34 +122,24 @@ async fn counter_enforces_node_and_content_limits() -> TestResult {
             TextMutationKind::Write,
         )
         .await
-        .expect_err("content quota must roll back the save");
+        .expect_err("text quota must roll back the save");
     assert!(matches!(
         content_error,
         Error::Conflict(message) if message.contains("maximum of 5 bytes")
     ));
-    assert_usage(&db.pool, space_id, (3, 5)).await?;
+    assert_usage(&db.pool, space_id, (4, 5, 2)).await?;
 
     repo.soft_delete_node(space_id, folder.id, account, false)
         .await?;
     let file_error = repo
         .insert_file(space_id, root_id, "blocked.bin", &file(b"x"), account)
         .await
-        .expect_err("content quota must roll back the file create");
-    assert!(matches!(file_error, Error::Conflict(_)));
-    assert_usage(&db.pool, space_id, (2, 5)).await?;
-
-    repo.save_text_content(
-        space_id,
-        text_node.id,
-        &text("hey"),
-        None,
-        account,
-        TextMutationKind::Write,
-    )
-    .await?;
-    repo.insert_file(space_id, root_id, "asset.bin", &file(b"ab"), account)
-        .await?;
-    assert_usage(&db.pool, space_id, (3, 5)).await?;
+        .expect_err("file quota must roll back the file create");
+    assert!(matches!(
+        file_error,
+        Error::Conflict(message) if message.contains("maximum of 2 bytes")
+    ));
+    assert_usage(&db.pool, space_id, (3, 5, 2)).await?;
 
     db.cleanup().await;
     Ok(())
@@ -154,7 +155,8 @@ async fn subtree_copy_checks_its_full_delta() -> TestResult {
         db.pool.clone(),
         Limits {
             space_max_nodes: 10,
-            space_max_content_bytes: 9,
+            space_max_text_bytes: 9,
+            space_max_file_bytes: 100,
             folder_max_children: 10,
         },
     );
@@ -188,7 +190,7 @@ async fn subtree_copy_checks_its_full_delta() -> TestResult {
         error,
         Error::Conflict(message) if message.contains("maximum of 9 bytes")
     ));
-    assert_usage(&db.pool, space_id, (3, 5)).await?;
+    assert_usage(&db.pool, space_id, (3, 5, 0)).await?;
 
     db.cleanup().await;
     Ok(())
@@ -204,7 +206,8 @@ async fn concurrent_node_creates_respect_the_boundary() -> TestResult {
         db.pool.clone(),
         Limits {
             space_max_nodes: 2,
-            space_max_content_bytes: 100,
+            space_max_text_bytes: 100,
+            space_max_file_bytes: 100,
             folder_max_children: 10,
         },
     );
@@ -233,14 +236,14 @@ async fn concurrent_node_creates_respect_the_boundary() -> TestResult {
         }
     }
     assert_eq!((succeeded, rejected), (1, 1));
-    assert_usage(&db.pool, space_id, (2, 0)).await?;
+    assert_usage(&db.pool, space_id, (2, 0, 0)).await?;
 
     db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
-async fn concurrent_content_creates_respect_the_boundary() -> TestResult {
+async fn concurrent_file_creates_respect_the_boundary() -> TestResult {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -250,7 +253,8 @@ async fn concurrent_content_creates_respect_the_boundary() -> TestResult {
         db.pool.clone(),
         Limits {
             space_max_nodes: 10,
-            space_max_content_bytes: 5,
+            space_max_text_bytes: 100,
+            space_max_file_bytes: 5,
             folder_max_children: 10,
         },
     );
@@ -273,7 +277,67 @@ async fn concurrent_content_creates_respect_the_boundary() -> TestResult {
         }
     }
     assert_eq!((succeeded, rejected), (1, 1));
-    assert_usage(&db.pool, space_id, (2, 3)).await?;
+    assert_usage(&db.pool, space_id, (2, 0, 3)).await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_text_saves_respect_the_boundary() -> TestResult {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "space-usage-text-race").await?;
+    let repo = FilesRepo::with_limits(
+        db.pool.clone(),
+        Limits {
+            space_max_nodes: 10,
+            space_max_text_bytes: 5,
+            space_max_file_bytes: 100,
+            folder_max_children: 10,
+        },
+    );
+    let (first_node, _) = repo
+        .insert_text(space_id, root_id, "first.md", &text(""), account)
+        .await?;
+    let (second_node, _) = repo
+        .insert_text(space_id, root_id, "second.md", &text(""), account)
+        .await?;
+    let first_repo = repo.clone();
+    let second_repo = repo.clone();
+    let first_text = text("abc");
+    let second_text = text("def");
+
+    let (first_result, second_result) = tokio::join!(
+        first_repo.save_text_content(
+            space_id,
+            first_node.id,
+            &first_text,
+            None,
+            account,
+            TextMutationKind::Write,
+        ),
+        second_repo.save_text_content(
+            space_id,
+            second_node.id,
+            &second_text,
+            None,
+            account,
+            TextMutationKind::Write,
+        ),
+    );
+    let mut succeeded = 0;
+    let mut rejected = 0;
+    for result in [first_result, second_result] {
+        match result {
+            Ok(_) => succeeded += 1,
+            Err(Error::Conflict(_)) => rejected += 1,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    assert_eq!((succeeded, rejected), (1, 1));
+    assert_usage(&db.pool, space_id, (3, 3, 0)).await?;
 
     db.cleanup().await;
     Ok(())
@@ -303,7 +367,8 @@ async fn quota_reducing_mutations_remain_available_above_the_limit() -> TestResu
         db.pool.clone(),
         Limits {
             space_max_nodes: 1,
-            space_max_content_bytes: 1,
+            space_max_text_bytes: 1,
+            space_max_file_bytes: 1,
             folder_max_children: 10,
         },
     );
@@ -321,7 +386,7 @@ async fn quota_reducing_mutations_remain_available_above_the_limit() -> TestResu
             TextMutationKind::Write,
         )
         .await?;
-    assert_usage(&db.pool, space_id, (2, 1)).await?;
+    assert_usage(&db.pool, space_id, (2, 1, 0)).await?;
 
     let error = restricted_repo
         .insert_folder(
@@ -391,7 +456,7 @@ async fn missing_counter_rolls_back_mutation_and_reconciliation_repairs_it() -> 
         account,
     )
     .await?;
-    assert_usage(&db.pool, space_id, (2, 0)).await?;
+    assert_usage(&db.pool, space_id, (2, 0, 0)).await?;
 
     db.cleanup().await;
     Ok(())

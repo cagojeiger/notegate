@@ -96,7 +96,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     space_usage::apply_quota_delta(
         &mut tx,
         &gate,
-        UsageDelta::new(0, content.byte_len - current_text.byte_len),
+        UsageDelta::text(0, content.byte_len - current_text.byte_len),
         caps,
     )
     .await?;

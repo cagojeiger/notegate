@@ -23,7 +23,7 @@ impl SpaceUsageRepo {
         Self { pool }
     }
 
-    /// Require the usage tables and active Space creation trigger from migration 0012.
+    /// Require the usage tables, split byte counters, and Space creation trigger.
     pub async fn require_schema(&self) -> Result<()> {
         let installed: bool = sqlx::query_scalar(
             "SELECT EXISTS ( \
@@ -52,6 +52,16 @@ impl SpaceUsageRepo {
                           AND t.tgname = 'spaces_create_usage' \
                           AND NOT t.tgisinternal \
                           AND t.tgenabled IN ('O', 'A') \
+                    ) \
+                    AND EXISTS ( \
+                        SELECT 1 FROM information_schema.columns \
+                        WHERE table_schema = current_schema() AND table_name = 'space_usage' \
+                          AND column_name = 'live_text_bytes' \
+                    ) \
+                    AND EXISTS ( \
+                        SELECT 1 FROM information_schema.columns \
+                        WHERE table_schema = current_schema() AND table_name = 'space_usage' \
+                          AND column_name = 'live_file_bytes' \
                     )",
         )
         .fetch_one(&self.pool)
@@ -142,11 +152,12 @@ fn live_usage_columns(space_ref: &str) -> String {
              SELECT sum(t.byte_len) FROM text_objects t \
              JOIN nodes n ON n.id = t.node_id AND n.space_id = t.space_id \
              WHERE t.space_id = {space_ref} AND n.deleted_at IS NULL \
-         ), 0)::bigint + COALESCE(( \
+         ), 0)::bigint AS live_text_bytes, \
+         COALESCE(( \
              SELECT sum(f.byte_len) FROM file_objects f \
              JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
              WHERE f.space_id = {space_ref} AND n.deleted_at IS NULL \
-         ), 0)::bigint AS live_content_bytes"
+         ), 0)::bigint AS live_file_bytes"
     )
 }
 
@@ -161,5 +172,6 @@ async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<Usag
 #[derive(Debug, Clone, Copy, FromRow, PartialEq, Eq)]
 pub struct UsageCounts {
     pub live_node_count: i64,
-    pub live_content_bytes: i64,
+    pub live_text_bytes: i64,
+    pub live_file_bytes: i64,
 }

@@ -63,13 +63,14 @@ async fn create_space_creates_root_and_owner_write_permission()
     assert_eq!(kind, "folder");
     assert_eq!(parent_id, None);
 
-    let usage: (i64, i64) = sqlx::query_as(
-        "SELECT live_node_count, live_content_bytes FROM space_usage WHERE space_id = $1",
+    let usage: (i64, i64, i64) = sqlx::query_as(
+        "SELECT live_node_count, live_text_bytes, live_file_bytes \
+         FROM space_usage WHERE space_id = $1",
     )
     .bind(space.id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(usage, (1, 0));
+    assert_eq!(usage, (1, 0, 0));
     db.cleanup().await;
     Ok(())
 }

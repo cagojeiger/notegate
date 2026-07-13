@@ -34,6 +34,18 @@ const agentMe: Me = {
   capabilities: { can_create_space: false, can_manage_agents: false }
 };
 
+const usage = {
+  tier: "tier0",
+  spaces: [{
+    id: "space-1",
+    name: "Personal",
+    items: { used: 11, limit: 1_999 },
+    text_bytes: { used: 1_024, limit: 134_217_728 },
+    file_bytes: { used: 2_048, limit: 134_217_728 },
+    reconciliation_pending: false
+  }]
+};
+
 type SpacePermission = "read" | "write" | "none";
 
 function mockSettingsApi(me: unknown = userMe, options: { failPermissionUpdate?: boolean; initialSpacePermission?: SpacePermission } = {}) {
@@ -67,6 +79,7 @@ function mockSettingsApi(me: unknown = userMe, options: { failPermissionUpdate?:
     }
     if (path.includes("/api/v1/spaces?")) return jsonResponse({ spaces: [space], page });
     if (path.endsWith("/api/v1/agents?limit=100")) return jsonResponse({ agents: [{ id: "agent-1", name: "ci-bot", owner_user_id: "user-1" }], page });
+    if (path.endsWith("/api/v1/me/usage")) return jsonResponse(usage);
     if (path.includes("/api/v1/me")) {
       return jsonResponse(me);
     }
@@ -113,6 +126,17 @@ describe("SettingsModal", () => {
     await user.click(screen.getByRole("button", { name: "Reset" }));
 
     expect(onResetSavedWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows storage usage by space for user accounts", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByRole("tab", { name: "Usage" }));
+
+    expect(await screen.findByText("Space usage")).toBeInTheDocument();
+    expect(screen.getByText("Tier 0")).toBeInTheDocument();
+    expect(screen.getByText("Personal")).toBeInTheDocument();
   });
 
   it("shows the MCP connection cheat sheet in its own tab", async () => {
@@ -230,5 +254,6 @@ describe("SettingsModal", () => {
     await userEvent.setup().click(screen.getByRole("tab", { name: "Account" }));
     expect(await screen.findByText("ci-bot")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
   });
 });
