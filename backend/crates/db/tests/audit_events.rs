@@ -40,6 +40,13 @@ async fn audit_rows(pool: &sqlx::PgPool) -> Result<Vec<AuditRow>, sqlx::Error> {
     .await
 }
 
+async fn clear_setup_events(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM audit_events")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 async fn insert_agent(
     repo: &AgentRepo,
     owner: Uuid,
@@ -87,6 +94,7 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
         return Ok(());
     };
     let owner = insert_user_account(&db.pool, "audit-space", "audit-space@example.test").await?;
+    clear_setup_events(&db.pool).await?;
     let repo = SpaceRepo::new(db.pool.clone());
 
     let space = repo
@@ -141,6 +149,7 @@ async fn account_delete_audit_records_nonzero_cascade_counts()
         "audit-delete-cascade@example.test",
     )
     .await?;
+    clear_setup_events(&db.pool).await?;
     set_user_tier(&db.pool, user, "system_max").await?;
 
     let agents = AgentRepo::new(db.pool.clone());
@@ -246,6 +255,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
         return Ok(());
     };
     let owner = insert_user_account(&db.pool, "audit-agent", "audit-agent@example.test").await?;
+    clear_setup_events(&db.pool).await?;
     set_user_tier(&db.pool, owner, "system_max").await?;
     let agents = AgentRepo::new(db.pool.clone());
     let connections = ConnectionRepo::new(db.pool.clone());
@@ -352,6 +362,7 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
         return Ok(());
     };
     let user = insert_user_account(&db.pool, "audit-user", "audit-user@example.test").await?;
+    clear_setup_events(&db.pool).await?;
     let api_keys = ApiKeyRepo::new(db.pool.clone());
 
     let first_key = Uuid::new_v4();

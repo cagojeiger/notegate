@@ -1,4 +1,41 @@
-const METADATA_PREVIEW_LIMIT = 180;
+import type { AccountRef, AuditEvent, FileChangeEvent } from "../../api/types";
+
+const FILE_CHANGE_ACTIONS: Record<string, string> = {
+  "folder.create": "Created a folder",
+  "text.create": "Created a text item",
+  "file.create": "Added a file",
+  "text.write": "Updated text",
+  "text.append": "Appended text",
+  "text.patch": "Patched text",
+  "text.line_edit": "Edited text lines",
+  "item.update": "Updated an item",
+  "item.move": "Moved an item",
+  "item.copy": "Copied an item",
+  "item.delete": "Deleted an item",
+  "metadata.replace": "Replaced metadata",
+  "metadata.patch": "Updated metadata"
+};
+
+const AUDIT_ACTIONS: Record<string, string> = {
+  "account.create": "Created the account",
+  "account.delete": "Deleted the account",
+  "session.login": "Signed in",
+  "session.logout": "Signed out",
+  "session.revoke": "Session access ended",
+  "space.create": "Created a space",
+  "space.update": "Updated a space",
+  "space.delete": "Deleted a space",
+  "agent.create": "Created an agent",
+  "agent.delete": "Deleted an agent",
+  "user_key.create": "Created a user API key",
+  "user_key.rotate": "Rotated a user API key",
+  "user_key.revoke": "Revoked a user API key",
+  "agent_key.create": "Created an agent API key",
+  "agent_key.rotate": "Rotated an agent API key",
+  "agent_key.revoke": "Revoked an agent API key",
+  "connection.upsert": "Changed agent access",
+  "connection.disconnect": "Disconnected an agent"
+};
 
 export function formatEventTime(value: string): string {
   const date = new Date(value);
@@ -16,17 +53,37 @@ export function shortId(value: string | null | undefined): string {
   return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
 }
 
-export function formatMetadata(metadata: Record<string, unknown> | null | undefined): string {
-  if (!metadata || Object.keys(metadata).length === 0) return "—";
-  const text = Object.entries(metadata)
-    .map(([key, value]) => `${key}=${formatMetadataValue(value)}`)
-    .join(" · ");
-  return text.length > METADATA_PREVIEW_LIMIT ? `${text.slice(0, METADATA_PREVIEW_LIMIT - 1)}…` : text;
+export function formatFileChangeAction(event: FileChangeEvent): string {
+  return FILE_CHANGE_ACTIONS[event.op_type] ?? event.op_type;
 }
 
-function formatMetadataValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (value === null) return "null";
-  return JSON.stringify(value);
+export function formatAuditAction(event: AuditEvent): string {
+  return AUDIT_ACTIONS[event.op_type] ?? event.op_type;
+}
+
+export function formatAuditTarget(event: AuditEvent): string {
+  const label = event.resource_type.replace(/_/g, " ");
+  return event.resource_id ? `${label} ${shortId(event.resource_id)}` : label;
+}
+
+export function formatAuditDetail(event: AuditEvent): string | null {
+  if (typeof event.metadata.reason === "string") return event.metadata.reason.replace(/_/g, " ");
+  if (typeof event.metadata.permission === "string") return `${event.metadata.permission} access`;
+  if (Array.isArray(event.metadata.changed_fields)) return `Changed ${event.metadata.changed_fields.join(", ")}`;
+  return null;
+}
+
+export function formatFileChangeTarget(event: FileChangeEvent): string {
+  const kind = typeof event.metadata.item_kind === "string" ? event.metadata.item_kind : "item";
+  const name = typeof event.metadata.item_name === "string" ? event.metadata.item_name : shortId(event.node_id);
+  return `${kind} ${name}`;
+}
+
+export function formatActor(
+  actor: AccountRef | null | undefined,
+  actorAccountId: string | null
+): string {
+  if (actor?.display_name) return `${actor.display_name} (${actor.kind === "agent" ? "Agent" : "User"})`;
+  const kind = actor?.kind === "agent" ? "Agent" : "Account";
+  return `${kind} ${shortId(actor?.id ?? actorAccountId)}`;
 }

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
-import type { RestNode, Space } from "../../api/types";
+import type { Space } from "../../api/types";
 import { EventHistoryModal } from "./EventHistoryModal";
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };
@@ -18,6 +18,13 @@ const space: Space = {
   updated_at: "2026-07-10T00:00:00Z"
 };
 
+const secondSpace: Space = {
+  ...space,
+  id: "space-2",
+  name: "Research",
+  root_node_id: "root-2"
+};
+
 function jsonResponse(body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
 }
@@ -28,12 +35,12 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider apiKey="agent-key" authCacheKey="agent-key:0">
-        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents={false} onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
       </ApiProvider>
     );
 
-    expect(screen.queryByRole("tab", { name: "Audit" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "File changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Audit log" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Activity" })).toBeInTheDocument();
 
     await screen.findByText("No file change events.");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -41,19 +48,21 @@ describe("EventHistoryModal", () => {
   });
 
   it("does not call the audit endpoint when the account loses audit access", async () => {
+    const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ events: [], page }));
     const { rerender } = render(
       <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
-        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
 
+    await user.click(screen.getByRole("tab", { name: "Audit log" }));
     await screen.findByText("No audit events.");
     fetchMock.mockClear();
 
     rerender(
       <ApiProvider apiKey="agent-key" authCacheKey="agent-key:1">
-        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents={false} onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
       </ApiProvider>
     );
 
@@ -79,14 +88,15 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
-        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
 
-    await screen.findByText("space.update");
+    await user.click(screen.getByRole("tab", { name: "Audit log" }));
+    await screen.findByText("Updated a space");
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
-    expect(await screen.findByText("space.delete")).toBeInTheDocument();
+    expect(await screen.findByText("Deleted a space")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/audit-events?limit=50&cursor=audit-cursor-1");
   });
 
@@ -111,73 +121,52 @@ describe("EventHistoryModal", () => {
 
     render(
       <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
-        <EventHistoryModal activeSpace={space} activeNode={null} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "File changes" }));
-    await screen.findByText("text.write");
+    await screen.findByText("Updated text");
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
-    expect(await screen.findByText("item.move")).toBeInTheDocument();
+    expect(await screen.findByText("Moved an item")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/spaces/space-1/file-change-events?limit=50&cursor=file-cursor-1");
   });
 
-  it("filters file changes by the active node", async () => {
-    const user = userEvent.setup();
-    const activeNode = textNode("node-1", space.id);
+  it("shows one space-wide timeline without a node scope control", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 
     render(
       <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
-        <EventHistoryModal activeSpace={space} activeNode={activeNode} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "File changes" }));
-    await user.click(screen.getByRole("button", { name: "Node" }));
-
-    expect(screen.getByText(activeNode.path)).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
-        "/api/v1/spaces/space-1/file-change-events?limit=50&node_id=node-1"
-      );
-    });
+    await screen.findByText("No file change events.");
+    expect(screen.queryByRole("button", { name: "Node" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+      "/api/v1/spaces/space-1/file-change-events?limit=50"
+    );
   });
 
-  it("does not offer node scope for a node from another space", async () => {
+  it("switches the activity query without changing the workbench space", async () => {
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 
     render(
       <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
-        <EventHistoryModal activeSpace={space} activeNode={textNode("node-2", "space-2")} canViewAuditEvents onClose={vi.fn()} />
+        <EventHistoryModal spaces={[space, secondSpace]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "File changes" }));
+    await screen.findByText("No file change events.");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Space" }), secondSpace.id);
 
-    expect(screen.getByRole("button", { name: "Node" })).toBeDisabled();
+    await waitFor(() => expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+      "/api/v1/spaces/space-2/file-change-events?limit=50"
+    ));
+    expect(screen.getByText("Content changes in Research, newest first.")).toBeInTheDocument();
   });
 });
-
-function textNode(id: string, spaceId: string): RestNode {
-  return {
-    id,
-    space_id: spaceId,
-    parent_id: `${spaceId}-root`,
-    name: `${id}.md`,
-    kind: "text",
-    path: `/${id}.md`,
-    sort_order: 0,
-    metadata: {},
-    has_children: false,
-    created_by: { id: "account-1", kind: "user", display_name: "User" },
-    updated_by: { id: "account-1", kind: "user", display_name: "User" },
-    created_at: "2026-07-10T02:00:00Z",
-    updated_at: "2026-07-10T02:12:00Z"
-  };
-}
 
 function auditEvent(id: number, op_type: string) {
   return {

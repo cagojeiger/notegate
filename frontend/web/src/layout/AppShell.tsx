@@ -25,8 +25,7 @@ type AppShellProps = {
 };
 
 type HistoryScope = {
-  activeSpace: Space | null;
-  activeNode: RestNode | null;
+  initialSpaceId: string | null;
 };
 
 export function AppShell({ me, onSignOut }: AppShellProps) {
@@ -49,7 +48,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   };
   const openHistory = () => {
     closeMobilePanels();
-    setHistoryScope({ activeSpace: workbench.activeSpace, activeNode: workbench.activeNode });
+    setHistoryScope({ initialSpaceId: workbench.activeSpace?.id ?? null });
   };
   const openNode = async (node: Parameters<typeof actions.openNode>[0]) => {
     try {
@@ -140,7 +139,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />
       <StatusBar activeSpace={workbench.activeSpace} />
       <Toast />
-      {historyScope ? <EventHistoryModal activeSpace={historyScope.activeSpace} activeNode={historyScope.activeNode} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
+      {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
       {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />
     </div>

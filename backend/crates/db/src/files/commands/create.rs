@@ -49,6 +49,7 @@ pub async fn insert_folder(
         &mut tx,
         file_change_events::context(created_by, space_id),
         row.id,
+        &row.name,
         parent_id,
     )
     .await?;
@@ -111,6 +112,7 @@ pub async fn insert_text(
         &mut tx,
         file_change_events::context(created_by, space_id),
         node_row.id,
+        &node_row.name,
         parent_id,
         content.byte_len,
         content.line_count,
@@ -179,6 +181,7 @@ pub async fn insert_file(
         &mut tx,
         file_change_events::context(created_by, space_id),
         node_row.id,
+        &node_row.name,
         parent_id,
         file.byte_len,
     )

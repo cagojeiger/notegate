@@ -104,6 +104,7 @@ pub(crate) struct AuditEventOut {
     pub id: i64,
     pub created_at: DateTime<Utc>,
     pub actor_account_id: Option<Uuid>,
+    pub actor: Option<AccountRef>,
     pub source: String,
     pub op_type: String,
     pub resource_type: String,
@@ -111,12 +112,15 @@ pub(crate) struct AuditEventOut {
     pub metadata: Value,
 }
 
-impl From<&AuditEvent> for AuditEventOut {
-    fn from(event: &AuditEvent) -> Self {
+impl AuditEventOut {
+    pub(crate) fn from_event(event: &AuditEvent, refs: &HashMap<Uuid, ModelAccountRef>) -> Self {
         Self {
             id: event.id,
             created_at: event.created_at,
             actor_account_id: event.actor_account_id,
+            actor: event
+                .actor_account_id
+                .and_then(|id| refs.get(&id).map(AccountRef::from)),
             source: event.source.clone(),
             op_type: event.op_type.clone(),
             resource_type: event.resource_type.clone(),
@@ -140,18 +144,25 @@ pub(crate) struct FileChangeEventOut {
     pub space_id: Uuid,
     pub node_id: Option<Uuid>,
     pub actor_account_id: Option<Uuid>,
+    pub actor: Option<AccountRef>,
     pub op_type: String,
     pub metadata: Value,
 }
 
-impl From<&FileChangeEvent> for FileChangeEventOut {
-    fn from(event: &FileChangeEvent) -> Self {
+impl FileChangeEventOut {
+    pub(crate) fn from_event(
+        event: &FileChangeEvent,
+        refs: &HashMap<Uuid, ModelAccountRef>,
+    ) -> Self {
         Self {
             id: event.id,
             created_at: event.created_at,
             space_id: event.space_id,
             node_id: event.node_id,
             actor_account_id: event.actor_account_id,
+            actor: event
+                .actor_account_id
+                .and_then(|id| refs.get(&id).map(AccountRef::from)),
             op_type: event.op_type.clone(),
             metadata: event.metadata.clone(),
         }
@@ -562,11 +573,24 @@ mod tests {
             metadata: json!({"name": "personal"}),
         };
 
-        let out = AuditEventOut::from(&event);
+        let actor_id = event.actor_account_id.expect("actor id");
+        let refs = HashMap::from([(
+            actor_id,
+            ModelAccountRef {
+                id: actor_id,
+                kind: AccountKind::User,
+                display_name: "Audit User".to_owned(),
+            },
+        )]);
+        let out = AuditEventOut::from_event(&event, &refs);
 
         assert_eq!(out.id, event.id);
         assert_eq!(out.created_at, event.created_at);
         assert_eq!(out.actor_account_id, event.actor_account_id);
+        assert_eq!(
+            out.actor.as_ref().map(|actor| actor.id),
+            event.actor_account_id
+        );
         assert_eq!(out.source, event.source);
         assert_eq!(out.op_type, event.op_type);
         assert_eq!(out.resource_type, event.resource_type);
@@ -586,13 +610,26 @@ mod tests {
             metadata: json!({"byte_len_after": 5}),
         };
 
-        let out = FileChangeEventOut::from(&event);
+        let actor_id = event.actor_account_id.expect("actor id");
+        let refs = HashMap::from([(
+            actor_id,
+            ModelAccountRef {
+                id: actor_id,
+                kind: AccountKind::Agent,
+                display_name: "File Agent".to_owned(),
+            },
+        )]);
+        let out = FileChangeEventOut::from_event(&event, &refs);
 
         assert_eq!(out.id, event.id);
         assert_eq!(out.created_at, event.created_at);
         assert_eq!(out.space_id, event.space_id);
         assert_eq!(out.node_id, event.node_id);
         assert_eq!(out.actor_account_id, event.actor_account_id);
+        assert_eq!(
+            out.actor.as_ref().map(|actor| actor.id),
+            event.actor_account_id
+        );
         assert_eq!(out.op_type, event.op_type);
         assert_eq!(out.metadata, event.metadata);
     }

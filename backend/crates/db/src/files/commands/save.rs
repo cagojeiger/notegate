@@ -136,6 +136,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         &mut tx,
         file_change_events::context(updated_by, space_id),
         node_id,
+        &node_row.name,
         mutation_kind,
         current_text.byte_len,
         content.byte_len,

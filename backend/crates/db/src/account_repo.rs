@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::map_sqlx_error;
+use crate::{audit_events, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::security::{EncryptedField, PiiAad, PiiCrypto, PiiFieldKind};
 use notegate_core::tier::UserTier;
@@ -276,6 +276,7 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
+        let created = existing.is_none();
         let account_id = match existing {
             // ADR 0004: a soft-deleted (pending-deletion) account still holds its
             // `provider_sub_hash` tombstone. Reject re-registration until the purge run
@@ -417,6 +418,10 @@ impl AccountRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        if created {
+            audit_events::account_created(&mut tx, account_id).await?;
+        }
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok((account, user_row.into_user(&self.crypto)?))

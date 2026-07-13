@@ -191,7 +191,7 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, credential, agent, space, connection 관리 변경을 기록한다. Retention policy는 1 year이며, 현재 schema는 purge 구현을 위한 `created_at` index까지만 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경을 기록한다. Retention policy는 1 year이며, 현재 schema는 purge 구현을 위한 `created_at` index까지만 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 ```text
 file_change_events

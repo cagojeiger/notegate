@@ -92,6 +92,7 @@ pub async fn update_node_metadata(
         file_change_events::context(updated_by, space_id),
         node_id,
         &node_kind,
+        &row.name,
         name_changed,
         sort_order_changed,
     )
@@ -150,6 +151,7 @@ pub async fn replace_node_metadata(
         node_id,
         mutation_kind,
         &node_kind,
+        &row.name,
     )
     .await?;
 

@@ -13,7 +13,6 @@ use crate::state::AppState;
 
 pub const BROWSER_SESSION_COOKIE: &str = "notegate_browser_session";
 const REFRESH_FAILED_REASON: &str = "refresh_failed";
-const LOGOUT_REASON: &str = "logout";
 
 pub async fn create_browser_session(
     state: &AppState,
@@ -97,12 +96,12 @@ pub async fn revoke_browser_session_for_logout(
             None
         }
     };
-    state
+    let revoked = state
         .browser_sessions
-        .revoke_session(session.id, LOGOUT_REASON)
+        .revoke_session_for_logout(session.id)
         .await
         .map_err(|_error| AuthError::Internal)?;
-    Ok(refresh_token)
+    Ok(revoked.then_some(refresh_token).flatten())
 }
 
 async fn refresh_browser_session(

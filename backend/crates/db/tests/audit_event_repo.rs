@@ -36,12 +36,20 @@ async fn insert_event(
     .await
 }
 
+async fn clear_setup_events(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM audit_events")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn list_by_owner_returns_newest_first() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let owner = insert_user_account(&db.pool, "order-user", "order-user@example.test").await?;
+    clear_setup_events(&db.pool).await?;
     let repo = AuditEventRepo::new(db.pool.clone());
 
     let base = Utc::now();
@@ -68,6 +76,7 @@ async fn list_by_owner_pages_by_cursor_without_gaps_or_duplicates()
         return Ok(());
     };
     let owner = insert_user_account(&db.pool, "page-user", "page-user@example.test").await?;
+    clear_setup_events(&db.pool).await?;
     let repo = AuditEventRepo::new(db.pool.clone());
 
     let base = Utc::now();
@@ -132,6 +141,7 @@ async fn list_by_owner_excludes_other_owners_events() -> Result<(), Box<dyn std:
     };
     let owner_a = insert_user_account(&db.pool, "scope-a", "scope-a@example.test").await?;
     let owner_b = insert_user_account(&db.pool, "scope-b", "scope-b@example.test").await?;
+    clear_setup_events(&db.pool).await?;
     let repo = AuditEventRepo::new(db.pool.clone());
 
     let now = Utc::now();

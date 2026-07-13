@@ -127,6 +127,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         file_change_events::context(created_by, space_id),
         copied_root.id,
         &source_kind,
+        &copied_root.name,
         source_node_id,
         new_parent_id,
         counts,

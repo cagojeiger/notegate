@@ -139,10 +139,13 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         &mut tx,
         file_change_events::context(updated_by, space_id),
         node_id,
-        &moved_kind,
-        current_parent_id,
-        new_parent_id,
-        final_name != current_name,
+        file_change_events::NodeMoved {
+            item_kind: &moved_kind,
+            item_name: &row.name,
+            parent_node_id_before: current_parent_id,
+            parent_node_id_after: new_parent_id,
+            name_changed: final_name != current_name,
+        },
     )
     .await?;
 

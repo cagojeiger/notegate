@@ -1,6 +1,6 @@
 //! Browser session persistence for server-side OAuth refresh.
 
-use crate::{active_account_predicate, map_sqlx_error};
+use crate::{active_account_predicate, audit_events, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::security::EncryptedField;
@@ -33,6 +33,7 @@ impl BrowserSessionRepo {
     }
 
     pub async fn insert_session(&self, args: InsertBrowserSession<'_>) -> Result<BrowserSession> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let row = sqlx::query_as::<_, BrowserSessionRow>(&format!(
             "INSERT INTO browser_sessions \
              (id, user_id, token_prefix, token_hash, hash_key_id, hash_version, \
@@ -53,9 +54,11 @@ impl BrowserSessionRepo {
         .bind(args.refresh_token_enc_version)
         .bind(args.validated_until)
         .bind(args.expires_at)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        audit_events::session_logged_in(&mut tx, args.user_id, args.session_id).await?;
+        tx.commit().await.map_err(map_sqlx_error)?;
         Ok(BrowserSession::from(row))
     }
 
@@ -214,18 +217,23 @@ impl BrowserSessionRepo {
         Ok(result.rows_affected() == 1)
     }
 
-    pub async fn revoke_session(&self, session_id: Uuid, reason: &str) -> Result<()> {
-        sqlx::query(
+    pub async fn revoke_session_for_logout(&self, session_id: Uuid) -> Result<bool> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let user_id = sqlx::query_scalar::<_, Uuid>(
             "UPDATE browser_sessions \
-             SET revoked_at = COALESCE(revoked_at, now()), revoked_reason = COALESCE(revoked_reason, $2), updated_at = now() \
-             WHERE id = $1",
+             SET revoked_at = now(), revoked_reason = 'logout', updated_at = now() \
+             WHERE id = $1 AND revoked_at IS NULL \
+             RETURNING user_id",
         )
         .bind(session_id)
-        .bind(reason)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(())
+        if let Some(user_id) = user_id {
+            audit_events::session_logged_out(&mut tx, user_id, session_id).await?;
+        }
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(user_id.is_some())
     }
 
     pub async fn revoke_claimed_refresh(
@@ -234,19 +242,25 @@ impl BrowserSessionRepo {
         refresh_claim_id: Uuid,
         reason: &str,
     ) -> Result<bool> {
-        let result = sqlx::query(
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let user_id = sqlx::query_scalar::<_, Uuid>(
             "UPDATE browser_sessions \
-             SET revoked_at = COALESCE(revoked_at, now()), revoked_reason = COALESCE(revoked_reason, $3), \
+             SET revoked_at = now(), revoked_reason = $3, \
                  refresh_started_at = NULL, refresh_claim_id = NULL, updated_at = now() \
-             WHERE id = $1 AND refresh_claim_id = $2",
+             WHERE id = $1 AND refresh_claim_id = $2 AND revoked_at IS NULL \
+             RETURNING user_id",
         )
         .bind(session_id)
         .bind(refresh_claim_id)
         .bind(reason)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(result.rows_affected() == 1)
+        if let Some(user_id) = user_id {
+            audit_events::session_revoked(&mut tx, user_id, session_id, reason).await?;
+        }
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(user_id.is_some())
     }
 
     pub async fn clear_refresh_claim(

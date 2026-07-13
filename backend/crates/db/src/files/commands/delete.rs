@@ -117,6 +117,7 @@ pub async fn soft_delete_node(
         file_change_events::context(deleted_by, space_id),
         node_id,
         &node.kind,
+        &node.name,
         subtree,
         recursive,
     )

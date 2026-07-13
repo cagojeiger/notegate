@@ -32,6 +32,13 @@ async fn upsert_user_creates_and_updates_same_account() -> Result<(), Box<dyn st
     assert_eq!(second.display_name, "Second");
     assert_eq!(first_user.id, second_user.id);
     assert_eq!(second_user.email.as_deref(), Some("second@example.test"));
+    let op_types = sqlx::query_scalar::<_, String>(
+        "SELECT op_type FROM audit_events WHERE owner_user_id = $1 ORDER BY id",
+    )
+    .bind(first.id)
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(op_types, ["account.create"]);
 
     db.cleanup().await;
     Ok(())

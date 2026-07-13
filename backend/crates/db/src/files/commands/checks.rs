@@ -48,21 +48,22 @@ async fn lock_live_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// A live node's kind + deleted flag, fetched inside a transaction. `None` when
+/// A live node's identifying fields, fetched inside a transaction. `None` when
 /// the node does not exist in the space.
 pub struct LiveNode {
     pub kind: String,
+    pub name: String,
     pub parent_id: Option<Uuid>,
 }
 
-/// Load a live node's kind/parent inside the transaction, or `None`.
+/// Load a live node's identifying fields inside the transaction, or `None`.
 pub async fn live_node(
     tx: &mut PgConnection,
     space_id: Uuid,
     node_id: Uuid,
 ) -> Result<Option<LiveNode>> {
-    let row: Option<(String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT kind, parent_id FROM nodes \
+    let row: Option<(String, String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT kind, name, parent_id FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL",
     )
     .bind(space_id)
@@ -70,7 +71,11 @@ pub async fn live_node(
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    Ok(row.map(|(kind, parent_id)| LiveNode { kind, parent_id }))
+    Ok(row.map(|(kind, name, parent_id)| LiveNode {
+        kind,
+        name,
+        parent_id,
+    }))
 }
 
 /// Assert the parent is a live folder. Returns its kind error otherwise.
