@@ -40,9 +40,9 @@ describe("EventHistoryModal", () => {
     );
 
     expect(screen.queryByRole("tab", { name: "Audit log" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
 
-    await screen.findByText("No file change events.");
+    await screen.findByText("No changes yet.");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/audit-events"))).toBe(false);
   });
@@ -66,7 +66,7 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    await screen.findByText("No file change events.");
+    await screen.findByText("No changes yet.");
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/audit-events"))).toBe(false);
   });
 
@@ -125,10 +125,10 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    await screen.findByText("Updated text");
+    await screen.findByText("Edited");
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
-    expect(await screen.findByText("Moved an item")).toBeInTheDocument();
+    expect(await screen.findByText("Moved")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/spaces/space-1/file-change-events?limit=50&cursor=file-cursor-1");
   });
 
@@ -141,7 +141,7 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    await screen.findByText("No file change events.");
+    await screen.findByText("No changes yet.");
     expect(screen.queryByRole("button", { name: "Node" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
       "/api/v1/spaces/space-1/file-change-events?limit=50"
@@ -158,13 +158,13 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    await screen.findByText("No file change events.");
+    await screen.findByText("No changes yet.");
     await user.selectOptions(screen.getByRole("combobox", { name: "Space" }), secondSpace.id);
 
     await waitFor(() => expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
       "/api/v1/spaces/space-2/file-change-events?limit=50"
     ));
-    expect(screen.getByText("Content changes in Research, newest first.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Space" })).toHaveValue(secondSpace.id);
   });
 });
 

@@ -1,6 +1,6 @@
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
-import { History, RefreshCw, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { History, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AuditEventListResponse, FileChangeEventListResponse, Space } from "../../api/types";
 import { Button, EmptyState, Modal, SelectField, Tabs } from "../../shared/ui";
@@ -20,7 +20,7 @@ type EventListResponse = AuditEventListResponse | FileChangeEventListResponse;
 type EventHistoryQuery<T extends EventListResponse> = UseInfiniteQueryResult<InfiniteData<T, unknown>, Error>;
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "files", label: "Activity" },
+  { id: "files", label: "Changes" },
   { id: "audit", label: "Audit log" }
 ];
 
@@ -58,7 +58,9 @@ function AuditEventsPanel() {
   const events = useMemo(() => query.data?.pages.flatMap((page) => page.events) ?? [], [query.data]);
   return (
     <section className="space-y-3">
-      <PanelToolbar icon={<ShieldCheck size={16} />} title="Account audit" isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
+      <div className="flex justify-end">
+        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
+      </div>
       <EventQueryState query={query} emptyLabel="No audit events." />
       {events.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
@@ -115,12 +117,9 @@ function FileChangeEventsPanel({
           {spaces.length === 0 ? <option value="">No spaces available</option> : null}
           {spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}
         </SelectField>
-        <Button size="sm" secondary onClick={() => { void query.refetch(); }} disabled={!selectedSpace || query.isFetching}>
-          <RefreshCw size={14} className={query.isFetching ? "animate-spin" : ""} /> Refresh
-        </Button>
+        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace} />
       </div>
-      <div className="text-xs text-muted">Content changes in {selectedSpace?.name ?? "the selected space"}, newest first.</div>
-      {!selectedSpace ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} emptyLabel="No file change events." />}
+      {!selectedSpace ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} emptyLabel="No changes yet." />}
       {events.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
           {events.map((event) => (
@@ -153,24 +152,19 @@ function selectInitialSpaceId(spaces: Space[], initialSpaceId: string | null): s
   return spaces.some((space) => space.id === initialSpaceId) ? initialSpaceId : spaces[0]?.id ?? null;
 }
 
-function PanelToolbar({
-  icon,
-  title,
+function RefreshButton({
   isFetching,
-  onRefresh
+  onRefresh,
+  disabled = false
 }: {
-  icon: ReactNode;
-  title: string;
   isFetching: boolean;
   onRefresh: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</div>
-      <Button size="sm" secondary onClick={onRefresh} disabled={isFetching}>
-        <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> Refresh
-      </Button>
-    </div>
+    <Button size="sm" secondary onClick={onRefresh} disabled={disabled || isFetching}>
+      <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> Refresh
+    </Button>
   );
 }
 

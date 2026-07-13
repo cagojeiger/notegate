@@ -5,6 +5,8 @@ import {
   formatActor,
   formatAuditAction,
   formatAuditDetail,
+  formatAuditTarget,
+  formatFileChangeAction,
   formatFileChangeTarget,
   shortId
 } from "./eventDisplay";
@@ -22,8 +24,9 @@ describe("eventDisplay", () => {
       metadata: { reason: "refresh_failed" }
     } satisfies AuditEvent;
 
-    expect(formatAuditAction(event)).toBe("Session access ended");
+    expect(formatAuditAction(event)).toBe("Session ended");
     expect(formatAuditDetail(event)).toBe("refresh failed");
+    expect(formatAuditTarget(event)).toBe("Browser session");
   });
 
   it("uses content names and actor display names when available", () => {
@@ -37,7 +40,9 @@ describe("eventDisplay", () => {
       metadata: { item_kind: "text", item_name: "notes.md" }
     } satisfies FileChangeEvent;
 
-    expect(formatFileChangeTarget(event)).toBe("text notes.md");
+    expect(formatFileChangeTarget(event)).toBe("Text · notes.md");
+    expect(formatFileChangeAction({ ...event, op_type: "text.edit" })).toBe("Edited");
+    expect(formatFileChangeAction({ ...event, op_type: "item.update", metadata: { name_changed: true } })).toBe("Renamed");
     expect(
       formatActor({ id: "user-1", kind: "user", display_name: "Ada" }, "user-1")
     ).toBe("Ada (User)");

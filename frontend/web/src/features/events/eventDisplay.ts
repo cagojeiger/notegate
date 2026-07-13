@@ -1,27 +1,40 @@
 import type { AccountRef, AuditEvent, FileChangeEvent } from "../../api/types";
 
 const FILE_CHANGE_ACTIONS: Record<string, string> = {
-  "folder.create": "Created a folder",
-  "text.create": "Created a text item",
-  "file.create": "Added a file",
-  "text.write": "Updated text",
-  "text.append": "Appended text",
-  "text.patch": "Patched text",
-  "text.line_edit": "Edited text lines",
-  "item.update": "Updated an item",
-  "item.move": "Moved an item",
-  "item.copy": "Copied an item",
-  "item.delete": "Deleted an item",
-  "metadata.replace": "Replaced metadata",
+  "folder.create": "Created",
+  "text.create": "Created",
+  "file.create": "Created",
+  "text.write": "Edited",
+  "text.append": "Edited",
+  "text.patch": "Edited",
+  "text.edit": "Edited",
+  "item.move": "Moved",
+  "item.copy": "Copied",
+  "item.delete": "Deleted",
+  "metadata.replace": "Updated metadata",
   "metadata.patch": "Updated metadata"
 };
 
+const ITEM_KIND_LABELS: Record<string, string> = {
+  folder: "Folder",
+  text: "Text",
+  file: "File"
+};
+
+const AUDIT_TARGET_LABELS: Record<string, string> = {
+  account: "Account",
+  agent: "Agent",
+  api_key: "API key",
+  browser_session: "Browser session",
+  space: "Space"
+};
+
 const AUDIT_ACTIONS: Record<string, string> = {
-  "account.create": "Created the account",
-  "account.delete": "Deleted the account",
+  "account.create": "Created account",
+  "account.delete": "Deleted account",
   "session.login": "Signed in",
   "session.logout": "Signed out",
-  "session.revoke": "Session access ended",
+  "session.revoke": "Session ended",
   "space.create": "Created a space",
   "space.update": "Updated a space",
   "space.delete": "Deleted a space",
@@ -54,6 +67,13 @@ export function shortId(value: string | null | undefined): string {
 }
 
 export function formatFileChangeAction(event: FileChangeEvent): string {
+  if (event.op_type === "item.update") {
+    const renamed = event.metadata.name_changed === true;
+    const reordered = event.metadata.sort_order_changed === true;
+    if (renamed && !reordered) return "Renamed";
+    if (reordered && !renamed) return "Reordered";
+    return "Updated";
+  }
   return FILE_CHANGE_ACTIONS[event.op_type] ?? event.op_type;
 }
 
@@ -62,7 +82,8 @@ export function formatAuditAction(event: AuditEvent): string {
 }
 
 export function formatAuditTarget(event: AuditEvent): string {
-  const label = event.resource_type.replace(/_/g, " ");
+  const label = AUDIT_TARGET_LABELS[event.resource_type] ?? event.resource_type.replace(/_/g, " ");
+  if (event.resource_type === "browser_session") return label;
   return event.resource_id ? `${label} ${shortId(event.resource_id)}` : label;
 }
 
@@ -76,7 +97,7 @@ export function formatAuditDetail(event: AuditEvent): string | null {
 export function formatFileChangeTarget(event: FileChangeEvent): string {
   const kind = typeof event.metadata.item_kind === "string" ? event.metadata.item_kind : "item";
   const name = typeof event.metadata.item_name === "string" ? event.metadata.item_name : shortId(event.node_id);
-  return `${kind} ${name}`;
+  return `${ITEM_KIND_LABELS[kind] ?? "Item"} · ${name}`;
 }
 
 export function formatActor(
