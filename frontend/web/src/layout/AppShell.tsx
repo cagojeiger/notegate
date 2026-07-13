@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { Me, RestNode, Space } from "../api/types";
+import type { Me } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";

@@ -223,32 +223,18 @@ impl FilesService {
 
     async fn node_views(&self, space_id: Uuid, rows: Vec<Node>) -> ServiceResult<Vec<NodeView>> {
         let node_ids: Vec<Uuid> = rows.iter().map(|node| node.id).collect();
-        let text_ids: Vec<Uuid> = rows
-            .iter()
-            .filter(|node| node.kind == NodeKind::Text)
-            .map(|node| node.id)
-            .collect();
-        let file_ids: Vec<Uuid> = rows
-            .iter()
-            .filter(|node| node.kind == NodeKind::File)
-            .map(|node| node.id)
-            .collect();
-        let has_children = self.store.has_children_many(space_id, &node_ids).await?;
-        let text_stats = self.store.text_stats_many(space_id, &text_ids).await?;
-        let file_stats = self.store.file_stats_many(space_id, &file_ids).await?;
-
-        let mut items = Vec::with_capacity(rows.len());
-        for node in rows {
-            let path = self.path_of(space_id, node.id).await?;
-            items.push(NodeView {
-                has_children: has_children.get(&node.id).copied().unwrap_or(false),
-                text: text_stats.get(&node.id).cloned(),
-                file: file_stats.get(&node.id).cloned(),
-                node,
-                path,
-            });
-        }
-        Ok(items)
+        let paths = self.store.node_paths_many(space_id, &node_ids).await?;
+        let rows = rows
+            .into_iter()
+            .map(|node| {
+                let path = paths
+                    .get(&node.id)
+                    .cloned()
+                    .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
+                Ok((node, path))
+            })
+            .collect::<ServiceResult<Vec<_>>>()?;
+        super::view::hydrate_node_views(&self.store, space_id, rows).await
     }
 
     /// Read an inline file's stored bytes. Requires read permission.

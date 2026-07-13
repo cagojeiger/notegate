@@ -3,8 +3,41 @@ use uuid::Uuid;
 
 use crate::error::ServiceResult;
 use crate::files::{FileStats, FileView, NodeView, TextStats, TextView};
+use notegate_db::FilesRepo;
 
 use super::FilesService;
+
+pub(crate) async fn hydrate_node_views(
+    store: &FilesRepo,
+    space_id: Uuid,
+    rows: Vec<(Node, String)>,
+) -> ServiceResult<Vec<NodeView>> {
+    let node_ids: Vec<Uuid> = rows.iter().map(|(node, _)| node.id).collect();
+    let text_ids: Vec<Uuid> = rows
+        .iter()
+        .filter(|(node, _)| node.kind == NodeKind::Text)
+        .map(|(node, _)| node.id)
+        .collect();
+    let file_ids: Vec<Uuid> = rows
+        .iter()
+        .filter(|(node, _)| node.kind == NodeKind::File)
+        .map(|(node, _)| node.id)
+        .collect();
+    let has_children = store.has_children_many(space_id, &node_ids).await?;
+    let text_stats = store.text_stats_many(space_id, &text_ids).await?;
+    let file_stats = store.file_stats_many(space_id, &file_ids).await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(node, path)| NodeView {
+            has_children: has_children.get(&node.id).copied().unwrap_or(false),
+            text: text_stats.get(&node.id).cloned(),
+            file: file_stats.get(&node.id).cloned(),
+            node,
+            path,
+        })
+        .collect())
+}
 
 impl FilesService {
     /// Build a [`NodeView`] for an existing node (derives path + has_children).

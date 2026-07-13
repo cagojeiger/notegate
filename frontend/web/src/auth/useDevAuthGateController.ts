@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { writeDevApiKey } from "./session";
 
@@ -16,14 +16,14 @@ export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticat
   const [loginHint, setLoginHint] = useState<string | null>(null);
   const popupCheckRef = useRef<number | null>(null);
 
-  async function checkSession(): Promise<boolean> {
+  const checkSession = useCallback(async (): Promise<boolean> => {
     const isAuthenticated = await onSessionAuthenticated();
     if (isAuthenticated && popupCheckRef.current !== null) {
       window.clearInterval(popupCheckRef.current);
       popupCheckRef.current = null;
     }
     return isAuthenticated;
-  }
+  }, [onSessionAuthenticated]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -36,7 +36,7 @@ export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticat
       window.removeEventListener("message", handleMessage);
       if (popupCheckRef.current !== null) window.clearInterval(popupCheckRef.current);
     };
-  }, [onSessionAuthenticated]);
+  }, [checkSession]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

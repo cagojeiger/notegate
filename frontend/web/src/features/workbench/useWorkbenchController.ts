@@ -15,7 +15,7 @@ type WorkbenchControllerProps = {
 
 export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerProps) {
   const spacesQuery = useSpacesQuery();
-  const spaces = spacesQuery.data?.spaces ?? [];
+  const spaces = useMemo(() => spacesQuery.data?.spaces ?? [], [spacesQuery.data?.spaces]);
 
   const theme = useUiStore((state) => state.theme);
   const activeSpaceId = useUiStore((state) => state.activeSpaceId);

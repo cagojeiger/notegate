@@ -355,6 +355,44 @@ pub mod node {
         derive_path(pool, space_id, node_id).await
     }
 
+    /// Derived absolute display paths for a bounded set of live nodes.
+    pub async fn node_paths_many(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>> {
+        if node_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let rows: Vec<(Uuid, String)> = sqlx::query_as(
+            "WITH RECURSIVE chain AS ( \
+                SELECT id AS target_id, id, parent_id, name, 0 AS depth \
+                FROM nodes \
+                WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
+                UNION ALL \
+                SELECT c.target_id, n.id, n.parent_id, n.name, c.depth + 1 \
+                FROM nodes n \
+                JOIN chain c ON n.id = c.parent_id \
+                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+             ) \
+             SELECT target_id, \
+                    CASE WHEN max(depth) = 0 THEN '/' \
+                         ELSE '/' || string_agg(name, '/' ORDER BY depth DESC) \
+                              FILTER (WHERE parent_id IS NOT NULL) \
+                    END AS path \
+             FROM chain \
+             GROUP BY target_id",
+        )
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(rows.into_iter().collect())
+    }
+
     /// Live ancestor chain from root to `node_id`, including the target.
     ///
     /// Returns an empty vector when the target is missing or soft-deleted. The

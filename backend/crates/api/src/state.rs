@@ -74,12 +74,13 @@ impl AppState {
             pii_crypto.lookup_key_id(),
             pii_crypto.version(),
         );
+        let account_repo = AccountRepo::with_crypto_and_default_user_tier(
+            db.clone(),
+            pii_crypto.clone(),
+            config.default_user_tier,
+        );
         let account_lifecycle = AccountService::with_api_keys(
-            AccountRepo::with_crypto_and_default_user_tier(
-                db.clone(),
-                pii_crypto.clone(),
-                config.default_user_tier,
-            ),
+            account_repo.clone(),
             api_key_repo.clone(),
             AuditEventRepo::new(db.clone()),
             pii_crypto.clone(),
@@ -92,11 +93,6 @@ impl AppState {
         let files = FilesService::new(files_repo.clone());
         let search = SearchService::new(files_repo);
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
-        let accounts = AccountRepo::with_crypto_and_default_user_tier(
-            db.clone(),
-            pii_crypto.clone(),
-            config.default_user_tier,
-        );
         let browser_sessions = BrowserSessionRepo::with_lookup_key(
             db.clone(),
             pii_crypto.lookup_key_id(),
@@ -117,7 +113,7 @@ impl AppState {
             files,
             search,
             usage,
-            accounts,
+            accounts: account_repo,
             browser_sessions,
         }
     }

@@ -22,8 +22,10 @@ export function ApiProvider({ apiKey, authCacheKey, onUnauthorized, children }: 
   onUnauthorizedRef.current = onUnauthorized;
 
   const queryClient = useMemo(
-    () =>
-      new QueryClient({
+    () => {
+      // Each authenticated identity gets an isolated query cache.
+      void authCacheKey;
+      return new QueryClient({
         defaultOptions: {
           queries: {
             // No server push exists, so re-sync external (MCP/REST/other-tab)
@@ -59,7 +61,8 @@ export function ApiProvider({ apiKey, authCacheKey, onUnauthorized, children }: 
             useUiStore.getState().showToast(message);
           }
         })
-      }),
+      });
+    },
     [authCacheKey]
   );
 

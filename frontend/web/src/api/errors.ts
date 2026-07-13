@@ -20,12 +20,7 @@ type ErrorLikeBody = {
 };
 
 export async function apiErrorFromResponse(response: Response): Promise<ApiError> {
-  let body: ErrorLikeBody | null = null;
-  try {
-    body = (await response.json()) as ErrorLikeBody;
-  } catch {
-    body = null;
-  }
+  const body = await response.json().catch(() => null) as ErrorLikeBody | null;
 
   const nested = typeof body?.error === "object" ? body.error : null;
   const message = nested?.message ?? body?.message ?? response.statusText ?? "Request failed";

@@ -40,7 +40,7 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
       return { status: error instanceof ApiError && error.status === 404 ? "not-found" : "error" };
     }
 
-    if (!isRenderableMarkdownImage(sourceNode, imageNode)) {
+    if (!isRenderableMarkdownImage(sourceNode.space_id, imageNode)) {
       return { status: "unsupported" };
     }
 
@@ -114,9 +114,9 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
   });
 }
 
-function isRenderableMarkdownImage(sourceNode: RestNode, imageNode: RestNode): boolean {
+function isRenderableMarkdownImage(sourceSpaceId: string, imageNode: RestNode): boolean {
   return (
-    imageNode.space_id === sourceNode.space_id &&
+    imageNode.space_id === sourceSpaceId &&
     imageNode.kind === "file" &&
     imageNode.encryption_mode !== "client" &&
     imageNode.media_type?.toLowerCase().startsWith("image/") === true

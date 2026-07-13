@@ -93,6 +93,14 @@ impl FilesRepo {
         queries::node::node_path(&self.pool, space_id, node_id).await
     }
 
+    pub async fn node_paths_many(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, String>> {
+        queries::node::node_paths_many(&self.pool, space_id, node_ids).await
+    }
+
     pub async fn ancestor_chain(&self, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
         queries::node::ancestor_chain(&self.pool, space_id, node_id).await
     }

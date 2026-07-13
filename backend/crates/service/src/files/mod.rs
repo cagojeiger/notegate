@@ -34,6 +34,7 @@ pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
 pub use target::{Target, parse_target};
 pub use validation::FilesValidationError;
+pub(crate) use view::hydrate_node_views;
 
 use notegate_core::limits::Limits;
 use notegate_db::FilesRepo;

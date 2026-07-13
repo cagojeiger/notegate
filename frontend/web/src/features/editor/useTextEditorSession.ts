@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
@@ -33,6 +33,7 @@ export function useTextEditorSession({
   const showToast = useUiStore((state) => state.showToast);
 
   const text = textQuery.data?.text;
+  const refetchText = textQuery.refetch;
   const plainText = isPlainTextContent(text) ? text : null;
   const content = plainText?.content ?? "";
   const sha = text?.content_sha256;
@@ -61,9 +62,9 @@ export function useTextEditorSession({
     if (mode === "edit" && textQuery.isSuccess && !canEdit) onSetMode("preview");
   }, [canEdit, mode, onSetMode, textQuery.isSuccess]);
 
-  async function reloadLatestText(showFailure: boolean) {
+  const reloadLatestText = useCallback(async (showFailure: boolean) => {
     const requestedNodeId = node.id;
-    const result = await textQuery.refetch();
+    const result = await refetchText();
     if (activeNodeId.current !== requestedNodeId) return false;
 
     const nextText = result.data?.text;
@@ -76,7 +77,7 @@ export function useTextEditorSession({
     setExternalUpdate(null);
     dismissedExternalSha.current = null;
     return true;
-  }
+  }, [node.id, refetchText, showToast]);
 
   useEffect(() => {
     const latestSha = latestNode?.content_sha256;
@@ -100,7 +101,7 @@ export function useTextEditorSession({
         lastAutoReloadSha.current = null;
       }
     });
-  }, [dirty, externalUpdate?.content_sha256, latestNode, sha]);
+  }, [dirty, externalUpdate?.content_sha256, latestNode, node.id, reloadLatestText, sha]);
 
   const saveMutation = useSaveTextDocument(
     node,
