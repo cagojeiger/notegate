@@ -48,11 +48,12 @@ async fn event(
     .await
 }
 
-fn folder_created_payload(parent_node_id: Uuid) -> (&'static str, Value) {
+fn folder_created_payload(item_name: &str, parent_node_id: Uuid) -> (&'static str, Value) {
     (
         "folder.create",
         json!({
             "item_kind": "folder",
+            "item_name": item_name,
             "parent_node_id": parent_node_id,
         }),
     )
@@ -62,13 +63,15 @@ pub(crate) async fn folder_created(
     tx: &mut PgConnection,
     ctx: FileChangeContext,
     node_id: Uuid,
+    item_name: &str,
     parent_node_id: Uuid,
 ) -> Result<()> {
-    let (op_type, metadata) = folder_created_payload(parent_node_id);
+    let (op_type, metadata) = folder_created_payload(item_name, parent_node_id);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
 fn text_created_payload(
+    item_name: &str,
     parent_node_id: Uuid,
     byte_len_after: i64,
     line_count_after: i32,
@@ -77,6 +80,7 @@ fn text_created_payload(
         "text.create",
         json!({
             "item_kind": "text",
+            "item_name": item_name,
             "parent_node_id": parent_node_id,
             "byte_len_after": byte_len_after,
             "line_count_after": line_count_after,
@@ -88,20 +92,26 @@ pub(crate) async fn text_created(
     tx: &mut PgConnection,
     ctx: FileChangeContext,
     node_id: Uuid,
+    item_name: &str,
     parent_node_id: Uuid,
     byte_len_after: i64,
     line_count_after: i32,
 ) -> Result<()> {
     let (op_type, metadata) =
-        text_created_payload(parent_node_id, byte_len_after, line_count_after);
+        text_created_payload(item_name, parent_node_id, byte_len_after, line_count_after);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
-fn file_created_payload(parent_node_id: Uuid, byte_len_after: i64) -> (&'static str, Value) {
+fn file_created_payload(
+    item_name: &str,
+    parent_node_id: Uuid,
+    byte_len_after: i64,
+) -> (&'static str, Value) {
     (
         "file.create",
         json!({
             "item_kind": "file",
+            "item_name": item_name,
             "parent_node_id": parent_node_id,
             "byte_len_after": byte_len_after,
         }),
@@ -112,15 +122,17 @@ pub(crate) async fn file_created(
     tx: &mut PgConnection,
     ctx: FileChangeContext,
     node_id: Uuid,
+    item_name: &str,
     parent_node_id: Uuid,
     byte_len_after: i64,
 ) -> Result<()> {
-    let (op_type, metadata) = file_created_payload(parent_node_id, byte_len_after);
+    let (op_type, metadata) = file_created_payload(item_name, parent_node_id, byte_len_after);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
 fn text_saved_payload(
     kind: TextMutationKind,
+    item_name: &str,
     byte_len_before: i64,
     byte_len_after: i64,
     line_count_before: i32,
@@ -130,6 +142,7 @@ fn text_saved_payload(
         kind.op_type(),
         json!({
             "item_kind": "text",
+            "item_name": item_name,
             "byte_len_before": byte_len_before,
             "byte_len_after": byte_len_after,
             "line_count_before": line_count_before,
@@ -143,6 +156,7 @@ pub(crate) async fn text_saved(
     tx: &mut PgConnection,
     ctx: FileChangeContext,
     node_id: Uuid,
+    item_name: &str,
     kind: TextMutationKind,
     byte_len_before: i64,
     byte_len_after: i64,
@@ -151,6 +165,7 @@ pub(crate) async fn text_saved(
 ) -> Result<()> {
     let (op_type, metadata) = text_saved_payload(
         kind,
+        item_name,
         byte_len_before,
         byte_len_after,
         line_count_before,
@@ -162,8 +177,12 @@ pub(crate) async fn text_saved(
 fn node_metadata_replaced_payload(
     kind: MetadataMutationKind,
     item_kind: &str,
+    item_name: &str,
 ) -> (&'static str, Value) {
-    (kind.op_type(), json!({ "item_kind": item_kind }))
+    (
+        kind.op_type(),
+        json!({ "item_kind": item_kind, "item_name": item_name }),
+    )
 }
 
 pub(crate) async fn node_metadata_replaced(
@@ -172,13 +191,15 @@ pub(crate) async fn node_metadata_replaced(
     node_id: Uuid,
     kind: MetadataMutationKind,
     item_kind: &str,
+    item_name: &str,
 ) -> Result<()> {
-    let (op_type, metadata) = node_metadata_replaced_payload(kind, item_kind);
+    let (op_type, metadata) = node_metadata_replaced_payload(kind, item_kind, item_name);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
 fn node_updated_payload(
     item_kind: &str,
+    item_name: &str,
     name_changed: bool,
     sort_order_changed: bool,
 ) -> (&'static str, Value) {
@@ -186,6 +207,7 @@ fn node_updated_payload(
         "item.update",
         json!({
             "item_kind": item_kind,
+            "item_name": item_name,
             "name_changed": name_changed,
             "sort_order_changed": sort_order_changed,
         }),
@@ -197,15 +219,18 @@ pub(crate) async fn node_updated(
     ctx: FileChangeContext,
     node_id: Uuid,
     item_kind: &str,
+    item_name: &str,
     name_changed: bool,
     sort_order_changed: bool,
 ) -> Result<()> {
-    let (op_type, metadata) = node_updated_payload(item_kind, name_changed, sort_order_changed);
+    let (op_type, metadata) =
+        node_updated_payload(item_kind, item_name, name_changed, sort_order_changed);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
 fn node_moved_payload(
     item_kind: &str,
+    item_name: &str,
     parent_node_id_before: Option<Uuid>,
     parent_node_id_after: Uuid,
     name_changed: bool,
@@ -214,6 +239,7 @@ fn node_moved_payload(
         "item.move",
         json!({
             "item_kind": item_kind,
+            "item_name": item_name,
             "parent_node_id_before": parent_node_id_before,
             "parent_node_id_after": parent_node_id_after,
             "name_changed": name_changed,
@@ -221,26 +247,33 @@ fn node_moved_payload(
     )
 }
 
+pub(crate) struct NodeMoved<'a> {
+    pub item_kind: &'a str,
+    pub item_name: &'a str,
+    pub parent_node_id_before: Option<Uuid>,
+    pub parent_node_id_after: Uuid,
+    pub name_changed: bool,
+}
+
 pub(crate) async fn node_moved(
     tx: &mut PgConnection,
     ctx: FileChangeContext,
     node_id: Uuid,
-    item_kind: &str,
-    parent_node_id_before: Option<Uuid>,
-    parent_node_id_after: Uuid,
-    name_changed: bool,
+    moved: NodeMoved<'_>,
 ) -> Result<()> {
     let (op_type, metadata) = node_moved_payload(
-        item_kind,
-        parent_node_id_before,
-        parent_node_id_after,
-        name_changed,
+        moved.item_kind,
+        moved.item_name,
+        moved.parent_node_id_before,
+        moved.parent_node_id_after,
+        moved.name_changed,
     );
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
 fn node_copied_payload(
     item_kind: &str,
+    item_name: &str,
     copied_from_node_id: Uuid,
     parent_node_id_after: Uuid,
     counts: CopyCounts,
@@ -250,6 +283,7 @@ fn node_copied_payload(
         "item.copy",
         json!({
             "item_kind": item_kind,
+            "item_name": item_name,
             "copied_from_node_id": copied_from_node_id,
             "parent_node_id_after": parent_node_id_after,
             "copied_nodes": counts.nodes,
@@ -266,6 +300,7 @@ pub(crate) async fn node_copied(
     ctx: FileChangeContext,
     new_node_id: Uuid,
     item_kind: &str,
+    item_name: &str,
     copied_from_node_id: Uuid,
     parent_node_id_after: Uuid,
     counts: CopyCounts,
@@ -273,6 +308,7 @@ pub(crate) async fn node_copied(
 ) -> Result<()> {
     let (op_type, metadata) = node_copied_payload(
         item_kind,
+        item_name,
         copied_from_node_id,
         parent_node_id_after,
         counts,
@@ -283,6 +319,7 @@ pub(crate) async fn node_copied(
 
 fn node_deleted_payload(
     item_kind: &str,
+    item_name: &str,
     deleted_nodes: usize,
     recursive: bool,
 ) -> (&'static str, Value) {
@@ -290,6 +327,7 @@ fn node_deleted_payload(
         "item.delete",
         json!({
             "item_kind": item_kind,
+            "item_name": item_name,
             "deleted_nodes": deleted_nodes,
             "recursive": recursive,
         }),
@@ -301,10 +339,11 @@ pub(crate) async fn node_deleted(
     ctx: FileChangeContext,
     node_id: Uuid,
     item_kind: &str,
+    item_name: &str,
     deleted_nodes: usize,
     recursive: bool,
 ) -> Result<()> {
-    let (op_type, metadata) = node_deleted_payload(item_kind, deleted_nodes, recursive);
+    let (op_type, metadata) = node_deleted_payload(item_kind, item_name, deleted_nodes, recursive);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
@@ -315,23 +354,24 @@ mod tests {
     #[test]
     fn folder_created_builds_expected_payload() {
         let parent = Uuid::new_v4();
-        let (op_type, metadata) = folder_created_payload(parent);
+        let (op_type, metadata) = folder_created_payload("notes", parent);
         assert_eq!(op_type, "folder.create");
         assert_eq!(
             metadata,
-            json!({ "item_kind": "folder", "parent_node_id": parent })
+            json!({ "item_kind": "folder", "item_name": "notes", "parent_node_id": parent })
         );
     }
 
     #[test]
     fn text_created_builds_expected_payload() {
         let parent = Uuid::new_v4();
-        let (op_type, metadata) = text_created_payload(parent, 11, 2);
+        let (op_type, metadata) = text_created_payload("draft.md", parent, 11, 2);
         assert_eq!(op_type, "text.create");
         assert_eq!(
             metadata,
             json!({
                 "item_kind": "text",
+                "item_name": "draft.md",
                 "parent_node_id": parent,
                 "byte_len_after": 11,
                 "line_count_after": 2,
@@ -342,22 +382,24 @@ mod tests {
     #[test]
     fn file_created_builds_expected_payload() {
         let parent = Uuid::new_v4();
-        let (op_type, metadata) = file_created_payload(parent, 5);
+        let (op_type, metadata) = file_created_payload("image.png", parent, 5);
         assert_eq!(op_type, "file.create");
         assert_eq!(
             metadata,
-            json!({ "item_kind": "file", "parent_node_id": parent, "byte_len_after": 5 })
+            json!({ "item_kind": "file", "item_name": "image.png", "parent_node_id": parent, "byte_len_after": 5 })
         );
     }
 
     #[test]
     fn text_saved_uses_mutation_kind_op_type() {
-        let (op_type, metadata) = text_saved_payload(TextMutationKind::Append, 5, 11, 1, 2);
+        let (op_type, metadata) =
+            text_saved_payload(TextMutationKind::Append, "draft.md", 5, 11, 1, 2);
         assert_eq!(op_type, "text.append");
         assert_eq!(
             metadata,
             json!({
                 "item_kind": "text",
+                "item_name": "draft.md",
                 "byte_len_before": 5,
                 "byte_len_after": 11,
                 "line_count_before": 1,
@@ -369,18 +411,21 @@ mod tests {
     #[test]
     fn node_metadata_replaced_uses_mutation_kind_op_type() {
         let (op_type, metadata) =
-            node_metadata_replaced_payload(MetadataMutationKind::Patch, "text");
+            node_metadata_replaced_payload(MetadataMutationKind::Patch, "text", "draft.md");
         assert_eq!(op_type, "metadata.patch");
-        assert_eq!(metadata, json!({ "item_kind": "text" }));
+        assert_eq!(
+            metadata,
+            json!({ "item_kind": "text", "item_name": "draft.md" })
+        );
     }
 
     #[test]
     fn node_updated_builds_expected_payload() {
-        let (op_type, metadata) = node_updated_payload("folder", true, false);
+        let (op_type, metadata) = node_updated_payload("folder", "renamed", true, false);
         assert_eq!(op_type, "item.update");
         assert_eq!(
             metadata,
-            json!({ "item_kind": "folder", "name_changed": true, "sort_order_changed": false })
+            json!({ "item_kind": "folder", "item_name": "renamed", "name_changed": true, "sort_order_changed": false })
         );
     }
 
@@ -388,12 +433,13 @@ mod tests {
     fn node_moved_builds_expected_payload() {
         let before = Uuid::new_v4();
         let after = Uuid::new_v4();
-        let (op_type, metadata) = node_moved_payload("text", Some(before), after, true);
+        let (op_type, metadata) = node_moved_payload("text", "moved.md", Some(before), after, true);
         assert_eq!(op_type, "item.move");
         assert_eq!(
             metadata,
             json!({
                 "item_kind": "text",
+                "item_name": "moved.md",
                 "parent_node_id_before": before,
                 "parent_node_id_after": after,
                 "name_changed": true,
@@ -410,12 +456,14 @@ mod tests {
             texts: 2,
             files: 1,
         };
-        let (op_type, metadata) = node_copied_payload("folder", source, dest_parent, counts, true);
+        let (op_type, metadata) =
+            node_copied_payload("folder", "copy", source, dest_parent, counts, true);
         assert_eq!(op_type, "item.copy");
         assert_eq!(
             metadata,
             json!({
                 "item_kind": "folder",
+                "item_name": "copy",
                 "copied_from_node_id": source,
                 "parent_node_id_after": dest_parent,
                 "copied_nodes": 3,
@@ -428,11 +476,11 @@ mod tests {
 
     #[test]
     fn node_deleted_builds_expected_payload() {
-        let (op_type, metadata) = node_deleted_payload("file", 4, true);
+        let (op_type, metadata) = node_deleted_payload("file", "old.pdf", 4, true);
         assert_eq!(op_type, "item.delete");
         assert_eq!(
             metadata,
-            json!({ "item_kind": "file", "deleted_nodes": 4, "recursive": true })
+            json!({ "item_kind": "file", "item_name": "old.pdf", "deleted_nodes": 4, "recursive": true })
         );
     }
 }

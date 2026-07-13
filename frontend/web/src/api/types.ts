@@ -161,6 +161,7 @@ export type AuditEvent = {
   id: number;
   created_at: string;
   actor_account_id: string | null;
+  actor?: AccountRef | null;
   source: string;
   op_type: string;
   resource_type: string;
@@ -179,6 +180,7 @@ export type FileChangeEvent = {
   space_id: string;
   node_id: string | null;
   actor_account_id: string | null;
+  actor?: AccountRef | null;
   op_type: string;
   metadata: Record<string, unknown>;
 };

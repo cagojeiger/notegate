@@ -15,6 +15,19 @@ use notegate_db::browser_session_repo::{
 };
 use uuid::Uuid;
 
+async fn audit_op_types(
+    db: &TestDb,
+    user_id: Uuid,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    Ok(sqlx::query_scalar(
+        "SELECT op_type FROM audit_events \
+             WHERE owner_user_id = $1 AND op_type LIKE 'session.%' ORDER BY id",
+    )
+    .bind(user_id)
+    .fetch_all(&db.pool)
+    .await?)
+}
+
 async fn insert_session(
     repo: &BrowserSessionRepo,
     crypto: &PiiCrypto,
@@ -66,6 +79,7 @@ async fn inserted_session_can_be_found_by_hash() -> Result<(), Box<dyn std::erro
         )?,
         "refresh-1"
     );
+    assert_eq!(audit_op_types(&db, user_id).await?, ["session.login"]);
     db.cleanup().await;
     Ok(())
 }
@@ -79,7 +93,12 @@ async fn revoked_or_inactive_sessions_are_not_live() -> Result<(), Box<dyn std::
     let repo = BrowserSessionRepo::new(db.pool.clone());
     let crypto = PiiCrypto::test();
     let (revoked_id, revoked_hash) = insert_session(&repo, &crypto, user_id, "refresh-1").await?;
-    repo.revoke_session(revoked_id, "test").await?;
+    assert!(repo.revoke_session_for_logout(revoked_id).await?);
+    assert!(!repo.revoke_session_for_logout(revoked_id).await?);
+    assert_eq!(
+        audit_op_types(&db, user_id).await?,
+        ["session.login", "session.logout"]
+    );
     assert!(
         repo.find_live_by_token(revoked_id, &revoked_hash)
             .await?
@@ -93,6 +112,59 @@ async fn revoked_or_inactive_sessions_are_not_live() -> Result<(), Box<dyn std::
             .await?
             .is_none()
     );
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejected_refresh_records_one_session_revoke() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user_id = insert_user_account(&db.pool, "revoke-user", "revoke@example.test").await?;
+    let repo = BrowserSessionRepo::new(db.pool.clone());
+    let crypto = PiiCrypto::test();
+    let (session_id, token_hash) = insert_session(&repo, &crypto, user_id, "refresh-1").await?;
+    sqlx::query(
+        "UPDATE browser_sessions SET validated_until = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(session_id)
+    .execute(&db.pool)
+    .await?;
+    let claim_id = Uuid::new_v4();
+    assert!(
+        repo.claim_refresh(session_id, &token_hash, claim_id)
+            .await?
+            .is_some()
+    );
+    assert!(
+        repo.revoke_claimed_refresh(session_id, claim_id, "refresh_failed")
+            .await?
+    );
+    assert!(
+        !repo
+            .revoke_claimed_refresh(session_id, claim_id, "refresh_failed")
+            .await?
+    );
+
+    let rows = sqlx::query_as::<_, (String, serde_json::Value)>(
+        "SELECT op_type, metadata FROM audit_events \
+         WHERE owner_user_id = $1 AND op_type LIKE 'session.%' ORDER BY id",
+    )
+    .bind(user_id)
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(
+        rows,
+        vec![
+            ("session.login".to_owned(), serde_json::json!({})),
+            (
+                "session.revoke".to_owned(),
+                serde_json::json!({ "reason": "refresh_failed" }),
+            ),
+        ]
+    );
+
     db.cleanup().await;
     Ok(())
 }

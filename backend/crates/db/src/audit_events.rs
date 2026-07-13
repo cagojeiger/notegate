@@ -53,6 +53,91 @@ async fn event(
     .await
 }
 
+fn account_created_payload() -> (&'static str, Value) {
+    ("account.create", json!({}))
+}
+
+pub(crate) async fn account_created(tx: &mut PgConnection, account_id: Uuid) -> Result<()> {
+    let (op_type, metadata) = account_created_payload();
+    event(
+        tx,
+        AuditContext::rest(account_id),
+        account_id,
+        op_type,
+        "account",
+        Some(account_id),
+        metadata,
+    )
+    .await
+}
+
+fn session_logged_in_payload() -> (&'static str, Value) {
+    ("session.login", json!({}))
+}
+
+pub(crate) async fn session_logged_in(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> Result<()> {
+    let (op_type, metadata) = session_logged_in_payload();
+    event(
+        tx,
+        AuditContext::rest(user_id),
+        user_id,
+        op_type,
+        "browser_session",
+        Some(session_id),
+        metadata,
+    )
+    .await
+}
+
+fn session_logged_out_payload() -> (&'static str, Value) {
+    ("session.logout", json!({}))
+}
+
+pub(crate) async fn session_logged_out(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> Result<()> {
+    let (op_type, metadata) = session_logged_out_payload();
+    event(
+        tx,
+        AuditContext::rest(user_id),
+        user_id,
+        op_type,
+        "browser_session",
+        Some(session_id),
+        metadata,
+    )
+    .await
+}
+
+fn session_revoked_payload(reason: &str) -> (&'static str, Value) {
+    ("session.revoke", json!({ "reason": reason }))
+}
+
+pub(crate) async fn session_revoked(
+    tx: &mut PgConnection,
+    user_id: Uuid,
+    session_id: Uuid,
+    reason: &str,
+) -> Result<()> {
+    let (op_type, metadata) = session_revoked_payload(reason);
+    event(
+        tx,
+        AuditContext::rest(user_id),
+        user_id,
+        op_type,
+        "browser_session",
+        Some(session_id),
+        metadata,
+    )
+    .await
+}
+
 fn space_created_payload() -> (&'static str, Value) {
     ("space.create", json!({}))
 }
@@ -387,6 +472,17 @@ pub(crate) async fn account_deleted(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_and_session_events_build_expected_payloads() {
+        assert_eq!(account_created_payload(), ("account.create", json!({})));
+        assert_eq!(session_logged_in_payload(), ("session.login", json!({})));
+        assert_eq!(session_logged_out_payload(), ("session.logout", json!({})));
+        assert_eq!(
+            session_revoked_payload("refresh_failed"),
+            ("session.revoke", json!({ "reason": "refresh_failed" }))
+        );
+    }
 
     #[test]
     fn space_created_builds_expected_payload() {

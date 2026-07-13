@@ -131,7 +131,17 @@ pub(crate) async fn list_file_change_events(
             },
         )
         .await?;
-    let events = page.items.iter().map(FileChangeEventOut::from).collect();
+    let actor_ids = page
+        .items
+        .iter()
+        .filter_map(|event| event.actor_account_id)
+        .collect::<Vec<_>>();
+    let refs = state.accounts.find_account_refs(&actor_ids).await?;
+    let events = page
+        .items
+        .iter()
+        .map(|event| FileChangeEventOut::from_event(event, &refs))
+        .collect();
 
     Ok(Json(FileChangeEventListResponse {
         events,

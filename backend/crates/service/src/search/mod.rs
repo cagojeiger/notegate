@@ -62,29 +62,12 @@ impl SearchService {
         Ok(node_id)
     }
 
-    async fn node_view(&self, space_id: Uuid, node: Node, path: String) -> ServiceResult<NodeView> {
-        let has_children = if node.kind == NodeKind::Folder {
-            self.store.has_children(space_id, node.id).await?
-        } else {
-            false
-        };
-        let text = if node.kind == NodeKind::Text {
-            self.store.text_stats(space_id, node.id).await?
-        } else {
-            None
-        };
-        let file = if node.kind == NodeKind::File {
-            self.store.file_stats(space_id, node.id).await?
-        } else {
-            None
-        };
-        Ok(NodeView {
-            node,
-            path,
-            has_children,
-            text,
-            file,
-        })
+    async fn node_views(
+        &self,
+        space_id: Uuid,
+        rows: Vec<(Node, String)>,
+    ) -> ServiceResult<Vec<NodeView>> {
+        crate::files::hydrate_node_views(&self.store, space_id, rows).await
     }
 
     fn text_node_view(&self, node: Node, path: String, text: &TextObject) -> NodeView {

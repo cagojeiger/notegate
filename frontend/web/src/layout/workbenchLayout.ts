@@ -52,5 +52,9 @@ export function resolveWorkbenchLayout(input: WorkbenchLayoutInput): WorkbenchLa
 }
 
 export function useWorkbenchLayout(input: WorkbenchLayoutInput): WorkbenchLayout {
-  return useMemo(() => resolveWorkbenchLayout(input), [input.auxiliaryOpen, input.editorGroupCount, input.isMobile, input.primaryOpen]);
+  const { auxiliaryOpen, editorGroupCount, isMobile, primaryOpen } = input;
+  return useMemo(
+    () => resolveWorkbenchLayout({ auxiliaryOpen, editorGroupCount, isMobile, primaryOpen }),
+    [auxiliaryOpen, editorGroupCount, isMobile, primaryOpen]
+  );
 }

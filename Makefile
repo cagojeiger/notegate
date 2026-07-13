@@ -17,6 +17,7 @@ build:
 
 frontend-check:
 	pnpm --filter web typecheck
+	pnpm --filter web lint
 	pnpm --filter web test
 	pnpm --filter web build
 

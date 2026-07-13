@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::format::validate_structured_text;
-use crate::files::patch::{apply_edits, apply_line_edits, unified_diff};
+use crate::files::patch::{AppliedText, apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
     AppendText, CopyNode, CopyResult, CreateFile, CreateFolder, CreateText, DeleteNode,
@@ -322,47 +322,15 @@ impl FilesService {
             ));
         }
 
-        let (node, text) = self.load_text(space_id, command.node_id).await?;
-        let previous_sha256 = text.content_sha256.clone();
-
-        // expected_sha256 is checked before any matching.
-        check_expected_sha(command.expected_sha256.as_deref(), &previous_sha256)?;
-
-        let plain_content = text.content.as_deref().ok_or_else(|| {
-            ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
-        })?;
-        let applied = apply_edits(plain_content, &command.edits)?;
-        let diff = unified_diff(plain_content, &applied.content);
-
-        validate_structured_text(&node.name, &applied.content)?;
-        let metrics = content::compute(&applied.content);
-        validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
-
-        let stored = metrics.into_stored_plain(applied.content);
-        let save_guard = command
-            .expected_sha256
-            .as_deref()
-            .unwrap_or(&previous_sha256);
-        let (node, text) = self
-            .store
-            .save_text_content(
-                space_id,
-                node.id,
-                &stored,
-                Some(save_guard),
-                caller_account_id,
-                TextMutationKind::Patch,
-            )
-            .await?;
-        let view = self.text_view(space_id, node, text).await?;
-
-        Ok(PatchResult {
-            node: view.node,
-            text: view.text,
-            previous_sha256,
-            edits_applied: applied.replacements,
-            diff,
-        })
+        self.apply_text_mutation(
+            caller_account_id,
+            space_id,
+            command.node_id,
+            command.expected_sha256.as_deref(),
+            TextMutationKind::Patch,
+            |content| apply_edits(content, &command.edits).map_err(Into::into),
+        )
+        .await
     }
 
     /// Apply line-based edits to a plain text. Requires write permission.
@@ -381,14 +349,35 @@ impl FilesService {
             ));
         }
 
-        let (node, text) = self.load_text(space_id, command.node_id).await?;
-        let previous_sha256 = text.content_sha256.clone();
-        check_expected_sha(command.expected_sha256.as_deref(), &previous_sha256)?;
+        self.apply_text_mutation(
+            caller_account_id,
+            space_id,
+            command.node_id,
+            command.expected_sha256.as_deref(),
+            TextMutationKind::Edit,
+            |content| apply_line_edits(content, &command.edits).map_err(Into::into),
+        )
+        .await
+    }
 
+    async fn apply_text_mutation(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+        expected_sha256: Option<&str>,
+        mutation_kind: TextMutationKind,
+        apply: impl FnOnce(&str) -> ServiceResult<AppliedText>,
+    ) -> ServiceResult<PatchResult> {
+        let (node, text) = self.load_text(space_id, node_id).await?;
+        let previous_sha256 = text.content_sha256.clone();
+
+        // Check the caller's version before matching either edit format.
+        check_expected_sha(expected_sha256, &previous_sha256)?;
         let plain_content = text.content.as_deref().ok_or_else(|| {
             ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
         })?;
-        let applied = apply_line_edits(plain_content, &command.edits)?;
+        let applied = apply(plain_content)?;
         let diff = unified_diff(plain_content, &applied.content);
 
         validate_structured_text(&node.name, &applied.content)?;
@@ -396,10 +385,7 @@ impl FilesService {
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
         let stored = metrics.into_stored_plain(applied.content);
-        let save_guard = command
-            .expected_sha256
-            .as_deref()
-            .unwrap_or(&previous_sha256);
+        let save_guard = expected_sha256.unwrap_or(&previous_sha256);
         let (node, text) = self
             .store
             .save_text_content(
@@ -408,7 +394,7 @@ impl FilesService {
                 &stored,
                 Some(save_guard),
                 caller_account_id,
-                TextMutationKind::Edit,
+                mutation_kind,
             )
             .await?;
         let view = self.text_view(space_id, node, text).await?;

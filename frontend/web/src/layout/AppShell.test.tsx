@@ -18,11 +18,11 @@ vi.mock("../features/nodes/PrimarySidebar", () => ({ PrimarySidebar: () => null 
 vi.mock("../features/spaces/MobileSpaceBar", () => ({ MobileSpaceBar: () => null }));
 vi.mock("./AuxiliarySidebar", () => ({ AuxiliarySidebar: () => null }));
 vi.mock("../features/events/EventHistoryModal", () => ({
-  EventHistoryModal: ({ activeSpace, activeNode, canViewAuditEvents }: { activeSpace: Space | null; activeNode: RestNode | null; canViewAuditEvents: boolean }) => (
+  EventHistoryModal: ({ spaces, initialSpaceId, canViewAuditEvents }: { spaces: Space[]; initialSpaceId: string | null; canViewAuditEvents: boolean }) => (
     <div
       data-testid="history-modal"
-      data-space-id={activeSpace?.id}
-      data-node-id={activeNode?.id}
+      data-space-id={initialSpaceId ?? undefined}
+      data-space-count={spaces.length}
       data-can-view-audit={String(canViewAuditEvents)}
     />
   )
@@ -68,7 +68,7 @@ describe("AppShell history", () => {
 
     const modal = screen.getByTestId("history-modal");
     expect(modal).toHaveAttribute("data-space-id", space.id);
-    expect(modal).toHaveAttribute("data-node-id", activeNode.id);
+    expect(modal).toHaveAttribute("data-space-count", "1");
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
   });
 });

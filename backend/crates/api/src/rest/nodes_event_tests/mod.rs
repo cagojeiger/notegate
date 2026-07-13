@@ -194,6 +194,13 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
             .iter()
             .all(|event| event["actor_account_id"] == json!(owner))
     );
+    assert!(
+        events["events"]
+            .as_array()
+            .expect("events array")
+            .iter()
+            .all(|event| event["actor"]["id"] == json!(owner))
+    );
     let file_event = events["events"]
         .as_array()
         .expect("events array")
@@ -201,6 +208,7 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         .find(|event| event["node_id"] == json!(file_node_id))
         .expect("file event");
     assert_eq!(file_event["metadata"]["byte_len_after"], json!(5));
+    assert_eq!(file_event["metadata"]["item_name"], json!("asset.txt"));
     assert!(file_event["metadata"].get("line_count_after").is_none());
 
     let (status, first_page) = get_json(

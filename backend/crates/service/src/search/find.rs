@@ -80,10 +80,7 @@ impl SearchService {
             let path_matches = path_filters.allows(&candidate.path);
             let name_matches = matcher.is_match(&candidate.node.name);
             if kind_matches && path_matches && name_matches {
-                items.push(
-                    self.node_view(space_id, candidate.node.clone(), candidate.path.clone())
-                        .await?,
-                );
+                items.push((candidate.node.clone(), candidate.path.clone()));
             }
             if items.len() >= limit as usize {
                 break;
@@ -98,7 +95,7 @@ impl SearchService {
         };
 
         Ok(FindPage {
-            items,
+            items: self.node_views(space_id, items).await?,
             limit,
             has_more,
             next_cursor,

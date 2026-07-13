@@ -201,7 +201,17 @@ pub(crate) async fn list_audit_events(
             },
         )
         .await?;
-    let events = page.items.iter().map(AuditEventOut::from).collect();
+    let actor_ids = page
+        .items
+        .iter()
+        .filter_map(|event| event.actor_account_id)
+        .collect::<Vec<_>>();
+    let refs = state.accounts.find_account_refs(&actor_ids).await?;
+    let events = page
+        .items
+        .iter()
+        .map(|event| AuditEventOut::from_event(event, &refs))
+        .collect();
     Ok(Json(AuditEventListResponse {
         events,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),

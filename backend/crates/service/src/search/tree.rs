@@ -80,7 +80,7 @@ impl SearchService {
                 let child_depth = frame.depth + 1;
                 let path = join_path(&parent_path, &child.name);
                 let is_descendable_folder = child.kind == NodeKind::Folder && child_depth < depth;
-                items.push(self.node_view(space_id, child.clone(), path).await?);
+                items.push((child.clone(), path));
 
                 if is_descendable_folder {
                     stack.push(TreeFrame {
@@ -116,7 +116,7 @@ impl SearchService {
         };
 
         Ok(TreePage {
-            items,
+            items: self.node_views(space_id, items).await?,
             depth,
             limit,
             has_more,
