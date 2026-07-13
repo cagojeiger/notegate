@@ -31,7 +31,7 @@ pub async fn insert_folder(
 
     let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::new(1, 0), caps).await?;
+    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::nodes(1), caps).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
@@ -72,7 +72,7 @@ pub async fn insert_text(
 
     let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::new(1, content.byte_len), caps)
+    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::text(1, content.byte_len), caps)
         .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
@@ -135,7 +135,8 @@ pub async fn insert_file(
 
     let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
     prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::new(1, file.byte_len), caps).await?;
+    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::file(1, file.byte_len), caps)
+        .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \

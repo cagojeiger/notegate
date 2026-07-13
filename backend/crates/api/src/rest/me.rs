@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_model::{Caller, CreateApiKey, ListApiKeys, ListAuditEvents};
-use notegate_service::usage::{CurrentUserUsage, QuotaUsage, SpaceReconciliation};
+use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -76,41 +76,18 @@ impl From<QuotaUsage> for QuotaUsageOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct AccountUsageOut {
-    spaces: QuotaUsageOut,
-    agents: QuotaUsageOut,
-    api_keys: QuotaUsageOut,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct SpaceReconciliationOut {
-    pending: bool,
-    reconciled_at: DateTime<Utc>,
-}
-
-impl From<SpaceReconciliation> for SpaceReconciliationOut {
-    fn from(value: SpaceReconciliation) -> Self {
-        Self {
-            pending: value.pending,
-            reconciled_at: value.reconciled_at,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct SpaceUsageOut {
     id: Uuid,
     name: String,
-    nodes: QuotaUsageOut,
-    content_bytes: QuotaUsageOut,
-    agent_connections: QuotaUsageOut,
-    reconciliation: SpaceReconciliationOut,
+    items: QuotaUsageOut,
+    text_bytes: QuotaUsageOut,
+    file_bytes: QuotaUsageOut,
+    reconciliation_pending: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct CurrentUserUsageOut {
     tier: String,
-    account: AccountUsageOut,
     spaces: Vec<SpaceUsageOut>,
 }
 
@@ -118,21 +95,16 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
     fn from(value: CurrentUserUsage) -> Self {
         Self {
             tier: value.tier.as_str().to_owned(),
-            account: AccountUsageOut {
-                spaces: value.account.spaces.into(),
-                agents: value.account.agents.into(),
-                api_keys: value.account.api_keys.into(),
-            },
             spaces: value
                 .spaces
                 .into_iter()
                 .map(|space| SpaceUsageOut {
                     id: space.id,
                     name: space.name,
-                    nodes: space.nodes.into(),
-                    content_bytes: space.content_bytes.into(),
-                    agent_connections: space.agent_connections.into(),
-                    reconciliation: space.reconciliation.into(),
+                    items: space.items.into(),
+                    text_bytes: space.text_bytes.into(),
+                    file_bytes: space.file_bytes.into(),
+                    reconciliation_pending: space.reconciliation_pending,
                 })
                 .collect(),
         }
@@ -154,7 +126,7 @@ pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutpu
     get,
     path = "/api/v1/me/usage",
     tag = "identity",
-    responses((status = 200, description = "Get current user quota and usage", body = CurrentUserUsageOut)),
+    responses((status = 200, description = "Get current user's Space usage", body = CurrentUserUsageOut)),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn get_usage(

@@ -259,6 +259,24 @@ mod tests {
             ),
             "#/components/schemas/ReconciliationQueuedResponse"
         );
+        assert_eq!(
+            response_ref(
+                &value,
+                "/api/v1/spaces/{space_id}/usage/reconcile",
+                "post",
+                "409"
+            ),
+            "#/components/schemas/ErrorResponse"
+        );
+        assert_eq!(
+            response_ref(
+                &value,
+                "/api/v1/spaces/{space_id}/usage/reconcile",
+                "post",
+                "503"
+            ),
+            "#/components/schemas/ErrorResponse"
+        );
     }
 
     #[test]

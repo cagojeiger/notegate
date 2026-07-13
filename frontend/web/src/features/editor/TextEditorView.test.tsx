@@ -112,6 +112,35 @@ describe("TextEditorView", () => {
 
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
+
+  it("keeps encrypted text read-only", () => {
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: {
+        node: partialText.node,
+        text: {
+          node_id: node.id,
+          storage_format: "encrypted",
+          encrypted_payload: { ciphertext: "encrypted" },
+          content_sha256: "sha",
+          byte_len: 9,
+          line_count: 1,
+          updated_by: { id: "user-1", kind: "user", display_name: "User" },
+          updated_at: "2026-06-13T00:00:00Z"
+        }
+      },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    renderTextEditorView();
+
+    expect(screen.getByText("Encrypted text cannot be previewed by the server.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy content" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+
   it("warns instead of overwriting a dirty editor when the server sha changes", async () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();

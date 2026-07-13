@@ -3,6 +3,7 @@ export const POLLING = {
   openedNodeJitterMs: 5_000,
   recentMs: 60_000,
   recentJitterMs: 10_000,
+  usagePendingMs: 3_000,
   treeChildrenMs: 60_000,
   treeChildrenJitterMs: 10_000
 } as const;

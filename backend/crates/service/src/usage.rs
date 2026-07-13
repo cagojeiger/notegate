@@ -1,9 +1,10 @@
 //! User-facing quota and usage views.
 
-use chrono::{DateTime, Utc};
-use notegate_core::limits::{self, Limits};
+use notegate_core::limits::Limits;
 use notegate_core::tier::{UserTier, effective_file_tree_limits};
-use notegate_db::{UsageRepo, UserUsageSnapshot};
+use notegate_db::{
+    UsageReconciliationOutcome as DbUsageReconciliationOutcome, UsageRepo, UserUsageSnapshot,
+};
 use notegate_model::AccountKind;
 use uuid::Uuid;
 
@@ -42,12 +43,30 @@ impl UsageService {
         caller_kind: AccountKind,
         caller_account_id: Uuid,
         space_id: Uuid,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<UsageReconciliationOutcome> {
         require_user_caller(caller_kind)?;
-        self.store
+        let outcome = self
+            .store
             .request_space_reconciliation(caller_account_id, space_id)
             .await?;
-        Ok(())
+        Ok(outcome.into())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageReconciliationOutcome {
+    Queued,
+    AlreadyQueued,
+    Cooldown,
+}
+
+impl From<DbUsageReconciliationOutcome> for UsageReconciliationOutcome {
+    fn from(outcome: DbUsageReconciliationOutcome) -> Self {
+        match outcome {
+            DbUsageReconciliationOutcome::Queued => Self::Queued,
+            DbUsageReconciliationOutcome::AlreadyQueued => Self::AlreadyQueued,
+            DbUsageReconciliationOutcome::Cooldown => Self::Cooldown,
+        }
     }
 }
 
@@ -58,80 +77,47 @@ pub struct QuotaUsage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AccountUsage {
-    pub spaces: QuotaUsage,
-    pub agents: QuotaUsage,
-    pub api_keys: QuotaUsage,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpaceUsage {
     pub id: Uuid,
     pub name: String,
-    pub nodes: QuotaUsage,
-    pub content_bytes: QuotaUsage,
-    pub agent_connections: QuotaUsage,
-    pub reconciliation: SpaceReconciliation,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpaceReconciliation {
-    pub pending: bool,
-    pub reconciled_at: DateTime<Utc>,
+    pub items: QuotaUsage,
+    pub text_bytes: QuotaUsage,
+    pub file_bytes: QuotaUsage,
+    pub reconciliation_pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentUserUsage {
     pub tier: UserTier,
-    pub account: AccountUsage,
     pub spaces: Vec<SpaceUsage>,
 }
 
 fn build_usage(snapshot: UserUsageSnapshot, runtime_limits: Limits) -> CurrentUserUsage {
-    let quota = snapshot.tier.quota();
-    let file_limits = effective_file_tree_limits(snapshot.tier, runtime_limits);
-    let spaces_used = snapshot.spaces.len();
+    let limits = effective_file_tree_limits(snapshot.tier, runtime_limits);
     let spaces = snapshot
         .spaces
         .into_iter()
         .map(|space| SpaceUsage {
             id: space.id,
             name: space.name,
-            nodes: QuotaUsage {
-                used: space.live_nodes,
-                limit: file_limits.space_max_nodes,
+            items: QuotaUsage {
+                used: space.live_nodes.saturating_sub(1),
+                limit: limits.space_max_nodes.saturating_sub(1),
             },
-            content_bytes: QuotaUsage {
-                used: space.live_content_bytes,
-                limit: file_limits.space_max_content_bytes,
+            text_bytes: QuotaUsage {
+                used: space.live_text_bytes,
+                limit: limits.space_max_text_bytes,
             },
-            agent_connections: QuotaUsage {
-                used: space.live_agent_connections,
-                limit: quota.connections_per_space,
+            file_bytes: QuotaUsage {
+                used: space.live_file_bytes,
+                limit: limits.space_max_file_bytes,
             },
-            reconciliation: SpaceReconciliation {
-                pending: space.reconciliation_pending,
-                reconciled_at: space.reconciled_at,
-            },
+            reconciliation_pending: space.reconciliation_pending,
         })
         .collect();
 
     CurrentUserUsage {
         tier: snapshot.tier,
-        account: AccountUsage {
-            spaces: QuotaUsage {
-                used: spaces_used,
-                limit: quota.spaces_per_user,
-            },
-            agents: QuotaUsage {
-                used: snapshot.live_agents,
-                limit: quota.agents_per_user,
-            },
-            api_keys: QuotaUsage {
-                used: snapshot.live_api_keys,
-                limit: limits::USER_API_KEYS_PER_ACCOUNT_MAX,
-            },
-        },
         spaces,
     }
 }
@@ -154,50 +140,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn usage_combines_tier_and_runtime_limits() {
+    fn usage_applies_space_tier_and_runtime_limits() {
         let space_id = Uuid::new_v4();
-        let reconciled_at = Utc::now();
         let usage = build_usage(
             UserUsageSnapshot {
                 tier: UserTier::Tier0,
-                live_agents: 2,
-                live_api_keys: 1,
                 spaces: vec![SpaceUsageSnapshot {
                     id: space_id,
-                    name: "Daily".to_owned(),
+                    name: "Personal".to_owned(),
                     live_nodes: 7,
-                    live_content_bytes: 512,
-                    live_agent_connections: 2,
-                    reconciled_at,
+                    live_text_bytes: 512,
+                    live_file_bytes: 128,
                     reconciliation_pending: true,
                 }],
             },
             Limits {
                 space_max_nodes: 5,
-                space_max_content_bytes: 256,
+                space_max_text_bytes: 256,
+                space_max_file_bytes: 64,
                 folder_max_children: 10,
             },
         );
 
         assert_eq!(usage.tier, UserTier::Tier0);
-        assert_eq!(usage.account.spaces, QuotaUsage { used: 1, limit: 1 });
-        assert_eq!(usage.account.agents, QuotaUsage { used: 2, limit: 3 });
-        assert_eq!(usage.account.api_keys, QuotaUsage { used: 1, limit: 2 });
         assert_eq!(usage.spaces[0].id, space_id);
-        assert_eq!(usage.spaces[0].nodes, QuotaUsage { used: 7, limit: 5 });
+        assert_eq!(usage.spaces[0].items, QuotaUsage { used: 6, limit: 4 });
         assert_eq!(
-            usage.spaces[0].content_bytes,
+            usage.spaces[0].text_bytes,
             QuotaUsage {
                 used: 512,
                 limit: 256,
             }
         );
         assert_eq!(
-            usage.spaces[0].agent_connections,
-            QuotaUsage { used: 2, limit: 5 }
+            usage.spaces[0].file_bytes,
+            QuotaUsage {
+                used: 128,
+                limit: 64,
+            }
         );
-        assert!(usage.spaces[0].reconciliation.pending);
-        assert_eq!(usage.spaces[0].reconciliation.reconciled_at, reconciled_at);
+        assert!(usage.spaces[0].reconciliation_pending);
     }
 
     #[test]
@@ -206,5 +188,30 @@ mod tests {
             require_user_caller(AccountKind::Agent),
             Err(ServiceError::Forbidden(_))
         ));
+    }
+
+    #[test]
+    fn usage_excludes_the_space_root_from_items() {
+        let usage = build_usage(
+            UserUsageSnapshot {
+                tier: UserTier::Tier0,
+                spaces: vec![SpaceUsageSnapshot {
+                    id: Uuid::new_v4(),
+                    name: "Empty".to_owned(),
+                    live_nodes: 1,
+                    live_text_bytes: 0,
+                    live_file_bytes: 0,
+                    reconciliation_pending: false,
+                }],
+            },
+            Limits {
+                space_max_nodes: 1,
+                space_max_text_bytes: 1,
+                space_max_file_bytes: 1,
+                folder_max_children: 1,
+            },
+        );
+
+        assert_eq!(usage.spaces[0].items, QuotaUsage { used: 0, limit: 0 });
     }
 }

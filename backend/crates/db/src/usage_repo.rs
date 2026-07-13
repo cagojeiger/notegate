@@ -9,6 +9,8 @@ use uuid::Uuid;
 use crate::{active_account_predicate, map_sqlx_error, to_usize};
 
 const MANUAL_RECONCILE_COOLDOWN_SECONDS: i64 = 60 * 60;
+const REQUEST_LOCK_TIMEOUT: &str = "1s";
+const REQUEST_RETRY_AFTER_SECONDS: u64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct UsageRepo {
@@ -22,14 +24,8 @@ impl UsageRepo {
 
     pub async fn current_user_usage(&self, user_id: Uuid) -> Result<Option<UserUsageSnapshot>> {
         let active_user = active_account_predicate("acc.");
-        let account = sqlx::query_as::<_, UserUsageRow>(&format!(
-            "SELECT u.tier, \
-                    (SELECT count(*) FROM agents a \
-                     JOIN accounts agent_acc ON agent_acc.id = a.id \
-                     WHERE a.owner_user_id = u.id \
-                       AND agent_acc.is_active = true AND agent_acc.deleted_at IS NULL) AS live_agents, \
-                    (SELECT count(*) FROM api_keys k \
-                     WHERE k.account_id = u.id AND k.revoked_at IS NULL AND k.expires_at > now()) AS live_api_keys \
+        let user = sqlx::query_as::<_, UserUsageRow>(&format!(
+            "SELECT u.tier \
              FROM users u \
              JOIN accounts acc ON acc.id = u.id \
              WHERE u.id = $1 AND acc.kind = 'user' AND {active_user}"
@@ -38,21 +34,15 @@ impl UsageRepo {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        let Some(account) = account else {
+        let Some(user) = user else {
             return Ok(None);
         };
 
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
-            "SELECT s.id, s.name, su.live_node_count, su.live_content_bytes, \
-                    su.reconciled_at, \
+            "SELECT s.id, s.name, su.live_node_count, su.live_text_bytes, su.live_file_bytes, \
                     EXISTS ( \
                         SELECT 1 FROM space_usage_reconcile_jobs j WHERE j.space_id = s.id \
-                    ) AS reconciliation_pending, \
-                    (SELECT count(*) FROM space_agent_connections c \
-                     JOIN accounts agent_acc ON agent_acc.id = c.agent_id \
-                     WHERE c.space_id = s.id AND c.disconnected_at IS NULL \
-                       AND agent_acc.is_active = true AND agent_acc.deleted_at IS NULL) \
-                        AS live_agent_connections \
+                    ) AS reconciliation_pending \
              FROM spaces s \
              LEFT JOIN space_usage su ON su.space_id = s.id \
              WHERE s.owner_user_id = $1 AND s.deleted_at IS NULL \
@@ -68,9 +58,7 @@ impl UsageRepo {
             .map(SpaceUsageSnapshot::try_from)
             .collect::<Result<Vec<_>>>()?;
         Ok(Some(UserUsageSnapshot {
-            tier: UserTier::parse_db(&account.tier)?,
-            live_agents: to_usize(account.live_agents, "agent")?,
-            live_api_keys: to_usize(account.live_api_keys, "api key")?,
+            tier: UserTier::parse_db(&user.tier)?,
             spaces,
         }))
     }
@@ -79,8 +67,13 @@ impl UsageRepo {
         &self,
         owner_user_id: Uuid,
         space_id: Uuid,
-    ) -> Result<()> {
+    ) -> Result<UsageReconciliationOutcome> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+            .bind(REQUEST_LOCK_TIMEOUT)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
         // Match file mutations and the reconciler: Space row before usage row.
         let live_space: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM spaces \
@@ -91,7 +84,7 @@ impl UsageRepo {
         .bind(owner_user_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(map_sqlx_error)?;
+        .map_err(map_request_lock_error)?;
         if live_space.is_none() {
             return Err(Error::not_found("space not found"));
         }
@@ -106,20 +99,21 @@ impl UsageRepo {
         .bind(space_id)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(map_sqlx_error)?
+        .map_err(map_request_lock_error)?
         .ok_or_else(|| Error::internal("live space is missing its usage counter"))?;
 
-        if state.pending {
-            return Err(Error::conflict(
-                "space usage reconciliation is already queued",
-            ));
-        }
-        if state.reconciled_at
+        let no_queue_outcome = if state.pending {
+            Some(UsageReconciliationOutcome::AlreadyQueued)
+        } else if state.reconciled_at
             > state.requested_at - Duration::seconds(MANUAL_RECONCILE_COOLDOWN_SECONDS)
         {
-            return Err(Error::conflict(
-                "space usage was reconciled recently; try again later",
-            ));
+            Some(UsageReconciliationOutcome::Cooldown)
+        } else {
+            None
+        };
+        if let Some(outcome) = no_queue_outcome {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(outcome);
         }
 
         sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
@@ -127,15 +121,30 @@ impl UsageRepo {
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
-        tx.commit().await.map_err(map_sqlx_error)
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(UsageReconciliationOutcome::Queued)
     }
+}
+
+fn map_request_lock_error(error: sqlx::Error) -> Error {
+    if let sqlx::Error::Database(database_error) = &error
+        && database_error.code().as_deref() == Some("55P03")
+    {
+        return Error::usage_recalculation_in_progress(REQUEST_RETRY_AFTER_SECONDS);
+    }
+    map_sqlx_error(error)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageReconciliationOutcome {
+    Queued,
+    AlreadyQueued,
+    Cooldown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserUsageSnapshot {
     pub tier: UserTier,
-    pub live_agents: usize,
-    pub live_api_keys: usize,
     pub spaces: Vec<SpaceUsageSnapshot>,
 }
 
@@ -144,9 +153,8 @@ pub struct SpaceUsageSnapshot {
     pub id: Uuid,
     pub name: String,
     pub live_nodes: usize,
-    pub live_content_bytes: usize,
-    pub live_agent_connections: usize,
-    pub reconciled_at: DateTime<Utc>,
+    pub live_text_bytes: usize,
+    pub live_file_bytes: usize,
     pub reconciliation_pending: bool,
 }
 
@@ -156,15 +164,15 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
     fn try_from(row: SpaceUsageRow) -> Result<Self> {
         let missing_counter = || Error::internal("live space is missing its usage counter");
         let live_node_count = row.live_node_count.ok_or_else(missing_counter)?;
-        let live_content_bytes = row.live_content_bytes.ok_or_else(missing_counter)?;
+        let live_text_bytes = row.live_text_bytes.ok_or_else(missing_counter)?;
+        let live_file_bytes = row.live_file_bytes.ok_or_else(missing_counter)?;
         Ok(Self {
             id: row.id,
             name: row.name,
             live_nodes: to_usize(live_node_count, "node")?,
-            live_content_bytes: to_usize(live_content_bytes, "content byte")?,
-            live_agent_connections: to_usize(row.live_agent_connections, "connection")?,
-            reconciled_at: row.reconciled_at.ok_or_else(missing_counter)?,
-            reconciliation_pending: row.reconciliation_pending.ok_or_else(missing_counter)?,
+            live_text_bytes: to_usize(live_text_bytes, "text byte")?,
+            live_file_bytes: to_usize(live_file_bytes, "file byte")?,
+            reconciliation_pending: row.reconciliation_pending,
         })
     }
 }
@@ -172,8 +180,6 @@ impl TryFrom<SpaceUsageRow> for SpaceUsageSnapshot {
 #[derive(Debug, FromRow)]
 struct UserUsageRow {
     tier: String,
-    live_agents: i64,
-    live_api_keys: i64,
 }
 
 #[derive(Debug, FromRow)]
@@ -181,10 +187,9 @@ struct SpaceUsageRow {
     id: Uuid,
     name: String,
     live_node_count: Option<i64>,
-    live_content_bytes: Option<i64>,
-    reconciled_at: Option<DateTime<Utc>>,
-    reconciliation_pending: Option<bool>,
-    live_agent_connections: i64,
+    live_text_bytes: Option<i64>,
+    live_file_bytes: Option<i64>,
+    reconciliation_pending: bool,
 }
 
 #[derive(Debug, FromRow)]

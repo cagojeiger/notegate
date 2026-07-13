@@ -35,33 +35,25 @@ Agent caller:
 GET /api/v1/me/usage
 ```
 
-User caller만 가능하다. 현재 tier quota와 live usage를 반환한다. User당 live Space가 최대 20개이므로 pagination하지 않는다.
+User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item usage를 반환한다. `items`는 내부 Space root를 제외한다. User당 live Space가 최대 20개이므로 pagination하지 않는다.
 
 ```json
 {
   "tier": "tier0",
-  "account": {
-    "spaces": {"used": 1, "limit": 1},
-    "agents": {"used": 2, "limit": 3},
-    "api_keys": {"used": 1, "limit": 2}
-  },
   "spaces": [
     {
       "id": "space-id",
-      "name": "Daily",
-      "nodes": {"used": 320, "limit": 2000},
-      "content_bytes": {"used": 48120320, "limit": 134217728},
-      "agent_connections": {"used": 2, "limit": 5},
-      "reconciliation": {
-        "pending": false,
-        "reconciled_at": "2026-07-11T10:00:00Z"
-      }
+      "name": "Personal",
+      "items": {"used": 319, "limit": 1999},
+      "text_bytes": {"used": 48120320, "limit": 134217728},
+      "file_bytes": {"used": 80000000, "limit": 134217728},
+      "reconciliation_pending": false
     }
   ]
 }
 ```
 
-사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
+Account, Agent, API key, connection limit은 각 리소스 API에서 별도로 검사하며 이 응답에 포함하지 않는다. 사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
 
 ## Current user API keys
 

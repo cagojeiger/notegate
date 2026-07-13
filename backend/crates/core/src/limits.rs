@@ -64,8 +64,10 @@ pub const MAX_PATH_LEN: usize = 903;
 pub const MAX_PATH_DEPTH: usize = 7;
 /// Maximum live nodes per space.
 pub const SPACE_MAX_NODES: usize = 25_000;
-/// Maximum total live text+file content bytes per space (1 GiB).
-pub const SPACE_MAX_CONTENT_BYTES: usize = 1_073_741_824;
+/// Maximum total live Text bytes per space (1 GiB).
+pub const SPACE_MAX_TEXT_BYTES: usize = 1_073_741_824;
+/// Maximum total live File bytes per space (1 GiB).
+pub const SPACE_MAX_FILE_BYTES: usize = 1_073_741_824;
 /// Maximum file bytes stored inline in PostgreSQL (256 KiB).
 pub const FILE_INLINE_PG_MAX_BYTES: usize = 262_144;
 /// Maximum bytes per uploaded file (100 MiB).
@@ -96,7 +98,8 @@ pub const FOLDER_MAX_CHILDREN: usize = 1_000;
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub space_max_nodes: usize,
-    pub space_max_content_bytes: usize,
+    pub space_max_text_bytes: usize,
+    pub space_max_file_bytes: usize,
     pub folder_max_children: usize,
 }
 
@@ -104,7 +107,8 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             space_max_nodes: SPACE_MAX_NODES,
-            space_max_content_bytes: SPACE_MAX_CONTENT_BYTES,
+            space_max_text_bytes: SPACE_MAX_TEXT_BYTES,
+            space_max_file_bytes: SPACE_MAX_FILE_BYTES,
             folder_max_children: FOLDER_MAX_CHILDREN,
         }
     }

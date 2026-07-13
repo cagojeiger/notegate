@@ -46,7 +46,8 @@ impl UserTier {
                 connected_spaces_per_agent: 5,
                 file_tree: Limits {
                     space_max_nodes: 2_000,
-                    space_max_content_bytes: 134_217_728,
+                    space_max_text_bytes: 134_217_728,
+                    space_max_file_bytes: 134_217_728,
                     folder_max_children: 200,
                 },
             },
@@ -76,9 +77,12 @@ pub fn effective_file_tree_limits(tier: UserTier, runtime_caps: Limits) -> Limit
     let tier_caps = tier.quota().file_tree;
     Limits {
         space_max_nodes: tier_caps.space_max_nodes.min(runtime_caps.space_max_nodes),
-        space_max_content_bytes: tier_caps
-            .space_max_content_bytes
-            .min(runtime_caps.space_max_content_bytes),
+        space_max_text_bytes: tier_caps
+            .space_max_text_bytes
+            .min(runtime_caps.space_max_text_bytes),
+        space_max_file_bytes: tier_caps
+            .space_max_file_bytes
+            .min(runtime_caps.space_max_file_bytes),
         folder_max_children: tier_caps
             .folder_max_children
             .min(runtime_caps.folder_max_children),
@@ -114,7 +118,8 @@ mod tests {
             assert!(quota.connections_per_space <= limits::CONNECTIONS_PER_SPACE_MAX);
             assert!(quota.connected_spaces_per_agent <= limits::CONNECTED_SPACES_PER_AGENT_MAX);
             assert!(quota.file_tree.space_max_nodes <= limits::SPACE_MAX_NODES);
-            assert!(quota.file_tree.space_max_content_bytes <= limits::SPACE_MAX_CONTENT_BYTES);
+            assert!(quota.file_tree.space_max_text_bytes <= limits::SPACE_MAX_TEXT_BYTES);
+            assert!(quota.file_tree.space_max_file_bytes <= limits::SPACE_MAX_FILE_BYTES);
             assert!(quota.file_tree.folder_max_children <= limits::FOLDER_MAX_CHILDREN);
         }
     }
@@ -123,7 +128,8 @@ mod tests {
     fn runtime_caps_can_only_lower_tier_caps() {
         let runtime = Limits {
             space_max_nodes: 10,
-            space_max_content_bytes: 1024,
+            space_max_text_bytes: 1024,
+            space_max_file_bytes: 2048,
             folder_max_children: 3,
         };
         assert_eq!(

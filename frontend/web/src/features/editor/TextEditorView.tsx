@@ -1,7 +1,7 @@
 import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
-import type { ReadTextResponse, RestNode } from "../../api/types";
+import type { RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { Button, Card, IconButton, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
@@ -12,33 +12,38 @@ import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { EditorNavigationActions, NodeActions } from "./types";
-import { useMarkdownImageLoader, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useMarkdownImageLoader } from "./useEditorQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
+import { useTextEditorSession } from "./useTextEditorSession";
 
 export function TextEditorView({ active, groupId, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
-  const textQuery = useTextDocument(node);
   const loadMarkdownImage = useMarkdownImageLoader(node);
-  const [draft, setDraft] = useState("");
-  const [conflict, setConflict] = useState(false);
-  const [externalUpdate, setExternalUpdate] = useState<RestNode | null>(null);
   const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
-  const lastAutoReloadSha = useRef<string | null>(null);
-  const dismissedExternalSha = useRef<string | null>(null);
   const [structuredMode, setStructuredMode] = useState<StructuredPreviewMode>("tree");
   const [structuredExpansionMode, setStructuredExpansionMode] = useState<StructuredExpansionMode>("expanded");
-  const text = textQuery.data?.text;
-  const plainText = isPlainTextContent(text) ? text : null;
-  const content = plainText?.content ?? "";
-  const sha = text?.content_sha256;
-  const encrypted = isEncryptedTextContent(text);
-  const partialText = plainText?.truncated ? plainText : null;
-  const canEditText = canWriteActiveSpace && !!plainText && !partialText;
-  const canCopyContent = !!plainText && !partialText;
+  const {
+    textQuery,
+    content,
+    draft,
+    setDraft,
+    encrypted,
+    partialText,
+    canEdit: canEditText,
+    canCopy: canCopyContent,
+    dirty,
+    conflict,
+    externalUpdate,
+    canSave,
+    saveDraft,
+    overwriteDraft,
+    cancelEdit,
+    reloadConflict,
+    reloadExternalUpdate,
+    dismissExternalUpdate
+  } = useTextEditorSession({ node, latestNode, mode, canWrite: canWriteActiveSpace, onSetMode });
   const copySource = mode === "edit" && canEditText ? draft : content;
   const format = inferTextFormat(node.name);
   const structured = isStructuredFormat(format);
-  const prevMode = useRef<"preview" | "edit">(mode);
-  const draftInitializedForNode = useRef<string | null>(null);
   const showToast = useUiStore((state) => state.showToast);
   const markdownLinkPolicy = useMemo(
     () => ({
@@ -59,26 +64,8 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   useEffect(() => {
     setStructuredMode("tree");
     setStructuredExpansionMode("expanded");
-    setExternalUpdate(null);
     setEditorMenu(null);
-    lastAutoReloadSha.current = null;
-    dismissedExternalSha.current = null;
   }, [node.id]);
-
-  useEffect(() => {
-    // Load the editor draft when entering or restoring edit mode.
-    if (mode === "edit" && canEditText && (prevMode.current !== "edit" || draftInitializedForNode.current !== node.id)) {
-      setDraft(content);
-      draftInitializedForNode.current = node.id;
-    }
-    prevMode.current = mode;
-  }, [mode, content, canEditText, node.id]);
-
-  useEffect(() => {
-    if (mode === "edit" && textQuery.isSuccess && !canEditText) onSetMode("preview");
-  }, [canEditText, mode, onSetMode, textQuery.isSuccess]);
-
-  const dirty = mode === "edit" && canEditText && draft !== content;
 
   function openEditorMenu(event: MouseEvent) {
     event.preventDefault();
@@ -93,63 +80,9 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
     showToast((await copyText(node.path)) ? "Path copied" : "Could not copy path");
   }
 
-  function saveDraft() {
-    saveMutation.mutate(false);
-  }
-
   function editText() {
     onSetMode("edit");
   }
-
-  function cancelEdit() {
-    if (dirty) {
-      setDraft(content);
-      showToast("Edit canceled");
-    }
-    setConflict(false);
-    setExternalUpdate(null);
-    onSetMode("preview");
-  }
-
-  async function reloadLatestText() {
-    const result = await textQuery.refetch();
-    const nextText = result.data?.text;
-    if (isPlainTextContent(nextText)) setDraft(nextText.content);
-    setExternalUpdate(null);
-    dismissedExternalSha.current = null;
-  }
-
-  useEffect(() => {
-    const latestSha = latestNode?.content_sha256;
-    if (!latestNode || !latestSha || !sha) return;
-
-    if (latestSha === sha) {
-      if (externalUpdate?.content_sha256 === latestSha) setExternalUpdate(null);
-      lastAutoReloadSha.current = null;
-      return;
-    }
-
-    if (dirty) {
-      if (dismissedExternalSha.current !== latestSha) setExternalUpdate(latestNode);
-      return;
-    }
-
-    if (lastAutoReloadSha.current === latestSha) return;
-    lastAutoReloadSha.current = latestSha;
-    void reloadLatestText();
-  }, [dirty, externalUpdate?.content_sha256, latestNode, sha]);
-
-  const saveMutation = useSaveTextDocument(
-    node,
-    draft,
-    sha,
-    () => {
-      setConflict(false);
-      onSetMode("preview");
-    },
-    () => setConflict(true)
-  );
-  const canSave = mode === "edit" && dirty && !saveMutation.isPending;
   const titleActions = mode === "preview" && structured && !encrypted ? (
     <>
       <IconButton label="Expand all" size="sm" onClick={() => setStructuredExpansionMode("expanded")} disabled={structuredMode !== "tree"}>
@@ -208,8 +141,8 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               <span>This node changed elsewhere since you opened it.</span>
               <div className="flex gap-2">
-                <Button size="sm" secondary onClick={() => { void reloadLatestText(); setConflict(false); }}>Reload</Button>
-                <Button size="sm" variant="danger" onClick={() => saveMutation.mutate(true)}>Overwrite</Button>
+                <Button size="sm" secondary onClick={reloadConflict}>Reload</Button>
+                <Button size="sm" variant="danger" onClick={overwriteDraft}>Overwrite</Button>
               </div>
             </div>
           ) : null}
@@ -217,8 +150,8 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               <span>This document changed outside this editor.</span>
               <div className="flex gap-2">
-                <Button size="sm" secondary onClick={() => { void reloadLatestText(); onSetMode("preview"); }}>Reload latest</Button>
-                <Button size="sm" secondary onClick={() => { dismissedExternalSha.current = externalUpdate.content_sha256 ?? null; setExternalUpdate(null); }}>Keep editing</Button>
+                <Button size="sm" secondary onClick={reloadExternalUpdate}>Reload latest</Button>
+                <Button size="sm" secondary onClick={dismissExternalUpdate}>Keep editing</Button>
               </div>
             </div>
           ) : null}
@@ -349,16 +282,6 @@ function EditorContextMenu({
       </Card>
     </>
   );
-}
-
-type TextContent = ReadTextResponse["text"];
-
-function isPlainTextContent(text: TextContent | undefined): text is Extract<TextContent, { storage_format: "plain" }> {
-  return !!text && text.storage_format === "plain" && "content" in text;
-}
-
-function isEncryptedTextContent(text: TextContent | undefined): text is Extract<TextContent, { storage_format: "encrypted" }> {
-  return !!text && text.storage_format === "encrypted" && "encrypted_payload" in text;
 }
 
 function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (value: string) => void }) {

@@ -7,6 +7,7 @@
 )]
 
 use axum::http::{StatusCode, header::RETRY_AFTER};
+use notegate_core::tier::effective_file_tree_limits;
 use notegate_db::{AgentRepo, test_support::TestDb};
 use notegate_model::{Caller, CallerIdentity, Channel, CreateAgent, ResolveAttrs};
 use serde_json::json;
@@ -33,6 +34,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     let state = state(&db);
     let (owner, space_id, root_id) = caller_and_space(&state).await?;
     let owner_id = owner.account_id();
+    let limits = effective_file_tree_limits(state.config.default_user_tier, state.config.limits);
 
     let (status, usage) = get_json(
         rest_app(state.clone(), owner.clone()),
@@ -44,9 +46,26 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
         usage["tier"],
         json!(state.config.default_user_tier.as_str())
     );
-    assert_eq!(usage["account"]["spaces"]["used"], json!(1));
+    assert!(usage.get("account").is_none());
     assert_eq!(usage["spaces"][0]["id"], json!(space_id));
-    assert_eq!(usage["spaces"][0]["nodes"]["used"], json!(1));
+    assert_eq!(usage["spaces"][0]["items"]["used"], json!(0));
+    assert_eq!(
+        usage["spaces"][0]["items"]["limit"],
+        json!(limits.space_max_nodes.saturating_sub(1))
+    );
+    assert_eq!(usage["spaces"][0]["text_bytes"]["used"], json!(0));
+    assert_eq!(
+        usage["spaces"][0]["text_bytes"]["limit"],
+        json!(limits.space_max_text_bytes)
+    );
+    assert_eq!(usage["spaces"][0]["file_bytes"]["used"], json!(0));
+    assert_eq!(
+        usage["spaces"][0]["file_bytes"]["limit"],
+        json!(limits.space_max_file_bytes)
+    );
+    assert!(usage["spaces"][0].get("content_bytes").is_none());
+    assert!(usage["spaces"][0].get("agent_connections").is_none());
+    assert_eq!(usage["spaces"][0]["reconciliation_pending"], json!(false));
 
     let (status, cooldown) = empty_request(
         rest_app(state.clone(), owner.clone()),
@@ -55,7 +74,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT, "{cooldown}");
-    assert_eq!(cooldown["kind"], json!("conflict"));
+    assert_eq!(cooldown["kind"], json!("usage_reconciliation_cooldown"));
 
     sqlx::query(
         "UPDATE space_usage \
@@ -88,7 +107,7 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
-    assert_eq!(duplicate["kind"], json!("conflict"));
+    assert_eq!(duplicate["kind"], json!("usage_reconciliation_pending"));
 
     let (stranger_account, stranger_user) = state
         .accounts

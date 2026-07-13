@@ -11,16 +11,16 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::Caller;
+use notegate_service::spaces::{CreateSpace, ListSpaces, UpdateSpace};
+use notegate_service::usage::UsageReconciliationOutcome;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::error::ApiError;
+use crate::error::{ApiError, ErrorResponse};
 use crate::page::Page;
 use crate::rest::dto::SpaceOut;
 use crate::state::AppState;
-
-use notegate_service::spaces::{CreateSpace, ListSpaces, UpdateSpace};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -192,7 +192,11 @@ pub(crate) async fn delete(
     path = "/api/v1/spaces/{space_id}/usage/reconcile",
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
-    responses((status = 202, description = "Queue usage reconciliation", body = ReconciliationQueuedResponse)),
+    responses(
+        (status = 202, description = "Queue usage reconciliation", body = ReconciliationQueuedResponse),
+        (status = 409, description = "Reconciliation is already pending or within its cooldown", body = ErrorResponse),
+        (status = 503, description = "Space usage is temporarily locked for maintenance", body = ErrorResponse),
+    ),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn request_usage_reconciliation(
@@ -200,12 +204,16 @@ pub(crate) async fn request_usage_reconciliation(
     Extension(caller): Extension<Caller>,
     Path(space_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ReconciliationQueuedResponse>), ApiError> {
-    state
+    let outcome = state
         .usage
         .request_space_reconciliation(caller.account.kind, caller.account_id(), space_id)
         .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(ReconciliationQueuedResponse { status: "queued" }),
-    ))
+    match outcome {
+        UsageReconciliationOutcome::Queued => Ok((
+            StatusCode::ACCEPTED,
+            Json(ReconciliationQueuedResponse { status: "queued" }),
+        )),
+        UsageReconciliationOutcome::AlreadyQueued => Err(ApiError::usage_reconciliation_pending()),
+        UsageReconciliationOutcome::Cooldown => Err(ApiError::usage_reconciliation_cooldown()),
+    }
 }

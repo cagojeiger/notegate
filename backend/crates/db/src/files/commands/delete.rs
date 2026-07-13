@@ -19,7 +19,8 @@ use crate::space_usage::{self, UsageDelta};
 #[derive(Debug, FromRow)]
 struct SubtreeUsage {
     nodes: i64,
-    content_bytes: i64,
+    text_bytes: i64,
+    file_bytes: i64,
 }
 
 /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
@@ -55,10 +56,11 @@ pub async fn soft_delete_node(
              COALESCE(( \
                  SELECT sum(t.byte_len) FROM text_objects t \
                  JOIN subtree s ON s.id = t.node_id WHERE t.space_id = $1 \
-             ), 0)::bigint + COALESCE(( \
+             ), 0)::bigint AS text_bytes, \
+             COALESCE(( \
                  SELECT sum(f.byte_len) FROM file_objects f \
                  JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1 \
-             ), 0)::bigint AS content_bytes",
+             ), 0)::bigint AS file_bytes",
     )
     .bind(space_id)
     .bind(node_id)
@@ -75,7 +77,11 @@ pub async fn soft_delete_node(
     space_usage::release_usage(
         &mut tx,
         &gate,
-        UsageDelta::new(-subtree_usage.nodes, -subtree_usage.content_bytes),
+        UsageDelta::subtree(
+            -subtree_usage.nodes,
+            -subtree_usage.text_bytes,
+            -subtree_usage.file_bytes,
+        ),
     )
     .await?;
 

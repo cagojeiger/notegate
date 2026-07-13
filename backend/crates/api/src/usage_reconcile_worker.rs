@@ -113,8 +113,10 @@ async fn execute_next(repo: &SpaceUsageRepo) -> bool {
                 counter_was_missing = previous.is_none(),
                 previous_nodes = previous.map(|counts| counts.live_node_count),
                 actual_nodes = actual.live_node_count,
-                previous_content_bytes = previous.map(|counts| counts.live_content_bytes),
-                actual_content_bytes = actual.live_content_bytes,
+                previous_text_bytes = previous.map(|counts| counts.live_text_bytes),
+                actual_text_bytes = actual.live_text_bytes,
+                previous_file_bytes = previous.map(|counts| counts.live_file_bytes),
+                actual_file_bytes = actual.live_file_bytes,
                 duration_ms = started.elapsed().as_millis(),
             );
             true
