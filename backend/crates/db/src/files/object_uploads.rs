@@ -94,6 +94,17 @@ pub async fn insert(
     row.into_pending()
 }
 
+pub async fn count_active(pool: &PgPool, requested_by: Uuid) -> Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM object_storage_objects \
+         WHERE requested_by_account_id = $1 AND state = 'uploading'",
+    )
+    .bind(requested_by)
+    .fetch_one(pool)
+    .await
+    .map_err(map_sqlx_error)
+}
+
 pub async fn find(
     pool: &PgPool,
     id: Uuid,

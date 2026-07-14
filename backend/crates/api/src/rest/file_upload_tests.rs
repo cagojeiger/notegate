@@ -244,6 +244,50 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
 }
 
 #[tokio::test]
+async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+
+    // Fill the per-account concurrent-upload allowance; quota is only charged at
+    // `/complete`, so this cap is what bounds unattached staging in object storage.
+    for index in 0..notegate_core::limits::OBJECT_UPLOAD_MAX_PENDING {
+        begin_upload(
+            &state,
+            &caller,
+            space_id,
+            root_id,
+            &format!("pending-{index}.bin"),
+            4,
+        )
+        .await?;
+    }
+
+    // The next begin is rejected before any object is staged.
+    let (status, body) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads"),
+        json!({
+            "parent_node_id": root_id,
+            "name": "over-cap.bin",
+            "byte_len": 4,
+            "media_type": "application/octet-stream"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn object_upload_rejects_a_size_mismatch() -> Result<(), Box<dyn std::error::Error>> {
     let Some(s3) = test_s3_config() else {
         return Ok(());

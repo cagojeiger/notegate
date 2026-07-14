@@ -93,6 +93,10 @@ pub async fn soft_delete_node(
             .await
             .map_err(map_sqlx_error)?;
 
+    // Queue physical S3 deletion at soft-delete time (not at `purge_after`):
+    // object bytes are removed immediately and are unlike inline Text/File rows,
+    // which survive the retention window. Object recovery is not a product
+    // contract — see `docs/spec/lifecycle.md` (Node 삭제).
     object_storage_repo::queue_subtree_object_deletions(&mut tx, space_id, node_id).await?;
 
     // Soft-delete the whole live subtree in one statement.

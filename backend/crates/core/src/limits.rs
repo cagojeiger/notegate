@@ -72,6 +72,10 @@ pub const SPACE_MAX_FILE_BYTES: usize = 1_073_741_824;
 pub const FILE_INLINE_PG_MAX_BYTES: usize = 262_144;
 /// Maximum bytes per uploaded file (100 MiB).
 pub const FILE_MAX_BYTES: usize = 104_857_600;
+/// Maximum concurrent in-flight object uploads (unfinished `uploading` rows)
+/// per account. Bounds how much a caller can stage in object storage before any
+/// quota is charged; stale rows are reclaimed by the cleanup worker.
+pub const OBJECT_UPLOAD_MAX_PENDING: usize = 16;
 
 // --- Node metadata limits ---
 

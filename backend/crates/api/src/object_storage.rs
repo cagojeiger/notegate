@@ -121,18 +121,19 @@ impl ObjectStorage {
         object_key: &str,
         filename: Option<&str>,
     ) -> Result<String, ObjectStorageError> {
-        let mut request = self
+        // Always force a download disposition: object media types are
+        // client-declared, so an inline render on the storage origin would let a
+        // caller serve `text/html` from a trusted bucket domain.
+        let disposition = match filename {
+            Some(filename) => format!("attachment; filename*=UTF-8''{}", rfc5987_encode(filename)),
+            None => "attachment".to_owned(),
+        };
+        let presigned = self
             .public
             .get_object()
             .bucket(&self.bucket)
-            .key(object_key);
-        if let Some(filename) = filename {
-            request = request.response_content_disposition(format!(
-                "attachment; filename*=UTF-8''{}",
-                rfc5987_encode(filename)
-            ));
-        }
-        let presigned = request
+            .key(object_key)
+            .response_content_disposition(disposition)
             .presigned(presigning_config()?)
             .await
             .map_err(|error| unavailable("presign_get", error))?;
