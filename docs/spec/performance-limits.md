@@ -96,9 +96,9 @@ Node/content-level limits
   node_metadata_string_max_chars = 2048
 ```
 
-`space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. File 저장소를 object storage로 확장해도 Text 한도를 바꾸지 않고 File 한도만 조정할 수 있다. Soft-deleted node의 bytes는 physical storage에는 남지만 live quota에는 포함하지 않는다.
+`space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Inline/S3 object File은 같은 File quota를 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. Inline bytes는 hard purge까지 PostgreSQL에 남고, S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
 
-현재 File 저장 구현은 `file_inline_pg_max_bytes` 이하만 지원한다. `file_max_bytes`는 File 하나의 제품 hard max이며, 현재 지원 크기를 의미하지 않는다.
+Inline upload는 `file_inline_pg_max_bytes`까지 지원한다. S3 호환 object upload는 single PUT으로 `file_max_bytes`까지 지원한다.
 
 Depth는 root 아래 segment 수로 계산한다.
 

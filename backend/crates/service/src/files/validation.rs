@@ -36,6 +36,8 @@ pub enum FilesValidationError {
         /// The configured maximum ([`limits::FILE_INLINE_PG_MAX_BYTES`]).
         max: usize,
     },
+    /// The object upload exceeds the product file-size cap.
+    ObjectFileBytesExceeded { max: usize },
     /// The text content exceeds the per-text byte cap.
     TextBytesExceeded {
         /// The configured maximum ([`limits::TEXT_MAX_BYTES`]).
@@ -63,6 +65,9 @@ impl FilesValidationError {
             Self::FileBytesExceeded { max } => ServiceError::InvalidInput(format!(
                 "file exceeds the maximum inline size of {max} bytes; object storage is not enabled"
             )),
+            Self::ObjectFileBytesExceeded { max } => {
+                ServiceError::InvalidInput(format!("file exceeds the maximum size of {max} bytes"))
+            }
             Self::TextBytesExceeded { max } => ServiceError::InvalidInput(format!(
                 "text exceeds the maximum of {max} bytes; split the text into smaller notes"
             )),
@@ -205,6 +210,15 @@ pub fn validate_file_bytes(byte_len: usize) -> Result<(), FilesValidationError> 
     Ok(())
 }
 
+pub fn validate_object_file_bytes(byte_len: i64) -> Result<(), FilesValidationError> {
+    if byte_len < 0 || byte_len > limits::FILE_MAX_BYTES as i64 {
+        return Err(FilesValidationError::ObjectFileBytesExceeded {
+            max: limits::FILE_MAX_BYTES,
+        });
+    }
+    Ok(())
+}
+
 pub fn validate_text_content(
     byte_len: usize,
     line_count: usize,
@@ -308,6 +322,14 @@ mod tests {
             validate_text_content(0, limits::TEXT_MAX_LINES + 1),
             Err(FilesValidationError::TextLinesExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn object_file_size_boundaries() {
+        assert!(validate_object_file_bytes(0).is_ok());
+        assert!(validate_object_file_bytes(limits::FILE_MAX_BYTES as i64).is_ok());
+        assert!(validate_object_file_bytes(-1).is_err());
+        assert!(validate_object_file_bytes(limits::FILE_MAX_BYTES as i64 + 1).is_err());
     }
 
     #[test]

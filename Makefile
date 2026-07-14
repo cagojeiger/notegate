@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build frontend-check release-check dev-db web-build up logs curl-meta
+.PHONY: fmt check test clippy build frontend-check release-check dev-db dev-infra web-build up logs curl-meta
 
 fmt:
 	cargo fmt --all --check
@@ -27,6 +27,10 @@ release-check: fmt check test clippy build frontend-check
 dev-db:
 	docker compose up -d postgres
 
+dev-infra:
+	docker compose up -d --wait postgres minio
+	docker compose run --rm --no-deps minio-init
+
 web-build:
 	docker compose build web
 
@@ -34,7 +38,7 @@ up:
 	docker compose up --build -d --remove-orphans
 
 logs:
-	docker compose logs -f web proxy
+	docker compose logs -f web proxy minio
 
 curl-meta:
 	curl -fsS http://localhost:9191/health

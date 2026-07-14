@@ -95,6 +95,7 @@ spaces.purge_after=now()+retention
 ```
 
 - 내부 nodes/text/file/connection은 즉시 hard delete하지 않는다.
+- Space에 연결된 S3 object File은 같은 transaction에서 `delete_pending`으로 전환하고 정리 worker가 물리 삭제를 재시도한다. Object 복구는 지원하지 않는다.
 - 연결 row는 즉시 disconnect하지 않는다. 삭제된 space는 live 조회와 권한 확인에서 제외되어 agent 접근이 차단된다.
 - `space_usage`는 purge까지 유지하지만 Usage 조회와 reconciliation 대상에서는 제외한다.
 - Live 조회는 deleted space를 제외한다.
@@ -140,11 +141,14 @@ text_objects
 nodes(kind='file')
 file_objects
 file_inline_contents
+object_storage_objects
 ```
 
 - File은 binary/object content다.
-- REST는 262144 bytes 이하 file upload/download를 제공한다.
-- 262144 bytes 초과 file은 제품 상한 안에 있어도 아직 저장하지 않는다.
+- REST inline upload는 262144 bytes 이하를 저장한다.
+- REST object upload는 Notegate가 발급한 S3 호환 presigned PUT URL로 bytes를 직접 전송하고, `HEAD` 크기 검증 뒤 최대 104857600 bytes를 File node에 연결한다.
+- Object download는 S3 호환 presigned GET URL로 redirect한다.
+- 완료되지 않은 upload와 soft-delete된 File의 물리 삭제는 `object_storage_objects` 원장과 정리 worker가 재시도한다.
 - MCP는 file content upload/download를 제공하지 않고 file node stat만 노출한다. Node metadata는 REST metadata API에서 다룬다.
 - File은 `read op=read`, `write op=patch/edit`, `search op=grep` 대상이 아니다.
 
@@ -159,6 +163,8 @@ nodes.purge_after=now()+retention
 ```
 
 Folder recursive delete는 subtree node를 같은 transaction에서 soft delete한다.
+
+삭제된 subtree의 S3 object File은 같은 transaction에서 `delete_pending`으로 전환한다. 정리 worker는 S3 삭제를 재시도하며 File object 복구는 지원하지 않는다. `purge_after`는 DB metadata의 hard purge 시점이며 S3 object 보존 기간이 아니다.
 
 Node/Text/File mutation은 같은 transaction에서 `space_usage` counter를 갱신한다. 생성, 내용 변경, 복사, 이동, soft delete별 증감 규칙은 `usage-and-quotas.md`를 따른다.
 

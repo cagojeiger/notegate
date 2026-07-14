@@ -18,8 +18,8 @@ use axum::extract::Extension;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
-use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
+use notegate_core::{Config, S3Config};
 use notegate_db::{AccountRepo, SpaceRepo, test_support::TestDb};
 use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
 use notegate_service::spaces::CreateSpace;
@@ -95,6 +95,7 @@ fn test_config() -> Arc<Config> {
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
         openapi_enabled: false,
         web_dist_dir: None,
+        s3: None,
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
         limits: notegate_core::limits::Limits::default(),
         secure_cookies: false,
@@ -102,7 +103,16 @@ fn test_config() -> Arc<Config> {
 }
 
 pub(super) fn state(db: &TestDb) -> crate::state::AppState {
-    let config = test_config();
+    state_from_config(db, test_config())
+}
+
+pub(super) fn state_with_s3(db: &TestDb, s3: S3Config) -> crate::state::AppState {
+    let mut config = (*test_config()).clone();
+    config.s3 = Some(s3);
+    state_from_config(db, Arc::new(config))
+}
+
+fn state_from_config(db: &TestDb, config: Arc<Config>) -> crate::state::AppState {
     let security = PiiCrypto::from_root_secrets(
         config.enc_root_key_id.clone(),
         &config.enc_root_secret,
@@ -168,6 +178,7 @@ pub(super) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router 
         .merge(crate::rest::spaces::routes())
         .merge(crate::rest::nodes::routes())
         .merge(crate::rest::text::routes())
+        .merge(crate::rest::file_uploads::routes())
         .merge(crate::rest::files::routes())
         .merge(crate::rest::connections::routes())
         .merge(crate::rest::agents::routes())

@@ -72,6 +72,9 @@ aliri_clock = "0.1.0"
 jsonwebtoken = "9"
 openidconnect = { version = "4.0.1", default-features = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls", "rt-tokio"] }
+aws-smithy-http-client = { version = "1", default-features = false, features = ["hyper-014"] }
+hyper-legacy = { package = "hyper", version = "0.14", features = ["client", "http1", "http2", "tcp"] }
 rand = "0.8"
 sha2 = "0.10"
 aes-gcm = "0.10"

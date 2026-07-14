@@ -63,7 +63,11 @@ impl NodeOut {
                 .text
                 .as_ref()
                 .map(|text| text.content_sha256.clone())
-                .or_else(|| view.file.as_ref().map(|file| file.content_sha256.clone())),
+                .or_else(|| {
+                    view.file
+                        .as_ref()
+                        .and_then(|file| file.content_sha256.clone())
+                }),
             byte_len: view
                 .text
                 .as_ref()

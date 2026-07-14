@@ -24,6 +24,19 @@ const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct S3Config {
+    pub endpoint: String,
+    pub public_endpoint: Option<String>,
+    pub region: String,
+    pub bucket: String,
+    pub access_key: String,
+    pub secret_key: SecretString,
+    #[serde(default = "default_true")]
+    pub force_path_style: bool,
+}
+
 /// Server + database configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,6 +99,9 @@ pub struct Config {
     /// Optional directory containing the built web dashboard. When set, unknown
     /// non-API routes fall back to this directory's `index.html`.
     pub web_dist_dir: Option<String>,
+    /// Optional S3-compatible object storage connection.
+    #[serde(default)]
+    pub s3: Option<S3Config>,
     /// Tier assigned to newly created users.
     #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
     pub default_user_tier: UserTier,
@@ -169,6 +185,30 @@ impl Validate for Config {
         if self.browser_session_ttl > self.browser_session_max_ttl {
             errors.add("browser_session_ttl", ValidationError::new("range"));
         }
+        if let Some(s3) = &self.s3 {
+            if validate_http_url_value(&s3.endpoint).is_err() {
+                errors.add("s3.endpoint", ValidationError::new("http_url"));
+            }
+            if s3
+                .public_endpoint
+                .as_deref()
+                .is_some_and(|value| validate_http_url_value(value).is_err())
+            {
+                errors.add("s3.public_endpoint", ValidationError::new("http_url"));
+            }
+            for (field, value) in [
+                ("s3.region", s3.region.as_str()),
+                ("s3.bucket", s3.bucket.as_str()),
+                ("s3.access_key", s3.access_key.as_str()),
+            ] {
+                if value.is_empty() {
+                    errors.add(field, ValidationError::new("length"));
+                }
+            }
+            if s3.secret_key.expose_secret().is_empty() {
+                errors.add("s3.secret_key", ValidationError::new("length"));
+            }
+        }
         validate_limits(&self.limits, &mut errors);
 
         if errors.is_empty() {
@@ -204,6 +244,12 @@ impl Config {
         } else {
             trim_trailing_slashes(&self.resource_url)
         };
+        if let Some(s3) = &mut self.s3 {
+            s3.endpoint = trim_trailing_slashes(&s3.endpoint);
+            if let Some(public_endpoint) = &mut s3.public_endpoint {
+                *public_endpoint = trim_trailing_slashes(public_endpoint);
+            }
+        }
         self.secure_cookies = secure_cookies_for_redirect(&self.oauth_redirect_url);
     }
 }
@@ -365,6 +411,10 @@ fn validate_key_id(value: &str) -> std::result::Result<(), ValidationError> {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn secure_cookies_for_redirect(oauth_redirect_url: &str) -> bool {
     oauth_redirect_url.starts_with("https://")
 }
@@ -439,6 +489,7 @@ mod tests {
             ),
             openapi_enabled: false,
             web_dist_dir: None,
+            s3: None,
             default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
             secure_cookies: false,
@@ -503,6 +554,13 @@ mod tests {
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
                 ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
+                ("NOTEGATE_S3__ENDPOINT", "https://s3.internal.env/"),
+                ("NOTEGATE_S3__PUBLIC_ENDPOINT", "https://s3.public.env/"),
+                ("NOTEGATE_S3__REGION", "us-east-1"),
+                ("NOTEGATE_S3__BUCKET", "notegate"),
+                ("NOTEGATE_S3__ACCESS_KEY", "notegate-access"),
+                ("NOTEGATE_S3__SECRET_KEY", "notegate-secret"),
+                ("NOTEGATE_S3__FORCE_PATH_STYLE", "true"),
                 ("PATH", "/bin"),
                 ("DATABASE_URL", "postgres://ignored"),
             ]),
@@ -519,6 +577,14 @@ mod tests {
         );
         assert_eq!(config.resource_url, "http://localhost:9191/mcp");
         assert_eq!(config.default_user_tier, UserTier::Tier0);
+        let s3 = config.s3.as_ref().expect("s3 config");
+        assert_eq!(s3.endpoint, "https://s3.internal.env");
+        assert_eq!(s3.public_endpoint.as_deref(), Some("https://s3.public.env"));
+        assert_eq!(s3.region, "us-east-1");
+        assert_eq!(s3.bucket, "notegate");
+        assert_eq!(s3.access_key, "notegate-access");
+        assert_eq!(s3.secret_key.expose_secret(), "notegate-secret");
+        assert!(s3.force_path_style);
         assert_eq!(
             config.jwks_cache_ttl.as_secs(),
             super::DEFAULT_JWKS_CACHE_TTL_SECS

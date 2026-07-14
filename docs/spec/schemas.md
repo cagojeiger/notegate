@@ -90,7 +90,7 @@ type RestNode = {
 }
 ```
 
-`byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `storage_kind="object"`는 schema와 DB에는 예약되어 있지만 현재 create path는 `inline_pg`만 생성한다.
+`byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `content_sha256`은 inline File에만 존재하며 S3 object에는 생략된다.
 
 ## REST node list/reveal envelopes
 
@@ -138,7 +138,7 @@ type McpNodeSummary = {
 }
 ```
 
-`storage_kind="object"`는 schema와 DB에는 예약되어 있지만 현재 create path는 `inline_pg`만 생성한다.
+MCP는 `inline_pg`와 `object` File의 metadata/stat을 같은 형태로 읽지만 File bytes는 전송하지 않는다.
 
 ## McpGrepSummary
 

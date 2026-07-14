@@ -43,6 +43,12 @@ jobs:
           --health-retries 10
     env:
       NOTEGATE_TEST_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+      NOTEGATE_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_TEST_S3_REGION: us-east-1
+      NOTEGATE_TEST_S3_BUCKET: notegate-test
+      NOTEGATE_TEST_S3_ACCESS_KEY: notegate-app
+      NOTEGATE_TEST_S3_SECRET_KEY: notegate-app-secret
 
     steps:
       - name: Checkout
@@ -50,6 +56,34 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Start MinIO
+        run: |
+          docker run --detach --name notegate-minio \
+            --publish 9000:9000 \
+            --env MINIO_ROOT_USER=minio-root \
+            --env MINIO_ROOT_PASSWORD=minio-root-secret \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              docker logs notegate-minio
+              exit 1
+            fi
+            sleep 1
+          done
+          docker run --rm --network host \
+            --env MINIO_ENDPOINT=http://127.0.0.1:9000 \
+            --env MINIO_ROOT_USER=minio-root \
+            --env MINIO_ROOT_PASSWORD=minio-root-secret \
+            --env NOTEGATE_S3_BUCKET=notegate-test \
+            --env NOTEGATE_S3_ACCESS_KEY=notegate-app \
+            --env NOTEGATE_S3_SECRET_KEY=notegate-app-secret \
+            --volume "$PWD/deploy/minio/init.sh:/config/init.sh:ro" \
+            --entrypoint /bin/sh \
+            minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
 
       - name: Check
         run: cargo check --workspace --all-targets

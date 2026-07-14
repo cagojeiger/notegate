@@ -20,7 +20,7 @@ notegate/
 ├─ deploy/
 │  ├─ docker/web.Dockerfile    # production-like image: FE build + BE binary
 │  └─ nginx/notegate.conf      # local reverse proxy for scaled web replicas
-└─ docker-compose.yml          # postgres + scaled web + proxy
+└─ docker-compose.yml          # postgres + MinIO + scaled web + proxy
 ```
 
 ## Local development
@@ -28,8 +28,8 @@ notegate/
 Development keeps the dashboard and API separate for fast feedback.
 
 ```sh
-# 1. Start Postgres
-make dev-db
+# 1. Start Postgres and MinIO
+make dev-infra
 
 # 2. Configure env
 cp .env.example .env
@@ -46,6 +46,8 @@ Default local URLs:
 - Dashboard dev server: `http://localhost:5173`
 - API/MCP server: `http://localhost:9191`
 - Postgres: `localhost:5433`
+- MinIO S3 API: `http://localhost:9000`
+- MinIO console: `http://localhost:9001`
 
 Health checks:
 
@@ -75,6 +77,13 @@ Services:
 - `proxy` -> public `http://localhost:9191`
 - `web` -> two FE+BE replicas inside the compose network
 - `postgres` -> local database on host port `5433`
+- `minio` -> local S3-compatible storage on host port `9000`
+- `minio-init` -> creates the local bucket and its least-privilege app account, then exits
+
+Compose configures browser access on MinIO with `MINIO_API_CORS_ALLOW_ORIGIN`.
+The MinIO root account is restricted to local initialization. The Notegate runtime
+uses a separate account limited to `GetObject`, `PutObject`, and `DeleteObject` on
+the configured bucket's `objects/*` prefix. It cannot create or list buckets.
 
 ## Auth/MCP settings
 
