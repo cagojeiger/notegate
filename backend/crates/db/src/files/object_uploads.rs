@@ -1,6 +1,6 @@
 //! Durable coordination between Notegate file nodes and S3-compatible objects.
 
-use notegate_core::limits::Limits;
+use notegate_core::limits::{self, Limits};
 use notegate_core::{Error, Result};
 use notegate_model::files::{BeginObjectUpload, PendingObjectUpload};
 use notegate_model::{FileEncryptionMode, FileObject, Node};
@@ -70,6 +70,32 @@ pub async fn insert(
     requested_by: Uuid,
     input: &BeginObjectUpload,
 ) -> Result<PendingObjectUpload> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    // Enforce the per-account in-flight upload cap atomically (mirrors
+    // `ApiKeyRepo::insert_key_with_cap`): lock the account row so concurrent
+    // begins serialize, then re-count `uploading` rows inside the tx. Quota is
+    // only charged at attach, so this cap is what bounds unattached staging.
+    sqlx::query("SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE")
+        .bind(requested_by)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM object_storage_objects \
+         WHERE requested_by_account_id = $1 AND state = 'uploading'",
+    )
+    .bind(requested_by)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    if pending as usize >= limits::OBJECT_UPLOAD_MAX_PENDING {
+        return Err(Error::conflict(format!(
+            "too many in-flight uploads; complete or wait for the {} pending uploads to expire",
+            limits::OBJECT_UPLOAD_MAX_PENDING
+        )));
+    }
+
     let row = sqlx::query_as::<_, ObjectUploadRow>(&format!(
         "INSERT INTO object_storage_objects \
          (id, object_key, space_id, parent_node_id, requested_by_account_id, name, \
@@ -88,21 +114,11 @@ pub async fn insert(
     .bind(&input.original_filename)
     .bind(input.encryption_mode.as_str())
     .bind(&input.encryption_metadata)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
     .map_err(map_constraint_error)?;
+    tx.commit().await.map_err(map_sqlx_error)?;
     row.into_pending()
-}
-
-pub async fn count_active(pool: &PgPool, requested_by: Uuid) -> Result<i64> {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM object_storage_objects \
-         WHERE requested_by_account_id = $1 AND state = 'uploading'",
-    )
-    .bind(requested_by)
-    .fetch_one(pool)
-    .await
-    .map_err(map_sqlx_error)
 }
 
 pub async fn find(

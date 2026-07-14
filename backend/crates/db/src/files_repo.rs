@@ -371,10 +371,6 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn count_active_object_uploads(&self, requested_by: Uuid) -> Result<i64> {
-        crate::files::object_uploads::count_active(&self.pool, requested_by).await
-    }
-
     pub async fn object_upload(
         &self,
         id: Uuid,

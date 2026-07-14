@@ -199,16 +199,6 @@ impl FilesService {
         {
             return Err(ServiceError::InvalidInput("invalid media_type".to_owned()));
         }
-        let pending = self
-            .store
-            .count_active_object_uploads(caller_account_id)
-            .await?;
-        if pending as usize >= limits::OBJECT_UPLOAD_MAX_PENDING {
-            return Err(ServiceError::Conflict(format!(
-                "too many in-flight uploads; complete or wait for the {} pending uploads to expire",
-                limits::OBJECT_UPLOAD_MAX_PENDING
-            )));
-        }
         self.prepare_create(space_id, command.parent_node_id, &command.name)
             .await?;
         Ok(())
