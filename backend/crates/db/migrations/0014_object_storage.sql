@@ -61,6 +61,10 @@ CREATE INDEX object_storage_objects_cleanup_idx
     ON object_storage_objects(state, retry_after, last_activity_at, id)
     WHERE state IN ('uploading','expire_pending','delete_pending');
 
+CREATE INDEX object_storage_objects_account_pending_idx
+    ON object_storage_objects(requested_by_account_id)
+    WHERE state IN ('uploading','expire_pending');
+
 ALTER TABLE file_objects
     ADD CONSTRAINT file_objects_object_key_fk
     FOREIGN KEY (object_key)

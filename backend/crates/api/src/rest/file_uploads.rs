@@ -141,15 +141,11 @@ pub(crate) async fn complete(
     Extension(caller): Extension<Caller>,
     Path((space_id, upload_id)): Path<(Uuid, Uuid)>,
 ) -> Result<(StatusCode, Json<FileResponse>), ApiError> {
-    let mut upload = state
+    let upload = state
         .files
-        .object_upload(caller.account_id(), space_id, upload_id)
+        .touch_object_upload(caller.account_id(), space_id, upload_id)
         .await?;
     if upload.node_id.is_none() {
-        upload = state
-            .files
-            .touch_object_upload(caller.account_id(), space_id, upload_id)
-            .await?;
         let storage = state
             .object_storage
             .as_ref()

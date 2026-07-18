@@ -241,11 +241,22 @@ impl FilesService {
         let upload = self
             .object_upload(caller_account_id, space_id, upload_id)
             .await?;
+        if upload.node_id.is_some() {
+            return Ok(upload);
+        }
         if !self
             .store
             .touch_object_upload(upload_id, space_id, caller_account_id)
             .await?
         {
+            if let Some(attached) = self
+                .store
+                .object_upload(upload_id, space_id, caller_account_id)
+                .await?
+                && attached.node_id.is_some()
+            {
+                return Ok(attached);
+            }
             return Err(ServiceError::Conflict(
                 "file upload is no longer active".to_owned(),
             ));

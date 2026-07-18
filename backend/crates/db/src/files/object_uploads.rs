@@ -83,7 +83,8 @@ pub async fn insert(
         .map_err(map_sqlx_error)?;
     let pending: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM object_storage_objects \
-         WHERE requested_by_account_id = $1 AND state = 'uploading'",
+         WHERE requested_by_account_id = $1 \
+           AND state IN ('uploading','expire_pending')",
     )
     .bind(requested_by)
     .fetch_one(&mut *tx)

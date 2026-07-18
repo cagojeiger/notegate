@@ -288,6 +288,54 @@ async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::err
 }
 
 #[tokio::test]
+async fn begin_counts_expiry_pending_uploads_toward_the_cap()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3.clone());
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let expiring = begin_upload(&state, &caller, space_id, root_id, "expiring.bin", 4).await?;
+    mark_upload_stale(&db, expiring.id).await?;
+
+    let unavailable_state = state_with_s3(&db, unavailable_internal_storage(s3));
+    run_cleanup(&db, &unavailable_state).await;
+    assert_eq!(object_state(&db, expiring.id).await?, "expire_pending");
+
+    for index in 1..notegate_core::limits::OBJECT_UPLOAD_MAX_PENDING {
+        begin_upload(
+            &state,
+            &caller,
+            space_id,
+            root_id,
+            &format!("pending-with-expiry-{index}.bin"),
+            4,
+        )
+        .await?;
+    }
+
+    let (status, body) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads"),
+        json!({
+            "parent_node_id": root_id,
+            "name": "over-cap-with-expiry.bin",
+            "byte_len": 4,
+            "media_type": "application/octet-stream"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn object_upload_rejects_a_size_mismatch() -> Result<(), Box<dyn std::error::Error>> {
     let Some(s3) = test_s3_config() else {
         return Ok(());
