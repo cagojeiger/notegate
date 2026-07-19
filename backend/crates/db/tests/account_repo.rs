@@ -5,6 +5,7 @@ use notegate_core::security::PiiCrypto;
 use notegate_core::tier::UserTier;
 use notegate_db::AccountRepo;
 use notegate_model::ResolveAttrs;
+use uuid::Uuid;
 
 fn attrs(sub: &str, email: &str, name: &str) -> ResolveAttrs {
     ResolveAttrs {
@@ -60,6 +61,26 @@ async fn upsert_user_uses_configured_default_tier() -> Result<(), Box<dyn std::e
         .await?;
 
     assert_eq!(user.tier, "tier0");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn users_table_defaults_to_tier0() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let account_id: Uuid =
+        sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('user') RETURNING id")
+            .fetch_one(&db.pool)
+            .await?;
+    let tier: String = sqlx::query_scalar("INSERT INTO users (id) VALUES ($1) RETURNING tier")
+        .bind(account_id)
+        .fetch_one(&db.pool)
+        .await?;
+
+    assert_eq!(tier, "tier0");
 
     db.cleanup().await;
     Ok(())

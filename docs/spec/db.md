@@ -79,7 +79,7 @@ users
   email_hash text null
   email_hash_key_id text null
   email_hash_version int null
-  tier text not null default 'system_max'
+  tier text not null default 'tier0'
   anonymized_at timestamptz null
 ```
 
@@ -102,7 +102,7 @@ accounts.deleted_*: deleted_at과 deleted_by_account_id는 모두 NULL이거나 
 users.provider_sub_hash_*: provider_sub hash 필드는 모두 NULL이거나 모두 non-NULL
 users.email_enc_*: email 암호화 필드는 모두 NULL이거나 모두 non-NULL
 users.email_hash_*: email lookup hash 필드는 모두 NULL이거나 모두 non-NULL
-users.tier: 'tier0' 또는 'system_max'. Application은 신규 user 생성 시 `NOTEGATE_DEFAULT_USER_TIER` 값을 명시적으로 저장한다. DB default 'system_max'는 직접 SQL 삽입을 위한 fallback이다.
+users.tier: 'tier0' 또는 'system_max'. Application은 신규 user 생성 시 `NOTEGATE_DEFAULT_USER_TIER` 값을 명시적으로 저장한다. DB default `tier0`는 직접 SQL 삽입을 위한 fallback이다.
 ```
 
 ## Credential table

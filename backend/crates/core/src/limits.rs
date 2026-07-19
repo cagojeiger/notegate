@@ -66,8 +66,8 @@ pub const MAX_PATH_DEPTH: usize = 7;
 pub const SPACE_MAX_NODES: usize = 25_000;
 /// Maximum total live Text bytes per space (1 GiB).
 pub const SPACE_MAX_TEXT_BYTES: usize = 1_073_741_824;
-/// Maximum total live File bytes per space (1 GiB).
-pub const SPACE_MAX_FILE_BYTES: usize = 1_073_741_824;
+/// Maximum total live File bytes per space (100 GiB).
+pub const SPACE_MAX_FILE_BYTES: usize = 107_374_182_400;
 /// Maximum bytes per uploaded file (100 MiB).
 pub const FILE_MAX_BYTES: usize = 104_857_600;
 /// Maximum unfinished object uploads per account. Both active uploads and
