@@ -106,7 +106,7 @@ pub(crate) async fn begin(
         )
         .await?;
     let transfer = storage
-        .presign_put(&object_key, &command.media_type)
+        .presign_put(&object_key, &command.media_type, command.byte_len)
         .await?;
 
     tracing::info!(
@@ -143,7 +143,7 @@ pub(crate) async fn complete(
 ) -> Result<(StatusCode, Json<FileResponse>), ApiError> {
     let upload = state
         .files
-        .touch_object_upload(caller.account_id(), space_id, upload_id)
+        .object_upload(caller.account_id(), space_id, upload_id)
         .await?;
     if upload.node_id.is_none() {
         let storage = state
@@ -159,6 +159,10 @@ pub(crate) async fn complete(
             %space_id,
             %etag,
         );
+        state
+            .files
+            .touch_object_upload(caller.account_id(), space_id, upload_id)
+            .await?;
     }
 
     let view = state

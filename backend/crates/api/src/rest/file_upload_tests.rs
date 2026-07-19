@@ -198,6 +198,17 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
     )
     .await?;
     assert_eq!(upload.headers.get("if-none-match"), Some(&"*".to_owned()));
+    assert!(!upload.headers.contains_key("content-length"));
+    let signed_headers = url::Url::parse(&upload.url)?
+        .query_pairs()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-amz-signedheaders"))
+        .map(|(_, value)| value.into_owned())
+        .ok_or("missing signed headers")?;
+    assert!(
+        signed_headers
+            .split(';')
+            .any(|name| name.eq_ignore_ascii_case("content-length"))
+    );
 
     let put = put_upload(&upload, payload).await?;
     assert!(put.status().is_success(), "PUT failed: {}", put.status());
@@ -336,7 +347,7 @@ async fn begin_counts_expiry_pending_uploads_toward_the_cap()
 }
 
 #[tokio::test]
-async fn object_upload_rejects_a_size_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+async fn presigned_put_rejects_a_size_mismatch() -> Result<(), Box<dyn std::error::Error>> {
     let Some(s3) = test_s3_config() else {
         return Ok(());
     };
@@ -346,11 +357,11 @@ async fn object_upload_rejects_a_size_mismatch() -> Result<(), Box<dyn std::erro
     let state = state_with_s3(&db, s3);
     let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "wrong-size.bin", 4).await?;
-    put_upload(&upload, b"bad").await?.error_for_status()?;
-
-    let (status, body) = complete_upload(&state, &caller, space_id, upload.id).await?;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["kind"], "invalid_input");
+    let put = put_upload(&upload, b"bad").await?;
+    assert!(
+        !put.status().is_success(),
+        "mismatched PUT unexpectedly succeeded"
+    );
 
     mark_upload_stale(&db, upload.id).await?;
     run_cleanup(&db, &state).await;
@@ -374,12 +385,12 @@ async fn object_upload_rejects_completion_before_put() -> Result<(), Box<dyn std
     let state = state_with_s3(&db, s3);
     let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let upload = begin_upload(&state, &caller, space_id, root_id, "missing.bin", 4).await?;
+    mark_upload_stale(&db, upload.id).await?;
 
     let (status, body) = complete_upload(&state, &caller, space_id, upload.id).await?;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["kind"], "conflict");
 
-    mark_upload_stale(&db, upload.id).await?;
     run_cleanup(&db, &state).await;
     assert_eq!(object_state(&db, upload.id).await?, "expired");
     assert_eq!(

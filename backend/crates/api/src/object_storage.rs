@@ -63,6 +63,7 @@ impl ObjectStorage {
         &self,
         object_key: &str,
         content_type: &str,
+        content_length: i64,
     ) -> Result<PresignedPut, ObjectStorageError> {
         let presigned = self
             .public
@@ -70,6 +71,7 @@ impl ObjectStorage {
             .bucket(&self.bucket)
             .key(object_key)
             .content_type(content_type)
+            .content_length(content_length)
             .if_none_match("*")
             .presigned(presigning_config()?)
             .await
@@ -78,6 +80,10 @@ impl ObjectStorage {
             url: presigned.uri().to_owned(),
             headers: presigned
                 .headers()
+                // Browsers generate Content-Length from the request body and
+                // forbid JavaScript from setting it. It remains part of the
+                // signature, but is not returned as a caller-supplied header.
+                .filter(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
                 .map(|(name, value)| (name.to_owned(), value.to_owned()))
                 .collect(),
         })
