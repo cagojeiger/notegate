@@ -19,7 +19,6 @@ export function FileDetailView({ node }: { node: RestNode }) {
         <dl className="space-y-3">
           <MetaRow label="Media type" value={node.media_type ?? "unknown"} />
           <MetaRow label="Bytes" value={node.byte_len ?? 0} />
-          <MetaRow label="SHA-256" value={node.content_sha256} />
         </dl>
       </Card>
       <Button className="mt-8" onClick={handleDownload}><Download size={16} /> Download</Button>

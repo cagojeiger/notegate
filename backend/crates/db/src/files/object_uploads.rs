@@ -234,9 +234,9 @@ pub async fn attach(
 
     let file = sqlx::query_as::<_, FileRow>(&format!(
         "INSERT INTO file_objects \
-         (node_id, space_id, storage_kind, object_key, media_type, byte_len, \
-          content_sha256, original_filename, encryption_mode, encryption_metadata) \
-         VALUES ($1, $2, 'object', $3, $4, $5, NULL, $6, $7, $8) \
+         (node_id, space_id, object_key, media_type, byte_len, original_filename, \
+          encryption_mode, encryption_metadata) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          RETURNING {FILE_COLUMNS}"
     ))
     .bind(node.id)

@@ -68,8 +68,6 @@ pub const SPACE_MAX_NODES: usize = 25_000;
 pub const SPACE_MAX_TEXT_BYTES: usize = 1_073_741_824;
 /// Maximum total live File bytes per space (1 GiB).
 pub const SPACE_MAX_FILE_BYTES: usize = 1_073_741_824;
-/// Maximum file bytes stored inline in PostgreSQL (256 KiB).
-pub const FILE_INLINE_PG_MAX_BYTES: usize = 262_144;
 /// Maximum bytes per uploaded file (100 MiB).
 pub const FILE_MAX_BYTES: usize = 104_857_600;
 /// Maximum unfinished object uploads per account. Both active uploads and

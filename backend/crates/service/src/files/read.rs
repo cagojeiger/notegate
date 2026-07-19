@@ -6,9 +6,9 @@ use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
-    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, FileContent, ListNodesRequest,
-    NodeListCursor, NodeListPage, NodeListSort, NodeReveal, NodeView, ReadContent, ReadResult,
-    ReadText, ReadTextBody,
+    ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, ListNodesRequest, NodeListCursor,
+    NodeListPage, NodeListSort, NodeReveal, NodeView, ReadContent, ReadResult, ReadText,
+    ReadTextBody,
 };
 use crate::pagination;
 
@@ -235,28 +235,6 @@ impl FilesService {
             })
             .collect::<ServiceResult<Vec<_>>>()?;
         super::view::hydrate_node_views(&self.store, space_id, rows).await
-    }
-
-    /// Read an inline file's stored bytes. Requires read permission.
-    pub async fn read_file(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> ServiceResult<FileContent> {
-        self.authorize(space_id, caller_account_id, FileCommand::Read)
-            .await?;
-        let (node, file, bytes) = self
-            .store
-            .read_inline_file(space_id, node_id)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("file not found".to_owned()))?;
-        let view = self.file_node_view(space_id, node, &file).await?;
-        Ok(FileContent {
-            node: view,
-            file,
-            bytes,
-        })
     }
 
     /// Resolve file metadata for a download without reading object bytes.

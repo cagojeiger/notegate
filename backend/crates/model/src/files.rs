@@ -5,9 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{
-    FileEncryptionMode, FileObject, FileStorageKind, Node, NodeKind, TextObject, TextStorageFormat,
-};
+use crate::{FileEncryptionMode, FileObject, Node, NodeKind, TextObject, TextStorageFormat};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
@@ -56,17 +54,6 @@ pub struct CreateFolder {
 pub struct CreateText {
     pub parent_node_id: Uuid,
     pub name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateFile {
-    pub parent_node_id: Uuid,
-    pub name: String,
-    pub bytes: Vec<u8>,
-    pub media_type: String,
-    pub original_filename: Option<String>,
-    pub encryption_mode: FileEncryptionMode,
-    pub encryption_metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,17 +190,6 @@ pub struct StoredContent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredFile {
-    pub bytes: Vec<u8>,
-    pub content_sha256: String,
-    pub byte_len: i64,
-    pub media_type: String,
-    pub original_filename: Option<String>,
-    pub encryption_mode: FileEncryptionMode,
-    pub encryption_metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BeginObjectUpload {
     pub parent_node_id: Uuid,
     pub name: String,
@@ -249,10 +225,8 @@ pub struct TextStats {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileStats {
-    pub storage_kind: FileStorageKind,
     pub media_type: String,
     pub byte_len: i64,
-    pub content_sha256: Option<String>,
     pub original_filename: Option<String>,
     pub encryption_mode: FileEncryptionMode,
     pub encryption_metadata: Option<Value>,
@@ -277,13 +251,6 @@ pub struct TextView {
 pub struct FileView {
     pub node: NodeView,
     pub file: FileObject,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileContent {
-    pub node: NodeView,
-    pub file: FileObject,
-    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

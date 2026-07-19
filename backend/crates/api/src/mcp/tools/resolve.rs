@@ -278,10 +278,8 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
     if let Some(file) = &view.file
         && let Some(object) = value.as_object_mut()
     {
-        object.insert("content_sha256".to_owned(), json!(file.content_sha256));
         object.insert("byte_len".to_owned(), json!(file.byte_len));
         object.insert("media_type".to_owned(), json!(file.media_type));
-        object.insert("storage_kind".to_owned(), json!(file.storage_kind.as_str()));
         object.insert(
             "encryption_mode".to_owned(),
             json!(file.encryption_mode.as_str()),
@@ -361,7 +359,7 @@ mod tests {
             browser_session_max_ttl: Duration::from_secs(30 * 86_400),
             openapi_enabled: false,
             web_dist_dir: None,
-            s3: None,
+            s3: crate::state::test_s3_config(),
             default_user_tier: notegate_core::tier::UserTier::DEFAULT,
             limits: notegate_core::limits::Limits::default(),
             secure_cookies: false,

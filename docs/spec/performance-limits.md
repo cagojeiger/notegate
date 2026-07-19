@@ -88,7 +88,6 @@ Node/content-level limits
   node_name_max_chars = 128
   text_max_bytes = 1048576               # 1 MiB per text object
   text_max_lines = 5000                  # lines per text object
-  file_inline_pg_max_bytes = 262144      # 현재 inline_pg로 저장 가능한 file bytes 상한
   file_max_bytes = 104857600             # 100 MiB per file product hard max
   node_metadata_max_bytes = 16384        # 16 KiB per node metadata object
   node_metadata_max_depth = 4
@@ -96,9 +95,9 @@ Node/content-level limits
   node_metadata_string_max_chars = 2048
 ```
 
-`space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Inline/S3 object File은 같은 File quota를 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. Inline bytes는 hard purge까지 PostgreSQL에 남고, S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
+`space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
 
-Inline upload는 `file_inline_pg_max_bytes`까지 지원한다. S3 호환 object upload는 single PUT으로 `file_max_bytes`까지 지원한다.
+S3 호환 object upload는 single PUT으로 `file_max_bytes`까지 지원한다.
 
 Depth는 root 아래 segment 수로 계산한다.
 
@@ -142,8 +141,6 @@ Node/content-level
     400 invalid_input "text exceeds the maximum of {max} lines; split the text into smaller notes"
   file bytes exceeded:
     400 invalid_input "file exceeds the maximum of {max} bytes"
-  inline file unsupported:
-    400 invalid_input "file exceeds the maximum inline size of {max} bytes; object storage is not enabled"
   metadata bytes/depth/key/string exceeded:
     400 invalid_input with the exceeded metadata limit
 ```

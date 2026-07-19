@@ -45,7 +45,7 @@ pub struct AppState {
     pub oidc: Arc<OidcProvider>,
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
-    pub object_storage: Option<ObjectStorage>,
+    pub object_storage: ObjectStorage,
     pub security: PiiCrypto,
     pub spaces: Spaces,
     pub account_lifecycle: Accounts,
@@ -70,7 +70,7 @@ impl AppState {
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
     ) -> Self {
-        let object_storage = config.s3.as_ref().map(ObjectStorage::new);
+        let object_storage = ObjectStorage::new(&config.s3);
         let spaces = SpaceService::new(SpaceRepo::new(db.clone()));
         let api_key_repo = ApiKeyRepo::with_lookup_key(
             db.clone(),
@@ -120,5 +120,18 @@ impl AppState {
             accounts: account_repo,
             browser_sessions,
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_s3_config() -> notegate_core::S3Config {
+    notegate_core::S3Config {
+        endpoint: "http://localhost:9000".to_owned(),
+        public_endpoint: None,
+        region: "us-east-1".to_owned(),
+        bucket: "notegate".to_owned(),
+        access_key: "notegate-test".to_owned(),
+        secret_key: secrecy::SecretString::from("notegate-test-secret".to_owned()),
+        force_path_style: true,
     }
 }

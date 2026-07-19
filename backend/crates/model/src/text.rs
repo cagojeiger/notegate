@@ -23,22 +23,6 @@ impl TextStorageFormat {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum FileStorageKind {
-    InlinePg,
-    Object,
-}
-
-impl FileStorageKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::InlinePg => "inline_pg",
-            Self::Object => "object",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum FileEncryptionMode {
     None,
     Client,
@@ -85,11 +69,9 @@ pub struct TextObject {
 pub struct FileObject {
     pub node_id: Uuid,
     pub space_id: Uuid,
-    pub storage_kind: FileStorageKind,
-    pub object_key: Option<String>,
+    pub object_key: String,
     pub media_type: String,
     pub byte_len: i64,
-    pub content_sha256: Option<String>,
     pub original_filename: Option<String>,
     pub encryption_mode: FileEncryptionMode,
     pub encryption_metadata: Option<Value>,

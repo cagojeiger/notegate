@@ -22,8 +22,8 @@ use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::{FileEncryptionMode, NodeKind};
 use notegate_service::files::{
-    AppendText, ChildrenCursor, CopyNode, CreateFile, CreateFolder, CreateText, DeleteNode, Edit,
-    EditText, FilesService, LineEdit, ListFileChangeEvents, ListNodesRequest, MoveNode,
+    AppendText, BeginObjectUpload, ChildrenCursor, CopyNode, CreateFolder, CreateText, DeleteNode,
+    Edit, EditText, FilesService, LineEdit, ListFileChangeEvents, ListNodesRequest, MoveNode,
     NodeListSort, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
     WriteTextBody,
 };
@@ -413,32 +413,85 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         .expect_err("encrypted text patch must fail");
     assert!(patch_err.to_string().contains("plaintext"));
 
-    // --- file: upload small inline bytes and read them back ---
-    let uploaded = files
-        .create_file(
+    // --- copy: text-only subtrees preserve metadata and encrypted text ---
+    let copied = files
+        .copy_node(
             owner,
             ws,
-            CreateFile {
-                parent_node_id: projects_id,
-                name: "diagram.bin".to_owned(),
-                bytes: b"binary-data".to_vec(),
-                media_type: "application/octet-stream".to_owned(),
-                original_filename: Some("diagram.bin".to_owned()),
-                encryption_mode: FileEncryptionMode::None,
-                encryption_metadata: None,
+            CopyNode {
+                node_id: projects_id,
+                new_parent_node_id: root,
+                new_name: "projects-copy".to_owned(),
+                recursive: true,
             },
         )
         .await?;
+    assert_eq!(copied.node.path, "/projects-copy");
+    assert_eq!(copied.counts.nodes, 3);
+    assert_eq!(copied.counts.texts, 2);
+    assert_eq!(copied.counts.files, 0);
+    assert_eq!(copied.node.node.metadata["title"], "Project notes");
+
+    let copied_secret = files
+        .resolve_path(owner, ws, "/projects-copy/secret.md")
+        .await?;
+    let copied_secret_read = files
+        .read_text(
+            owner,
+            ws,
+            ReadText {
+                node_id: copied_secret.node.id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    match copied_secret_read.body {
+        ReadTextBody::Encrypted(payload) => assert_eq!(payload["alg"], "AES-256-GCM"),
+        other => panic!("expected copied encrypted body, got {other:?}"),
+    }
+
+    let non_recursive_copy = files
+        .copy_node(
+            owner,
+            ws,
+            CopyNode {
+                node_id: projects_id,
+                new_parent_node_id: root,
+                new_name: "projects-copy-2".to_owned(),
+                recursive: false,
+            },
+        )
+        .await
+        .expect_err("folder copy must require recursive=true");
+    assert!(non_recursive_copy.to_string().contains("recursive=true"));
+
+    // --- file: attach object metadata after a direct-to-storage upload ---
+    let upload_id = Uuid::new_v4();
+    let upload = BeginObjectUpload {
+        parent_node_id: projects_id,
+        name: "diagram.bin".to_owned(),
+        byte_len: 11,
+        media_type: "application/octet-stream".to_owned(),
+        original_filename: Some("diagram.bin".to_owned()),
+        encryption_mode: FileEncryptionMode::None,
+        encryption_metadata: None,
+    };
+    files.prepare_object_upload(owner, ws, &upload).await?;
+    files
+        .record_object_upload(
+            upload_id,
+            &format!("objects/{upload_id}"),
+            owner,
+            ws,
+            &upload,
+        )
+        .await?;
+    let uploaded = files.complete_object_upload(owner, ws, upload_id).await?;
     assert_eq!(uploaded.node.path, "/projects/diagram.bin");
     assert_eq!(uploaded.file.byte_len, 11);
-    assert_eq!(
-        uploaded.node.file.as_ref().expect("file stats").byte_len,
-        11
-    );
-
-    let downloaded = files.read_file(owner, ws, uploaded.node.node.id).await?;
-    assert_eq!(downloaded.bytes, b"binary-data");
-    assert_eq!(downloaded.file.content_sha256, uploaded.file.content_sha256);
 
     let page = files
         .children(
@@ -465,70 +518,20 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         "application/octet-stream"
     );
 
-    // --- copy: server-side semantic copy preserves metadata, encrypted text, and file stats ---
-    let copied = files
+    let object_copy = files
         .copy_node(
             owner,
             ws,
             CopyNode {
                 node_id: projects_id,
                 new_parent_node_id: root,
-                new_name: "projects-copy".to_owned(),
+                new_name: "projects-with-file-copy".to_owned(),
                 recursive: true,
             },
         )
-        .await?;
-    assert_eq!(copied.node.path, "/projects-copy");
-    assert_eq!(copied.counts.nodes, 4);
-    assert_eq!(copied.counts.texts, 2);
-    assert_eq!(copied.counts.files, 1);
-    assert_eq!(copied.node.node.metadata["title"], "Project notes");
-
-    let copied_secret = files
-        .resolve_path(owner, ws, "/projects-copy/secret.md")
-        .await?;
-    let copied_secret_read = files
-        .read_text(
-            owner,
-            ws,
-            ReadText {
-                node_id: copied_secret.node.id,
-                start_line: None,
-                max_lines: None,
-                max_bytes: None,
-                if_none_match_sha256: None,
-            },
-        )
-        .await?;
-    match copied_secret_read.body {
-        ReadTextBody::Encrypted(payload) => assert_eq!(payload["alg"], "AES-256-GCM"),
-        other => panic!("expected copied encrypted body, got {other:?}"),
-    }
-
-    let copied_file = files
-        .resolve_path(owner, ws, "/projects-copy/diagram.bin")
-        .await?;
-    let copied_downloaded = files.read_file(owner, ws, copied_file.node.id).await?;
-    assert_eq!(copied_downloaded.bytes, b"binary-data");
-    assert_eq!(
-        copied_downloaded.file.content_sha256,
-        uploaded.file.content_sha256
-    );
-
-    let non_recursive_copy = files
-        .copy_node(
-            owner,
-            ws,
-            CopyNode {
-                node_id: projects_id,
-                new_parent_node_id: root,
-                new_name: "projects-copy-2".to_owned(),
-                recursive: false,
-            },
-        )
         .await
-        .expect_err("folder copy must require recursive=true");
-    assert!(non_recursive_copy.to_string().contains("recursive=true"));
+        .expect_err("object-backed files are not copied implicitly");
+    assert!(object_copy.to_string().contains("file nodes"));
 
     // --- patch: exact-match replacement ---
     let patched = files

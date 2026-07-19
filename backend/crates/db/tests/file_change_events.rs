@@ -9,13 +9,10 @@
 )]
 mod common;
 
-use common::{TestDb, space_with_root};
+use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
-use notegate_model::FileEncryptionMode;
-use notegate_model::files::{
-    CopyNode, CreateFolder, MoveNode, StoredContent, StoredFile, WriteTextBody,
-};
+use notegate_model::files::{CopyNode, CreateFolder, MoveNode, StoredContent, WriteTextBody};
 use serde_json::json;
 
 fn text(content: &str) -> StoredContent {
@@ -24,18 +21,6 @@ fn text(content: &str) -> StoredContent {
         content_sha256: "0".repeat(64),
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
-    }
-}
-
-fn file(bytes: &[u8]) -> StoredFile {
-    StoredFile {
-        bytes: bytes.to_vec(),
-        content_sha256: "1".repeat(64),
-        byte_len: bytes.len() as i64,
-        media_type: "text/plain".to_owned(),
-        original_filename: Some("asset.txt".to_owned()),
-        encryption_mode: FileEncryptionMode::None,
-        encryption_metadata: None,
     }
 }
 
@@ -69,9 +54,7 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     let (node, _) = repo
         .insert_text(space_id, root_id, "note.md", &text("hello"), account)
         .await?;
-    let (file_node, _) = repo
-        .insert_file(space_id, root_id, "asset.txt", &file(b"asset"), account)
-        .await?;
+    let (file_node, _) = attach_file(&repo, space_id, root_id, "asset.txt", 5, account).await?;
     let (_, written_text) = repo
         .save_text_content(
             space_id,

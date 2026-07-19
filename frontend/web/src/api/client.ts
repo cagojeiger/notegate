@@ -6,14 +6,12 @@ export type ApiClient = {
   put<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
-  upload<T>(path: string, body: FormData): Promise<T>;
   download(path: string): Promise<Blob>;
 };
 
 type RequestOptions = {
   method: string;
   body?: unknown;
-  formData?: FormData;
 };
 
 export function createApiClient(getApiKey: () => string | null): ApiClient {
@@ -27,7 +25,7 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
       method: options.method,
       headers,
       credentials: "same-origin",
-      body: options.formData ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined)
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined
     });
 
     if (!response.ok) {
@@ -47,7 +45,6 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
     delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-    upload: <T>(path: string, body: FormData) => request<T>(path, { method: "POST", formData: body }),
     async download(path: string) {
       const apiKey = getApiKey();
       const headers = new Headers();

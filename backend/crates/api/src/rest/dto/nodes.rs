@@ -29,8 +29,6 @@ pub struct NodeOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub storage_kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_filename: Option<String>,
@@ -59,25 +57,13 @@ impl NodeOut {
             sort_order: node.sort_order,
             metadata: node.metadata.clone(),
             has_children: view.has_children,
-            content_sha256: view
-                .text
-                .as_ref()
-                .map(|text| text.content_sha256.clone())
-                .or_else(|| {
-                    view.file
-                        .as_ref()
-                        .and_then(|file| file.content_sha256.clone())
-                }),
+            content_sha256: view.text.as_ref().map(|text| text.content_sha256.clone()),
             byte_len: view
                 .text
                 .as_ref()
                 .map(|text| text.byte_len)
                 .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
             line_count: view.text.as_ref().map(|text| text.line_count),
-            storage_kind: view
-                .file
-                .as_ref()
-                .map(|file| file.storage_kind.as_str().to_owned()),
             media_type: view.file.as_ref().map(|file| file.media_type.clone()),
             original_filename: view
                 .file

@@ -9,8 +9,8 @@ use crate::files::format::validate_structured_text;
 use crate::files::patch::{AppliedText, apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
-    AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFile, CreateFolder, CreateText,
-    DeleteNode, DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
+    AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
+    DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
     PendingObjectUpload, StoredContent, TextView, WriteTarget, WriteText, WriteTextBody, content,
 };
 
@@ -132,48 +132,6 @@ impl FilesService {
             .await?;
         let path = join_path(&parent_path, &node.name);
         Ok(text_view_at_path(node, path, text))
-    }
-
-    /// Create an inline file. Requires write permission.
-    pub async fn create_file(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        command: CreateFile,
-    ) -> ServiceResult<crate::files::FileView> {
-        self.authorize(space_id, caller_account_id, FileCommand::Write)
-            .await?;
-        validation::validate_basename(&command.name, NodeKind::File)?;
-        let byte_len = command.bytes.len();
-        validation::validate_file_bytes(byte_len)?;
-        validate_file_encryption(
-            command.encryption_mode,
-            command.encryption_metadata.as_ref(),
-        )?;
-
-        let parent_path = self
-            .prepare_create(space_id, command.parent_node_id, &command.name)
-            .await?;
-
-        let stored = content::compute_file(
-            command.bytes,
-            command.media_type,
-            command.original_filename,
-            command.encryption_mode,
-            command.encryption_metadata,
-        );
-        let (node, file) = self
-            .store
-            .insert_file(
-                space_id,
-                command.parent_node_id,
-                &command.name,
-                &stored,
-                caller_account_id,
-            )
-            .await?;
-        let path = join_path(&parent_path, &node.name);
-        Ok(file_view_at_path(node, path, file))
     }
 
     pub async fn prepare_object_upload(

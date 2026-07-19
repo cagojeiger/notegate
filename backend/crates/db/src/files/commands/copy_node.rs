@@ -1,21 +1,21 @@
 //! Server-side copy command (`cp`).
 //!
 //! Copies a live node inside one space-serialized transaction. The new root
-//! gets a fresh id/location/attribution, while node metadata and text/file
-//! content payloads are preserved.
+//! gets a fresh id/location/attribution, while node metadata and text content
+//! are preserved. File nodes are rejected during preflight.
 
 use std::collections::HashMap;
 
 use notegate_core::limits::{self, Limits};
 use notegate_core::{Error, Result};
+use notegate_model::Node;
 use notegate_model::files::CopyCounts;
-use notegate_model::{FileStorageKind, Node};
 use serde_json::Value;
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
-use super::super::rows::{FILE_COLUMNS, FileRow, NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
+use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::checks;
 use crate::file_change_events;
 use crate::space_usage::{self, UsageDelta};
@@ -61,6 +61,9 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     checks::require_fanout(&mut tx, space_id, new_parent_id, caps).await?;
 
     let snapshot = load_subtree(&mut tx, space_id, source_node_id).await?;
+    if snapshot.iter().any(|node| node.kind == "file") {
+        return Err(Error::conflict("copy does not support file nodes"));
+    }
     if snapshot.len() > limits::SUBTREE_DELETE_MAX_NODES {
         return Err(Error::conflict(format!(
             "subtree of {} nodes exceeds the synchronous copy limit of {}",
@@ -81,15 +84,15 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     let counts = CopyCounts {
         nodes: snapshot.len(),
         texts: snapshot.iter().filter(|node| node.kind == "text").count(),
-        files: snapshot.iter().filter(|node| node.kind == "file").count(),
+        files: 0,
     };
-    let (text_bytes, file_bytes) = copied_bytes(&mut tx, space_id, source_node_id).await?;
+    let text_bytes = copied_text_bytes(&mut tx, space_id, source_node_id).await?;
     let copied_nodes = i64::try_from(counts.nodes)
         .map_err(|_error| Error::internal("copied node count exceeds bigint"))?;
     space_usage::apply_quota_delta(
         &mut tx,
         &gate,
-        UsageDelta::subtree(copied_nodes, text_bytes, file_bytes),
+        UsageDelta::subtree(copied_nodes, text_bytes, 0),
         caps,
     )
     .await?;
@@ -174,27 +177,27 @@ async fn load_subtree(
     .map_err(map_sqlx_error)
 }
 
-async fn copied_bytes(
+async fn copied_text_bytes(
     tx: &mut PgConnection,
     space_id: Uuid,
     source_node_id: Uuid,
-) -> Result<(i64, i64)> {
-    sqlx::query_as(
-            "WITH RECURSIVE subtree AS ( \
+) -> Result<i64> {
+    sqlx::query_scalar(
+        "WITH RECURSIVE subtree AS ( \
                 SELECT id FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
-             SELECT \
-                COALESCE((SELECT sum(t.byte_len) FROM text_objects t JOIN subtree s ON s.id = t.node_id WHERE t.space_id = $1), 0)::bigint, \
-                COALESCE((SELECT sum(f.byte_len) FROM file_objects f JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1), 0)::bigint",
-        )
-        .bind(space_id)
-        .bind(source_node_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)
+             SELECT COALESCE(sum(t.byte_len), 0)::bigint \
+             FROM text_objects t JOIN subtree s ON s.id = t.node_id \
+             WHERE t.space_id = $1",
+    )
+    .bind(space_id)
+    .bind(source_node_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)
 }
 
 async fn insert_copied_node(
@@ -233,7 +236,7 @@ async fn copy_content(
     match new_node.kind.as_str() {
         "folder" => Ok(()),
         "text" => copy_text(tx, space_id, source_node_id, new_node.id, created_by).await,
-        "file" => copy_file(tx, space_id, source_node_id, new_node.id).await,
+        "file" => Err(Error::internal("file copy passed the preflight check")),
         _ => Err(Error::internal("unknown node kind during copy")),
     }
 }
@@ -272,62 +275,6 @@ async fn copy_text(
         .bind(source.encoding)
         .bind(created_by)
         .fetch_one(&mut *tx)
-        .await
-        .map_err(map_constraint_error)?;
-    Ok(())
-}
-
-async fn copy_file(
-    tx: &mut PgConnection,
-    space_id: Uuid,
-    source_node_id: Uuid,
-    new_node_id: Uuid,
-) -> Result<()> {
-    let source = sqlx::query_as::<_, FileRow>(&format!(
-        "SELECT {FILE_COLUMNS} FROM file_objects WHERE space_id = $1 AND node_id = $2"
-    ))
-    .bind(space_id)
-    .bind(source_node_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    let file = source.into_file()?;
-    if file.storage_kind != FileStorageKind::InlinePg {
-        return Err(Error::conflict(
-            "copy does not support object-storage files yet",
-        ));
-    }
-    let bytes: Vec<u8> = sqlx::query_scalar(
-        "SELECT bytes FROM file_inline_contents WHERE space_id = $1 AND node_id = $2",
-    )
-    .bind(space_id)
-    .bind(source_node_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-
-    sqlx::query(&format!(
-            "INSERT INTO file_objects \
-             (node_id, space_id, storage_kind, media_type, byte_len, content_sha256, original_filename, encryption_mode, encryption_metadata) \
-             VALUES ($1, $2, 'inline_pg', $3, $4, $5, $6, $7, $8) RETURNING {FILE_COLUMNS}"
-        ))
-        .bind(new_node_id)
-        .bind(space_id)
-        .bind(file.media_type)
-        .bind(file.byte_len)
-        .bind(file.content_sha256)
-        .bind(file.original_filename)
-        .bind(file.encryption_mode.as_str())
-        .bind(file.encryption_metadata)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_constraint_error)?;
-
-    sqlx::query("INSERT INTO file_inline_contents (node_id, space_id, bytes) VALUES ($1, $2, $3)")
-        .bind(new_node_id)
-        .bind(space_id)
-        .bind(bytes)
-        .execute(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
     Ok(())

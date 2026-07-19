@@ -26,7 +26,7 @@ use crate::files::{commands, queries};
 use crate::tier_lookup;
 use notegate_model::files::{
     BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode,
-    NodeListCursor, NodeListSort, PendingObjectUpload, StoredContent, StoredFile, TextStats,
+    NodeListCursor, NodeListSort, PendingObjectUpload, StoredContent, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -182,14 +182,6 @@ impl FilesRepo {
         queries::file::find_file(&self.pool, space_id, node_id).await
     }
 
-    pub async fn read_inline_file(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, FileObject, Vec<u8>)>> {
-        queries::file::read_inline_file(&self.pool, space_id, node_id).await
-    }
-
     pub async fn paged_children(
         &self,
         space_id: Uuid,
@@ -326,26 +318,6 @@ impl FilesRepo {
             parent_node_id,
             name,
             content,
-            created_by,
-            self.limits,
-        )
-        .await
-    }
-
-    pub async fn insert_file(
-        &self,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        name: &str,
-        file: &StoredFile,
-        created_by: Uuid,
-    ) -> Result<(Node, FileObject)> {
-        commands::create::insert_file(
-            &self.pool,
-            space_id,
-            parent_node_id,
-            name,
-            file,
             created_by,
             self.limits,
         )

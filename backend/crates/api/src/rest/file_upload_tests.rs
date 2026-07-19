@@ -136,7 +136,7 @@ async fn mark_upload_stale(db: &TestDb, upload_id: Uuid) -> Result<(), Box<dyn s
 async fn run_cleanup(db: &TestDb, state: &crate::state::AppState) {
     crate::object_storage_cleanup_worker::run_once(
         &ObjectStorageRepo::new(db.pool.clone()),
-        state.object_storage.as_ref().expect("object storage"),
+        &state.object_storage,
         &CancellationToken::new(),
     )
     .await;
@@ -154,8 +154,6 @@ async fn object_state(db: &TestDb, upload_id: Uuid) -> Result<String, Box<dyn st
 async fn object_get_status(state: &crate::state::AppState, upload_id: Uuid) -> StatusCode {
     let url = state
         .object_storage
-        .as_ref()
-        .expect("object storage")
         .presign_get(&format!("objects/{upload_id}"), None)
         .await
         .expect("presign get");
@@ -485,8 +483,6 @@ async fn presigned_put_cannot_overwrite_an_existing_object()
     let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
     let url = state
         .object_storage
-        .as_ref()
-        .expect("object storage")
         .presign_get(&format!("objects/{}", upload.id), None)
         .await
         .expect("presign get");
@@ -653,8 +649,6 @@ async fn cleanup_recovers_when_object_was_deleted_before_state_commit()
     assert!(repo.begin_expiry(upload.id).await?);
     state
         .object_storage
-        .as_ref()
-        .expect("object storage")
         .delete(&format!("objects/{}", upload.id))
         .await
         .expect("delete object");

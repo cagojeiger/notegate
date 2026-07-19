@@ -9,7 +9,7 @@
 //!
 //! Status mapping (see [`FilesValidationError::into_service_error`]):
 //! - Format-of-input failures (bad name, non-absolute/too-long/too-deep path,
-//!   per-text content over the byte/line cap) are `400` (`InvalidInput`).
+//!   per-content byte/line cap) are `400` (`InvalidInput`).
 //! - The folder fanout capacity failure is `409` (`Conflict`) with a hint.
 //!
 //! Everything here is pure: no IO and no store access. Space-level node/content
@@ -31,11 +31,6 @@ pub enum FilesValidationError {
         /// The configured maximum.
         max: usize,
     },
-    /// The uploaded file exceeds the inline PostgreSQL byte cap.
-    FileBytesExceeded {
-        /// The configured maximum ([`limits::FILE_INLINE_PG_MAX_BYTES`]).
-        max: usize,
-    },
     /// The object upload exceeds the product file-size cap.
     ObjectFileBytesExceeded { max: usize },
     /// The text content exceeds the per-text byte cap.
@@ -54,16 +49,13 @@ pub enum FilesValidationError {
 
 impl FilesValidationError {
     /// Map this validation failure to the service-layer error the api will turn
-    /// into an HTTP status. Format failures become `400`; capacity and size
-    /// failures become `409` with a hint.
+    /// into an HTTP status. Input and object-size failures become `400`; folder
+    /// capacity failures become `409` with a hint.
     pub fn into_service_error(self) -> ServiceError {
         match self {
             Self::Name(error) => ServiceError::InvalidInput(error.to_string()),
             Self::FanoutExceeded { max } => ServiceError::Conflict(format!(
                 "folder already has the maximum of {max} live children; split into subfolders"
-            )),
-            Self::FileBytesExceeded { max } => ServiceError::InvalidInput(format!(
-                "file exceeds the maximum inline size of {max} bytes; object storage is not enabled"
             )),
             Self::ObjectFileBytesExceeded { max } => {
                 ServiceError::InvalidInput(format!("file exceeds the maximum size of {max} bytes"))
@@ -195,16 +187,6 @@ pub fn validate_fanout(live_children: usize, limits: Limits) -> Result<(), Files
     if live_children >= limits.folder_max_children {
         return Err(FilesValidationError::FanoutExceeded {
             max: limits.folder_max_children,
-        });
-    }
-    Ok(())
-}
-
-/// Reject files larger than the current inline PostgreSQL cap.
-pub fn validate_file_bytes(byte_len: usize) -> Result<(), FilesValidationError> {
-    if byte_len > limits::FILE_INLINE_PG_MAX_BYTES {
-        return Err(FilesValidationError::FileBytesExceeded {
-            max: limits::FILE_INLINE_PG_MAX_BYTES,
         });
     }
     Ok(())

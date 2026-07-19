@@ -99,9 +99,8 @@ pub struct Config {
     /// Optional directory containing the built web dashboard. When set, unknown
     /// non-API routes fall back to this directory's `index.html`.
     pub web_dist_dir: Option<String>,
-    /// Optional S3-compatible object storage connection.
-    #[serde(default)]
-    pub s3: Option<S3Config>,
+    /// S3-compatible object storage connection.
+    pub s3: S3Config,
     /// Tier assigned to newly created users.
     #[serde(default = "default_user_tier", deserialize_with = "user_tier_from_str")]
     pub default_user_tier: UserTier,
@@ -185,29 +184,28 @@ impl Validate for Config {
         if self.browser_session_ttl > self.browser_session_max_ttl {
             errors.add("browser_session_ttl", ValidationError::new("range"));
         }
-        if let Some(s3) = &self.s3 {
-            if validate_http_url_value(&s3.endpoint).is_err() {
-                errors.add("s3.endpoint", ValidationError::new("http_url"));
+        let s3 = &self.s3;
+        if validate_http_url_value(&s3.endpoint).is_err() {
+            errors.add("s3.endpoint", ValidationError::new("http_url"));
+        }
+        if s3
+            .public_endpoint
+            .as_deref()
+            .is_some_and(|value| validate_http_url_value(value).is_err())
+        {
+            errors.add("s3.public_endpoint", ValidationError::new("http_url"));
+        }
+        for (field, value) in [
+            ("s3.region", s3.region.as_str()),
+            ("s3.bucket", s3.bucket.as_str()),
+            ("s3.access_key", s3.access_key.as_str()),
+        ] {
+            if value.is_empty() {
+                errors.add(field, ValidationError::new("length"));
             }
-            if s3
-                .public_endpoint
-                .as_deref()
-                .is_some_and(|value| validate_http_url_value(value).is_err())
-            {
-                errors.add("s3.public_endpoint", ValidationError::new("http_url"));
-            }
-            for (field, value) in [
-                ("s3.region", s3.region.as_str()),
-                ("s3.bucket", s3.bucket.as_str()),
-                ("s3.access_key", s3.access_key.as_str()),
-            ] {
-                if value.is_empty() {
-                    errors.add(field, ValidationError::new("length"));
-                }
-            }
-            if s3.secret_key.expose_secret().is_empty() {
-                errors.add("s3.secret_key", ValidationError::new("length"));
-            }
+        }
+        if s3.secret_key.expose_secret().is_empty() {
+            errors.add("s3.secret_key", ValidationError::new("length"));
         }
         validate_limits(&self.limits, &mut errors);
 
@@ -244,11 +242,9 @@ impl Config {
         } else {
             trim_trailing_slashes(&self.resource_url)
         };
-        if let Some(s3) = &mut self.s3 {
-            s3.endpoint = trim_trailing_slashes(&s3.endpoint);
-            if let Some(public_endpoint) = &mut s3.public_endpoint {
-                *public_endpoint = trim_trailing_slashes(public_endpoint);
-            }
+        self.s3.endpoint = trim_trailing_slashes(&self.s3.endpoint);
+        if let Some(public_endpoint) = &mut self.s3.public_endpoint {
+            *public_endpoint = trim_trailing_slashes(public_endpoint);
         }
         self.secure_cookies = secure_cookies_for_redirect(&self.oauth_redirect_url);
     }
@@ -489,7 +485,15 @@ mod tests {
             ),
             openapi_enabled: false,
             web_dist_dir: None,
-            s3: None,
+            s3: super::S3Config {
+                endpoint: "http://localhost:9000".to_owned(),
+                public_endpoint: None,
+                region: "us-east-1".to_owned(),
+                bucket: "notegate".to_owned(),
+                access_key: "notegate-test".to_owned(),
+                secret_key: SecretString::from("notegate-test-secret".to_owned()),
+                force_path_style: true,
+            },
             default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
             secure_cookies: false,
@@ -497,11 +501,31 @@ mod tests {
     }
 
     fn test_env(vars: &[(&str, &str)]) -> Environment {
-        Environment::with_prefix("NOTEGATE").source(Some(
+        let mut values = HashMap::from([
+            (
+                "NOTEGATE_S3__ENDPOINT".to_owned(),
+                "http://localhost:9000".to_owned(),
+            ),
+            ("NOTEGATE_S3__REGION".to_owned(), "us-east-1".to_owned()),
+            ("NOTEGATE_S3__BUCKET".to_owned(), "notegate".to_owned()),
+            (
+                "NOTEGATE_S3__ACCESS_KEY".to_owned(),
+                "notegate-test".to_owned(),
+            ),
+            (
+                "NOTEGATE_S3__SECRET_KEY".to_owned(),
+                "notegate-test-secret".to_owned(),
+            ),
+            (
+                "NOTEGATE_S3__FORCE_PATH_STYLE".to_owned(),
+                "true".to_owned(),
+            ),
+        ]);
+        values.extend(
             vars.iter()
-                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-                .collect::<HashMap<_, _>>(),
-        ))
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+        );
+        Environment::with_prefix("NOTEGATE").source(Some(values))
     }
 
     #[test]
@@ -577,7 +601,7 @@ mod tests {
         );
         assert_eq!(config.resource_url, "http://localhost:9191/mcp");
         assert_eq!(config.default_user_tier, UserTier::Tier0);
-        let s3 = config.s3.as_ref().expect("s3 config");
+        let s3 = &config.s3;
         assert_eq!(s3.endpoint, "https://s3.internal.env");
         assert_eq!(s3.public_endpoint.as_deref(), Some("https://s3.public.env"));
         assert_eq!(s3.region, "us-east-1");

@@ -56,7 +56,6 @@ export type RestNode = {
   content_sha256?: string;
   byte_len?: number;
   line_count?: number;
-  storage_kind?: "inline_pg" | "object";
   media_type?: string;
   original_filename?: string;
   encryption_mode?: "none" | "client";
@@ -151,6 +150,15 @@ export type TextResponse = {
 
 export type FileResponse = {
   node: RestNode;
+};
+
+export type BeginFileUploadResponse = {
+  upload_id: string;
+  transfer: {
+    mode: "single";
+    url: string;
+    headers: Record<string, string>;
+  };
 };
 
 export type MetadataResponse = {

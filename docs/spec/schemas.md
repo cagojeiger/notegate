@@ -69,15 +69,16 @@ type RestNode = {
   metadata: object
   has_children: boolean
 
-  // text 또는 file node에서만 존재
+  // text node에서만 존재
   content_sha256?: string
+
+  // text 또는 file node에서만 존재
   byte_len?: number
 
   // text node에서만 존재
   line_count?: number
 
   // file node에서만 존재
-  storage_kind?: "inline_pg" | "object"
   media_type?: string
   original_filename?: string
   encryption_mode?: "none" | "client"
@@ -90,7 +91,7 @@ type RestNode = {
 }
 ```
 
-`byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `content_sha256`은 inline File에만 존재하며 S3 object에는 생략된다.
+`byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `content_sha256`은 Text에만 존재한다.
 
 ## REST node list/reveal envelopes
 
@@ -122,15 +123,16 @@ type McpNodeSummary = {
   created_at: string
   updated_at: string
 
-  // text 또는 file node에서만 존재
+  // text node에서만 존재
   content_sha256?: string
+
+  // text 또는 file node에서만 존재
   byte_len?: number
 
   // text node에서만 존재
   line_count?: number
 
   // file node에서만 존재
-  storage_kind?: "inline_pg" | "object"
   media_type?: string
   original_filename?: string
   encryption_mode?: "none" | "client"
@@ -138,7 +140,7 @@ type McpNodeSummary = {
 }
 ```
 
-MCP는 `inline_pg`와 `object` File의 metadata/stat을 같은 형태로 읽지만 File bytes는 전송하지 않는다.
+MCP는 File metadata/stat을 읽지만 File bytes는 전송하지 않는다.
 
 ## McpGrepSummary
 

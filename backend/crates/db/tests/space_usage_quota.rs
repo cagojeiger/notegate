@@ -9,12 +9,11 @@
 )]
 mod common;
 
-use common::{TestDb, space_with_root};
+use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_core::limits::Limits;
 use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
-use notegate_model::FileEncryptionMode;
-use notegate_model::files::{CopyNode, CreateFolder, StoredContent, StoredFile, WriteTextBody};
+use notegate_model::files::{CopyNode, CreateFolder, StoredContent, WriteTextBody};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -26,18 +25,6 @@ fn text(content: &str) -> StoredContent {
         content_sha256: "0".repeat(64),
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
-    }
-}
-
-fn file(bytes: &[u8]) -> StoredFile {
-    StoredFile {
-        bytes: bytes.to_vec(),
-        content_sha256: "f".repeat(64),
-        byte_len: bytes.len() as i64,
-        media_type: "application/octet-stream".to_owned(),
-        original_filename: Some("asset.bin".to_owned()),
-        encryption_mode: FileEncryptionMode::None,
-        encryption_metadata: None,
     }
 }
 
@@ -92,8 +79,7 @@ async fn counter_enforces_independent_node_text_and_file_limits() -> TestResult 
     let (text_node, _) = repo
         .insert_text(space_id, root_id, "note.md", &text("hello"), account)
         .await?;
-    repo.insert_file(space_id, root_id, "asset.bin", &file(b"ab"), account)
-        .await?;
+    attach_file(&repo, space_id, root_id, "asset.bin", 2, account).await?;
     assert_usage(&db.pool, space_id, (4, 5, 2)).await?;
 
     let node_error = repo
@@ -131,8 +117,7 @@ async fn counter_enforces_independent_node_text_and_file_limits() -> TestResult 
 
     repo.soft_delete_node(space_id, folder.id, account, false)
         .await?;
-    let file_error = repo
-        .insert_file(space_id, root_id, "blocked.bin", &file(b"x"), account)
+    let file_error = attach_file(&repo, space_id, root_id, "blocked.bin", 1, account)
         .await
         .expect_err("file quota must roll back the file create");
     assert!(matches!(
@@ -260,12 +245,9 @@ async fn concurrent_file_creates_respect_the_boundary() -> TestResult {
     );
     let first_repo = repo.clone();
     let second_repo = repo.clone();
-    let first_file = file(b"abc");
-    let second_file = file(b"def");
-
     let (first_result, second_result) = tokio::join!(
-        first_repo.insert_file(space_id, root_id, "first.bin", &first_file, account),
-        second_repo.insert_file(space_id, root_id, "second.bin", &second_file, account),
+        attach_file(&first_repo, space_id, root_id, "first.bin", 3, account),
+        attach_file(&second_repo, space_id, root_id, "second.bin", 3, account),
     );
     let mut succeeded = 0;
     let mut rejected = 0;

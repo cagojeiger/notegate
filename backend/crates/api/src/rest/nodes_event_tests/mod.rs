@@ -7,13 +7,14 @@
 )]
 
 use axum::http::StatusCode;
-use notegate_db::{AccountRepo, test_support::TestDb};
-use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
+use notegate_db::{AccountRepo, FilesRepo, test_support::TestDb};
+use notegate_model::files::BeginObjectUpload;
+use notegate_model::{Caller, CallerIdentity, Channel, FileEncryptionMode, ResolveAttrs};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::rest::test_support::{
-    caller_and_space, empty_request, get_json, json_request, rest_app, state, upload_file,
+    caller_and_space, empty_request, get_json, json_request, rest_app, state,
 };
 
 #[tokio::test]
@@ -55,10 +56,29 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
     assert_eq!(status, StatusCode::CREATED, "{text}");
     let text_id: Uuid = serde_json::from_value(text["id"].clone())?;
 
-    let (status, file) =
-        upload_file(rest_app(state.clone(), caller.clone()), space_id, root_id).await?;
-    assert_eq!(status, StatusCode::CREATED, "{file}");
-    let file_node_id: Uuid = serde_json::from_value(file["node"]["id"].clone())?;
+    let upload_id = Uuid::new_v4();
+    let files = FilesRepo::new(db.pool.clone());
+    files
+        .insert_object_upload(
+            upload_id,
+            &format!("objects/{upload_id}"),
+            space_id,
+            owner,
+            &BeginObjectUpload {
+                parent_node_id: root_id,
+                name: "asset.txt".to_owned(),
+                byte_len: 5,
+                media_type: "text/plain".to_owned(),
+                original_filename: Some("asset.txt".to_owned()),
+                encryption_mode: FileEncryptionMode::None,
+                encryption_metadata: None,
+            },
+        )
+        .await?;
+    let (file_node, _) = files
+        .attach_object_upload(upload_id, space_id, owner)
+        .await?;
+    let file_node_id = file_node.id;
 
     let (status, written) = json_request(
         rest_app(state.clone(), caller.clone()),

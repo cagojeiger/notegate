@@ -88,11 +88,6 @@ pub(crate) async fn begin(
         .files
         .prepare_object_upload(caller.account_id(), space_id, &command)
         .await?;
-    let storage = state
-        .object_storage
-        .as_ref()
-        .ok_or_else(ApiError::object_storage_unavailable)?;
-
     let upload_id = Uuid::new_v4();
     let object_key = format!("objects/{upload_id}");
     state
@@ -105,7 +100,8 @@ pub(crate) async fn begin(
             &command,
         )
         .await?;
-    let transfer = storage
+    let transfer = state
+        .object_storage
         .presign_put(&object_key, &command.media_type, command.byte_len)
         .await?;
 
@@ -146,11 +142,8 @@ pub(crate) async fn complete(
         .object_upload(caller.account_id(), space_id, upload_id)
         .await?;
     if upload.node_id.is_none() {
-        let storage = state
+        let etag = state
             .object_storage
-            .as_ref()
-            .ok_or_else(ApiError::object_storage_unavailable)?;
-        let etag = storage
             .verify_upload(&upload.object_key, upload.byte_len)
             .await?;
         tracing::info!(

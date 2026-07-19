@@ -11,9 +11,44 @@ mod common;
 
 use common::{TestDb, insert_user_account, space_with_root};
 use notegate_db::{FilesRepo, ObjectStorageRepo, PurgeRepo, SpaceRepo};
+use notegate_model::FileEncryptionMode;
 use notegate_model::files::{BeginObjectUpload, CreateFolder};
-use notegate_model::{FileEncryptionMode, FileStorageKind};
 use uuid::Uuid;
+
+#[tokio::test]
+async fn file_schema_is_object_only() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+
+    let inline_table_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables \
+         WHERE table_schema = current_schema() AND table_name = 'file_inline_contents')",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    let legacy_columns: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_schema = current_schema() AND table_name = 'file_objects' \
+           AND column_name IN ('storage_kind', 'content_sha256')",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    let object_key_nullable: String = sqlx::query_scalar(
+        "SELECT is_nullable FROM information_schema.columns \
+         WHERE table_schema = current_schema() AND table_name = 'file_objects' \
+           AND column_name = 'object_key'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+
+    assert!(!inline_table_exists);
+    assert_eq!(legacy_columns, 0);
+    assert_eq!(object_key_nullable, "NO");
+
+    db.cleanup().await;
+    Ok(())
+}
 
 #[tokio::test]
 async fn object_upload_attach_is_idempotent_and_updates_usage_and_history()
@@ -51,10 +86,8 @@ async fn object_upload_attach_is_idempotent_and_updates_usage_and_history()
     let (node, file) = repo
         .attach_object_upload(upload_id, space_id, account_id)
         .await?;
-    assert_eq!(file.storage_kind, FileStorageKind::Object);
-    assert_eq!(file.object_key.as_deref(), Some(object_key.as_str()));
+    assert_eq!(file.object_key, object_key);
     assert_eq!(file.byte_len, byte_len);
-    assert_eq!(file.content_sha256, None);
 
     let (retried_node, retried_file) = repo
         .attach_object_upload(upload_id, space_id, account_id)
