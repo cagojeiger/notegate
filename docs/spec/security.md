@@ -91,7 +91,11 @@ none    = 서버가 저장 bytes를 그대로 반환
 client  = client-side encrypted bytes
 ```
 
-`encryption_mode=client`에서 서버는 원본, 비밀번호, 복호화 키를 받거나 저장하지 않는다. `byte_len`과 `content_sha256`은 저장된 bytes 기준이다.
+`encryption_mode=client`에서 서버는 원본, 비밀번호, 복호화 키를 받거나 저장하지 않는다. `byte_len`은 저장된 bytes 기준이다. Inline File의 `content_sha256`은 저장된 bytes 기준이며, S3 object File은 `content_sha256`을 저장하거나 노출하지 않는다.
+
+## Object storage access
+
+Notegate object storage credential은 설정된 bucket의 `objects/*`에 대한 `GetObject`, `PutObject`, `DeleteObject`만 허용한다. Bucket 생성, bucket 목록 조회, 익명 접근과 관리 작업은 허용하지 않는다. MinIO root credential은 로컬 초기화에만 사용하며 Notegate runtime에 전달하지 않는다.
 
 ## Deletion and anonymization
 

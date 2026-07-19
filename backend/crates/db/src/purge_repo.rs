@@ -51,8 +51,53 @@ impl PurgeRepo {
                 accounts_anonymized: 0,
                 api_keys_deleted: 0,
                 browser_sessions_deleted: 0,
+                object_deletions_queued: 0,
             });
         }
+
+        // Safety net for requests missed during soft delete: queue physical
+        // object deletion before semantic rows disappear. The operational
+        // ledger survives the following cascades and is processed outside this
+        // transaction by the object-storage cleanup worker.
+        let queued_for_spaces = sqlx::query(
+            "UPDATE object_storage_objects f SET \
+                 state = 'delete_pending', \
+                 delete_requested_at = COALESCE(delete_requested_at, now()), \
+                 retry_after = NULL, last_error_code = NULL \
+             WHERE f.state = 'attached' AND f.space_id IN ( \
+                 SELECT id FROM spaces \
+                 WHERE deleted_at IS NOT NULL AND purge_after <= now() \
+                 ORDER BY purge_after, id LIMIT $1 \
+             )",
+        )
+        .bind(SPACE_PURGE_BATCH)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected();
+
+        let queued_for_nodes = sqlx::query(
+            "WITH RECURSIVE due_roots AS ( \
+                 SELECT id FROM nodes \
+                 WHERE deleted_at IS NOT NULL AND purge_after <= now() \
+                 ORDER BY purge_after, id LIMIT $1 \
+             ), due_nodes AS ( \
+                 SELECT id FROM due_roots \
+                 UNION \
+                 SELECT child.id FROM nodes child \
+                 JOIN due_nodes parent ON child.parent_id = parent.id \
+             ) \
+             UPDATE object_storage_objects f SET \
+                 state = 'delete_pending', \
+                 delete_requested_at = COALESCE(delete_requested_at, now()), \
+                 retry_after = NULL, last_error_code = NULL \
+             WHERE f.state = 'attached' AND f.node_id IN (SELECT id FROM due_nodes)",
+        )
+        .bind(NODE_PURGE_BATCH)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected();
 
         // Space hard delete cascades agent connections, nodes, text objects, and file objects.
         let spaces_deleted: i64 = sqlx::query(
@@ -197,6 +242,7 @@ impl PurgeRepo {
             accounts_anonymized: accounts_anonymized.max(0) as u64,
             api_keys_deleted: api_keys_deleted.max(0) as u64,
             browser_sessions_deleted: browser_sessions_deleted.max(0) as u64,
+            object_deletions_queued: queued_for_spaces + queued_for_nodes,
         })
     }
 }
@@ -209,4 +255,5 @@ pub struct PurgeRun {
     pub accounts_anonymized: u64,
     pub api_keys_deleted: u64,
     pub browser_sessions_deleted: u64,
+    pub object_deletions_queued: u64,
 }

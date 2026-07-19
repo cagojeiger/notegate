@@ -259,6 +259,24 @@ impl FilesService {
         })
     }
 
+    /// Resolve file metadata for a download without reading object bytes.
+    pub async fn file_for_download(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<crate::files::FileView> {
+        self.authorize(space_id, caller_account_id, FileCommand::Read)
+            .await?;
+        let (node, file) = self
+            .store
+            .find_file(space_id, node_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("file not found".to_owned()))?;
+        let view = self.file_node_view(space_id, node, &file).await?;
+        Ok(crate::files::FileView { node: view, file })
+    }
+
     /// Read a text with range limits (`read`/`open`). Requires read permission.
     pub async fn read_text(
         &self,

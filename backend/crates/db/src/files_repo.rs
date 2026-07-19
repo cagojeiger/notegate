@@ -25,8 +25,8 @@ use crate::file_change_event_repo;
 use crate::files::{commands, queries};
 use crate::tier_lookup;
 use notegate_model::files::{
-    ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode, NodeListCursor,
-    NodeListSort, StoredContent, StoredFile, TextStats,
+    BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode,
+    NodeListCursor, NodeListSort, PendingObjectUpload, StoredContent, StoredFile, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -350,6 +350,53 @@ impl FilesRepo {
             self.limits,
         )
         .await
+    }
+
+    pub async fn insert_object_upload(
+        &self,
+        id: Uuid,
+        object_key: &str,
+        space_id: Uuid,
+        requested_by: Uuid,
+        input: &BeginObjectUpload,
+    ) -> Result<PendingObjectUpload> {
+        crate::files::object_uploads::insert(
+            &self.pool,
+            id,
+            object_key,
+            space_id,
+            requested_by,
+            input,
+        )
+        .await
+    }
+
+    pub async fn object_upload(
+        &self,
+        id: Uuid,
+        space_id: Uuid,
+        requested_by: Uuid,
+    ) -> Result<Option<PendingObjectUpload>> {
+        crate::files::object_uploads::find(&self.pool, id, space_id, requested_by).await
+    }
+
+    pub async fn touch_object_upload(
+        &self,
+        id: Uuid,
+        space_id: Uuid,
+        requested_by: Uuid,
+    ) -> Result<bool> {
+        crate::files::object_uploads::touch(&self.pool, id, space_id, requested_by).await
+    }
+
+    pub async fn attach_object_upload(
+        &self,
+        id: Uuid,
+        space_id: Uuid,
+        requested_by: Uuid,
+    ) -> Result<(Node, FileObject)> {
+        crate::files::object_uploads::attach(&self.pool, id, space_id, requested_by, self.limits)
+            .await
     }
 
     pub async fn save_text_content(

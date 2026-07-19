@@ -17,6 +17,7 @@ use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
 
 use crate::identity::CallerResolver;
+use crate::object_storage::ObjectStorage;
 
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub oidc: Arc<OidcProvider>,
     pub resolver: Arc<dyn CallerResolver>,
     pub http: reqwest::Client,
+    pub object_storage: Option<ObjectStorage>,
     pub security: PiiCrypto,
     pub spaces: Spaces,
     pub account_lifecycle: Accounts,
@@ -68,6 +70,7 @@ impl AppState {
         http: reqwest::Client,
         pii_crypto: PiiCrypto,
     ) -> Self {
+        let object_storage = config.s3.as_ref().map(ObjectStorage::new);
         let spaces = SpaceService::new(SpaceRepo::new(db.clone()));
         let api_key_repo = ApiKeyRepo::with_lookup_key(
             db.clone(),
@@ -105,6 +108,7 @@ impl AppState {
             oidc,
             resolver,
             http,
+            object_storage,
             security: pii_crypto,
             spaces,
             account_lifecycle,

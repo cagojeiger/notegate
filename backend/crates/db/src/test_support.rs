@@ -22,6 +22,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0011_nodes_name_sort_index.sql"),
     include_str!("../migrations/0012_space_usage.sql"),
     include_str!("../migrations/0013_split_space_usage_bytes.sql"),
+    include_str!("../migrations/0014_object_storage.sql"),
 ];
 
 /// A throwaway schema-isolated database for one test.

@@ -214,6 +214,33 @@ pub struct StoredFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BeginObjectUpload {
+    pub parent_node_id: Uuid,
+    pub name: String,
+    pub byte_len: i64,
+    pub media_type: String,
+    pub original_filename: Option<String>,
+    pub encryption_mode: FileEncryptionMode,
+    pub encryption_metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingObjectUpload {
+    pub id: Uuid,
+    pub object_key: String,
+    pub space_id: Uuid,
+    pub parent_node_id: Uuid,
+    pub requested_by_account_id: Uuid,
+    pub name: String,
+    pub byte_len: i64,
+    pub media_type: String,
+    pub original_filename: Option<String>,
+    pub encryption_mode: FileEncryptionMode,
+    pub encryption_metadata: Option<Value>,
+    pub node_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextStats {
     pub content_sha256: String,
     pub byte_len: i64,
@@ -225,7 +252,7 @@ pub struct FileStats {
     pub storage_kind: FileStorageKind,
     pub media_type: String,
     pub byte_len: i64,
-    pub content_sha256: String,
+    pub content_sha256: Option<String>,
     pub original_filename: Option<String>,
     pub encryption_mode: FileEncryptionMode,
     pub encryption_metadata: Option<Value>,

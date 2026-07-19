@@ -5,7 +5,7 @@
 
 use axum::body::Body;
 use axum::extract::{Extension, Multipart, Path, State};
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderName, HeaderValue};
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -34,7 +34,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct FileResponse {
-    node: NodeOut,
+    pub(crate) node: NodeOut,
 }
 
 #[utoipa::path(
@@ -114,7 +114,10 @@ pub(crate) async fn stat(
     path = "/api/v1/spaces/{space_id}/files/{node_id}/content",
     tag = "files",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    responses((status = 200, description = "File content bytes")),
+    responses(
+        (status = 200, description = "Inline file content bytes"),
+        (status = 302, description = "Redirect to a presigned object download URL")
+    ),
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn download(
@@ -122,6 +125,28 @@ pub(crate) async fn download(
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Response, ApiError> {
+    let file_view = state
+        .files
+        .file_for_download(caller.account_id(), space_id, node_id)
+        .await?;
+    if file_view.file.storage_kind == notegate_model::FileStorageKind::Object {
+        let object_key = file_view
+            .file
+            .object_key
+            .as_deref()
+            .ok_or_else(|| ApiError::internal("object file is missing its storage key"))?;
+        let storage = state
+            .object_storage
+            .as_ref()
+            .ok_or_else(ApiError::object_storage_unavailable)?;
+        let get_url = storage
+            .presign_get(object_key, file_view.file.original_filename.as_deref())
+            .await?;
+        let location =
+            HeaderValue::from_str(&get_url).map_err(|_| ApiError::object_storage_unavailable())?;
+        return Ok((StatusCode::FOUND, [(LOCATION, location)]).into_response());
+    }
+
     let result = state
         .files
         .read_file(caller.account_id(), space_id, node_id)
@@ -135,8 +160,14 @@ pub(crate) async fn download(
     );
     headers.insert(
         HeaderName::from_static("x-content-sha256"),
-        HeaderValue::from_str(&result.file.content_sha256)
-            .map_err(|_| ApiError::internal("invalid stored content hash"))?,
+        HeaderValue::from_str(
+            result
+                .file
+                .content_sha256
+                .as_deref()
+                .ok_or_else(|| ApiError::internal("inline file is missing its content hash"))?,
+        )
+        .map_err(|_| ApiError::internal("invalid stored content hash"))?,
     );
     headers.insert(
         HeaderName::from_static("x-encryption-mode"),

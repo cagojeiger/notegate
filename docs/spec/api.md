@@ -59,6 +59,6 @@ OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser ses
 - Node는 folder/text/file 공통 `metadata` JSON object를 가진다.
 - Text는 plain UTF-8 content 또는 client-side encrypted payload다. grep/patch는 plain Text만 대상으로 한다.
 - Markdown Text의 leading YAML frontmatter는 Text content 안의 표시용 convention이며 Node `metadata`로 해석하거나 동기화하지 않는다.
-- File은 object/binary content다. REST는 small file upload/download를 제공하고, MCP는 file content upload/download를 제공하지 않는다.
+- File은 object/binary content다. REST는 inline upload와 S3 호환 object upload/download를 제공하고, MCP는 file content upload/download를 제공하지 않는다.
 - Agent connection permission은 `read` 또는 `write`다. `write`는 `read`를 포함한다.
 - User/agent action attribution은 account id로 기록한다.

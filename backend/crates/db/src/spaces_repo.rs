@@ -1,7 +1,7 @@
 //! Space lifecycle persistence.
 
 use crate::audit_events::{self, AuditContext};
-use crate::{map_sqlx_error, space_permission, tier_lookup};
+use crate::{map_sqlx_error, object_storage_repo, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
 use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
@@ -387,6 +387,8 @@ impl SpaceRepo {
         if result.rows_affected() == 0 {
             return Err(Error::not_found("space not found"));
         }
+
+        object_storage_repo::queue_space_object_deletions(&mut tx, space_id).await?;
 
         let audit_ctx = AuditContext::rest(deleted_by_user_id);
         audit_events::space_deleted(&mut tx, audit_ctx, owner_user_id, space_id).await?;

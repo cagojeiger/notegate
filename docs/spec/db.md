@@ -349,7 +349,7 @@ file_objects
   object_key text null
   media_type text not null
   byte_len bigint not null check 0..104857600
-  content_sha256 text not null
+  content_sha256 text null
   original_filename text null
   encryption_mode text not null check ('none','client')
   encryption_metadata jsonb null
@@ -363,14 +363,27 @@ file_inline_contents
   bytes bytea not null check octet_length(bytes) <= 262144
 ```
 
-`File`은 공통 metadata와 실제 bytes를 분리한다. 현재 content 저장 방식은 `storage_kind='inline_pg'`이며, `file_inline_contents.bytes`에 최대 262144 bytes까지 저장한다. 262144 bytes 초과 file은 제품 상한 `file_max_bytes` 안에 있어도 아직 저장하지 않는다.
+`File`은 공통 metadata와 실제 bytes를 분리한다. `inline_pg`는 `file_inline_contents.bytes`에 최대 262144 bytes를 저장한다. `object`는 S3 호환 저장소에 bytes를 저장하고 Notegate는 외부에 노출하지 않는 `object_key`를 저장한다.
 
 Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. `storage_kind='inline_pg'`와 `storage_kind='object'`는 같은 File counter에 포함한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 
 ```text
 storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL, byte_len <= 262144
-storage_kind='object'    -> 262144 bytes 초과 file 저장 방식으로 예약됨, object_key IS NOT NULL
+storage_kind='object'    -> object_key IS NOT NULL, bytes는 S3 호환 저장소에 저장됨
 ```
+
+```text
+object_storage_objects
+  id uuid pk
+  object_key text unique not null
+  space_id/parent_node_id/node_id/requested_by_account_id uuid null
+  name/declared_byte_len/media_type/encryption metadata
+  state text check ('uploading','attached','expire_pending','expired','delete_pending','deleted')
+  last_activity_at/retry_count/retry_after/last_error_code
+  created_at/attached_at/delete_requested_at/deleted_at
+```
+
+`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete transaction은 연결된 object를 즉시 `delete_pending`으로 전환한다. Hard purge의 같은 전환은 이전에 누락된 요청을 보정하는 안전장치다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 90일 뒤 bounded batch로 삭제한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
 
 Content FK invariant:
 
@@ -379,10 +392,10 @@ DB FK: text_objects/file_objects row -> matching nodes(id, space_id) ON DELETE C
 DB FK: file_inline_contents row -> matching file_objects(node_id, space_id) ON DELETE CASCADE
 DB CHECK: file_inline_contents.bytes <= 262144
 DB CHECK: file_objects.byte_len <= 104857600
-DB CHECK: inline_pg는 byte_len <= 262144 그리고 object_key IS NULL
+DB CHECK: inline_pg는 byte_len <= 262144, object_key IS NULL, content_sha256 IS NOT NULL
 DB CHECK: object는 object_key IS NOT NULL
 Service transaction: storage_kind='inline_pg'는 file_inline_contents row를 하나 생성
-Service transaction: 현재 create path는 storage_kind='object'를 쓰지 않음
+Service transaction: storage_kind='object' attach는 node, file_objects, usage counter, file change event, 원장 상태를 함께 commit
 ```
 
 File content encryption은 client-side only다.

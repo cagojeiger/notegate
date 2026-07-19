@@ -9,9 +9,9 @@ use crate::files::format::validate_structured_text;
 use crate::files::patch::{AppliedText, apply_edits, apply_line_edits, unified_diff};
 use crate::files::validation;
 use crate::files::{
-    AppendText, CopyNode, CopyResult, CreateFile, CreateFolder, CreateText, DeleteNode,
-    DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText, StoredContent,
-    TextView, WriteTarget, WriteText, WriteTextBody, content,
+    AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFile, CreateFolder, CreateText,
+    DeleteNode, DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
+    PendingObjectUpload, StoredContent, TextView, WriteTarget, WriteText, WriteTextBody, content,
 };
 
 use super::view::{file_view_at_path, text_view_at_path};
@@ -173,6 +173,110 @@ impl FilesService {
             )
             .await?;
         let path = join_path(&parent_path, &node.name);
+        Ok(file_view_at_path(node, path, file))
+    }
+
+    pub async fn prepare_object_upload(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: &BeginObjectUpload,
+    ) -> ServiceResult<()> {
+        self.authorize(space_id, caller_account_id, FileCommand::Write)
+            .await?;
+        validation::validate_basename(&command.name, NodeKind::File)?;
+        validation::validate_object_file_bytes(command.byte_len)?;
+        validate_file_encryption(
+            command.encryption_mode,
+            command.encryption_metadata.as_ref(),
+        )?;
+        if command.media_type.is_empty()
+            || command.media_type.len() > 255
+            || !command
+                .media_type
+                .bytes()
+                .all(|byte| (0x20..0x7f).contains(&byte))
+        {
+            return Err(ServiceError::InvalidInput("invalid media_type".to_owned()));
+        }
+        self.prepare_create(space_id, command.parent_node_id, &command.name)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn record_object_upload(
+        &self,
+        upload_id: Uuid,
+        object_key: &str,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: &BeginObjectUpload,
+    ) -> ServiceResult<PendingObjectUpload> {
+        Ok(self
+            .store
+            .insert_object_upload(upload_id, object_key, space_id, caller_account_id, command)
+            .await?)
+    }
+
+    pub async fn object_upload(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        upload_id: Uuid,
+    ) -> ServiceResult<PendingObjectUpload> {
+        self.authorize(space_id, caller_account_id, FileCommand::Write)
+            .await?;
+        self.store
+            .object_upload(upload_id, space_id, caller_account_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("file upload not found".to_owned()))
+    }
+
+    pub async fn touch_object_upload(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        upload_id: Uuid,
+    ) -> ServiceResult<PendingObjectUpload> {
+        let upload = self
+            .object_upload(caller_account_id, space_id, upload_id)
+            .await?;
+        if upload.node_id.is_some() {
+            return Ok(upload);
+        }
+        if !self
+            .store
+            .touch_object_upload(upload_id, space_id, caller_account_id)
+            .await?
+        {
+            if let Some(attached) = self
+                .store
+                .object_upload(upload_id, space_id, caller_account_id)
+                .await?
+                && attached.node_id.is_some()
+            {
+                return Ok(attached);
+            }
+            return Err(ServiceError::Conflict(
+                "file upload is no longer active".to_owned(),
+            ));
+        }
+        Ok(upload)
+    }
+
+    pub async fn complete_object_upload(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        upload_id: Uuid,
+    ) -> ServiceResult<crate::files::FileView> {
+        self.authorize(space_id, caller_account_id, FileCommand::Write)
+            .await?;
+        let (node, file) = self
+            .store
+            .attach_object_upload(upload_id, space_id, caller_account_id)
+            .await?;
+        let path = self.path_of(space_id, node.id).await?;
         Ok(file_view_at_path(node, path, file))
     }
 

@@ -80,6 +80,14 @@ impl ApiError {
         )
     }
 
+    pub fn object_storage_unavailable() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "object_storage_unavailable",
+            "file storage is temporarily unavailable",
+        )
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
     }

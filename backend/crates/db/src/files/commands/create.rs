@@ -193,7 +193,7 @@ pub async fn insert_file(
 
 /// Shared in-tx create pre-checks: parent live folder, depth, sibling-unique,
 /// and fanout.
-async fn prepare_create(
+pub(crate) async fn prepare_create(
     tx: &mut sqlx::PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
