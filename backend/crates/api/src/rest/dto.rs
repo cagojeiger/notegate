@@ -139,9 +139,7 @@ mod tests {
         clippy::panic,
         clippy::unwrap_in_result
     )]
-    use notegate_model::{
-        AccountKind, AuditEvent, FileEncryptionMode, FileStorageKind, Node, NodeKind,
-    };
+    use notegate_model::{AccountKind, AuditEvent, FileEncryptionMode, Node, NodeKind};
     use notegate_service::files::{FileChangeEvent, FileStats, NodeView, TextStats};
     use serde_json::json;
 
@@ -187,10 +185,8 @@ mod tests {
 
     fn file_stats() -> FileStats {
         FileStats {
-            storage_kind: FileStorageKind::InlinePg,
             media_type: "image/png".to_owned(),
             byte_len: 1024,
-            content_sha256: Some("file-sha".to_owned()),
             original_filename: Some("photo.png".to_owned()),
             encryption_mode: FileEncryptionMode::Client,
             encryption_metadata: Some(json!({"iv": "abc"})),
@@ -207,7 +203,6 @@ mod tests {
         assert!(out.content_sha256.is_none());
         assert!(out.byte_len.is_none());
         assert!(out.line_count.is_none());
-        assert!(out.storage_kind.is_none());
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
@@ -225,7 +220,6 @@ mod tests {
         assert_eq!(out.byte_len, Some(42));
         assert_eq!(out.line_count, Some(3));
         // Text-only fields stay unset for a text node.
-        assert!(out.storage_kind.is_none());
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
@@ -239,29 +233,14 @@ mod tests {
         let out = NodeOut::from_view(&view, &HashMap::new());
 
         assert_eq!(out.kind, "file");
-        assert_eq!(out.content_sha256, Some("file-sha".to_owned()));
+        assert!(out.content_sha256.is_none());
         assert_eq!(out.byte_len, Some(1024));
         // line_count is text-only; a file never has one.
         assert!(out.line_count.is_none());
-        assert_eq!(out.storage_kind, Some("inline_pg".to_owned()));
         assert_eq!(out.media_type, Some("image/png".to_owned()));
         assert_eq!(out.original_filename, Some("photo.png".to_owned()));
         assert_eq!(out.encryption_mode, Some("client".to_owned()));
         assert_eq!(out.encryption_metadata, Some(json!({"iv": "abc"})));
-    }
-
-    #[test]
-    fn node_out_from_view_object_file_omits_content_hash() {
-        let mut view = base_view(NodeKind::File);
-        let mut stats = file_stats();
-        stats.storage_kind = FileStorageKind::Object;
-        stats.content_sha256 = None;
-        view.file = Some(stats);
-
-        let out = NodeOut::from_view(&view, &HashMap::new());
-
-        assert_eq!(out.storage_kind, Some("object".to_owned()));
-        assert!(out.content_sha256.is_none());
     }
 
     #[test]

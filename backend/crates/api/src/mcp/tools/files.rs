@@ -792,7 +792,7 @@ mod tests {
             browser_session_max_ttl: Duration::from_secs(30 * 86_400),
             openapi_enabled: false,
             web_dist_dir: None,
-            s3: None,
+            s3: crate::state::test_s3_config(),
             default_user_tier: notegate_core::tier::UserTier::DEFAULT,
             limits: notegate_core::limits::Limits::default(),
             secure_cookies: false,

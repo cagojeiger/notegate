@@ -75,9 +75,10 @@ File은 binary/object content node다. MCP/CLI command surface는 file upload/do
 - Destination은 새 path여야 하며 overwrite하지 않는다.
 - Folder 복사는 `recursive=true`가 필요하다.
 - 새 root node와 descendants는 새 id를 가진다.
-- Node metadata, plain/encrypted Text payload, inline File payload는 보존한다.
+- Node metadata와 plain/encrypted Text payload는 보존한다.
 - 새 row의 create/update attribution은 copy caller로 기록한다.
 - Space 간 copy는 지원하지 않는다.
+- File node 또는 File을 포함한 subtree 복사는 지원하지 않는다.
 
 ## Search semantics
 

@@ -10,11 +10,10 @@
 mod common;
 
 use chrono::Utc;
-use common::{TestDb, space_with_root};
+use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo, SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
-use notegate_model::FileEncryptionMode;
-use notegate_model::files::{CreateFolder, StoredContent, StoredFile, WriteTextBody};
+use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -28,18 +27,6 @@ fn text(content: &str) -> StoredContent {
         content_sha256: "0".repeat(64),
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
-    }
-}
-
-fn file(bytes: &[u8]) -> StoredFile {
-    StoredFile {
-        bytes: bytes.to_vec(),
-        content_sha256: "f".repeat(64),
-        byte_len: bytes.len() as i64,
-        media_type: "application/octet-stream".to_owned(),
-        original_filename: Some("asset.bin".to_owned()),
-        encryption_mode: FileEncryptionMode::None,
-        encryption_metadata: None,
     }
 }
 
@@ -84,9 +71,7 @@ async fn reconciliation_repairs_drift_and_records_execution()
     files
         .insert_text(space_id, root_id, "note.md", &text("hello"), account)
         .await?;
-    files
-        .insert_file(space_id, root_id, "asset.bin", &file(b"abc"), account)
-        .await?;
+    attach_file(&files, space_id, root_id, "asset.bin", 3, account).await?;
     sqlx::query(
         "UPDATE space_usage \
          SET live_node_count = 99, live_text_bytes = 999, live_file_bytes = 888, \

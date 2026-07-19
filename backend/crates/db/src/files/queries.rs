@@ -156,9 +156,9 @@ pub mod text {
 }
 
 pub mod file {
-    //! File reads: metadata stats, file object lookup, and inline bytes.
+    //! File metadata reads.
 
-    use notegate_core::{Error, Result};
+    use notegate_core::Result;
     use notegate_model::files::FileStats;
     use notegate_model::{FileObject, Node};
     use sqlx::PgPool;
@@ -191,10 +191,8 @@ pub mod file {
         row.map(|row| {
             let file = row.into_file()?;
             Ok(FileStats {
-                storage_kind: file.storage_kind,
                 media_type: file.media_type,
                 byte_len: file.byte_len,
-                content_sha256: file.content_sha256,
                 original_filename: file.original_filename,
                 encryption_mode: file.encryption_mode,
                 encryption_metadata: file.encryption_metadata,
@@ -237,10 +235,8 @@ pub mod file {
             stats.insert(
                 file.node_id,
                 FileStats {
-                    storage_kind: file.storage_kind,
                     media_type: file.media_type,
                     byte_len: file.byte_len,
-                    content_sha256: file.content_sha256,
                     original_filename: file.original_filename,
                     encryption_mode: file.encryption_mode,
                     encryption_metadata: file.encryption_metadata,
@@ -282,27 +278,6 @@ pub mod file {
             Some(file_row) => Ok(Some((node_row.into_node()?, file_row.into_file()?))),
             None => Ok(None),
         }
-    }
-
-    pub async fn read_inline_file(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<Option<(Node, FileObject, Vec<u8>)>> {
-        let Some((node, file)) = find_file(pool, space_id, node_id).await? else {
-            return Ok(None);
-        };
-        let bytes: Option<Vec<u8>> = sqlx::query_scalar(
-            "SELECT bytes FROM file_inline_contents WHERE space_id = $1 AND node_id = $2",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let bytes = bytes.ok_or_else(|| Error::not_found("file content not found"))?;
-        Ok(Some((node, file, bytes)))
     }
 }
 

@@ -140,12 +140,10 @@ text_objects
 ```text
 nodes(kind='file')
 file_objects
-file_inline_contents
 object_storage_objects
 ```
 
 - File은 binary/object content다.
-- REST inline upload는 262144 bytes 이하를 저장한다.
 - REST object upload는 Notegate가 발급한 S3 호환 presigned PUT URL로 bytes를 직접 전송하고, `HEAD` 크기 검증 뒤 최대 104857600 bytes를 File node에 연결한다.
 - Object download는 S3 호환 presigned GET URL로 redirect한다.
 - 완료되지 않은 upload와 soft-delete된 File의 물리 삭제는 `object_storage_objects` 원장과 정리 worker가 재시도한다.

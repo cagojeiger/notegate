@@ -28,5 +28,5 @@ pub use space::{
     ConnectAgent, ConnectionPage, CreateSpace, ListConnections, ListSpaces, Permission, Space,
     SpaceAgentConnection, SpaceCursor, SpacePage, SpaceView, UpdateSpace,
 };
-pub use text::{FileEncryptionMode, FileObject, FileStorageKind, TextObject, TextStorageFormat};
+pub use text::{FileEncryptionMode, FileObject, TextObject, TextStorageFormat};
 pub use user::User;

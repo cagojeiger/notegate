@@ -7,9 +7,10 @@
     clippy::panic,
     clippy::unwrap_in_result
 )]
-use notegate_db::AccountRepo;
 pub use notegate_db::test_support::TestDb;
-use notegate_model::ResolveAttrs;
+use notegate_db::{AccountRepo, FilesRepo};
+use notegate_model::files::BeginObjectUpload;
+use notegate_model::{FileEncryptionMode, FileObject, Node, ResolveAttrs};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -52,6 +53,37 @@ pub async fn space_with_root(
             .fetch_one(pool)
             .await?;
     Ok((account, space, root))
+}
+
+/// Record and attach an object-backed file without contacting object storage.
+#[allow(dead_code)]
+pub async fn attach_file(
+    repo: &FilesRepo,
+    space_id: Uuid,
+    parent_node_id: Uuid,
+    name: &str,
+    byte_len: i64,
+    account_id: Uuid,
+) -> Result<(Node, FileObject), notegate_core::Error> {
+    let upload_id = Uuid::new_v4();
+    repo.insert_object_upload(
+        upload_id,
+        &format!("objects/{upload_id}"),
+        space_id,
+        account_id,
+        &BeginObjectUpload {
+            parent_node_id,
+            name: name.to_owned(),
+            byte_len,
+            media_type: "application/octet-stream".to_owned(),
+            original_filename: Some(name.to_owned()),
+            encryption_mode: FileEncryptionMode::None,
+            encryption_metadata: None,
+        },
+    )
+    .await?;
+    repo.attach_object_upload(upload_id, space_id, account_id)
+        .await
 }
 
 /// Assign a test user to a product tier.

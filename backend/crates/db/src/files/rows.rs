@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{
-    FileEncryptionMode, FileObject, FileStorageKind, Node, NodeKind, TextObject, TextStorageFormat,
+    FileEncryptionMode, FileObject, Node, NodeKind, TextObject, TextStorageFormat,
 };
 use serde_json::Value;
 use sqlx::FromRow;
@@ -112,16 +112,14 @@ pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, encr
      byte_len, line_count, media_type, encoding, storage_format, \
      created_by_account_id, updated_by_account_id, created_at, updated_at";
 
-/// A row from `file_objects` (metadata only; inline bytes live in `file_inline_contents`).
+/// A row from `file_objects`; content bytes live in object storage.
 #[derive(Debug, FromRow)]
 pub struct FileRow {
     pub node_id: Uuid,
     pub space_id: Uuid,
-    pub storage_kind: String,
-    pub object_key: Option<String>,
+    pub object_key: String,
     pub media_type: String,
     pub byte_len: i64,
-    pub content_sha256: Option<String>,
     pub original_filename: Option<String>,
     pub encryption_mode: String,
     pub encryption_metadata: Option<Value>,
@@ -130,15 +128,6 @@ pub struct FileRow {
 
 impl FileRow {
     pub fn into_file(self) -> Result<FileObject> {
-        let storage_kind = match self.storage_kind.as_str() {
-            "inline_pg" => FileStorageKind::InlinePg,
-            "object" => FileStorageKind::Object,
-            value => {
-                return Err(Error::internal(format!(
-                    "unknown file storage kind: {value}"
-                )));
-            }
-        };
         let encryption_mode =
             FileEncryptionMode::parse(&self.encryption_mode).ok_or_else(|| {
                 Error::internal(format!(
@@ -149,11 +138,9 @@ impl FileRow {
         Ok(FileObject {
             node_id: self.node_id,
             space_id: self.space_id,
-            storage_kind,
             object_key: self.object_key,
             media_type: self.media_type,
             byte_len: self.byte_len,
-            content_sha256: self.content_sha256,
             original_filename: self.original_filename,
             encryption_mode,
             encryption_metadata: self.encryption_metadata,
@@ -163,5 +150,5 @@ impl FileRow {
 }
 
 /// Selectable columns of `file_objects`, in [`FileRow`] order.
-pub const FILE_COLUMNS: &str = "node_id, space_id, storage_kind, object_key, media_type, byte_len, content_sha256, \
+pub const FILE_COLUMNS: &str = "node_id, space_id, object_key, media_type, byte_len, \
      original_filename, encryption_mode, encryption_metadata, uploaded_at";

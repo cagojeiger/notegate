@@ -84,14 +84,14 @@ REST는 encrypted payload 저장/조회가 가능하다. MCP Text content operat
 
 ## File content encryption
 
-File content는 두 저장 방식을 가진다.
+File content는 S3 호환 object storage에 저장하며 두 encryption mode를 가진다.
 
 ```text
 none    = 서버가 저장 bytes를 그대로 반환
 client  = client-side encrypted bytes
 ```
 
-`encryption_mode=client`에서 서버는 원본, 비밀번호, 복호화 키를 받거나 저장하지 않는다. `byte_len`은 저장된 bytes 기준이다. Inline File의 `content_sha256`은 저장된 bytes 기준이며, S3 object File은 `content_sha256`을 저장하거나 노출하지 않는다.
+`encryption_mode=client`에서 서버는 원본, 비밀번호, 복호화 키를 받거나 저장하지 않는다. `byte_len`은 저장된 bytes 기준이다. File의 `content_sha256`은 저장하거나 노출하지 않는다.
 
 ## Object storage access
 

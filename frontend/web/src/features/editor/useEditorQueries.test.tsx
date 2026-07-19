@@ -60,7 +60,7 @@ describe("useMarkdownImageLoader", () => {
 
   it("reuses cached node resolution and blobs for repeated markdown image loads", async () => {
     const blob = new Blob(["image"], { type: "image/png" });
-    const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png", content_sha256: "sha-1" });
+    const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png" });
     vi.mocked(resolveNodePath).mockResolvedValue(imageNode);
     vi.mocked(downloadFile).mockResolvedValue(blob);
 
@@ -123,7 +123,6 @@ function fileNode(overrides: Partial<RestNode>): RestNode {
     path: "/docs/image.png",
     media_type: "image/png",
     encryption_mode: "none",
-    content_sha256: "sha",
     ...overrides
   };
 }

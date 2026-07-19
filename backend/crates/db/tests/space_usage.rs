@@ -9,13 +9,10 @@
 )]
 mod common;
 
-use common::{TestDb, space_with_root};
+use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
-use notegate_model::FileEncryptionMode;
-use notegate_model::files::{
-    CopyNode, CreateFolder, MoveNode, StoredContent, StoredFile, WriteTextBody,
-};
+use notegate_model::files::{CopyNode, CreateFolder, MoveNode, StoredContent, WriteTextBody};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -25,18 +22,6 @@ fn text(content: &str) -> StoredContent {
         content_sha256: "0".repeat(64),
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
-    }
-}
-
-fn file(bytes: &[u8]) -> StoredFile {
-    StoredFile {
-        bytes: bytes.to_vec(),
-        content_sha256: "f".repeat(64),
-        byte_len: bytes.len() as i64,
-        media_type: "application/octet-stream".to_owned(),
-        original_filename: Some("asset.bin".to_owned()),
-        encryption_mode: FileEncryptionMode::None,
-        encryption_metadata: None,
     }
 }
 
@@ -91,8 +76,7 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
     let (text_node, _) = repo
         .insert_text(space_id, folder.id, "note.md", &text("hello"), account)
         .await?;
-    repo.insert_file(space_id, folder.id, "asset.bin", &file(b"abc"), account)
-        .await?;
+    attach_file(&repo, space_id, root_id, "asset.bin", 3, account).await?;
     assert_usage(&db.pool, space_id, (4, 5, 3)).await?;
 
     repo.save_text_content(
@@ -127,8 +111,8 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
             account,
         )
         .await?;
-    assert_eq!(counts.nodes, 3);
-    assert_usage(&db.pool, space_id, (7, 22, 6)).await?;
+    assert_eq!(counts.nodes, 2);
+    assert_usage(&db.pool, space_id, (6, 22, 3)).await?;
 
     repo.move_node(
         space_id,
@@ -143,7 +127,7 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
     .await?;
     repo.update_node_metadata(space_id, copied.id, None, Some(2_000), account)
         .await?;
-    assert_usage(&db.pool, space_id, (7, 22, 6)).await?;
+    assert_usage(&db.pool, space_id, (6, 22, 3)).await?;
 
     repo.soft_delete_node(space_id, folder.id, account, true)
         .await?;
@@ -220,8 +204,7 @@ async fn migration_backfills_existing_space_usage() -> Result<(), Box<dyn std::e
     let repo = FilesRepo::new(db.pool.clone());
     repo.insert_text(space_id, root_id, "note.md", &text("hello"), account)
         .await?;
-    repo.insert_file(space_id, root_id, "asset.bin", &file(b"abc"), account)
-        .await?;
+    attach_file(&repo, space_id, root_id, "asset.bin", 3, account).await?;
 
     sqlx::raw_sql(
         "DROP TRIGGER spaces_create_usage ON spaces; \

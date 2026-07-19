@@ -20,7 +20,7 @@ space_agent_connections
 nodes
 text_objects
 file_objects
-file_inline_contents
+object_storage_objects
 ```
 
 ## Security tables
@@ -345,32 +345,18 @@ text_objects
 file_objects
   node_id uuid pk
   space_id uuid not null references spaces(id) on delete cascade
-  storage_kind text not null check ('inline_pg','object')
-  object_key text null
+  object_key text not null
   media_type text not null
   byte_len bigint not null check 0..104857600
-  content_sha256 text null
   original_filename text null
   encryption_mode text not null check ('none','client')
   encryption_metadata jsonb null
   uploaded_at timestamptz
 ```
 
-```text
-file_inline_contents
-  node_id uuid pk
-  space_id uuid not null
-  bytes bytea not null check octet_length(bytes) <= 262144
-```
+`File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. Notegate는 외부에 노출하지 않는 `object_key`만 저장한다.
 
-`File`은 공통 metadata와 실제 bytes를 분리한다. `inline_pg`는 `file_inline_contents.bytes`에 최대 262144 bytes를 저장한다. `object`는 S3 호환 저장소에 bytes를 저장하고 Notegate는 외부에 노출하지 않는 `object_key`를 저장한다.
-
-Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. `storage_kind='inline_pg'`와 `storage_kind='object'`는 같은 File counter에 포함한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
-
-```text
-storage_kind='inline_pg' -> file_inline_contents row가 같은 transaction에서 생성됨, object_key IS NULL, byte_len <= 262144
-storage_kind='object'    -> object_key IS NOT NULL, bytes는 S3 호환 저장소에 저장됨
-```
+Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 
 ```text
 object_storage_objects
@@ -389,13 +375,10 @@ Content FK invariant:
 
 ```text
 DB FK: text_objects/file_objects row -> matching nodes(id, space_id) ON DELETE CASCADE
-DB FK: file_inline_contents row -> matching file_objects(node_id, space_id) ON DELETE CASCADE
-DB CHECK: file_inline_contents.bytes <= 262144
 DB CHECK: file_objects.byte_len <= 104857600
-DB CHECK: inline_pg는 byte_len <= 262144, object_key IS NULL, content_sha256 IS NOT NULL
-DB CHECK: object는 object_key IS NOT NULL
-Service transaction: storage_kind='inline_pg'는 file_inline_contents row를 하나 생성
-Service transaction: storage_kind='object' attach는 node, file_objects, usage counter, file change event, 원장 상태를 함께 commit
+DB FK: file_objects.object_key -> object_storage_objects.object_key
+DB CHECK: file_objects.object_key IS NOT NULL
+Service transaction: object attach는 node, file_objects, usage counter, file change event, 원장 상태를 함께 commit
 ```
 
 File content encryption은 client-side only다.

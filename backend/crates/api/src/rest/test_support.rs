@@ -95,7 +95,7 @@ fn test_config() -> Arc<Config> {
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
         openapi_enabled: false,
         web_dist_dir: None,
-        s3: None,
+        s3: crate::state::test_s3_config(),
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
         limits: notegate_core::limits::Limits::default(),
         secure_cookies: false,
@@ -108,7 +108,7 @@ pub(super) fn state(db: &TestDb) -> crate::state::AppState {
 
 pub(super) fn state_with_s3(db: &TestDb, s3: S3Config) -> crate::state::AppState {
     let mut config = (*test_config()).clone();
-    config.s3 = Some(s3);
+    config.s3 = s3;
     state_from_config(db, Arc::new(config))
 }
 
@@ -234,43 +234,6 @@ pub(super) async fn empty_request(
                 .method(method)
                 .uri(uri)
                 .body(Body::empty())?,
-        )
-        .await?;
-    decode_response(response).await
-}
-
-pub(super) async fn upload_file(
-    app: Router,
-    space_id: Uuid,
-    parent_id: Uuid,
-) -> Result<(StatusCode, Value), Box<dyn std::error::Error>> {
-    let boundary = "notegate-test-boundary";
-    let body = format!(
-        "--{boundary}\r\n\
-             Content-Disposition: form-data; name=\"parent_node_id\"\r\n\r\n\
-             {parent_id}\r\n\
-             --{boundary}\r\n\
-             Content-Disposition: form-data; name=\"name\"\r\n\r\n\
-             asset.txt\r\n\
-             --{boundary}\r\n\
-             Content-Disposition: form-data; name=\"media_type\"\r\n\r\n\
-             text/plain\r\n\
-             --{boundary}\r\n\
-             Content-Disposition: form-data; name=\"file\"; filename=\"asset.txt\"\r\n\
-             Content-Type: text/plain\r\n\r\n\
-             asset\r\n\
-             --{boundary}--\r\n"
-    );
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/spaces/{space_id}/files"))
-                .header(
-                    CONTENT_TYPE,
-                    format!("multipart/form-data; boundary={boundary}"),
-                )
-                .body(Body::from(body))?,
         )
         .await?;
     decode_response(response).await

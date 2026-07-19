@@ -115,13 +115,11 @@ async fn main() -> anyhow::Result<()> {
     let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
     let usage_reconcile_worker =
         usage_reconcile_worker::spawn(pool.clone(), background_shutdown_token.clone());
-    let object_storage_cleanup_worker = state.object_storage.clone().map(|storage| {
-        object_storage_cleanup_worker::spawn(
-            pool.clone(),
-            storage,
-            background_shutdown_token.clone(),
-        )
-    });
+    let object_storage_cleanup_worker = object_storage_cleanup_worker::spawn(
+        pool.clone(),
+        state.object_storage.clone(),
+        background_shutdown_token.clone(),
+    );
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -152,9 +150,7 @@ async fn main() -> anyhow::Result<()> {
     if let Err(error) = usage_reconcile_worker.await {
         tracing::error!(event = "usage_reconcile_worker.join_failed", %error);
     }
-    if let Some(worker) = object_storage_cleanup_worker
-        && let Err(error) = worker.await
-    {
+    if let Err(error) = object_storage_cleanup_worker.await {
         tracing::error!(event = "object_storage_cleanup_worker.join_failed", %error);
     }
 

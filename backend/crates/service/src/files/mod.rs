@@ -21,11 +21,11 @@ mod view;
 
 pub use notegate_model::files::{
     AppendText, BeginObjectUpload, ChildrenCursor, ChildrenPage, ChildrenRequest, CopyCounts,
-    CopyNode, CopyResult, CreateFile, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit,
-    EditText, FileContent, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode,
-    NodeListCursor, NodeListPage, NodeListSort, NodeReveal, NodeView, PatchMode, PatchResult,
-    PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
-    StoredFile, TextStats, TextView, WriteTarget, WriteText, WriteTextBody,
+    CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit, EditText,
+    FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor, NodeListPage,
+    NodeListSort, NodeReveal, NodeView, PatchMode, PatchResult, PatchText, PendingObjectUpload,
+    ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent, TextStats, TextView,
+    WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::{
     FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, ListFileChangeEvents,
