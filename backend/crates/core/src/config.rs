@@ -553,6 +553,7 @@ mod tests {
         )?;
 
         assert_eq!(config.web_dist_dir.as_deref(), Some("/app/web"));
+        assert_eq!(config.default_user_tier, UserTier::Tier0);
         Ok(())
     }
 

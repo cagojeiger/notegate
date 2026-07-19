@@ -16,7 +16,7 @@ pub enum UserTier {
 }
 
 impl UserTier {
-    pub const DEFAULT: Self = Self::SystemMax;
+    pub const DEFAULT: Self = Self::Tier0;
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -107,6 +107,23 @@ mod tests {
             limits::CONNECTED_SPACES_PER_AGENT_MAX
         );
         assert_eq!(quota.file_tree, Limits::default());
+    }
+
+    #[test]
+    fn default_tier_is_tier0() {
+        assert_eq!(UserTier::DEFAULT, UserTier::Tier0);
+    }
+
+    #[test]
+    fn file_quota_is_tier_specific() {
+        assert_eq!(
+            UserTier::Tier0.quota().file_tree.space_max_file_bytes,
+            128 * 1024 * 1024
+        );
+        assert_eq!(
+            UserTier::SystemMax.quota().file_tree.space_max_file_bytes,
+            100 * 1024 * 1024 * 1024
+        );
     }
 
     #[test]
