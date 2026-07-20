@@ -144,7 +144,7 @@ object_storage_objects
 ```
 
 - File은 binary/object content다.
-- REST/browser object upload는 최대 104857600 bytes를 single PUT으로 전송한다. MCP는 최대 107374182400 bytes를 지원하며 100MiB 초과 시 multipart를 사용한다. 두 경로 모두 `HEAD` 크기 검증 뒤 File node를 연결한다.
+- REST/browser object upload 상한은 10737418240 bytes다. REST와 MCP 모두 100MiB 이하는 single PUT, 초과 파일은 64MiB part의 multipart upload를 사용한다. MCP와 제품 전체 File hard max는 107374182400 bytes다. 두 경로 모두 `HEAD` 크기 검증 뒤 File node를 연결한다.
 - Object download는 S3 호환 presigned GET URL로 redirect한다.
 - 완료되지 않은 upload와 soft-delete된 File의 물리 삭제는 `object_storage_objects` 원장과 정리 worker가 재시도한다.
 - Provider multipart 생성과 DB 원장 기록은 하나의 transaction이 아니므로, S3 provider에도 incomplete multipart 자동 abort 정책을 설정한다. 로컬 MinIO는 server 기본 stale multipart cleanup을 2차 안전망으로 사용한다.

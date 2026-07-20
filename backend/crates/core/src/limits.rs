@@ -70,8 +70,10 @@ pub const SPACE_MAX_TEXT_BYTES: usize = 1_073_741_824;
 pub const SPACE_MAX_FILE_BYTES: usize = 107_374_182_400;
 /// Maximum bytes per uploaded file (100 GiB). Effective Space quota may be lower.
 pub const FILE_MAX_BYTES: usize = 107_374_182_400;
-/// Maximum object size accepted by the legacy single-PUT REST/browser flow (100 MiB).
+/// Maximum object size accepted by a single presigned PUT (100 MiB).
 pub const SINGLE_PUT_MAX_BYTES: usize = 104_857_600;
+/// Maximum file size accepted by the browser upload flow (10 GiB).
+pub const BROWSER_FILE_MAX_BYTES: usize = 10_737_418_240;
 /// Maximum unfinished object uploads per account. Both active uploads and
 /// objects awaiting expiry deletion count until the physical object is removed.
 pub const OBJECT_UPLOAD_MAX_PENDING: usize = 16;

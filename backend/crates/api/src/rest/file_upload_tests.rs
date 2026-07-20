@@ -9,9 +9,12 @@
 use std::collections::BTreeMap;
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode, header::LOCATION};
+use axum::http::{
+    Request, StatusCode,
+    header::{ACCESS_CONTROL_EXPOSE_HEADERS, LOCATION, ORIGIN},
+};
 use notegate_core::S3Config;
-use notegate_core::limits::SINGLE_PUT_MAX_BYTES;
+use notegate_core::limits::{BROWSER_FILE_MAX_BYTES, SINGLE_PUT_MAX_BYTES};
 use notegate_db::{FilesRepo, ObjectStorageRepo, test_support::TestDb};
 use notegate_model::files::{BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration};
 use notegate_model::{Caller, FileEncryptionMode};
@@ -121,10 +124,22 @@ async fn put_mcp_part(transfer: &Value) -> Result<CompletedPartInput, Box<dyn st
         request = request.header(name, value.as_str().ok_or("part header value")?);
     }
     let response = request
+        .header(ORIGIN, "http://localhost:5173")
         .body(vec![part_number as u8; content_length as usize])
         .send()
         .await?
         .error_for_status()?;
+    let exposed_headers = response
+        .headers()
+        .get(ACCESS_CONTROL_EXPOSE_HEADERS)
+        .and_then(|value| value.to_str().ok())
+        .ok_or("storage CORS does not expose response headers")?;
+    if !exposed_headers
+        .split(',')
+        .any(|name| name.trim().eq_ignore_ascii_case("etag"))
+    {
+        return Err("storage CORS does not expose ETag".into());
+    }
     let etag = response
         .headers()
         .get(reqwest::header::ETAG)
@@ -288,6 +303,89 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
 }
 
 #[tokio::test]
+async fn rest_multipart_upload_round_trips_and_completes_idempotently()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let byte_len = SINGLE_PUT_MAX_BYTES as i64 + 1;
+
+    let (status, begun) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads"),
+        json!({
+            "parent_node_id": root_id,
+            "name": "browser-large.bin",
+            "byte_len": byte_len,
+            "media_type": "application/octet-stream"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED, "{begun}");
+    assert_eq!(begun["transfer"]["mode"], "multipart");
+    assert_eq!(begun["transfer"]["part_count"], 2);
+    let upload_id: Uuid = serde_json::from_value(begun["upload_id"].clone())?;
+
+    let (status, prepared) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads/{upload_id}/parts"),
+        json!({ "part_numbers": [1, 2] }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{prepared}");
+    let transfers = prepared["parts"].as_array().ok_or("part transfers")?;
+    let (first, second) = tokio::join!(put_mcp_part(&transfers[0]), put_mcp_part(&transfers[1]));
+    let completed_parts = [first?, second?];
+    let completion_body = json!({
+        "completed_parts": completed_parts
+            .iter()
+            .map(|part| json!({ "part_number": part.part_number, "etag": part.etag }))
+            .collect::<Vec<_>>()
+    });
+
+    let first = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads/{upload_id}/complete"),
+        completion_body.clone(),
+    );
+    let second = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads/{upload_id}/complete"),
+        completion_body,
+    );
+    let (first, second) = tokio::join!(first, second);
+    let (first_status, first_body) = first?;
+    let (second_status, second_body) = second?;
+    assert_eq!(first_status, StatusCode::CREATED, "{first_body}");
+    assert_eq!(second_status, StatusCode::CREATED, "{second_body}");
+    assert_eq!(first_body["node"]["id"], second_body["node"]["id"]);
+    let node_id: Uuid = serde_json::from_value(first_body["node"]["id"].clone())?;
+
+    let download = state
+        .object_storage
+        .presign_get(&format!("objects/{upload_id}"), None)
+        .await
+        .map_err(|error| format!("presign download: {error:?}"))?;
+    assert_eq!(
+        reqwest::get(download).await?.bytes().await?.len(),
+        byte_len as usize
+    );
+
+    delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::error::Error>> {
     let Some(s3) = test_s3_config() else {
         return Ok(());
@@ -332,8 +430,62 @@ async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::err
 }
 
 #[tokio::test]
-async fn rest_begin_rejects_files_above_the_single_put_limit()
+async fn rest_begin_uses_multipart_above_the_single_put_limit()
 -> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+
+    let (status, body) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads"),
+        json!({
+            "parent_node_id": root_id,
+            "name": "multipart.bin",
+            "byte_len": SINGLE_PUT_MAX_BYTES as i64 + 1,
+            "media_type": "application/octet-stream"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["transfer"]["mode"], "multipart");
+    assert_eq!(body["transfer"]["part_count"], 2);
+    let upload_id: Uuid = serde_json::from_value(body["upload_id"].clone())?;
+
+    for part_numbers in [json!([1, 1]), json!([3])] {
+        let (status, error) = json_request(
+            rest_app(state.clone(), caller.clone()),
+            "POST",
+            format!("/v1/spaces/{space_id}/file-uploads/{upload_id}/parts"),
+            json!({ "part_numbers": part_numbers }),
+        )
+        .await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        assert_eq!(error["kind"], "invalid_input");
+    }
+
+    let (status, _) = empty_request(
+        rest_app(state.clone(), caller),
+        "DELETE",
+        format!("/v1/spaces/{space_id}/file-uploads/{upload_id}"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    run_cleanup(&db, &state).await;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rest_begin_rejects_files_above_the_browser_limit() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(s3) = test_s3_config() else {
         return Ok(());
     };
@@ -349,8 +501,8 @@ async fn rest_begin_rejects_files_above_the_single_put_limit()
         format!("/v1/spaces/{space_id}/file-uploads"),
         json!({
             "parent_node_id": root_id,
-            "name": "too-large-for-single-put.bin",
-            "byte_len": SINGLE_PUT_MAX_BYTES as i64 + 1,
+            "name": "too-large-for-browser.bin",
+            "byte_len": BROWSER_FILE_MAX_BYTES as i64 + 1,
             "media_type": "application/octet-stream"
         }),
     )

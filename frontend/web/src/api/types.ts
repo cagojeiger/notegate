@@ -154,11 +154,31 @@ export type FileResponse = {
 
 export type BeginFileUploadResponse = {
   upload_id: string;
-  transfer: {
-    mode: "single";
-    url: string;
-    headers: Record<string, string>;
-  };
+  transfer: SingleFileUploadTransfer | MultipartFileUploadTransfer;
+};
+
+export type SingleFileUploadTransfer = {
+  mode: "single";
+  url: string;
+  headers: Record<string, string>;
+};
+
+export type MultipartFileUploadTransfer = {
+  mode: "multipart";
+  part_size: number;
+  part_count: number;
+};
+
+export type PreparedFileUploadPart = {
+  part_number: number;
+  url: string;
+  headers: Record<string, string>;
+  content_length: number;
+};
+
+export type CompletedFileUploadPart = {
+  part_number: number;
+  etag: string;
 };
 
 export type MetadataResponse = {

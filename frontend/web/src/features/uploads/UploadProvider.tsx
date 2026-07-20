@@ -2,7 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { beginFileUpload, completeFileUpload, transferFile, type FileUploadInput } from "../../api/files";
+import {
+  abortFileUpload,
+  beginFileUpload,
+  completeFileUpload,
+  transferFile,
+  type FileUploadInput
+} from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
 import { useUiStore } from "../../stores/uiStore";
 
@@ -58,17 +64,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     mutationFn: async ({ taskId, input, controller }: UploadRun) => {
       updateTask(taskId, (task) => ({ ...task, status: "preparing", uploadedBytes: 0, error: null }));
       const upload = await beginFileUpload(client, input.spaceId, input);
-      if (controller.signal.aborted) throw canceledError();
+      try {
+        if (controller.signal.aborted) throw canceledError();
 
-      updateTask(taskId, (task) => ({ ...task, status: "uploading" }));
-      await transferFile(upload, input.file, {
-        signal: controller.signal,
-        onProgress: (uploadedBytes) => updateTask(taskId, (task) => ({ ...task, uploadedBytes }))
-      });
-      if (controller.signal.aborted) throw canceledError();
+        updateTask(taskId, (task) => ({ ...task, status: "uploading" }));
+        const completedParts = await transferFile(client, input.spaceId, upload, input.file, {
+          signal: controller.signal,
+          onProgress: (uploadedBytes) => updateTask(taskId, (task) => ({ ...task, uploadedBytes }))
+        });
+        if (controller.signal.aborted) throw canceledError();
 
-      updateTask(taskId, (task) => ({ ...task, status: "finalizing", uploadedBytes: input.file.size }));
-      return completeFileUpload(client, input.spaceId, upload.upload_id);
+        updateTask(taskId, (task) => ({ ...task, status: "finalizing", uploadedBytes: input.file.size }));
+        return await completeFileUpload(client, input.spaceId, upload.upload_id, completedParts);
+      } catch (error) {
+        // Do not hold the UI in an active state while best-effort cleanup runs.
+        // The server also expires abandoned uploads if this request fails.
+        void abortFileUpload(client, input.spaceId, upload.upload_id).catch(() => undefined);
+        throw error;
+      }
     },
     meta: { silentError: true }
   });
