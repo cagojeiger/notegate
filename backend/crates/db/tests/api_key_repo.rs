@@ -60,7 +60,6 @@ async fn insert_agent_account(
     Ok(id)
 }
 
-/// P0-1: concurrent capped creates against one account never exceed the cap.
 /// Runs against real Postgres so the in-tx `FOR UPDATE` serialization is exercised.
 async fn concurrent_create_respects_cap(
     pool: &sqlx::PgPool,

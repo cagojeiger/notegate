@@ -663,7 +663,6 @@ impl FilesService {
             .unwrap_or_else(|| node.name.clone());
         validation::validate_basename(&final_name, node.kind)?;
 
-        // Same parent and same name ⇒ no-op success.
         if node.parent_id == Some(command.new_parent_node_id) && final_name == node.name {
             return self.node_view(space_id, node).await;
         }
@@ -692,7 +691,6 @@ impl FilesService {
             )));
         }
 
-        // Resulting subtree depth and path length.
         let dest_parent_path = self.path_of(space_id, command.new_parent_node_id).await?;
         let dest_parent_depth = path_depth(&dest_parent_path);
         let new_path = join_path(&dest_parent_path, &final_name);
@@ -703,7 +701,6 @@ impl FilesService {
             .await?;
         validation::validate_depth(dest_parent_depth + 1 + subtree_depth)?;
 
-        // Destination fanout (only when actually changing parent).
         if node.parent_id != Some(command.new_parent_node_id) {
             let children = self
                 .store

@@ -77,8 +77,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         updateTask(taskId, (task) => ({ ...task, status: "finalizing", uploadedBytes: input.file.size }));
         return await completeFileUpload(client, input.spaceId, upload.upload_id, completedParts);
       } catch (error) {
-        // Do not hold the UI in an active state while best-effort cleanup runs.
-        // The server also expires abandoned uploads if this request fails.
+        // Cleanup runs in the background so the task can settle immediately.
+        // Abandoned uploads also expire server-side.
         void abortFileUpload(client, input.spaceId, upload.upload_id).catch(() => undefined);
         throw error;
       }

@@ -266,8 +266,7 @@ pub async fn complete_upload(
             if completed_parts.is_some() {
                 return Err(invalid("single uploads do not accept completed_parts"));
             }
-            // Missing single-PUT objects must remain eligible for inactivity
-            // cleanup instead of extending their lifetime on failed complete.
+            // Verify first so missing single-PUT objects remain eligible for inactivity cleanup.
             verify_upload(state, &upload).await?;
             state
                 .files

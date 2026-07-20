@@ -219,7 +219,6 @@ mod tests {
         assert_eq!(out.content_sha256, Some("text-sha".to_owned()));
         assert_eq!(out.byte_len, Some(42));
         assert_eq!(out.line_count, Some(3));
-        // Text-only fields stay unset for a text node.
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
@@ -235,7 +234,6 @@ mod tests {
         assert_eq!(out.kind, "file");
         assert!(out.content_sha256.is_none());
         assert_eq!(out.byte_len, Some(1024));
-        // line_count is text-only; a file never has one.
         assert!(out.line_count.is_none());
         assert_eq!(out.media_type, Some("image/png".to_owned()));
         assert_eq!(out.original_filename, Some("photo.png".to_owned()));

@@ -1,9 +1,3 @@
-//! P0-2: file-tree mutations on a soft-deleted space must read as not_found.
-//!
-//! Run with:
-//! `NOTEGATE_TEST_DATABASE_URL=postgres://notegate:notegate@localhost:5433/notegate \
-//!  cargo test -p notegate-db --test files_commands`
-
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
