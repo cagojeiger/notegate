@@ -235,12 +235,13 @@ describe("useWorkbenchNodeActions", () => {
 
   it("queues a selected file with the current space snapshot", async () => {
     const activeSpace = space("space-1");
+    const destinationFolder = node("reports", activeSpace.id, "/Reports", "folder");
     const setDialog = vi.fn();
     const file = new File(["data"], "source.bin", { type: "application/octet-stream" });
     const { result } = renderHook(() =>
       useWorkbenchNodeActions({
         activeSpace,
-        activeNode: null,
+        activeNode: destinationFolder,
         canWriteActiveSpace: true,
         setDialog
       })
@@ -256,7 +257,8 @@ describe("useWorkbenchNodeActions", () => {
     expect(mocks.startUpload).toHaveBeenCalledWith({
       spaceId: activeSpace.id,
       spaceName: activeSpace.name,
-      parentNodeId: activeSpace.root_node_id,
+      destinationPath: destinationFolder.path,
+      parentNodeId: destinationFolder.id,
       name: "archive.bin",
       file
     });

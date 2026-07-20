@@ -1,18 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
 import type { Space } from "../../api/types";
 import { EventHistoryModal } from "./EventHistoryModal";
-
-const uploadMocks = vi.hoisted(() => ({
-  useUploadManager: vi.fn()
-}));
-
-vi.mock("../uploads/UploadProvider", () => ({
-  useUploadManager: uploadMocks.useUploadManager
-}));
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 
@@ -38,10 +30,6 @@ function jsonResponse(body: unknown) {
 }
 
 describe("EventHistoryModal", () => {
-  beforeEach(() => {
-    uploadMocks.useUploadManager.mockReset().mockReturnValue(emptyUploadManager());
-  });
-
   it("does not call the user-only audit endpoint when audit is unavailable", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 
@@ -212,58 +200,7 @@ describe("EventHistoryModal", () => {
     expect(screen.getByRole("combobox", { name: "Space" })).toHaveValue(secondSpace.id);
   });
 
-  it("shows failed transfers and routes retry actions", async () => {
-    const user = userEvent.setup();
-    const manager = emptyUploadManager();
-    manager.tasks = [{
-      id: "upload-1",
-      spaceId: space.id,
-      spaceName: space.name,
-      parentNodeId: space.root_node_id,
-      name: "archive.zip",
-      file: new File(["data"], "archive.zip"),
-      status: "failed",
-      uploadedBytes: 0,
-      error: "network unavailable"
-    }];
-    manager.failedCount = 1;
-    uploadMocks.useUploadManager.mockReturnValue(manager);
-
-    render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
-        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} initialTab="transfers" canViewAuditEvents onClose={vi.fn()} />
-      </ApiProvider>
-    );
-
-    expect(screen.getByRole("tab", { name: "Transfers" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("network unavailable")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Retry upload archive.zip" }));
-    expect(manager.retryUpload).toHaveBeenCalledWith("upload-1");
-  });
 });
-
-function emptyUploadManager() {
-  return {
-    tasks: [] as Array<{
-      id: string;
-      spaceId: string;
-      spaceName: string;
-      parentNodeId: string;
-      name: string;
-      file: File;
-      status: "failed";
-      uploadedBytes: number;
-      error: string | null;
-    }>,
-    activeCount: 0,
-    failedCount: 0,
-    progressPercent: 0,
-    startUpload: vi.fn(),
-    cancelUpload: vi.fn(),
-    retryUpload: vi.fn(),
-    dismissUpload: vi.fn()
-  };
-}
 
 function auditEvent(id: number, op_type: string) {
   return {

@@ -10,7 +10,6 @@ import {
   type FileUploadInput
 } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
-import { useUiStore } from "../../stores/uiStore";
 
 export type UploadTaskStatus = "preparing" | "uploading" | "finalizing" | "failed" | "completed";
 
@@ -18,6 +17,7 @@ export type UploadTask = FileUploadInput & {
   id: string;
   spaceId: string;
   spaceName: string;
+  destinationPath: string;
   status: UploadTaskStatus;
   uploadedBytes: number;
   error: string | null;
@@ -26,13 +26,13 @@ export type UploadTask = FileUploadInput & {
 export type StartUploadInput = FileUploadInput & {
   spaceId: string;
   spaceName: string;
+  destinationPath: string;
 };
 
 type UploadManager = {
   tasks: UploadTask[];
   activeCount: number;
   failedCount: number;
-  progressPercent: number;
   startUpload: (input: StartUploadInput) => string;
   cancelUpload: (taskId: string) => void;
   retryUpload: (taskId: string) => void;
@@ -104,7 +104,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         updateTask(taskId, (task) => ({ ...task, status: "completed", uploadedBytes: task.file.size }));
         void queryClient.invalidateQueries({ queryKey: queryKeys.spaces, exact: true });
         void queryClient.invalidateQueries({ queryKey: ["spaces", input.spaceId] });
-        useUiStore.getState().showToast(`Uploaded ${input.name}`);
         const timer = window.setTimeout(() => removeTask(taskId), COMPLETED_TASK_TTL_MS);
         cleanupTimers.current.set(taskId, timer);
       })
@@ -115,7 +114,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           return;
         }
         updateTask(taskId, (task) => ({ ...task, status: "failed", error: uploadErrorMessage(error) }));
-        useUiStore.getState().showToast(`Upload failed: ${input.name}`);
       });
   }, [executeUpload, queryClient, removeTask, updateTask]);
 
@@ -144,7 +142,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const dismissUpload = useCallback((taskId: string) => {
     const task = tasks.find((candidate) => candidate.id === taskId);
-    if (!task || isActive(task.status)) return;
+    if (!task || isActive(task.status) || controllers.current.has(taskId)) return;
     removeTask(taskId);
   }, [removeTask, tasks]);
 
@@ -174,12 +172,9 @@ export function useUploadManager(): UploadManager {
 
 function summarizeUploads(tasks: UploadTask[]) {
   const active = tasks.filter((task) => isActive(task.status));
-  const totalBytes = active.reduce((sum, task) => sum + task.file.size, 0);
-  const uploadedBytes = active.reduce((sum, task) => sum + task.uploadedBytes, 0);
   return {
     activeCount: active.length,
-    failedCount: tasks.filter((task) => task.status === "failed").length,
-    progressPercent: totalBytes > 0 ? Math.min(100, Math.round((uploadedBytes / totalBytes) * 100)) : 0
+    failedCount: tasks.filter((task) => task.status === "failed").length
   };
 }
 
