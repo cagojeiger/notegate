@@ -2,7 +2,9 @@
 
 use notegate_core::limits::{self, Limits};
 use notegate_core::{Error, Result};
-use notegate_model::files::{BeginObjectUpload, PendingObjectUpload};
+use notegate_model::files::{
+    BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
+};
 use notegate_model::{FileEncryptionMode, FileObject, Node};
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
@@ -28,6 +30,9 @@ struct ObjectUploadRow {
     original_filename: Option<String>,
     encryption_mode: String,
     encryption_metadata: Option<Value>,
+    upload_mode: String,
+    multipart_upload_id: Option<String>,
+    multipart_part_size: Option<i64>,
     state: String,
 }
 
@@ -35,6 +40,8 @@ impl ObjectUploadRow {
     fn into_pending(self) -> Result<PendingObjectUpload> {
         let encryption_mode = FileEncryptionMode::parse(&self.encryption_mode)
             .ok_or_else(|| Error::internal("unknown object upload encryption mode"))?;
+        let upload_mode = ObjectUploadMode::parse(&self.upload_mode)
+            .ok_or_else(|| Error::internal("unknown object upload mode"))?;
         Ok(PendingObjectUpload {
             id: self.id,
             object_key: self.object_key,
@@ -53,6 +60,9 @@ impl ObjectUploadRow {
             original_filename: self.original_filename,
             encryption_mode,
             encryption_metadata: self.encryption_metadata,
+            upload_mode,
+            multipart_upload_id: self.multipart_upload_id,
+            multipart_part_size: self.multipart_part_size,
             node_id: self.node_id,
         })
     }
@@ -60,17 +70,44 @@ impl ObjectUploadRow {
 
 const UPLOAD_COLUMNS: &str = "id, object_key, space_id, parent_node_id, node_id, \
     requested_by_account_id, name, declared_byte_len, media_type, original_filename, \
-    encryption_mode, encryption_metadata, state";
+    encryption_mode, encryption_metadata, upload_mode, multipart_upload_id, \
+    multipart_part_size, state";
 
 pub async fn insert(
     pool: &PgPool,
-    id: Uuid,
-    object_key: &str,
+    registration: &ObjectUploadRegistration,
     space_id: Uuid,
     requested_by: Uuid,
     input: &BeginObjectUpload,
+    limits: Limits,
 ) -> Result<PendingObjectUpload> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    // Serialize against other Space mutations and reject staging that would
+    // already exceed the effective tier quota before object bytes are sent.
+    let (_gate, effective_limits) =
+        checks::lock_space_with_limits(&mut tx, space_id, limits).await?;
+    let (live_file_bytes, pending_file_bytes): (i64, i64) = sqlx::query_as(
+        "SELECT su.live_file_bytes, COALESCE(( \
+             SELECT sum(o.declared_byte_len) FROM object_storage_objects o \
+             WHERE o.space_id = $1 AND o.state IN ('uploading','expire_pending') \
+         ), 0)::bigint \
+         FROM space_usage su WHERE su.space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    let projected = live_file_bytes
+        .checked_add(pending_file_bytes)
+        .and_then(|value| value.checked_add(input.byte_len))
+        .ok_or_else(|| Error::internal("pending file byte total overflow"))?;
+    if projected > effective_limits.space_max_file_bytes as i64 {
+        return Err(Error::conflict(format!(
+            "space files and pending uploads would exceed the maximum of {} bytes",
+            effective_limits.space_max_file_bytes
+        )));
+    }
 
     // Enforce the per-account in-flight upload cap atomically (mirrors
     // `ApiKeyRepo::insert_key_with_cap`): lock the account row so concurrent
@@ -100,12 +137,13 @@ pub async fn insert(
     let row = sqlx::query_as::<_, ObjectUploadRow>(&format!(
         "INSERT INTO object_storage_objects \
          (id, object_key, space_id, parent_node_id, requested_by_account_id, name, \
-          declared_byte_len, media_type, original_filename, encryption_mode, encryption_metadata, state) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'uploading') \
+          declared_byte_len, media_type, original_filename, encryption_mode, encryption_metadata, \
+          upload_mode, multipart_upload_id, multipart_part_size, state) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'uploading') \
          RETURNING {UPLOAD_COLUMNS}"
     ))
-    .bind(id)
-    .bind(object_key)
+    .bind(registration.id)
+    .bind(&registration.object_key)
     .bind(space_id)
     .bind(input.parent_node_id)
     .bind(requested_by)
@@ -115,6 +153,9 @@ pub async fn insert(
     .bind(&input.original_filename)
     .bind(input.encryption_mode.as_str())
     .bind(&input.encryption_metadata)
+    .bind(registration.upload_mode.as_str())
+    .bind(&registration.multipart_upload_id)
+    .bind(registration.multipart_part_size)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_constraint_error)?;
@@ -142,10 +183,49 @@ pub async fn find(
     row.map(ObjectUploadRow::into_pending).transpose()
 }
 
+pub async fn find_for_caller(
+    pool: &PgPool,
+    id: Uuid,
+    requested_by: Uuid,
+) -> Result<Option<PendingObjectUpload>> {
+    let row = sqlx::query_as::<_, ObjectUploadRow>(&format!(
+        "SELECT {UPLOAD_COLUMNS} FROM object_storage_objects \
+         WHERE id = $1 AND requested_by_account_id = $2 \
+           AND state IN ('uploading','attached')"
+    ))
+    .bind(id)
+    .bind(requested_by)
+    .fetch_optional(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    row.map(ObjectUploadRow::into_pending).transpose()
+}
+
 pub async fn touch(pool: &PgPool, id: Uuid, space_id: Uuid, requested_by: Uuid) -> Result<bool> {
     let result = sqlx::query(
         "UPDATE object_storage_objects SET last_activity_at = now(), retry_after = NULL, \
              retry_count = 0, last_error_code = NULL \
+         WHERE id = $1 AND space_id = $2 AND requested_by_account_id = $3 \
+           AND state = 'uploading'",
+    )
+    .bind(id)
+    .bind(space_id)
+    .bind(requested_by)
+    .execute(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn request_expiry(
+    pool: &PgPool,
+    id: Uuid,
+    space_id: Uuid,
+    requested_by: Uuid,
+) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE object_storage_objects \
+         SET state = 'expire_pending', retry_after = NULL, last_error_code = NULL \
          WHERE id = $1 AND space_id = $2 AND requested_by_account_id = $3 \
            AND state = 'uploading'",
     )

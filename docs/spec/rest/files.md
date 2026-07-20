@@ -26,7 +26,7 @@ Permission: `write`.
 2. 응답의 `transfer.url`에 `transfer.headers`를 모두 적용해 bytes를 PUT한다. `If-None-Match: *`와 요청의 `Content-Length`가 서명되므로 같은 URL로 object를 덮어쓰거나 선언한 `byte_len`과 다른 크기를 업로드할 수 없다. 브라우저가 직접 설정할 수 없는 `Content-Length`는 `transfer.headers`에 포함하지 않으며 user agent가 body 길이로 자동 생성한다. Presigned URL은 15분 동안 유효하다.
 3. `/complete`를 호출한다. S3 `HEAD`로 실물 크기를 검증하고 Notegate quota 검사를 통과하면 File node가 생성된다.
 
-현재 제품 상한은 104857600 bytes이며 single PUT만 지원한다. S3 설정은 API 시작에 필수다. 실행 중 저장소가 일시적으로 실패하면 file operation은 `503 object_storage_unavailable`을 반환한다. 완료 전 upload는 File node가 아니며, 30분 동안 활동이 없으면 정리 대상이 된다. quota는 `/complete`에서만 부과되므로, 한 account가 완료하지 않은 upload를 무한히 스테이징하지 못하도록 물리 삭제 전인 `uploading`과 `expire_pending` upload를 합쳐 16개로 제한한다. 초과하면 `POST /file-uploads`는 `409 conflict`를 반환한다.
+REST/browser 상한은 104857600 bytes이며 single PUT만 지원한다. 전체 File hard max와 MCP multipart 상한은 107374182400 bytes다. S3 설정은 API 시작에 필수다. 실행 중 저장소가 일시적으로 실패하면 file operation은 `503 object_storage_unavailable`을 반환한다. 완료 전 upload는 File node가 아니며, 2시간 동안 활동이 없으면 정리 대상이 된다. begin 시 live File bytes와 진행 중 선언 bytes를 함께 검사하고, 물리 삭제 전인 `uploading`과 `expire_pending` upload를 account당 16개로 제한한다.
 
 브라우저가 `PUBLIC_ENDPOINT`로 직접 PUT/GET할 수 있도록 S3 provider의 CORS는 Notegate origin과 `PUT`, `GET`, `Content-Type`, `If-None-Match` header를 허용해야 한다. 로컬 오픈소스 MinIO Compose는 버킷별 CORS 대신 `MINIO_API_CORS_ALLOW_ORIGIN`으로 서버 전역 origin을 설정한다. `ENDPOINT`는 서버 내부 주소이고 `PUBLIC_ENDPOINT`는 브라우저가 접근하고 서명에 사용하는 주소다.
 

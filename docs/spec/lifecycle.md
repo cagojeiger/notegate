@@ -144,10 +144,11 @@ object_storage_objects
 ```
 
 - File은 binary/object content다.
-- REST object upload는 Notegate가 발급한 S3 호환 presigned PUT URL로 bytes를 직접 전송하고, `HEAD` 크기 검증 뒤 최대 104857600 bytes를 File node에 연결한다.
+- REST/browser object upload는 최대 104857600 bytes를 single PUT으로 전송한다. MCP는 최대 107374182400 bytes를 지원하며 100MiB 초과 시 multipart를 사용한다. 두 경로 모두 `HEAD` 크기 검증 뒤 File node를 연결한다.
 - Object download는 S3 호환 presigned GET URL로 redirect한다.
 - 완료되지 않은 upload와 soft-delete된 File의 물리 삭제는 `object_storage_objects` 원장과 정리 worker가 재시도한다.
-- MCP는 file content upload/download를 제공하지 않고 file node stat만 노출한다. Node metadata는 REST metadata API에서 다룬다.
+- Provider multipart 생성과 DB 원장 기록은 하나의 transaction이 아니므로, S3 provider에도 incomplete multipart 자동 abort 정책을 설정한다. 로컬 MinIO는 server 기본 stale multipart cleanup을 2차 안전망으로 사용한다.
+- MCP `file_transfer`는 5분짜리 presigned upload/download URL만 제공하고 bytes는 MCP payload를 통과하지 않는다. Node metadata는 REST metadata API에서 다룬다.
 - File은 `read op=read`, `write op=patch/edit`, `search op=grep` 대상이 아니다.
 
 ### Node 삭제

@@ -8,7 +8,7 @@
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
 - 페이지네이션은 `limit`과 `cursor`를 사용한다.
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
-- MCP는 encrypted Text와 binary File content를 읽거나 수정하지 않는다.
+- MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
 - `run_sequence`는 여러 command를 순서대로 실행할 때만 사용한다. rollback은 제공하지 않는다.
 - 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 여러 tool의 필드를 담는 공통 상위 타입이지만, 여기에 없는 필드도 거부한다.
@@ -149,6 +149,47 @@ mv:    op, source, destination
 cp:    op, source, destination
 rm:    op, target
 ```
+
+## `file_transfer`
+
+로컬 caller와 S3 호환 저장소 사이의 직접 File 전송을 준비한다. Caller는 응답의 presigned URL을 전송에만 사용하고 로그나 문서에 지속 저장하지 않는다. API key는 transfer 응답에 포함되지 않는다.
+
+```ts
+type FileTransferInput = {
+  op: "begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload" | "prepare_download"
+  target?: string
+  byte_len?: number
+  media_type?: string
+  original_filename?: string
+  encryption_mode?: "none" | "client"
+  encryption_metadata?: object
+  upload_id?: string
+  part_numbers?: number[]
+  completed_parts?: { part_number: number, etag: string }[]
+}
+```
+
+- `begin_upload`: 새 File target과 byte length를 검증하고 upload handle을 만든다. 100MiB 이하는 single PUT URL을, 초과하면 `part_size`와 `part_count`를 반환한다.
+- `prepare_parts`: multipart part 번호를 최대 16개까지 받아 5분짜리 PUT URL을 발급한다. Caller는 part를 최대 4개까지 병렬 업로드하고 실패한 part만 새 URL로 다시 시도한다. 호출할 때마다 무활동 정리 시각을 갱신한다.
+- `complete_upload`: single object 또는 모든 multipart ETag를 검증하고 File node를 연결한다.
+- `abort_upload`: 완료되지 않은 upload를 비동기 정리 대상으로 전환한다.
+- `prepare_download`: 기존 File target의 5분짜리 GET URL을 반환한다.
+
+필수 필드:
+
+```text
+begin_upload:     op, target, byte_len
+prepare_parts:    op, upload_id, part_numbers
+complete_upload:  op, upload_id (+ multipart는 completed_parts)
+abort_upload:     op, upload_id
+prepare_download: op, target
+```
+
+File bytes는 MCP request/response에 포함하지 않는다. Single/multipart PUT의 성공 응답 ETag는 로컬 caller가 수집해 multipart complete에 전달한다. `file_transfer`는 외부 전송 사이에 caller 작업이 필요하므로 `run_sequence` 안에서 실행할 수 없다.
+
+모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하고, `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 `max_concurrency=4` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
+
+완료되지 않은 upload는 `begin_upload`, `prepare_parts`, `complete_upload` 중 마지막 활동 이후 2시간이 지나면 비동기 정리 대상이 된다. Presigned URL의 5분 만료와 upload 원장의 2시간 무활동 만료는 서로 다른 제한이다.
 
 ## `run_sequence`
 

@@ -73,6 +73,11 @@ pub(crate) async fn begin(
     Path(space_id): Path<Uuid>,
     Json(body): Json<BeginUploadBody>,
 ) -> Result<(StatusCode, Json<BeginUploadResponse>), ApiError> {
+    if body.byte_len > notegate_core::limits::SINGLE_PUT_MAX_BYTES as i64 {
+        return Err(ApiError::invalid_field(
+            "browser uploads currently support files up to 104857600 bytes",
+        ));
+    }
     let encryption_mode = FileEncryptionMode::parse(&body.encryption_mode)
         .ok_or_else(|| ApiError::invalid_field("encryption_mode must be 'none' or 'client'"))?;
     let command = BeginObjectUpload {
@@ -90,6 +95,10 @@ pub(crate) async fn begin(
         .await?;
     let upload_id = Uuid::new_v4();
     let object_key = format!("objects/{upload_id}");
+    let transfer = state
+        .object_storage
+        .presign_put(&object_key, &command.media_type, command.byte_len)
+        .await?;
     state
         .files
         .record_object_upload(
@@ -99,10 +108,6 @@ pub(crate) async fn begin(
             space_id,
             &command,
         )
-        .await?;
-    let transfer = state
-        .object_storage
-        .presign_put(&object_key, &command.media_type, command.byte_len)
         .await?;
 
     tracing::info!(

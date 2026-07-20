@@ -34,7 +34,7 @@ use crate::identity::me::MeOutput;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -130,6 +130,21 @@ impl McpServer {
         params: Parameters<tools::unified::ManageInput>,
     ) -> Result<Json<Value>, ErrorData> {
         tools::unified::manage(&self.state, &parts, params).await
+    }
+
+    #[tool(
+        name = "file_transfer",
+        description = "Prepare direct local file transfers without sending bytes through MCP. Follow the structured next_action in every successful response. begin_upload returns one PUT or multipart geometry; for multipart, request up to 16 one-based part URLs, upload at most 4 parts concurrently using each exact content_length, collect response ETags, then complete_upload. prepare_download returns one GET. URLs expire after 5 minutes; do not print or persist them.",
+        annotations(title = "Transfer Notegate Files", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = true),
+        output_schema = object_output_schema()
+    )]
+    pub async fn file_transfer_tool(
+        &self,
+        Extension(parts): Extension<Parts>,
+        params: Parameters<tools::unified::FileTransferInput>,
+    ) -> Result<Json<Value>, ErrorData> {
+        let Parameters(input) = params;
+        tools::transfers::call(&self.state, &parts, input).await
     }
 
     #[tool(
@@ -324,6 +339,11 @@ mod tests {
                 "op target source destination parents recursive",
                 "op",
             ),
+            (
+                "file_transfer",
+                "op target byte_len media_type original_filename encryption_mode encryption_metadata upload_id part_numbers completed_parts",
+                "op",
+            ),
             ("run_sequence", "commands", "commands"),
         ] {
             assert_input_properties(&tools, tool_name, properties);
@@ -338,12 +358,34 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("file_transfer"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("next_action"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("run_sequence"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("cannot create"));
+
+        let file_transfer = McpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "file_transfer")
+            .expect("file_transfer tool exists");
+        assert!(
+            file_transfer
+                .description
+                .as_deref()
+                .is_some_and(|description| description.contains("next_action"))
+        );
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {
-        BTreeSet::from(["me", "read", "search", "write", "manage", "run_sequence"])
+        BTreeSet::from([
+            "me",
+            "read",
+            "search",
+            "write",
+            "manage",
+            "file_transfer",
+            "run_sequence",
+        ])
     }
 
     fn assert_input_properties(

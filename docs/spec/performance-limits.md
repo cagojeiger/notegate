@@ -88,7 +88,7 @@ Node/content-level limits
   node_name_max_chars = 128
   text_max_bytes = 1048576               # 1 MiB per text object
   text_max_lines = 5000                  # lines per text object
-  file_max_bytes = 104857600             # 100 MiB per file product hard max
+  file_max_bytes = 107374182400          # 100 GiB per file product hard max
   node_metadata_max_bytes = 16384        # 16 KiB per node metadata object
   node_metadata_max_depth = 4
   node_metadata_key_max_chars = 64
@@ -97,7 +97,7 @@ Node/content-level limits
 
 `space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
 
-S3 호환 object upload는 single PUT으로 `file_max_bytes`까지 지원한다.
+REST/browser object upload는 single PUT으로 100MiB까지 지원한다. MCP는 100MiB를 초과하면 64MiB part의 multipart upload를 사용하며 part 수 상한은 10000이다. 현재 multipart 호환 검증 대상은 MinIO다. 운영 S3 provider는 incomplete multipart 자동 abort 정책을 제공해야 한다.
 
 Depth는 root 아래 segment 수로 계산한다.
 

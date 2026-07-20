@@ -127,6 +127,43 @@ pub struct ManageInput {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct FileTransferInput {
+    /// Operation: begin_upload/prepare_parts/complete_upload/abort_upload/prepare_download.
+    pub op: String,
+    /// Path-first target for begin_upload and prepare_download.
+    #[serde(default)]
+    pub target: Option<String>,
+    /// Local file byte length for begin_upload.
+    #[serde(default)]
+    pub byte_len: Option<i64>,
+    #[serde(default)]
+    pub media_type: Option<String>,
+    #[serde(default)]
+    pub original_filename: Option<String>,
+    #[serde(default)]
+    pub encryption_mode: Option<String>,
+    #[serde(default)]
+    pub encryption_metadata: Option<Value>,
+    /// Upload handle returned by begin_upload.
+    #[serde(default)]
+    pub upload_id: Option<String>,
+    /// Multipart numbers to presign, at most 16 per call.
+    #[serde(default)]
+    pub part_numbers: Option<Vec<i32>>,
+    /// Multipart ETags captured from successful PUT responses.
+    #[serde(default)]
+    pub completed_parts: Option<Vec<CompletedPartInput>>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CompletedPartInput {
+    pub part_number: i32,
+    pub etag: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RunSequenceInput {
     /// Ordered Notegate commands to execute. Maximum 20.
     pub commands: Vec<SequenceCommand>,

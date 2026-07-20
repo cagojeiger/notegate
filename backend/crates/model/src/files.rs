@@ -200,6 +200,38 @@ pub struct BeginObjectUpload {
     pub encryption_metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectUploadMode {
+    Single,
+    Multipart,
+}
+
+impl ObjectUploadMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Multipart => "multipart",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "single" => Some(Self::Single),
+            "multipart" => Some(Self::Multipart),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectUploadRegistration {
+    pub id: Uuid,
+    pub object_key: String,
+    pub upload_mode: ObjectUploadMode,
+    pub multipart_upload_id: Option<String>,
+    pub multipart_part_size: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingObjectUpload {
     pub id: Uuid,
@@ -213,6 +245,9 @@ pub struct PendingObjectUpload {
     pub original_filename: Option<String>,
     pub encryption_mode: FileEncryptionMode,
     pub encryption_metadata: Option<Value>,
+    pub upload_mode: ObjectUploadMode,
+    pub multipart_upload_id: Option<String>,
+    pub multipart_part_size: Option<i64>,
     pub node_id: Option<Uuid>,
 }
 

@@ -11,6 +11,8 @@ pub struct CleanupCandidate {
     pub id: Uuid,
     pub object_key: String,
     pub state: String,
+    pub upload_mode: String,
+    pub multipart_upload_id: Option<String>,
     pub retry_count: i32,
 }
 
@@ -45,7 +47,8 @@ impl ObjectStorageRepo {
              UPDATE object_storage_objects f \
              SET retry_after = now() + ($2 * interval '1 second') \
              FROM due WHERE f.id = due.id \
-             RETURNING f.id, f.object_key, f.state, f.retry_count",
+             RETURNING f.id, f.object_key, f.state, f.upload_mode, \
+                 f.multipart_upload_id, f.retry_count",
         )
         .bind(stale_after_seconds)
         .bind(claim_seconds)

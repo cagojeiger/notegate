@@ -170,9 +170,27 @@ impl FilesService {
         space_id: Uuid,
         command: &BeginObjectUpload,
     ) -> ServiceResult<PendingObjectUpload> {
+        let registration = notegate_model::files::ObjectUploadRegistration {
+            id: upload_id,
+            object_key: object_key.to_owned(),
+            upload_mode: notegate_model::files::ObjectUploadMode::Single,
+            multipart_upload_id: None,
+            multipart_part_size: None,
+        };
+        self.record_registered_object_upload(&registration, caller_account_id, space_id, command)
+            .await
+    }
+
+    pub async fn record_registered_object_upload(
+        &self,
+        registration: &notegate_model::files::ObjectUploadRegistration,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: &BeginObjectUpload,
+    ) -> ServiceResult<PendingObjectUpload> {
         Ok(self
             .store
-            .insert_object_upload(upload_id, object_key, space_id, caller_account_id, command)
+            .insert_registered_object_upload(registration, space_id, caller_account_id, command)
             .await?)
     }
 
@@ -188,6 +206,21 @@ impl FilesService {
             .object_upload(upload_id, space_id, caller_account_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("file upload not found".to_owned()))
+    }
+
+    pub async fn object_upload_by_id(
+        &self,
+        caller_account_id: Uuid,
+        upload_id: Uuid,
+    ) -> ServiceResult<PendingObjectUpload> {
+        let upload = self
+            .store
+            .object_upload_for_caller(upload_id, caller_account_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("file upload not found".to_owned()))?;
+        self.authorize(upload.space_id, caller_account_id, FileCommand::Write)
+            .await?;
+        Ok(upload)
     }
 
     pub async fn touch_object_upload(
@@ -220,6 +253,32 @@ impl FilesService {
             ));
         }
         Ok(upload)
+    }
+
+    pub async fn cancel_object_upload(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        upload_id: Uuid,
+    ) -> ServiceResult<()> {
+        let upload = self
+            .object_upload(caller_account_id, space_id, upload_id)
+            .await?;
+        if upload.node_id.is_some() {
+            return Err(ServiceError::Conflict(
+                "attached file upload cannot be aborted".to_owned(),
+            ));
+        }
+        if !self
+            .store
+            .request_object_upload_expiry(upload_id, space_id, caller_account_id)
+            .await?
+        {
+            return Err(ServiceError::Conflict(
+                "file upload is no longer active".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn complete_object_upload(
