@@ -1,8 +1,8 @@
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
-import { History, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronRight, History, RefreshCw } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
 
-import type { AuditEventListResponse, FileChangeEventListResponse, Space } from "../../api/types";
+import type { AuditEventListResponse, FileChangeEvent, FileChangeEventListResponse, Space } from "../../api/types";
 import { Button, EmptyState, Modal, SelectField, Tabs } from "../../shared/ui";
 import {
   formatActor,
@@ -10,7 +10,9 @@ import {
   formatAuditDetail,
   formatAuditTarget,
   formatEventTime,
+  formatEventTimeCompact,
   formatFileChangeAction,
+  formatFileChangeDetails,
   formatFileChangeTarget
 } from "./eventDisplay";
 import { useAuditEventsQuery, useFileChangeEventsQuery } from "./useEventHistoryQueries";
@@ -66,22 +68,25 @@ function AuditEventsPanel() {
         <ol className="rounded-lg border border-border bg-surface px-4">
           {events.map((event) => {
             const detail = formatAuditDetail(event);
+            const action = formatAuditAction(event);
+            const target = formatAuditTarget(event);
+            const actor = formatActor(event.actor, event.actor_account_id);
             return (
-              <li key={event.id} className="group relative flex gap-3 border-b border-seam py-3 last:border-b-0">
+              <li key={event.id} className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
                 <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
                   <span className="absolute bottom-[-0.75rem] top-3 w-px bg-seam group-last:hidden" />
                   <span className="relative mt-1.5 size-2 rounded-full bg-primary ring-4 ring-surface" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="sm:flex sm:items-baseline sm:justify-between sm:gap-3">
-                    <div className="font-medium text-text">{formatAuditAction(event)}</div>
-                    <div className="mt-1 sm:mt-0"><EventTime value={event.created_at} /></div>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <div className="truncate text-sm font-medium text-text">{action}</div>
+                    <EventTime value={event.created_at} />
                   </div>
-                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                    <span title={event.actor_account_id ?? undefined}>{formatActor(event.actor, event.actor_account_id)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="truncate" title={event.resource_id ?? undefined}>{formatAuditTarget(event)}</span>
-                    {detail ? <><span aria-hidden="true">·</span><span>{detail}</span></> : null}
+                  <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
+                    <span className="truncate" title={event.resource_id ?? undefined}>{target}</span>
+                    {detail ? <><span className="shrink-0" aria-hidden="true">·</span><span className="shrink-0">{detail}</span></> : null}
+                    <span className="shrink-0" aria-hidden="true">·</span>
+                    <span className="truncate" title={event.actor_account_id ?? undefined}>{actor}</span>
                   </div>
                 </div>
               </li>
@@ -122,29 +127,69 @@ function FileChangeEventsPanel({
       {!selectedSpace ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} emptyLabel="No changes yet." />}
       {events.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
-          {events.map((event) => (
-            <li key={event.id} className="group relative flex gap-3 border-b border-seam py-3 last:border-b-0">
-              <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
-                <span className="absolute bottom-[-0.75rem] top-3 w-px bg-seam group-last:hidden" />
-                <span className="relative mt-1.5 size-2 rounded-full bg-primary ring-4 ring-surface" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="sm:flex sm:items-baseline sm:justify-between sm:gap-3">
-                  <div className="font-medium text-text">{formatFileChangeAction(event)}</div>
-                  <div className="mt-1 sm:mt-0"><EventTime value={event.created_at} /></div>
-                </div>
-                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                  <span title={event.actor_account_id ?? undefined}>{formatActor(event.actor, event.actor_account_id)}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="truncate font-mono" title={event.node_id ?? undefined}>{formatFileChangeTarget(event)}</span>
-                </div>
-              </div>
-            </li>
-          ))}
+          {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
         </ol>
       ) : null}
       <LoadMore query={query} />
     </section>
+  );
+}
+
+function FileChangeEventRow({ event }: { event: FileChangeEvent }) {
+  const [open, setOpen] = useState(false);
+  const detailsId = useId();
+  const target = formatFileChangeTarget(event);
+  const actor = formatActor(event.actor, event.actor_account_id);
+  const details = formatFileChangeDetails(event);
+  const toggleLabel = `${open ? "Hide" : "Show"} change details for ${target}`;
+
+  return (
+    <li className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
+      <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
+        <span className="absolute bottom-[-0.75rem] top-3 w-px bg-seam group-last:hidden" />
+        <span className="relative mt-1.5 size-2 rounded-full bg-primary ring-4 ring-surface" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="truncate text-sm font-medium text-text">{formatFileChangeAction(event)}</div>
+          <div className="flex shrink-0 items-center gap-1">
+            <EventTime value={event.created_at} />
+            {details.length > 0 ? (
+              <button
+                type="button"
+                aria-label={toggleLabel}
+                aria-expanded={open}
+                aria-controls={detailsId}
+                title={toggleLabel}
+                onClick={() => setOpen((value) => !value)}
+                className="grid size-7 place-items-center rounded-lg text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+              >
+                <ChevronRight size={14} className={`transition ${open ? "rotate-90" : ""}`} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
+          <span className="truncate font-mono" title={event.node_id ?? undefined}>{target}</span>
+          <span className="shrink-0" aria-hidden="true">·</span>
+          <span className="truncate" title={event.actor_account_id ?? undefined}>{actor}</span>
+        </div>
+        {open ? (
+          <dl id={detailsId} className="mt-3 grid gap-x-6 gap-y-2 border-t border-seam pt-3 text-xs sm:grid-cols-2">
+            <div className="flex min-w-0 items-baseline justify-between gap-3 sm:hidden">
+              <dt className="text-muted">Actor</dt>
+              <dd className="truncate text-text" title={actor}>{actor}</dd>
+            </div>
+            {details.map((detail) => (
+              <div key={detail.label} className="flex min-w-0 items-baseline justify-between gap-3">
+                <dt className="text-muted">{detail.label}</dt>
+                <dd className="truncate font-mono text-text" title={detail.value}>{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
@@ -180,7 +225,8 @@ function EventTime({ value }: { value: string }) {
   return (
     <time className="text-xs text-muted" dateTime={value}>
       <History size={14} className="mr-1 inline-block align-[-2px]" />
-      {formatEventTime(value)}
+      <span className="sm:hidden">{formatEventTimeCompact(value)}</span>
+      <span className="hidden sm:inline">{formatEventTime(value)}</span>
     </time>
   );
 }

@@ -1,4 +1,12 @@
 import type { AccountRef, AuditEvent, FileChangeEvent } from "../../api/types";
+import { formatBytes } from "../../shared/lib/formatBytes";
+
+export type FileChangeDetail = {
+  label: string;
+  value: string;
+};
+
+const numberFormatter = new Intl.NumberFormat("en-US");
 
 const FILE_CHANGE_ACTIONS: Record<string, string> = {
   "folder.create": "Created",
@@ -61,6 +69,16 @@ export function formatEventTime(value: string): string {
   }).format(date);
 }
 
+export function formatEventTimeCompact(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(date);
+}
+
 export function shortId(value: string | null | undefined): string {
   if (!value) return "—";
   return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
@@ -98,6 +116,79 @@ export function formatFileChangeTarget(event: FileChangeEvent): string {
   const kind = typeof event.metadata.item_kind === "string" ? event.metadata.item_kind : "item";
   const name = typeof event.metadata.item_name === "string" ? event.metadata.item_name : shortId(event.node_id);
   return `${ITEM_KIND_LABELS[kind] ?? "Item"} · ${name}`;
+}
+
+export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetail[] {
+  const metadata = event.metadata;
+  const details: FileChangeDetail[] = [];
+
+  if (event.op_type === "folder.create" || event.op_type === "text.create" || event.op_type === "file.create") {
+    addIdDetail(details, "Parent", metadata.parent_node_id);
+    addByteDetail(details, "Size", metadata.byte_len_after);
+    addNumberDetail(details, "Lines", metadata.line_count_after);
+  } else if (event.op_type.startsWith("text.")) {
+    addChangeDetail(details, "Size", metadata.byte_len_before, metadata.byte_len_after, formatBytes);
+    addChangeDetail(details, "Lines", metadata.line_count_before, metadata.line_count_after, formatNumber);
+  } else if (event.op_type === "item.move") {
+    addIdDetail(details, "From parent", metadata.parent_node_id_before);
+    addIdDetail(details, "To parent", metadata.parent_node_id_after);
+    if (metadata.name_changed === true) details.push({ label: "Also renamed", value: "Yes" });
+  } else if (event.op_type === "item.copy") {
+    addIdDetail(details, "Source", metadata.copied_from_node_id);
+    addIdDetail(details, "To parent", metadata.parent_node_id_after);
+    addNumberDetail(details, "Copied items", metadata.copied_nodes);
+    addNumberDetail(details, "Copied texts", metadata.copied_texts);
+    addNumberDetail(details, "Copied files", metadata.copied_files);
+    addBooleanDetail(details, "Recursive", metadata.recursive);
+  } else if (event.op_type === "item.delete") {
+    addNumberDetail(details, "Deleted items", metadata.deleted_nodes);
+    addBooleanDetail(details, "Recursive", metadata.recursive);
+  } else if (event.op_type === "item.update") {
+    const changes = [
+      metadata.name_changed === true ? "Name" : null,
+      metadata.sort_order_changed === true ? "Order" : null
+    ].filter((value): value is string => value !== null);
+    if (changes.length > 0) details.push({ label: "Changed", value: changes.join(", ") });
+  }
+
+  if (event.node_id) details.push({ label: "Node", value: shortId(event.node_id) });
+  return details;
+}
+
+function addIdDetail(details: FileChangeDetail[], label: string, value: unknown) {
+  if (typeof value === "string") details.push({ label, value: shortId(value) });
+}
+
+function addByteDetail(details: FileChangeDetail[], label: string, value: unknown) {
+  if (isFiniteNumber(value)) details.push({ label, value: formatBytes(value) });
+}
+
+function addNumberDetail(details: FileChangeDetail[], label: string, value: unknown) {
+  if (isFiniteNumber(value)) details.push({ label, value: formatNumber(value) });
+}
+
+function addBooleanDetail(details: FileChangeDetail[], label: string, value: unknown) {
+  if (typeof value === "boolean") details.push({ label, value: value ? "Yes" : "No" });
+}
+
+function addChangeDetail(
+  details: FileChangeDetail[],
+  label: string,
+  before: unknown,
+  after: unknown,
+  format: (value: number) => string
+) {
+  if (isFiniteNumber(before) && isFiniteNumber(after)) {
+    details.push({ label, value: `${format(before)} → ${format(after)}` });
+  }
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatNumber(value: number): string {
+  return numberFormatter.format(value);
 }
 
 export function formatActor(

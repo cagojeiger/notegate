@@ -148,6 +148,39 @@ describe("EventHistoryModal", () => {
     );
   });
 
+  it("reveals structured file-change details on demand", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({
+      events: [{
+        ...fileChangeEvent(1, "file.create"),
+        node_id: "12345678-1234-1234-1234-123456789012",
+        metadata: {
+          item_kind: "file",
+          item_name: "archive.zip",
+          parent_node_id: "87654321-4321-4321-4321-210987654321",
+          byte_len_after: 1536
+        }
+      }],
+      page: { ...page, returned: 1 }
+    }));
+
+    render(
+      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    const toggle = await screen.findByRole("button", { name: "Show change details for File · archive.zip" });
+    expect(screen.queryByText("1.5 KB")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(screen.getByText("1.5 KB")).toBeInTheDocument();
+    expect(screen.getByText("87654321…4321")).toBeInTheDocument();
+    expect(screen.getByText("12345678…9012")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide change details for File · archive.zip" })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("switches the activity query without changing the workbench space", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));

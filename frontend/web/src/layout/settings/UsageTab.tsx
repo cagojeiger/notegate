@@ -3,8 +3,9 @@ import { CircleHelp, RefreshCw } from "lucide-react";
 
 import { ApiError } from "../../api/errors";
 import type { QuotaUsage, SpaceUsage } from "../../api/usage";
-import { Badge, Button, Card, EmptyState, SectionHeader } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
+import { formatBytes } from "../../shared/lib/formatBytes";
+import { Badge, Button, Card, EmptyState, SectionHeader } from "../../shared/ui";
 import { useCheckSpaceUsageMutation, useUsageQuery } from "./useUsageQueries";
 
 const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
@@ -194,16 +195,4 @@ function formatTier(tier: string): string {
   if (tier === "tier0") return "Tier 0";
   if (tier === "system_max") return "System max";
   return tier.split("_").join(" ");
-}
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${numberFormatter.format(bytes)} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${numberFormatter.format(value)} ${units[unitIndex]}`;
 }
