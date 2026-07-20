@@ -1,10 +1,8 @@
 //! Path-first MCP control plane for direct object upload and download transfers.
 
-use std::collections::HashSet;
-
 use axum::http::request::Parts;
 use notegate_model::FileEncryptionMode;
-use notegate_model::files::{BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration};
+use notegate_model::files::BeginObjectUpload;
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -12,15 +10,14 @@ use uuid::Uuid;
 use super::resolve::{
     caller, invalid_input_error, node_summary, resolve_target, service_error, split_parent_name,
 };
-use super::unified::{CompletedPartInput, FileTransferInput};
-use crate::object_storage::{
-    CompletedUploadPart, MCP_TRANSFER_URL_TTL, MULTIPART_PART_SIZE, ObjectStorageError,
-    multipart_part_count, multipart_part_len, uses_multipart,
+use super::unified::FileTransferInput;
+use crate::object_storage::{CompletedUploadPart, MCP_TRANSFER_URL_TTL, ObjectStorageError};
+use crate::object_upload_flow::{
+    BegunTransfer, PART_UPLOAD_CONCURRENCY_MAX, PART_URL_BATCH_MAX, UploadFlowError,
+    abort_upload as abort_object_upload, begin_upload as begin_object_upload,
+    complete_upload as complete_object_upload, prepare_parts as prepare_upload_parts,
 };
 use crate::state::AppState;
-
-const PART_URL_BATCH_MAX: usize = 16;
-const PART_UPLOAD_CONCURRENCY_MAX: usize = 4;
 
 pub async fn call(
     state: &AppState,
@@ -73,119 +70,45 @@ async fn begin_upload(
         encryption_mode,
         encryption_metadata: input.encryption_metadata,
     };
-    state
-        .files
-        .prepare_object_upload(caller.account_id(), resolved.space_id(), &command)
-        .await
-        .map_err(service_error)?;
-
-    let upload_id = Uuid::new_v4();
-    let object_key = format!("objects/{upload_id}");
-    if uses_multipart(byte_len) {
-        let part_count = multipart_part_count(byte_len, MULTIPART_PART_SIZE)
-            .ok_or_else(|| invalid_input_error("file is too large for multipart upload"))?;
-        let storage_upload_id = state
-            .object_storage
-            .create_multipart_upload(&object_key, &command.media_type)
-            .await
-            .map_err(storage_error)?;
-        let registration = ObjectUploadRegistration {
-            id: upload_id,
-            object_key: object_key.clone(),
-            upload_mode: ObjectUploadMode::Multipart,
-            multipart_upload_id: Some(storage_upload_id.clone()),
-            multipart_part_size: Some(MULTIPART_PART_SIZE),
-        };
-        let recorded = state
-            .files
-            .record_registered_object_upload(
-                &registration,
-                caller.account_id(),
-                resolved.space_id(),
-                &command,
-            )
-            .await;
-        if let Err(error) = recorded {
-            if let Err(abort_error) = state
-                .object_storage
-                .abort_multipart_upload(&object_key, &storage_upload_id)
-                .await
-            {
-                tracing::error!(
-                    event = "object_storage.multipart_registration_cleanup_failed",
-                    %upload_id,
-                    %object_key,
-                    ?abort_error,
-                );
-            }
-            return Err(service_error(error));
-        }
-        tracing::info!(
-            event = "object_storage.upload_created",
-            %upload_id,
-            space_id = %resolved.space_id(),
-            account_id = %caller.account_id(),
-            byte_len,
-            upload_mode = "multipart",
-        );
-        let first_part_numbers =
-            (1..=part_count.min(PART_URL_BATCH_MAX as i32)).collect::<Vec<_>>();
-        return Ok(Json(json!({
-            "upload_id": upload_id,
-            "target": target,
-            "transfer": {
-                "mode": "multipart",
-                "part_size": MULTIPART_PART_SIZE,
-                "part_count": part_count,
-            },
-            "next_action": {
-                "kind": "call_tool",
-                "tool": "file_transfer",
-                "input": {
-                    "op": "prepare_parts",
-                    "upload_id": upload_id,
-                    "part_numbers": first_part_numbers,
+    let begun = begin_object_upload(
+        state,
+        caller.account_id(),
+        resolved.space_id(),
+        &command,
+        MCP_TRANSFER_URL_TTL,
+    )
+    .await
+    .map_err(flow_error)?;
+    let upload_id = begun.upload_id;
+    let transfer = match begun.transfer {
+        BegunTransfer::Multipart {
+            part_size,
+            part_count,
+        } => {
+            let first_part_numbers =
+                (1..=part_count.min(PART_URL_BATCH_MAX as i32)).collect::<Vec<_>>();
+            return Ok(Json(json!({
+                "upload_id": upload_id,
+                "target": target,
+                "transfer": {
+                    "mode": "multipart",
+                    "part_size": part_size,
+                    "part_count": part_count,
                 },
-                "instruction": "Request upload URLs for the first part batch.",
-            },
-        })));
-    }
-
-    let registration = ObjectUploadRegistration {
-        id: upload_id,
-        object_key: object_key.clone(),
-        upload_mode: ObjectUploadMode::Single,
-        multipart_upload_id: None,
-        multipart_part_size: None,
+                "next_action": {
+                    "kind": "call_tool",
+                    "tool": "file_transfer",
+                    "input": {
+                        "op": "prepare_parts",
+                        "upload_id": upload_id,
+                        "part_numbers": first_part_numbers,
+                    },
+                    "instruction": "Request upload URLs for the first part batch.",
+                },
+            })));
+        }
+        BegunTransfer::Single(transfer) => transfer,
     };
-    let transfer = state
-        .object_storage
-        .presign_put_with_ttl(
-            &object_key,
-            &command.media_type,
-            command.byte_len,
-            MCP_TRANSFER_URL_TTL,
-        )
-        .await
-        .map_err(storage_error)?;
-    state
-        .files
-        .record_registered_object_upload(
-            &registration,
-            caller.account_id(),
-            resolved.space_id(),
-            &command,
-        )
-        .await
-        .map_err(service_error)?;
-    tracing::info!(
-        event = "object_storage.upload_created",
-        %upload_id,
-        space_id = %resolved.space_id(),
-        account_id = %caller.account_id(),
-        byte_len,
-        upload_mode = "single",
-    );
     Ok(Json(json!({
         "upload_id": upload_id,
         "target": target,
@@ -223,65 +146,32 @@ async fn prepare_parts(
         .part_numbers
         .filter(|numbers| !numbers.is_empty())
         .ok_or_else(|| invalid_input_error("op=prepare_parts requires part_numbers"))?;
-    if part_numbers.len() > PART_URL_BATCH_MAX {
-        return Err(invalid_input_error(format!(
-            "prepare_parts accepts at most {PART_URL_BATCH_MAX} part numbers"
-        )));
-    }
-    let unique: HashSet<i32> = part_numbers.iter().copied().collect();
-    if unique.len() != part_numbers.len() {
-        return Err(invalid_input_error(
-            "part_numbers must not contain duplicates",
-        ));
-    }
     let upload = state
         .files
         .object_upload_by_id(caller.account_id(), upload_id)
         .await
         .map_err(service_error)?;
-    if upload.upload_mode != ObjectUploadMode::Multipart {
-        return Err(invalid_input_error("upload is not multipart"));
-    }
-    let upload = state
-        .files
-        .touch_object_upload(caller.account_id(), upload.space_id, upload_id)
-        .await
-        .map_err(service_error)?;
-    if upload.node_id.is_some() {
-        return Err(invalid_input_error("upload is already complete"));
-    }
-    let storage_upload_id = upload
-        .multipart_upload_id
-        .as_deref()
-        .ok_or_else(|| ErrorData::internal_error("multipart upload state is incomplete", None))?;
-    let part_size = upload
-        .multipart_part_size
-        .ok_or_else(|| ErrorData::internal_error("multipart upload state is incomplete", None))?;
-
-    let mut transfers = Vec::with_capacity(part_numbers.len());
-    for part_number in part_numbers {
-        let content_length = multipart_part_len(upload.byte_len, part_size, part_number)
-            .ok_or_else(|| invalid_input_error("part number is outside the upload range"))?;
-        let transfer = state
-            .object_storage
-            .presign_upload_part(
-                &upload.object_key,
-                storage_upload_id,
-                part_number,
-                content_length,
-                MCP_TRANSFER_URL_TTL,
-            )
-            .await
-            .map_err(storage_error)?;
-        transfers.push(json!({
-            "part_number": part_number,
+    let transfers = prepare_upload_parts(
+        state,
+        caller.account_id(),
+        upload,
+        part_numbers,
+        MCP_TRANSFER_URL_TTL,
+    )
+    .await
+    .map_err(flow_error)?
+    .into_iter()
+    .map(|part| {
+        json!({
+            "part_number": part.part_number,
             "method": "PUT",
-            "url": transfer.url,
-            "headers": transfer.headers,
-            "content_length": content_length,
+            "url": part.transfer.url,
+            "headers": part.transfer.headers,
+            "content_length": part.content_length,
             "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
-        }));
-    }
+        })
+    })
+    .collect::<Vec<_>>();
     Ok(Json(json!({
         "upload_id": upload_id,
         "parts": transfers,
@@ -324,60 +214,18 @@ async fn complete_upload(
         .object_upload_by_id(caller.account_id(), upload_id)
         .await
         .map_err(service_error)?;
-    if upload.node_id.is_none() {
-        // Refresh before any provider call so a stale-upload cleanup claim
-        // cannot abort this upload while completion is in progress.
-        state
-            .files
-            .touch_object_upload(caller.account_id(), upload.space_id, upload_id)
-            .await
-            .map_err(service_error)?;
-        if upload.upload_mode == ObjectUploadMode::Multipart {
-            let completed = validate_completed_parts(&upload, input.completed_parts)?;
-            let storage_upload_id = upload.multipart_upload_id.as_deref().ok_or_else(|| {
-                ErrorData::internal_error("multipart upload state is incomplete", None)
-            })?;
-            if let Err(completion_error) = state
-                .object_storage
-                .complete_multipart_upload(&upload.object_key, storage_upload_id, &completed)
-                .await
-            {
-                // A concurrent completion may have already consumed the provider
-                // upload id. A matching final object makes completion idempotent.
-                match state
-                    .object_storage
-                    .verify_upload(&upload.object_key, upload.byte_len)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(ObjectStorageError::Missing) => {
-                        return Err(storage_error(completion_error));
-                    }
-                    Err(error) => return Err(storage_error(error)),
-                }
-            }
-        } else if input.completed_parts.is_some() {
-            return Err(invalid_input_error(
-                "single uploads do not accept completed_parts",
-            ));
-        }
-        state
-            .object_storage
-            .verify_upload(&upload.object_key, upload.byte_len)
-            .await
-            .map_err(storage_error)?;
-    }
-    let view = state
-        .files
-        .complete_object_upload(caller.account_id(), upload.space_id, upload_id)
+    let completed_parts = input.completed_parts.map(|parts| {
+        parts
+            .into_iter()
+            .map(|part| CompletedUploadPart {
+                part_number: part.part_number,
+                etag: part.etag,
+            })
+            .collect()
+    });
+    let view = complete_object_upload(state, caller.account_id(), upload, completed_parts)
         .await
-        .map_err(service_error)?;
-    tracing::info!(
-        event = "object_storage.file_attached",
-        %upload_id,
-        node_id = %view.node.node.id,
-        space_id = %upload.space_id,
-    );
+        .map_err(flow_error)?;
     Ok(Json(json!({
         "upload_id": upload_id,
         "node": node_summary(&view.node),
@@ -399,17 +247,9 @@ async fn abort_upload(
         .object_upload_by_id(caller.account_id(), upload_id)
         .await
         .map_err(service_error)?;
-    state
-        .files
-        .cancel_object_upload(caller.account_id(), upload.space_id, upload_id)
+    abort_object_upload(state, caller.account_id(), &upload)
         .await
-        .map_err(service_error)?;
-    tracing::info!(
-        event = "object_storage.upload_aborted",
-        %upload_id,
-        space_id = %upload.space_id,
-        account_id = %caller.account_id(),
-    );
+        .map_err(flow_error)?;
     Ok(Json(json!({
         "upload_id": upload_id,
         "status": "cleanup_queued",
@@ -463,37 +303,6 @@ async fn prepare_download(
     })))
 }
 
-fn validate_completed_parts(
-    upload: &notegate_model::files::PendingObjectUpload,
-    parts: Option<Vec<CompletedPartInput>>,
-) -> Result<Vec<CompletedUploadPart>, ErrorData> {
-    let part_size = upload
-        .multipart_part_size
-        .ok_or_else(|| ErrorData::internal_error("multipart upload state is incomplete", None))?;
-    let part_count = multipart_part_count(upload.byte_len, part_size)
-        .ok_or_else(|| ErrorData::internal_error("invalid multipart upload geometry", None))?;
-    let mut parts = parts
-        .filter(|parts| !parts.is_empty())
-        .ok_or_else(|| invalid_input_error("multipart completion requires completed_parts"))?;
-    parts.sort_by_key(|part| part.part_number);
-    if parts.len() != part_count as usize
-        || parts.iter().enumerate().any(|(index, part)| {
-            part.part_number != index as i32 + 1 || part.etag.trim().is_empty()
-        })
-    {
-        return Err(invalid_input_error(
-            "completed_parts must contain every part exactly once with a non-empty etag",
-        ));
-    }
-    Ok(parts
-        .into_iter()
-        .map(|part| CompletedUploadPart {
-            part_number: part.part_number,
-            etag: part.etag,
-        })
-        .collect())
-}
-
 fn upload_id(input: &FileTransferInput) -> Result<Uuid, ErrorData> {
     let raw = input
         .upload_id
@@ -504,6 +313,15 @@ fn upload_id(input: &FileTransferInput) -> Result<Uuid, ErrorData> {
 
 fn required(value: Option<String>, field: &str, op: &str) -> Result<String, ErrorData> {
     value.ok_or_else(|| invalid_input_error(format!("op={op} requires {field}")))
+}
+
+fn flow_error(error: UploadFlowError) -> ErrorData {
+    match error {
+        UploadFlowError::InvalidInput(message) => invalid_input_error(message),
+        UploadFlowError::Service(error) => service_error(error),
+        UploadFlowError::Storage(error) => storage_error(error),
+        UploadFlowError::Internal(message) => ErrorData::internal_error(message, None),
+    }
 }
 
 fn storage_error(error: ObjectStorageError) -> ErrorData {
@@ -529,54 +347,5 @@ fn storage_error(error: ObjectStorageError) -> ErrorData {
                 "retryable": true,
             })),
         ),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use notegate_model::files::PendingObjectUpload;
-
-    #[test]
-    fn completed_parts_require_a_complete_ordered_set() -> Result<(), ErrorData> {
-        let upload = PendingObjectUpload {
-            id: Uuid::new_v4(),
-            object_key: "objects/test".to_owned(),
-            space_id: Uuid::new_v4(),
-            parent_node_id: Uuid::new_v4(),
-            requested_by_account_id: Uuid::new_v4(),
-            name: "large.bin".to_owned(),
-            byte_len: MULTIPART_PART_SIZE + 1,
-            media_type: "application/octet-stream".to_owned(),
-            original_filename: None,
-            encryption_mode: FileEncryptionMode::None,
-            encryption_metadata: None,
-            upload_mode: ObjectUploadMode::Multipart,
-            multipart_upload_id: Some("provider-id".to_owned()),
-            multipart_part_size: Some(MULTIPART_PART_SIZE),
-            node_id: None,
-        };
-        let valid = vec![
-            CompletedPartInput {
-                part_number: 2,
-                etag: "two".to_owned(),
-            },
-            CompletedPartInput {
-                part_number: 1,
-                etag: "one".to_owned(),
-            },
-        ];
-        assert_eq!(validate_completed_parts(&upload, Some(valid))?.len(), 2);
-        assert!(
-            validate_completed_parts(
-                &upload,
-                Some(vec![CompletedPartInput {
-                    part_number: 1,
-                    etag: "one".to_owned(),
-                }])
-            )
-            .is_err()
-        );
-        Ok(())
     }
 }

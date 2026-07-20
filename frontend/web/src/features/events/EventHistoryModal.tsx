@@ -3,8 +3,6 @@ import { ChevronRight, History, RefreshCw } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 
 import type { AuditEventListResponse, FileChangeEvent, FileChangeEventListResponse, Space } from "../../api/types";
-import { UploadTransfersPanel } from "../uploads/UploadTransfersPanel";
-import { useUploadManager } from "../uploads/UploadProvider";
 import { Button, EmptyState, Modal, SelectField, Tabs } from "../../shared/ui";
 import {
   formatActor,
@@ -19,39 +17,32 @@ import {
 } from "./eventDisplay";
 import { useAuditEventsQuery, useFileChangeEventsQuery } from "./useEventHistoryQueries";
 
-export type HistoryTab = "audit" | "files" | "transfers";
+type HistoryTab = "audit" | "files";
 type EventListResponse = AuditEventListResponse | FileChangeEventListResponse;
 type EventHistoryQuery<T extends EventListResponse> = UseInfiniteQueryResult<InfiniteData<T, unknown>, Error>;
 
 const TABS: { id: HistoryTab; label: string }[] = [
   { id: "files", label: "Changes" },
-  { id: "transfers", label: "Transfers" },
   { id: "audit", label: "Audit log" }
 ];
 
 export function EventHistoryModal({
   spaces,
   initialSpaceId,
-  initialTab = "files",
   canViewAuditEvents,
   onClose
 }: {
   spaces: Space[];
   initialSpaceId: string | null;
-  initialTab?: HistoryTab;
   canViewAuditEvents: boolean;
   onClose: () => void;
 }) {
-  const { tasks } = useUploadManager();
-  const hasTransfers = tasks.length > 0;
-  const [tab, setTab] = useState<HistoryTab>(() => availableInitialTab(initialTab, canViewAuditEvents, hasTransfers));
-  const tabs = useMemo(() => TABS.filter((item) => (
-    (item.id !== "audit" || canViewAuditEvents) && (item.id !== "transfers" || hasTransfers)
-  )), [canViewAuditEvents, hasTransfers]);
+  const [tab, setTab] = useState<HistoryTab>("files");
+  const tabs = useMemo(() => TABS.filter((item) => item.id !== "audit" || canViewAuditEvents), [canViewAuditEvents]);
 
   useEffect(() => {
-    if ((!canViewAuditEvents && tab === "audit") || (!hasTransfers && tab === "transfers")) setTab("files");
-  }, [canViewAuditEvents, hasTransfers, tab]);
+    if (!canViewAuditEvents && tab === "audit") setTab("files");
+  }, [canViewAuditEvents, tab]);
 
   return (
     <Modal title="History" onClose={onClose} width="max-w-5xl">
@@ -59,16 +50,9 @@ export function EventHistoryModal({
       <div className="min-h-[34rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1">
         {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
         {tab === "files" ? <FileChangeEventsPanel spaces={spaces} initialSpaceId={initialSpaceId} /> : null}
-        {tab === "transfers" ? <UploadTransfersPanel /> : null}
       </div>
     </Modal>
   );
-}
-
-function availableInitialTab(initialTab: HistoryTab, canViewAuditEvents: boolean, hasTransfers: boolean): HistoryTab {
-  if (initialTab === "audit" && !canViewAuditEvents) return "files";
-  if (initialTab === "transfers" && !hasTransfers) return "files";
-  return initialTab;
 }
 
 function AuditEventsPanel() {

@@ -3,10 +3,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useUiStore } from "../../stores/uiStore";
 import { UploadProvider, useUploadManager } from "./UploadProvider";
 
 const mocks = vi.hoisted(() => ({
+  abortFileUpload: vi.fn(),
   beginFileUpload: vi.fn(),
   completeFileUpload: vi.fn(),
   transferFile: vi.fn()
@@ -17,6 +17,7 @@ vi.mock("../../api/ApiProvider", () => ({
 }));
 
 vi.mock("../../api/files", () => ({
+  abortFileUpload: mocks.abortFileUpload,
   beginFileUpload: mocks.beginFileUpload,
   completeFileUpload: mocks.completeFileUpload,
   transferFile: mocks.transferFile
@@ -30,8 +31,8 @@ const uploadResponse = {
 describe("UploadProvider", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    useUiStore.setState(useUiStore.getInitialState(), true);
     mocks.beginFileUpload.mockReset().mockResolvedValue(uploadResponse);
+    mocks.abortFileUpload.mockReset().mockResolvedValue(undefined);
     mocks.completeFileUpload.mockReset().mockResolvedValue({ node: { id: "node-1" } });
     mocks.transferFile.mockReset();
   });
@@ -39,7 +40,7 @@ describe("UploadProvider", () => {
   it("tracks transfer progress and completes without changing workbench state", async () => {
     const transfer = deferred<void>();
     let reportProgress: ((uploadedBytes: number, totalBytes: number) => void) | undefined;
-    mocks.transferFile.mockImplementation((_upload, _file, options) => {
+    mocks.transferFile.mockImplementation((_client, _spaceId, _upload, _file, options) => {
       reportProgress = options.onProgress;
       return transfer.promise;
     });
@@ -50,21 +51,20 @@ describe("UploadProvider", () => {
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("uploading"));
 
     act(() => { reportProgress?.(5, 10); });
-    expect(result.current.progressPercent).toBe(50);
+    expect(result.current.tasks[0]?.uploadedBytes).toBe(5);
     act(() => { reportProgress?.(12, 10); });
-    expect(result.current.progressPercent).toBe(100);
+    expect(result.current.tasks[0]?.uploadedBytes).toBe(12);
 
     await act(async () => { transfer.resolve(); });
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
 
-    expect(mocks.completeFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1");
+    expect(mocks.completeFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1", undefined);
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces"], exact: true });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces", "space-1"] });
-    expect(useUiStore.getState().toast).toBe("Uploaded archive.zip");
   });
 
   it("removes a transfer when the user cancels it", async () => {
-    mocks.transferFile.mockImplementation((_upload, _file, options) => new Promise<void>((_resolve, reject) => {
+    mocks.transferFile.mockImplementation((_client, _spaceId, _upload, _file, options) => new Promise<void>((_resolve, reject) => {
       options.signal.addEventListener("abort", () => reject(new DOMException("canceled", "AbortError")), { once: true });
     }));
     const { result } = renderUploadManager();
@@ -76,6 +76,7 @@ describe("UploadProvider", () => {
     act(() => { result.current.cancelUpload(taskId); });
 
     await waitFor(() => expect(result.current.tasks).toHaveLength(0));
+    expect(mocks.abortFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1");
     expect(mocks.completeFileUpload).not.toHaveBeenCalled();
   });
 
@@ -88,6 +89,7 @@ describe("UploadProvider", () => {
     let taskId = "";
     act(() => { taskId = result.current.startUpload(input()); });
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("failed"));
+    expect(mocks.abortFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1");
 
     act(() => {
       result.current.retryUpload(taskId);
@@ -97,6 +99,27 @@ describe("UploadProvider", () => {
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
     expect(mocks.beginFileUpload).toHaveBeenCalledTimes(2);
     expect(mocks.transferFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not dismiss a failed task after its retry has started", async () => {
+    const retry = deferred<void>();
+    mocks.transferFile
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockReturnValueOnce(retry.promise);
+    const { result } = renderUploadManager();
+
+    let taskId = "";
+    act(() => { taskId = result.current.startUpload(input()); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("failed"));
+
+    act(() => {
+      result.current.retryUpload(taskId);
+      result.current.dismissUpload(taskId);
+    });
+
+    expect(result.current.tasks).toHaveLength(1);
+    await act(async () => { retry.resolve(); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
   });
 });
 
@@ -114,6 +137,7 @@ function input() {
   return {
     spaceId: "space-1",
     spaceName: "Daily",
+    destinationPath: "/Reports",
     parentNodeId: "parent-1",
     name: "archive.zip",
     file: new File(["0123456789"], "archive.zip", { type: "application/zip" })

@@ -13,7 +13,7 @@ use secrecy::ExposeSecret as _;
 
 use crate::error::ApiError;
 
-const TRANSFER_URL_TTL: Duration = Duration::from_secs(15 * 60);
+pub const TRANSFER_URL_TTL: Duration = Duration::from_secs(15 * 60);
 pub const MCP_TRANSFER_URL_TTL: Duration = Duration::from_secs(5 * 60);
 pub const MULTIPART_PART_SIZE: i64 = 64 * 1024 * 1024;
 const MAX_MULTIPART_PARTS: i32 = 10_000;
@@ -72,16 +72,6 @@ impl ObjectStorage {
             public: client(config, public_endpoint),
             bucket: config.bucket.clone(),
         }
-    }
-
-    pub async fn presign_put(
-        &self,
-        object_key: &str,
-        content_type: &str,
-        content_length: i64,
-    ) -> Result<PresignedPut, ObjectStorageError> {
-        self.presign_put_with_ttl(object_key, content_type, content_length, TRANSFER_URL_TTL)
-            .await
     }
 
     pub async fn presign_put_with_ttl(

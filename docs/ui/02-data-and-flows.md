@@ -195,8 +195,9 @@ folder/text create
 select file
 -> confirm node name
 -> POST /file-uploads
--> PUT bytes to the presigned URL
--> POST /file-uploads/{upload_id}/complete
+-> single: PUT all bytes to the presigned URL
+-> multipart: request part URLs, PUT at most 4 parts concurrently
+-> POST /file-uploads/{upload_id}/complete with multipart ETags
 -> refresh the source space
 ```
 
@@ -204,7 +205,9 @@ select file
 
 - upload는 앱 범위의 memory queue에서 실행하므로 space나 node를 이동해도 계속된다.
 - 새로고침이나 tab 종료 뒤에는 이어서 전송하지 않는다. 완료되지 않은 object 정리는 backend 정책을 따른다.
-- 진행 중이거나 실패한 항목은 History의 임시 Transfers tab에서 확인한다.
+- 100MiB 초과 파일은 64MiB part로 나누고 URL은 16개씩 발급받는다. 실패한 part만 새 URL로 최대 3회 전송한다.
+- 취소하거나 최종 실패하면 backend에 upload 정리를 요청한다. 요청 실패 시 backend의 inactivity cleanup이 처리한다.
+- 진행 중이거나 실패한 항목은 전역 UploadProgressDock에서 확인한다. 시작 시 대상 space와 folder path를 snapshot으로 보관한다.
 - 실패한 항목은 처음부터 재시도하거나 목록에서 제거할 수 있다.
 - 완료 항목은 잠시 표시한 뒤 제거한다. 완료 기록의 정본은 Changes event다.
 - 완료 시 현재 editor를 file node로 이동하지 않는다.

@@ -120,7 +120,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
 
   function uploadInFolder(folder: RestNode, file: File | null) {
     if (!canWriteActiveSpace || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
-    promptUpload(activeSpace, folder.id, file);
+    promptUpload(activeSpace, folder.id, folder.path, file);
   }
 
   function collapseTree() {
@@ -156,17 +156,21 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   function handleFileSelected(file: File | null) {
     const parentId = parentForCreate();
     if (!canWriteActiveSpace || !file || !parentId || !activeSpace) return;
-    promptUpload(activeSpace, parentId, file);
+    const destinationPath = !activeNode
+      ? "/"
+      : activeNode.kind === "folder" ? activeNode.path : parentPath(activeNode.path);
+    promptUpload(activeSpace, parentId, destinationPath, file);
   }
 
-  function promptUpload(space: Space, parentId: string, file: File) {
+  function promptUpload(space: Space, parentId: string, destinationPath: string, file: File) {
     setDialog(uploadFileDialog(parentId, file, (input) => {
       startUpload({
         parentNodeId: input.parentId,
         name: input.name,
         file: input.file,
         spaceId: space.id,
-        spaceName: space.name
+        spaceName: space.name,
+        destinationPath
       });
     }));
   }
@@ -201,4 +205,9 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     promptReplaceMetadata,
     downloadFileNode
   };
+}
+
+function parentPath(path: string): string {
+  const lastSlash = path.lastIndexOf("/");
+  return lastSlash <= 0 ? "/" : path.slice(0, lastSlash);
 }

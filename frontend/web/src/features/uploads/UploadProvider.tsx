@@ -2,9 +2,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { beginFileUpload, completeFileUpload, transferFile, type FileUploadInput } from "../../api/files";
+import {
+  abortFileUpload,
+  beginFileUpload,
+  completeFileUpload,
+  transferFile,
+  type FileUploadInput
+} from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
-import { useUiStore } from "../../stores/uiStore";
 
 export type UploadTaskStatus = "preparing" | "uploading" | "finalizing" | "failed" | "completed";
 
@@ -12,6 +17,7 @@ export type UploadTask = FileUploadInput & {
   id: string;
   spaceId: string;
   spaceName: string;
+  destinationPath: string;
   status: UploadTaskStatus;
   uploadedBytes: number;
   error: string | null;
@@ -20,13 +26,13 @@ export type UploadTask = FileUploadInput & {
 export type StartUploadInput = FileUploadInput & {
   spaceId: string;
   spaceName: string;
+  destinationPath: string;
 };
 
 type UploadManager = {
   tasks: UploadTask[];
   activeCount: number;
   failedCount: number;
-  progressPercent: number;
   startUpload: (input: StartUploadInput) => string;
   cancelUpload: (taskId: string) => void;
   retryUpload: (taskId: string) => void;
@@ -58,17 +64,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     mutationFn: async ({ taskId, input, controller }: UploadRun) => {
       updateTask(taskId, (task) => ({ ...task, status: "preparing", uploadedBytes: 0, error: null }));
       const upload = await beginFileUpload(client, input.spaceId, input);
-      if (controller.signal.aborted) throw canceledError();
+      try {
+        if (controller.signal.aborted) throw canceledError();
 
-      updateTask(taskId, (task) => ({ ...task, status: "uploading" }));
-      await transferFile(upload, input.file, {
-        signal: controller.signal,
-        onProgress: (uploadedBytes) => updateTask(taskId, (task) => ({ ...task, uploadedBytes }))
-      });
-      if (controller.signal.aborted) throw canceledError();
+        updateTask(taskId, (task) => ({ ...task, status: "uploading" }));
+        const completedParts = await transferFile(client, input.spaceId, upload, input.file, {
+          signal: controller.signal,
+          onProgress: (uploadedBytes) => updateTask(taskId, (task) => ({ ...task, uploadedBytes }))
+        });
+        if (controller.signal.aborted) throw canceledError();
 
-      updateTask(taskId, (task) => ({ ...task, status: "finalizing", uploadedBytes: input.file.size }));
-      return completeFileUpload(client, input.spaceId, upload.upload_id);
+        updateTask(taskId, (task) => ({ ...task, status: "finalizing", uploadedBytes: input.file.size }));
+        return await completeFileUpload(client, input.spaceId, upload.upload_id, completedParts);
+      } catch (error) {
+        // Do not hold the UI in an active state while best-effort cleanup runs.
+        // The server also expires abandoned uploads if this request fails.
+        void abortFileUpload(client, input.spaceId, upload.upload_id).catch(() => undefined);
+        throw error;
+      }
     },
     meta: { silentError: true }
   });
@@ -91,7 +104,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         updateTask(taskId, (task) => ({ ...task, status: "completed", uploadedBytes: task.file.size }));
         void queryClient.invalidateQueries({ queryKey: queryKeys.spaces, exact: true });
         void queryClient.invalidateQueries({ queryKey: ["spaces", input.spaceId] });
-        useUiStore.getState().showToast(`Uploaded ${input.name}`);
         const timer = window.setTimeout(() => removeTask(taskId), COMPLETED_TASK_TTL_MS);
         cleanupTimers.current.set(taskId, timer);
       })
@@ -102,7 +114,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           return;
         }
         updateTask(taskId, (task) => ({ ...task, status: "failed", error: uploadErrorMessage(error) }));
-        useUiStore.getState().showToast(`Upload failed: ${input.name}`);
       });
   }, [executeUpload, queryClient, removeTask, updateTask]);
 
@@ -131,7 +142,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const dismissUpload = useCallback((taskId: string) => {
     const task = tasks.find((candidate) => candidate.id === taskId);
-    if (!task || isActive(task.status)) return;
+    if (!task || isActive(task.status) || controllers.current.has(taskId)) return;
     removeTask(taskId);
   }, [removeTask, tasks]);
 
@@ -161,12 +172,9 @@ export function useUploadManager(): UploadManager {
 
 function summarizeUploads(tasks: UploadTask[]) {
   const active = tasks.filter((task) => isActive(task.status));
-  const totalBytes = active.reduce((sum, task) => sum + task.file.size, 0);
-  const uploadedBytes = active.reduce((sum, task) => sum + task.uploadedBytes, 0);
   return {
     activeCount: active.length,
-    failedCount: tasks.filter((task) => task.status === "failed").length,
-    progressPercent: totalBytes > 0 ? Math.min(100, Math.round((uploadedBytes / totalBytes) * 100)) : 0
+    failedCount: tasks.filter((task) => task.status === "failed").length
   };
 }
 

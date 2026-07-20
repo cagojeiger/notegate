@@ -23,11 +23,10 @@ vi.mock("../features/nodes/PrimarySidebar", () => ({ PrimarySidebar: () => null 
 vi.mock("../features/spaces/MobileSpaceBar", () => ({ MobileSpaceBar: () => null }));
 vi.mock("./AuxiliarySidebar", () => ({ AuxiliarySidebar: () => null }));
 vi.mock("../features/events/EventHistoryModal", () => ({
-  EventHistoryModal: ({ spaces, initialSpaceId, initialTab, canViewAuditEvents }: { spaces: Space[]; initialSpaceId: string | null; initialTab: string; canViewAuditEvents: boolean }) => (
+  EventHistoryModal: ({ spaces, initialSpaceId, canViewAuditEvents }: { spaces: Space[]; initialSpaceId: string | null; canViewAuditEvents: boolean }) => (
     <div
       data-testid="history-modal"
       data-space-id={initialSpaceId ?? undefined}
-      data-initial-tab={initialTab}
       data-space-count={spaces.length}
       data-can-view-audit={String(canViewAuditEvents)}
     />
@@ -77,18 +76,6 @@ describe("AppShell history", () => {
     expect(modal).toHaveAttribute("data-space-id", space.id);
     expect(modal).toHaveAttribute("data-space-count", "1");
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
-    expect(modal).toHaveAttribute("data-initial-tab", "files");
-  });
-
-  it("opens active transfers from the history button", async () => {
-    const user = userEvent.setup();
-    mocks.useWorkbenchController.mockReturnValue(workbench());
-    mocks.useUploadManager.mockReturnValue(uploadManager({ activeCount: 1, progressPercent: 40 }));
-
-    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "History" }));
-
-    expect(screen.getByTestId("history-modal")).toHaveAttribute("data-initial-tab", "transfers");
   });
 });
 
@@ -131,7 +118,6 @@ function uploadManager(overrides: Record<string, unknown> = {}) {
     tasks: [],
     activeCount: 0,
     failedCount: 0,
-    progressPercent: 0,
     startUpload: vi.fn(),
     cancelUpload: vi.fn(),
     retryUpload: vi.fn(),

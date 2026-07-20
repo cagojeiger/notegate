@@ -15,6 +15,7 @@ mod identity;
 mod mcp;
 mod object_storage;
 mod object_storage_cleanup_worker;
+mod object_upload_flow;
 mod openapi;
 mod page;
 mod periodic_worker;
