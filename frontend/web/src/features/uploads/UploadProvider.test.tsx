@@ -1,0 +1,131 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { useUiStore } from "../../stores/uiStore";
+import { UploadProvider, useUploadManager } from "./UploadProvider";
+
+const mocks = vi.hoisted(() => ({
+  beginFileUpload: vi.fn(),
+  completeFileUpload: vi.fn(),
+  transferFile: vi.fn()
+}));
+
+vi.mock("../../api/ApiProvider", () => ({
+  useApiClient: () => ({})
+}));
+
+vi.mock("../../api/files", () => ({
+  beginFileUpload: mocks.beginFileUpload,
+  completeFileUpload: mocks.completeFileUpload,
+  transferFile: mocks.transferFile
+}));
+
+const uploadResponse = {
+  upload_id: "server-upload-1",
+  transfer: { mode: "single", url: "https://objects.test/upload", headers: {} }
+};
+
+describe("UploadProvider", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useUiStore.setState(useUiStore.getInitialState(), true);
+    mocks.beginFileUpload.mockReset().mockResolvedValue(uploadResponse);
+    mocks.completeFileUpload.mockReset().mockResolvedValue({ node: { id: "node-1" } });
+    mocks.transferFile.mockReset();
+  });
+
+  it("tracks transfer progress and completes without changing workbench state", async () => {
+    const transfer = deferred<void>();
+    let reportProgress: ((uploadedBytes: number, totalBytes: number) => void) | undefined;
+    mocks.transferFile.mockImplementation((_upload, _file, options) => {
+      reportProgress = options.onProgress;
+      return transfer.promise;
+    });
+    const { result, queryClient } = renderUploadManager();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    act(() => { result.current.startUpload(input()); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("uploading"));
+
+    act(() => { reportProgress?.(5, 10); });
+    expect(result.current.progressPercent).toBe(50);
+    act(() => { reportProgress?.(12, 10); });
+    expect(result.current.progressPercent).toBe(100);
+
+    await act(async () => { transfer.resolve(); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
+
+    expect(mocks.completeFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1");
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces"], exact: true });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces", "space-1"] });
+    expect(useUiStore.getState().toast).toBe("Uploaded archive.zip");
+  });
+
+  it("removes a transfer when the user cancels it", async () => {
+    mocks.transferFile.mockImplementation((_upload, _file, options) => new Promise<void>((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new DOMException("canceled", "AbortError")), { once: true });
+    }));
+    const { result } = renderUploadManager();
+
+    let taskId = "";
+    act(() => { taskId = result.current.startUpload(input()); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("uploading"));
+
+    act(() => { result.current.cancelUpload(taskId); });
+
+    await waitFor(() => expect(result.current.tasks).toHaveLength(0));
+    expect(mocks.completeFileUpload).not.toHaveBeenCalled();
+  });
+
+  it("restarts a failed transfer from the begin step only once", async () => {
+    mocks.transferFile
+      .mockRejectedValueOnce(new Error("network unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const { result } = renderUploadManager();
+
+    let taskId = "";
+    act(() => { taskId = result.current.startUpload(input()); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("failed"));
+
+    act(() => {
+      result.current.retryUpload(taskId);
+      result.current.retryUpload(taskId);
+    });
+
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
+    expect(mocks.beginFileUpload).toHaveBeenCalledTimes(2);
+    expect(mocks.transferFile).toHaveBeenCalledTimes(2);
+  });
+});
+
+function renderUploadManager() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <UploadProvider>{children}</UploadProvider>
+    </QueryClientProvider>
+  );
+  return { ...renderHook(() => useUploadManager(), { wrapper }), queryClient };
+}
+
+function input() {
+  return {
+    spaceId: "space-1",
+    spaceName: "Daily",
+    parentNodeId: "parent-1",
+    name: "archive.zip",
+    file: new File(["0123456789"], "archive.zip", { type: "application/zip" })
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}

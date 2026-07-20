@@ -39,6 +39,7 @@ describe("MobileSpaceBar", () => {
         spaces={spaces}
         activeSpace={spaces[0]}
         canCreateSpace
+        transferCount={0}
         onSelectSpace={onSelectSpace}
         onCreateSpace={onCreateSpace}
         onOpenHistory={onOpenHistory}
@@ -63,6 +64,7 @@ describe("MobileSpaceBar", () => {
         spaces={spaces}
         activeSpace={spaces[0]}
         canCreateSpace
+        transferCount={0}
         onSelectSpace={vi.fn()}
         onCreateSpace={vi.fn()}
         onOpenHistory={vi.fn()}

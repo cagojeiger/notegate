@@ -182,12 +182,32 @@ GET /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&limit=50
 ### Create
 
 ```text
-folder/text/file create
+folder/text create
 -> choose parent folder
--> POST node/text/file API
+-> POST node/text API
 -> refresh affected children/recent
 -> open created node when applicable
 ```
+
+### Upload file
+
+```text
+select file
+-> confirm node name
+-> POST /file-uploads
+-> PUT bytes to the presigned URL
+-> POST /file-uploads/{upload_id}/complete
+-> refresh the source space
+```
+
+규칙:
+
+- upload는 앱 범위의 memory queue에서 실행하므로 space나 node를 이동해도 계속된다.
+- 새로고침이나 tab 종료 뒤에는 이어서 전송하지 않는다. 완료되지 않은 object 정리는 backend 정책을 따른다.
+- 진행 중이거나 실패한 항목은 History의 임시 Transfers tab에서 확인한다.
+- 실패한 항목은 처음부터 재시도하거나 목록에서 제거할 수 있다.
+- 완료 항목은 잠시 표시한 뒤 제거한다. 완료 기록의 정본은 Changes event다.
+- 완료 시 현재 editor를 file node로 이동하지 않는다.
 
 ### Rename
 

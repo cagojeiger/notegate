@@ -56,6 +56,7 @@ ActivityRail
 
 - SpaceRailList는 스크롤 가능하다.
 - SpaceAddButton은 space 목록 바로 아래에 둔다.
+- History는 진행 중이거나 실패한 file transfer 수를 badge로 표시한다.
 - SettingsButton은 하단에 고정한다.
 - space reorder는 desktop drag-and-drop으로 한다.
 
@@ -118,8 +119,10 @@ EditorArea
 포함:
 
 - 앱 준비/저장 상태.
+- 진행 중인 file upload 수와 전체 진행률, 실패 수.
 - 현재 space 이름.
-- 향후 runtime indicator 자리.
+
+file upload 상태를 선택하면 History의 Transfers tab을 연다. mobile은 StatusBar 대신 하단 History badge를 사용한다.
 
 포함하지 않음:
 
