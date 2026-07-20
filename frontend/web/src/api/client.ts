@@ -1,4 +1,5 @@
 import { apiErrorFromResponse } from "./errors";
+import { downloadBlob, downloadUrl } from "../shared/lib/downloadBlob";
 
 export type ApiClient = {
   get<T>(path: string): Promise<T>;
@@ -6,7 +7,8 @@ export type ApiClient = {
   put<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
-  download(path: string): Promise<Blob>;
+  fetchBlob(path: string): Promise<Blob>;
+  download(path: string, filename: string): Promise<void>;
 };
 
 type RequestOptions = {
@@ -39,19 +41,28 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
     return (await response.json()) as T;
   }
 
+  async function fetchBlob(path: string): Promise<Blob> {
+    const apiKey = getApiKey();
+    const headers = new Headers();
+    if (apiKey) headers.set("authorization", `Bearer ${apiKey}`);
+    const response = await fetch(path, { method: "GET", headers, credentials: "same-origin" });
+    if (!response.ok) throw await apiErrorFromResponse(response);
+    return response.blob();
+  }
+
   return {
     get: <T>(path: string) => request<T>(path, { method: "GET" }),
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
     delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-    async download(path: string) {
-      const apiKey = getApiKey();
-      const headers = new Headers();
-      if (apiKey) headers.set("authorization", `Bearer ${apiKey}`);
-      const response = await fetch(path, { method: "GET", headers, credentials: "same-origin" });
-      if (!response.ok) throw await apiErrorFromResponse(response);
-      return response.blob();
+    fetchBlob,
+    async download(path: string, filename: string) {
+      if (!getApiKey()) {
+        downloadUrl(path, filename);
+        return;
+      }
+      downloadBlob(await fetchBlob(path), filename);
     }
   };
 }

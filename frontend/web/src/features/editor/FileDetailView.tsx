@@ -1,15 +1,13 @@
 import { Download } from "lucide-react";
 
 import type { RestNode } from "../../api/types";
-import { downloadBlob } from "../../shared/lib/downloadBlob";
 import { Button, Card, MetaRow } from "../../shared/ui";
 import { useFileDownload } from "./useEditorQueries";
 
 export function FileDetailView({ node }: { node: RestNode }) {
   const download = useFileDownload(node);
   async function handleDownload() {
-    const blob = await download();
-    downloadBlob(blob, node.original_filename ?? node.name);
+    await download();
   }
   return (
     <article className="mx-auto max-w-[44rem] px-10 py-14">

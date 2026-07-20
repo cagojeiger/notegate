@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
-import { downloadFile } from "../../api/files";
+import { downloadFile, fetchFileBlob } from "../../api/files";
 import { getNode, listChildren, resolveNodePath } from "../../api/nodes";
 import { POLLING, withPollingJitter } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
@@ -20,7 +20,7 @@ export function useFolderChildrenStat(node: RestNode) {
 
 export function useFileDownload(node: RestNode) {
   const client = useApiClient();
-  return async () => downloadFile(client, node.space_id, node.id);
+  return async () => downloadFile(client, node.space_id, node.id, node.original_filename ?? node.name);
 }
 
 export function useMarkdownImageLoader(sourceNode: RestNode) {
@@ -48,7 +48,7 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
       const contentVersion = imageNode.content_sha256 ?? imageNode.updated_at;
       const blob = await queryClient.fetchQuery({
         queryKey: queryKeys.markdownImageBlob(imageNode.space_id, imageNode.id, contentVersion),
-        queryFn: () => downloadFile(client, imageNode.space_id, imageNode.id),
+        queryFn: () => fetchFileBlob(client, imageNode.space_id, imageNode.id),
         retry: false,
         staleTime: Infinity
       });
