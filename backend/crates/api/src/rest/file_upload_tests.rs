@@ -11,13 +11,18 @@ use std::collections::BTreeMap;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header::LOCATION};
 use notegate_core::S3Config;
+use notegate_core::limits::SINGLE_PUT_MAX_BYTES;
 use notegate_db::{FilesRepo, ObjectStorageRepo, test_support::TestDb};
-use notegate_model::Caller;
+use notegate_model::files::{BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration};
+use notegate_model::{Caller, FileEncryptionMode};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt as _;
 use uuid::Uuid;
+
+use crate::mcp::tools::transfers;
+use crate::mcp::tools::unified::{CompletedPartInput, FileTransferInput};
 
 use crate::rest::test_support::{
     caller_and_space, empty_request, json_request, rest_app, state_with_s3,
@@ -108,6 +113,27 @@ async fn put_upload(
     Ok(request.body(bytes.to_vec()).send().await?)
 }
 
+async fn put_mcp_part(transfer: &Value) -> Result<CompletedPartInput, Box<dyn std::error::Error>> {
+    let part_number = transfer["part_number"].as_i64().ok_or("part number")? as i32;
+    let content_length = transfer["content_length"].as_u64().ok_or("part length")?;
+    let mut request = reqwest::Client::new().put(transfer["url"].as_str().ok_or("part url")?);
+    for (name, value) in transfer["headers"].as_object().ok_or("part headers")? {
+        request = request.header(name, value.as_str().ok_or("part header value")?);
+    }
+    let response = request
+        .body(vec![part_number as u8; content_length as usize])
+        .send()
+        .await?
+        .error_for_status()?;
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .ok_or("part etag")?
+        .to_str()?
+        .to_owned();
+    Ok(CompletedPartInput { part_number, etag })
+}
+
 async fn complete_upload(
     state: &crate::state::AppState,
     caller: &Caller,
@@ -123,11 +149,20 @@ async fn complete_upload(
 }
 
 async fn mark_upload_stale(db: &TestDb, upload_id: Uuid) -> Result<(), Box<dyn std::error::Error>> {
+    set_upload_inactivity(db, upload_id, "3 hours").await
+}
+
+async fn set_upload_inactivity(
+    db: &TestDb,
+    upload_id: Uuid,
+    duration: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     sqlx::query(
         "UPDATE object_storage_objects \
-         SET last_activity_at = now() - interval '1 hour' WHERE id = $1",
+         SET last_activity_at = now() - $2::interval WHERE id = $1",
     )
     .bind(upload_id)
+    .bind(duration)
     .execute(&db.pool)
     .await?;
     Ok(())
@@ -263,8 +298,8 @@ async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::err
     let state = state_with_s3(&db, s3);
     let (caller, space_id, root_id) = caller_and_space(&state).await?;
 
-    // Fill the per-account concurrent-upload allowance; quota is only charged at
-    // `/complete`, so this cap is what bounds unattached staging in object storage.
+    // Fill the per-account concurrent-upload allowance with tiny objects so the
+    // count cap, rather than the byte quota, is the rejecting invariant.
     for index in 0..notegate_core::limits::OBJECT_UPLOAD_MAX_PENDING {
         begin_upload(
             &state,
@@ -291,6 +326,167 @@ async fn begin_rejects_too_many_pending_uploads() -> Result<(), Box<dyn std::err
     )
     .await?;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rest_begin_rejects_files_above_the_single_put_limit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+
+    let (status, body) = json_request(
+        rest_app(state, caller),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads"),
+        json!({
+            "parent_node_id": root_id,
+            "name": "too-large-for-single-put.bin",
+            "byte_len": SINGLE_PUT_MAX_BYTES as i64 + 1,
+            "media_type": "application/octet-stream"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["kind"], "invalid_input");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_declared_bytes_count_toward_the_space_quota()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+
+    begin_upload(
+        &state,
+        &caller,
+        space_id,
+        root_id,
+        "pending-100-mib.bin",
+        SINGLE_PUT_MAX_BYTES,
+    )
+    .await?;
+
+    let (status, body) = json_request(
+        rest_app(state, caller),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads"),
+        json!({
+            "parent_node_id": root_id,
+            "name": "over-tier-quota.bin",
+            "byte_len": 28 * 1024 * 1024 + 1,
+            "media_type": "application/octet-stream"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn multipart_abort_cleanup_closes_the_provider_upload()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let upload_id = Uuid::new_v4();
+    let object_key = format!("objects/{upload_id}");
+    let byte_len = 6 * 1024 * 1024;
+    let command = BeginObjectUpload {
+        parent_node_id: root_id,
+        name: "aborted-multipart.bin".to_owned(),
+        byte_len,
+        media_type: "application/octet-stream".to_owned(),
+        original_filename: None,
+        encryption_mode: FileEncryptionMode::None,
+        encryption_metadata: None,
+    };
+    state
+        .files
+        .prepare_object_upload(caller.account_id(), space_id, &command)
+        .await?;
+    let provider_upload_id = state
+        .object_storage
+        .create_multipart_upload(&object_key, &command.media_type)
+        .await
+        .map_err(|error| format!("create multipart upload: {error:?}"))?;
+    let registration = ObjectUploadRegistration {
+        id: upload_id,
+        object_key: object_key.clone(),
+        upload_mode: ObjectUploadMode::Multipart,
+        multipart_upload_id: Some(provider_upload_id.clone()),
+        multipart_part_size: Some(byte_len),
+    };
+    state
+        .files
+        .record_registered_object_upload(&registration, caller.account_id(), space_id, &command)
+        .await?;
+    assert_eq!(
+        state
+            .object_storage
+            .complete_multipart_upload(
+                &object_key,
+                &provider_upload_id,
+                &[crate::object_storage::CompletedUploadPart {
+                    part_number: 1,
+                    etag: "missing-part".to_owned(),
+                }],
+            )
+            .await,
+        Err(crate::object_storage::ObjectStorageError::InvalidMultipart)
+    );
+    let transfer = state
+        .object_storage
+        .presign_upload_part(
+            &object_key,
+            &provider_upload_id,
+            1,
+            byte_len,
+            crate::object_storage::MCP_TRANSFER_URL_TTL,
+        )
+        .await
+        .map_err(|error| format!("presign upload part: {error:?}"))?;
+
+    state
+        .files
+        .cancel_object_upload(caller.account_id(), space_id, upload_id)
+        .await?;
+    run_cleanup(&db, &state).await;
+    assert_eq!(object_state(&db, upload_id).await?, "expired");
+
+    let mut request = reqwest::Client::new().put(transfer.url);
+    for (name, value) in transfer.headers {
+        request = request.header(name, value);
+    }
+    let response = request.body(vec![1_u8; byte_len as usize]).send().await?;
+    assert!(
+        !response.status().is_success(),
+        "upload part succeeded after multipart abort"
+    );
 
     db.cleanup().await;
     Ok(())
@@ -430,6 +626,26 @@ async fn abandoned_uploaded_object_is_expired_and_deleted() -> Result<(), Box<dy
             .fetch_one(&db.pool)
             .await?;
     assert_eq!(file_count, 0);
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn one_hour_inactive_upload_is_not_expired() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let upload = begin_upload(&state, &caller, space_id, root_id, "inactive.bin", 4).await?;
+
+    set_upload_inactivity(&db, upload.id, "1 hour").await?;
+    run_cleanup(&db, &state).await;
+
+    assert_eq!(object_state(&db, upload.id).await?, "uploading");
     db.cleanup().await;
     Ok(())
 }
@@ -703,6 +919,224 @@ async fn attachment_conflict_expires_only_the_unattached_object()
     );
 
     delete_attached_file(&db, &state, &caller, space_id, first_node_id).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_single_upload_guides_put_completion_and_abort()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, _space_id, _root_id) = caller_and_space(&state).await?;
+    let (mut request_parts, _) = Request::new(()).into_parts();
+    request_parts.extensions.insert(caller);
+
+    let begun = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "begin_upload".to_owned(),
+            target: Some("rest-test:/guided-single.bin".to_owned()),
+            byte_len: Some(4),
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: None,
+            part_numbers: None,
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    assert_eq!(begun["next_action"]["kind"], "http_upload");
+    assert_eq!(
+        begun["next_action"]["then"]["input"]["op"],
+        "complete_upload"
+    );
+    let upload_id = begun["upload_id"].as_str().ok_or("upload id")?.to_owned();
+
+    let aborted = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "abort_upload".to_owned(),
+            target: None,
+            byte_len: None,
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: Some(upload_id.clone()),
+            part_numbers: None,
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    assert_eq!(aborted["next_action"]["kind"], "done");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_multipart_upload_and_presigned_download_round_trip()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, _root_id) = caller_and_space(&state).await?;
+    let (mut request_parts, _) = Request::new(()).into_parts();
+    request_parts.extensions.insert(caller.clone());
+    let byte_len = SINGLE_PUT_MAX_BYTES as i64 + 1;
+
+    let begun = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "begin_upload".to_owned(),
+            target: Some("rest-test:/large.bin".to_owned()),
+            byte_len: Some(byte_len),
+            media_type: Some("application/octet-stream".to_owned()),
+            original_filename: Some("large.bin".to_owned()),
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: None,
+            part_numbers: None,
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    assert_eq!(begun["transfer"]["mode"], "multipart");
+    assert_eq!(begun["transfer"]["part_count"], 2);
+    assert_eq!(begun["next_action"]["kind"], "call_tool");
+    assert_eq!(begun["next_action"]["input"]["part_numbers"], json!([1, 2]));
+    let upload_id = begun["upload_id"].as_str().ok_or("upload id")?.to_owned();
+
+    let prepared = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "prepare_parts".to_owned(),
+            target: None,
+            byte_len: None,
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: Some(upload_id.clone()),
+            part_numbers: Some(vec![1, 2]),
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    assert_eq!(prepared["next_action"]["kind"], "http_upload_parts");
+    assert_eq!(prepared["next_action"]["collect_response_header"], "etag");
+    assert_eq!(prepared["next_action"]["max_concurrency"], 4);
+    assert_eq!(
+        prepared["next_action"]["repeat"]["input"]["op"],
+        "prepare_parts"
+    );
+    assert_eq!(
+        prepared["next_action"]["then"]["input"]["op"],
+        "complete_upload"
+    );
+    let part_transfers = prepared["parts"].as_array().ok_or("part transfers")?;
+    assert_eq!(part_transfers.len(), 2);
+    let (first, second) = tokio::join!(
+        put_mcp_part(&part_transfers[0]),
+        put_mcp_part(&part_transfers[1])
+    );
+    let completed_parts = vec![first?, second?];
+
+    let completed = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "complete_upload".to_owned(),
+            target: None,
+            byte_len: None,
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: Some(upload_id.clone()),
+            part_numbers: None,
+            completed_parts: Some(completed_parts),
+        },
+    )
+    .await?
+    .0;
+    assert_eq!(completed["next_action"]["kind"], "done");
+    let prepare_after_completion = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "prepare_parts".to_owned(),
+            target: None,
+            byte_len: None,
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: Some(upload_id),
+            part_numbers: Some(vec![1]),
+            completed_parts: None,
+        },
+    )
+    .await;
+    assert!(prepare_after_completion.is_err());
+    let node_id = state
+        .files
+        .resolve_path(caller.account_id(), space_id, "/large.bin")
+        .await?
+        .node
+        .id;
+
+    let download = transfers::call(
+        &state,
+        &request_parts,
+        FileTransferInput {
+            op: "prepare_download".to_owned(),
+            target: Some("rest-test:/large.bin".to_owned()),
+            byte_len: None,
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: None,
+            part_numbers: None,
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    assert_eq!(download["next_action"]["kind"], "http_download");
+    let mut response = reqwest::Client::new()
+        .get(download["transfer"]["url"].as_str().ok_or("download url")?)
+        .send()
+        .await?
+        .error_for_status()?;
+    let mut downloaded = 0_u64;
+    while let Some(chunk) = response.chunk().await? {
+        downloaded += chunk.len() as u64;
+    }
+    assert_eq!(downloaded, byte_len as u64);
+
+    delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
     db.cleanup().await;
     Ok(())
 }

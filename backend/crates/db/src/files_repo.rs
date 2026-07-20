@@ -26,7 +26,8 @@ use crate::files::{commands, queries};
 use crate::tier_lookup;
 use notegate_model::files::{
     BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode,
-    NodeListCursor, NodeListSort, PendingObjectUpload, StoredContent, TextStats,
+    NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
+    StoredContent, TextStats,
 };
 
 #[derive(Debug, Clone)]
@@ -332,13 +333,31 @@ impl FilesRepo {
         requested_by: Uuid,
         input: &BeginObjectUpload,
     ) -> Result<PendingObjectUpload> {
+        let registration = ObjectUploadRegistration {
+            id,
+            object_key: object_key.to_owned(),
+            upload_mode: ObjectUploadMode::Single,
+            multipart_upload_id: None,
+            multipart_part_size: None,
+        };
+        self.insert_registered_object_upload(&registration, space_id, requested_by, input)
+            .await
+    }
+
+    pub async fn insert_registered_object_upload(
+        &self,
+        registration: &ObjectUploadRegistration,
+        space_id: Uuid,
+        requested_by: Uuid,
+        input: &BeginObjectUpload,
+    ) -> Result<PendingObjectUpload> {
         crate::files::object_uploads::insert(
             &self.pool,
-            id,
-            object_key,
+            registration,
             space_id,
             requested_by,
             input,
+            self.limits,
         )
         .await
     }
@@ -352,6 +371,14 @@ impl FilesRepo {
         crate::files::object_uploads::find(&self.pool, id, space_id, requested_by).await
     }
 
+    pub async fn object_upload_for_caller(
+        &self,
+        id: Uuid,
+        requested_by: Uuid,
+    ) -> Result<Option<PendingObjectUpload>> {
+        crate::files::object_uploads::find_for_caller(&self.pool, id, requested_by).await
+    }
+
     pub async fn touch_object_upload(
         &self,
         id: Uuid,
@@ -359,6 +386,15 @@ impl FilesRepo {
         requested_by: Uuid,
     ) -> Result<bool> {
         crate::files::object_uploads::touch(&self.pool, id, space_id, requested_by).await
+    }
+
+    pub async fn request_object_upload_expiry(
+        &self,
+        id: Uuid,
+        space_id: Uuid,
+        requested_by: Uuid,
+    ) -> Result<bool> {
+        crate::files::object_uploads::request_expiry(&self.pool, id, space_id, requested_by).await
     }
 
     pub async fn attach_object_upload(

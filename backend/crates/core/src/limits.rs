@@ -68,8 +68,10 @@ pub const SPACE_MAX_NODES: usize = 25_000;
 pub const SPACE_MAX_TEXT_BYTES: usize = 1_073_741_824;
 /// Maximum total live File bytes per space (100 GiB).
 pub const SPACE_MAX_FILE_BYTES: usize = 107_374_182_400;
-/// Maximum bytes per uploaded file (100 MiB).
-pub const FILE_MAX_BYTES: usize = 104_857_600;
+/// Maximum bytes per uploaded file (100 GiB). Effective Space quota may be lower.
+pub const FILE_MAX_BYTES: usize = 107_374_182_400;
+/// Maximum object size accepted by the legacy single-PUT REST/browser flow (100 MiB).
+pub const SINGLE_PUT_MAX_BYTES: usize = 104_857_600;
 /// Maximum unfinished object uploads per account. Both active uploads and
 /// objects awaiting expiry deletion count until the physical object is removed.
 pub const OBJECT_UPLOAD_MAX_PENDING: usize = 16;

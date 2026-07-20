@@ -17,7 +17,12 @@ mc admin policy create local notegate-app /dev/stdin <<POLICY
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload"
+      ],
       "Resource": "arn:aws:s3:::$NOTEGATE_S3_BUCKET/objects/*"
     }
   ]

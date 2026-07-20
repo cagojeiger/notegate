@@ -63,10 +63,15 @@ edit   line 기반 insert/replace/delete 적용
 
 ## File commands
 
-File은 binary/object content node다. MCP/CLI command surface는 file upload/download를 포함하지 않고 file node stat만 노출한다. Node metadata는 REST metadata API에서 다룬다.
+File은 binary/object content node다. MCP `file_transfer`는 presigned URL을 발급하고 실제 bytes는 로컬 caller와 S3 호환 저장소 사이에서 직접 전송한다. Node metadata는 REST metadata API에서 다룬다.
 
 - File은 `nodes.kind='file'`이다.
 - File은 Text content operation과 grep 대상이 아니다.
+- 100MiB 이하는 single PUT, 초과 파일은 64MiB part의 multipart upload를 사용한다.
+- 단일 file hard max는 100GiB이며 실제 허용량은 Space tier quota가 더 낮을 수 있다.
+- 업로드와 다운로드 URL은 MCP 응답에만 임시로 노출되며 5분 뒤 만료된다.
+- Multipart part URL은 최대 16개씩 발급하고 재발급할 때 upload activity를 갱신한다.
+- 현재 multipart 호환 검증 대상은 MinIO다. Filegate S3 호환 표면은 multipart operation 추가 전까지 single PUT만 지원한다.
 
 ## Copy semantics
 

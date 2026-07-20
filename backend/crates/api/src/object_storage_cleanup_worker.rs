@@ -11,7 +11,7 @@ use crate::periodic_worker;
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 const DELETE_TIMEOUT: Duration = Duration::from_secs(10);
-const STALE_UPLOAD_SECONDS: i64 = 30 * 60;
+const STALE_UPLOAD_SECONDS: i64 = 2 * 60 * 60;
 // A claimed row remains unavailable longer than one bounded S3 delete call.
 const CLAIM_SECONDS: i64 = 30;
 const CLEANUP_BATCH: i64 = 100;
@@ -96,12 +96,23 @@ async fn process_candidate(
         _ => return Ok(()),
     };
 
-    let delete_error_code =
-        match tokio::time::timeout(DELETE_TIMEOUT, storage.delete(&candidate.object_key)).await {
-            Ok(Ok(())) => None,
-            Ok(Err(_error)) => Some("unavailable"),
-            Err(_elapsed) => Some("timeout"),
-        };
+    let cleanup = async {
+        if candidate.upload_mode == "multipart"
+            && let Some(upload_id) = candidate.multipart_upload_id.as_deref()
+        {
+            storage
+                .abort_multipart_upload(&candidate.object_key, upload_id)
+                .await?;
+        }
+        // A multipart complete may have succeeded before attachment failed.
+        // Delete is idempotent and covers both that case and ordinary objects.
+        storage.delete(&candidate.object_key).await
+    };
+    let delete_error_code = match tokio::time::timeout(DELETE_TIMEOUT, cleanup).await {
+        Ok(Ok(())) => None,
+        Ok(Err(_error)) => Some("unavailable"),
+        Err(_elapsed) => Some("timeout"),
+    };
 
     match delete_error_code {
         None => {

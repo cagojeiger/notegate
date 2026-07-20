@@ -347,7 +347,7 @@ file_objects
   space_id uuid not null references spaces(id) on delete cascade
   object_key text not null
   media_type text not null
-  byte_len bigint not null check 0..104857600
+  byte_len bigint not null check 0..107374182400
   original_filename text null
   encryption_mode text not null check ('none','client')
   encryption_metadata jsonb null
@@ -364,6 +364,9 @@ object_storage_objects
   object_key text unique not null
   space_id/parent_node_id/node_id/requested_by_account_id uuid null
   name/declared_byte_len/media_type/encryption metadata
+  upload_mode text check ('single','multipart')
+  multipart_upload_id text null
+  multipart_part_size bigint null
   state text check ('uploading','attached','expire_pending','expired','delete_pending','deleted')
   last_activity_at/retry_count/retry_after/last_error_code
   created_at/attached_at/delete_requested_at/deleted_at
@@ -375,7 +378,7 @@ Content FK invariant:
 
 ```text
 DB FK: text_objects/file_objects row -> matching nodes(id, space_id) ON DELETE CASCADE
-DB CHECK: file_objects.byte_len <= 104857600
+DB CHECK: file_objects.byte_len <= 107374182400
 DB FK: file_objects.object_key -> object_storage_objects.object_key
 DB CHECK: file_objects.object_key IS NOT NULL
 Service transaction: object attach는 node, file_objects, usage counter, file change event, 원장 상태를 함께 commit
