@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { uploadFile } from "../../api/files";
 import { replaceMetadata } from "../../api/metadata";
 import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
@@ -62,21 +61,6 @@ export function useDeleteNodeMutation(onDeleted: (node: RestNode) => void) {
       queryClient.removeQueries({ queryKey: queryKeys.metadata(node.space_id, node.id) });
       onDeleted(node);
       invalidateSpace(node.space_id);
-    }
-  });
-}
-
-export function useUploadFileMutation(activeSpace: Space | null, onUploaded: (node: RestNode) => void) {
-  const client = useApiClient();
-  const invalidateSpace = useInvalidateSpace();
-  return useMutation({
-    mutationFn: ({ parentId, name, file }: { parentId: string; name: string; file: File }) => {
-      if (!activeSpace) throw new Error("No active space");
-      return uploadFile(client, activeSpace.id, { parentNodeId: parentId, name, file });
-    },
-    onSuccess: (response) => {
-      invalidateSpace(response.node.space_id);
-      onUploaded(response.node);
     }
   });
 }

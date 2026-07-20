@@ -8,7 +8,8 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
 const mocks = vi.hoisted(() => ({
-  revealNode: vi.fn()
+  revealNode: vi.fn(),
+  startUpload: vi.fn()
 }));
 
 vi.mock("../../api/ApiProvider", () => ({
@@ -19,6 +20,10 @@ vi.mock("../../api/nodes", () => ({
   resolveNodePath: vi.fn()
 }));
 
+vi.mock("../uploads/UploadProvider", () => ({
+  useUploadManager: () => ({ startUpload: mocks.startUpload })
+}));
+
 vi.mock("./useWorkbenchQueries", () => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn() });
   return {
@@ -27,7 +32,6 @@ vi.mock("./useWorkbenchQueries", () => {
     useMoveNodeMutation: mutation,
     useReplaceMetadataMutation: mutation,
     useUpdateNodeMutation: mutation,
-    useUploadFileMutation: mutation,
     useRevealNode: () => mocks.revealNode
   };
 });
@@ -38,6 +42,7 @@ describe("useWorkbenchNodeActions", () => {
     useUiStore.setState(useUiStore.getInitialState(), true);
     vi.mocked(resolveNodePath).mockReset();
     mocks.revealNode.mockReset();
+    mocks.startUpload.mockReset();
   });
 
   it("opens a resolved markdown link through the active editor group and reveals its ancestors", async () => {
@@ -226,6 +231,35 @@ describe("useWorkbenchNodeActions", () => {
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
+  });
+
+  it("queues a selected file with the current space snapshot", async () => {
+    const activeSpace = space("space-1");
+    const setDialog = vi.fn();
+    const file = new File(["data"], "source.bin", { type: "application/octet-stream" });
+    const { result } = renderHook(() =>
+      useWorkbenchNodeActions({
+        activeSpace,
+        activeNode: null,
+        canWriteActiveSpace: true,
+        setDialog
+      })
+    );
+
+    act(() => { result.current.handleFileSelected(file); });
+    const dialog = setDialog.mock.calls[0]?.[0];
+    expect(dialog?.kind).toBe("prompt");
+    if (!dialog || dialog.kind !== "prompt") throw new Error("upload prompt was not opened");
+
+    await act(async () => { await dialog.onSubmit("archive.bin"); });
+
+    expect(mocks.startUpload).toHaveBeenCalledWith({
+      spaceId: activeSpace.id,
+      spaceName: activeSpace.name,
+      parentNodeId: activeSpace.root_node_id,
+      name: "archive.bin",
+      file
+    });
   });
 });
 

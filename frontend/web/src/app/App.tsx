@@ -6,6 +6,7 @@ import type { Me } from "../api/types";
 import { DevAuthGate } from "../auth/DevAuthGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { clearDevApiKey, readDevApiKey } from "../auth/session";
+import { UploadProvider } from "../features/uploads/UploadProvider";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
@@ -111,7 +112,11 @@ function AuthBoundary({
     );
   }
 
-  return <AppShell me={authViewState.me} onSignOut={onSignOut} />;
+  return (
+    <UploadProvider>
+      <AppShell me={authViewState.me} onSignOut={onSignOut} />
+    </UploadProvider>
+  );
 }
 
 type AuthViewState =

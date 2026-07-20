@@ -9,7 +9,8 @@ import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
 import { downloadBlob } from "../../shared/lib/downloadBlob";
 import { useUiStore } from "../../stores/uiStore";
-import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation, useUploadFileMutation } from "./useWorkbenchQueries";
+import { useUploadManager } from "../uploads/UploadProvider";
+import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation } from "./useWorkbenchQueries";
 
 type NodeActionsProps = {
   activeSpace: Space | null;
@@ -29,6 +30,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   const setExpanded = useUiStore((state) => state.setExpanded);
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
+  const { startUpload } = useUploadManager();
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
     addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
@@ -37,7 +39,6 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
-  const uploadFileMutation = useUploadFileMutation(activeSpace, openInActiveGroup);
   const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
   const revealNodeInSpace = useRevealNode();
 
@@ -118,10 +119,8 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   }
 
   function uploadInFolder(folder: RestNode, file: File | null) {
-    if (!canWriteActiveSpace || !file) return;
-    setDialog(uploadFileDialog(folder.id, file, async (input) => {
-      await uploadFileMutation.mutateAsync(input);
-    }));
+    if (!canWriteActiveSpace || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
+    promptUpload(activeSpace, folder.id, file);
   }
 
   function collapseTree() {
@@ -156,9 +155,19 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
 
   function handleFileSelected(file: File | null) {
     const parentId = parentForCreate();
-    if (!canWriteActiveSpace || !file || !parentId) return;
-    setDialog(uploadFileDialog(parentId, file, async (input) => {
-      await uploadFileMutation.mutateAsync(input);
+    if (!canWriteActiveSpace || !file || !parentId || !activeSpace) return;
+    promptUpload(activeSpace, parentId, file);
+  }
+
+  function promptUpload(space: Space, parentId: string, file: File) {
+    setDialog(uploadFileDialog(parentId, file, (input) => {
+      startUpload({
+        parentNodeId: input.parentId,
+        name: input.name,
+        file: input.file,
+        spaceId: space.id,
+        spaceName: space.name
+      });
     }));
   }
 

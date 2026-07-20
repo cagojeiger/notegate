@@ -19,6 +19,7 @@ type ActivityRailProps = {
   activeSpace: Space | null;
   canCreateSpace: boolean;
   canManageSpaces: boolean;
+  transferCount: number;
   onSelectSpace: (space: Space) => void;
   onReorderSpaces: (spaces: Space[]) => void;
   onCreateSpace: () => void;
@@ -28,7 +29,7 @@ type ActivityRailProps = {
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenHistory, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, transferCount, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenHistory, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
@@ -99,8 +100,9 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
         ) : null}
       </div>
       <div className="space-y-1 border-t border-seam p-2">
-        <button onClick={onOpenHistory} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="History">
+        <button onClick={onOpenHistory} className="relative grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="History" title={transferCount > 0 ? `${transferCount} file transfers need attention` : "History"}>
           <History size={16} />
+          {transferCount > 0 ? <span className="absolute right-0 top-0 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-white" aria-hidden="true">{transferCount}</span> : null}
         </button>
         <button onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="Settings">
           <Settings size={16} />
