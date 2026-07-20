@@ -169,6 +169,21 @@ pub async fn prepare_parts(
     if upload.upload_mode != ObjectUploadMode::Multipart {
         return Err(invalid("upload is not multipart"));
     }
+    if upload.node_id.is_some() {
+        return Err(invalid("upload is already complete"));
+    }
+    let part_size = upload.multipart_part_size.ok_or(UploadFlowError::Internal(
+        "multipart upload state is incomplete",
+    ))?;
+    let prepared_parts = part_numbers
+        .into_iter()
+        .map(|part_number| {
+            multipart_part_len(upload.byte_len, part_size, part_number)
+                .map(|content_length| (part_number, content_length))
+                .ok_or_else(|| invalid("part number is outside the upload range"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     let upload = state
         .files
         .touch_object_upload(account_id, upload.space_id, upload.id)
@@ -183,14 +198,9 @@ pub async fn prepare_parts(
             .ok_or(UploadFlowError::Internal(
                 "multipart upload state is incomplete",
             ))?;
-    let part_size = upload.multipart_part_size.ok_or(UploadFlowError::Internal(
-        "multipart upload state is incomplete",
-    ))?;
 
-    let mut transfers = Vec::with_capacity(part_numbers.len());
-    for part_number in part_numbers {
-        let content_length = multipart_part_len(upload.byte_len, part_size, part_number)
-            .ok_or_else(|| invalid("part number is outside the upload range"))?;
+    let mut transfers = Vec::with_capacity(prepared_parts.len());
+    for (part_number, content_length) in prepared_parts {
         let transfer = state
             .object_storage
             .presign_upload_part(
@@ -218,12 +228,6 @@ pub async fn complete_upload(
 ) -> Result<notegate_model::files::FileView, UploadFlowError> {
     if upload.node_id.is_none() {
         if upload.upload_mode == ObjectUploadMode::Multipart {
-            // Refresh before the provider call so stale cleanup cannot claim
-            // this upload while multipart completion is in progress.
-            state
-                .files
-                .touch_object_upload(account_id, upload.space_id, upload.id)
-                .await?;
             let completed = validate_completed_parts(&upload, completed_parts)?;
             let storage_upload_id =
                 upload
@@ -232,6 +236,12 @@ pub async fn complete_upload(
                     .ok_or(UploadFlowError::Internal(
                         "multipart upload state is incomplete",
                     ))?;
+            // Refresh before the provider call so stale cleanup cannot claim
+            // this upload while multipart completion is in progress.
+            state
+                .files
+                .touch_object_upload(account_id, upload.space_id, upload.id)
+                .await?;
             if let Err(completion_error) = state
                 .object_storage
                 .complete_multipart_upload(&upload.object_key, storage_upload_id, &completed)

@@ -183,6 +183,16 @@ async fn set_upload_inactivity(
     Ok(())
 }
 
+async fn upload_is_stale(db: &TestDb, upload_id: Uuid) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(sqlx::query_scalar(
+        "SELECT last_activity_at <= now() - interval '1 hour' \
+         FROM object_storage_objects WHERE id = $1",
+    )
+    .bind(upload_id)
+    .fetch_one(&db.pool)
+    .await?)
+}
+
 async fn run_cleanup(db: &TestDb, state: &crate::state::AppState) {
     crate::object_storage_cleanup_worker::run_once(
         &ObjectStorageRepo::new(db.pool.clone()),
@@ -457,6 +467,7 @@ async fn rest_begin_uses_multipart_above_the_single_put_limit()
     assert_eq!(body["transfer"]["mode"], "multipart");
     assert_eq!(body["transfer"]["part_count"], 2);
     let upload_id: Uuid = serde_json::from_value(body["upload_id"].clone())?;
+    mark_upload_stale(&db, upload_id).await?;
 
     for part_numbers in [json!([1, 1]), json!([3])] {
         let (status, error) = json_request(
@@ -469,6 +480,20 @@ async fn rest_begin_uses_multipart_above_the_single_put_limit()
         assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
         assert_eq!(error["kind"], "invalid_input");
     }
+    assert!(upload_is_stale(&db, upload_id).await?);
+
+    let (status, error) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads/{upload_id}/complete"),
+        json!({
+            "completed_parts": [{ "part_number": 1, "etag": "etag-1" }]
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert_eq!(error["kind"], "invalid_input");
+    assert!(upload_is_stale(&db, upload_id).await?);
 
     let (status, _) = empty_request(
         rest_app(state.clone(), caller),

@@ -31,7 +31,7 @@ Permission: `write`.
 
 Single PUT은 `If-None-Match: *`와 요청의 `Content-Length`를 서명하므로 같은 URL로 object를 덮어쓰거나 선언한 `byte_len`과 다른 크기를 업로드할 수 없다. 브라우저가 직접 설정할 수 없는 `Content-Length`는 응답 header 목록에서 제외하며 user agent가 body 길이로 자동 생성한다. Single과 multipart part presigned URL은 15분 동안 유효하다.
 
-REST/browser 상한은 10737418240 bytes다. 104857600 bytes 이하는 single PUT, 초과 파일은 67108864-byte part의 multipart를 사용한다. 전체 File hard max와 MCP multipart 상한은 107374182400 bytes다. S3 설정은 API 시작에 필수다. 실행 중 저장소가 일시적으로 실패하면 file operation은 `503 object_storage_unavailable`을 반환한다. 완료 전 upload는 File node가 아니며, 2시간 동안 활동이 없으면 정리 대상이 된다. begin과 part URL 재발급은 활동 시각을 갱신한다. begin 시 live File bytes와 진행 중 선언 bytes를 함께 검사하고, 물리 삭제 전인 `uploading`과 `expire_pending` upload를 account당 16개로 제한한다.
+REST/browser 상한은 10737418240 bytes다. 104857600 bytes 이하는 single PUT, 초과 파일은 67108864-byte part의 multipart를 사용한다. 전체 File hard max와 MCP multipart 상한은 107374182400 bytes다. S3 설정은 API 시작에 필수다. 실행 중 저장소가 일시적으로 실패하면 file operation은 `503 object_storage_unavailable`을 반환한다. 완료 전 upload는 File node가 아니며, 2시간 동안 Notegate API 활동이 없으면 정리 대상이 된다. begin과 part URL 재발급, 유효한 multipart 완료 요청은 활동 시각을 갱신한다. 브라우저와 저장소 사이의 직접 PUT 진행률은 Notegate가 관찰하지 않는다. begin 시 live File bytes와 진행 중 선언 bytes를 함께 검사하고, 물리 삭제 전인 `uploading`과 `expire_pending` upload를 account당 16개로 제한한다.
 
 사용자가 취소하면 `DELETE /file-uploads/{upload_id}`로 정리를 요청한다. Provider 삭제는 cleanup worker가 재시도하므로 응답은 물리 삭제 완료가 아니라 cleanup queue 등록을 뜻한다.
 

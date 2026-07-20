@@ -104,9 +104,28 @@ describe("files api", () => {
     expect(request.method).toBe("PUT");
     expect(request.url).toBe(singleUpload.transfer.mode === "single" ? singleUpload.transfer.url : "");
     expect(request.withCredentials).toBe(false);
+    expect(request.headers).toEqual(new Map(Object.entries(
+      singleUpload.transfer.mode === "single" ? singleUpload.transfer.headers : {}
+    )));
     expect(request.body).toBe(file);
     expect(onProgress).toHaveBeenNthCalledWith(1, 2, 5);
     expect(onProgress).toHaveBeenLastCalledWith(5, 5);
+  });
+
+  it("reports a failed single PUT as an object upload failure", async () => {
+    const pending = transferFile(
+      {} as ApiClient,
+      "space-1",
+      singleUpload,
+      new File(["hello"], "hello.txt")
+    );
+
+    FakeXmlHttpRequest.instances[0].respond(503);
+
+    await expect(pending).rejects.toMatchObject({
+      status: 503,
+      kind: "object_upload_failed"
+    });
   });
 
   it("uploads multipart batches with at most four concurrent requests", async () => {
