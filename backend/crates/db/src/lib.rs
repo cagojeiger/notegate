@@ -95,13 +95,23 @@ pub async fn check_readiness(pool: &PgPool) -> Result<()> {
         .await
         .map_err(|e| Error::internal(format!("database ping failed: {e}")))?;
 
+    let versions = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .collect::<Vec<_>>();
+    let applied = sqlx::query_as::<_, (i64, Vec<u8>, bool)>(
+        "SELECT version, checksum, success FROM _sqlx_migrations WHERE version = ANY($1)",
+    )
+    .bind(&versions)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| Error::internal(format!("migration readiness check failed: {e}")))?
+    .into_iter()
+    .map(|(version, checksum, success)| (version, (checksum, success)))
+    .collect::<std::collections::HashMap<_, _>>();
+
     for migration in MIGRATOR.iter() {
-        let applied: Option<(Vec<u8>, bool)> =
-            sqlx::query_as("SELECT checksum, success FROM _sqlx_migrations WHERE version = $1")
-                .bind(migration.version)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| Error::internal(format!("migration readiness check failed: {e}")))?;
+        let applied = applied.get(&migration.version);
 
         let Some((checksum, success)) = applied else {
             return Err(Error::internal(format!(

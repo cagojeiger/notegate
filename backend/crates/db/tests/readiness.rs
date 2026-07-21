@@ -43,6 +43,26 @@ async fn readiness_rejects_missing_migration_row() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
+async fn readiness_rejects_migration_checksum_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = $1 WHERE version = 1")
+        .bind(vec![0_u8])
+        .execute(&db.pool)
+        .await?;
+
+    let err = notegate_db::check_readiness(&db.pool)
+        .await
+        .expect_err("checksum mismatch is not ready");
+    assert!(err.to_string().contains("migration 1 checksum mismatch"));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn readiness_rejects_missing_space_usage_table() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
