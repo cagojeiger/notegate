@@ -1,7 +1,7 @@
 //! Object-backed file metadata and download redirects.
 //!
-//! REST handles file content. MCP only exposes file nodes and metadata through
-//! `ls`/`stat`/`find`.
+//! REST handles browser file content. MCP prepares direct transfers through
+//! `file_transfer` without carrying file bytes in MCP payloads.
 
 use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;

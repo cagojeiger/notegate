@@ -50,8 +50,15 @@ test("dev API key dashboard supports space, text, metadata, and file basics", as
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(uploadPath);
   await page.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.locator("body")).toContainText(fileName);
+  const fileNode = page.getByRole("button", { name: fileName, exact: true });
+  await expect(fileNode).toBeVisible();
+  await fileNode.click();
   await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(fileName);
 
   await page.getByLabel("Manage space").click();
   await page.getByRole("button", { name: "Delete space" }).click();

@@ -203,7 +203,7 @@ select file
 
 규칙:
 
-- upload는 앱 범위의 memory queue에서 실행하므로 space나 node를 이동해도 계속된다.
+- upload는 앱 범위의 memory queue에서 최대 2개 파일까지 실행하므로 space나 node를 이동해도 계속된다. Multipart는 파일당 최대 4개 part를 병렬 전송한다.
 - 새로고침이나 tab 종료 뒤에는 이어서 전송하지 않는다. 완료되지 않은 object 정리는 backend 정책을 따른다.
 - 100MiB 초과 파일은 64MiB part로 나누고 URL은 16개씩 발급받는다. 실패한 part만 새 URL로 최대 3회 전송한다.
 - 취소하거나 최종 실패하면 backend에 upload 정리를 요청한다. 요청 실패 시 backend의 inactivity cleanup이 처리한다.

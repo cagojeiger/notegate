@@ -127,3 +127,132 @@ jobs:
 
       - name: Build
         run: pnpm --filter web build
+
+  browser:
+    name: Browser E2E
+    needs: [hygiene, rust, web]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: notegate
+          POSTGRES_PASSWORD: notegate
+          POSTGRES_DB: notegate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U notegate -d notegate"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
+      NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
+      NOTEGATE_PUBLIC_URL: http://127.0.0.1:9191
+      NOTEGATE_OAUTH_CLIENT_ID: notegate-web
+      NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
+      NOTEGATE_ENC_ROOT_KEY_ID: e2e-enc
+      NOTEGATE_ENC_ROOT_SECRET: e2e-distinct-enc-root-secret-32-bytes
+      NOTEGATE_LOOKUP_ROOT_KEY_ID: e2e-lookup
+      NOTEGATE_LOOKUP_ROOT_SECRET: e2e-distinct-lookup-root-secret-32b
+      NOTEGATE_S3__ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_S3__PUBLIC_ENDPOINT: http://127.0.0.1:9000
+      NOTEGATE_S3__REGION: us-east-1
+      NOTEGATE_S3__BUCKET: notegate-e2e
+      NOTEGATE_S3__ACCESS_KEY: notegate-app
+      NOTEGATE_S3__SECRET_KEY: notegate-app-secret
+      NOTEGATE_S3__FORCE_PATH_STYLE: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.29.3
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: Start MinIO
+        run: |
+          docker run --detach --name notegate-minio \
+            --publish 9000:9000 \
+            --env MINIO_API_CORS_ALLOW_ORIGIN=http://127.0.0.1:5173 \
+            --env MINIO_ROOT_USER=minio-root \
+            --env MINIO_ROOT_PASSWORD=minio-root-secret \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              docker logs notegate-minio
+              exit 1
+            fi
+            sleep 1
+          done
+          docker run --rm --network host \
+            --env MINIO_ENDPOINT=http://127.0.0.1:9000 \
+            --env MINIO_ROOT_USER=minio-root \
+            --env MINIO_ROOT_PASSWORD=minio-root-secret \
+            --env NOTEGATE_S3_BUCKET="$NOTEGATE_S3__BUCKET" \
+            --env NOTEGATE_S3_ACCESS_KEY="$NOTEGATE_S3__ACCESS_KEY" \
+            --env NOTEGATE_S3_SECRET_KEY="$NOTEGATE_S3__SECRET_KEY" \
+            --volume "$PWD/deploy/minio/init.sh:/config/init.sh:ro" \
+            --entrypoint /bin/sh \
+            minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
+
+      - name: Seed browser identity
+        id: seed_browser_identity
+        run: |
+          output=$(cargo run --quiet --package notegate-api --example seed_user)
+          token=$(printf '%s\n' "$output" | sed -n 's/^TOKEN=//p')
+          test -n "$token"
+          echo "::add-mask::$token"
+          echo "api_key=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Start application
+        run: |
+          mkdir -p browser-e2e
+          cargo run --quiet --package notegate-api --bin notegate-api >browser-e2e/api.log 2>&1 &
+          pnpm --filter web dev --host 127.0.0.1 >browser-e2e/web.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null && \
+               curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat browser-e2e/api.log
+          cat browser-e2e/web.log
+          exit 1
+
+      - name: Test browser workflow
+        env:
+          NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_browser_identity.outputs.api_key }}
+        run: pnpm --filter web test:e2e
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-diagnostics
+          if-no-files-found: ignore
+          path: |
+            browser-e2e/*.log
+            frontend/web/test-results

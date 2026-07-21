@@ -117,6 +117,7 @@ function uploadManager(overrides: Record<string, unknown> = {}) {
   return {
     tasks: [],
     activeCount: 0,
+    queuedCount: 0,
     failedCount: 0,
     startUpload: vi.fn(),
     cancelUpload: vi.fn(),

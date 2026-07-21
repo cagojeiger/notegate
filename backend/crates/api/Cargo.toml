@@ -20,7 +20,6 @@ tokio-util.workspace = true
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
-sqlx.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
@@ -56,6 +55,7 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 [dev-dependencies]
 notegate-db = { workspace = true, features = ["test-util"] }
+sqlx.workspace = true
 
 [lints]
 workspace = true

@@ -1,11 +1,12 @@
 import { Check, ChevronDown, RotateCcw, UploadCloud, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import { formatBytes } from "../../shared/lib/formatBytes";
+import { IconButton } from "../../shared/ui";
 import { useUploadManager, type UploadTask } from "./UploadProvider";
 
 export function UploadProgressDock() {
-  const { tasks, activeCount, failedCount, cancelUpload, retryUpload, dismissUpload } = useUploadManager();
+  const { tasks, activeCount, queuedCount, failedCount, cancelUpload, retryUpload, dismissUpload } = useUploadManager();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function UploadProgressDock() {
         <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <UploadCloud size={15} className="shrink-0 text-primary" aria-hidden="true" />
           <span>Uploads</span>
-          <span className="truncate text-xs font-normal text-muted">{uploadSummary(tasks.length, activeCount, failedCount)}</span>
+          <span className="truncate text-xs font-normal text-muted">{uploadSummary(tasks.length, activeCount, queuedCount, failedCount)}</span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-muted transition ${collapsed ? "-rotate-90" : ""}`} aria-hidden="true" />
       </button>
@@ -80,9 +81,9 @@ function UploadProgressRow({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <UploadStatus task={task} progress={progress} />
-          {isCancelable(task.status) ? <IconButton label={`Cancel upload ${task.name}`} onClick={onCancel}><X size={14} /></IconButton> : null}
-          {task.status === "failed" ? <IconButton label={`Retry upload ${task.name}`} onClick={onRetry}><RotateCcw size={14} /></IconButton> : null}
-          {task.status === "failed" ? <IconButton label={`Dismiss upload ${task.name}`} onClick={onDismiss}><X size={14} /></IconButton> : null}
+          {isCancelable(task.status) ? <IconButton label={`Cancel upload ${task.name}`} size="sm" onClick={onCancel}><X size={14} /></IconButton> : null}
+          {task.status === "failed" ? <IconButton label={`Retry upload ${task.name}`} size="sm" onClick={onRetry}><RotateCcw size={14} /></IconButton> : null}
+          {task.status === "failed" ? <IconButton label={`Dismiss upload ${task.name}`} size="sm" onClick={onDismiss}><X size={14} /></IconButton> : null}
           {task.status === "completed" ? <Check size={14} className="text-success" aria-hidden="true" /> : null}
         </div>
       </div>
@@ -99,6 +100,7 @@ function UploadProgressRow({
 }
 
 function UploadStatus({ task, progress }: { task: UploadTask; progress: number }) {
+  if (task.status === "queued") return <span className="text-xs text-muted">Queued</span>;
   if (task.status === "uploading") return <span className="text-xs tabular-nums text-muted">{progress}%</span>;
   if (task.status === "preparing") return <span className="text-xs text-muted">Preparing</span>;
   if (task.status === "finalizing") return <span className="text-xs text-muted">Finalizing</span>;
@@ -106,20 +108,16 @@ function UploadStatus({ task, progress }: { task: UploadTask; progress: number }
   return <span className="text-xs text-muted">Complete</span>;
 }
 
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" aria-label={label} title={label} onClick={onClick} className="grid size-7 place-items-center rounded-md text-muted outline-none hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45">
-      {children}
-    </button>
-  );
-}
-
-function uploadSummary(taskCount: number, activeCount: number, failedCount: number): string {
-  if (activeCount > 0) return `${activeCount} active${failedCount > 0 ? ` · ${failedCount} failed` : ""}`;
-  if (failedCount > 0) return `${failedCount} failed`;
+function uploadSummary(taskCount: number, activeCount: number, queuedCount: number, failedCount: number): string {
+  const pending = [
+    activeCount > 0 ? `${activeCount} active` : null,
+    queuedCount > 0 ? `${queuedCount} queued` : null,
+    failedCount > 0 ? `${failedCount} failed` : null
+  ].filter((value): value is string => value !== null);
+  if (pending.length > 0) return pending.join(" · ");
   return `${taskCount} complete`;
 }
 
 function isCancelable(status: UploadTask["status"]): boolean {
-  return status === "preparing" || status === "uploading";
+  return status === "queued" || status === "preparing" || status === "uploading";
 }

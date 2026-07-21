@@ -324,7 +324,7 @@ pub mod node {
     /// The derived absolute display path of a live node (root = `/`), or `None`.
     ///
     /// Walks the parent chain upward via a recursive CTE, prepending each ancestor's
-    /// name. The chain is bounded by the depth limit (≤5 below root) so the recursion
+    /// name. The chain is bounded by the depth limit (≤7 below root) so the recursion
     /// terminates well within Postgres limits.
     pub async fn node_path(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
         derive_path(pool, space_id, node_id).await
