@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { UploadProvider, useUploadManager } from "./UploadProvider";
+import { UploadProvider, useUploadActions, useUploadManager } from "./UploadProvider";
 
 const mocks = vi.hoisted(() => ({
   abortFileUpload: vi.fn(),
@@ -121,16 +121,50 @@ describe("UploadProvider", () => {
     await act(async () => { retry.resolve(); });
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
   });
+
+  it("does not rerender action-only consumers when transfer progress changes", async () => {
+    const transfer = deferred<void>();
+    let reportProgress: ((uploadedBytes: number, totalBytes: number) => void) | undefined;
+    mocks.transferFile.mockImplementation((_client, _spaceId, _upload, _file, options) => {
+      reportProgress = options.onProgress;
+      return transfer.promise;
+    });
+    const queryClient = createQueryClient();
+    const renders = vi.fn();
+
+    function ActionConsumer() {
+      const { startUpload } = useUploadActions();
+      renders();
+      return <button onClick={() => startUpload(input())}>Upload</button>;
+    }
+
+    const view = render(<ActionConsumer />, { wrapper: uploadWrapper(queryClient) });
+    act(() => { view.getByRole("button", { name: "Upload" }).click(); });
+    await waitFor(() => expect(mocks.transferFile).toHaveBeenCalled());
+    const rendersBeforeProgress = renders.mock.calls.length;
+
+    act(() => { reportProgress?.(5, 10); });
+
+    expect(renders).toHaveBeenCalledTimes(rendersBeforeProgress);
+    await act(async () => { transfer.resolve(); });
+  });
 });
 
 function renderUploadManager() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  const wrapper = ({ children }: { children: ReactNode }) => (
+  const queryClient = createQueryClient();
+  return { ...renderHook(() => useUploadManager(), { wrapper: uploadWrapper(queryClient) }), queryClient };
+}
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+}
+
+function uploadWrapper(queryClient: QueryClient) {
+  return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
       <UploadProvider>{children}</UploadProvider>
     </QueryClientProvider>
   );
-  return { ...renderHook(() => useUploadManager(), { wrapper }), queryClient };
 }
 
 function input() {

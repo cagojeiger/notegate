@@ -8,6 +8,7 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
 const mocks = vi.hoisted(() => ({
+  downloadFile: vi.fn(),
   revealNode: vi.fn(),
   startUpload: vi.fn()
 }));
@@ -20,8 +21,12 @@ vi.mock("../../api/nodes", () => ({
   resolveNodePath: vi.fn()
 }));
 
+vi.mock("../../api/files", () => ({
+  downloadFile: mocks.downloadFile
+}));
+
 vi.mock("../uploads/UploadProvider", () => ({
-  useUploadManager: () => ({ startUpload: mocks.startUpload })
+  useUploadActions: () => ({ startUpload: mocks.startUpload })
 }));
 
 vi.mock("./useWorkbenchQueries", () => {
@@ -41,6 +46,7 @@ describe("useWorkbenchNodeActions", () => {
     window.localStorage.clear();
     useUiStore.setState(useUiStore.getInitialState(), true);
     vi.mocked(resolveNodePath).mockReset();
+    mocks.downloadFile.mockReset().mockResolvedValue(undefined);
     mocks.revealNode.mockReset();
     mocks.startUpload.mockReset();
   });
@@ -262,6 +268,31 @@ describe("useWorkbenchNodeActions", () => {
       name: "archive.bin",
       file
     });
+  });
+
+  it("downloads a file through the browser download path", async () => {
+    const activeSpace = space("space-1");
+    const fileNode = {
+      ...node("file-1", activeSpace.id, "/Reports/report.pdf", "file"),
+      original_filename: "source-report.pdf"
+    };
+    const { result } = renderHook(() =>
+      useWorkbenchNodeActions({
+        activeSpace,
+        activeNode: fileNode,
+        canWriteActiveSpace: true,
+        setDialog: vi.fn()
+      })
+    );
+
+    await act(async () => { await result.current.downloadFileNode(fileNode); });
+
+    expect(mocks.downloadFile).toHaveBeenCalledWith(
+      expect.anything(),
+      activeSpace.id,
+      fileNode.id,
+      "source-report.pdf"
+    );
   });
 });
 

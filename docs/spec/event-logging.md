@@ -259,5 +259,3 @@ file_change_events: 3 months
 ```
 
 현재 migration은 retention 조회/삭제를 위한 `created_at` index만 둔다. 실제 삭제 enforcement는 purge 작업 범위에서 구현한다.
-
-User anonymization 이후에도 attribution shell은 유지한다. 향후 policy가 event anonymization을 요구하면 actor/owner identifier를 policy에 맞게 clear 또는 replace한다.

@@ -5,6 +5,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { listChildren, listNodes } from "../../api/nodes";
 import { POLLING, withPollingJitter } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
+import { invalidateSpaceResources } from "../../api/queryInvalidation";
 import { usePageVisible } from "../../shared/hooks/usePageVisible";
 
 export function useNodeChildrenQuery(spaceId: string, nodeId: string, enabled: boolean) {
@@ -35,5 +36,5 @@ export function useRecentNodesQuery(spaceId: string) {
 
 export function useRefreshSpace() {
   const queryClient = useQueryClient();
-  return (spaceId: string) => void queryClient.invalidateQueries({ queryKey: ["spaces", spaceId] });
+  return (spaceId: string) => invalidateSpaceResources(queryClient, spaceId);
 }

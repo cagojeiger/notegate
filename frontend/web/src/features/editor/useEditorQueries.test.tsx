@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import { downloadFile } from "../../api/files";
+import { fetchFileBlob } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
 import type { RestNode } from "../../api/types";
 import { useMarkdownImageLoader } from "./useEditorQueries";
@@ -16,7 +16,8 @@ vi.mock("../../api/ApiProvider", () => ({
 }));
 
 vi.mock("../../api/files", () => ({
-  downloadFile: vi.fn()
+  downloadFile: vi.fn(),
+  fetchFileBlob: vi.fn()
 }));
 
 vi.mock("../../api/nodes", () => ({
@@ -42,34 +43,34 @@ const sourceNode: RestNode = {
 describe("useMarkdownImageLoader", () => {
   beforeEach(() => {
     vi.mocked(resolveNodePath).mockReset();
-    vi.mocked(downloadFile).mockReset();
+    vi.mocked(fetchFileBlob).mockReset();
   });
 
   it("resolves markdown image paths and downloads image files", async () => {
     const blob = new Blob(["image"], { type: "image/png" });
     const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png" });
     vi.mocked(resolveNodePath).mockResolvedValue(imageNode);
-    vi.mocked(downloadFile).mockResolvedValue(blob);
+    vi.mocked(fetchFileBlob).mockResolvedValue(blob);
 
     const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
 
     await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", blob });
     expect(resolveNodePath).toHaveBeenCalledWith(mockClient, "space-1", "/docs/assets/diagram.png");
-    expect(downloadFile).toHaveBeenCalledWith(mockClient, "space-1", "image-1");
+    expect(fetchFileBlob).toHaveBeenCalledWith(mockClient, "space-1", "image-1");
   });
 
   it("reuses cached node resolution and blobs for repeated markdown image loads", async () => {
     const blob = new Blob(["image"], { type: "image/png" });
     const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png" });
     vi.mocked(resolveNodePath).mockResolvedValue(imageNode);
-    vi.mocked(downloadFile).mockResolvedValue(blob);
+    vi.mocked(fetchFileBlob).mockResolvedValue(blob);
 
     const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
 
     await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", blob });
     await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", blob });
     expect(resolveNodePath).toHaveBeenCalledTimes(1);
-    expect(downloadFile).toHaveBeenCalledTimes(1);
+    expect(fetchFileBlob).toHaveBeenCalledTimes(1);
   });
 
   it("returns not-found when the image path does not resolve", async () => {
@@ -78,7 +79,7 @@ describe("useMarkdownImageLoader", () => {
     const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
 
     await expect(result.current("/docs/assets/missing.png")).resolves.toEqual({ status: "not-found" });
-    expect(downloadFile).not.toHaveBeenCalled();
+    expect(fetchFileBlob).not.toHaveBeenCalled();
   });
 
   it("does not download resolved nodes that are not displayable images", async () => {
@@ -96,7 +97,7 @@ describe("useMarkdownImageLoader", () => {
     vi.mocked(resolveNodePath).mockResolvedValueOnce(fileNode({ id: "other-space-1", space_id: "space-2", path: "/docs/other.png", media_type: "image/png" }));
     await expect(result.current("/docs/other.png")).resolves.toEqual({ status: "unsupported" });
 
-    expect(downloadFile).not.toHaveBeenCalled();
+    expect(fetchFileBlob).not.toHaveBeenCalled();
   });
 });
 

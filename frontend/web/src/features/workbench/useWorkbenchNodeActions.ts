@@ -7,9 +7,8 @@ import { resolveNodePath } from "../../api/nodes";
 import type { RestNode, Space } from "../../api/types";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
-import { downloadBlob } from "../../shared/lib/downloadBlob";
 import { useUiStore } from "../../stores/uiStore";
-import { useUploadManager } from "../uploads/UploadProvider";
+import { useUploadActions } from "../uploads/UploadProvider";
 import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation } from "./useWorkbenchQueries";
 
 type NodeActionsProps = {
@@ -30,7 +29,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   const setExpanded = useUiStore((state) => state.setExpanded);
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
-  const { startUpload } = useUploadManager();
+  const { startUpload } = useUploadActions();
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
     addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
@@ -177,8 +176,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
 
   async function downloadFileNode(node: RestNode) {
     if (node.kind !== "file") return;
-    const blob = await downloadFile(client, node.space_id, node.id);
-    downloadBlob(blob, node.original_filename ?? node.name);
+    await downloadFile(client, node.space_id, node.id, node.original_filename ?? node.name);
   }
 
   function promptReplaceMetadata() {

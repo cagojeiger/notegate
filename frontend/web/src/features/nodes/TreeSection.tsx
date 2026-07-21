@@ -1,6 +1,6 @@
 import { ChevronsDownUp, Folder } from "lucide-react";
 import type { DragEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import type { RestNode, Space } from "../../api/types";
 import { useNodeChildrenQuery } from "./useNodeQueries";
@@ -104,10 +104,9 @@ function RootTree(props: TreeProps) {
   );
 }
 
-function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, draggedNode, dropFolderId, onDragStartNode, onDragOverNode, onDropOnNode, onDragEndNode, onToggleFolder, onOpenNode, onNodeContextMenu, onMoveNodeToFolder, canWriteActiveSpace }: TreeProps & { node: RestNode; depth: number }) {
+const TreeNode = memo(function TreeNode({ node, depth, ...props }: TreeProps & { node: RestNode; depth: number }) {
+  const { activeNodeId, expandedFolderIds, dropFolderId, onDragStartNode, onDragOverNode, onDropOnNode, onDragEndNode, onToggleFolder, onOpenNode, onNodeContextMenu, canWriteActiveSpace } = props;
   const isExpanded = expandedFolderIds.has(node.id);
-  const childrenQuery = useNodeChildrenQuery(activeSpace.id, node.id, node.kind === "folder" && isExpanded);
-  const children = childrenQuery.data?.pages.flatMap((page) => page.children) ?? [];
   return (
     <div>
       <NodeRow
@@ -126,15 +125,21 @@ function TreeNode({ node, depth, activeSpace, activeNodeId, expandedFolderIds, d
         onDragEndNode={onDragEndNode}
       />
       {node.kind === "folder" && isExpanded ? (
-        <div>
-          {childrenQuery.isLoading ? <div className="px-8 py-1 text-xs text-muted">Loading…</div> : null}
-          {children.map((child) => (
-            <TreeNode key={child.id} node={child} depth={depth + 1} activeSpace={activeSpace} activeNodeId={activeNodeId} expandedFolderIds={expandedFolderIds} draggedNode={draggedNode} dropFolderId={dropFolderId} onDragStartNode={onDragStartNode} onDragOverNode={onDragOverNode} onDropOnNode={onDropOnNode} onDragEndNode={onDragEndNode} onToggleFolder={onToggleFolder} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} onMoveNodeToFolder={onMoveNodeToFolder} canWriteActiveSpace={canWriteActiveSpace} />
-          ))}
-          {childrenQuery.hasNextPage ? (
-            <AutoLoadMore loaded={children.length} depth={depth + 1} isFetching={childrenQuery.isFetchingNextPage} fetchNextPage={() => childrenQuery.fetchNextPage()} />
-          ) : null}
-        </div>
+        <FolderChildren folder={node} depth={depth + 1} {...props} />
+      ) : null}
+    </div>
+  );
+});
+
+function FolderChildren({ folder, depth, ...props }: TreeProps & { folder: RestNode; depth: number }) {
+  const childrenQuery = useNodeChildrenQuery(props.activeSpace.id, folder.id, true);
+  const children = childrenQuery.data?.pages.flatMap((page) => page.children) ?? [];
+  return (
+    <div>
+      {childrenQuery.isLoading ? <div className="px-8 py-1 text-xs text-muted">Loading…</div> : null}
+      {children.map((child) => <TreeNode key={child.id} node={child} depth={depth} {...props} />)}
+      {childrenQuery.hasNextPage ? (
+        <AutoLoadMore loaded={children.length} depth={depth} isFetching={childrenQuery.isFetchingNextPage} fetchNextPage={() => childrenQuery.fetchNextPage()} />
       ) : null}
     </div>
   );

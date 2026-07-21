@@ -14,7 +14,6 @@ export type ApiKeyMetadata = {
 // Create/rotate return the plaintext token exactly once.
 export type CreatedApiKey = ApiKeyMetadata & { token: string };
 
-// Minimal shape shared by user- and agent-key creation (the fields the UI reads).
 export type MintedKey = { id: string; name: string; token: string; expires_at: string; created_at: string };
 
 export type ApiKeyListResponse = {

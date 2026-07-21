@@ -212,6 +212,10 @@ select file
 - 완료 항목은 잠시 표시한 뒤 제거한다. 완료 기록의 정본은 Changes event다.
 - 완료 시 현재 editor를 file node로 이동하지 않는다.
 
+### Download file
+
+- 파일 다운로드는 브라우저 기본 다운로드 관리자를 사용한다.
+
 ### Rename
 
 ```text

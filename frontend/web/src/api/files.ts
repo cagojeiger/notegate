@@ -102,8 +102,12 @@ export function abortFileUpload(client: ApiClient, spaceId: string, uploadId: st
   return client.delete<void>(`/api/v1/spaces/${spaceId}/file-uploads/${uploadId}`);
 }
 
-export function downloadFile(client: ApiClient, spaceId: string, nodeId: string): Promise<Blob> {
-  return client.download(`/api/v1/spaces/${spaceId}/files/${nodeId}/content`);
+export function fetchFileBlob(client: ApiClient, spaceId: string, nodeId: string): Promise<Blob> {
+  return client.fetchBlob(`/api/v1/spaces/${spaceId}/files/${nodeId}/content`);
+}
+
+export function downloadFile(client: ApiClient, spaceId: string, nodeId: string, filename: string): Promise<void> {
+  return client.download(`/api/v1/spaces/${spaceId}/files/${nodeId}/content`, filename);
 }
 
 function prepareFileUploadParts(

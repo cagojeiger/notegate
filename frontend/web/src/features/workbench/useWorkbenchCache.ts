@@ -1,11 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 
-import { queryKeys } from "../../api/queryKeys";
+import { invalidateSpace } from "../../api/queryInvalidation";
 
 export function useInvalidateSpace() {
   const queryClient = useQueryClient();
-  return (spaceId: string) => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
-    void queryClient.invalidateQueries({ queryKey: ["spaces", spaceId] });
-  };
+  return (spaceId: string) => invalidateSpace(queryClient, spaceId);
 }

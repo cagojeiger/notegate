@@ -1,5 +1,6 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 
+import { usePointerDrag } from "../../shared/hooks/usePointerDrag";
 import { useUiStore } from "../../stores/uiStore";
 
 export function usePrimarySidebarSections() {
@@ -12,6 +13,7 @@ export function usePrimarySidebarSections() {
   const toggleRecentSection = useUiStore((state) => state.toggleRecentSection);
   const toggleRecentDensity = useUiStore((state) => state.toggleRecentDensity);
   const gridRef = useRef<HTMLDivElement>(null);
+  const startPointerDrag = usePointerDrag();
   const bothSectionsOpen = treeSectionOpen && recentSectionOpen;
 
   function startTreeResize(event: ReactPointerEvent) {
@@ -19,15 +21,7 @@ export function usePrimarySidebarSections() {
     event.preventDefault();
     const rect = gridRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const move = (e: PointerEvent) => setTreeRatio((e.clientY - rect.top) / rect.height);
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.classList.remove("select-none");
-    };
-    document.body.classList.add("select-none");
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag((moveEvent) => setTreeRatio((moveEvent.clientY - rect.top) / rect.height));
   }
 
   const gridRows = bothSectionsOpen

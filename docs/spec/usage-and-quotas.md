@@ -161,8 +161,6 @@ notegate-api --recalculate-usage
 
 명령은 모든 live Space의 reconciliation job을 한 번에 등록한 뒤(`ON CONFLICT`로 기존 job은 즉시 실행 가능하게만 갱신) queue가 빌 때까지 job을 하나씩 실행한다. Space 하나를 재계산하는 동안 그 Space의 mutation만 잠시 거부되고, 나머지 Space와 read는 영향받지 않으므로 서비스 운영 중에도 실행할 수 있다. 다른 worker가 lock을 쥐고 있으면 1초 간격으로 최대 30번 재시도한다. Ready job이 없어도 deferred/failed job이 queue에 남아 있으면 성공으로 처리하지 않는다. Busy로 지연되거나 실패한 Space가 있으면 오류로 종료하고 background worker가 이어서 재시도한다. 누락된 counter row는 job 실행이 다시 생성한다.
 
-`space_usage`를 처음 배포하거나 Text/File counter 분리 migration을 적용할 때 이전 버전 API는 새 counter를 갱신하지 못하고 Space reconciliation gate도 지키지 않는다. 따라서 이전 버전 writer에 종료 신호를 보낸 뒤 진행 중인 요청과 worker transaction이 drain되어 모든 프로세스가 종료된 것을 확인한다. 기존 `NOTEGATE_LIMITS__SPACE_MAX_CONTENT_BYTES`가 설정되어 있으면 제거하고 `NOTEGATE_LIMITS__SPACE_MAX_TEXT_BYTES`, `NOTEGATE_LIMITS__SPACE_MAX_FILE_BYTES`로 각각 교체한다. 그 다음 새 코드로 migration을 완료하고 새 API를 시작한다. Migration이 counter를 backfill하므로 별도 재계산 없이 시작할 수 있다. 서로 다른 counter schema를 사용하는 버전을 동시에 writer로 운영하지 않는다.
-
 ## Maintenance error
 
 재계산 때문에 차단된 REST mutation은 `503 Service Unavailable`, `Retry-After`, `kind=usage_recalculation_in_progress`를 반환한다. MCP mutation은 JSON-RPC server error에 같은 `data.kind`, `retryable=true`, `retry_after_seconds`를 반환한다. Client는 인증 상태와 편집 중인 draft를 유지하고 mutation을 자동 재실행하지 않는다.

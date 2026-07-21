@@ -3,6 +3,7 @@ import { useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Space, RestNode } from "../../api/types";
 import { clearDevApiKey } from "../../auth/session";
 import type { AppDialog } from "../../layout/dialogs/DialogHost";
+import { usePointerDrag } from "../../shared/hooks/usePointerDrag";
 import { useUiStore } from "../../stores/uiStore";
 import { clearPersistedWorkbenches } from "../../stores/workbenchStorage";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
@@ -35,6 +36,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
   const toggleMobileAux = useUiStore((state) => state.toggleMobileAux);
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
+  const startPointerDrag = usePointerDrag();
 
   const spaceActions = useWorkbenchSpaceActions({ activeSpace, canCreateSpace, setDialog });
   const nodeActions = useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog });
@@ -53,15 +55,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = primaryWidth;
-    const move = (e: PointerEvent) => setPrimaryWidth(startWidth + (e.clientX - startX));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      document.body.classList.remove("select-none");
-    };
-    document.body.classList.add("select-none");
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    startPointerDrag((moveEvent) => setPrimaryWidth(startWidth + (moveEvent.clientX - startX)));
   }
 
   function confirmResetSavedWorkspace() {

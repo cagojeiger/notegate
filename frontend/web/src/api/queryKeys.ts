@@ -7,6 +7,7 @@ export const queryKeys = {
   agentKeys: (agentId: string) => ["agents", agentId, "keys"] as const,
   connections: (spaceId: string) => ["spaces", spaceId, "connections"] as const,
   spaces: ["spaces"] as const,
+  space: (spaceId: string) => ["spaces", spaceId] as const,
   fileChangeEvents: (spaceId: string, nodeId?: string | null) => ["spaces", spaceId, "file-change-events", nodeId ?? "space"] as const,
   children: (spaceId: string, nodeId: string) => ["spaces", spaceId, "children", nodeId] as const,
   recent: (spaceId: string) => ["spaces", spaceId, "recent"] as const,
