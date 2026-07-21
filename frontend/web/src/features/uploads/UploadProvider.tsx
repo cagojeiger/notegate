@@ -11,7 +11,7 @@ import {
 } from "../../api/files";
 import { invalidateSpace } from "../../api/queryInvalidation";
 
-export type UploadTaskStatus = "preparing" | "uploading" | "finalizing" | "failed" | "completed";
+export type UploadTaskStatus = "queued" | "preparing" | "uploading" | "finalizing" | "failed" | "completed";
 
 export type UploadTask = FileUploadInput & {
   id: string;
@@ -32,6 +32,7 @@ export type StartUploadInput = FileUploadInput & {
 type UploadState = {
   tasks: UploadTask[];
   activeCount: number;
+  queuedCount: number;
   failedCount: number;
 };
 
@@ -51,6 +52,7 @@ type UploadRun = {
 };
 
 const COMPLETED_TASK_TTL_MS = 4_000;
+const MAX_CONCURRENT_UPLOADS = 2;
 const UploadStateContext = createContext<UploadState | null>(null);
 const UploadActionsContext = createContext<UploadActions | null>(null);
 let nextTaskId = 0;
@@ -129,23 +131,26 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     setTasks((current) => [{
       ...input,
       id: taskId,
-      status: "preparing",
+      status: "queued",
       uploadedBytes: 0,
       error: null
     }, ...current]);
-    runUpload(taskId, input);
     return taskId;
-  }, [runUpload]);
+  }, []);
 
   const cancelUpload = useCallback((taskId: string) => {
-    controllers.current.get(taskId)?.abort();
-  }, []);
+    const controller = controllers.current.get(taskId);
+    if (controller) controller.abort();
+    else removeTask(taskId);
+  }, [removeTask]);
 
   const retryUpload = useCallback((taskId: string) => {
     const task = tasksRef.current.find((candidate) => candidate.id === taskId);
     if (!task || task.status !== "failed") return;
-    runUpload(taskId, task);
-  }, [runUpload]);
+    const queuedTask: UploadTask = { ...task, status: "queued", uploadedBytes: 0, error: null };
+    tasksRef.current = tasksRef.current.map((candidate) => candidate.id === taskId ? queuedTask : candidate);
+    setTasks((current) => current.map((candidate) => candidate.id === taskId ? queuedTask : candidate));
+  }, []);
 
   const dismissUpload = useCallback((taskId: string) => {
     const task = tasksRef.current.find((candidate) => candidate.id === taskId);
@@ -157,6 +162,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     for (const controller of controllers.current.values()) controller.abort();
     for (const timer of cleanupTimers.current.values()) window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const available = MAX_CONCURRENT_UPLOADS - controllers.current.size;
+    if (available <= 0) return;
+    const queued = tasks
+      .filter((task) => task.status === "queued")
+      .slice(-available)
+      .reverse();
+    for (const task of queued) runUpload(task.id, task);
+  }, [runUpload, tasks]);
 
   const state = useMemo<UploadState>(() => ({ tasks, ...summarizeUploads(tasks) }), [tasks]);
   const actions = useMemo<UploadActions>(() => ({
@@ -187,14 +202,18 @@ export function useUploadActions(): UploadActions {
 }
 
 function summarizeUploads(tasks: UploadTask[]) {
-  const active = tasks.filter((task) => isActive(task.status));
   return {
-    activeCount: active.length,
+    activeCount: tasks.filter((task) => isTransferring(task.status)).length,
+    queuedCount: tasks.filter((task) => task.status === "queued").length,
     failedCount: tasks.filter((task) => task.status === "failed").length
   };
 }
 
 function isActive(status: UploadTaskStatus): boolean {
+  return status === "queued" || isTransferring(status);
+}
+
+function isTransferring(status: UploadTaskStatus): boolean {
   return status === "preparing" || status === "uploading" || status === "finalizing";
 }
 

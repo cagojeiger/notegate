@@ -148,6 +148,62 @@ describe("UploadProvider", () => {
     expect(renders).toHaveBeenCalledTimes(rendersBeforeProgress);
     await act(async () => { transfer.resolve(); });
   });
+
+  it("runs at most two uploads and starts queued uploads in arrival order", async () => {
+    const transfers = [deferred<void>(), deferred<void>(), deferred<void>()];
+    mocks.transferFile
+      .mockReturnValueOnce(transfers[0].promise)
+      .mockReturnValueOnce(transfers[1].promise)
+      .mockReturnValueOnce(transfers[2].promise);
+    const { result } = renderUploadManager();
+
+    act(() => {
+      result.current.startUpload(input({ name: "first.zip" }));
+      result.current.startUpload(input({ name: "second.zip" }));
+      result.current.startUpload(input({ name: "third.zip" }));
+    });
+
+    await waitFor(() => expect(mocks.transferFile).toHaveBeenCalledTimes(2));
+    expect(result.current.tasks.find((task) => task.name === "first.zip")?.status).toBe("uploading");
+    expect(result.current.tasks.find((task) => task.name === "second.zip")?.status).toBe("uploading");
+    expect(result.current.tasks.find((task) => task.name === "third.zip")?.status).toBe("queued");
+
+    await act(async () => { transfers[0].resolve(); });
+    await waitFor(() => expect(mocks.transferFile).toHaveBeenCalledTimes(3));
+    expect(result.current.tasks.find((task) => task.name === "third.zip")?.status).toBe("uploading");
+
+    await act(async () => {
+      transfers[1].resolve();
+      transfers[2].resolve();
+    });
+  });
+
+  it("cancels a queued upload without creating a server upload", async () => {
+    const transfers = [deferred<void>(), deferred<void>()];
+    mocks.transferFile
+      .mockReturnValueOnce(transfers[0].promise)
+      .mockReturnValueOnce(transfers[1].promise);
+    const { result } = renderUploadManager();
+
+    let queuedTaskId = "";
+    act(() => {
+      result.current.startUpload(input({ name: "first.zip" }));
+      result.current.startUpload(input({ name: "second.zip" }));
+      queuedTaskId = result.current.startUpload(input({ name: "third.zip" }));
+    });
+    await waitFor(() => expect(mocks.beginFileUpload).toHaveBeenCalledTimes(2));
+
+    act(() => { result.current.cancelUpload(queuedTaskId); });
+
+    expect(result.current.tasks.some((task) => task.id === queuedTaskId)).toBe(false);
+    expect(mocks.beginFileUpload).toHaveBeenCalledTimes(2);
+    expect(mocks.abortFileUpload).not.toHaveBeenCalled();
+
+    await act(async () => {
+      transfers[0].resolve();
+      transfers[1].resolve();
+    });
+  });
 });
 
 function renderUploadManager() {
@@ -167,7 +223,11 @@ function uploadWrapper(queryClient: QueryClient) {
   );
 }
 
-function input() {
+function input(overrides: Partial<ReturnType<typeof inputBase>> = {}) {
+  return { ...inputBase(), ...overrides };
+}
+
+function inputBase() {
   return {
     spaceId: "space-1",
     spaceName: "Daily",

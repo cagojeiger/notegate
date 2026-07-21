@@ -26,6 +26,7 @@ describe("UploadProgressDock", () => {
         task({ id: "upload-2", name: "assets.tar", destinationPath: "/Assets", file: new File(["0123456789"], "assets.tar") })
       ],
       activeCount: 2,
+      queuedCount: 0,
       cancelUpload
     }));
 
@@ -63,6 +64,23 @@ describe("UploadProgressDock", () => {
     expect(dismissUpload).toHaveBeenCalledWith("upload-1");
   });
 
+  it("shows queued uploads as cancelable without a progress bar", async () => {
+    const cancelUpload = vi.fn();
+    mocks.useUploadManager.mockReturnValue(manager({
+      tasks: [task({ status: "queued" })],
+      queuedCount: 1,
+      cancelUpload
+    }));
+
+    render(<UploadProgressDock />);
+
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+    expect(screen.getByText("1 queued")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel upload archive.zip" }));
+    expect(cancelUpload).toHaveBeenCalledWith("upload-1");
+  });
+
   it("collapses the transfer list without leaving the current screen", async () => {
     mocks.useUploadManager.mockReturnValue(manager({ tasks: [task()], activeCount: 1 }));
     render(<UploadProgressDock />);
@@ -82,6 +100,7 @@ function manager(overrides: Record<string, unknown> = {}) {
   return {
     tasks: [],
     activeCount: 0,
+    queuedCount: 0,
     failedCount: 0,
     startUpload: vi.fn(),
     cancelUpload: vi.fn(),
