@@ -218,12 +218,13 @@ jobs:
             minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
 
       - name: Seed browser identity
+        id: seed_browser_identity
         run: |
           output=$(cargo run --quiet --package notegate-api --example seed_user)
           token=$(printf '%s\n' "$output" | sed -n 's/^TOKEN=//p')
           test -n "$token"
           echo "::add-mask::$token"
-          echo "NOTEGATE_WEB_E2E_API_KEY=$token" >> "$GITHUB_ENV"
+          echo "api_key=$token" >> "$GITHUB_OUTPUT"
 
       - name: Start application
         run: |
@@ -242,6 +243,8 @@ jobs:
           exit 1
 
       - name: Test browser workflow
+        env:
+          NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_browser_identity.outputs.api_key }}
         run: pnpm --filter web test:e2e
 
       - name: Upload browser diagnostics
