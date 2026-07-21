@@ -43,8 +43,7 @@ use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
 
-/// File-tree command service: `ls` / `stat` / `mkdir` / `touch` / `read` /
-/// `write` / `append` / `patch` / `mv` / `rm`.
+/// File-tree service for node, text, metadata, and object-upload operations.
 ///
 /// Every command takes `(caller_account_id, space_id, ...)`. The service:
 ///
