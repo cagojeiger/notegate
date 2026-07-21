@@ -6,6 +6,7 @@ import { ApiError } from "../../api/errors";
 import { downloadFile, fetchFileBlob } from "../../api/files";
 import { getNode, listChildren, resolveNodePath } from "../../api/nodes";
 import { POLLING, withPollingJitter } from "../../api/polling";
+import { invalidateSpaceResources } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
@@ -99,9 +100,7 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
       setSaveState("saved");
       showToast("Saved");
       onSaved();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.text(node.space_id, node.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.recent(node.space_id) });
-      void queryClient.invalidateQueries({ queryKey: ["spaces", node.space_id] });
+      invalidateSpaceResources(queryClient, node.space_id);
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {

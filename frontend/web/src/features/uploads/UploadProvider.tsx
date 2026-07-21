@@ -9,7 +9,7 @@ import {
   transferFile,
   type FileUploadInput
 } from "../../api/files";
-import { queryKeys } from "../../api/queryKeys";
+import { invalidateSpace } from "../../api/queryInvalidation";
 
 export type UploadTaskStatus = "preparing" | "uploading" | "finalizing" | "failed" | "completed";
 
@@ -29,15 +29,20 @@ export type StartUploadInput = FileUploadInput & {
   destinationPath: string;
 };
 
-type UploadManager = {
+type UploadState = {
   tasks: UploadTask[];
   activeCount: number;
   failedCount: number;
+};
+
+type UploadActions = {
   startUpload: (input: StartUploadInput) => string;
   cancelUpload: (taskId: string) => void;
   retryUpload: (taskId: string) => void;
   dismissUpload: (taskId: string) => void;
 };
+
+type UploadManager = UploadState & UploadActions;
 
 type UploadRun = {
   taskId: string;
@@ -46,15 +51,18 @@ type UploadRun = {
 };
 
 const COMPLETED_TASK_TTL_MS = 4_000;
-const UploadContext = createContext<UploadManager | null>(null);
+const UploadStateContext = createContext<UploadState | null>(null);
+const UploadActionsContext = createContext<UploadActions | null>(null);
 let nextTaskId = 0;
 
 export function UploadProvider({ children }: { children: ReactNode }) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const [tasks, setTasks] = useState<UploadTask[]>([]);
+  const tasksRef = useRef(tasks);
   const controllers = useRef(new Map<string, AbortController>());
   const cleanupTimers = useRef(new Map<string, number>());
+  tasksRef.current = tasks;
 
   const updateTask = useCallback((taskId: string, update: (task: UploadTask) => UploadTask) => {
     setTasks((current) => current.map((task) => task.id === taskId ? update(task) : task));
@@ -102,8 +110,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       .then(() => {
         controllers.current.delete(taskId);
         updateTask(taskId, (task) => ({ ...task, status: "completed", uploadedBytes: task.file.size }));
-        void queryClient.invalidateQueries({ queryKey: queryKeys.spaces, exact: true });
-        void queryClient.invalidateQueries({ queryKey: ["spaces", input.spaceId] });
+        invalidateSpace(queryClient, input.spaceId);
         const timer = window.setTimeout(() => removeTask(taskId), COMPLETED_TASK_TTL_MS);
         cleanupTimers.current.set(taskId, timer);
       })
@@ -135,39 +142,48 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const retryUpload = useCallback((taskId: string) => {
-    const task = tasks.find((candidate) => candidate.id === taskId);
+    const task = tasksRef.current.find((candidate) => candidate.id === taskId);
     if (!task || task.status !== "failed") return;
     runUpload(taskId, task);
-  }, [runUpload, tasks]);
+  }, [runUpload]);
 
   const dismissUpload = useCallback((taskId: string) => {
-    const task = tasks.find((candidate) => candidate.id === taskId);
+    const task = tasksRef.current.find((candidate) => candidate.id === taskId);
     if (!task || isActive(task.status) || controllers.current.has(taskId)) return;
     removeTask(taskId);
-  }, [removeTask, tasks]);
+  }, [removeTask]);
 
   useEffect(() => () => {
     for (const controller of controllers.current.values()) controller.abort();
     for (const timer of cleanupTimers.current.values()) window.clearTimeout(timer);
   }, []);
 
-  const summary = useMemo(() => summarizeUploads(tasks), [tasks]);
-  const value = useMemo<UploadManager>(() => ({
-    tasks,
-    ...summary,
+  const state = useMemo<UploadState>(() => ({ tasks, ...summarizeUploads(tasks) }), [tasks]);
+  const actions = useMemo<UploadActions>(() => ({
     startUpload,
     cancelUpload,
     retryUpload,
     dismissUpload
-  }), [cancelUpload, dismissUpload, retryUpload, startUpload, summary, tasks]);
+  }), [cancelUpload, dismissUpload, retryUpload, startUpload]);
 
-  return <UploadContext.Provider value={value}>{children}</UploadContext.Provider>;
+  return (
+    <UploadActionsContext.Provider value={actions}>
+      <UploadStateContext.Provider value={state}>{children}</UploadStateContext.Provider>
+    </UploadActionsContext.Provider>
+  );
 }
 
 export function useUploadManager(): UploadManager {
-  const manager = useContext(UploadContext);
-  if (!manager) throw new Error("UploadProvider is missing");
-  return manager;
+  const state = useContext(UploadStateContext);
+  const actions = useUploadActions();
+  if (!state) throw new Error("UploadProvider is missing");
+  return { ...state, ...actions };
+}
+
+export function useUploadActions(): UploadActions {
+  const actions = useContext(UploadActionsContext);
+  if (!actions) throw new Error("UploadProvider is missing");
+  return actions;
 }
 
 function summarizeUploads(tasks: UploadTask[]) {

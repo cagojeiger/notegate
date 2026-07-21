@@ -26,7 +26,7 @@ vi.mock("../../api/files", () => ({
 }));
 
 vi.mock("../uploads/UploadProvider", () => ({
-  useUploadManager: () => ({ startUpload: mocks.startUpload })
+  useUploadActions: () => ({ startUpload: mocks.startUpload })
 }));
 
 vi.mock("./useWorkbenchQueries", () => {
