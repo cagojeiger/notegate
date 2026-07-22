@@ -1,7 +1,7 @@
 import type { RestNode, Space } from "../../api/types";
 import { RecentSection } from "./RecentSection";
 import { TreeSection } from "./TreeSection";
-import type { NodeContextHandler } from "./types";
+import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
 import { usePrimarySidebarSections } from "./usePrimarySidebarSections";
 
 export function PrimarySidebarSections({
@@ -13,6 +13,7 @@ export function PrimarySidebarSections({
   onNodeContextMenu,
   onMoveNodeToFolder,
   onCollapseTree,
+  onTreeNavigationChange,
   canWriteActiveSpace
 }: {
   activeSpace: Space;
@@ -24,6 +25,7 @@ export function PrimarySidebarSections({
   onNodeContextMenu: NodeContextHandler;
   onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
   onCollapseTree: () => void;
+  onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   const sections = usePrimarySidebarSections();
   return (
@@ -35,6 +37,7 @@ export function PrimarySidebarSections({
         open={sections.treeSectionOpen}
         onToggle={sections.toggleTreeSection}
         onCollapseTree={onCollapseTree}
+        onTreeNavigationChange={onTreeNavigationChange}
         onToggleFolder={onToggleFolder}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}

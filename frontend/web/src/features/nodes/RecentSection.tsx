@@ -12,7 +12,7 @@ export function RecentSection({ activeSpace, activeNodeId, density, open, onTogg
     <section className="flex min-h-0 min-w-0 flex-col px-3 py-2">
       <SidebarSectionHeader icon={<FileText size={13} />} label="Recent" open={open} onToggle={onToggle} action={{ label: "Toggle recent density", icon: <List size={13} />, onClick: onToggleDensity }} />
       {open ? (
-        <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
+        <div data-recent-list className="mt-2 min-h-0 flex-1 overflow-y-auto">
           <RecentList activeSpace={activeSpace} activeNodeId={activeNodeId} density={density} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} />
         </div>
       ) : null}

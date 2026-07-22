@@ -4,3 +4,9 @@ import type { RestNode } from "../../api/types";
 
 export type NodeContextPoint = Pick<MouseEvent, "clientX" | "clientY" | "preventDefault">;
 export type NodeContextHandler = (node: RestNode, event: NodeContextPoint) => void;
+
+export type TreeKeyboardNavigation = {
+  focusLastNode: () => boolean;
+};
+
+export type TreeKeyboardNavigationRegistrar = (navigation: TreeKeyboardNavigation | null) => void;
