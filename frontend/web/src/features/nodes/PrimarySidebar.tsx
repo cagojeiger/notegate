@@ -55,7 +55,7 @@ export function PrimarySidebar({
   onUploadInFolder: (folder: RestNode, file: File | null) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; node: RestNode } | null>(null);
-  const { asideRef, onSidebarKeyDown } = useSidebarKeyboardNavigation();
+  const { asideRef, onSidebarKeyDown, registerTreeNavigation } = useSidebarKeyboardNavigation();
 
   const onNodeContextMenu: NodeContextHandler = (node, event) => {
     event.preventDefault();
@@ -75,6 +75,7 @@ export function PrimarySidebar({
           onNodeContextMenu={onNodeContextMenu}
           onMoveNodeToFolder={onMoveNodeToFolder}
           onCollapseTree={onCollapseTree}
+          onTreeNavigationChange={registerTreeNavigation}
           canWriteActiveSpace={canWriteActiveSpace}
         />
       ) : (
