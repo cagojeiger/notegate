@@ -51,6 +51,32 @@ describe("FileDetailView", () => {
     expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 
+  it("renders a verified PDF inside the file detail view", () => {
+    vi.mocked(useFilePreviewUrl).mockReturnValue({
+      data: {
+        url: "https://storage.example/document.pdf",
+        media_type: "application/pdf",
+        expires_at: "2026-06-13T00:15:00Z"
+      }
+    } as never);
+
+    render(<FileDetailView node={fileNode({
+      name: "document.pdf",
+      path: "/document.pdf",
+      media_type: "application/octet-stream",
+      detected_media_type: "application/pdf"
+    })} />);
+
+    expect(screen.getByTitle("PDF preview: document.pdf")).toHaveAttribute(
+      "src",
+      "https://storage.example/document.pdf"
+    );
+    expect(screen.getByTitle("PDF preview: document.pdf")).toHaveAttribute(
+      "referrerpolicy",
+      "no-referrer"
+    );
+  });
+
   it("shows an error when preview URL issuance fails", () => {
     vi.mocked(useFilePreviewUrl).mockReturnValue({
       data: undefined,
@@ -60,7 +86,7 @@ describe("FileDetailView", () => {
 
     render(<FileDetailView node={fileNode()} />);
 
-    expect(screen.getByText("Image cannot be displayed")).toBeInTheDocument();
+    expect(screen.getByText("File preview cannot be displayed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 

@@ -251,13 +251,15 @@ node kind별 데이터:
 ```text
 folder -> node detail
 text   -> node detail + text content
-file   -> node detail + file metadata/download
+file   -> node detail + supported inline preview + file metadata/download
 ```
 
 규칙:
 
 - header에는 node name만 표시한다.
 - path와 metrics는 Inspector에 둔다.
+- 10 MiB 이하의 서버 검증 raster image와 PDF는 file detail 안에서 미리보기한다.
+- PDF는 browser-native viewer를 사용하며 실패하거나 지원하지 않는 경우 download action을 유지한다.
 - text preview가 기본이다.
 - plain text는 단순 메모처럼 보여준다.
 - markdown은 GFM, code highlight, Mermaid를 지원한다.

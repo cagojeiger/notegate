@@ -261,6 +261,21 @@ mod tests {
     }
 
     #[test]
+    fn node_out_enables_preview_for_detected_pdf() {
+        let mut view = base_view(NodeKind::File);
+        let mut stats = file_stats();
+        stats.media_type = "application/octet-stream".to_owned();
+        stats.detected_media_type = Some("application/pdf".to_owned());
+        stats.encryption_mode = FileEncryptionMode::None;
+        view.file = Some(stats);
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert_eq!(out.detected_media_type, Some("application/pdf".to_owned()));
+        assert_eq!(out.preview_available, Some(true));
+    }
+
+    #[test]
     fn node_out_disables_preview_above_the_preview_size_limit() {
         let mut view = base_view(NodeKind::File);
         let mut stats = file_stats();

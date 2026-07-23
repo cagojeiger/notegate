@@ -72,10 +72,12 @@ Permission: `read`.
 
 응답은 `Location`만 노출한다. URL은 한 object의 GET으로 제한되고 15분 뒤 만료되며 S3 자격증명은 포함하지 않는다. Presigned GET은 `original_filename` 유무와 무관하게 항상 `Content-Disposition: attachment`를 서명에 포함해, client가 선언한 `media_type`이 저장소 origin에서 inline으로 렌더링되지 않도록 한다.
 
-## Image preview
+## Inline preview
 
 Permission: `read`.
 
-`GET /files/{node_id}/preview-url`은 10 MiB 이하이면서 서버가 실제 bytes에서 PNG, JPEG, WebP, AVIF, GIF로 감지한 파일에만 15분짜리 presigned GET URL을 반환한다. URL은 감지된 `Content-Type`과 `Content-Disposition: inline`을 서명에 포함한다. 응답은 `Cache-Control: private, no-store`로 중간 캐시와 browser HTTP cache에 저장하지 않는다.
+`GET /files/{node_id}/preview-url`은 10 MiB 이하이면서 서버가 실제 bytes에서 PNG, JPEG, WebP, AVIF, GIF 또는 PDF로 감지한 파일에만 15분짜리 presigned GET URL을 반환한다. URL은 감지된 `Content-Type`과 `Content-Disposition: inline`을 서명에 포함한다. 응답은 `Cache-Control: private, no-store`로 중간 캐시와 browser HTTP cache에 저장하지 않는다.
 
-SVG, PDF, HTML, 알 수 없는 형식, client-encrypted file, 10 MiB 초과 file은 preview 대상이 아니며 `404`를 반환한다. 원본 download는 형식과 무관하게 기존 `/content` endpoint로 가능하다. Preview URL에는 NoteGate credential이 포함되지 않는다.
+Raster image는 image element로, PDF는 browser-native PDF viewer로 File detail 안에 표시한다. Markdown image syntax는 raster image만 허용하며 PDF를 image로 렌더링하지 않는다.
+
+SVG, HTML, 알 수 없는 형식, client-encrypted file, 10 MiB 초과 file은 preview 대상이 아니며 `404`를 반환한다. 원본 download는 형식과 무관하게 기존 `/content` endpoint로 가능하다. Preview URL에는 NoteGate credential이 포함되지 않는다.

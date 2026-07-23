@@ -40,6 +40,15 @@ const imageNode: RestNode = {
   updated_at: "2026-07-01T00:00:00Z"
 };
 
+const pdfNode: RestNode = {
+  ...imageNode,
+  id: "pdf-1",
+  name: "document.pdf",
+  path: "/document.pdf",
+  media_type: "application/octet-stream",
+  detected_media_type: "application/pdf"
+};
+
 for (const viewport of [
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
@@ -85,21 +94,55 @@ for (const viewport of [
       })).toBe(true);
     }
   });
+
+  test(`PDF previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mockFilePreviewApi(page);
+    await page.goto("/");
+
+    if (viewport.mobile) {
+      await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+    }
+    await page.getByRole("button", { name: pdfNode.name }).first().click();
+
+    const preview = page.getByTitle(`PDF preview: ${pdfNode.name}`);
+    await expect(preview).toBeVisible();
+    await expect(preview).toHaveAttribute("src", /^data:application\/pdf;base64,/);
+    const scroller = page.locator("[data-file-detail-scroll]");
+    const [previewBox, scrollerBox] = await Promise.all([
+      preview.boundingBox(),
+      scroller.boundingBox()
+    ]);
+    expect(previewBox).not.toBeNull();
+    expect(scrollerBox).not.toBeNull();
+    expect(previewBox!.width).toBeGreaterThan(0);
+    expect(previewBox!.height).toBeGreaterThan(300);
+    expect(previewBox!.x).toBeGreaterThanOrEqual(scrollerBox!.x);
+    expect(previewBox!.x + previewBox!.width).toBeLessThanOrEqual(
+      scrollerBox!.x + scrollerBox!.width + 1
+    );
+
+    const download = page.getByRole("button", { name: "Download" });
+    await download.scrollIntoViewIfNeeded();
+    await expect(download).toBeVisible();
+    await expectNoAccessibilityViolations(page);
+  });
 }
 
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {
   const previewSvg = Buffer.from(
     '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="4000"><rect width="1200" height="4000" fill="#ffffff"/><path d="M80 120h1040v3760H80z" fill="none" stroke="#185fc4" stroke-width="16"/></svg>'
   ).toString("base64");
+  const previewPdf = Buffer.from("%PDF-1.4\n%%EOF\n").toString("base64");
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
-    const response = responseFor(url, previewSvg);
+    const response = responseFor(url, previewSvg, previewPdf);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
   });
 }
 
-function responseFor(url: URL, previewSvg: string) {
+function responseFor(url: URL, previewSvg: string, previewPdf: string) {
   if (url.pathname === "/api/v1/me") return me;
   if (url.pathname === "/api/v1/spaces") {
     return { spaces: [space], page: pageInfo(1) };
@@ -107,23 +150,32 @@ function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
     return {
       parent: { id: space.root_node_id, path: "/" },
-      children: [imageNode],
-      page: pageInfo(1)
+      children: [imageNode, pdfNode],
+      page: pageInfo(2)
     };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) {
-    return { nodes: [imageNode], page: pageInfo(1) };
+    return { nodes: [imageNode, pdfNode], page: pageInfo(2) };
   }
-  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${imageNode.id}`) {
-    return imageNode;
-  }
-  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${imageNode.id}/reveal`) {
-    return { ancestors: [], target: imageNode };
+  for (const node of [imageNode, pdfNode]) {
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}`) {
+      return node;
+    }
+    if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${node.id}/reveal`) {
+      return { ancestors: [], target: node };
+    }
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/files/${imageNode.id}/preview-url`) {
     return {
       url: `data:image/svg+xml;base64,${previewSvg}`,
       media_type: "image/png",
+      expires_at: "2026-07-24T12:00:00Z"
+    };
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/files/${pdfNode.id}/preview-url`) {
+    return {
+      url: `data:application/pdf;base64,${previewPdf}`,
+      media_type: "application/pdf",
       expires_at: "2026-07-24T12:00:00Z"
     };
   }
