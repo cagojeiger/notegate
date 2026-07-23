@@ -1,116 +1,70 @@
-# NoteGate
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/web/public/brand/svg/logo-horizontal-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="frontend/web/public/brand/svg/logo-horizontal-light.svg">
+    <img src="frontend/web/public/brand/svg/logo-horizontal-light.svg" alt="NoteGate" width="300">
+  </picture>
+</p>
 
-A personal file-tree notes service with a Rust backend (Axum + Tokio + sqlx + PostgreSQL)
-and a React dashboard. Browser login and MCP/API access are authenticated through authgate.
+<p align="center">
+  <strong>Your private notes, files, and agents behind one trusted gate.</strong><br>
+  An open-source personal file space where you and trusted AI agents work from the same tree.
+</p>
 
-## Layout
+![NoteGate light workbench showing a Markdown note](docs/images/workbench-light.jpg)
 
-```
-notegate/
-├─ Cargo.toml                  # Rust workspace root
-├─ package.json                # frontend workspace scripts
-├─ pnpm-workspace.yaml
-├─ backend/crates/
-│  ├─ api/                     # Axum server, REST/MCP/auth/static web serving
-│  ├─ service/                 # business logic and command semantics
-│  ├─ db/                      # sqlx pool, repositories, migrations
-│  ├─ model/                   # shared domain data types
-│  └─ core/                    # config, limits, validation, shared error type
-├─ frontend/web/               # React dashboard
-├─ deploy/
-│  ├─ docker/web.Dockerfile    # production-like image: FE build + BE binary
-│  └─ nginx/notegate.conf      # local reverse proxy for scaled web replicas
-└─ docker-compose.yml          # postgres + MinIO + scaled web + proxy
-```
+## What is NoteGate?
 
-## Local development
+NoteGate is a personal storage boundary for knowledge shared between a person and their AI agents. You manage a familiar file tree in the web app; connected agents use the same `Space / Folder / Text / File` model through MCP and REST.
 
-Development keeps the dashboard and API separate for fast feedback.
+- Keep Markdown, JSON, YAML, plain text, images, PDFs, and other files together.
+- Read, edit, preview, search, and transfer content without maintaining a second agent-only store.
+- Give each user-managed agent read or write access only to the spaces it needs.
+- Sign in to the browser with Google SSO. REST and MCP access use bearer credentials.
+- Work across responsive light and dark interfaces.
+
+## Screens
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/workbench-dark.jpg" alt="NoteGate dark workbench showing structured JSON"></td>
+    <td width="50%"><img src="docs/images/google-sign-in-dark.jpg" alt="NoteGate Google sign-in screen"></td>
+  </tr>
+  <tr>
+    <td align="center">Structured text and file-tree workbench</td>
+    <td align="center">Google-only production sign-in</td>
+  </tr>
+</table>
+
+## Run locally
+
+Requirements: Docker, Rust, Node.js, and pnpm.
 
 ```sh
-# 1. Start Postgres and MinIO
-make dev-infra
-
-# 2. Configure env
 cp .env.example .env
+pnpm install
+make dev-infra
+```
 
-# 3. Run the API (migrations run on startup)
+Then run the API and dashboard in separate terminals:
+
+```sh
 cargo run --bin notegate-api
-
-# 4. Run the dashboard
 pnpm web:dev
 ```
 
-Default local URLs:
+Open [http://localhost:5173](http://localhost:5173). For the production-like Docker stack, run `make up` and open [http://localhost:9191](http://localhost:9191).
 
-- Dashboard dev server: `http://localhost:5173`
-- API/MCP server: `http://localhost:9191`
-- Postgres: `localhost:5433`
-- MinIO S3 API: `http://localhost:9000`
-- MinIO console: `http://localhost:9001`
+See the [development guide](docs/development.md) for architecture, configuration, service URLs, and checks.
 
-Health checks:
+## Documentation
 
-```sh
-curl localhost:9191/health
-curl localhost:9191/ready
-```
+- [Product model](docs/adr/0001-ai-native-personal-file-space.md)
+- [Agent and permission model](docs/adr/0002-user-managed-agents-and-space-connections.md)
+- [MCP tools](docs/spec/mcp/README.md)
+- [UI design source of truth](DESIGN.md)
+- [Security model](docs/spec/security.md)
 
-## Local production-like stack
+## Project status
 
-This builds one `web` image containing both the Rust server and the built dashboard.
-The Rust server handles `/api`, `/auth`, `/mcp`, and serves the SPA for browser routes.
-
-```sh
-cp .env.example .env
-make up
-```
-
-Equivalent command:
-
-```sh
-docker compose up -d --build --remove-orphans
-```
-
-Services:
-
-- `proxy` -> public `http://localhost:9191`
-- `web` -> two FE+BE replicas inside the compose network
-- `postgres` -> local database on host port `5433`
-- `minio` -> local S3-compatible storage on host port `9000`
-- `minio-init` -> creates the local bucket and its least-privilege app account, then exits
-
-Compose configures browser access on MinIO with `MINIO_API_CORS_ALLOW_ORIGIN`.
-The MinIO root account is restricted to local initialization. The Notegate runtime
-uses a separate account limited to `GetObject`, `PutObject`, and `DeleteObject` on
-the configured bucket's `objects/*` prefix. It cannot create or list buckets.
-
-## Auth/MCP settings
-
-Auth/MCP settings are configured from `.env`:
-
-- `NOTEGATE_AUTHGATE_URL=https://authgate.project-jelly.io`
-- `NOTEGATE_PUBLIC_URL=http://localhost:9191`
-- `NOTEGATE_OAUTH_CLIENT_ID=notegate-web`
-- `NOTEGATE_MCP_OAUTH_CLIENT_ID=notegate-mcp`
-- OAuth redirect URL defaults to `${NOTEGATE_PUBLIC_URL}/auth/callback`
-- resource URL defaults to `${NOTEGATE_PUBLIC_URL}/mcp`
-- `NOTEGATE_ENC_ROOT_SECRET` and `NOTEGATE_LOOKUP_ROOT_SECRET` must be at least 32 bytes.
-
-First-time MCP users can open `${NOTEGATE_PUBLIC_URL}/auth/login`, then reconnect
-the MCP client to `${NOTEGATE_PUBLIC_URL}/mcp`.
-
-On startup, the API idempotently ensures missing active ENC/LOOKUP key epoch rows from
-the configured root key IDs/secrets, then verifies them. If the database already has a
-different active key for a domain, startup fails; rotation is not automatic.
-
-## Checks
-
-```sh
-cargo fmt --all
-cargo clippy --all-targets
-cargo test
-pnpm web:typecheck
-pnpm web:test
-pnpm web:build
-```
+NoteGate is open source under [AGPL-3.0-or-later](LICENSE) and is primarily maintained by one developer. The project is actively evolving; focused issues and real-world feedback are welcome.
