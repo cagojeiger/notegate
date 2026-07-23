@@ -45,7 +45,7 @@ describe("App auth boundary", () => {
 
     render(<App />);
 
-    await screen.findByText("Sign in to Notegate");
+    await screen.findByText("Continue to NoteGate");
     await waitFor(() => expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull());
   });
 
@@ -61,7 +61,7 @@ describe("App auth boundary", () => {
     render(<App />);
 
     await screen.findByText("Authentication temporarily unavailable");
-    expect(screen.queryByText("Sign in to Notegate")).not.toBeInTheDocument();
+    expect(screen.queryByText("Continue to NoteGate")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
@@ -75,6 +75,6 @@ describe("App auth boundary", () => {
 
     fireEvent.click(await screen.findByText("Mock sign out"));
 
-    await screen.findByText("Sign in to Notegate");
+    await screen.findByText("Continue to NoteGate");
   });
 });

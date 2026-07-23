@@ -36,7 +36,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; node: RestNode; groupIndex: number } | null>(null);
   const visibleRange = editorGroupVisibleRange(groups.length, activeGroupIndex, visibleGroupCount);
   return (
-    <div className="relative flex min-w-0 flex-1">
+    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       {groups.map((group, index) => {
         const active = index === activeGroupIndex;
         const outsideVisibleRange = index < visibleRange.start || index >= visibleRange.end;
@@ -47,7 +47,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
             data-editor-group
             data-active={active ? "true" : "false"}
             onMouseDown={() => onFocusGroup(index)}
-            className={`${hidden ? "hidden" : "flex"} min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active || presentation === "focused" ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
+            className={`${hidden ? "hidden" : "flex"} min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active || presentation === "focused" ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
           >
             <GroupBody
               active={active}

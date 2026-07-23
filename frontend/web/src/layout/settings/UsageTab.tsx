@@ -157,7 +157,7 @@ function UsageMeter({
           {label}
           <button
             type="button"
-            className="peer inline-grid size-5 shrink-0 place-items-center rounded text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+            className="peer inline-grid size-6 shrink-0 place-items-center rounded text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
             aria-label={`About ${label}`}
             aria-describedby={descriptionId}
           >

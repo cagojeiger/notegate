@@ -120,12 +120,15 @@ frontend/web/src/design/theme.css
 
 ## Visual rules
 
-- Light mode는 밝고 따뜻한 neutral surface.
-- Dark mode는 graphite 계열.
+- Light mode는 brand paper와 cool-neutral surface.
+- Dark mode는 brand ink와 graphite 계열.
 - 읽기 영역은 가장 깨끗한 surface로 둔다.
 - 불필요한 nested card를 만들지 않는다.
 - primary color는 selected state와 primary action에만 쓴다.
 - hover/focus 시 클릭 가능성이 보여야 한다.
+- 일반 텍스트는 WCAG 2.2 AA 4.5:1, 의미 있는 UI 경계와 포커스는 3:1 이상을 유지한다.
+- 상태는 색상만으로 전달하지 않고 text, icon, shape 중 하나를 함께 사용한다.
+- 브랜드 자산은 제품 식별에만 사용하고 기능 icon은 Lucide로 통일한다.
 - UI font는 Apple/system sans stack.
 - editor/code font는 monospace stack.
 - Button/input radius는 8-10px.
@@ -142,6 +145,19 @@ frontend/web/src/design/theme.css
 | EditorArea | plain text는 메모처럼, markdown frontmatter/code/mermaid/structured preview 지원 |
 | AuxiliarySidebar | 빈 Inspector도 보여주고 metadata warning은 과하게 강조하지 않는다 |
 
+## Brand assets
+
+- 정본: `frontend/web/public/brand/`
+- 워드마크는 호스트 폰트에 의존하지 않는 SVG path로 유지한다.
+- 32px 미만 제품 표시는 app icon을 사용한다.
+- 32px 이상에서는 symbol 또는 horizontal lockup을 사용한다.
+- `pnpm --dir frontend/web export:icons`로 favicon, Apple touch, PWA, maskable, Windows tile 출력을 다시 생성한다.
+- 제품명은 항상 `NoteGate`로 쓴다.
+- 로그인 CTA는 `Continue with Google`로 표시하고 AuthGate를 사용자-facing provider로 노출하지 않는다.
+- Google G는 `frontend/web/public/google-g.png`의 Google 공식 배포본을 사용한다.
+- Google CTA의 크기, 색상, pill shape, Roboto/Arial font stack은 Google 공식 HTML button configurator 출력을 따른다.
+- 자세한 제품 및 접근성 결정은 root `DESIGN.md`를 따른다.
+
 ## Tests
 
 필수 확인:
@@ -150,7 +166,10 @@ frontend/web/src/design/theme.css
 pnpm --filter web typecheck
 pnpm --filter web test -- --run
 pnpm --filter web build
+pnpm --filter web test:e2e
 ```
+
+화면 변경은 desktop `1440×900`, tablet `900×1024`, mobile `390×844`에서 light/dark 모드를 모두 확인한다. 로그인과 reflow는 `320 CSS px` 최소 폭도 추가 확인한다.
 
 우선 테스트 대상:
 

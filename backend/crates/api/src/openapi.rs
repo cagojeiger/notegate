@@ -95,7 +95,7 @@ impl Modify for SecurityAddon {
             SecurityScheme::Http(
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
-                    .bearer_format("JWT or notegate API key")
+                    .bearer_format("JWT or NoteGate API key")
                     .build(),
             ),
         );
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(scheme["scheme"].as_str(), Some("bearer"));
         assert_eq!(
             scheme["bearerFormat"].as_str(),
-            Some("JWT or notegate API key")
+            Some("JWT or NoteGate API key")
         );
     }
 

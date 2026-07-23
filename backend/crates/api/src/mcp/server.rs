@@ -67,7 +67,7 @@ impl McpServer {
 
     #[tool(
         name = "me",
-        description = "Show who is calling notegate and what this caller can generally do."
+        description = "Show who is calling NoteGate and what this caller can generally do."
     )]
     pub async fn me_tool(
         &self,
@@ -78,8 +78,8 @@ impl McpServer {
 
     #[tool(
         name = "read",
-        description = "Read Notegate spaces, folders, nodes, and plain text. Read-only. Use op=spaces/ls/tree/stat/read. Space name filters are exact and case-sensitive.",
-        annotations(title = "Read Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
+        description = "Read NoteGate spaces, folders, nodes, and plain text. Read-only. Use op=spaces/ls/tree/stat/read. Space name filters are exact and case-sensitive.",
+        annotations(title = "Read NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
     pub async fn read_tool(
@@ -92,8 +92,8 @@ impl McpServer {
 
     #[tool(
         name = "search",
-        description = "Search Notegate node names and plain text. Read-only. Use op=find or op=grep. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
-        annotations(title = "Search Notegate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
+        description = "Search NoteGate node names and plain text. Read-only. Use op=find or op=grep. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
+        annotations(title = "Search NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
     pub async fn search_tool(
@@ -107,7 +107,7 @@ impl McpServer {
     #[tool(
         name = "write",
         description = "Create or modify plain text content. Use op=write/append/patch/edit. Does not move or delete nodes.",
-        annotations(title = "Write Notegate", read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
+        annotations(title = "Write NoteGate", read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
     pub async fn write_tool(
@@ -121,7 +121,7 @@ impl McpServer {
     #[tool(
         name = "manage",
         description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. MCP cannot create spaces.",
-        annotations(title = "Manage Notegate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        annotations(title = "Manage NoteGate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
     pub async fn manage_tool(
@@ -135,7 +135,7 @@ impl McpServer {
     #[tool(
         name = "file_transfer",
         description = "Prepare direct local file transfers without sending bytes through MCP. Follow the structured next_action in every successful response. begin_upload returns one PUT or multipart geometry; for multipart, request up to 16 one-based part URLs, upload at most 4 parts concurrently using each exact content_length, collect response ETags, then complete_upload. prepare_download returns one GET. URLs expire after 5 minutes; do not print or persist them.",
-        annotations(title = "Transfer Notegate Files", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = true),
+        annotations(title = "Transfer NoteGate Files", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = true),
         output_schema = object_output_schema()
     )]
     pub async fn file_transfer_tool(
@@ -150,7 +150,7 @@ impl McpServer {
     #[tool(
         name = "run_sequence",
         description = "Run an ordered command sequence. Each command is committed independently; execution stops on first failure and completed commands are not rolled back.",
-        annotations(title = "Run Notegate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
+        annotations(title = "Run NoteGate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
     pub async fn run_sequence_tool(
@@ -168,7 +168,7 @@ impl ServerHandler for McpServer {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::V_2025_03_26)
             .with_server_info(
-                Implementation::new("notegate", env!("CARGO_PKG_VERSION")).with_title("notegate"),
+                Implementation::new("notegate", env!("CARGO_PKG_VERSION")).with_title("NoteGate"),
             )
             .with_instructions(MCP_SERVER_INSTRUCTIONS)
     }

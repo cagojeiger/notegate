@@ -213,7 +213,7 @@ pub async fn callback(
             html_page(
                 StatusCode::BAD_REQUEST,
                 "Login error",
-                "identity attributes exceed notegate limits",
+                "identity attributes exceed NoteGate limits",
             ),
         )
             .into_response(),
@@ -232,8 +232,22 @@ pub async fn callback(
     }
 }
 
-pub async fn success() -> Response {
-    Html(
+pub async fn success(State(state): State<AppState>) -> Response {
+    let Some(html) = login_complete_html(&state.config.notegate_public_url) else {
+        tracing::error!(event = "oauth.success_page_failed");
+        return html_page(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Login failed",
+            "internal error",
+        );
+    };
+    Html(html).into_response()
+}
+
+fn login_complete_html(public_url: &str) -> Option<String> {
+    let public_url = url::Url::parse(public_url).ok()?;
+    let target_origin = serde_json::to_string(&public_url.origin().ascii_serialization()).ok()?;
+    Some(
         r#"<!doctype html>
 <html>
 <head>
@@ -242,17 +256,17 @@ pub async fn success() -> Response {
 </head>
 <body>
   <h1>Login complete</h1>
-  <p>Login complete. You can close this tab and return to Notegate.</p>
+  <p>Login complete. You can close this tab and return to NoteGate.</p>
   <script>
     if (window.opener) {
-      window.opener.postMessage({ type: "notegate:login-complete" }, "*");
+      window.opener.postMessage({ type: "notegate:login-complete" }, __NOTEGATE_TARGET_ORIGIN__);
       window.close();
     }
   </script>
 </body>
-</html>"#,
+</html>"#
+            .replace("__NOTEGATE_TARGET_ORIGIN__", &target_origin),
     )
-    .into_response()
 }
 
 pub async fn logout(State(state): State<AppState>, jar: CookieJar, headers: HeaderMap) -> Response {
@@ -327,7 +341,16 @@ async fn revoke_authgate_refresh_token(state: &AppState, refresh_token: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_next;
+    use super::{login_complete_html, sanitize_next};
+
+    #[test]
+    fn login_complete_page_posts_only_to_configured_origin() {
+        let html = login_complete_html("https://notes.example.test/app").unwrap_or_default();
+        assert!(html.contains(
+            r#"postMessage({ type: "notegate:login-complete" }, "https://notes.example.test")"#
+        ));
+        assert!(!html.contains(r#"postMessage({ type: "notegate:login-complete" }, "*")"#));
+    }
 
     #[test]
     fn sanitize_next_allows_relative_paths_only() {
