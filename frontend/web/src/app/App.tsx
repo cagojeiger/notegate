@@ -11,7 +11,8 @@ import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 
-const DEV_API_KEY_FALLBACK_ENABLED = import.meta.env.DEV || import.meta.env.MODE === "test";
+const DEV_API_KEY_FALLBACK_ENABLED =
+  import.meta.env.DEV || import.meta.env.MODE === "test" || import.meta.env.VITE_NOTEGATE_ENABLE_DEV_API_KEY === "true";
 
 export function App() {
   const [apiKey, setApiKey] = useState(() => {
