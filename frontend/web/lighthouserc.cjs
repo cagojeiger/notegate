@@ -6,6 +6,7 @@ module.exports = {
       url: ["http://localhost/"],
       numberOfRuns: 3,
       settings: {
+        chromeFlags: process.env.CI ? "--no-sandbox" : "",
         onlyCategories: ["performance", "accessibility", "best-practices"]
       }
     },
