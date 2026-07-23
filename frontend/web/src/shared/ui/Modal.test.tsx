@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { Button } from "./Button";
 import { Modal } from "./Modal";
 
-function ModalHarness() {
+function ModalHarness({ autoFocusInput = false }: { autoFocusInput?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -17,7 +17,7 @@ function ModalHarness() {
           onClose={() => setOpen(false)}
           footer={<Button onClick={() => setOpen(false)}>Save</Button>}
         >
-          <p>Modal content</p>
+          {autoFocusInput ? <input aria-label="Name" autoFocus /> : <p>Modal content</p>}
         </Modal>
       ) : null}
     </>
@@ -46,5 +46,23 @@ describe("Modal", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it("preserves explicit autofocus and restores the opener", async () => {
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <ModalHarness autoFocusInput />
+      </StrictMode>
+    );
+
+    const trigger = screen.getByRole("button", { name: "Open modal" });
+    await user.click(trigger);
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus());
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 });
