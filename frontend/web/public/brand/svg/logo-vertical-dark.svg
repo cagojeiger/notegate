@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 680" role="img" aria-label="NoteGate">
+  <g transform="translate(72 24) scale(.8)" fill="none" stroke="#f7f9fb" stroke-linecap="round" stroke-linejoin="round"><path d="M116 410V102a30 30 0 0 1 30-30h210" stroke-width="24"/><path d="M116 410h240" stroke-width="24"/><path d="M198 176v160M198 228h80M198 304h80" stroke-width="18"/></g>
+  <g transform="translate(72 24) scale(.8)" fill="#f7f9fb"><rect x="174" y="150" width="48" height="48" rx="9"/><rect x="270" y="204" width="58" height="48" rx="9"/><rect x="270" y="280" width="58" height="48" rx="9"/><path d="M342 112 430 66v380l-88-46V112Z"/></g>
+  <text x="280" y="604" text-anchor="middle" fill="#f7f9fb" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="92" font-weight="650" letter-spacing="-4">NoteGate</text>
+</svg>

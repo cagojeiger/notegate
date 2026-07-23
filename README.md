@@ -1,4 +1,4 @@
-# notegate
+# NoteGate
 
 A personal file-tree notes service with a Rust backend (Axum + Tokio + sqlx + PostgreSQL)
 and a React dashboard. Browser login and MCP/API access are authenticated through authgate.

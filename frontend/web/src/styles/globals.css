@@ -50,20 +50,115 @@ button:not(:disabled):active {
   transform: translateY(0.5px);
 }
 
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ng-focus-ring);
+  outline-offset: 2px;
+}
 
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: none;
-  box-shadow: var(--ng-focus-shadow);
+.lucide {
+  flex-shrink: 0;
+  stroke-width: 1.75;
 }
 
 ::selection {
   background: var(--ng-panel-strong);
 }
 
+.ng-auth-screen {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 78% 48%, rgba(24, 95, 196, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(23, 33, 43, 0.025), transparent 46%),
+    var(--ng-bg);
+}
+
+:root[data-theme="dark"] .ng-auth-screen {
+  background:
+    radial-gradient(circle at 78% 48%, rgba(139, 184, 255, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(247, 249, 251, 0.025), transparent 46%),
+    var(--ng-bg);
+}
+
+.ng-auth-backdrop-mark {
+  position: absolute;
+  z-index: 0;
+  top: 50%;
+  right: clamp(-270px, -13vw, -120px);
+  width: clamp(520px, 52vw, 760px);
+  height: auto;
+  color: var(--ng-brand-ink);
+  opacity: 0.055;
+  pointer-events: none;
+  transform: translateY(-48%);
+}
+
+:root[data-theme="dark"] .ng-auth-backdrop-mark {
+  color: var(--ng-primary);
+  opacity: 0.09;
+}
+
+.ng-brand-theme-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .ng-brand-theme-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .ng-brand-theme-dark {
+  display: block;
+}
+
+.ng-google-button {
+  display: inline-flex;
+  min-height: 44px;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px solid var(--ng-google-border);
+  border-radius: 10px;
+  background: var(--ng-google-bg);
+  color: var(--ng-google-text);
+  font-family: "Google Sans", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.ng-google-button:hover {
+  background: var(--ng-google-hover);
+}
+
+.ng-google-button:disabled {
+  opacity: 0.56;
+}
+
+@media (max-width: 720px) {
+  .ng-auth-screen {
+    overflow-y: auto;
+    background:
+      radial-gradient(circle at 50% -12%, rgba(24, 95, 196, 0.12), transparent 38%),
+      var(--ng-bg);
+  }
+
+  :root[data-theme="dark"] .ng-auth-screen {
+    background:
+      radial-gradient(circle at 50% -12%, rgba(139, 184, 255, 0.12), transparent 38%),
+      var(--ng-bg);
+  }
+
+  .ng-auth-backdrop-mark {
+    display: none;
+  }
+}
+
 .markdown {
+  width: min(100%, 78ch);
+  margin-inline: auto;
   color: var(--ng-text);
   font-size: 16px;
   line-height: 1.7;
@@ -109,6 +204,11 @@ select:focus-visible {
   color: var(--ng-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+.markdown a:hover {
+  text-decoration-thickness: 2px;
 }
 
 .markdown strong {
@@ -520,4 +620,19 @@ button.markdown-image-fallback {
 
 .ng-source-flat .shiki span {
   background: transparent !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  button:not(:disabled):active {
+    transform: none;
+  }
 }

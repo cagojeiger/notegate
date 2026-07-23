@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:contrast": "node scripts/check-theme-contrast.mjs",
+    "export:icons": "bash scripts/export-brand-icons.sh",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --config vitest.config.ts",

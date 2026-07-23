@@ -24,6 +24,9 @@ function initialActiveSpaceId(): string | null {
   return window.localStorage.getItem(LAST_SPACE_KEY);
 }
 
+const initialThemeMode = initialTheme();
+if (typeof document !== "undefined") document.documentElement.dataset.theme = initialThemeMode;
+
 const initialSpaceId = initialActiveSpaceId();
 const initialEditorState = initialSpaceId ? restoreSpaceWorkbench(initialSpaceId, 0) : resetEditorGroupsState({ nextGroupId: 0 });
 const initialPanelState = restoreWorkbenchPanelState();
@@ -76,7 +79,7 @@ type UiState = {
 };
 
 export const useUiStore = create<UiState>((set, get) => ({
-  theme: initialTheme(),
+  theme: initialThemeMode,
   activeSpaceId: initialSpaceId,
   editorGroups: initialEditorState.editorGroups,
   activeGroupIndex: initialEditorState.activeGroupIndex,

@@ -1,4 +1,5 @@
 export { Badge } from "./Badge";
+export { BrandAppIcon, BrandLockup } from "./Brand";
 export { Button } from "./Button";
 export { Card } from "./Card";
 export { CopyableCodeBlock } from "./CopyableCodeBlock";

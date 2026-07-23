@@ -1,48 +1,123 @@
-import { Button, Card, TextField } from "../shared/ui";
+import { useEffect } from "react";
+import { Moon, ShieldCheck, Sun } from "lucide-react";
+
+import { persistTheme, useUiStore } from "../stores/uiStore";
+import { BrandLockup, Button, Card, IconButton, TextField } from "../shared/ui";
 import { useDevAuthGateController, type DevAuthGateControllerProps } from "./useDevAuthGateController";
 
 type DevAuthGateProps = DevAuthGateControllerProps & { devApiKeyFallbackEnabled: boolean };
 
 export function DevAuthGate({ devApiKeyFallbackEnabled, ...controllerProps }: DevAuthGateProps) {
   const auth = useDevAuthGateController(controllerProps);
+  const theme = useUiStore((state) => state.theme);
+  const toggleTheme = useUiStore((state) => state.toggleTheme);
+
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
+
   return (
-    <main className="grid h-full place-items-center bg-bg px-6 text-text">
-      <Card as="form" onSubmit={auth.handleSubmit} className="w-full max-w-md bg-panel p-6 shadow-[var(--ng-focus-shadow)]">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-xl bg-text text-lg font-bold text-bg">N</div>
-          <div>
-            <h1 className="text-xl font-semibold">Sign in to Notegate</h1>
-            <p className="text-sm text-muted">Use your Notegate account to open the dashboard.</p>
-          </div>
-        </div>
-        <Button className="w-full" onClick={auth.startLogin}>Continue with login</Button>
-        <a
-          href={auth.loginHref}
-          target="notegate-login"
-          onClick={() => auth.beginPolling(null)}
-          className="mt-2 block text-center text-xs text-muted underline underline-offset-2 hover:text-text"
+    <main className="ng-auth-screen grid h-full overflow-y-auto px-6 py-10 text-text">
+      <AuthBackdropMark />
+
+      <div className="absolute right-4 top-4 z-10">
+        <IconButton label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={toggleTheme}>
+          {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+        </IconButton>
+      </div>
+
+      <section className="relative z-10 m-auto w-full max-w-[420px]">
+        <header className="mb-7 text-center">
+          <BrandLockup className="w-[190px]" />
+          <p className="mx-auto mt-4 max-w-sm text-sm leading-6 text-muted">
+            Your private notes, files, and agents behind one trusted gate.
+          </p>
+        </header>
+
+        <Card
+          as="form"
+          onSubmit={auth.handleSubmit}
+          className="w-full border-border bg-surface p-6 shadow-[var(--ng-focus-shadow)] sm:p-7"
+          aria-labelledby="auth-title"
         >
-          Or open the login page in a new window
-        </a>
-        <p className="mt-3 text-xs leading-5 text-muted">OAuth creates an HttpOnly browser session cookie.</p>
-        {auth.loginHint ? <Card className="mt-3 text-xs leading-5 text-muted" padding="sm">{auth.loginHint}</Card> : null}
-        {devApiKeyFallbackEnabled ? (
-          <details className="mt-5 rounded-xl border border-border bg-surface p-3">
-            <summary className="cursor-pointer text-sm font-medium">Developer API key fallback</summary>
-            <TextField
-              id="api-key"
-              name="apiKey"
-              label="User API key"
-              value={auth.apiKey}
-              onChange={(event) => auth.setApiKey(event.target.value)}
-              inputClassName="mt-2 bg-bg font-mono text-sm"
-              placeholder="ngk_v1_..."
-              autoComplete="off"
-            />
-            <Button type="submit" className="mt-4 w-full" secondary disabled={!auth.canSubmitApiKey}>Open with API key</Button>
-          </details>
-        ) : null}
-      </Card>
+          <div className="mb-6">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted">Welcome back</p>
+            <h1 id="auth-title" className="text-2xl font-semibold tracking-tight">Continue to NoteGate</h1>
+            <p className="mt-2 text-sm leading-6 text-muted">Use the Google account connected to your NoteGate workspace.</p>
+          </div>
+
+          <button type="button" className="ng-google-button" onClick={auth.startLogin}>
+            <GoogleMark />
+            Continue with Google
+          </button>
+
+          <a
+            href={auth.loginHref}
+            target="notegate-login"
+            onClick={() => auth.beginPolling(null)}
+            className="mt-3 block rounded text-center text-xs text-muted underline underline-offset-2 hover:text-text"
+          >
+            Open Google sign-in in a new window
+          </a>
+
+          <div className="mt-6 flex gap-2.5 rounded-xl border border-border bg-panel p-3 text-xs leading-5 text-muted">
+            <ShieldCheck className="mt-0.5 text-success" size={16} aria-hidden="true" />
+            <p>Google SSO is NoteGate's only production sign-in method. NoteGate never asks for your Google password.</p>
+          </div>
+
+          {auth.loginHint ? (
+            <Card className="mt-3 text-xs leading-5 text-muted" padding="sm" role="status" aria-live="polite">
+              {auth.loginHint}
+            </Card>
+          ) : null}
+
+          {devApiKeyFallbackEnabled ? (
+            <details className="mt-5 rounded-xl border border-border bg-panel p-3">
+              <summary className="cursor-pointer rounded text-sm font-medium">Developer API key fallback</summary>
+              <TextField
+                id="api-key"
+                name="apiKey"
+                label="User API key"
+                value={auth.apiKey}
+                onChange={(event) => auth.setApiKey(event.target.value)}
+                inputClassName="mt-2 bg-bg font-mono text-sm"
+                placeholder="ngk_v1_..."
+                autoComplete="off"
+              />
+              <Button type="submit" className="mt-4 w-full" secondary disabled={!auth.canSubmitApiKey}>Open with API key</Button>
+            </details>
+          ) : null}
+        </Card>
+      </section>
     </main>
+  );
+}
+
+function AuthBackdropMark() {
+  return (
+    <svg className="ng-auth-backdrop-mark" viewBox="0 0 512 512" aria-hidden="true">
+      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M116 410V102a30 30 0 0 1 30-30h210" strokeWidth="24" />
+        <path d="M116 410h240" strokeWidth="24" />
+        <path d="M198 176v160M198 228h80M198 304h80" strokeWidth="18" />
+      </g>
+      <g fill="currentColor">
+        <rect x="174" y="150" width="48" height="48" rx="9" />
+        <rect x="270" y="204" width="58" height="48" rx="9" />
+        <rect x="270" y="280" width="58" height="48" rx="9" />
+        <path d="M342 112 430 66v380l-88-46V112Z" />
+      </g>
+    </svg>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.05H12v3.87h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.35Z" />
+      <path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.42l-3.24-2.51c-.9.6-2.05.96-3.38.96-2.6 0-4.8-1.76-5.6-4.12H3.05v2.59A10 10 0 0 0 12 22Z" />
+      <path fill="#FBBC05" d="M6.4 13.91A6 6 0 0 1 6.08 12c0-.66.12-1.3.32-1.91V7.5H3.05A10 10 0 0 0 2 12c0 1.61.39 3.14 1.05 4.5l3.35-2.59Z" />
+      <path fill="#EA4335" d="M12 5.97c1.47 0 2.78.5 3.82 1.5l2.86-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.95 5.5l3.35 2.59c.8-2.36 3-4.12 5.6-4.12Z" />
+    </svg>
   );
 }
