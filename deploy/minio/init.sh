@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$MINIO_ROOT_USER" = "$NOTEGATE_S3_ACCESS_KEY" ]; then
-  echo "MinIO root and Notegate access keys must differ" >&2
+  echo "MinIO root and NoteGate access keys must differ" >&2
   exit 1
 fi
 

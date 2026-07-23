@@ -193,7 +193,7 @@ File bytes는 MCP request/response에 포함하지 않는다. Single/multipart P
 
 ## `run_sequence`
 
-여러 Notegate command를 순서대로 실행한다. 단일 command는 `read`, `search`, `write`, `manage`를 직접 호출한다.
+여러 NoteGate command를 순서대로 실행한다. 단일 command는 `read`, `search`, `write`, `manage`를 직접 호출한다.
 
 ```ts
 type RunSequenceInput = {

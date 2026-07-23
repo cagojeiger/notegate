@@ -90,7 +90,7 @@
 
 - Framework/styling system: React, TypeScript, Tailwind utilities, and CSS custom properties.
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
-- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency.
+- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font.
 - Compatibility constraints: Preserve the current OAuth popup and developer API-key fallback behavior.
 - Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, and light/dark login screenshots.
 

@@ -154,6 +154,7 @@ frontend/web/src/design/theme.css
 - 제품명은 항상 `NoteGate`로 쓴다.
 - 로그인 CTA는 `Continue with Google`로 표시하고 AuthGate를 사용자-facing provider로 노출하지 않는다.
 - Google G는 `frontend/web/public/google-g.png`의 Google 공식 배포본을 사용한다.
+- Google CTA의 크기, 색상, pill shape, Roboto/Arial font stack은 Google 공식 HTML button configurator 출력을 따른다.
 - 자세한 제품 및 접근성 결정은 root `DESIGN.md`를 따른다.
 
 ## Tests

@@ -116,6 +116,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check theme contrast
+        run: pnpm --filter web check:contrast
+
       - name: Typecheck
         run: pnpm --filter web typecheck
 

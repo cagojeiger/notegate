@@ -1,6 +1,6 @@
 # Database schema
 
-이 문서는 Notegate DB schema의 정본이다.
+이 문서는 NoteGate DB schema의 정본이다.
 
 ## Entity overview
 
@@ -163,7 +163,7 @@ browser_sessions
   updated_at timestamptz
 ```
 
-Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. `refresh_token_*` 필드는 authgate refresh token을 암호화 저장한다. AuthGate가 refresh token의 canonical state를 관리하고, Notegate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
+Browser session cookie 원문은 저장하지 않는다. `token_hash`는 cookie의 opaque session token을 검증하기 위한 HMAC이다. `refresh_token_*` 필드는 authgate refresh token을 암호화 저장한다. AuthGate가 refresh token의 canonical state를 관리하고, NoteGate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
 
 Browser session DB 제약:
 
@@ -355,7 +355,7 @@ file_objects
   uploaded_at timestamptz
 ```
 
-`File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. Notegate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
+`File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. NoteGate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
 
 Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 

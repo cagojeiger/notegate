@@ -213,7 +213,7 @@ pub async fn callback(
             html_page(
                 StatusCode::BAD_REQUEST,
                 "Login error",
-                "identity attributes exceed notegate limits",
+                "identity attributes exceed NoteGate limits",
             ),
         )
             .into_response(),

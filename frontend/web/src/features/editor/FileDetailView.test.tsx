@@ -40,6 +40,7 @@ describe("FileDetailView", () => {
       "src",
       "https://storage.example/image.png"
     );
+    expect(screen.getByRole("article")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
     expect(screen.getByText("image/png")).toBeInTheDocument();
   });
 
