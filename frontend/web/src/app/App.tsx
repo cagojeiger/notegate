@@ -11,11 +11,14 @@ import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 
-const DEV_API_KEY_FALLBACK_ENABLED =
-  import.meta.env.DEV || import.meta.env.MODE === "test" || import.meta.env.VITE_NOTEGATE_ENABLE_DEV_API_KEY === "true";
+const DEV_API_KEY_FALLBACK_ENABLED = import.meta.env.DEV || import.meta.env.MODE === "test";
 
 export function App() {
-  const [apiKey, setApiKey] = useState(() => (DEV_API_KEY_FALLBACK_ENABLED ? readDevApiKey() : null));
+  const [apiKey, setApiKey] = useState(() => {
+    if (DEV_API_KEY_FALLBACK_ENABLED) return readDevApiKey();
+    clearDevApiKey();
+    return null;
+  });
   const [sessionRevision, setSessionRevision] = useState(0);
 
   // A 401 from any non-session query, or an explicit sign-out, means the
