@@ -164,7 +164,10 @@ frontend/web/src/design/theme.css
 pnpm --filter web typecheck
 pnpm --filter web test -- --run
 pnpm --filter web build
+pnpm --filter web test:e2e
 ```
+
+화면 변경은 desktop `1440×900`, tablet `900×1024`, mobile `390×844`에서 light/dark 모드를 모두 확인한다. 로그인과 reflow는 `320 CSS px` 최소 폭도 추가 확인한다.
 
 우선 테스트 대상:
 
