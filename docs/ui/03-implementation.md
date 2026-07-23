@@ -153,6 +153,7 @@ frontend/web/src/design/theme.css
 - `pnpm --dir frontend/web export:icons`로 favicon, Apple touch, PWA, maskable, Windows tile 출력을 다시 생성한다.
 - 제품명은 항상 `NoteGate`로 쓴다.
 - 로그인 CTA는 `Continue with Google`로 표시하고 AuthGate를 사용자-facing provider로 노출하지 않는다.
+- Google G는 `frontend/web/public/google-g.png`의 Google 공식 배포본을 사용한다.
 - 자세한 제품 및 접근성 결정은 root `DESIGN.md`를 따른다.
 
 ## Tests
