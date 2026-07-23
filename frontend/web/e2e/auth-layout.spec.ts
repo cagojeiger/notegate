@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { expectNoAccessibilityViolations } from "./support/accessibility";
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/me", async (route) => {
     await route.fulfill({
@@ -27,11 +29,14 @@ for (const viewport of [
     await expect.poll(() => googleMark.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
     await expect.poll(() => authScreen.evaluate((element) => getComputedStyle(element).overflowX)).toBe("hidden");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await expectNoAccessibilityViolations(page);
 
     await page.getByRole("button", { name: "Use dark theme" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(googleButton).toBeVisible();
+    await expect.poll(() => googleButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(19, 19, 20)");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await expectNoAccessibilityViolations(page);
   });
 }
 

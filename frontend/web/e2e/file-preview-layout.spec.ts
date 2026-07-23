@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
+import { expectNoAccessibilityViolations } from "./support/accessibility";
 
 const space: Space = {
   id: "space-1",
@@ -64,6 +65,7 @@ for (const viewport of [
 
     const download = page.getByRole("button", { name: "Download" });
     await download.scrollIntoViewIfNeeded();
+    await expectNoAccessibilityViolations(page);
     const [scrollerBox, downloadBox] = await Promise.all([scroller.boundingBox(), download.boundingBox()]);
     expect(scrollerBox).not.toBeNull();
     expect(downloadBox).not.toBeNull();

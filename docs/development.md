@@ -94,3 +94,18 @@ make test
 make frontend-check
 git diff --check
 ```
+
+`make frontend-check` runs the production dependency audit, theme contrast check,
+typecheck, lint, unit tests, and production build. Browser quality checks use:
+
+```sh
+pnpm --filter web exec playwright install chromium
+pnpm --filter web test:e2e
+pnpm --filter web test:lighthouse
+```
+
+The Playwright suite runs WCAG 2.2 AA axe checks for the login and authenticated
+workspace across desktop, tablet, and mobile layouts. Lighthouse CI checks the
+production build with performance, accessibility, and best-practice budgets.
+Its LCP, CLS, and TBT results are lab regression signals; production INP and
+other Core Web Vitals still require field monitoring after deployment.

@@ -148,6 +148,7 @@ frontend/web/src/design/theme.css
 ## Brand assets
 
 - 정본: `frontend/web/public/brand/`
+- 워드마크는 호스트 폰트에 의존하지 않는 SVG path로 유지한다.
 - 32px 미만 제품 표시는 app icon을 사용한다.
 - 32px 이상에서는 symbol 또는 horizontal lockup을 사용한다.
 - `pnpm --dir frontend/web export:icons`로 favicon, Apple touch, PWA, maskable, Windows tile 출력을 다시 생성한다.

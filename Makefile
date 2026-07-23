@@ -16,6 +16,7 @@ build:
 	cargo build --release --bin notegate-api
 
 frontend-check:
+	pnpm audit --prod --audit-level moderate
 	pnpm --filter web check:contrast
 	pnpm --filter web typecheck
 	pnpm --filter web lint

@@ -20,7 +20,9 @@ for (const [themeName, theme] of Object.entries(themes)) {
     check(themeName, "--ng-focus-ring", surface, theme["--ng-focus-ring"], theme[surface], 3);
     check(themeName, "--ng-active-border", surface, theme["--ng-active-border"], theme[surface], 3);
     for (const overlay of ["--ng-selection", "--ng-active-surface", "--ng-hover"]) {
-      checkCompositeBackground(themeName, "--ng-text", overlay, surface, theme["--ng-text"], theme[overlay], theme[surface], 4.5);
+      for (const text of ["--ng-text", "--ng-muted", "--ng-faint"]) {
+        checkCompositeBackground(themeName, text, overlay, surface, theme[text], theme[overlay], theme[surface], 4.5);
+      }
     }
   }
   check(themeName, "--ng-primary-contrast", "--ng-primary", theme["--ng-primary-contrast"], theme["--ng-primary"], 4.5);
