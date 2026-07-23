@@ -1,8 +1,9 @@
 import type { DragEvent } from "react";
 import { useRef } from "react";
-import { ChevronRight, Database, FileText, Folder } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 import type { RestNode } from "../../api/types";
+import { nodeIcon } from "./nodeDisplay";
 import type { NodeContextHandler } from "./types";
 
 export function NodeRow({
@@ -36,7 +37,7 @@ export function NodeRow({
   onDropOnNode?: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
   onDragEndNode?: () => void;
 }) {
-  const Icon = node.kind === "folder" ? Folder : node.kind === "file" ? Database : FileText;
+  const Icon = nodeIcon(node);
   const draggable = node.parent_id !== null && Boolean(onDragStartNode);
   const longPressRef = useRef<number | null>(null);
   function clearLongPress() {

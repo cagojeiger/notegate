@@ -80,6 +80,8 @@ type RestNode = {
 
   // file node에서만 존재
   media_type?: string
+  detected_media_type?: string
+  preview_available?: boolean
   original_filename?: string
   encryption_mode?: "none" | "client"
   encryption_metadata?: object

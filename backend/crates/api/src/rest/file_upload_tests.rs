@@ -8,10 +8,10 @@
 
 use std::collections::BTreeMap;
 
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::http::{
     Request, StatusCode,
-    header::{ACCESS_CONTROL_EXPOSE_HEADERS, LOCATION, ORIGIN},
+    header::{ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL, LOCATION, ORIGIN},
 };
 use notegate_core::S3Config;
 use notegate_core::limits::{BROWSER_FILE_MAX_BYTES, SINGLE_PUT_MAX_BYTES};
@@ -70,6 +70,27 @@ async fn begin_upload(
     name: &str,
     byte_len: usize,
 ) -> Result<BegunUpload, Box<dyn std::error::Error>> {
+    begin_upload_with_media_type(
+        state,
+        caller,
+        space_id,
+        parent_node_id,
+        name,
+        byte_len,
+        "application/octet-stream",
+    )
+    .await
+}
+
+async fn begin_upload_with_media_type(
+    state: &crate::state::AppState,
+    caller: &Caller,
+    space_id: Uuid,
+    parent_node_id: Uuid,
+    name: &str,
+    byte_len: usize,
+    media_type: &str,
+) -> Result<BegunUpload, Box<dyn std::error::Error>> {
     let (status, body) = json_request(
         rest_app(state.clone(), caller.clone()),
         "POST",
@@ -78,7 +99,7 @@ async fn begin_upload(
             "parent_node_id": parent_node_id,
             "name": name,
             "byte_len": byte_len,
-            "media_type": "application/octet-stream"
+            "media_type": media_type
         }),
     )
     .await?;
@@ -103,6 +124,140 @@ async fn begin_upload(
             .to_owned(),
         headers,
     })
+}
+
+#[tokio::test]
+async fn verified_raster_images_receive_inline_preview_urls()
+-> Result<(), Box<dyn std::error::Error>> {
+    const PNG: &[u8] = &[
+        0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H', b'D',
+        b'R', 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00,
+    ];
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let upload = begin_upload_with_media_type(
+        &state,
+        &caller,
+        space_id,
+        root_id,
+        "image.bin",
+        PNG.len(),
+        "text/plain",
+    )
+    .await?;
+    put_upload(&upload, PNG).await?.error_for_status()?;
+
+    let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    assert_eq!(status, StatusCode::CREATED, "{completed}");
+    assert_eq!(completed["node"]["media_type"], "text/plain");
+    assert_eq!(completed["node"]["detected_media_type"], "image/png");
+    assert_eq!(completed["node"]["preview_available"], true);
+    let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
+
+    let preview_response = rest_app(state.clone(), caller.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/spaces/{space_id}/files/{node_id}/preview-url"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(preview_response.status(), StatusCode::OK);
+    assert_eq!(
+        preview_response.headers().get(CACHE_CONTROL),
+        Some(&axum::http::HeaderValue::from_static("private, no-store"))
+    );
+    let preview: Value =
+        serde_json::from_slice(&to_bytes(preview_response.into_body(), usize::MAX).await?)?;
+    assert_eq!(preview["media_type"], "image/png");
+    let response = reqwest::get(preview["url"].as_str().ok_or("preview url")?).await?;
+    assert!(response.status().is_success());
+    assert_eq!(
+        response.headers().get(reqwest::header::CONTENT_TYPE),
+        Some(&reqwest::header::HeaderValue::from_static("image/png"))
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("inline")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store, max-age=0")
+    );
+
+    sqlx::query("UPDATE file_objects SET detected_media_type = NULL WHERE node_id = $1")
+        .bind(node_id)
+        .execute(&db.pool)
+        .await?;
+    let (status, _) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    let detected: Option<String> =
+        sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
+            .bind(node_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(detected.as_deref(), Some("image/png"));
+
+    delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn non_image_bytes_do_not_receive_preview_urls() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let bytes = b"%PDF-1.7\n";
+    let upload = begin_upload_with_media_type(
+        &state,
+        &caller,
+        space_id,
+        root_id,
+        "document.png",
+        bytes.len(),
+        "image/png",
+    )
+    .await?;
+    put_upload(&upload, bytes).await?.error_for_status()?;
+    let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    assert_eq!(status, StatusCode::CREATED, "{completed}");
+    assert_eq!(completed["node"]["detected_media_type"], "application/pdf");
+    assert_eq!(completed["node"]["preview_available"], false);
+    let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
+
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
+    db.cleanup().await;
+    Ok(())
 }
 
 async fn put_upload(

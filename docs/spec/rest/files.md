@@ -11,6 +11,7 @@ POST /api/v1/spaces/{space_id}/file-uploads/{upload_id}/complete
 DELETE /api/v1/spaces/{space_id}/file-uploads/{upload_id}
 GET  /api/v1/spaces/{space_id}/files/{node_id}
 GET  /api/v1/spaces/{space_id}/files/{node_id}/content
+GET  /api/v1/spaces/{space_id}/files/{node_id}/preview-url
 ```
 
 공통 schema는 `../schemas.md`를 따른다.
@@ -18,6 +19,7 @@ GET  /api/v1/spaces/{space_id}/files/{node_id}/content
 ```ts
 GET  /files/{node_id}   -> { node: RestNode }
 GET  /files/{node_id}/content -> 302 presigned GET redirect
+GET  /files/{node_id}/preview-url -> { url, media_type, expires_at }
 ```
 
 ## Upload
@@ -27,7 +29,7 @@ Permission: `write`.
 1. `POST /file-uploads`에 `parent_node_id`, `name`, `byte_len`, `media_type`과 선택 metadata를 보낸다.
 2. `transfer.mode=single`이면 `transfer.url`에 `transfer.headers`를 적용해 전체 bytes를 PUT한다.
 3. `transfer.mode=multipart`이면 `/parts`에 part number를 최대 16개씩 보내 URL을 발급받는다. 각 응답의 `content_length`만큼 원본을 잘라 최대 4개를 병렬 PUT하고 응답 `ETag`를 기록한다. 실패한 part만 새 URL로 재시도한다.
-4. `/complete`를 호출한다. Multipart는 모든 `{ part_number, etag }`를 `completed_parts`로 보낸다. S3 `HEAD`로 실물 크기를 검증하고 Notegate quota 검사를 통과하면 File node가 생성된다.
+4. `/complete`를 호출한다. Multipart는 모든 `{ part_number, etag }`를 `completed_parts`로 보낸다. S3 `HEAD`로 실물 크기를 검증하고 Notegate quota 검사를 통과하면 File node가 생성된다. 암호화하지 않은 파일은 object 앞부분을 범위 조회해 실제 media type도 기록한다. 감지 실패는 upload 완료를 막지 않는다.
 
 Single PUT은 `If-None-Match: *`와 요청의 `Content-Length`를 서명하므로 같은 URL로 object를 덮어쓰거나 선언한 `byte_len`과 다른 크기를 업로드할 수 없다. 브라우저가 직접 설정할 수 없는 `Content-Length`는 응답 header 목록에서 제외하며 user agent가 body 길이로 자동 생성한다. Single과 multipart part presigned URL은 15분 동안 유효하다.
 
@@ -57,6 +59,8 @@ Permission: `read`.
 
 `GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Node metadata는 공통 metadata API로 수정한다.
 
+`media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다. 감지가 끝난 File node에는 서버가 계산한 `preview_available`도 포함된다. Inline preview 여부는 client 선언값이 아니라 감지 결과로 결정한다. 기존 파일처럼 아직 감지값이 없으면 첫 preview URL 요청에서 감지하고 기록한다.
+
 ## Download
 
 Permission: `read`.
@@ -66,4 +70,12 @@ Permission: `read`.
 - `encryption_mode=none`: 원본 bytes
 - `encryption_mode=client`: 클라이언트 암호문 bytes
 
-응답은 `Location`만 노출하며 S3 자격증명이나 물리 object key를 포함하지 않는다. Presigned GET은 `original_filename` 유무와 무관하게 항상 `Content-Disposition: attachment`를 서명에 포함해, client가 선언한 `media_type`이 저장소 origin에서 inline으로 렌더링되지 않도록 한다.
+응답은 `Location`만 노출한다. URL은 한 object의 GET으로 제한되고 15분 뒤 만료되며 S3 자격증명은 포함하지 않는다. Presigned GET은 `original_filename` 유무와 무관하게 항상 `Content-Disposition: attachment`를 서명에 포함해, client가 선언한 `media_type`이 저장소 origin에서 inline으로 렌더링되지 않도록 한다.
+
+## Image preview
+
+Permission: `read`.
+
+`GET /files/{node_id}/preview-url`은 10 MiB 이하이면서 서버가 실제 bytes에서 PNG, JPEG, WebP, AVIF, GIF로 감지한 파일에만 15분짜리 presigned GET URL을 반환한다. URL은 감지된 `Content-Type`과 `Content-Disposition: inline`을 서명에 포함한다. 응답은 `Cache-Control: private, no-store`로 중간 캐시와 browser HTTP cache에 저장하지 않는다.
+
+SVG, PDF, HTML, 알 수 없는 형식, client-encrypted file, 10 MiB 초과 file은 preview 대상이 아니며 `404`를 반환한다. 원본 download는 형식과 무관하게 기존 `/content` endpoint로 가능하다. Preview URL에는 Notegate credential이 포함되지 않는다.

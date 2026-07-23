@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use notegate_model::{AccountRef as ModelAccountRef, NodeKind};
+use notegate_model::{AccountRef as ModelAccountRef, FileEncryptionMode, NodeKind};
 use notegate_service::files::NodeView;
 use serde::Serialize;
 use serde_json::Value;
@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::AccountRef;
+use crate::file_preview::{is_preview_size_allowed, is_previewable_image_type};
 
 /// Node output: tree metadata, derived `path`, and attribution refs.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -30,6 +31,10 @@ pub struct NodeOut {
     pub line_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_media_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_filename: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,6 +70,20 @@ impl NodeOut {
                 .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
             line_count: view.text.as_ref().map(|text| text.line_count),
             media_type: view.file.as_ref().map(|file| file.media_type.clone()),
+            detected_media_type: view
+                .file
+                .as_ref()
+                .and_then(|file| file.detected_media_type.clone()),
+            preview_available: view.file.as_ref().and_then(|file| {
+                if file.encryption_mode != FileEncryptionMode::None
+                    || !is_preview_size_allowed(file.byte_len)
+                {
+                    return Some(false);
+                }
+                file.detected_media_type
+                    .as_deref()
+                    .map(is_previewable_image_type)
+            }),
             original_filename: view
                 .file
                 .as_ref()

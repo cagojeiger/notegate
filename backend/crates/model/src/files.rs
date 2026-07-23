@@ -261,6 +261,7 @@ pub struct TextStats {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileStats {
     pub media_type: String,
+    pub detected_media_type: Option<String>,
     pub byte_len: i64,
     pub original_filename: Option<String>,
     pub encryption_mode: FileEncryptionMode,

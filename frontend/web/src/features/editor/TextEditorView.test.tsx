@@ -6,7 +6,8 @@ import type { ReadTextResponse, RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
 import { TextEditorView } from "./TextEditorView";
-import { useMarkdownImageLoader, useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import { useMarkdownImageLoader } from "./useFilePreviewQueries";
 
 vi.mock("../../shared/lib/clipboard", () => ({
   copyText: vi.fn()
@@ -14,7 +15,10 @@ vi.mock("../../shared/lib/clipboard", () => ({
 
 vi.mock("./useEditorQueries", () => ({
   useTextDocument: vi.fn(),
-  useSaveTextDocument: vi.fn(),
+  useSaveTextDocument: vi.fn()
+}));
+
+vi.mock("./useFilePreviewQueries", () => ({
   useMarkdownImageLoader: vi.fn()
 }));
 
@@ -399,8 +403,7 @@ describe("TextEditorView", () => {
   });
 
   it("passes markdown image links through the editor image loader", async () => {
-    const objectUrls = installObjectUrlMock();
-    const loadMarkdownImage = vi.fn().mockResolvedValue({ status: "loaded", blob: new Blob(["image"], { type: "image/png" }) });
+    const loadMarkdownImage = vi.fn().mockResolvedValue({ status: "loaded", url: "https://storage.example/image.png" });
     vi.mocked(useTextDocument).mockReturnValue({
       data: { ...partialText, text: { ...partialText.text, content: "![Diagram](./assets/diagram.png)", truncated: false, next_start_line: null } },
       isLoading: false,
@@ -427,20 +430,15 @@ describe("TextEditorView", () => {
       onDeleteNode: vi.fn()
     };
 
-    try {
-      const view = render(<TextEditorView {...viewProps} />);
+    const view = render(<TextEditorView {...viewProps} />);
 
-      expect(await screen.findByRole("img", { name: "Diagram" })).toHaveAttribute("src", "blob:notegate-editor-test");
-      expect(useMarkdownImageLoader).toHaveBeenCalledWith(expect.objectContaining({ id: sourceNode.id, path: sourceNode.path }));
-      expect(loadMarkdownImage).toHaveBeenCalledWith("/docs/assets/diagram.png");
-      expect(loadMarkdownImage).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("img", { name: "Diagram" })).toHaveAttribute("src", "https://storage.example/image.png");
+    expect(useMarkdownImageLoader).toHaveBeenCalledWith(expect.objectContaining({ id: sourceNode.id, path: sourceNode.path }));
+    expect(loadMarkdownImage).toHaveBeenCalledWith("/docs/assets/diagram.png");
+    expect(loadMarkdownImage).toHaveBeenCalledTimes(1);
 
-      view.rerender(<TextEditorView {...viewProps} />);
-      await waitFor(() => expect(loadMarkdownImage).toHaveBeenCalledTimes(1));
-      view.unmount();
-    } finally {
-      objectUrls.restore();
-    }
+    view.rerender(<TextEditorView {...viewProps} />);
+    await waitFor(() => expect(loadMarkdownImage).toHaveBeenCalledTimes(1));
   });
 
   it("shows a placeholder for unsupported markdown images", async () => {
@@ -456,6 +454,26 @@ describe("TextEditorView", () => {
     renderTextEditorView();
 
     expect(await screen.findByText("Image cannot be displayed: Not image")).toBeInTheDocument();
+  });
+
+  it("shows a placeholder when the browser cannot decode a markdown image", async () => {
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, content: "![Broken](./broken.png)", truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    const loadMarkdownImage = vi.fn().mockResolvedValue({ status: "loaded", url: "https://storage.example/broken.png" });
+    vi.mocked(useMarkdownImageLoader).mockReturnValue(loadMarkdownImage);
+    renderTextEditorView();
+
+    fireEvent.error(await screen.findByRole("img", { name: "Broken" }));
+    await waitFor(() => expect(loadMarkdownImage).toHaveBeenCalledTimes(2));
+    expect(loadMarkdownImage).toHaveBeenLastCalledWith("/broken.png", { forceRefresh: true });
+    fireEvent.error(screen.getByRole("img", { name: "Broken" }));
+
+    expect(await screen.findByText("Could not load image: Broken")).toBeInTheDocument();
   });
 
   it("shows editor actions from the preview context menu", async () => {
@@ -549,24 +567,3 @@ describe("TextEditorView", () => {
   });
 
 });
-
-function installObjectUrlMock() {
-  const originalCreateObjectURL = URL.createObjectURL;
-  const originalRevokeObjectURL = URL.revokeObjectURL;
-  const createObjectURL = vi.fn().mockReturnValue("blob:notegate-editor-test");
-  const revokeObjectURL = vi.fn();
-
-  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
-  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
-
-  return {
-    createObjectURL,
-    revokeObjectURL,
-    restore: () => {
-      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectURL });
-      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
-      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectURL });
-      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
-    }
-  };
-}

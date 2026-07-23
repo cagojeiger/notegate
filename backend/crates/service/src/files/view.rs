@@ -149,6 +149,7 @@ fn stats_from_text(text: &TextObject) -> TextStats {
 fn stats_from_file(file: &FileObject) -> FileStats {
     FileStats {
         media_type: file.media_type.clone(),
+        detected_media_type: file.detected_media_type.clone(),
         byte_len: file.byte_len,
         original_filename: file.original_filename.clone(),
         encryption_mode: file.encryption_mode,

@@ -192,6 +192,7 @@ pub mod file {
             let file = row.into_file()?;
             Ok(FileStats {
                 media_type: file.media_type,
+                detected_media_type: file.detected_media_type,
                 byte_len: file.byte_len,
                 original_filename: file.original_filename,
                 encryption_mode: file.encryption_mode,
@@ -236,6 +237,7 @@ pub mod file {
                 file.node_id,
                 FileStats {
                     media_type: file.media_type,
+                    detected_media_type: file.detected_media_type,
                     byte_len: file.byte_len,
                     original_filename: file.original_filename,
                     encryption_mode: file.encryption_mode,

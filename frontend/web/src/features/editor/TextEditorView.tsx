@@ -12,7 +12,7 @@ import { inferTextFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { EditorNavigationActions, NodeActions } from "./types";
-import { useMarkdownImageLoader } from "./useEditorQueries";
+import { useMarkdownImageLoader } from "./useFilePreviewQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 import { useTextEditorSession } from "./useTextEditorSession";
 

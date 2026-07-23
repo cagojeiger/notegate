@@ -1,4 +1,12 @@
+import { Database, FileText, Folder, Image as ImageIcon, type LucideIcon } from "lucide-react";
+
 import type { RestNode, Space } from "../../api/types";
+
+export function nodeIcon(node: RestNode): LucideIcon {
+  if (node.kind === "folder") return Folder;
+  if (node.kind === "text") return FileText;
+  return node.preview_available === true ? ImageIcon : Database;
+}
 
 export function fmtBytes(bytes = 0): string {
   if (bytes < 1024) return `${bytes} B`;

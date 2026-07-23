@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "./client";
 import { ApiError } from "./errors";
-import { beginFileUpload, completeFileUpload, transferFile } from "./files";
+import {
+  beginFileUpload,
+  completeFileUpload,
+  filePreviewStaleTime,
+  getFilePreviewUrl,
+  transferFile
+} from "./files";
 import type { BeginFileUploadResponse } from "./types";
 
 const singleUpload: BeginFileUploadResponse = {
@@ -237,6 +243,26 @@ describe("files api", () => {
       .rejects.toMatchObject({ status: 409, kind: "conflict" });
 
     expect(api.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests the dedicated file preview URL", async () => {
+    const response = {
+      url: "https://objects.test/preview",
+      media_type: "image/png",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const api = { get: vi.fn().mockResolvedValue(response) } as unknown as ApiClient;
+
+    await expect(getFilePreviewUrl(api, "space-1", "file-1")).resolves.toEqual(response);
+    expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/preview-url");
+  });
+
+  it("derives preview cache duration from the server expiry with a safety window", () => {
+    const cachedAt = Date.parse("2026-06-13T00:00:00Z");
+
+    expect(filePreviewStaleTime("2026-06-13T00:15:00Z", cachedAt)).toBe(14 * 60_000);
+    expect(filePreviewStaleTime("invalid", cachedAt)).toBe(0);
+    expect(filePreviewStaleTime("2026-06-13T00:00:30Z", cachedAt)).toBe(0);
   });
 });
 

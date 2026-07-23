@@ -286,15 +286,31 @@ impl FilesService {
         caller_account_id: Uuid,
         space_id: Uuid,
         upload_id: Uuid,
+        detected_media_type: Option<&str>,
     ) -> ServiceResult<crate::files::FileView> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
         let (node, file) = self
             .store
-            .attach_object_upload(upload_id, space_id, caller_account_id)
+            .attach_object_upload(upload_id, space_id, caller_account_id, detected_media_type)
             .await?;
         let path = self.path_of(space_id, node.id).await?;
         Ok(file_view_at_path(node, path, file))
+    }
+
+    pub async fn record_detected_file_media_type(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+        detected_media_type: &str,
+    ) -> ServiceResult<()> {
+        self.authorize(space_id, caller_account_id, FileCommand::Read)
+            .await?;
+        self.store
+            .set_detected_file_media_type(space_id, node_id, detected_media_type)
+            .await?;
+        Ok(())
     }
 
     /// Replace a text's content (`write`/`save`). Requires write permission.

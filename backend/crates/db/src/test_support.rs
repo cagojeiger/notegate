@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0015_object_only_files.sql"),
     include_str!("../migrations/0016_default_user_tier.sql"),
     include_str!("../migrations/0017_multipart_object_uploads.sql"),
+    include_str!("../migrations/0018_detected_file_media_type.sql"),
 ];
 
 /// A throwaway schema-isolated database for one test.

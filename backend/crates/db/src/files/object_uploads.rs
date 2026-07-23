@@ -243,6 +243,7 @@ pub async fn attach(
     id: Uuid,
     space_id: Uuid,
     requested_by: Uuid,
+    detected_media_type: Option<&str>,
     limits: Limits,
 ) -> Result<(Node, FileObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
@@ -314,15 +315,16 @@ pub async fn attach(
 
     let file = sqlx::query_as::<_, FileRow>(&format!(
         "INSERT INTO file_objects \
-         (node_id, space_id, object_key, media_type, byte_len, original_filename, \
+         (node_id, space_id, object_key, media_type, detected_media_type, byte_len, original_filename, \
           encryption_mode, encryption_metadata) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          RETURNING {FILE_COLUMNS}"
     ))
     .bind(node.id)
     .bind(space_id)
     .bind(&upload.object_key)
     .bind(&upload.media_type)
+    .bind(detected_media_type)
     .bind(upload.declared_byte_len)
     .bind(&upload.original_filename)
     .bind(&upload.encryption_mode)
@@ -357,4 +359,23 @@ pub async fn attach(
 
     tx.commit().await.map_err(map_sqlx_error)?;
     Ok((node.into_node()?, file.into_file()?))
+}
+
+pub async fn set_detected_media_type(
+    pool: &PgPool,
+    space_id: Uuid,
+    node_id: Uuid,
+    detected_media_type: &str,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE file_objects SET detected_media_type = $3 \
+         WHERE space_id = $1 AND node_id = $2 AND detected_media_type IS NULL",
+    )
+    .bind(space_id)
+    .bind(node_id)
+    .bind(detected_media_type)
+    .execute(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
 }

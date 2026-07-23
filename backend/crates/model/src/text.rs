@@ -71,6 +71,7 @@ pub struct FileObject {
     pub space_id: Uuid,
     pub object_key: String,
     pub media_type: String,
+    pub detected_media_type: Option<String>,
     pub byte_len: i64,
     pub original_filename: Option<String>,
     pub encryption_mode: FileEncryptionMode,

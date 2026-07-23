@@ -76,7 +76,7 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         )
         .await?;
     let (file_node, _) = files
-        .attach_object_upload(upload_id, space_id, owner)
+        .attach_object_upload(upload_id, space_id, owner, None)
         .await?;
     let file_node_id = file_node.id;
 

@@ -119,6 +119,7 @@ pub struct FileRow {
     pub space_id: Uuid,
     pub object_key: String,
     pub media_type: String,
+    pub detected_media_type: Option<String>,
     pub byte_len: i64,
     pub original_filename: Option<String>,
     pub encryption_mode: String,
@@ -140,6 +141,7 @@ impl FileRow {
             space_id: self.space_id,
             object_key: self.object_key,
             media_type: self.media_type,
+            detected_media_type: self.detected_media_type,
             byte_len: self.byte_len,
             original_filename: self.original_filename,
             encryption_mode,
@@ -150,5 +152,5 @@ impl FileRow {
 }
 
 /// Selectable columns of `file_objects`, in [`FileRow`] order.
-pub const FILE_COLUMNS: &str = "node_id, space_id, object_key, media_type, byte_len, \
+pub const FILE_COLUMNS: &str = "node_id, space_id, object_key, media_type, detected_media_type, byte_len, \
      original_filename, encryption_mode, encryption_metadata, uploaded_at";

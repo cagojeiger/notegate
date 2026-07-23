@@ -347,6 +347,7 @@ file_objects
   space_id uuid not null references spaces(id) on delete cascade
   object_key text not null
   media_type text not null
+  detected_media_type text null
   byte_len bigint not null check 0..107374182400
   original_filename text null
   encryption_mode text not null check ('none','client')
@@ -354,7 +355,7 @@ file_objects
   uploaded_at timestamptz
 ```
 
-`File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. Notegate는 외부에 노출하지 않는 `object_key`만 저장한다.
+`File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. Notegate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
 
 Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 
@@ -379,6 +380,7 @@ Content FK invariant:
 ```text
 DB FK: text_objects/file_objects row -> matching nodes(id, space_id) ON DELETE CASCADE
 DB CHECK: file_objects.byte_len <= 107374182400
+DB CHECK: client-encrypted file_objects.detected_media_type IS NULL
 DB FK: file_objects.object_key -> object_storage_objects.object_key
 DB CHECK: file_objects.object_key IS NOT NULL
 Service transaction: object attach는 node, file_objects, usage counter, file change event, 원장 상태를 함께 commit

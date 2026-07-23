@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "../../api/ApiProvider";
 import { replaceMetadata } from "../../api/metadata";
 import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
+import { removeDeletedNodeQueries } from "../../api/queryInvalidation";
 import type { RestNode, Space } from "../../api/types";
 import { useInvalidateSpace } from "./useWorkbenchCache";
 
@@ -52,13 +52,8 @@ export function useDeleteNodeMutation(onDeleted: (node: RestNode) => void) {
   const invalidateSpace = useInvalidateSpace();
   return useMutation({
     mutationFn: ({ node, recursive }: { node: RestNode; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive).then(() => node),
-    onSuccess: (node) => {
-      void queryClient.cancelQueries({ queryKey: queryKeys.text(node.space_id, node.id) });
-      void queryClient.cancelQueries({ queryKey: queryKeys.file(node.space_id, node.id) });
-      void queryClient.cancelQueries({ queryKey: queryKeys.metadata(node.space_id, node.id) });
-      queryClient.removeQueries({ queryKey: queryKeys.text(node.space_id, node.id) });
-      queryClient.removeQueries({ queryKey: queryKeys.file(node.space_id, node.id) });
-      queryClient.removeQueries({ queryKey: queryKeys.metadata(node.space_id, node.id) });
+    onSuccess: async (node, { recursive }) => {
+      await removeDeletedNodeQueries(queryClient, node, recursive);
       onDeleted(node);
       invalidateSpace(node.space_id);
     }
