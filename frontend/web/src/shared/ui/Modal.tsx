@@ -18,6 +18,7 @@ export function Modal({ title, onClose, children, footer, width = "max-w-md" }: 
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -27,7 +28,7 @@ export function Modal({ title, onClose, children, footer, width = "max-w-md" }: 
     const currentDialog = dialogRef.current;
     if (!currentDialog) return;
     const dialog: HTMLDivElement = currentDialog;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousFocus = previousFocusRef.current;
 
     function focusableElements(): HTMLElement[] {
       return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
@@ -60,11 +61,15 @@ export function Modal({ title, onClose, children, footer, width = "max-w-md" }: 
       }
     }
 
-    (focusableElements()[0] ?? dialog).focus();
+    if (!dialog.contains(document.activeElement)) {
+      (focusableElements()[0] ?? dialog).focus();
+    }
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      if (previousFocus?.isConnected) previousFocus.focus();
+      window.setTimeout(() => {
+        if (!dialog.isConnected && previousFocus?.isConnected) previousFocus.focus();
+      }, 0);
     };
   }, []);
 
