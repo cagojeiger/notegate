@@ -57,6 +57,8 @@ export type RestNode = {
   byte_len?: number;
   line_count?: number;
   media_type?: string;
+  detected_media_type?: string;
+  preview_available?: boolean;
   original_filename?: string;
   encryption_mode?: "none" | "client";
   encryption_metadata?: Record<string, unknown>;
@@ -150,6 +152,12 @@ export type TextResponse = {
 
 export type FileResponse = {
   node: RestNode;
+};
+
+export type FilePreviewUrlResponse = {
+  url: string;
+  media_type: string;
+  expires_at: string;
 };
 
 export type BeginFileUploadResponse = {

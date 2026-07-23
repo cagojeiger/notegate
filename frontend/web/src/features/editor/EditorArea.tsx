@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from "react";
-import { Database, Folder } from "lucide-react";
+import { nodeIcon } from "../nodes/nodeDisplay";
 
 import type { RestNode, Space } from "../../api/types";
 import { MAX_EDITOR_GROUPS, type EditorGroup } from "../../stores/uiStore";
@@ -144,7 +144,7 @@ function NodeGroupContent({ active, groupId, node, mode, canWriteActiveSpace, ca
   if (node.kind === "text") {
     return <TextEditorView active={active} groupId={groupId} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onOpenMarkdownLink={onOpenMarkdownLink} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
   }
-  const Icon = node.kind === "file" ? Database : Folder;
+  const Icon = nodeIcon(node);
   return (
     <>
       <EditorGroupHeader

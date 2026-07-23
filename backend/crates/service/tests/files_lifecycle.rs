@@ -489,7 +489,9 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             &upload,
         )
         .await?;
-    let uploaded = files.complete_object_upload(owner, ws, upload_id).await?;
+    let uploaded = files
+        .complete_object_upload(owner, ws, upload_id, None)
+        .await?;
     assert_eq!(uploaded.node.path, "/projects/diagram.bin");
     assert_eq!(uploaded.file.byte_len, 11);
 

@@ -275,9 +275,38 @@ pub async fn complete_upload(
         }
     }
 
+    let detected_media_type = if upload.node_id.is_none() {
+        match crate::file_preview::detect_object_media_type(
+            &state.object_storage,
+            &upload.object_key,
+            upload.byte_len,
+            upload.encryption_mode,
+        )
+        .await
+        {
+            Ok(media_type) => media_type,
+            Err(error) => {
+                tracing::warn!(
+                    event = "object_storage.media_type_detection_failed",
+                    upload_id = %upload.id,
+                    space_id = %upload.space_id,
+                    ?error,
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let view = state
         .files
-        .complete_object_upload(account_id, upload.space_id, upload.id)
+        .complete_object_upload(
+            account_id,
+            upload.space_id,
+            upload.id,
+            detected_media_type.as_deref(),
+        )
         .await?;
     tracing::info!(
         event = "object_storage.file_attached",

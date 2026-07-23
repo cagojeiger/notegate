@@ -11,6 +11,7 @@ use tracing_subscriber::EnvFilter;
 
 mod auth;
 mod error;
+mod file_preview;
 mod identity;
 mod mcp;
 mod object_storage;

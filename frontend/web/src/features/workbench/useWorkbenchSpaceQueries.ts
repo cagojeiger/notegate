@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { queryKeys } from "../../api/queryKeys";
-import { invalidateAuditEvents } from "../../api/queryInvalidation";
+import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
 import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
 import type { Space, SpacesListResponse } from "../../api/types";
 import { buildSpaceSortOrderUpdates } from "../spaces/spaceReorder";
@@ -66,7 +66,8 @@ export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (spaceId: string) => deleteSpace(client, spaceId),
-    onSuccess: (_data, spaceId) => {
+    onSuccess: async (_data, spaceId) => {
+      await removeDeletedSpaceQueries(queryClient, spaceId);
       onDeleted(spaceId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
       invalidateAuditEvents(queryClient);

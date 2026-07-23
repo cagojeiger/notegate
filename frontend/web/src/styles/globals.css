@@ -277,6 +277,12 @@ select:focus-visible {
   padding: 0.35em 0.6em;
 }
 
+button.markdown-image-fallback {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
 .shiki {
   margin: 0;
   padding: 1rem;

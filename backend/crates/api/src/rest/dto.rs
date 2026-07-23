@@ -186,6 +186,7 @@ mod tests {
     fn file_stats() -> FileStats {
         FileStats {
             media_type: "image/png".to_owned(),
+            detected_media_type: Some("image/png".to_owned()),
             byte_len: 1024,
             original_filename: Some("photo.png".to_owned()),
             encryption_mode: FileEncryptionMode::Client,
@@ -236,6 +237,8 @@ mod tests {
         assert_eq!(out.byte_len, Some(1024));
         assert!(out.line_count.is_none());
         assert_eq!(out.media_type, Some("image/png".to_owned()));
+        assert_eq!(out.detected_media_type, Some("image/png".to_owned()));
+        assert_eq!(out.preview_available, Some(false));
         assert_eq!(out.original_filename, Some("photo.png".to_owned()));
         assert_eq!(out.encryption_mode, Some("client".to_owned()));
         assert_eq!(out.encryption_metadata, Some(json!({"iv": "abc"})));
@@ -254,6 +257,35 @@ mod tests {
         assert!(out.original_filename.is_none());
         assert!(out.encryption_metadata.is_none());
         assert_eq!(out.encryption_mode, Some("none".to_owned()));
+        assert_eq!(out.preview_available, Some(true));
+    }
+
+    #[test]
+    fn node_out_disables_preview_above_the_preview_size_limit() {
+        let mut view = base_view(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.byte_len = crate::file_preview::PREVIEW_MAX_BYTES + 1;
+        view.file = Some(stats);
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert_eq!(out.preview_available, Some(false));
+    }
+
+    #[test]
+    fn node_out_disables_oversized_legacy_preview_without_media_detection() {
+        let mut view = base_view(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.byte_len = crate::file_preview::PREVIEW_MAX_BYTES + 1;
+        stats.detected_media_type = None;
+        view.file = Some(stats);
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert_eq!(out.detected_media_type, None);
+        assert_eq!(out.preview_available, Some(false));
     }
 
     #[test]

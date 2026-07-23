@@ -41,10 +41,18 @@ async fn file_schema_is_object_only() -> Result<(), Box<dyn std::error::Error>> 
     )
     .fetch_one(&db.pool)
     .await?;
+    let detected_media_type_nullable: String = sqlx::query_scalar(
+        "SELECT is_nullable FROM information_schema.columns \
+         WHERE table_schema = current_schema() AND table_name = 'file_objects' \
+           AND column_name = 'detected_media_type'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
 
     assert!(!inline_table_exists);
     assert_eq!(legacy_columns, 0);
     assert_eq!(object_key_nullable, "NO");
+    assert_eq!(detected_media_type_nullable, "YES");
 
     db.cleanup().await;
     Ok(())
@@ -84,13 +92,13 @@ async fn object_upload_attach_is_idempotent_and_updates_usage_and_history()
     );
 
     let (node, file) = repo
-        .attach_object_upload(upload_id, space_id, account_id)
+        .attach_object_upload(upload_id, space_id, account_id, None)
         .await?;
     assert_eq!(file.object_key, object_key);
     assert_eq!(file.byte_len, byte_len);
 
     let (retried_node, retried_file) = repo
-        .attach_object_upload(upload_id, space_id, account_id)
+        .attach_object_upload(upload_id, space_id, account_id, None)
         .await?;
     assert_eq!(retried_node.id, node.id);
     assert_eq!(retried_file, file);
@@ -291,7 +299,7 @@ async fn subtree_soft_delete_queues_objects_and_purge_preserves_missed_requests(
         )
         .await?;
     let (node, _) = files
-        .attach_object_upload(upload_id, space_id, account_id)
+        .attach_object_upload(upload_id, space_id, account_id, None)
         .await?;
     files
         .soft_delete_node(space_id, folder.id, account_id, true)
@@ -369,7 +377,7 @@ async fn space_soft_delete_queues_all_attached_objects() -> Result<(), Box<dyn s
         )
         .await?;
     files
-        .attach_object_upload(upload_id, space_id, account_id)
+        .attach_object_upload(upload_id, space_id, account_id, None)
         .await?;
 
     SpaceRepo::new(db.pool.clone())

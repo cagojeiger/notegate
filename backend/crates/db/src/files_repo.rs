@@ -402,9 +402,32 @@ impl FilesRepo {
         id: Uuid,
         space_id: Uuid,
         requested_by: Uuid,
+        detected_media_type: Option<&str>,
     ) -> Result<(Node, FileObject)> {
-        crate::files::object_uploads::attach(&self.pool, id, space_id, requested_by, self.limits)
-            .await
+        crate::files::object_uploads::attach(
+            &self.pool,
+            id,
+            space_id,
+            requested_by,
+            detected_media_type,
+            self.limits,
+        )
+        .await
+    }
+
+    pub async fn set_detected_file_media_type(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+        detected_media_type: &str,
+    ) -> Result<()> {
+        crate::files::object_uploads::set_detected_media_type(
+            &self.pool,
+            space_id,
+            node_id,
+            detected_media_type,
+        )
+        .await
     }
 
     pub async fn save_text_content(

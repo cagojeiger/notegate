@@ -50,6 +50,7 @@ uuid.workspace = true
 thiserror.workspace = true
 schemars.workspace = true
 time.workspace = true
+infer.workspace = true
 utoipa = { version = "5.5.0", features = ["axum_extras", "chrono", "uuid", "url"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 

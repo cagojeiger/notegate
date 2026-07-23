@@ -3,6 +3,7 @@ import { ApiError } from "./errors";
 import type {
   BeginFileUploadResponse,
   CompletedFileUploadPart,
+  FilePreviewUrlResponse,
   FileResponse,
   PreparedFileUploadPart
 } from "./types";
@@ -25,6 +26,13 @@ type PreparedPartsResponse = {
 const PART_URL_BATCH_SIZE = 16;
 const PART_UPLOAD_CONCURRENCY = 4;
 const PART_UPLOAD_ATTEMPTS = 3;
+const FILE_PREVIEW_EXPIRY_SAFETY_MS = 60_000;
+
+export function filePreviewStaleTime(expiresAt: string, cachedAt: number): number {
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs) || cachedAt <= 0) return 0;
+  return Math.max(0, expiresAtMs - cachedAt - FILE_PREVIEW_EXPIRY_SAFETY_MS);
+}
 
 export function statFile(client: ApiClient, spaceId: string, nodeId: string): Promise<FileResponse> {
   return client.get<FileResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}`);
@@ -102,8 +110,8 @@ export function abortFileUpload(client: ApiClient, spaceId: string, uploadId: st
   return client.delete<void>(`/api/v1/spaces/${spaceId}/file-uploads/${uploadId}`);
 }
 
-export function fetchFileBlob(client: ApiClient, spaceId: string, nodeId: string): Promise<Blob> {
-  return client.fetchBlob(`/api/v1/spaces/${spaceId}/files/${nodeId}/content`);
+export function getFilePreviewUrl(client: ApiClient, spaceId: string, nodeId: string): Promise<FilePreviewUrlResponse> {
+  return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/preview-url`);
 }
 
 export function downloadFile(client: ApiClient, spaceId: string, nodeId: string, filename: string): Promise<void> {

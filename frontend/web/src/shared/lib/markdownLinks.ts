@@ -8,7 +8,8 @@ const SAFE_MARKDOWN_IMAGE_PROTOCOLS = new Set(["http", "https"]);
 export type MarkdownInternalLinkHandler = (path: string) => void | Promise<void>;
 export type MarkdownInvalidInternalLinkHandler = () => void;
 export type MarkdownLinkIntent = { kind: "external" } | { kind: "internal"; path: string } | { kind: "invalid" };
-export type MarkdownImageLoadResult = { status: "loaded"; blob: Blob } | { status: "not-found" | "unsupported" | "error" };
+export type MarkdownImageLoadResult = { status: "loaded"; url: string } | { status: "not-found" | "unsupported" | "error" };
+export type MarkdownImageLoadOptions = { forceRefresh?: boolean };
 export type MarkdownLinkPolicy = {
   sourcePath: string;
   onOpenInternalLink: MarkdownInternalLinkHandler;
@@ -16,7 +17,7 @@ export type MarkdownLinkPolicy = {
 };
 export type MarkdownImagePolicy = {
   sourcePath: string;
-  loadInternalImage: (path: string) => Promise<MarkdownImageLoadResult>;
+  loadInternalImage: (path: string, options?: MarkdownImageLoadOptions) => Promise<MarkdownImageLoadResult>;
 };
 
 export function safeMarkdownUrlTransform(value: string, key?: string, node?: { tagName?: string }): string {

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyText } from "../../shared/lib/clipboard";
 import { StructuredPreview } from "./StructuredPreview";
@@ -14,6 +14,10 @@ describe("TextPreview", () => {
   beforeEach(() => {
     vi.mocked(copyText).mockReset();
     vi.mocked(copyText).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("renders markdown as prose", async () => {
@@ -101,7 +105,8 @@ describe("TextPreview", () => {
     expect(link).not.toHaveAttribute("href");
   });
 
-  it("renders external markdown images without internal resolution", async () => {
+  it("loads external markdown images only after user confirmation", async () => {
+    const user = userEvent.setup();
     const loadInternalImage = vi.fn();
     render(
       <TextPreview
@@ -111,33 +116,123 @@ describe("TextPreview", () => {
       />
     );
 
+    expect(screen.queryByRole("img", { name: "Logo" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Load external image: Logo" }));
+
     const image = await screen.findByRole("img", { name: "Logo" });
     expect(image).toHaveAttribute("src", "https://example.com/logo.png");
+    expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
     expect(loadInternalImage).not.toHaveBeenCalled();
   });
 
+  it("requests internal image URLs only when the placeholder nears the viewport", async () => {
+    let revealImage = () => {};
+    let observedRoot: Element | Document | null | undefined;
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        observedRoot = options?.root;
+        revealImage = () => callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        );
+      }
+
+      observe() {}
+      disconnect() {}
+    });
+    const loadInternalImage = vi.fn().mockResolvedValue({ status: "loaded", url: "https://storage.example/logo.png" });
+    const { container } = render(
+      <TextPreview
+        name="index.md"
+        content={"![Logo](./Assets/logo.png)"}
+        markdownImagePolicy={{ sourcePath: "/Docs/index.md", loadInternalImage }}
+      />
+    );
+
+    expect(loadInternalImage).not.toHaveBeenCalled();
+    expect(observedRoot).toBe(container.querySelector(".overflow-y-auto"));
+    act(() => revealImage());
+
+    expect(await screen.findByRole("img", { name: "Logo" })).toHaveAttribute("src", "https://storage.example/logo.png");
+    expect(loadInternalImage).toHaveBeenCalledWith("/Docs/Assets/logo.png");
+  });
+
   it("resolves and renders internal markdown image files", async () => {
-    const objectUrls = installObjectUrlMock();
-    const loadInternalImage = vi.fn().mockResolvedValue({ status: "loaded", blob: new Blob(["image"], { type: "image/png" }) });
+    const loadInternalImage = vi.fn().mockResolvedValue({ status: "loaded", url: "https://storage.example/logo.png" });
+    render(
+      <TextPreview
+        name="index.md"
+        content={"![Logo](./Assets/logo.png)"}
+        markdownImagePolicy={{ sourcePath: "/Docs/index.md", loadInternalImage }}
+      />
+    );
 
-    try {
-      const view = render(
-        <TextPreview
-          name="index.md"
-          content={"![Logo](./Assets/logo.png)"}
-          markdownImagePolicy={{ sourcePath: "/Docs/index.md", loadInternalImage }}
-        />
-      );
+    const image = await screen.findByRole("img", { name: "Logo" });
+    expect(image).toHaveAttribute("src", "https://storage.example/logo.png");
+    expect(loadInternalImage).toHaveBeenCalledWith("/Docs/Assets/logo.png");
+  });
 
-      const image = await screen.findByRole("img", { name: "Logo" });
-      expect(image).toHaveAttribute("src", "blob:notegate-test");
-      expect(loadInternalImage).toHaveBeenCalledWith("/Docs/Assets/logo.png");
+  it("refreshes an internal image URL once after an object load failure", async () => {
+    const loadInternalImage = vi.fn()
+      .mockResolvedValueOnce({ status: "loaded", url: "https://storage.example/expired.png" })
+      .mockResolvedValueOnce({ status: "loaded", url: "https://storage.example/refreshed.png" });
+    render(
+      <TextPreview
+        name="index.md"
+        content={"![Logo](./Assets/logo.png)"}
+        markdownImagePolicy={{ sourcePath: "/Docs/index.md", loadInternalImage }}
+      />
+    );
 
-      view.unmount();
-      expect(objectUrls.revokeObjectURL).toHaveBeenCalledWith("blob:notegate-test");
-    } finally {
-      objectUrls.restore();
-    }
+    fireEvent.error(await screen.findByRole("img", { name: "Logo" }));
+    const refreshedImage = await screen.findByRole("img", { name: "Logo" });
+    await waitFor(() => expect(refreshedImage).toHaveAttribute("src", "https://storage.example/refreshed.png"));
+    expect(loadInternalImage).toHaveBeenNthCalledWith(1, "/Docs/Assets/logo.png");
+    expect(loadInternalImage).toHaveBeenNthCalledWith(2, "/Docs/Assets/logo.png", { forceRefresh: true });
+
+    fireEvent.error(refreshedImage);
+    expect(await screen.findByText("Could not load image: Logo")).toBeInTheDocument();
+    expect(loadInternalImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a fresh retry budget when the markdown image path changes", async () => {
+    let requestNumber = 0;
+    const loadInternalImage = vi.fn().mockImplementation(async () => ({
+      status: "loaded" as const,
+      url: `https://storage.example/image-${++requestNumber}.png`
+    }));
+    const markdownImagePolicy = { sourcePath: "/Docs/index.md", loadInternalImage };
+    const view = render(
+      <TextPreview
+        name="index.md"
+        content={"![Diagram](./Assets/a.png)"}
+        markdownImagePolicy={markdownImagePolicy}
+      />
+    );
+
+    fireEvent.error(await screen.findByRole("img", { name: "Diagram" }));
+    await waitFor(() => expect(loadInternalImage).toHaveBeenCalledTimes(2));
+    expect(loadInternalImage).toHaveBeenNthCalledWith(2, "/Docs/Assets/a.png", { forceRefresh: true });
+
+    view.rerender(
+      <TextPreview
+        name="index.md"
+        content={"![Diagram](./Assets/b.png)"}
+        markdownImagePolicy={markdownImagePolicy}
+      />
+    );
+    await waitFor(() => expect(loadInternalImage).toHaveBeenCalledTimes(3));
+    expect(loadInternalImage).toHaveBeenNthCalledWith(3, "/Docs/Assets/b.png");
+
+    view.rerender(
+      <TextPreview
+        name="index.md"
+        content={"![Diagram](./Assets/a.png)"}
+        markdownImagePolicy={markdownImagePolicy}
+      />
+    );
+    await waitFor(() => expect(loadInternalImage).toHaveBeenCalledTimes(4));
+    expect(loadInternalImage).toHaveBeenNthCalledWith(4, "/Docs/Assets/a.png");
   });
 
   it("keeps invalid internal-looking markdown images inside the preview", async () => {
@@ -395,27 +490,6 @@ function installSingleResizeObserverMock() {
     restore: () => {
       if (originalResizeObserver) globalThis.ResizeObserver = originalResizeObserver;
       else delete (globalThis as unknown as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
-    }
-  };
-}
-
-function installObjectUrlMock() {
-  const originalCreateObjectURL = URL.createObjectURL;
-  const originalRevokeObjectURL = URL.revokeObjectURL;
-  const createObjectURL = vi.fn().mockReturnValue("blob:notegate-test");
-  const revokeObjectURL = vi.fn();
-
-  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
-  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
-
-  return {
-    createObjectURL,
-    revokeObjectURL,
-    restore: () => {
-      if (originalCreateObjectURL) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreateObjectURL });
-      else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
-      if (originalRevokeObjectURL) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectURL });
-      else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
     }
   };
 }

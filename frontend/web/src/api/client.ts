@@ -7,7 +7,6 @@ export type ApiClient = {
   put<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
-  fetchBlob(path: string): Promise<Blob>;
   download(path: string, filename: string): Promise<void>;
 };
 
@@ -56,7 +55,6 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
     delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-    fetchBlob,
     async download(path: string, filename: string) {
       if (!getApiKey()) {
         downloadUrl(path, filename);

@@ -10,6 +10,7 @@ use aws_smithy_http_client::hyper_014::HyperClientBuilder;
 use notegate_core::S3Config;
 use notegate_core::limits::SINGLE_PUT_MAX_BYTES;
 use secrecy::ExposeSecret as _;
+use tokio::io::AsyncReadExt as _;
 
 use crate::error::ApiError;
 
@@ -286,6 +287,71 @@ impl ObjectStorage {
             .await
             .map_err(|error| unavailable("presign_get", error))?;
         Ok(presigned.uri().to_owned())
+    }
+
+    pub async fn presign_inline_get(
+        &self,
+        object_key: &str,
+        media_type: &str,
+        ttl: Duration,
+    ) -> Result<String, ObjectStorageError> {
+        let presigned = self
+            .public
+            .get_object()
+            .bucket(&self.bucket)
+            .key(object_key)
+            .response_cache_control("private, no-store, max-age=0")
+            .response_content_disposition("inline")
+            .response_content_type(media_type)
+            .presigned(presigning_config(ttl)?)
+            .await
+            .map_err(|error| unavailable("presign_inline_get", error))?;
+        Ok(presigned.uri().to_owned())
+    }
+
+    pub async fn read_prefix(
+        &self,
+        object_key: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, ObjectStorageError> {
+        let end = max_bytes
+            .checked_sub(1)
+            .ok_or(ObjectStorageError::Unavailable)?;
+        let output = self
+            .internal
+            .get_object()
+            .bucket(&self.bucket)
+            .key(object_key)
+            .range(format!("bytes=0-{end}"))
+            .send()
+            .await
+            .map_err(|error| unavailable("read_prefix", error))?;
+        if output
+            .content_length()
+            .is_some_and(|length| length > max_bytes as i64)
+        {
+            tracing::error!(
+                event = "object_storage.range_ignored",
+                object_key,
+                max_bytes,
+            );
+            return Err(ObjectStorageError::Unavailable);
+        }
+        let read_limit = u64::try_from(max_bytes)
+            .map_err(|_| ObjectStorageError::Unavailable)?
+            .saturating_add(1);
+        let mut bytes = Vec::with_capacity(max_bytes.min(8 * 1024));
+        output
+            .body
+            .into_async_read()
+            .take(read_limit)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|error| unavailable("read_prefix_body", error))?;
+        if bytes.len() > max_bytes {
+            return Err(ObjectStorageError::Unavailable);
+        }
+        Ok(bytes)
     }
 
     pub async fn delete(&self, object_key: &str) -> Result<(), ObjectStorageError> {
