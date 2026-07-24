@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode, Space } from "../../../api/types";
 import { createNodeDialog, deleteNodeDialog, renameNodeDialog, renameSpaceDialog, uploadFileDialog } from "./appDialogs";
 
 const space: Space = {

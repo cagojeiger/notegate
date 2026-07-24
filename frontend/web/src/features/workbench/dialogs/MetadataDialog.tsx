@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Button, Modal, TextAreaField } from "../../shared/ui";
+import { Button, Modal, TextAreaField } from "../../../shared/ui";
 import { dialogErrorMessage } from "./dialogErrors";
 import type { AppDialog } from "./dialogTypes";
 

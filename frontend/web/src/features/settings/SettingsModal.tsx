@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { Me } from "../api/types";
-import { canManageAgents } from "../auth/permissions";
-import { Modal, Tabs } from "../shared/ui";
-import { AccountTab } from "./settings/AccountTab";
-import { AgentsTab } from "./settings/AgentsTab";
-import { GeneralTab } from "./settings/GeneralTab";
-import { McpTab } from "./settings/McpTab";
-import { UsageTab } from "./settings/UsageTab";
+import type { Me } from "../../api/types";
+import { canManageAgents } from "../../auth/permissions";
+import { Modal, Tabs } from "../../shared/ui";
+import { AccountTab } from "./AccountTab";
+import { AgentsTab } from "./AgentsTab";
+import { GeneralTab } from "./GeneralTab";
+import { McpTab } from "./McpTab";
+import { UsageTab } from "./UsageTab";
 
 type Tab = "general" | "account" | "usage" | "agents" | "mcp";
 

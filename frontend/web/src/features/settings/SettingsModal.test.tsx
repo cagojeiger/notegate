@@ -2,8 +2,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiProvider } from "../api/ApiProvider";
-import type { Me, Space } from "../api/types";
+import { ApiProvider } from "../../api/ApiProvider";
+import type { Me, Space } from "../../api/types";
 import { SettingsModal } from "./SettingsModal";
 
 const page = { limit: 100, returned: 0, has_more: false, next_cursor: null };
