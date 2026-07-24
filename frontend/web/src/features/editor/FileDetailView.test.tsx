@@ -7,6 +7,11 @@ import { FileDetailView } from "./FileDetailView";
 import { useFileDownload } from "./useEditorQueries";
 import { useFilePreviewUrl } from "./useFilePreviewQueries";
 
+const { pdfPreviewMounted, pdfPreviewUnmounted } = vi.hoisted(() => ({
+  pdfPreviewMounted: vi.fn(),
+  pdfPreviewUnmounted: vi.fn()
+}));
+
 vi.mock("./useEditorQueries", () => ({
   useFileDownload: vi.fn()
 }));
@@ -15,8 +20,24 @@ vi.mock("./useFilePreviewQueries", () => ({
   useFilePreviewUrl: vi.fn()
 }));
 
+vi.mock("./PdfPreview", async () => {
+  const { useEffect, useRef } = await import("react");
+  return {
+    PdfPreview: ({ name, url }: { name: string; url: string }) => {
+      const initialUrl = useRef(url).current;
+      useEffect(() => {
+        pdfPreviewMounted(initialUrl);
+        return () => pdfPreviewUnmounted(initialUrl);
+      }, [initialUrl]);
+      return <section aria-label={`PDF preview: ${name}`} data-url={url} />;
+    }
+  };
+});
+
 describe("FileDetailView", () => {
   beforeEach(() => {
+    pdfPreviewMounted.mockClear();
+    pdfPreviewUnmounted.mockClear();
     vi.mocked(useFileDownload).mockReturnValue(vi.fn());
     vi.mocked(useFilePreviewUrl).mockReturnValue({ data: undefined } as never);
   });
@@ -51,7 +72,7 @@ describe("FileDetailView", () => {
     expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 
-  it("renders a verified PDF inside the file detail view", () => {
+  it("renders a verified PDF inside the file detail view", async () => {
     vi.mocked(useFilePreviewUrl).mockReturnValue({
       data: {
         url: "https://storage.example/document.pdf",
@@ -67,14 +88,29 @@ describe("FileDetailView", () => {
       detected_media_type: "application/pdf"
     })} />);
 
-    expect(screen.getByTitle("PDF preview: document.pdf")).toHaveAttribute(
-      "src",
+    expect(await screen.findByRole("region", { name: "PDF preview: document.pdf" })).toHaveAttribute(
+      "data-url",
       "https://storage.example/document.pdf"
     );
-    expect(screen.getByTitle("PDF preview: document.pdf")).toHaveAttribute(
-      "referrerpolicy",
-      "no-referrer"
-    );
+  });
+
+  it("remounts the PDF viewer when the presigned URL changes", async () => {
+    const node = fileNode({
+      name: "document.pdf",
+      path: "/document.pdf",
+      media_type: "application/pdf"
+    });
+    vi.mocked(useFilePreviewUrl).mockReturnValue(pdfPreviewQuery("https://storage.example/first.pdf"));
+    const view = render(<FileDetailView node={node} />);
+    await waitFor(() => expect(pdfPreviewMounted).toHaveBeenCalledWith("https://storage.example/first.pdf"));
+
+    vi.mocked(useFilePreviewUrl).mockReturnValue(pdfPreviewQuery("https://storage.example/refreshed.pdf"));
+    view.rerender(<FileDetailView node={node} />);
+
+    await waitFor(() => {
+      expect(pdfPreviewUnmounted).toHaveBeenCalledWith("https://storage.example/first.pdf");
+      expect(pdfPreviewMounted).toHaveBeenCalledWith("https://storage.example/refreshed.pdf");
+    });
   });
 
   it("shows an error when preview URL issuance fails", () => {
@@ -146,4 +182,14 @@ function fileNode(overrides: Partial<RestNode> = {}): RestNode {
     updated_at: "2026-06-13T00:00:00Z",
     ...overrides
   };
+}
+
+function pdfPreviewQuery(url: string) {
+  return {
+    data: {
+      url,
+      media_type: "application/pdf",
+      expires_at: "2026-06-13T00:15:00Z"
+    }
+  } as never;
 }

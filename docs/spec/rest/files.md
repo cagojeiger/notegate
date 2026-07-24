@@ -78,6 +78,6 @@ Permission: `read`.
 
 `GET /files/{node_id}/preview-url`은 10 MiB 이하이면서 서버가 실제 bytes에서 PNG, JPEG, WebP, AVIF, GIF 또는 PDF로 감지한 파일에만 15분짜리 presigned GET URL을 반환한다. URL은 감지된 `Content-Type`과 `Content-Disposition: inline`을 서명에 포함한다. 응답은 `Cache-Control: private, no-store`로 중간 캐시와 browser HTTP cache에 저장하지 않는다.
 
-Raster image는 image element로, PDF는 browser-native PDF viewer로 File detail 안에 표시한다. Markdown image syntax는 raster image만 허용하며 PDF를 image로 렌더링하지 않는다.
+Raster image는 image element로, PDF는 앱 내부의 lazy-loaded PDFium viewer로 File detail 안에 표시한다. PDF viewer는 외부 폰트나 CDN fallback을 요청하지 않으며 URL 만료나 렌더링 실패 시 preview URL을 한 번 재발급한다. Markdown image syntax는 raster image만 허용하며 PDF를 image로 렌더링하지 않는다.
 
 SVG, HTML, 알 수 없는 형식, client-encrypted file, 10 MiB 초과 file은 preview 대상이 아니며 `404`를 반환한다. 원본 download는 형식과 무관하게 기존 `/content` endpoint로 가능하다. Preview URL에는 NoteGate credential이 포함되지 않는다.

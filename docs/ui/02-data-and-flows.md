@@ -259,7 +259,7 @@ file   -> node detail + supported inline preview + file metadata/download
 - header에는 node name만 표시한다.
 - path와 metrics는 Inspector에 둔다.
 - 10 MiB 이하의 서버 검증 raster image와 PDF는 file detail 안에서 미리보기한다.
-- PDF는 browser-native viewer를 사용하며 실패하거나 지원하지 않는 경우 download action을 유지한다.
+- PDF는 앱 내부의 lazy-loaded PDFium viewer로 표시한다. 검색, 페이지 이동, 확대/축소, 인쇄, 전체화면을 제공하고 편집 도구와 외부 폰트 요청은 비활성화한다. 태블릿에서 처음 열 때 Inspector를 접어 최소 480 px의 읽기 폭을 확보하며 사용자는 title bar에서 다시 열 수 있다. URL 만료나 렌더링 실패 시 한 번 재발급한 뒤 download action을 유지한다.
 - text preview가 기본이다.
 - plain text는 단순 메모처럼 보여준다.
 - markdown은 GFM, code highlight, Mermaid를 지원한다.

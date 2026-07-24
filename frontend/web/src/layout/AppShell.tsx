@@ -10,6 +10,7 @@ import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { UploadProgressDock } from "../features/uploads/UploadProgressDock";
 import { useWorkbenchController } from "../features/workbench/useWorkbenchController";
+import { filePreviewKind } from "../shared/lib/filePreview";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 import { DialogHost } from "./dialogs/DialogHost";
 import { FullScreenStatus } from "./FullScreenStatus";
@@ -29,17 +30,48 @@ type HistoryScope = {
   initialSpaceId: string | null;
 };
 
+type TabletPdfInspectorState = {
+  nodeId: string;
+  open: boolean;
+};
+
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
+  const [tabletPdfInspector, setTabletPdfInspector] = useState<TabletPdfInspectorState | null>(null);
   const { actions } = workbench;
+  const tabletPdfId = workbench.isTablet
+    && workbench.activeNode?.kind === "file"
+    && filePreviewKind(workbench.activeNode.detected_media_type ?? workbench.activeNode.media_type) === "pdf"
+    ? workbench.activeNode.id
+    : null;
+  const tabletPdfInspectorOpen = tabletPdfId
+    ? tabletPdfInspector?.nodeId === tabletPdfId && tabletPdfInspector.open
+    : null;
+  const auxiliaryOpen = workbench.isMobile
+    ? workbench.mobileAuxOpen
+    : tabletPdfInspectorOpen ?? workbench.showAuxiliary;
   const layout = useWorkbenchLayout({
     isMobile: workbench.isMobile,
     primaryOpen: workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen,
-    auxiliaryOpen: workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary,
+    auxiliaryOpen,
     editorGroupCount: workbench.editorGroups.length
   });
   const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
+  const toggleAuxiliary = () => {
+    if (workbench.isMobile) {
+      actions.toggleMobileAux();
+      return;
+    }
+    if (tabletPdfId) {
+      setTabletPdfInspector((current) => ({
+        nodeId: tabletPdfId,
+        open: current?.nodeId === tabletPdfId ? !current.open : true
+      }));
+      return;
+    }
+    actions.toggleAuxiliary();
+  };
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
   };
@@ -75,12 +107,12 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         activeSpace={workbench.activeSpace}
         theme={workbench.theme}
         primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
-        auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+        auxiliaryOpen={auxiliaryOpen}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
         onToggleTheme={actions.toggleTheme}
         onTogglePrimarySidebar={workbench.isMobile ? actions.toggleMobileTree : actions.togglePrimarySidebar}
-        onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
+        onToggleAuxiliary={toggleAuxiliary}
       />
       <main className="relative flex min-h-0 flex-1 border-y border-seam">
         <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onReorderSpaces={actions.reorderSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />

@@ -105,9 +105,10 @@ for (const viewport of [
     }
     await page.getByRole("button", { name: pdfNode.name }).first().click();
 
-    const preview = page.getByTitle(`PDF preview: ${pdfNode.name}`);
+    const preview = page.getByRole("region", { name: `PDF preview: ${pdfNode.name}` });
     await expect(preview).toBeVisible();
-    await expect(preview).toHaveAttribute("src", /^data:application\/pdf;base64,/);
+    await expect(preview.locator("embedpdf-container")).toHaveAttribute("data-color-scheme", /light|dark/);
+    await expect(preview.locator('img[src^="blob:"]').first()).toBeVisible();
     const scroller = page.locator("[data-file-detail-scroll]");
     const [previewBox, scrollerBox] = await Promise.all([
       preview.boundingBox(),
@@ -115,7 +116,7 @@ for (const viewport of [
     ]);
     expect(previewBox).not.toBeNull();
     expect(scrollerBox).not.toBeNull();
-    expect(previewBox!.width).toBeGreaterThan(0);
+    expect(previewBox!.width).toBeGreaterThanOrEqual(viewport.name === "tablet" ? 480 : 320);
     expect(previewBox!.height).toBeGreaterThan(300);
     expect(previewBox!.x).toBeGreaterThanOrEqual(scrollerBox!.x);
     expect(previewBox!.x + previewBox!.width).toBeLessThanOrEqual(
@@ -133,13 +134,76 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
   const previewSvg = Buffer.from(
     '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="4000"><rect width="1200" height="4000" fill="#ffffff"/><path d="M80 120h1040v3760H80z" fill="none" stroke="#185fc4" stroke-width="16"/></svg>'
   ).toString("base64");
-  const previewPdf = Buffer.from("%PDF-1.4\n%%EOF\n").toString("base64");
+  const previewPdf = createPreviewPdf().toString("base64");
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const response = responseFor(url, previewSvg, previewPdf);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
   });
+}
+
+function createPreviewPdf(): Buffer {
+  const firstPage = [
+    "q",
+    "0.094 0.373 0.769 rg",
+    "72 648 468 72 re f",
+    "Q",
+    "BT",
+    "/F1 28 Tf",
+    "1 1 1 rg",
+    "96 684 Td",
+    "(NoteGate PDF Preview) Tj",
+    "ET",
+    "BT",
+    "/F1 16 Tf",
+    "0.09 0.13 0.17 rg",
+    "72 596 Td",
+    "(A polished in-app reading experience) Tj",
+    "0 -36 Td",
+    "/F1 12 Tf",
+    "(Search, zoom, page navigation, print, and fullscreen are built in.) Tj",
+    "0 -24 Td",
+    "(The viewer follows the NoteGate light and dark themes.) Tj",
+    "0 -24 Td",
+    "(PDF bytes stay inside the browser and no external fonts are requested.) Tj",
+    "ET"
+  ].join("\n");
+  const secondPage = [
+    "BT",
+    "/F1 24 Tf",
+    "0.09 0.13 0.17 rg",
+    "72 690 Td",
+    "(Page 2) Tj",
+    "0 -42 Td",
+    "/F1 13 Tf",
+    "(Page navigation is rendered by PDFium inside NoteGate.) Tj",
+    "ET"
+  ].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>",
+    `<< /Length ${Buffer.byteLength(firstPage, "latin1")} >>\nstream\n${firstPage}\nendstream`,
+    `<< /Length ${Buffer.byteLength(secondPage, "latin1")} >>\nstream\n${secondPage}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+  ];
+  const offsets = [0];
+  let pdf = "%PDF-1.4\n";
+
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf, "latin1"));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+
+  const xrefOffset = Buffer.byteLength(pdf, "latin1");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  pdf += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+  return Buffer.from(pdf, "latin1");
 }
 
 function responseFor(url: URL, previewSvg: string, previewPdf: string) {

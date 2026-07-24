@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -79,6 +79,35 @@ describe("AppShell history", () => {
   });
 });
 
+describe("AppShell PDF layout", () => {
+  it("folds the Inspector locally when a PDF opens on tablet", async () => {
+    const user = userEvent.setup();
+    const toggleAuxiliary = vi.fn();
+    mocks.useWorkbenchController.mockReturnValue(workbench({
+      activeNode: {
+        ...activeNode,
+        id: "pdf-1",
+        name: "document.pdf",
+        kind: "file",
+        media_type: "application/pdf"
+      },
+      auxiliaryOpen: true,
+      showAuxiliary: true,
+      isTablet: true,
+      actions: { toggleAuxiliary }
+    }));
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    const inspectorToggle = screen.getByRole("button", { name: "Toggle right sidebar" });
+    expect(inspectorToggle).toHaveAttribute("aria-pressed", "false");
+    await user.click(inspectorToggle);
+    await waitFor(() => expect(inspectorToggle).toHaveAttribute("aria-pressed", "true"));
+    expect(toggleAuxiliary).not.toHaveBeenCalled();
+  });
+});
+
 function me(kind: Me["account"]["kind"]): Me {
   return {
     account: { id: `${kind}-1`, kind, display_name: kind },
@@ -86,7 +115,7 @@ function me(kind: Me["account"]["kind"]): Me {
   };
 }
 
-function workbench() {
+function workbench(overrides: Record<string, unknown> = {}) {
   return {
     loading: false,
     error: null,
@@ -107,9 +136,11 @@ function workbench() {
     mobileAuxOpen: false,
     showAuxiliary: false,
     isMobile: false,
+    isTablet: false,
     settingsOpen: false,
     dialog: null,
-    actions: {}
+    actions: {},
+    ...overrides
   };
 }
 
