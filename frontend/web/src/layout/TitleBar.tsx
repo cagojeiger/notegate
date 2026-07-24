@@ -1,9 +1,9 @@
 import { Columns2, Columns3, Moon, PanelLeft, PanelRight, Square, Sun } from "lucide-react";
 
+import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
 import type { ThemeMode } from "../design/tokens";
-import { MAX_EDITOR_GROUPS } from "../shared/model/workbench";
-import { BrandAppIcon, IconButton } from "../shared/ui";
-import type { Space } from "../entities/space/model";
+import { IconButton } from "../shared/ui";
+import type { Space } from "../api/types";
 
 export function TitleBar({ activeSpace, theme, primarySidebarOpen, auxiliaryOpen, editorGroupCount, onAddGroup, onToggleTheme, onTogglePrimarySidebar, onToggleAuxiliary }: { activeSpace: Space | null; theme: ThemeMode; primarySidebarOpen: boolean; auxiliaryOpen: boolean; editorGroupCount: number; onAddGroup: () => void; onToggleTheme: () => void; onTogglePrimarySidebar: () => void; onToggleAuxiliary: () => void }) {
   const atMaxGroups = editorGroupCount >= MAX_EDITOR_GROUPS;
@@ -13,8 +13,8 @@ export function TitleBar({ activeSpace, theme, primarySidebarOpen, auxiliaryOpen
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-seam bg-surface px-3 max-md:h-[calc(3rem+env(safe-area-inset-top))] max-md:pt-[env(safe-area-inset-top)]">
       <div className="flex min-w-0 items-center gap-2">
-        <BrandAppIcon size={28} decorative />
-        <span className="font-semibold tracking-tight">NoteGate</span>
+        <div className="grid size-7 place-items-center rounded-xl bg-text text-sm font-semibold text-bg">N</div>
+        <span className="font-semibold tracking-tight">Notegate</span>
         {activeSpace ? <span className="truncate text-sm text-muted">/ {activeSpace.name}</span> : null}
       </div>
       <div className="flex items-center gap-2 text-muted">

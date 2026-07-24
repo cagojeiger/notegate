@@ -3,24 +3,27 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "../../api/errors";
 import { invalidateSpaceResources } from "../../api/queryInvalidation";
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
-import type { OpenedNodeRef } from "../../shared/model/workbench";
-import { useOpenedNodeQuery } from "./useEditorQueries";
+import { useNodeFreshness } from "./useEditorQueries";
 
-export function OpenedNodeGuard({ nodeRef, children }: { nodeRef: OpenedNodeRef; children: (node: RestNode) => ReactNode }) {
-  const nodeQuery = useOpenedNodeQuery(nodeRef);
+export function OpenedNodeGuard({ node, children }: { node: RestNode; children: (node: RestNode) => ReactNode }) {
+  const freshnessQuery = useNodeFreshness(node);
   const queryClient = useQueryClient();
+  const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
+  const latestNode = freshnessQuery.data ?? node;
 
   useEffect(() => {
-    const error = nodeQuery.error;
-    if (!(error instanceof ApiError) || error.status !== 404) return;
-    clearGroupsWithNode(nodeRef.nodeId);
-    invalidateSpaceResources(queryClient, nodeRef.spaceId);
-  }, [clearGroupsWithNode, nodeQuery.error, nodeRef.nodeId, nodeRef.spaceId, queryClient]);
+    if (freshnessQuery.data) updateGroupsNode(freshnessQuery.data);
+  }, [freshnessQuery.data, updateGroupsNode]);
 
-  if (nodeQuery.data) return <>{children(nodeQuery.data)}</>;
-  if (nodeQuery.isLoading) return <div className="p-10 text-muted">Loading node…</div>;
-  return <div className="p-10 text-danger">Could not load node.</div>;
+  useEffect(() => {
+    const error = freshnessQuery.error;
+    if (!(error instanceof ApiError) || error.status !== 404) return;
+    clearGroupsWithNode(node.id);
+    invalidateSpaceResources(queryClient, node.space_id);
+  }, [clearGroupsWithNode, freshnessQuery.error, node.id, node.space_id, queryClient]);
+
+  return <>{children(latestNode)}</>;
 }

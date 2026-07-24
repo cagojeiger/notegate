@@ -1,4 +1,4 @@
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 
 const SORT_ORDER_STEP = 1000;
 

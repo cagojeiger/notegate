@@ -2,8 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Space } from "../entities/space/model";
-import { MAX_EDITOR_GROUPS } from "../shared/model/workbench";
+import type { Space } from "../api/types";
+import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
 import { TitleBar } from "./TitleBar";
 
 const space: Space = {
@@ -38,7 +38,7 @@ describe("TitleBar", () => {
     const user = userEvent.setup();
     const props = renderTitleBar();
 
-    expect(screen.getByText("NoteGate")).toBeInTheDocument();
+    expect(screen.getByText("Notegate")).toBeInTheDocument();
     expect(screen.getByText("/ Personal")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Toggle left sidebar" }));

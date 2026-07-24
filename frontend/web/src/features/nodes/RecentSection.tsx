@@ -1,7 +1,6 @@
 import { FileText, List } from "lucide-react";
 
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
+import type { RestNode, Space } from "../../api/types";
 import { useRecentNodesQuery } from "./useNodeQueries";
 import { EmptyState } from "../../shared/ui";
 import { NodeRow } from "./NodeRow";

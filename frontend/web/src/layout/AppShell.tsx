@@ -1,25 +1,24 @@
 import { useState } from "react";
 
-import type { Me } from "../entities/account/model";
+import type { Me } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
+import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
-import { SettingsModal } from "../features/settings/SettingsModal";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { UploadProgressDock } from "../features/uploads/UploadProgressDock";
-import { DialogHost } from "../features/workbench/dialogs/DialogHost";
 import { useWorkbenchController } from "../features/workbench/useWorkbenchController";
-import { useViewportWidth } from "../shared/hooks/useMediaQuery";
-import { MAX_EDITOR_GROUPS } from "../shared/model/workbench";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
+import { DialogHost } from "./dialogs/DialogHost";
 import { FullScreenStatus } from "./FullScreenStatus";
+import { SettingsModal } from "./SettingsModal";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toast } from "./Toast";
-import { useWorkbenchPresentation } from "./useWorkbenchPresentation";
 import { AuxiliarySidebarFrame, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
+import { useWorkbenchLayout } from "./workbenchLayout";
 
 type AppShellProps = {
   me: Me;
@@ -33,24 +32,14 @@ type HistoryScope = {
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
-  const viewportWidth = useViewportWidth();
   const { actions } = workbench;
-  const presentation = useWorkbenchPresentation({
-    activeNode: workbench.activeNode,
-    auxiliaryOpen: workbench.showAuxiliary,
-    editorGroupCount: workbench.editorGroups.length,
+  const layout = useWorkbenchLayout({
     isMobile: workbench.isMobile,
-    mobileAuxiliaryOpen: workbench.mobileAuxOpen,
-    mobilePrimaryOpen: workbench.mobileTreeOpen,
-    onToggleAuxiliary: actions.toggleAuxiliary,
-    onToggleMobileAuxiliary: actions.toggleMobileAux,
-    onToggleMobilePrimary: actions.toggleMobileTree,
-    onTogglePrimary: actions.togglePrimarySidebar,
-    primaryOpen: workbench.primarySidebarOpen,
-    primaryWidth: workbench.primaryWidth,
-    viewportWidth
+    primaryOpen: workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen,
+    auxiliaryOpen: workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary,
+    editorGroupCount: workbench.editorGroups.length
   });
-  const { auxiliaryOpen, layout, mobileOverlayVisible, primaryOpen, toggleAuxiliary, togglePrimary } = presentation;
+  const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
   };
@@ -85,13 +74,13 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       <TitleBar
         activeSpace={workbench.activeSpace}
         theme={workbench.theme}
-        primarySidebarOpen={primaryOpen}
-        auxiliaryOpen={auxiliaryOpen}
+        primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
+        auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
         onToggleTheme={actions.toggleTheme}
-        onTogglePrimarySidebar={togglePrimary}
-        onToggleAuxiliary={toggleAuxiliary}
+        onTogglePrimarySidebar={workbench.isMobile ? actions.toggleMobileTree : actions.togglePrimarySidebar}
+        onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
       />
       <main className="relative flex min-h-0 flex-1 border-y border-seam">
         <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onReorderSpaces={actions.reorderSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />
@@ -150,8 +139,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       </main>
       <UploadProgressDock />
       <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />
-      <StatusBar activeSpace={workbench.activeSpace} saveState={workbench.saveState} />
-      <Toast message={workbench.toast} onClear={actions.clearToast} />
+      <StatusBar activeSpace={workbench.activeSpace} />
+      <Toast />
       {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
       {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />

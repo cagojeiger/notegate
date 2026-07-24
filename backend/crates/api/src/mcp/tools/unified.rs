@@ -165,7 +165,7 @@ pub struct CompletedPartInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunSequenceInput {
-    /// Ordered NoteGate commands to execute. Maximum 20.
+    /// Ordered Notegate commands to execute. Maximum 20.
     pub commands: Vec<SequenceCommand>,
 }
 

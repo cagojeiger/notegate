@@ -15,31 +15,26 @@ export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticat
   const [apiKey, setApiKey] = useState("");
   const [loginHint, setLoginHint] = useState<string | null>(null);
   const popupCheckRef = useRef<number | null>(null);
-  const loginPopupRef = useRef<Window | null>(null);
 
   const checkSession = useCallback(async (): Promise<boolean> => {
     const isAuthenticated = await onSessionAuthenticated();
     if (isAuthenticated && popupCheckRef.current !== null) {
       window.clearInterval(popupCheckRef.current);
       popupCheckRef.current = null;
-      loginPopupRef.current = null;
     }
     return isAuthenticated;
   }, [onSessionAuthenticated]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
-      if (popupCheckRef.current === null) return;
-      if (event.origin !== window.location.origin) return;
-      if (loginPopupRef.current && event.source !== loginPopupRef.current) return;
-      if ((event.data as { type?: string } | null)?.type !== "notegate:login-complete") return;
-      void checkSession();
+      if ((event.data as { type?: string } | null)?.type === "notegate:login-complete") {
+        void checkSession();
+      }
     }
     window.addEventListener("message", handleMessage);
     return () => {
       window.removeEventListener("message", handleMessage);
       if (popupCheckRef.current !== null) window.clearInterval(popupCheckRef.current);
-      loginPopupRef.current = null;
     };
   }, [checkSession]);
 
@@ -53,14 +48,12 @@ export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticat
 
   function beginPolling(popup: Window | null) {
     if (popupCheckRef.current !== null) window.clearInterval(popupCheckRef.current);
-    loginPopupRef.current = popup;
     popupCheckRef.current = window.setInterval(() => {
       void checkSession();
       try {
         if (popup && popup.closed) {
           if (popupCheckRef.current !== null) window.clearInterval(popupCheckRef.current);
           popupCheckRef.current = null;
-          loginPopupRef.current = null;
           void checkSession();
         }
       } catch {

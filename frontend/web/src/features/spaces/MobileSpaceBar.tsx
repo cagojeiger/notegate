@@ -1,6 +1,6 @@
 import { History, Plus, Settings } from "lucide-react";
 
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
 // Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 01-layout).
@@ -12,7 +12,6 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSp
           <button
             key={space.id}
             type="button"
-            aria-label={space.name}
             title={space.name}
             onClick={() => onSelectSpace(space)}
             className={`grid size-9 shrink-0 place-items-center rounded-xl text-sm font-semibold transition ${activeSpace?.id === space.id ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}

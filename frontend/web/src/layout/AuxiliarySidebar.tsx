@@ -1,4 +1,4 @@
-import type { RestNode } from "../entities/node/model";
+import type { RestNode } from "../api/types";
 import { Button, MetaRow, SectionHeader } from "../shared/ui";
 
 const EMPTY = "—";

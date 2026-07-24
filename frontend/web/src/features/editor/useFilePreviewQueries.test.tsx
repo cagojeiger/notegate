@@ -7,7 +7,7 @@ import { ApiError } from "../../api/errors";
 import { getFilePreviewUrl } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { useFilePreviewUrl, useMarkdownImageLoader } from "./useFilePreviewQueries";
 
 const mockClient = vi.hoisted(() => ({}));
@@ -162,27 +162,6 @@ describe("useMarkdownImageLoader", () => {
 
     await expect(result.current("/docs/image.png")).resolves.toEqual({ status: "unsupported" });
   });
-
-  it("does not render a verified PDF through Markdown image syntax", async () => {
-    vi.mocked(resolveNodePath).mockResolvedValue(fileNode({
-      id: "pdf-1",
-      path: "/docs/document.pdf",
-      media_type: "application/pdf",
-      detected_media_type: undefined,
-      preview_available: undefined
-    }));
-    vi.mocked(getFilePreviewUrl).mockResolvedValue({
-      ...previewUrl(),
-      media_type: "application/pdf"
-    });
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), {
-      wrapper: createQueryWrapper()
-    });
-
-    await expect(result.current("/docs/document.pdf")).resolves.toEqual({
-      status: "unsupported"
-    });
-  });
 });
 
 describe("useFilePreviewUrl", () => {
@@ -235,28 +214,6 @@ describe("useFilePreviewUrl", () => {
     await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
 
     expect(getFilePreviewUrl).toHaveBeenCalledTimes(1);
-  });
-
-  it("requests a preview URL for a server-verified PDF", async () => {
-    const pdfNode = fileNode({
-      id: "pdf-1",
-      name: "document.pdf",
-      path: "/docs/document.pdf",
-      media_type: "application/pdf",
-      detected_media_type: "application/pdf",
-      preview_available: true
-    });
-    vi.mocked(getFilePreviewUrl).mockResolvedValue({
-      ...previewUrl(),
-      media_type: "application/pdf"
-    });
-
-    const { result } = renderHook(() => useFilePreviewUrl(pdfNode), {
-      wrapper: createQueryWrapper()
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.media_type).toBe("application/pdf");
   });
 });
 

@@ -116,15 +116,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level moderate
-
-      - name: Check frontend dependency boundaries
-        run: pnpm --filter web check:boundaries
-
-      - name: Check theme contrast
-        run: pnpm --filter web check:contrast
-
       - name: Typecheck
         run: pnpm --filter web typecheck
 
@@ -256,9 +247,6 @@ jobs:
           NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_browser_identity.outputs.api_key }}
         run: pnpm --filter web test:e2e
 
-      - name: Test Lighthouse budgets
-        run: pnpm --filter web test:lighthouse
-
       - name: Upload browser diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -268,5 +256,3 @@ jobs:
           path: |
             browser-e2e/*.log
             frontend/web/test-results
-            frontend/web/.lighthouseci
-            frontend/web/lighthouse-reports

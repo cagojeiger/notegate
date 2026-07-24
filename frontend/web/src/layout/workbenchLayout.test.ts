@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_EDITOR_GROUPS } from "../shared/model/workbench";
-import { resolvePdfReadingLayout, resolveWorkbenchLayout } from "./workbenchLayout";
+import { MAX_EDITOR_GROUPS } from "../stores/uiStoreReducers";
+import { resolveWorkbenchLayout } from "./workbenchLayout";
 
 const base = {
   isMobile: false,
@@ -63,37 +63,5 @@ describe("resolveWorkbenchLayout", () => {
       editorPresentation: "focused",
       visibleEditorGroupCount: 1
     });
-  });
-
-  it("focuses one non-mobile editor when requested", () => {
-    expect(resolveWorkbenchLayout({ ...base, editorGroupCount: 3, focusEditor: true })).toMatchObject({
-      primaryMode: "docked",
-      auxiliaryMode: "docked",
-      editorPresentation: "focused",
-      visibleEditorGroupCount: 1
-    });
-  });
-});
-
-describe("resolvePdfReadingLayout", () => {
-  it.each([
-    [768, 300, 1, { foldAuxiliary: true, foldPrimary: true, focusEditor: false }],
-    [1024, 300, 1, { foldAuxiliary: true, foldPrimary: false, focusEditor: false }],
-    [1024, 520, 1, { foldAuxiliary: true, foldPrimary: true, focusEditor: false }],
-    [900, 300, 2, { foldAuxiliary: true, foldPrimary: false, focusEditor: true }],
-    [1440, 300, 3, { foldAuxiliary: false, foldPrimary: false, focusEditor: true }]
-  ])("preserves PDF reading width at %ipx with a %ipx tree and %i groups", (
-    viewportWidth,
-    primaryWidth,
-    editorGroupCount,
-    expected
-  ) => {
-    expect(resolvePdfReadingLayout({
-      auxiliaryOpen: true,
-      editorGroupCount,
-      primaryOpen: true,
-      primaryWidth,
-      viewportWidth
-    })).toEqual(expected);
   });
 });

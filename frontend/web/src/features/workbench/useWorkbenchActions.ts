@@ -1,8 +1,8 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
-import type { AppDialog } from "./dialogs/DialogHost";
+import type { Space, RestNode } from "../../api/types";
+import { clearDevApiKey } from "../../auth/session";
+import type { AppDialog } from "../../layout/dialogs/DialogHost";
 import { usePointerDrag } from "../../shared/hooks/usePointerDrag";
 import { useUiStore } from "../../stores/uiStore";
 import { clearPersistedWorkbenches } from "../../stores/workbenchStorage";
@@ -36,7 +36,6 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
   const toggleMobileAux = useUiStore((state) => state.toggleMobileAux);
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
-  const clearToast = useUiStore((state) => state.clearToast);
   const startPointerDrag = usePointerDrag();
 
   const spaceActions = useWorkbenchSpaceActions({ activeSpace, canCreateSpace, setDialog });
@@ -47,6 +46,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
     try {
       await logoutSession();
     } finally {
+      clearDevApiKey();
       onSignOut();
     }
   }
@@ -86,7 +86,6 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
       toggleMobileTree,
       toggleMobileAux,
       closeMobile,
-      clearToast,
       setSettingsOpen,
       setDialog,
       ...spaceActions,

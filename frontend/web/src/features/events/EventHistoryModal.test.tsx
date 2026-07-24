@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 import { EventHistoryModal } from "./EventHistoryModal";
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };

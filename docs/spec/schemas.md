@@ -81,7 +81,6 @@ type RestNode = {
   // file node에서만 존재
   media_type?: string
   detected_media_type?: string
-  // 10 MiB 이하의 검증된 raster image 또는 PDF
   preview_available?: boolean
   original_filename?: string
   encryption_mode?: "none" | "client"

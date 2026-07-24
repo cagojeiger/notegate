@@ -2,13 +2,13 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { EditorArea } from "./EditorArea";
-import type { EditorGroup } from "../../shared/model/workbench";
+import type { EditorGroup } from "../../stores/uiStore";
 
 function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> = {}) {
   const groups: EditorGroup[] = [
-    { id: 0, nodeRef: null, mode: "preview" },
-    { id: 1, nodeRef: null, mode: "preview" },
-    { id: 2, nodeRef: null, mode: "preview" }
+    { id: 0, node: null, mode: "preview" },
+    { id: 1, node: null, mode: "preview" },
+    { id: 2, node: null, mode: "preview" }
   ];
 
   return render(
@@ -55,14 +55,5 @@ describe("EditorArea", () => {
     expect(groups[0]).toHaveClass("hidden");
     expect(groups[1]).toHaveClass("flex");
     expect(groups[2]).toHaveClass("hidden");
-  });
-
-  it("clips editor groups to the workbench viewport", () => {
-    const { container } = renderEditorArea();
-
-    expect(container.firstElementChild).toHaveClass("min-h-0", "overflow-hidden");
-    for (const group of container.querySelectorAll("[data-editor-group]")) {
-      expect(group).toHaveClass("min-h-0", "overflow-hidden");
-    }
   });
 });

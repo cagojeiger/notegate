@@ -4,8 +4,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
 import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
-import type { SpacesListResponse } from "../../api/types";
-import type { Space } from "../../entities/space/model";
+import type { Space, SpacesListResponse } from "../../api/types";
 import { buildSpaceSortOrderUpdates } from "../spaces/spaceReorder";
 
 export function useSpacesQuery() {
@@ -19,20 +18,9 @@ export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
   return useMutation({
     mutationFn: (name: string) => createSpace(client, name),
     onSuccess: (space) => {
-      queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, (current) => {
-        if (!current) {
-          return {
-            spaces: [space],
-            page: { limit: 100, returned: 1, has_more: false, next_cursor: null }
-          };
-        }
-        if (current.spaces.some((candidate) => candidate.id === space.id)) return current;
-        const spaces = [...current.spaces, space].sort((left, right) => left.sort_order - right.sort_order);
-        return { ...current, spaces, page: { ...current.page, returned: spaces.length } };
-      });
-      onCreated(space);
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
       invalidateAuditEvents(queryClient);
+      onCreated(space);
     }
   });
 }

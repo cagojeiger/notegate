@@ -1,15 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { downloadFile } from "../../api/files";
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { resolveNodePath } from "../../api/nodes";
-import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
-import type { AppDialog } from "./dialogs/DialogHost";
-import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
+import type { RestNode, Space } from "../../api/types";
+import type { AppDialog } from "../../layout/dialogs/DialogHost";
+import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "../../layout/dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
 import { useUploadActions } from "../uploads/UploadProvider";
 import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation } from "./useWorkbenchQueries";
@@ -23,10 +20,10 @@ type NodeActionsProps = {
 
 export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog }: NodeActionsProps) {
   const client = useApiClient();
-  const queryClient = useQueryClient();
   const openInActiveGroup = useUiStore((state) => state.openInActiveGroup);
   const openInGroup = useUiStore((state) => state.openInGroup);
   const openInNewGroup = useUiStore((state) => state.openInNewGroup);
+  const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
   const addExpanded = useUiStore((state) => state.addExpanded);
   const setExpanded = useUiStore((state) => state.setExpanded);
@@ -38,21 +35,19 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
     openInActiveGroup(node);
   });
-  const updateNodeMutation = useUpdateNodeMutation();
-  const moveNodeMutation = useMoveNodeMutation();
+  const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
+  const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
-  const replaceMetadataMutation = useReplaceMetadataMutation();
+  const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
   const revealNodeInSpace = useRevealNode();
 
   async function openNode(node: RestNode) {
-    cacheOpenedNode(node);
     openInActiveGroup(node);
     closeMobile();
     await revealNodeBestEffort(node);
   }
 
   async function openNodeInNewGroup(node: RestNode) {
-    cacheOpenedNode(node);
     openInNewGroup(node);
     closeMobile();
     await revealNodeBestEffort(node);
@@ -76,7 +71,6 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     }
     if (!isCurrentMarkdownLinkSource(spaceId, groupId, sourceNode)) return;
 
-    cacheOpenedNode(node);
     openInGroup(groupId, node);
     closeMobile();
     await revealNodeBestEffort(node);
@@ -84,11 +78,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
 
   function isCurrentMarkdownLinkSource(spaceId: string, groupId: number, sourceNode: RestNode): boolean {
     const state = useUiStore.getState();
-    return state.activeSpaceId === spaceId && state.editorGroups.some((group) => group.id === groupId && group.nodeRef?.nodeId === sourceNode.id);
-  }
-
-  function cacheOpenedNode(node: RestNode) {
-    queryClient.setQueryData(queryKeys.node(node.space_id, node.id), node);
+    return state.activeSpaceId === spaceId && state.editorGroups.some((group) => group.id === groupId && group.node?.id === sourceNode.id);
   }
 
   async function revealNodeBestEffort(node: RestNode) {

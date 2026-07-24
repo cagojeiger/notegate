@@ -95,7 +95,7 @@ client  = client-side encrypted bytes
 
 ## Object storage access
 
-NoteGate object storage credential은 설정된 bucket의 `objects/*`에 대한 `GetObject`, `PutObject`, `DeleteObject`만 허용한다. Bucket 생성, bucket 목록 조회, 익명 접근과 관리 작업은 허용하지 않는다. MinIO root credential은 로컬 초기화에만 사용하며 NoteGate runtime에 전달하지 않는다.
+Notegate object storage credential은 설정된 bucket의 `objects/*`에 대한 `GetObject`, `PutObject`, `DeleteObject`만 허용한다. Bucket 생성, bucket 목록 조회, 익명 접근과 관리 작업은 허용하지 않는다. MinIO root credential은 로컬 초기화에만 사용하며 Notegate runtime에 전달하지 않는다.
 
 ## Deletion and anonymization
 

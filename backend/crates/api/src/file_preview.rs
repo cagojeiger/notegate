@@ -40,16 +40,9 @@ pub fn is_previewable_image_type(media_type: &str) -> bool {
     )
 }
 
-pub fn is_previewable_media_type(media_type: &str) -> bool {
-    is_previewable_image_type(media_type) || media_type == "application/pdf"
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        PREVIEW_MAX_BYTES, is_preview_size_allowed, is_previewable_image_type,
-        is_previewable_media_type,
-    };
+    use super::{PREVIEW_MAX_BYTES, is_preview_size_allowed, is_previewable_image_type};
 
     #[test]
     fn only_safe_raster_image_types_are_previewable() {
@@ -69,23 +62,6 @@ mod tests {
             "application/octet-stream",
         ] {
             assert!(!is_previewable_image_type(media_type), "{media_type}");
-        }
-    }
-
-    #[test]
-    fn safe_raster_images_and_pdf_are_previewable_media() {
-        for media_type in [
-            "image/png",
-            "image/jpeg",
-            "image/webp",
-            "image/avif",
-            "image/gif",
-            "application/pdf",
-        ] {
-            assert!(is_previewable_media_type(media_type), "{media_type}");
-        }
-        for media_type in ["image/svg+xml", "text/html", "application/octet-stream"] {
-            assert!(!is_previewable_media_type(media_type), "{media_type}");
         }
     }
 

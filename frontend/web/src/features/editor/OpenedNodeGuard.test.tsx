@@ -3,13 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
-import { useOpenedNodeQuery } from "./useEditorQueries";
+import { useNodeFreshness } from "./useEditorQueries";
 
 vi.mock("./useEditorQueries", () => ({
-  useOpenedNodeQuery: vi.fn()
+  useNodeFreshness: vi.fn()
 }));
 
 const node: RestNode = {
@@ -32,7 +32,7 @@ function renderGuard() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <OpenedNodeGuard nodeRef={{ nodeId: node.id, spaceId: node.space_id }}>{(freshNode) => <span>{freshNode.name}</span>}</OpenedNodeGuard>
+      <OpenedNodeGuard node={node}>{(freshNode) => <span>{freshNode.name}</span>}</OpenedNodeGuard>
     </QueryClientProvider>
   );
 }
@@ -43,20 +43,20 @@ describe("OpenedNodeGuard", () => {
     useUiStore.getState().openInActiveGroup(node);
   });
 
-  it("renders the authoritative node from React Query without copying it into UI state", () => {
-    vi.mocked(useOpenedNodeQuery).mockReturnValue({ data: { ...node, name: "renamed.md" }, error: null, isLoading: false, isError: false } as never);
+  it("updates opened editor groups with the latest node stat", async () => {
+    vi.mocked(useNodeFreshness).mockReturnValue({ data: { ...node, name: "renamed.md" }, error: null } as never);
 
     renderGuard();
 
     expect(screen.getByText("renamed.md")).toBeInTheDocument();
-    expect(useUiStore.getState().editorGroups[0].nodeRef).toEqual({ nodeId: node.id, spaceId: node.space_id });
+    await waitFor(() => expect(useUiStore.getState().editorGroups[0].node?.name).toBe("renamed.md"));
   });
 
   it("clears an opened editor group when the node was deleted elsewhere", async () => {
-    vi.mocked(useOpenedNodeQuery).mockReturnValue({ data: undefined, error: new ApiError("not found", 404), isLoading: false, isError: true } as never);
+    vi.mocked(useNodeFreshness).mockReturnValue({ data: undefined, error: new ApiError("not found", 404) } as never);
 
     renderGuard();
 
-    await waitFor(() => expect(useUiStore.getState().editorGroups[0].nodeRef).toBeNull());
+    await waitFor(() => expect(useUiStore.getState().editorGroups[0].node).toBeNull());
   });
 });

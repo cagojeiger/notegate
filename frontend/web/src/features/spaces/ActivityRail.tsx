@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Copy, History, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
@@ -85,7 +85,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
             >
               {dropBefore ? <span className="absolute left-2 right-2 -top-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}
               {active ? <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
-              <button type="button" aria-label={space.name} onClick={() => onSelectSpace(space)} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
+              <button type="button" onClick={() => onSelectSpace(space)} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
                 {space.name.slice(0, 1).toUpperCase()}
               </button>
               {dropAfter ? <span className="absolute left-2 right-2 -bottom-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}

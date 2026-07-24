@@ -9,7 +9,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::AccountRef;
-use crate::file_preview::{is_preview_size_allowed, is_previewable_media_type};
+use crate::file_preview::{is_preview_size_allowed, is_previewable_image_type};
 
 /// Node output: tree metadata, derived `path`, and attribution refs.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -82,7 +82,7 @@ impl NodeOut {
                 }
                 file.detected_media_type
                     .as_deref()
-                    .map(is_previewable_media_type)
+                    .map(is_previewable_image_type)
             }),
             original_filename: view
                 .file
