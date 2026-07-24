@@ -16,6 +16,7 @@ pub mod validation;
 mod events;
 mod format;
 mod mutate;
+mod preview;
 mod read;
 mod view;
 
@@ -33,6 +34,7 @@ pub use notegate_model::{
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
+pub use preview::{BatchPreviewCandidate, MAX_BATCH_PREVIEW_PATH_BYTES, MAX_BATCH_PREVIEW_PATHS};
 pub use target::{Target, parse_target};
 pub use validation::FilesValidationError;
 pub(crate) use view::hydrate_node_views;

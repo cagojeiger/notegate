@@ -3,9 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError } from "../../api/errors";
-import { getFilePreviewUrl } from "../../api/files";
-import { resolveNodePath } from "../../api/nodes";
+import { batchResolveFilePreviews, getFilePreviewUrl } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import { useFilePreviewUrl, useMarkdownImageLoader } from "./useFilePreviewQueries";
@@ -17,12 +15,9 @@ vi.mock("../../api/ApiProvider", () => ({
 }));
 
 vi.mock("../../api/files", () => ({
+  batchResolveFilePreviews: vi.fn(),
   filePreviewStaleTime: vi.fn(() => 60_000),
   getFilePreviewUrl: vi.fn()
-}));
-
-vi.mock("../../api/nodes", () => ({
-  resolveNodePath: vi.fn()
 }));
 
 const sourceNode: RestNode = {
@@ -43,124 +38,90 @@ const sourceNode: RestNode = {
 
 describe("useMarkdownImageLoader", () => {
   beforeEach(() => {
-    vi.mocked(resolveNodePath).mockReset();
+    vi.mocked(batchResolveFilePreviews).mockReset();
     vi.mocked(getFilePreviewUrl).mockReset();
   });
 
-  it("resolves markdown image paths and requests preview URLs", async () => {
-    const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png" });
-    vi.mocked(resolveNodePath).mockResolvedValue(imageNode);
-    vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
-
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
-
-    await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", url: "https://storage.example/preview" });
-    expect(resolveNodePath).toHaveBeenCalledWith(mockClient, "space-1", "/docs/assets/diagram.png");
-    expect(getFilePreviewUrl).toHaveBeenCalledWith(mockClient, "space-1", "image-1");
-  });
-
-  it("reuses cached node resolution and preview URLs for repeated markdown image loads", async () => {
-    const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png" });
-    vi.mocked(resolveNodePath).mockResolvedValue(imageNode);
-    vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
-
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
-
-    await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", url: "https://storage.example/preview" });
-    await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", url: "https://storage.example/preview" });
-    expect(resolveNodePath).toHaveBeenCalledTimes(1);
-    expect(getFilePreviewUrl).toHaveBeenCalledTimes(1);
-  });
-
-  it("refreshes a cached preview URL when an image load asks for recovery", async () => {
-    const imageNode = fileNode({ id: "image-1", path: "/docs/assets/diagram.png", media_type: "image/png" });
-    vi.mocked(resolveNodePath).mockResolvedValue(imageNode);
-    vi.mocked(getFilePreviewUrl)
-      .mockResolvedValueOnce(previewUrl())
-      .mockResolvedValueOnce({ ...previewUrl(), url: "https://storage.example/refreshed" });
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
-
-    await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({
-      status: "loaded",
-      url: "https://storage.example/preview"
+  it("loads a markdown image through the batch endpoint", async () => {
+    vi.mocked(batchResolveFilePreviews).mockResolvedValue({
+      results: [batchPreview("/docs/assets/diagram.png")]
     });
-    await expect(result.current("/docs/assets/diagram.png", { forceRefresh: true })).resolves.toEqual({
+
+    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
+
+    await expect(result.current("/docs/assets/diagram.png")).resolves.toEqual({ status: "loaded", url: "https://storage.example/preview" });
+    expect(batchResolveFilePreviews).toHaveBeenCalledWith(
+      mockClient,
+      "space-1",
+      ["/docs/assets/diagram.png"]
+    );
+  });
+
+  it("coalesces twenty near-viewport images into one request", async () => {
+    const paths = Array.from({ length: 20 }, (_, index) => `/docs/image-${index}.png`);
+    vi.mocked(batchResolveFilePreviews).mockImplementation(async (_client, _spaceId, requested) => ({
+      results: requested.map((path, index) => batchPreview(path, `image-${index}`))
+    }));
+
+    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
+
+    await Promise.all(paths.map((path) => result.current(path)));
+
+    expect(batchResolveFilePreviews).toHaveBeenCalledTimes(1);
+    expect(batchResolveFilePreviews).toHaveBeenCalledWith(mockClient, "space-1", paths);
+  });
+
+  it("reuses a cached batch result for repeated markdown image loads", async () => {
+    vi.mocked(batchResolveFilePreviews).mockResolvedValue({
+      results: [batchPreview("/docs/assets/diagram.png")]
+    });
+    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
+
+    await result.current("/docs/assets/diagram.png");
+    await result.current("/docs/assets/diagram.png");
+
+    expect(batchResolveFilePreviews).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes a cached batch result when image recovery is requested", async () => {
+    vi.mocked(batchResolveFilePreviews)
+      .mockResolvedValueOnce({ results: [batchPreview("/docs/image.png")] })
+      .mockResolvedValueOnce({
+        results: [{
+          ...batchPreview("/docs/image.png"),
+          url: "https://storage.example/refreshed"
+        }]
+      });
+    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
+
+    await result.current("/docs/image.png");
+    await expect(result.current("/docs/image.png", { forceRefresh: true })).resolves.toEqual({
       status: "loaded",
       url: "https://storage.example/refreshed"
     });
-    expect(resolveNodePath).toHaveBeenCalledTimes(1);
-    expect(getFilePreviewUrl).toHaveBeenCalledTimes(2);
+    expect(batchResolveFilePreviews).toHaveBeenCalledTimes(2);
   });
 
-  it("returns not-found when the image path does not resolve", async () => {
-    vi.mocked(resolveNodePath).mockRejectedValue(new ApiError("missing", 404));
-
+  it("maps per-path missing, unsupported, and error results", async () => {
+    vi.mocked(batchResolveFilePreviews).mockImplementation(async (_client, _spaceId, paths) => ({
+      results: paths.map((path) => ({
+        path,
+        status: path.includes("missing")
+          ? "not_found" as const
+          : path.includes("unsupported")
+            ? "unsupported" as const
+            : "error" as const,
+        node_id: null,
+        media_type: null,
+        url: null,
+        expires_at: null
+      }))
+    }));
     const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
 
-    await expect(result.current("/docs/assets/missing.png")).resolves.toEqual({ status: "not-found" });
-    expect(getFilePreviewUrl).not.toHaveBeenCalled();
-  });
-
-  it("does not download resolved nodes that are not displayable images", async () => {
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
-
-    vi.mocked(resolveNodePath).mockResolvedValueOnce({ ...sourceNode, path: "/docs/note.md" });
-    await expect(result.current("/docs/note.md")).resolves.toEqual({ status: "unsupported" });
-
-    vi.mocked(resolveNodePath).mockResolvedValueOnce(fileNode({
-      id: "text-file-1",
-      path: "/docs/file.txt",
-      media_type: "text/plain",
-      detected_media_type: "text/plain",
-      preview_available: false
-    }));
-    await expect(result.current("/docs/file.txt")).resolves.toEqual({ status: "unsupported" });
-
-    vi.mocked(resolveNodePath).mockResolvedValueOnce(fileNode({
-      id: "fake-image-1",
-      path: "/docs/document.png",
-      media_type: "image/png",
-      detected_media_type: "application/pdf",
-      preview_available: false
-    }));
-    await expect(result.current("/docs/document.png")).resolves.toEqual({ status: "unsupported" });
-
-    vi.mocked(resolveNodePath).mockResolvedValueOnce(fileNode({ id: "encrypted-1", path: "/docs/secret.png", encryption_mode: "client", media_type: "image/png" }));
-    await expect(result.current("/docs/secret.png")).resolves.toEqual({ status: "unsupported" });
-
-    vi.mocked(resolveNodePath).mockResolvedValueOnce(fileNode({ id: "other-space-1", space_id: "space-2", path: "/docs/other.png", media_type: "image/png" }));
-    await expect(result.current("/docs/other.png")).resolves.toEqual({ status: "unsupported" });
-
-    expect(getFilePreviewUrl).not.toHaveBeenCalled();
-  });
-
-  it("uses detected image bytes even when the client declared another media type", async () => {
-    vi.mocked(resolveNodePath).mockResolvedValue(fileNode({
-      id: "detected-image-1",
-      media_type: "application/octet-stream",
-      detected_media_type: "image/webp",
-      preview_available: true
-    }));
-    vi.mocked(getFilePreviewUrl).mockResolvedValue({ ...previewUrl(), media_type: "image/webp" });
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
-
-    await expect(result.current("/docs/image.webp")).resolves.toEqual({
-      status: "loaded",
-      url: "https://storage.example/preview"
-    });
-    expect(getFilePreviewUrl).toHaveBeenCalledTimes(1);
-  });
-
-  it("reports an unsupported image when server verification rejects it", async () => {
-    vi.mocked(resolveNodePath).mockResolvedValue(fileNode({
-      media_type: "text/plain",
-      detected_media_type: undefined,
-      preview_available: undefined
-    }));
-    vi.mocked(getFilePreviewUrl).mockRejectedValue(new ApiError("not previewable", 404));
-    const { result } = renderHook(() => useMarkdownImageLoader(sourceNode), { wrapper: createQueryWrapper() });
-
-    await expect(result.current("/docs/image.png")).resolves.toEqual({ status: "unsupported" });
+    await expect(result.current("/docs/missing.png")).resolves.toEqual({ status: "not-found" });
+    await expect(result.current("/docs/unsupported.txt")).resolves.toEqual({ status: "unsupported" });
+    await expect(result.current("/docs/error.png")).resolves.toEqual({ status: "error" });
   });
 });
 
@@ -189,10 +150,6 @@ describe("useFilePreviewUrl", () => {
       }],
       pageParams: [null]
     });
-    queryClient.setQueryData(
-      queryKeys.markdownImageNode("space-1", "/docs/image.png"),
-      imageNode
-    );
 
     const { result } = renderHook(() => useFilePreviewUrl(imageNode), {
       wrapper: createQueryWrapper(queryClient)
@@ -208,8 +165,6 @@ describe("useFilePreviewUrl", () => {
       detected_media_type: "image/png",
       preview_available: true
     });
-    expect(queryClient.getQueryData(queryKeys.markdownImageNode("space-1", "/docs/image.png")))
-      .toMatchObject({ detected_media_type: "image/png", preview_available: true });
   });
 
   it("shares a preview URL across stale node snapshots of the same immutable file", async () => {
@@ -257,6 +212,17 @@ function previewUrl() {
   return {
     url: "https://storage.example/preview",
     media_type: "image/png",
+    expires_at: "2026-06-13T00:15:00Z"
+  };
+}
+
+function batchPreview(path: string, nodeId = "image-1") {
+  return {
+    path,
+    status: "ready" as const,
+    node_id: nodeId,
+    media_type: "image/png",
+    url: "https://storage.example/preview",
     expires_at: "2026-06-13T00:15:00Z"
   };
 }

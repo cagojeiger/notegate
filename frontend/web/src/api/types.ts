@@ -160,6 +160,19 @@ export type FilePreviewUrlResponse = {
   expires_at: string;
 };
 
+export type BatchFilePreviewItem = {
+  path: string;
+  status: "ready" | "not_found" | "unsupported" | "error";
+  node_id: string | null;
+  media_type: string | null;
+  url: string | null;
+  expires_at: string | null;
+};
+
+export type BatchFilePreviewResponse = {
+  results: BatchFilePreviewItem[];
+};
+
 export type BeginFileUploadResponse = {
   upload_id: string;
   transfer: SingleFileUploadTransfer | MultipartFileUploadTransfer;

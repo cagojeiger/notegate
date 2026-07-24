@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
@@ -6,11 +6,11 @@ import type { ApiClient } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { updateNodeCaches } from "../../api/nodeCache";
-import { resolveNodePath } from "../../api/nodes";
 import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../api/types";
+import type { BatchFilePreviewItem, RestNode } from "../../api/types";
 import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
+import { createMarkdownPreviewBatcher } from "./markdownPreviewBatcher";
 
 const FILE_PREVIEW_CACHE_GC_MS = 15 * 60 * 1_000;
 
@@ -26,38 +26,26 @@ export function useFilePreviewUrl(node: RestNode) {
 export function useMarkdownImageLoader(sourceNode: RestNode) {
   const client = useApiClient();
   const queryClient = useQueryClient();
+  const batchLoad = useMemo(
+    () => createMarkdownPreviewBatcher(client, queryClient, sourceNode.space_id),
+    [client, queryClient, sourceNode.space_id]
+  );
 
   return useCallback(async (path: string, options: MarkdownImageLoadOptions = {}): Promise<MarkdownImageLoadResult> => {
-    let imageNode: RestNode;
     try {
-      imageNode = await queryClient.fetchQuery({
-        queryKey: queryKeys.markdownImageNode(sourceNode.space_id, path),
-        queryFn: () => resolveNodePath(client, sourceNode.space_id, path),
-        retry: false,
-        staleTime: POLLING.spaceChangesMs
-      });
-    } catch (error) {
-      return { status: error instanceof ApiError && error.status === 404 ? "not-found" : "error" };
+      const query = markdownPreviewQueryOptions(
+        sourceNode.space_id,
+        path,
+        batchLoad
+      );
+      const result = await queryClient.fetchQuery(
+        options.forceRefresh ? { ...query, staleTime: 0 } : query
+      );
+      return markdownImageResult(result);
+    } catch {
+      return { status: "error" };
     }
-
-    if (!isRenderableMarkdownImage(sourceNode.space_id, imageNode)) {
-      return { status: "unsupported" };
-    }
-
-    try {
-      const query = filePreviewQueryOptions(client, queryClient, imageNode);
-      const preview = await queryClient.fetchQuery(options.forceRefresh ? { ...query, staleTime: 0 } : query);
-      return { status: "loaded", url: preview.url };
-    } catch (error) {
-      return {
-        status: error instanceof ApiError && error.status === 404 ? "unsupported" : "error"
-      };
-    }
-  }, [client, queryClient, sourceNode.space_id]);
-}
-
-function isRenderableMarkdownImage(sourceSpaceId: string, imageNode: RestNode): boolean {
-  return imageNode.space_id === sourceSpaceId && isImagePreviewCandidate(imageNode);
+  }, [batchLoad, queryClient, sourceNode.space_id]);
 }
 
 function isImagePreviewCandidate(node: RestNode): boolean {
@@ -88,6 +76,35 @@ function filePreviewQueryOptions(client: ApiClient, queryClient: QueryClient, no
       query.state.dataUpdatedAt
     )
   });
+}
+
+function markdownPreviewQueryOptions(
+  spaceId: string,
+  path: string,
+  batchLoad: (path: string) => Promise<BatchFilePreviewItem>
+) {
+  return queryOptions({
+    queryKey: queryKeys.markdownImagePreview(spaceId, path),
+    queryFn: () => batchLoad(path),
+    retry: false,
+    gcTime: FILE_PREVIEW_CACHE_GC_MS,
+    staleTime: (query) => {
+      const result = query.state.data;
+      if (result?.status === "ready" && result.expires_at) {
+        return filePreviewStaleTime(result.expires_at, query.state.dataUpdatedAt);
+      }
+      return POLLING.spaceChangesMs;
+    }
+  });
+}
+
+function markdownImageResult(result: BatchFilePreviewItem): MarkdownImageLoadResult {
+  if (result.status === "ready" && result.url) {
+    return { status: "loaded", url: result.url };
+  }
+  if (result.status === "not_found") return { status: "not-found" };
+  if (result.status === "unsupported") return { status: "unsupported" };
+  return { status: "error" };
 }
 
 function refreshDiscoveredPreviewState(

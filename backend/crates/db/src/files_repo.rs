@@ -110,6 +110,14 @@ impl FilesRepo {
         queries::search::resolve_scope_node(&self.pool, space_id, path).await
     }
 
+    pub async fn resolve_nodes_by_paths(
+        &self,
+        space_id: Uuid,
+        paths: &[String],
+    ) -> Result<Vec<(usize, String, Node)>> {
+        queries::search::resolve_nodes_by_paths(&self.pool, space_id, paths).await
+    }
+
     pub async fn has_children(&self, space_id: Uuid, node_id: Uuid) -> Result<bool> {
         queries::node::has_children(&self.pool, space_id, node_id).await
     }
@@ -181,6 +189,14 @@ impl FilesRepo {
         node_id: Uuid,
     ) -> Result<Option<(Node, FileObject)>> {
         queries::file::find_file(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn find_files(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, FileObject>> {
+        queries::file::find_files(&self.pool, space_id, node_ids).await
     }
 
     pub async fn paged_children(

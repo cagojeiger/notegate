@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./client";
 import { ApiError } from "./errors";
 import {
+  batchResolveFilePreviews,
   beginFileUpload,
   completeFileUpload,
   filePreviewStaleTime,
@@ -255,6 +256,30 @@ describe("files api", () => {
 
     await expect(getFilePreviewUrl(api, "space-1", "file-1")).resolves.toEqual(response);
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/preview-url");
+  });
+
+  it("resolves ordered file previews in one request", async () => {
+    const response = {
+      results: [
+        {
+          path: "/assets/logo.png",
+          status: "ready" as const,
+          node_id: "file-1",
+          media_type: "image/png",
+          url: "https://objects.test/logo",
+          expires_at: "2026-06-13T00:15:00Z"
+        }
+      ]
+    };
+    const api = { post: vi.fn().mockResolvedValue(response) } as unknown as ApiClient;
+
+    await expect(
+      batchResolveFilePreviews(api, "space-1", ["/assets/logo.png"])
+    ).resolves.toEqual(response);
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/spaces/space-1/file-previews:batchResolve",
+      { paths: ["/assets/logo.png"] }
+    );
   });
 
   it("derives preview cache duration from the server expiry with a safety window", () => {

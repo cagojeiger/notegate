@@ -1,6 +1,7 @@
 import type { ApiClient } from "./client";
 import { ApiError } from "./errors";
 import type {
+  BatchFilePreviewResponse,
   BeginFileUploadResponse,
   CompletedFileUploadPart,
   FilePreviewUrlResponse,
@@ -112,6 +113,17 @@ export function abortFileUpload(client: ApiClient, spaceId: string, uploadId: st
 
 export function getFilePreviewUrl(client: ApiClient, spaceId: string, nodeId: string): Promise<FilePreviewUrlResponse> {
   return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/preview-url`);
+}
+
+export function batchResolveFilePreviews(
+  client: ApiClient,
+  spaceId: string,
+  paths: string[]
+): Promise<BatchFilePreviewResponse> {
+  return client.post<BatchFilePreviewResponse>(
+    `/api/v1/spaces/${spaceId}/file-previews:batchResolve`,
+    { paths }
+  );
 }
 
 export function downloadFile(client: ApiClient, spaceId: string, nodeId: string, filename: string): Promise<void> {

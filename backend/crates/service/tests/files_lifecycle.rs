@@ -1363,6 +1363,77 @@ async fn mktext(
         .id
 }
 
+#[tokio::test]
+async fn batch_preview_candidates_preserve_path_order_and_partial_results()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let owner = insert_user_account(&db.pool, "preview-owner", "preview@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "batch-previews").await;
+
+    let assets = mkdir(&files, owner, ws, root, "assets").await;
+    let docs = mkdir(&files, owner, ws, root, "docs").await;
+    let text_id = mktext(&files, owner, ws, docs, "readme.md", "hello").await;
+    let upload_id = Uuid::new_v4();
+    let upload = BeginObjectUpload {
+        parent_node_id: assets,
+        name: "logo.png".to_owned(),
+        byte_len: 8,
+        media_type: "image/png".to_owned(),
+        original_filename: Some("logo.png".to_owned()),
+        encryption_mode: FileEncryptionMode::None,
+        encryption_metadata: None,
+    };
+    files.prepare_object_upload(owner, ws, &upload).await?;
+    files
+        .record_object_upload(upload_id, "objects/logo.png", owner, ws, &upload)
+        .await?;
+    let uploaded = files
+        .complete_object_upload(owner, ws, upload_id, Some("image/png"))
+        .await?;
+
+    let candidates = files
+        .batch_preview_candidates(
+            owner,
+            ws,
+            vec![
+                "//assets/logo.png".to_owned(),
+                "/missing.png".to_owned(),
+                "/docs/readme.md".to_owned(),
+            ],
+        )
+        .await?;
+
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/assets/logo.png", "/missing.png", "/docs/readme.md"]
+    );
+    assert_eq!(
+        candidates[0].node.as_ref().map(|node| node.id),
+        Some(uploaded.node.node.id)
+    );
+    assert_eq!(
+        candidates[0].file.as_ref().map(|file| file.node_id),
+        Some(uploaded.node.node.id)
+    );
+    assert!(candidates[1].node.is_none());
+    assert!(candidates[1].file.is_none());
+    assert_eq!(
+        candidates[2].node.as_ref().map(|node| node.id),
+        Some(text_id)
+    );
+    assert!(candidates[2].file.is_none());
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// The DB-side candidate scan returns the whole subtree in DFS pre-order, and the
 /// `sort_path` keyset cursor pages through it exactly once with no repeats. The
 /// cursor is bound to its query, so reusing it under a different query is rejected.

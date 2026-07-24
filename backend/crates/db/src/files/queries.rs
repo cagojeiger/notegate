@@ -281,6 +281,43 @@ pub mod file {
             None => Ok(None),
         }
     }
+
+    /// Load live file objects for a bounded set of node ids.
+    pub async fn find_files(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, FileObject>> {
+        if node_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let columns = FILE_COLUMNS
+            .split(',')
+            .map(|column| format!("f.{}", column.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
+            "SELECT {columns} FROM file_objects f \
+             JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
+             WHERE f.space_id = $1 \
+               AND f.node_id = ANY($2) \
+               AND n.deleted_at IS NULL \
+               AND n.kind = 'file'"
+        ))
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut files = std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let file = row.into_file()?;
+            files.insert(file.node_id, file);
+        }
+        Ok(files)
+    }
 }
 
 pub mod node {
@@ -748,6 +785,26 @@ pub mod search {
     use super::super::rows::{NodeRow, TextRow};
 
     #[derive(Debug, FromRow)]
+    struct ResolvedNodePathRow {
+        input_index: i64,
+        input_path: String,
+        id: Uuid,
+        space_id: Uuid,
+        parent_id: Option<Uuid>,
+        name: String,
+        kind: String,
+        sort_order: i32,
+        metadata: Value,
+        created_by_account_id: Uuid,
+        updated_by_account_id: Uuid,
+        deleted_by_account_id: Option<Uuid>,
+        purge_after: Option<DateTime<Utc>>,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+        deleted_at: Option<DateTime<Utc>>,
+    }
+
+    #[derive(Debug, FromRow)]
     struct NodeCandidateRow {
         id: Uuid,
         space_id: Uuid,
@@ -921,6 +978,85 @@ pub mod search {
         }
 
         Ok(current)
+    }
+
+    /// Resolve a bounded ordered path set with one recursive SQL query.
+    ///
+    /// Missing paths are omitted. `input_index` lets the caller restore request
+    /// order without issuing one query per path or path segment.
+    pub async fn resolve_nodes_by_paths(
+        pool: &PgPool,
+        space_id: Uuid,
+        paths: &[String],
+    ) -> Result<Vec<(usize, String, notegate_model::Node)>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let node_columns = super::super::rows::NODE_COLUMNS
+            .split(',')
+            .map(|column| format!("n.{}", column.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rows = sqlx::query_as::<_, ResolvedNodePathRow>(&format!(
+            "WITH RECURSIVE requested AS ( \
+                SELECT ordinality::bigint AS input_index, input_path, \
+                       string_to_array(trim(both '/' from input_path), '/') AS segments \
+                FROM unnest($2::text[]) WITH ORDINALITY AS input(input_path, ordinality) \
+            ), walk AS ( \
+                SELECT r.input_index, r.input_path, r.segments, root.id AS node_id, 0 AS depth \
+                FROM requested r \
+                JOIN nodes root ON root.space_id = $1 \
+                    AND root.parent_id IS NULL \
+                    AND root.deleted_at IS NULL \
+                UNION ALL \
+                SELECT w.input_index, w.input_path, w.segments, child.id, w.depth + 1 \
+                FROM walk w \
+                JOIN nodes child ON child.space_id = $1 \
+                    AND child.parent_id = w.node_id \
+                    AND child.name = w.segments[w.depth + 1] \
+                    AND child.deleted_at IS NULL \
+                WHERE w.depth < cardinality(w.segments) \
+            ), resolved AS ( \
+                SELECT input_index, input_path, node_id \
+                FROM walk \
+                WHERE depth = cardinality(segments) \
+            ) \
+            SELECT r.input_index, r.input_path, {node_columns} \
+            FROM resolved r \
+            JOIN nodes n ON n.id = r.node_id AND n.space_id = $1 \
+            ORDER BY r.input_index"
+        ))
+        .bind(space_id)
+        .bind(paths.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let index = usize::try_from(row.input_index - 1)
+                    .map_err(|_| notegate_core::Error::internal("invalid path input index"))?;
+                let node = NodeRow {
+                    id: row.id,
+                    space_id: row.space_id,
+                    parent_id: row.parent_id,
+                    name: row.name,
+                    kind: row.kind,
+                    sort_order: row.sort_order,
+                    metadata: row.metadata,
+                    created_by_account_id: row.created_by_account_id,
+                    updated_by_account_id: row.updated_by_account_id,
+                    deleted_by_account_id: row.deleted_by_account_id,
+                    purge_after: row.purge_after,
+                    created_at: row.created_at,
+                    updated_at: row.updated_at,
+                    deleted_at: row.deleted_at,
+                }
+                .into_node()?;
+                Ok((index, row.input_path, node))
+            })
+            .collect()
     }
 
     pub async fn node_candidates(

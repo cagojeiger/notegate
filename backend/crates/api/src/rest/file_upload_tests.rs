@@ -196,6 +196,22 @@ async fn verified_raster_images_receive_inline_preview_urls()
         Some("private, no-store, max-age=0")
     );
 
+    let (status, batch) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-previews:batchResolve"),
+        json!({ "paths": ["/missing.png", "/image.bin"] }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    assert_eq!(batch["results"][0]["path"], "/missing.png");
+    assert_eq!(batch["results"][0]["status"], "not_found");
+    assert_eq!(batch["results"][1]["path"], "/image.bin");
+    assert_eq!(batch["results"][1]["status"], "ready");
+    assert_eq!(batch["results"][1]["node_id"], node_id.to_string());
+    assert_eq!(batch["results"][1]["media_type"], "image/png");
+    assert!(batch["results"][1]["url"].as_str().is_some());
+
     sqlx::query("UPDATE file_objects SET detected_media_type = NULL WHERE node_id = $1")
         .bind(node_id)
         .execute(&db.pool)

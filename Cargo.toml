@@ -65,6 +65,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 regex = "1"
 infer = { version = "0.22", default-features = false }
+futures-util = "0.3"
 
 # Auth / OAuth / MCP
 aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }

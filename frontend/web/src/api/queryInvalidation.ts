@@ -26,7 +26,7 @@ export function invalidateFolderSubtree(queryClient: QueryClient, spaceId: strin
   invalidateRecentNodes(queryClient, spaceId);
   void queryClient.invalidateQueries({ queryKey: queryKeys.childrenFamily(spaceId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.nodes(spaceId) });
-  removeMarkdownImageNodeQueries(queryClient, spaceId);
+  removeMarkdownImageQueries(queryClient, spaceId);
 }
 
 export async function applyExternalFileChanges(
@@ -106,7 +106,7 @@ export async function applyExternalFileChanges(
     }
   }
   if (pathChanged) {
-    removeMarkdownImageNodeQueries(queryClient, spaceId);
+    removeMarkdownImageQueries(queryClient, spaceId);
   }
 }
 
@@ -125,8 +125,19 @@ export function invalidateText(queryClient: QueryClient, spaceId: string, nodeId
   void queryClient.invalidateQueries({ queryKey: queryKeys.text(spaceId, nodeId), exact: true });
 }
 
-export function removeMarkdownImageNodeQueries(queryClient: QueryClient, spaceId: string) {
-  queryClient.removeQueries({ queryKey: queryKeys.markdownImageNodes(spaceId) });
+export function removeMarkdownImageQueries(queryClient: QueryClient, spaceId: string) {
+  queryClient.removeQueries({ queryKey: queryKeys.markdownImagePreviews(spaceId) });
+}
+
+export function removeMarkdownImagePreviewQuery(
+  queryClient: QueryClient,
+  spaceId: string,
+  path: string
+) {
+  queryClient.removeQueries({
+    queryKey: queryKeys.markdownImagePreview(spaceId, path),
+    exact: true
+  });
 }
 
 export function invalidateSpaceResources(queryClient: QueryClient, spaceId: string) {
@@ -147,7 +158,7 @@ export function removeDeletedNodeQueries(
     queryKeys.text(node.space_id, node.id),
     queryKeys.file(node.space_id, node.id),
     queryKeys.metadata(node.space_id, node.id),
-    queryKeys.markdownImageNode(node.space_id, node.path),
+    queryKeys.markdownImagePreview(node.space_id, node.path),
     previewQueryKey
   ]);
 }

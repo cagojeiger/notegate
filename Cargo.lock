@@ -2361,6 +2361,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dotenvy",
+ "futures-util",
  "hyper 0.14.32",
  "infer",
  "jsonwebtoken",

@@ -8,25 +8,45 @@ export function updateNodeCaches(
   node: RestNode,
   update: (current: RestNode) => RestNode
 ) {
-  const updateNode = (current: RestNode | undefined) => update(current ?? node);
-  queryClient.setQueryData<RestNode>(queryKeys.node(node.space_id, node.id), updateNode);
-  const pathQueryKey = queryKeys.markdownImageNode(node.space_id, node.path);
-  if (queryClient.getQueryState(pathQueryKey)) {
-    queryClient.setQueryData<RestNode>(pathQueryKey, updateNode);
+  queryClient.setQueryData<RestNode>(
+    queryKeys.node(node.space_id, node.id),
+    (current) => update(current ?? node)
+  );
+  updateNodeReferences(queryClient, node.space_id, node.id, update);
+}
+
+export function updateExistingNodeCaches(
+  queryClient: QueryClient,
+  spaceId: string,
+  nodeId: string,
+  update: (current: RestNode) => RestNode
+) {
+  const canonicalKey = queryKeys.node(spaceId, nodeId);
+  if (queryClient.getQueryState(canonicalKey)) {
+    queryClient.setQueryData<RestNode>(canonicalKey, (current) => current ? update(current) : current);
   }
+  updateNodeReferences(queryClient, spaceId, nodeId, update);
+}
+
+function updateNodeReferences(
+  queryClient: QueryClient,
+  spaceId: string,
+  nodeId: string,
+  update: (current: RestNode) => RestNode
+) {
   queryClient.setQueryData<RestNodeListResponse>(
-    queryKeys.recent(node.space_id),
-    (current) => current ? replaceListNode(current, node.id, update) : current
+    queryKeys.recent(spaceId),
+    (current) => current ? replaceListNode(current, nodeId, update) : current
   );
   queryClient.setQueriesData<InfiniteData<ChildrenResponse>>(
     {
       predicate: ({ queryKey }) =>
         queryKey.length === 4
         && queryKey[0] === "spaces"
-        && queryKey[1] === node.space_id
+        && queryKey[1] === spaceId
         && queryKey[2] === "children"
     },
-    (current) => current ? replaceChildrenNode(current, node.id, update) : current
+    (current) => current ? replaceChildrenNode(current, nodeId, update) : current
   );
 }
 
