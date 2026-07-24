@@ -1,55 +1,79 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { listFileChangeEvents } from "../../api/events";
+import type { ApiClient } from "../../api/client";
+import { drainFileChanges } from "../../api/events";
 import { POLLING, withPollingJitter } from "../../api/polling";
-import { invalidateSpaceResources } from "../../api/queryInvalidation";
+import {
+  applyExternalFileChanges,
+  invalidateFileSyncFallback
+} from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
+import type { FileChangeSyncResponse } from "../../api/types";
 import { usePageVisible } from "../../shared/hooks/usePageVisible";
+
+export function createSpaceChangeSynchronizer(
+  client: ApiClient,
+  queryClient: QueryClient
+) {
+  const lastAppliedBySpace = new Map<string, number>();
+  const pendingBySpace = new Map<string, Promise<FileChangeSyncResponse>>();
+
+  return function syncSpaceChanges(spaceId: string) {
+    const previous = pendingBySpace.get(spaceId);
+    const current = (previous ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(async () => {
+        const response = await drainFileChanges(
+          client,
+          spaceId,
+          lastAppliedBySpace.get(spaceId)
+        );
+        if (response.resync_required) {
+          await invalidateFileSyncFallback(queryClient, spaceId);
+        } else {
+          await applyExternalFileChanges(queryClient, spaceId, response.changes);
+        }
+        lastAppliedBySpace.set(spaceId, response.next_after_id);
+        return response;
+      });
+
+    pendingBySpace.set(spaceId, current);
+    void current.then(
+      () => {
+        if (pendingBySpace.get(spaceId) === current) pendingBySpace.delete(spaceId);
+      },
+      () => {
+        if (pendingBySpace.get(spaceId) === current) pendingBySpace.delete(spaceId);
+      }
+    );
+    return current;
+  };
+}
 
 export function useSpaceChangeSync(spaceId: string | null) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const pageVisible = usePageVisible();
-  const lastSeenBySpace = useRef(new Map<string, number | null>());
+  const syncSpaceChanges = useMemo(
+    () => createSpaceChangeSynchronizer(client, queryClient),
+    [client, queryClient]
+  );
   const refetchInterval = useMemo(
     () => withPollingJitter(POLLING.spaceChangesMs, POLLING.spaceChangesJitterMs),
     []
   );
-  const query = useQuery({
+  useQuery({
     queryKey: spaceId ? queryKeys.spaceChangeSignal(spaceId) : ["sync", "space-change", "none"],
     queryFn: () => {
       if (!spaceId) throw new Error("No active space");
-      return listFileChangeEvents(client, spaceId, { limit: 1 });
+      return syncSpaceChanges(spaceId);
     },
-    select: (data) => data.events[0] ?? null,
     enabled: Boolean(spaceId) && pageVisible,
     refetchInterval: pageVisible ? refetchInterval : false,
     staleTime: refetchInterval,
     notifyOnChangeProps: ["data"]
   });
-  const latestEventId = query.data?.id ?? null;
-
-  useEffect(() => {
-    if (!spaceId || query.data === undefined) return;
-
-    if (!lastSeenBySpace.current.has(spaceId)) {
-      lastSeenBySpace.current.set(spaceId, latestEventId);
-      return;
-    }
-    if (lastSeenBySpace.current.get(spaceId) === latestEventId) return;
-
-    lastSeenBySpace.current.set(spaceId, latestEventId);
-    invalidateSpaceResources(queryClient, spaceId);
-
-    if (query.data?.op_type === "item.delete") {
-      const previewKey = query.data.metadata.item_kind === "folder"
-        ? queryKeys.filePreviewUrls(spaceId)
-        : query.data.node_id
-          ? queryKeys.filePreviewUrl(spaceId, query.data.node_id)
-          : queryKeys.filePreviewUrls(spaceId);
-      queryClient.removeQueries({ queryKey: previewKey });
-    }
-  }, [latestEventId, query.data, queryClient, spaceId]);
 }

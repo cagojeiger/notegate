@@ -300,6 +300,55 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
     .await?;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid_cursor}");
 
+    let (status, baseline) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        format!("/v1/spaces/{space_id}/file-change-sync?limit=1"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{baseline}");
+    assert_eq!(baseline["changes"], json!([]));
+    assert_eq!(baseline["resync_required"], json!(false));
+    let baseline_id = baseline["next_after_id"].as_i64().expect("baseline id");
+
+    let (status, after_folder) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/nodes"),
+        json!({
+            "parent_id": root_id,
+            "kind": "folder",
+            "name": "after-baseline"
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED, "{after_folder}");
+
+    let (status, delta) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        format!("/v1/spaces/{space_id}/file-change-sync?after_id={baseline_id}&limit=1"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{delta}");
+    assert_eq!(delta["changes"].as_array().expect("changes").len(), 1);
+    assert_eq!(delta["changes"][0]["op_type"], json!("folder.create"));
+    assert_eq!(delta["changes"][0]["item_kind"], json!("folder"));
+    assert_eq!(delta["changes"][0]["affected_parent_ids"], json!([root_id]));
+    assert_eq!(delta["changes"][0]["parent_scope_known"], json!(true));
+    assert_eq!(delta["changes"][0]["path_changed"], json!(true));
+    assert_eq!(delta["changes"][0]["subtree_changed"], json!(false));
+    assert_eq!(delta["has_more"], json!(false));
+
+    let invalid_after = delta["next_after_id"].as_i64().expect("delta id") + 1000;
+    let (status, resync) = get_json(
+        rest_app(state.clone(), caller.clone()),
+        format!("/v1/spaces/{space_id}/file-change-sync?after_id={invalid_after}"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{resync}");
+    assert_eq!(resync["changes"], json!([]));
+    assert_eq!(resync["resync_required"], json!(true));
+    assert_eq!(resync["next_after_id"], delta["next_after_id"]);
+
     let (stranger_account, stranger_user) = AccountRepo::with_crypto_and_default_user_tier(
         state.db.clone(),
         state.security.clone(),
@@ -318,7 +367,7 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
     };
     let (status, hidden) = get_json(
         rest_app(state.clone(), stranger),
-        format!("/v1/spaces/{space_id}/file-change-events?limit=20"),
+        format!("/v1/spaces/{space_id}/file-change-sync"),
     )
     .await?;
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden}");

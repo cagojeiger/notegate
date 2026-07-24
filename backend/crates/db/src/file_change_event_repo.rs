@@ -71,6 +71,88 @@ pub(crate) async fn list_file_change_events(
         .collect())
 }
 
+#[derive(Debug)]
+pub struct FileChangeSyncRows {
+    pub events: Vec<notegate_model::FileChangeEvent>,
+    pub latest_id: i64,
+    pub token_valid: bool,
+}
+
+/// Read file-change events after a space-scoped sync token, oldest first.
+///
+/// `id` is globally increasing, but the token is accepted only when it belongs
+/// to this Space. A missing token indicates that retained history can no longer
+/// prove a lossless continuation. File-tree commands hold the Space mutation
+/// lock through event insert and commit, so `id` order is commit-stable within
+/// one Space.
+pub(crate) async fn sync_file_change_events(
+    pool: &PgPool,
+    space_id: Uuid,
+    after_id: Option<i64>,
+    limit: i64,
+) -> Result<FileChangeSyncRows> {
+    let (latest_id, token_valid) = sqlx::query_as::<_, (i64, bool)>(
+        "SELECT \
+            COALESCE(( \
+                SELECT id FROM file_change_events \
+                WHERE space_id = $1 ORDER BY id DESC LIMIT 1 \
+            ), 0), \
+            ($2::bigint IS NULL OR $2 = 0 OR EXISTS( \
+                SELECT 1 FROM file_change_events WHERE space_id = $1 AND id = $2 \
+            ))",
+    )
+    .bind(space_id)
+    .bind(after_id)
+    .fetch_one(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    let Some(after_id) = after_id else {
+        return Ok(FileChangeSyncRows {
+            events: Vec::new(),
+            latest_id,
+            token_valid: true,
+        });
+    };
+
+    if !token_valid {
+        return Ok(FileChangeSyncRows {
+            events: Vec::new(),
+            latest_id,
+            token_valid: false,
+        });
+    }
+
+    if after_id == latest_id {
+        return Ok(FileChangeSyncRows {
+            events: Vec::new(),
+            latest_id,
+            token_valid: true,
+        });
+    }
+
+    let rows = sqlx::query_as::<_, FileChangeEventRow>(&format!(
+        "SELECT {FILE_CHANGE_EVENT_COLUMNS} FROM file_change_events \
+         WHERE space_id = $1 AND id > $2 \
+         ORDER BY id ASC LIMIT $3"
+    ))
+    .bind(space_id)
+    .bind(after_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+
+    Ok(FileChangeSyncRows {
+        events: rows
+            .into_iter()
+            .map(notegate_model::FileChangeEvent::from)
+            .collect(),
+        latest_id,
+        token_valid: true,
+    })
+}
+
 #[derive(Debug, FromRow)]
 struct FileChangeEventRow {
     id: i64,

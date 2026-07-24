@@ -45,13 +45,13 @@ for (const viewport of [
     const tree = page.getByRole("tree", { name: "Files" });
     await expect(tree).toBeVisible();
     await expect(tree.getByRole("button", { name: "note.md", exact: true })).toBeVisible();
-    await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/file-change-events`)).toBe(1);
+    await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(1);
     await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`)).toBe(1);
     await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
 
     await page.clock.fastForward(36_000);
 
-    await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/file-change-events`)).toBe(2);
+    await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(2);
     expect(count(requests, `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`)).toBe(1);
     expect(count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
   });
@@ -78,18 +78,12 @@ function responseFor(url: URL) {
       page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
     };
   }
-  if (url.pathname === `/api/v1/spaces/${space.id}/file-change-events`) {
+  if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {
     return {
-      events: [{
-        id: 10,
-        created_at: "2026-07-24T00:00:00Z",
-        space_id: space.id,
-        node_id: "text-1",
-        actor_account_id: "user-1",
-        op_type: "text.write",
-        metadata: {}
-      }],
-      page: { limit: 1, returned: 1, has_more: false, next_cursor: null }
+      changes: [],
+      next_after_id: 10,
+      has_more: false,
+      resync_required: false
     };
   }
   throw new Error(`Unhandled API request: ${url.pathname}${url.search}`);

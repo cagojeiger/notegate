@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applyExternalFileChanges,
   invalidateFolderSubtree,
   invalidateNodeLists,
   invalidateSpaceResources,
@@ -61,6 +62,68 @@ describe("query invalidation", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledTimes(3);
     expect(queryClient.getQueryData(pathKey)).toBeUndefined();
+  });
+
+  it("coalesces multiple external changes into one list refresh per affected parent", async () => {
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await applyExternalFileChanges(queryClient, "space-1", [
+      delta(11, "text-1", ["parent-1"]),
+      delta(12, "text-2", ["parent-1"])
+    ]);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.node("space-1", "text-1"),
+      exact: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.node("space-1", "text-2"),
+      exact: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(
+      invalidateQueries.mock.calls.filter(
+        ([filters]) =>
+          JSON.stringify(filters?.queryKey) ===
+          JSON.stringify(queryKeys.children("space-1", "parent-1"))
+      )
+    ).toHaveLength(1);
+  });
+
+  it("falls back to the children family when an external event has no parent context", async () => {
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await applyExternalFileChanges(queryClient, "space-1", [
+      delta(11, "text-1", [])
+    ]);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
+  });
+
+  it("drops descendant content caches after an external recursive folder delete", async () => {
+    const queryClient = new QueryClient();
+    const deletedContent = queryKeys.text("space-1", "child-1");
+    const unrelatedContent = queryKeys.text("space-2", "child-2");
+    queryClient.setQueryData(deletedContent, { content: "deleted" });
+    queryClient.setQueryData(unrelatedContent, { content: "keep" });
+
+    await applyExternalFileChanges(queryClient, "space-1", [{
+      ...delta(11, "folder-1", ["root-1"]),
+      op_type: "item.delete",
+      item_kind: "folder",
+      path_changed: true,
+      subtree_changed: true
+    }]);
+
+    expect(queryClient.getQueryData(deletedContent)).toBeUndefined();
+    expect(queryClient.getQueryData(unrelatedContent)).toEqual({ content: "keep" });
   });
 
   it("keeps file preview URLs outside space resource invalidation", () => {
@@ -132,3 +195,16 @@ describe("query invalidation", () => {
     expect(queryClient.getQueryData(otherSpacePreview)).toEqual({ cached: true });
   });
 });
+
+function delta(id: number, nodeId: string, parentIds: string[]) {
+  return {
+    id,
+    node_id: nodeId,
+    op_type: "text.write",
+    item_kind: "text" as const,
+    affected_parent_ids: parentIds,
+    parent_scope_known: parentIds.length > 0,
+    path_changed: false,
+    subtree_changed: false
+  };
+}

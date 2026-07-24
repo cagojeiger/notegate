@@ -40,6 +40,7 @@ pub use api_key_repo::ApiKeyRepo;
 pub use audit_event_repo::AuditEventRepo;
 pub use browser_session_repo::BrowserSessionRepo;
 pub use connection_repo::ConnectionRepo;
+pub use file_change_event_repo::FileChangeSyncRows;
 pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};

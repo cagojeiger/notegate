@@ -296,10 +296,10 @@ edit text
 ### External sync
 
 ```text
-visible tab: poll latest active-space change event
--> event id changed: invalidate active-space resource cache
--> opened node changed: refresh snapshot
--> text hash changed: refetch text
+visible tab: poll active-space changes after the last applied event id
+-> drain every page in ascending event order
+-> invalidate changed node/content + affected parent children + Recent
+-> expired/unknown token: refresh file-related cache families once and establish a new token
 -> opened node 404: clear editor group
 ```
 

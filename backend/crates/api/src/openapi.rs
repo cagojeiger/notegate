@@ -39,6 +39,7 @@ use crate::state::AppState;
         rest::nodes::resolve_path,
         rest::nodes::list,
         rest::nodes::list_file_change_events,
+        rest::nodes::sync_file_changes,
         rest::nodes::create,
         rest::nodes::get_node,
         rest::nodes::reveal,
@@ -329,6 +330,12 @@ mod tests {
         );
         assert_query_params(
             &value,
+            "/api/v1/spaces/{space_id}/file-change-sync",
+            "get",
+            &["after_id", "limit"],
+        );
+        assert_query_params(
+            &value,
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "get",
             &["limit", "cursor"],
@@ -476,6 +483,7 @@ mod tests {
             "/api/v1/spaces/{space_id}/paths/resolve",
             "/api/v1/spaces/{space_id}/nodes",
             "/api/v1/spaces/{space_id}/file-change-events",
+            "/api/v1/spaces/{space_id}/file-change-sync",
             "/api/v1/spaces/{space_id}/nodes/{node_id}",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
@@ -535,6 +543,7 @@ mod tests {
             "GET /api/v1/spaces/{space_id}/files/{node_id}/content",
             "GET /api/v1/spaces/{space_id}/files/{node_id}/preview-url",
             "GET /api/v1/spaces/{space_id}/file-change-events",
+            "GET /api/v1/spaces/{space_id}/file-change-sync",
             "GET /api/v1/spaces/{space_id}/nodes",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}",
             "GET /api/v1/spaces/{space_id}/nodes/{node_id}/children",

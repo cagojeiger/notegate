@@ -225,3 +225,21 @@ export type FileChangeEventListResponse = {
   events: FileChangeEvent[];
   page: Page;
 };
+
+export type FileChangeDelta = {
+  id: number;
+  node_id: string | null;
+  op_type: string;
+  item_kind: RestNode["kind"] | null;
+  affected_parent_ids: string[];
+  parent_scope_known: boolean;
+  path_changed: boolean;
+  subtree_changed: boolean;
+};
+
+export type FileChangeSyncResponse = {
+  changes: FileChangeDelta[];
+  next_after_id: number;
+  has_more: boolean;
+  resync_required: boolean;
+};

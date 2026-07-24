@@ -111,10 +111,12 @@ function responseFor(url: URL, children: RestNode[]) {
       page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
     };
   }
-  if (url.pathname === `/api/v1/spaces/${space.id}/file-change-events`) {
+  if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {
     return {
-      events: [],
-      page: { limit: 1, returned: 0, has_more: false, next_cursor: null }
+      changes: [],
+      next_after_id: 0,
+      has_more: false,
+      resync_required: false
     };
   }
   throw new Error(`Unhandled API request: ${url.pathname}${url.search}`);

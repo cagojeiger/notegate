@@ -91,10 +91,13 @@ pub async fn update_node_metadata(
         &mut tx,
         file_change_events::context(updated_by, space_id),
         node_id,
-        &node_kind,
-        &row.name,
-        name_changed,
-        sort_order_changed,
+        file_change_events::NodeUpdated {
+            item_kind: &node_kind,
+            item_name: &row.name,
+            parent_node_id: row.parent_id,
+            name_changed,
+            sort_order_changed,
+        },
     )
     .await?;
 
@@ -152,6 +155,7 @@ pub async fn replace_node_metadata(
         mutation_kind,
         &node_kind,
         &row.name,
+        row.parent_id,
     )
     .await?;
 
