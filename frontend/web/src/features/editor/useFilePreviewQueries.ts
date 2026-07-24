@@ -8,6 +8,7 @@ import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
+import { filePreviewKind } from "../../shared/lib/filePreview";
 import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
 
 const FILE_PREVIEW_CACHE_GC_MS = 15 * 60 * 1_000;
@@ -17,7 +18,7 @@ export function useFilePreviewUrl(node: RestNode) {
   const queryClient = useQueryClient();
   return useQuery({
     ...filePreviewQueryOptions(client, queryClient, node),
-    enabled: isImagePreviewCandidate(node)
+    enabled: isFilePreviewCandidate(node)
   });
 }
 
@@ -45,6 +46,7 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
     try {
       const query = filePreviewQueryOptions(client, queryClient, imageNode);
       const preview = await queryClient.fetchQuery(options.forceRefresh ? { ...query, staleTime: 0 } : query);
+      if (filePreviewKind(preview.media_type) !== "image") return { status: "unsupported" };
       return { status: "loaded", url: preview.url };
     } catch (error) {
       return {
@@ -55,10 +57,14 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
 }
 
 function isRenderableMarkdownImage(sourceSpaceId: string, imageNode: RestNode): boolean {
-  return imageNode.space_id === sourceSpaceId && isImagePreviewCandidate(imageNode);
+  if (imageNode.space_id !== sourceSpaceId || !isFilePreviewCandidate(imageNode)) return false;
+  if (imageNode.detected_media_type) {
+    return filePreviewKind(imageNode.detected_media_type) === "image";
+  }
+  return true;
 }
 
-function isImagePreviewCandidate(node: RestNode): boolean {
+function isFilePreviewCandidate(node: RestNode): boolean {
   if (node.kind !== "file" || node.encryption_mode === "client") return false;
   if (node.preview_available !== undefined) return node.preview_available;
   return true;

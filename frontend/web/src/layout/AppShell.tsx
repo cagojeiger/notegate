@@ -10,6 +10,8 @@ import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { UploadProgressDock } from "../features/uploads/UploadProgressDock";
 import { useWorkbenchController } from "../features/workbench/useWorkbenchController";
+import { useViewportWidth } from "../shared/hooks/useMediaQuery";
+import { filePreviewKind } from "../shared/lib/filePreview";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 import { DialogHost } from "./dialogs/DialogHost";
 import { FullScreenStatus } from "./FullScreenStatus";
@@ -18,7 +20,7 @@ import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toast } from "./Toast";
 import { AuxiliarySidebarFrame, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
-import { useWorkbenchLayout } from "./workbenchLayout";
+import { resolvePdfReadingLayout, useWorkbenchLayout } from "./workbenchLayout";
 
 type AppShellProps = {
   me: Me;
@@ -29,17 +31,79 @@ type HistoryScope = {
   initialSpaceId: string | null;
 };
 
+type PdfPanelState = {
+  nodeId: string;
+  auxiliaryOpen?: boolean;
+  primaryOpen?: boolean;
+};
+
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
+  const [pdfPanels, setPdfPanels] = useState<PdfPanelState | null>(null);
+  const viewportWidth = useViewportWidth();
   const { actions } = workbench;
+  const activePdfId = workbench.activeNode?.kind === "file"
+    && workbench.activeNode.preview_available === true
+    && filePreviewKind(workbench.activeNode.detected_media_type) === "pdf"
+    ? workbench.activeNode.id
+    : null;
+  const pdfReadingLayout = activePdfId && !workbench.isMobile
+    ? resolvePdfReadingLayout({
+        auxiliaryOpen: workbench.showAuxiliary,
+        editorGroupCount: workbench.editorGroups.length,
+        primaryOpen: workbench.primarySidebarOpen,
+        primaryWidth: workbench.primaryWidth,
+        viewportWidth
+      })
+    : { foldAuxiliary: false, foldPrimary: false, focusEditor: false };
+  const activePdfPanels = pdfPanels?.nodeId === activePdfId ? pdfPanels : null;
+  const primaryOpen = workbench.isMobile
+    ? workbench.mobileTreeOpen
+    : activePdfPanels?.primaryOpen
+      ?? (pdfReadingLayout.foldPrimary ? false : workbench.primarySidebarOpen);
+  const auxiliaryOpen = workbench.isMobile
+    ? workbench.mobileAuxOpen
+    : activePdfPanels?.auxiliaryOpen
+      ?? (pdfReadingLayout.foldAuxiliary ? false : workbench.showAuxiliary);
   const layout = useWorkbenchLayout({
     isMobile: workbench.isMobile,
-    primaryOpen: workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen,
-    auxiliaryOpen: workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary,
-    editorGroupCount: workbench.editorGroups.length
+    primaryOpen,
+    auxiliaryOpen,
+    editorGroupCount: workbench.editorGroups.length,
+    focusEditor: pdfReadingLayout.focusEditor
   });
   const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
+  const updatePdfPanels = (update: Omit<PdfPanelState, "nodeId">) => {
+    if (!activePdfId) return;
+    setPdfPanels((current) => ({
+      ...(current?.nodeId === activePdfId ? current : {}),
+      nodeId: activePdfId,
+      ...update
+    }));
+  };
+  const togglePrimary = () => {
+    if (workbench.isMobile) {
+      actions.toggleMobileTree();
+      return;
+    }
+    if (activePdfId && (pdfReadingLayout.foldPrimary || activePdfPanels?.primaryOpen !== undefined)) {
+      updatePdfPanels({ primaryOpen: !primaryOpen });
+      return;
+    }
+    actions.togglePrimarySidebar();
+  };
+  const toggleAuxiliary = () => {
+    if (workbench.isMobile) {
+      actions.toggleMobileAux();
+      return;
+    }
+    if (activePdfId && (pdfReadingLayout.foldAuxiliary || activePdfPanels?.auxiliaryOpen !== undefined)) {
+      updatePdfPanels({ auxiliaryOpen: !auxiliaryOpen });
+      return;
+    }
+    actions.toggleAuxiliary();
+  };
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
   };
@@ -74,13 +138,13 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       <TitleBar
         activeSpace={workbench.activeSpace}
         theme={workbench.theme}
-        primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
-        auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+        primarySidebarOpen={primaryOpen}
+        auxiliaryOpen={auxiliaryOpen}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
         onToggleTheme={actions.toggleTheme}
-        onTogglePrimarySidebar={workbench.isMobile ? actions.toggleMobileTree : actions.togglePrimarySidebar}
-        onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
+        onTogglePrimarySidebar={togglePrimary}
+        onToggleAuxiliary={toggleAuxiliary}
       />
       <main className="relative flex min-h-0 flex-1 border-y border-seam">
         <ActivityRail spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onReorderSpaces={actions.reorderSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />

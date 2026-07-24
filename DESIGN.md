@@ -3,8 +3,8 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-07-23
-- Primary product surfaces: Google SSO login, desktop-first workbench, settings, file transfer status, Markdown and structured previews.
+- Last refreshed: 2026-07-24
+- Primary product surfaces: Google SSO login, desktop-first workbench, settings, file transfer status, Markdown, structured, image, and PDF previews.
 - Evidence reviewed: `docs/ui/*`, `frontend/web/src/design/*`, `frontend/web/src/styles/globals.css`, shared UI primitives, auth and layout components, and the 2026-07-23 NoteGate brand asset set.
 
 ## Brand
@@ -53,8 +53,8 @@
 ## Components
 
 - Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`.
-- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status.
-- Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback.
+- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, and an in-app PDFium preview.
+- Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; PDF loading, rendered, retried, and download-fallback states.
 - Token/component ownership: `theme.css` owns semantic colors. Shared UI owns focus, controls, and repeated visual treatment. Feature components own data and state.
 
 ## Accessibility
@@ -68,7 +68,7 @@
 ## Responsive behavior
 
 - Supported breakpoints/devices: Existing desktop/tablet/mobile layout policy remains authoritative.
-- Layout adaptations: Login stays centered and bounded; workbench sidebars and editor behavior remain unchanged.
+- Layout adaptations: Login stays centered and bounded. The PDF viewer collapses its controls responsively; when docked panels or split editors would leave less than 480 px, a verified PDF initially focuses the active editor and folds side panels only as needed. Title-bar panel toggles remain available.
 - Touch/hover differences: Essential actions do not depend on hover; mobile controls keep touch-safe spacing.
 
 ## Interaction states
@@ -90,9 +90,9 @@
 
 - Framework/styling system: React, TypeScript, Tailwind utilities, and CSS custom properties.
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
-- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font.
+- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. Inline image and PDF previews are limited to 10 MiB. The PDF viewer is lazy-loaded, processes bytes in a worker, and does not request external fonts or font fallbacks.
 - Compatibility constraints: Preserve the current OAuth popup and developer API-key fallback behavior.
-- Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, and light/dark login screenshots.
+- Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, and light/dark login screenshots. PDF preview tests use a valid document and cover rendered desktop, 768/900/1024 px boundary layouts, split editors, theme changes, and mobile.
 
 ## Open questions
 

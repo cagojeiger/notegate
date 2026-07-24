@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::file_preview::{
     PREVIEW_URL_TTL_SECONDS, detect_object_media_type, is_preview_size_allowed,
-    is_previewable_image_type,
+    is_previewable_media_type,
 };
 use crate::rest::dto::{NodeOut, attribution_ids};
 use crate::state::AppState;
@@ -114,8 +114,8 @@ pub(crate) async fn download(
     tag = "files",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses(
-        (status = 200, description = "Short-lived URL for a detected raster image up to 10 MiB", body = FilePreviewUrlResponse),
-        (status = 404, description = "File has no supported image preview or exceeds 10 MiB")
+        (status = 200, description = "Short-lived URL for detected safe inline media up to 10 MiB", body = FilePreviewUrlResponse),
+        (status = 404, description = "File has no supported inline preview or exceeds 10 MiB")
     ),
     security(("bearer_auth" = []))
 )]
@@ -166,7 +166,7 @@ pub(crate) async fn preview_url(
             media_type
         }
     };
-    if !is_previewable_image_type(&media_type) {
+    if !is_previewable_media_type(&media_type) {
         return Err(ApiError::not_found("file preview is not available"));
     }
 

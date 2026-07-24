@@ -220,7 +220,8 @@ async fn verified_raster_images_receive_inline_preview_urls()
 }
 
 #[tokio::test]
-async fn non_image_bytes_do_not_receive_preview_urls() -> Result<(), Box<dyn std::error::Error>> {
+async fn verified_pdf_bytes_receive_inline_preview_urls() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(s3) = test_s3_config() else {
         return Ok(());
     };
@@ -244,16 +245,35 @@ async fn non_image_bytes_do_not_receive_preview_urls() -> Result<(), Box<dyn std
     let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
     assert_eq!(status, StatusCode::CREATED, "{completed}");
     assert_eq!(completed["node"]["detected_media_type"], "application/pdf");
-    assert_eq!(completed["node"]["preview_available"], false);
+    assert_eq!(completed["node"]["preview_available"], true);
     let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
 
-    let (status, body) = empty_request(
-        rest_app(state.clone(), caller.clone()),
-        "GET",
-        format!("/v1/spaces/{space_id}/files/{node_id}/preview-url"),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let preview_response = rest_app(state.clone(), caller.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/spaces/{space_id}/files/{node_id}/preview-url"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(preview_response.status(), StatusCode::OK);
+    let preview: Value =
+        serde_json::from_slice(&to_bytes(preview_response.into_body(), usize::MAX).await?)?;
+    assert_eq!(preview["media_type"], "application/pdf");
+    let response = reqwest::get(preview["url"].as_str().ok_or("preview url")?).await?;
+    assert!(response.status().is_success());
+    assert_eq!(
+        response.headers().get(reqwest::header::CONTENT_TYPE),
+        Some(&reqwest::header::HeaderValue::from_static(
+            "application/pdf"
+        ))
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("inline")
+    );
 
     delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
     db.cleanup().await;

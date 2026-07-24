@@ -12,6 +12,7 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSp
           <button
             key={space.id}
             type="button"
+            aria-label={space.name}
             title={space.name}
             onClick={() => onSelectSpace(space)}
             className={`grid size-9 shrink-0 place-items-center rounded-xl text-sm font-semibold transition ${activeSpace?.id === space.id ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}

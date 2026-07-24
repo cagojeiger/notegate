@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -79,6 +79,63 @@ describe("AppShell history", () => {
   });
 });
 
+describe("AppShell PDF layout", () => {
+  it("folds the Inspector locally when a verified PDF needs more reading width", async () => {
+    const user = userEvent.setup();
+    const toggleAuxiliary = vi.fn();
+    mocks.useWorkbenchController.mockReturnValue(workbench({
+      activeNode: {
+        ...activeNode,
+        id: "pdf-1",
+        name: "document.pdf",
+        kind: "file",
+        media_type: "application/pdf",
+        detected_media_type: "application/pdf",
+        preview_available: true
+      },
+      auxiliaryOpen: true,
+      showAuxiliary: true,
+      actions: { toggleAuxiliary }
+    }));
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    const inspectorToggle = screen.getByRole("button", { name: "Toggle right sidebar" });
+    expect(inspectorToggle).toHaveAttribute("aria-pressed", "false");
+    await user.click(inspectorToggle);
+    await waitFor(() => expect(inspectorToggle).toHaveAttribute("aria-pressed", "true"));
+    expect(toggleAuxiliary).not.toHaveBeenCalled();
+  });
+
+  it("keeps normal panel behavior for an unverified declared PDF", async () => {
+    const user = userEvent.setup();
+    const toggleAuxiliary = vi.fn();
+    mocks.useWorkbenchController.mockReturnValue(workbench({
+      activeNode: {
+        ...activeNode,
+        id: "declared-pdf",
+        name: "declared.pdf",
+        kind: "file",
+        media_type: "application/pdf",
+        detected_media_type: undefined,
+        preview_available: false
+      },
+      auxiliaryOpen: true,
+      showAuxiliary: true,
+      actions: { toggleAuxiliary }
+    }));
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    const inspectorToggle = screen.getByRole("button", { name: "Toggle right sidebar" });
+    expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
+    await user.click(inspectorToggle);
+    expect(toggleAuxiliary).toHaveBeenCalledOnce();
+  });
+});
+
 function me(kind: Me["account"]["kind"]): Me {
   return {
     account: { id: `${kind}-1`, kind, display_name: kind },
@@ -86,7 +143,7 @@ function me(kind: Me["account"]["kind"]): Me {
   };
 }
 
-function workbench() {
+function workbench(overrides: Record<string, unknown> = {}) {
   return {
     loading: false,
     error: null,
@@ -109,7 +166,8 @@ function workbench() {
     isMobile: false,
     settingsOpen: false,
     dialog: null,
-    actions: {}
+    actions: {},
+    ...overrides
   };
 }
 
