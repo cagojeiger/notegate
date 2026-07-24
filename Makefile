@@ -17,6 +17,7 @@ build:
 
 frontend-check:
 	pnpm audit --prod --audit-level moderate
+	pnpm --filter web check:boundaries
 	pnpm --filter web check:contrast
 	pnpm --filter web typecheck
 	pnpm --filter web lint

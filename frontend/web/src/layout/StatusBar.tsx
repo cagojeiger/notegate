@@ -1,5 +1,5 @@
 import type { Space } from "../entities/space/model";
-import { useUiStore } from "../stores/uiStore";
+import type { SaveState } from "../shared/model/workbench";
 
 const SAVE_LABEL: Record<string, { text: string; dot: string }> = {
   idle: { text: "ready", dot: "bg-success" },
@@ -10,11 +10,12 @@ const SAVE_LABEL: Record<string, { text: string; dot: string }> = {
 };
 
 export function StatusBar({
-  activeSpace
+  activeSpace,
+  saveState
 }: {
   activeSpace: Space | null;
+  saveState: SaveState;
 }) {
-  const saveState = useUiStore((state) => state.saveState);
   const status = SAVE_LABEL[saveState] ?? SAVE_LABEL.idle;
   return (
     <footer className="hidden h-7 items-center justify-between border-t border-seam bg-surface px-3 text-xs text-muted md:flex">

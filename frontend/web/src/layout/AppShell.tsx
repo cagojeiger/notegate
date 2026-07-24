@@ -150,8 +150,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       </main>
       <UploadProgressDock />
       <MobileSpaceBar spaces={workbench.spaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} onSelectSpace={actions.selectSpace} onCreateSpace={actions.promptCreateSpace} onOpenHistory={openHistory} onOpenSettings={openSettings} />
-      <StatusBar activeSpace={workbench.activeSpace} />
-      <Toast />
+      <StatusBar activeSpace={workbench.activeSpace} saveState={workbench.saveState} />
+      <Toast message={workbench.toast} onClear={actions.clearToast} />
       {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
       {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />

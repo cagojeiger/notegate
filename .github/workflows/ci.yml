@@ -119,6 +119,9 @@ jobs:
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level moderate
 
+      - name: Check frontend dependency boundaries
+        run: pnpm --filter web check:boundaries
+
       - name: Check theme contrast
         run: pnpm --filter web check:contrast
 

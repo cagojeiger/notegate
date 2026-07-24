@@ -164,11 +164,13 @@ function workbench(overrides: Record<string, unknown> = {}) {
     primaryWidth: 300,
     mobileTreeOpen: false,
     mobileAuxOpen: false,
+    toast: null,
+    saveState: "idle",
     showAuxiliary: false,
     isMobile: false,
     settingsOpen: false,
     dialog: null,
-    actions: {},
+    actions: { clearToast: vi.fn() },
     ...overrides
   };
 }
