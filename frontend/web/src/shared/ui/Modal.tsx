@@ -12,7 +12,7 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(",");
 
-// Shared modal shell matching the SettingsModal tone: soft backdrop + paper panel.
+// Shared modal shell with a soft backdrop and paper panel.
 // Escape and backdrop click both dismiss. Keep panels small and focused.
 export function Modal({ title, onClose, children, footer, width = "max-w-md" }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; width?: string }) {
   const titleId = useId();
