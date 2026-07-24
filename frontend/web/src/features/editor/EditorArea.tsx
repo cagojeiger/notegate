@@ -2,8 +2,7 @@ import { useState, type MouseEvent } from "react";
 import { nodeIcon } from "../nodes/nodeDisplay";
 
 import type { RestNode, Space } from "../../api/types";
-import { MAX_EDITOR_GROUPS, type EditorGroup } from "../../stores/uiStore";
-import type { OpenedNodeRef } from "../../stores/uiStoreReducers";
+import { MAX_EDITOR_GROUPS, type EditorGroup, type EditorPresentation, type OpenedNodeRef } from "../../shared/model/workbench";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EmptyEditor } from "./EmptyEditor";
 import { FileDetailView } from "./FileDetailView";
@@ -13,7 +12,6 @@ import { NodeContextMenu } from "../nodes/NodeContextMenu";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { TextEditorView } from "./TextEditorView";
 import type { EditorNavigationActions, NodeActions } from "./types";
-import type { EditorPresentation } from "../../layout/workbenchLayout";
 
 type EditorAreaProps = NodeActions & {
   groups: EditorGroup[];

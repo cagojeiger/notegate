@@ -1,4 +1,5 @@
-import { MAX_EDITOR_GROUPS, resetEditorGroupsState, type EditorGroup, type EditorGroupState, type OpenedNodeRef } from "./uiStoreReducers";
+import { MAX_EDITOR_GROUPS, type EditorGroup, type EditorGroupState, type OpenedNodeRef } from "../shared/model/workbench";
+import { resetEditorGroupsState } from "./uiStoreReducers";
 
 const WORKBENCH_VERSION = 2;
 const WORKBENCH_INDEX_VERSION = 1;

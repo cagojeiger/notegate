@@ -5,7 +5,7 @@ import { ApiError } from "../../api/errors";
 import { invalidateSpaceResources } from "../../api/queryInvalidation";
 import type { RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
-import type { OpenedNodeRef } from "../../stores/uiStoreReducers";
+import type { OpenedNodeRef } from "../../shared/model/workbench";
 import { useOpenedNodeQuery } from "./useEditorQueries";
 
 export function OpenedNodeGuard({ nodeRef, children }: { nodeRef: OpenedNodeRef; children: (node: RestNode) => ReactNode }) {

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Space } from "../api/types";
-import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
+import { MAX_EDITOR_GROUPS } from "../shared/model/workbench";
 import { TitleBar } from "./TitleBar";
 
 const space: Space = {

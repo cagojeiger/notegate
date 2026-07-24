@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { EditorArea } from "./EditorArea";
-import type { EditorGroup } from "../../stores/uiStore";
+import type { EditorGroup } from "../../shared/model/workbench";
 
 function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> = {}) {
   const groups: EditorGroup[] = [

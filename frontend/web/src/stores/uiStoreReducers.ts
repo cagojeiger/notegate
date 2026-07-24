@@ -1,21 +1,5 @@
 import type { RestNode } from "../api/types";
-
-export const MAX_EDITOR_GROUPS = 3;
-
-export type OpenedNodeRef = {
-  nodeId: string;
-  spaceId: string;
-};
-
-// Server node data stays in React Query. A group only owns the identity of the
-// node it shows and its preview/edit mode.
-export type EditorGroup = { id: number; nodeRef: OpenedNodeRef | null; mode: "preview" | "edit" };
-
-export type EditorGroupState = {
-  editorGroups: EditorGroup[];
-  activeGroupIndex: number;
-  nextGroupId: number;
-};
+import { MAX_EDITOR_GROUPS, type EditorGroup, type EditorGroupState, type OpenedNodeRef } from "../shared/model/workbench";
 
 export function openNodeInActiveGroupState(state: EditorGroupState, node: RestNode): Pick<EditorGroupState, "editorGroups"> {
   return {
