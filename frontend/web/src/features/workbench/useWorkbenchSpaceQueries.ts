@@ -4,7 +4,8 @@ import { useApiClient } from "../../api/ApiProvider";
 import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
 import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
-import type { Space, SpacesListResponse } from "../../api/types";
+import type { SpacesListResponse } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { buildSpaceSortOrderUpdates } from "../spaces/spaceReorder";
 
 export function useSpacesQuery() {

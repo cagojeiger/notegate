@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { RestNode } from "../api/types";
+import type { RestNode } from "../entities/node/model";
 import { useUiStore } from "../stores/uiStore";
 import {
   LAST_ACTIVE_SPACE_KEY,

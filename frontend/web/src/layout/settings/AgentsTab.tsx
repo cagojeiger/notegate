@@ -2,7 +2,7 @@ import { Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { Agent } from "../../api/agents";
-import type { Space } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { canWriteSpace } from "../../auth/permissions";
 import { Button, Card, EmptyState, IconButton, SectionHeader, TextField } from "../../shared/ui";
 import {

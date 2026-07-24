@@ -2,7 +2,8 @@ import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query
 import { ChevronRight, History, RefreshCw } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 
-import type { AuditEventListResponse, FileChangeEvent, FileChangeEventListResponse, Space } from "../../api/types";
+import type { AuditEventListResponse, FileChangeEvent, FileChangeEventListResponse } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { Button, EmptyState, Modal, SelectField, Tabs } from "../../shared/ui";
 import {
   formatActor,

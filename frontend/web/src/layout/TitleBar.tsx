@@ -3,7 +3,7 @@ import { Columns2, Columns3, Moon, PanelLeft, PanelRight, Square, Sun } from "lu
 import type { ThemeMode } from "../design/tokens";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbench";
 import { BrandAppIcon, IconButton } from "../shared/ui";
-import type { Space } from "../api/types";
+import type { Space } from "../entities/space/model";
 
 export function TitleBar({ activeSpace, theme, primarySidebarOpen, auxiliaryOpen, editorGroupCount, onAddGroup, onToggleTheme, onTogglePrimarySidebar, onToggleAuxiliary }: { activeSpace: Space | null; theme: ThemeMode; primarySidebarOpen: boolean; auxiliaryOpen: boolean; editorGroupCount: number; onAddGroup: () => void; onToggleTheme: () => void; onTogglePrimarySidebar: () => void; onToggleAuxiliary: () => void }) {
   const atMaxGroups = editorGroupCount >= MAX_EDITOR_GROUPS;

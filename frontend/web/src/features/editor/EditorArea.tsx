@@ -1,7 +1,8 @@
 import { useState, type MouseEvent } from "react";
 import { nodeIcon } from "../nodes/nodeDisplay";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import { MAX_EDITOR_GROUPS, type EditorGroup, type EditorPresentation, type OpenedNodeRef } from "../../shared/model/workbench";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EmptyEditor } from "./EmptyEditor";

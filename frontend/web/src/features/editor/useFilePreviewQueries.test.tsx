@@ -7,7 +7,7 @@ import { ApiError } from "../../api/errors";
 import { getFilePreviewUrl } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { useFilePreviewUrl, useMarkdownImageLoader } from "./useFilePreviewQueries";
 
 const mockClient = vi.hoisted(() => ({}));

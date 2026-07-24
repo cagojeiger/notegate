@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import type { Space } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { useUiStore } from "../../stores/uiStore";
 import { persistLastActiveSpace, persistSpaceWorkbench } from "../../stores/workbenchStorage";
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { Me } from "../api/types";
+import type { Me } from "../entities/account/model";
 import { canManageAgents } from "../auth/permissions";
 import { Modal, Tabs } from "../shared/ui";
 import { AccountTab } from "./settings/AccountTab";

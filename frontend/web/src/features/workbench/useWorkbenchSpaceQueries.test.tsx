@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
 import { createSpace } from "../../api/spaces";
-import type { Space, SpacesListResponse } from "../../api/types";
+import type { SpacesListResponse } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { useCreateSpaceMutation } from "./useWorkbenchSpaceQueries";
 
 const mockClient = vi.hoisted(() => ({}));

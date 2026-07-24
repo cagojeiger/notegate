@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import type { Space } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { canWriteSpace } from "../../auth/permissions";
 import type { AppDialog } from "./dialogs/DialogHost";
 import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "./dialogs/appDialogs";

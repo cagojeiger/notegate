@@ -7,7 +7,7 @@ import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { filePreviewKind } from "../../shared/lib/filePreview";
 import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
 

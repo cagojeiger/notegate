@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
-import type { RestNode } from "./types";
+import type { RestNode } from "../entities/node/model";
 import { queryKeys } from "./queryKeys";
 
 export function invalidateAuditEvents(queryClient: QueryClient) {

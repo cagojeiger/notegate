@@ -1,6 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 
-import type { Me } from "../../api/types";
+import type { Me } from "../../entities/account/model";
 import { Button, Card, SectionHeader } from "../../shared/ui";
 import { KeyManager } from "./KeyManager";
 import { useUiStore } from "../../stores/uiStore";

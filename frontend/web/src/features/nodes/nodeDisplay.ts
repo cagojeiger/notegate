@@ -1,6 +1,7 @@
 import { Database, FileText, Folder, Image as ImageIcon, type LucideIcon } from "lucide-react";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import { filePreviewKind } from "../../shared/lib/filePreview";
 
 export function nodeIcon(node: RestNode): LucideIcon {

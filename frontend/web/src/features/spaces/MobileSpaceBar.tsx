@@ -1,6 +1,6 @@
 import { History, Plus, Settings } from "lucide-react";
 
-import type { Space } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
 // Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 01-layout).

@@ -9,7 +9,7 @@ import { POLLING, withPollingJitter } from "../../api/polling";
 import { invalidateSpaceResources } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { usePageVisible } from "../../shared/hooks/usePageVisible";
 import { useUiStore } from "../../stores/uiStore";
 import type { OpenedNodeRef } from "../../shared/model/workbench";

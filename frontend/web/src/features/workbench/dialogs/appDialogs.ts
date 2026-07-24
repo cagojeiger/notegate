@@ -1,4 +1,5 @@
-import type { RestNode, Space } from "../../../api/types";
+import type { RestNode } from "../../../entities/node/model";
+import type { Space } from "../../../entities/space/model";
 import type { AppDialog } from "./DialogHost";
 
 export function newSpaceDialog(onCreate: (name: string) => void): AppDialog {

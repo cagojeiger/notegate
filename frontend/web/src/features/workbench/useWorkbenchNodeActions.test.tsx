@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import { resolveNodePath } from "../../api/nodes";
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 

@@ -1,4 +1,4 @@
-import type { Space } from "../api/types";
+import type { Space } from "../entities/space/model";
 import { useUiStore } from "../stores/uiStore";
 
 const SAVE_LABEL: Record<string, { text: string; dot: string }> = {

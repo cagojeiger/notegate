@@ -1,4 +1,5 @@
-import type { AccountRef, AuditEvent, FileChangeEvent } from "../../api/types";
+import type { AuditEvent, FileChangeEvent } from "../../api/types";
+import type { AccountRef } from "../../entities/account/model";
 import { formatBytes } from "../../shared/lib/formatBytes";
 
 export type FileChangeDetail = {

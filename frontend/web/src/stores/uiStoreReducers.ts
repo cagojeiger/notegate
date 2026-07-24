@@ -1,4 +1,4 @@
-import type { RestNode } from "../api/types";
+import type { RestNode } from "../entities/node/model";
 import { MAX_EDITOR_GROUPS, type EditorGroup, type EditorGroupState, type OpenedNodeRef } from "../shared/model/workbench";
 
 export function openNodeInActiveGroupState(state: EditorGroupState, node: RestNode): Pick<EditorGroupState, "editorGroups"> {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
-import type { Me } from "../api/types";
+import type { Me } from "../entities/account/model";
 import { DevAuthGate } from "../auth/DevAuthGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { clearDevApiKey, readDevApiKey } from "../auth/session";

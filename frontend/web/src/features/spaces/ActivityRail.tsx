@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Copy, History, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
-import type { Space } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { copyText } from "../../shared/lib/clipboard";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";

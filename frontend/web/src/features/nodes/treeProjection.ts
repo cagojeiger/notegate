@@ -1,4 +1,4 @@
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 
 export type TreeFolderSnapshot = {
   children: RestNode[];

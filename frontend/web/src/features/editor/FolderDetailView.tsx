@@ -1,4 +1,4 @@
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { Card, MetaRow } from "../../shared/ui";
 import { useFolderChildrenStat } from "./useEditorQueries";
 

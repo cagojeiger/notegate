@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RestNode } from "../api/types";
+import type { RestNode } from "../entities/node/model";
 import { useUiStore } from "../stores/uiStore";
 import { persistLastActiveSpace, persistSpaceWorkbench, workbenchSpaceKey } from "../stores/workbenchStorage";
 import { App } from "./App";

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { deleteNode, updateNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { useDeleteNodeMutation, useUpdateNodeMutation } from "./useWorkbenchNodeQueries";
 
 vi.mock("../../api/ApiProvider", () => ({
