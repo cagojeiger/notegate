@@ -2,8 +2,8 @@ import { useEffect } from "react";
 
 import type { Space } from "../../api/types";
 import type { ThemeMode } from "../../design/tokens";
-import { persistLastSpace, persistTheme, useUiStore } from "../../stores/uiStore";
-import { persistSpaceWorkbench } from "../../stores/workbenchStorage";
+import { persistTheme, useUiStore } from "../../stores/uiStore";
+import { persistLastActiveSpace, persistSpaceWorkbench } from "../../stores/workbenchStorage";
 
 export function useWorkbenchPersistence(theme: ThemeMode, activeSpace: Space | null, activeSpaceId: string | null) {
   const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
@@ -18,7 +18,7 @@ export function useWorkbenchPersistence(theme: ThemeMode, activeSpace: Space | n
   useEffect(() => {
     if (!activeSpace) return;
     if (activeSpace.id !== activeSpaceId) setActiveSpaceId(activeSpace.id);
-    persistLastSpace(activeSpace.id);
+    persistLastActiveSpace(activeSpace.id);
     addExpanded([activeSpace.root_node_id]);
   }, [activeSpace, activeSpaceId, setActiveSpaceId, addExpanded]);
 
