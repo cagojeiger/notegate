@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RestNode } from "../api/types";
 import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
 import { MAX_EDITOR_GROUPS, useUiStore } from "./uiStore";
-import { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
+import { LAST_ACTIVE_SPACE_KEY, MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistLastActiveSpace, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
 
 function resetStore() {
   useUiStore.setState(useUiStore.getInitialState(), true);
@@ -225,6 +225,7 @@ describe("useUiStore", () => {
   it("clears saved workspace snapshots and panel visibility together", () => {
     persistSpaceWorkbench("space-1", [{ id: 1, node: node("node-1"), mode: "preview" }], 0);
     useUiStore.getState().toggleAuxiliary();
+    persistLastActiveSpace("space-1");
 
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).not.toBeNull();
     expect(window.localStorage.getItem(WORKBENCH_PANEL_STATE_KEY)).not.toBeNull();
@@ -233,6 +234,7 @@ describe("useUiStore", () => {
 
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
     expect(window.localStorage.getItem(WORKBENCH_PANEL_STATE_KEY)).toBeNull();
+    expect(window.localStorage.getItem(LAST_ACTIVE_SPACE_KEY)).toBeNull();
   });
 
   it("keeps only the most recent persisted space snapshots", () => {

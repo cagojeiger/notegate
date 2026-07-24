@@ -38,7 +38,8 @@ frontend/web/src
 - `useSessionQuery`가 `/api/v1/me`의 authority다.
 - `/me` 401은 AuthScreen을 렌더링한다.
 - 일반 query/mutation 401은 session reset을 유발한다.
-- logout은 local developer API key fallback을 지운다.
+- logout과 session 401은 local developer API key fallback, in-memory workbench,
+  browser-local pane snapshot과 마지막 space ID를 지운다. Theme은 기기 UI 선호로 유지한다.
 - browser session refresh는 BE가 HttpOnly cookie와 encrypted refresh token으로 처리한다.
 - FE는 refresh token을 저장하지 않고, refresh 불가 상태에서 반환되는 401만 처리한다.
 

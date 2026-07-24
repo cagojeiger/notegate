@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
 import type { Me } from "../api/types";
+import { clearAuthenticatedClientState, resetWorkbenchClientState } from "../auth/clientSession";
 import { DevAuthGate } from "../auth/DevAuthGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { clearDevApiKey, readDevApiKey } from "../auth/session";
@@ -22,21 +23,27 @@ export function App() {
   });
   const [sessionRevision, setSessionRevision] = useState(0);
 
+  const clearClientSession = useCallback(() => {
+    clearAuthenticatedClientState();
+  }, []);
+
   // A 401 from any non-session query, or an explicit sign-out, means the
   // authenticated session is no longer trustworthy. Bump the revision so /me
   // is checked with a fresh query key instead of reusing stale account data.
   const resetSession = useCallback(() => {
-    clearDevApiKey();
+    clearClientSession();
     setApiKey(null);
     setSessionRevision((revision) => revision + 1);
-  }, []);
+  }, [clearClientSession]);
 
   const handleApiKeyAuthenticated = useCallback((nextApiKey: string) => {
+    resetWorkbenchClientState();
     setApiKey(nextApiKey);
     setSessionRevision((revision) => revision + 1);
   }, []);
 
   const handleBrowserSessionAuthenticated = useCallback(() => {
+    resetWorkbenchClientState();
     setSessionRevision((revision) => revision + 1);
   }, []);
 
@@ -50,6 +57,7 @@ export function App() {
         devApiKeyFallbackEnabled={DEV_API_KEY_FALLBACK_ENABLED}
         onAuthenticated={handleApiKeyAuthenticated}
         onBrowserSessionAuthenticated={handleBrowserSessionAuthenticated}
+        onBrowserSessionInvalidated={clearClientSession}
         onSignOut={resetSession}
       />
     </ApiProvider>
@@ -62,6 +70,7 @@ function AuthBoundary({
   devApiKeyFallbackEnabled,
   onAuthenticated,
   onBrowserSessionAuthenticated,
+  onBrowserSessionInvalidated,
   onSignOut
 }: {
   apiKey: string | null;
@@ -69,6 +78,7 @@ function AuthBoundary({
   devApiKeyFallbackEnabled: boolean;
   onAuthenticated: (apiKey: string) => void;
   onBrowserSessionAuthenticated: () => void;
+  onBrowserSessionInvalidated: () => void;
   onSignOut: () => void;
 }) {
   const meQuery = useSessionQuery(apiKey, sessionRevision);
@@ -82,8 +92,10 @@ function AuthBoundary({
   });
 
   useEffect(() => {
-    if (unauthorized && apiKey) onSignOut();
-  }, [apiKey, onSignOut, unauthorized]);
+    if (!unauthorized) return;
+    if (apiKey) onSignOut();
+    else onBrowserSessionInvalidated();
+  }, [apiKey, onBrowserSessionInvalidated, onSignOut, unauthorized]);
 
   if (authViewState.kind === "checking") return <FullScreenStatus label="Checking session" />;
 

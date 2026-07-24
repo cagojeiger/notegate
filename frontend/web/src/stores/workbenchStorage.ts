@@ -5,6 +5,7 @@ const WORKBENCH_VERSION = 1;
 const WORKBENCH_INDEX_KEY = "notegate.workbench.v1.index";
 const WORKBENCH_SPACE_KEY_PREFIX = "notegate.workbench.v1.space.";
 const WORKBENCH_PANEL_STATE_KEY = "notegate.workbenchPanels.v1";
+const LAST_ACTIVE_SPACE_KEY = "notegate.lastActiveSpaceId";
 const MAX_WORKBENCH_SNAPSHOTS = 20;
 
 type PersistedEditorGroup = {
@@ -39,7 +40,17 @@ const DEFAULT_WORKBENCH_PANEL_STATE: WorkbenchPanelState = {
   auxiliaryOpen: true
 };
 
-export { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY };
+export { LAST_ACTIVE_SPACE_KEY, MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY };
+
+export function readLastActiveSpace(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(LAST_ACTIVE_SPACE_KEY);
+}
+
+export function persistLastActiveSpace(spaceId: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LAST_ACTIVE_SPACE_KEY, spaceId);
+}
 
 export function workbenchSpaceKey(spaceId: string): string {
   return `${WORKBENCH_SPACE_KEY_PREFIX}${spaceId}`;
@@ -133,6 +144,7 @@ export function clearPersistedWorkbenches(): void {
     }
     window.localStorage.removeItem(WORKBENCH_INDEX_KEY);
     window.localStorage.removeItem(WORKBENCH_PANEL_STATE_KEY);
+    window.localStorage.removeItem(LAST_ACTIVE_SPACE_KEY);
   } catch {
     // Browser storage cleanup is best-effort.
   }

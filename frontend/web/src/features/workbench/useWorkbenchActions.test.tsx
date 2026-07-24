@@ -1,8 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { writeDevApiKey } from "../../auth/session";
-import { persistWorkbenchPanelState, persistSpaceWorkbench, workbenchSpaceKey } from "../../stores/workbenchStorage";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 
 const mocks = vi.hoisted(() => ({
@@ -39,33 +37,22 @@ function renderActions(onSignOut = vi.fn()) {
   };
 }
 
-function persistBrowserWorkspace() {
-  persistSpaceWorkbench("space-1", [{ id: 1, node: null, mode: "preview" }], 0);
-  persistWorkbenchPanelState({ primarySidebarOpen: true, auxiliaryOpen: false });
-  writeDevApiKey("dev-key");
-}
-
 describe("useWorkbenchActions", () => {
   beforeEach(() => {
     mocks.logout.mockReset().mockResolvedValue(undefined);
   });
 
-  it("clears browser workspace metadata after logout", async () => {
-    persistBrowserWorkspace();
+  it("notifies the auth boundary after logout", async () => {
     const { result, onSignOut } = renderActions();
 
     await act(async () => {
       await result.current.actions.handleSignOut();
     });
 
-    expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
-    expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull();
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("still clears browser workspace metadata when server logout fails", async () => {
-    persistBrowserWorkspace();
+  it("still notifies the auth boundary when server logout fails", async () => {
     mocks.logout.mockRejectedValue(new Error("logout failed"));
     const { result, onSignOut } = renderActions();
     let error: unknown;
@@ -79,8 +66,6 @@ describe("useWorkbenchActions", () => {
     });
 
     expect(error).toEqual(new Error("logout failed"));
-    expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull();
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 });

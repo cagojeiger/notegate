@@ -54,6 +54,7 @@ App load
 Logout
 -> POST /auth/logout
 -> clear local API key fallback
+-> clear in-memory workbench and browser-local pane snapshots
 -> reset session
 -> AuthScreen
 ```
@@ -61,11 +62,13 @@ Logout
 ```text
 any /api/v1/* returns 401
 -> clear local API key fallback
+-> clear in-memory workbench and browser-local pane snapshots
 -> reset session
 -> AuthScreen
 ```
 
 Browser session refresh는 server-side flow다. FE는 refresh token을 저장하거나 직접 refresh endpoint를 호출하지 않는다. `/api/v1/me` 401은 재로그인 필요 상태로 처리하고, 503 `auth_unavailable`은 세션을 지우지 않는 일시 장애/재시도 상태로 처리한다.
+인증 상태를 정리해도 theme은 이 브라우저의 UI 선호로 유지한다.
 
 ## Space
 
