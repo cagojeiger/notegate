@@ -6,9 +6,9 @@ import type { EditorGroup } from "../../stores/uiStore";
 
 function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> = {}) {
   const groups: EditorGroup[] = [
-    { id: 0, node: null, mode: "preview" },
-    { id: 1, node: null, mode: "preview" },
-    { id: 2, node: null, mode: "preview" }
+    { id: 0, nodeRef: null, mode: "preview" },
+    { id: 1, nodeRef: null, mode: "preview" },
+    { id: 2, nodeRef: null, mode: "preview" }
   ];
 
   return render(

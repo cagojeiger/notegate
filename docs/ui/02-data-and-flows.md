@@ -21,7 +21,7 @@
 | 서버 자원 | React Query | cache only |
 | active space id | UI store | local storage |
 | editor groups, active group, mode | UI store | space별 local storage snapshot |
-| opened node snapshot | UI store | space별 local storage snapshot |
+| opened node identity (`spaceId`, `nodeId`) | UI store | space별 local storage snapshot |
 | primary/aux sidebar visibility | UI store | local storage |
 | primary sidebar width | UI store | session only |
 | Files/Recent ratio, section open, density | UI store | session only |
@@ -33,7 +33,7 @@
 규칙:
 
 - 서버 collection은 UI store에 복제하지 않는다.
-- EditorGroup은 열린 pane 복원을 위해 현재 열린 node snapshot만 보관할 수 있다.
+- EditorGroup은 열린 pane 복원을 위해 `spaceId`와 `nodeId`만 보관한다. 이름, 경로, metadata 등 node detail의 정본은 React Query다.
 - text body와 file content는 UI store에 보관하지 않는다.
 - space별 workbench snapshot은 browser-local best-effort 상태다. 계정/서버 정본이 아니며 다른 브라우저로 동기화하지 않는다.
 - workbench snapshot은 최근 20개 space까지만 유지한다. 손상됐거나 현재 space와 맞지 않는 snapshot은 폐기한다.
@@ -225,7 +225,7 @@ select file
 rename
 -> PATCH /nodes/{node_id}
 -> refresh node, children, recent
--> update opened node snapshot
+-> update opened node query cache
 ```
 
 ### Move
@@ -234,7 +234,7 @@ rename
 move into folder
 -> POST /nodes/{node_id}/move
 -> refresh old/new parents, reveal, recent
--> update opened node snapshot
+-> update opened node query cache
 ```
 
 ### Delete
@@ -276,7 +276,8 @@ file   -> node detail + supported inline preview + file metadata/download
 
 ```text
 open node
--> set active EditorGroup node snapshot
+-> cache selected node detail in React Query
+-> set active EditorGroup node identity
 -> fetch detail/content by kind
 -> show Inspector for active node
 ```
@@ -302,7 +303,7 @@ edit text
 
 ```text
 visible tab polling
--> opened node changed: refresh snapshot
+-> opened node changed: refresh node query cache
 -> text hash changed: refetch text
 -> opened node 404: clear editor group
 ```

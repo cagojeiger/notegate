@@ -23,7 +23,7 @@ describe("clearAuthenticatedClientState", () => {
     useUiStore.setState({
       theme: "dark",
       activeSpaceId: "space-1",
-      editorGroups: [{ id: 7, node: openedNode, mode: "edit" }],
+      editorGroups: [{ id: 7, nodeRef: { nodeId: openedNode.id, spaceId: openedNode.space_id }, mode: "edit" }],
       activeGroupIndex: 0,
       expandedFolderIds: new Set(["folder-1"]),
       primarySidebarOpen: false,
@@ -32,7 +32,7 @@ describe("clearAuthenticatedClientState", () => {
       toast: "Private document saved",
       saveState: "saved"
     });
-    persistSpaceWorkbench("space-1", [{ id: 7, node: openedNode, mode: "edit" }], 0);
+    persistSpaceWorkbench("space-1", [{ id: 7, nodeRef: { nodeId: openedNode.id, spaceId: openedNode.space_id }, mode: "edit" }], 0);
     persistWorkbenchPanelState({ primarySidebarOpen: false, auxiliaryOpen: false });
     persistLastActiveSpace("space-1");
     writeDevApiKey("dev-key");
@@ -42,7 +42,7 @@ describe("clearAuthenticatedClientState", () => {
     const state = useUiStore.getState();
     expect(state.theme).toBe("dark");
     expect(state.activeSpaceId).toBeNull();
-    expect(state.editorGroups).toMatchObject([{ node: null, mode: "preview" }]);
+    expect(state.editorGroups).toMatchObject([{ nodeRef: null, mode: "preview" }]);
     expect(state.expandedFolderIds.size).toBe(0);
     expect(state.primarySidebarOpen).toBe(true);
     expect(state.auxiliaryOpen).toBe(true);

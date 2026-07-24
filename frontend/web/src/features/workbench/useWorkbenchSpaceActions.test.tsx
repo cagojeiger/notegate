@@ -61,7 +61,7 @@ describe("useWorkbenchSpaceActions", () => {
 
     useUiStore.getState().setActiveSpaceId(activeSpace.id);
     useUiStore.getState().openInActiveGroup(node("active", activeSpace.id));
-    persistSpaceWorkbench(deletedSpace.id, [{ id: 9, node: node("deleted", deletedSpace.id), mode: "preview" }], 0);
+    persistSpaceWorkbench(deletedSpace.id, [{ id: 9, nodeRef: { nodeId: "deleted", spaceId: deletedSpace.id }, mode: "preview" }], 0);
 
     const { result } = renderHook(() =>
       useWorkbenchSpaceActions({
@@ -77,7 +77,7 @@ describe("useWorkbenchSpaceActions", () => {
     await requireConfirmDialog(dialog).onConfirm();
 
     expect(useUiStore.getState().activeSpaceId).toBe(activeSpace.id);
-    expect(useUiStore.getState().editorGroups[0].node?.id).toBe("active");
+    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe("active");
     expect(window.localStorage.getItem(workbenchSpaceKey(deletedSpace.id))).toBeNull();
   });
 
@@ -102,7 +102,7 @@ describe("useWorkbenchSpaceActions", () => {
     await requireConfirmDialog(dialog).onConfirm();
 
     expect(useUiStore.getState().activeSpaceId).toBeNull();
-    expect(useUiStore.getState().editorGroups).toMatchObject([{ node: null, mode: "preview" }]);
+    expect(useUiStore.getState().editorGroups).toMatchObject([{ nodeRef: null, mode: "preview" }]);
     expect(window.localStorage.getItem(workbenchSpaceKey(activeSpace.id))).toBeNull();
   });
 

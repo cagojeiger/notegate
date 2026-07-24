@@ -3,6 +3,7 @@ import { nodeIcon } from "../nodes/nodeDisplay";
 
 import type { RestNode, Space } from "../../api/types";
 import { MAX_EDITOR_GROUPS, type EditorGroup } from "../../stores/uiStore";
+import type { OpenedNodeRef } from "../../stores/uiStoreReducers";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EmptyEditor } from "./EmptyEditor";
 import { FileDetailView } from "./FileDetailView";
@@ -52,7 +53,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
             <GroupBody
               active={active}
               groupId={group.id}
-              node={group.node}
+              nodeRef={group.nodeRef}
               mode={group.mode}
               activeSpace={activeSpace}
               canWriteActiveSpace={canWriteActiveSpace}
@@ -106,8 +107,8 @@ function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visib
   return { start, end: start + count };
 }
 
-function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
-  if (!node) {
+function GroupBody({ active, groupId, nodeRef, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; nodeRef: OpenedNodeRef | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+  if (!nodeRef) {
     return (
       <>
         <EditorGroupHeader title="Open a node" canClose={canClose} onClose={onClose} active={active} />
@@ -116,7 +117,7 @@ function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpa
     );
   }
   return (
-    <OpenedNodeGuard node={node}>
+    <OpenedNodeGuard nodeRef={nodeRef}>
       {(freshNode) => (
         <NodeGroupContent
           active={active}

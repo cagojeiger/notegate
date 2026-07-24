@@ -12,6 +12,7 @@ import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
 import { usePageVisible } from "../../shared/hooks/usePageVisible";
 import { useUiStore } from "../../stores/uiStore";
+import type { OpenedNodeRef } from "../../stores/uiStoreReducers";
 
 export function useFolderChildrenStat(node: RestNode) {
   const client = useApiClient();
@@ -28,16 +29,29 @@ export function useTextDocument(node: RestNode) {
   return useQuery({ queryKey: queryKeys.text(node.space_id, node.id), queryFn: () => readText(client, node.space_id, node.id) });
 }
 
-export function useNodeFreshness(node: RestNode) {
+export function useOpenedNodeQuery(nodeRef: OpenedNodeRef | null) {
   const client = useApiClient();
   const pageVisible = usePageVisible();
   const refetchInterval = useMemo(() => withPollingJitter(POLLING.openedNodeMs, POLLING.openedNodeJitterMs), []);
   return useQuery({
-    queryKey: queryKeys.node(node.space_id, node.id),
-    queryFn: () => getNode(client, node.space_id, node.id),
-    enabled: pageVisible,
+    queryKey: nodeRef ? queryKeys.node(nodeRef.spaceId, nodeRef.nodeId) : ["opened-node", "none"],
+    queryFn: () => {
+      if (!nodeRef) throw new Error("No opened node");
+      return getNode(client, nodeRef.spaceId, nodeRef.nodeId);
+    },
+    enabled: Boolean(nodeRef) && pageVisible,
     refetchInterval: pageVisible ? refetchInterval : false,
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3
+  });
+}
+
+export function useOpenedNodeCache(nodeRef: OpenedNodeRef | null) {
+  return useQuery<RestNode>({
+    queryKey: nodeRef ? queryKeys.node(nodeRef.spaceId, nodeRef.nodeId) : ["opened-node", "none"],
+    queryFn: async () => {
+      throw new Error("Opened node cache subscriptions do not fetch");
+    },
+    enabled: false
   });
 }
 
@@ -46,13 +60,12 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
   const queryClient = useQueryClient();
   const showToast = useUiStore((state) => state.showToast);
   const setSaveState = useUiStore((state) => state.setSaveState);
-  const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   return useMutation({
     meta: { silentError: true },
     mutationFn: (force: boolean) => replaceText(client, node.space_id, node.id, draft, force ? undefined : sha),
     onMutate: () => setSaveState("saving"),
     onSuccess: (response) => {
-      updateGroupsNode({
+      queryClient.setQueryData<RestNode>(queryKeys.node(node.space_id, node.id), {
         ...node,
         content_sha256: response.text.content_sha256,
         byte_len: response.text.byte_len,
