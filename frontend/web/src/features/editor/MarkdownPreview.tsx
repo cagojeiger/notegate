@@ -1,7 +1,7 @@
 import { useRef } from "react";
 
-import { Markdown } from "../../shared/ui/Markdown";
 import type { MarkdownImagePolicy, MarkdownLinkPolicy } from "../../shared/lib/markdownLinks";
+import { Markdown } from "./Markdown";
 
 export function MarkdownPreview({ content, linkPolicy, imagePolicy }: { content: string; linkPolicy?: MarkdownLinkPolicy; imagePolicy?: MarkdownImagePolicy }) {
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
