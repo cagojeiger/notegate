@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_EDITOR_GROUPS } from "../stores/uiStoreReducers";
+import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { resolveWorkbenchLayout } from "./workbenchLayout";
 
 const base = {

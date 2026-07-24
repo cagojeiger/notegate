@@ -1,6 +1,6 @@
 import { Columns2, Columns3, Moon, PanelLeft, PanelRight, Square, Sun } from "lucide-react";
 
-import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
+import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import type { ThemeMode } from "../design/tokens";
 import { IconButton } from "../shared/ui";
 import type { Space } from "../api/types";

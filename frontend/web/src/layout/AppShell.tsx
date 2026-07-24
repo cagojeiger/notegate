@@ -5,7 +5,7 @@ import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
 import { SettingsModal } from "../features/settings/SettingsModal";
-import { MAX_EDITOR_GROUPS } from "../stores/uiStore";
+import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";

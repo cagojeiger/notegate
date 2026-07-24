@@ -2,11 +2,10 @@ import { create } from "zustand";
 
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
-import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
-import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
+import { WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
+import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
 import { persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
 
-export { MAX_EDITOR_GROUPS };
 export type { EditorGroup };
 
 const THEME_KEY = "notegate.theme";

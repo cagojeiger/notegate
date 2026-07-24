@@ -1,21 +1,6 @@
 import { useMemo } from "react";
 
-import { MAX_EDITOR_GROUPS } from "../stores/uiStoreReducers";
-
-export type WorkbenchPanelMode = "hidden" | "overlay" | "docked";
-export type EditorPresentation = "split" | "focused";
-
-export const WORKBENCH_LAYOUT = {
-  defaultPrimaryWidth: 300,
-  minPrimaryWidth: 220,
-  maxPrimaryWidth: 520,
-  auxiliaryWidth: 320,
-  mobilePrimaryWidthPercent: "85%",
-  mobilePrimaryMaxWidth: 320,
-  defaultTreeRatio: 0.67,
-  minTreeRatio: 0.2,
-  maxTreeRatio: 0.82
-} as const;
+import { MAX_EDITOR_GROUPS, type EditorPresentation, type WorkbenchPanelMode } from "../shared/model/workbenchLayout";
 
 export type WorkbenchLayoutInput = {
   isMobile: boolean;

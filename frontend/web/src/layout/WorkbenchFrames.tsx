@@ -1,6 +1,6 @@
 import type { PointerEventHandler, ReactNode } from "react";
 
-import { WORKBENCH_LAYOUT, type WorkbenchPanelMode } from "./workbenchLayout";
+import { WORKBENCH_LAYOUT, type WorkbenchPanelMode } from "../shared/model/workbenchLayout";
 
 export function PrimarySidebarFrame({ mode, width, children }: { mode: WorkbenchPanelMode; width: number; children: ReactNode }) {
   if (mode === "hidden") return null;
