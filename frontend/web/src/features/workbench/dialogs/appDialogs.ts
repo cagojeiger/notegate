@@ -1,4 +1,4 @@
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode, Space } from "../../../api/types";
 import type { AppDialog } from "./DialogHost";
 
 export function newSpaceDialog(onCreate: (name: string) => void): AppDialog {

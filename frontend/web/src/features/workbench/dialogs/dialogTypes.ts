@@ -1,4 +1,4 @@
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode, Space } from "../../../api/types";
 
 type MaybePromise<T> = T | Promise<T>;
 
