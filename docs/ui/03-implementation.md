@@ -44,6 +44,12 @@ frontend/web/src
 - browser session refresh는 BE가 HttpOnly cookie와 encrypted refresh token으로 처리한다.
 - FE는 refresh token을 저장하지 않고, refresh 불가 상태에서 반환되는 401만 처리한다.
 
+## Layout boundary
+
+- `AppShell`은 frame과 화면 영역을 조합한다.
+- `useWorkbenchPresentation`은 viewport, mobile panel 상태, active preview에 따른 panel 표시와 editor presentation을 계산한다.
+- PDF reading width에 따른 자동 접기와 해당 node의 임시 panel override는 presentation hook이 소유한다. 전역 panel 선호는 UI store가 계속 소유한다.
+
 ## React Query
 
 - query key는 `api/queryKeys.ts`에 둔다.
