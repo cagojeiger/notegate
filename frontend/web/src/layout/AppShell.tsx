@@ -11,7 +11,6 @@ import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { UploadProgressDock } from "../features/uploads/UploadProgressDock";
 import { useWorkbenchController } from "../features/workbench/useWorkbenchController";
 import { useViewportWidth } from "../shared/hooks/useMediaQuery";
-import { filePreviewKind } from "../shared/lib/filePreview";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 import { DialogHost } from "./dialogs/DialogHost";
 import { FullScreenStatus } from "./FullScreenStatus";
@@ -19,8 +18,8 @@ import { SettingsModal } from "./SettingsModal";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toast } from "./Toast";
+import { useWorkbenchPresentation } from "./useWorkbenchPresentation";
 import { AuxiliarySidebarFrame, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
-import { resolvePdfReadingLayout, useWorkbenchLayout } from "./workbenchLayout";
 
 type AppShellProps = {
   me: Me;
@@ -31,79 +30,27 @@ type HistoryScope = {
   initialSpaceId: string | null;
 };
 
-type PdfPanelState = {
-  nodeId: string;
-  auxiliaryOpen?: boolean;
-  primaryOpen?: boolean;
-};
-
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
-  const [pdfPanels, setPdfPanels] = useState<PdfPanelState | null>(null);
   const viewportWidth = useViewportWidth();
   const { actions } = workbench;
-  const activePdfId = workbench.activeNode?.kind === "file"
-    && workbench.activeNode.preview_available === true
-    && filePreviewKind(workbench.activeNode.detected_media_type) === "pdf"
-    ? workbench.activeNode.id
-    : null;
-  const pdfReadingLayout = activePdfId && !workbench.isMobile
-    ? resolvePdfReadingLayout({
-        auxiliaryOpen: workbench.showAuxiliary,
-        editorGroupCount: workbench.editorGroups.length,
-        primaryOpen: workbench.primarySidebarOpen,
-        primaryWidth: workbench.primaryWidth,
-        viewportWidth
-      })
-    : { foldAuxiliary: false, foldPrimary: false, focusEditor: false };
-  const activePdfPanels = pdfPanels?.nodeId === activePdfId ? pdfPanels : null;
-  const primaryOpen = workbench.isMobile
-    ? workbench.mobileTreeOpen
-    : activePdfPanels?.primaryOpen
-      ?? (pdfReadingLayout.foldPrimary ? false : workbench.primarySidebarOpen);
-  const auxiliaryOpen = workbench.isMobile
-    ? workbench.mobileAuxOpen
-    : activePdfPanels?.auxiliaryOpen
-      ?? (pdfReadingLayout.foldAuxiliary ? false : workbench.showAuxiliary);
-  const layout = useWorkbenchLayout({
-    isMobile: workbench.isMobile,
-    primaryOpen,
-    auxiliaryOpen,
+  const presentation = useWorkbenchPresentation({
+    activeNode: workbench.activeNode,
+    auxiliaryOpen: workbench.showAuxiliary,
     editorGroupCount: workbench.editorGroups.length,
-    focusEditor: pdfReadingLayout.focusEditor
+    isMobile: workbench.isMobile,
+    mobileAuxiliaryOpen: workbench.mobileAuxOpen,
+    mobilePrimaryOpen: workbench.mobileTreeOpen,
+    onToggleAuxiliary: actions.toggleAuxiliary,
+    onToggleMobileAuxiliary: actions.toggleMobileAux,
+    onToggleMobilePrimary: actions.toggleMobileTree,
+    onTogglePrimary: actions.togglePrimarySidebar,
+    primaryOpen: workbench.primarySidebarOpen,
+    primaryWidth: workbench.primaryWidth,
+    viewportWidth
   });
-  const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
-  const updatePdfPanels = (update: Omit<PdfPanelState, "nodeId">) => {
-    if (!activePdfId) return;
-    setPdfPanels((current) => ({
-      ...(current?.nodeId === activePdfId ? current : {}),
-      nodeId: activePdfId,
-      ...update
-    }));
-  };
-  const togglePrimary = () => {
-    if (workbench.isMobile) {
-      actions.toggleMobileTree();
-      return;
-    }
-    if (activePdfId && (pdfReadingLayout.foldPrimary || activePdfPanels?.primaryOpen !== undefined)) {
-      updatePdfPanels({ primaryOpen: !primaryOpen });
-      return;
-    }
-    actions.togglePrimarySidebar();
-  };
-  const toggleAuxiliary = () => {
-    if (workbench.isMobile) {
-      actions.toggleMobileAux();
-      return;
-    }
-    if (activePdfId && (pdfReadingLayout.foldAuxiliary || activePdfPanels?.auxiliaryOpen !== undefined)) {
-      updatePdfPanels({ auxiliaryOpen: !auxiliaryOpen });
-      return;
-    }
-    actions.toggleAuxiliary();
-  };
+  const { auxiliaryOpen, layout, mobileOverlayVisible, primaryOpen, toggleAuxiliary, togglePrimary } = presentation;
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
   };
