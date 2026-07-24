@@ -1,7 +1,7 @@
 import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Button, Card, EmptyState, Modal } from "../../shared/ui";
+import { Button, Card, EmptyState, Modal } from "../../../shared/ui";
 import { dialogErrorMessage } from "./dialogErrors";
 import type { AppDialog } from "./dialogTypes";
 import { useMovePickerChildren } from "./useDialogQueries";

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Modal } from "../../shared/ui";
+import { Button, Modal } from "../../../shared/ui";
 import { dialogErrorMessage } from "./dialogErrors";
 import type { AppDialog } from "./dialogTypes";
 
