@@ -1,5 +1,6 @@
 import type { RestNode } from "../api/types";
-import { MAX_EDITOR_GROUPS, resetEditorGroupsState, type EditorGroup, type EditorGroupState } from "./uiStoreReducers";
+import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
+import { resetEditorGroupsState, type EditorGroup, type EditorGroupState } from "./uiStoreReducers";
 
 const WORKBENCH_VERSION = 1;
 const WORKBENCH_INDEX_KEY = "notegate.workbench.v1.index";

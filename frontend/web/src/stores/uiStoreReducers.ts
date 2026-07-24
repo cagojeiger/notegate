@@ -1,6 +1,5 @@
 import type { RestNode } from "../api/types";
-
-export const MAX_EDITOR_GROUPS = 3;
+import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 
 // An EditorGroup is an independent pane. It owns the node it shows and its own
 // preview/edit mode, so each group toggles independently of the others.
