@@ -14,6 +14,7 @@ export const WORKBENCH_LAYOUT = {
 
 export type WorkbenchPanelMode = "hidden" | "overlay" | "docked";
 export type EditorPresentation = "split" | "focused";
+export type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 
 export type OpenedNodeRef = {
   nodeId: string;

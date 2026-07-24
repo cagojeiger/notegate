@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import type { RestNode } from "../entities/node/model";
 import type { ThemeMode } from "../design/tokens";
-import { WORKBENCH_LAYOUT, type EditorGroup } from "../shared/model/workbench";
+import { WORKBENCH_LAYOUT, type EditorGroup, type SaveState } from "../shared/model/workbench";
 import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState } from "./uiStoreReducers";
 import { persistSpaceWorkbench, persistWorkbenchPanelState, readLastActiveSpace, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
 
@@ -38,7 +38,7 @@ type UiState = {
   mobileTreeOpen: boolean;
   mobileAuxOpen: boolean;
   toast: string | null;
-  saveState: "idle" | "saving" | "saved" | "error" | "conflict";
+  saveState: SaveState;
   toggleTheme: () => void;
   setActiveSpaceId: (id: string | null) => void;
   openInActiveGroup: (node: RestNode) => void;
@@ -65,7 +65,7 @@ type UiState = {
   closeMobile: () => void;
   showToast: (message: string) => void;
   clearToast: () => void;
-  setSaveState: (saveState: "idle" | "saving" | "saved" | "error" | "conflict") => void;
+  setSaveState: (saveState: SaveState) => void;
   resetWorkbenchSession: () => void;
 };
 

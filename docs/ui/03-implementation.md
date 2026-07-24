@@ -4,15 +4,26 @@
 
 ```text
 frontend/web/src
-├─ app/        # entry, auth boundary
-├─ api/        # REST client, query keys, API types
-├─ auth/       # session/login helpers
+├─ app/        # entry, composition, auth boundary
+├─ api/        # REST client, query keys, transport DTOs
+├─ auth/       # session/login UI and helpers
 ├─ design/     # tokens and global theme styles
-├─ layout/     # AppShell, frames, Settings, dialogs
-├─ features/   # spaces, nodes, editor, workbench behavior
+├─ entities/   # account, space, node domain models
+├─ features/   # editor, events, nodes, settings, spaces, uploads, workbench
+├─ layout/     # AppShell and presentational frames
 ├─ stores/     # UI/draft stores
-└─ shared/     # shared UI and utilities
+└─ shared/     # foundation UI, models, hooks, utilities
 ```
+
+## Dependency direction
+
+- `app`은 provider와 상위 화면을 조립한다.
+- `layout`은 feature를 배치하지만 API나 store를 직접 참조하지 않는다.
+- `features`는 API, auth, entities, shared, stores를 사용할 수 있고 `layout`이나 `app`을 참조하지 않는다.
+- `api`는 transport와 query infrastructure만 소유하며 UI와 store를 참조하지 않는다.
+- `stores`는 shared model과 entities를 사용하며 API, auth, feature, layout을 참조하지 않는다.
+- `entities`, `shared`, `design`은 상위 계층을 참조하지 않는다.
+- 상대 import의 금지 방향과 파일 순환은 `pnpm --filter web check:boundaries`로 검사한다.
 
 ## State ownership
 
@@ -173,6 +184,8 @@ frontend/web/src/design/theme.css
 
 ```text
 pnpm --filter web typecheck
+pnpm --filter web check:boundaries
+pnpm --filter web check:contrast
 pnpm --filter web test -- --run
 pnpm --filter web build
 pnpm --filter web test:e2e

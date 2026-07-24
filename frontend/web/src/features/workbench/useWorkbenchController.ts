@@ -28,6 +28,8 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const primaryWidth = useUiStore((state) => state.primaryWidth);
   const mobileTreeOpen = useUiStore((state) => state.mobileTreeOpen);
   const mobileAuxOpen = useUiStore((state) => state.mobileAuxOpen);
+  const toast = useUiStore((state) => state.toast);
+  const saveState = useUiStore((state) => state.saveState);
   const isMobile = useIsMobile();
   const activeNodeRef = editorGroups[activeGroupIndex]?.nodeRef ?? null;
   const activeNodeQuery = useOpenedNodeCache(activeNodeRef);
@@ -67,6 +69,8 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
     primaryWidth,
     mobileTreeOpen,
     mobileAuxOpen,
+    toast,
+    saveState,
     showAuxiliary,
     isMobile,
     settingsOpen,

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:boundaries": "node scripts/check-import-boundaries.mjs",
     "check:contrast": "node scripts/check-theme-contrast.mjs",
     "export:icons": "bash scripts/export-brand-icons.sh",
     "lint": "eslint src --max-warnings 0",

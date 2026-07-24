@@ -5,7 +5,7 @@ import { StatusBar } from "./StatusBar";
 
 describe("StatusBar", () => {
   it("shows the save state and active space", () => {
-    render(<StatusBar activeSpace={null} />);
+    render(<StatusBar activeSpace={null} saveState="idle" />);
 
     expect(screen.getByText("ready")).toBeInTheDocument();
     expect(screen.getByText("No space")).toBeInTheDocument();

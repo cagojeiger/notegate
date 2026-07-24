@@ -36,6 +36,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
   const toggleMobileAux = useUiStore((state) => state.toggleMobileAux);
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
+  const clearToast = useUiStore((state) => state.clearToast);
   const startPointerDrag = usePointerDrag();
 
   const spaceActions = useWorkbenchSpaceActions({ activeSpace, canCreateSpace, setDialog });
@@ -85,6 +86,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
       toggleMobileTree,
       toggleMobileAux,
       closeMobile,
+      clearToast,
       setSettingsOpen,
       setDialog,
       ...spaceActions,
