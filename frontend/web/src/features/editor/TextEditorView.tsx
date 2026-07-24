@@ -1,7 +1,7 @@
 import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { copyText } from "../../shared/lib/clipboard";
 import { Button, Card, IconButton, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";

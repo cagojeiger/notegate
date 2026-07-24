@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { RestNode } from "../api/types";
+import type { RestNode } from "../entities/node/model";
 import type { ThemeMode } from "../design/tokens";
 import { WORKBENCH_LAYOUT, type EditorGroup } from "../shared/model/workbench";
 import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState } from "./uiStoreReducers";

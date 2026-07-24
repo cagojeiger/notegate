@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { Me } from "../../api/types";
+import type { Me } from "../../entities/account/model";
 import { canCreateSpace, canManageSpace, canWriteSpace } from "../../auth/permissions";
 import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { useUiStore } from "../../stores/uiStore";

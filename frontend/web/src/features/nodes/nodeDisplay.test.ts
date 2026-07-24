@@ -1,7 +1,7 @@
 import { Database, FileText, Folder, Image as ImageIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { nodeIcon } from "./nodeDisplay";
 
 describe("nodeIcon", () => {

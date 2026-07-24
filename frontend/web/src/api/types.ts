@@ -1,71 +1,12 @@
+import type { AccountRef } from "../entities/account/model";
+import type { RestNode } from "../entities/node/model";
+import type { Space } from "../entities/space/model";
+
 export type Page = {
   limit: number;
   returned: number;
   has_more: boolean;
   next_cursor: string | null;
-};
-
-export type Me = {
-  account: {
-    id: string;
-    kind: "user" | "agent";
-    display_name: string;
-  };
-  user?: {
-    email?: string | null;
-  } | null;
-  agent?: {
-    name: string;
-  } | null;
-  capabilities: {
-    can_create_space: boolean;
-    can_manage_agents: boolean;
-  };
-};
-
-export type SpacePermission = "read" | "write";
-
-export type Space = {
-  id: string;
-  name: string;
-  sort_order: number;
-  permission: SpacePermission;
-  root_node_id: string;
-  created_at: string;
-  updated_at: string;
-};
-
-export type NodeKind = "folder" | "text" | "file";
-
-export type AccountRef = {
-  id: string;
-  kind: "user" | "agent";
-  display_name: string;
-};
-
-export type RestNode = {
-  id: string;
-  space_id: string;
-  parent_id: string | null;
-  name: string;
-  kind: NodeKind;
-  path: string;
-  sort_order: number;
-  metadata: Record<string, unknown>;
-  has_children: boolean;
-  content_sha256?: string;
-  byte_len?: number;
-  line_count?: number;
-  media_type?: string;
-  detected_media_type?: string;
-  preview_available?: boolean;
-  original_filename?: string;
-  encryption_mode?: "none" | "client";
-  encryption_metadata?: Record<string, unknown>;
-  created_by: AccountRef;
-  updated_by: AccountRef;
-  created_at: string;
-  updated_at: string;
 };
 
 export type SpacesListResponse = {

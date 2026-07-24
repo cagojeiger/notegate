@@ -3,7 +3,8 @@ import { ChevronsDownUp, Folder } from "lucide-react";
 import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";

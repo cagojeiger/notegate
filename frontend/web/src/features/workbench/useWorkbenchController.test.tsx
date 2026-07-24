@@ -1,7 +1,9 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Me, RestNode, Space } from "../../api/types";
+import type { Me } from "../../entities/account/model";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import { useOpenedNodeCache } from "../editor/useEditorQueries";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchController } from "./useWorkbenchController";

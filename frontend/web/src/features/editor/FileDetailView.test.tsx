@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { FileDetailView } from "./FileDetailView";
 import { useFileDownload } from "./useEditorQueries";
 import { useFilePreviewUrl } from "./useFilePreviewQueries";

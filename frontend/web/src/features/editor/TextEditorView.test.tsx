@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ReadTextResponse, RestNode } from "../../api/types";
+import type { ReadTextResponse } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
 import { TextEditorView } from "./TextEditorView";

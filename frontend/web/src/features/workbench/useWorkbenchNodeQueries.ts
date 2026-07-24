@@ -5,7 +5,8 @@ import { replaceMetadata } from "../../api/metadata";
 import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../../api/nodes";
 import { removeDeletedNodeQueries } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import { useInvalidateSpace } from "./useWorkbenchCache";
 
 export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (node: RestNode) => void) {

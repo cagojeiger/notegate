@@ -2,7 +2,7 @@ import { Download } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 
 import { ApiError } from "../../api/errors";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { filePreviewKind } from "../../shared/lib/filePreview";
 import { Button, Card, MetaRow } from "../../shared/ui";
 import { useFileDownload } from "./useEditorQueries";

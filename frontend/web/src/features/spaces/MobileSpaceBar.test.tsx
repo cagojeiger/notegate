@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Space } from "../../api/types";
+import type { Space } from "../../entities/space/model";
 import { MobileSpaceBar } from "./MobileSpaceBar";
 
 const spaces: Space[] = [

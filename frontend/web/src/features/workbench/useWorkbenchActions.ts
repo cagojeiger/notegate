@@ -1,6 +1,7 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import type { Space, RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import type { AppDialog } from "./dialogs/DialogHost";
 import { usePointerDrag } from "../../shared/hooks/usePointerDrag";
 import { useUiStore } from "../../stores/uiStore";

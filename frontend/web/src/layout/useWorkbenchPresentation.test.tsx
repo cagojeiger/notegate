@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RestNode } from "../api/types";
+import type { RestNode } from "../entities/node/model";
 import { useWorkbenchPresentation } from "./useWorkbenchPresentation";
 
 const pdfNode: RestNode = {

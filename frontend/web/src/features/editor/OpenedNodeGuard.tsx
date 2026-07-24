@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiError } from "../../api/errors";
 import { invalidateSpaceResources } from "../../api/queryInvalidation";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { useUiStore } from "../../stores/uiStore";
 import type { OpenedNodeRef } from "../../shared/model/workbench";
 import { useOpenedNodeQuery } from "./useEditorQueries";

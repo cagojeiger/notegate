@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ReadTextResponse, RestNode } from "../../api/types";
+import type { ReadTextResponse } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { useTextEditorSession } from "./useTextEditorSession";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 

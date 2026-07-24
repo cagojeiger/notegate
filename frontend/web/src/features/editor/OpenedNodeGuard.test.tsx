@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { useUiStore } from "../../stores/uiStore";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { useOpenedNodeQuery } from "./useEditorQueries";

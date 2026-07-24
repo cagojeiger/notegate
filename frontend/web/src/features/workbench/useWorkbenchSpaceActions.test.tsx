@@ -1,7 +1,8 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
+import type { Space } from "../../entities/space/model";
 import type { AppDialog } from "./dialogs/DialogHost";
 import { useUiStore } from "../../stores/uiStore";
 import { persistSpaceWorkbench, workbenchSpaceKey } from "../../stores/workbenchStorage";

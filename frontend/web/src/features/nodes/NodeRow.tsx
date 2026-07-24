@@ -2,7 +2,7 @@ import type { DragEvent } from "react";
 import { useRef } from "react";
 import { ChevronRight } from "lucide-react";
 
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../entities/node/model";
 import { nodeIcon } from "./nodeDisplay";
 import type { NodeContextHandler } from "./types";
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { RestNode } from "../api/types";
+import type { RestNode } from "../entities/node/model";
 import { filePreviewKind } from "../shared/lib/filePreview";
 import { resolvePdfReadingLayout, useWorkbenchLayout } from "./workbenchLayout";
 
