@@ -12,7 +12,7 @@ import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
 import { usePageVisible } from "../../shared/hooks/usePageVisible";
 import { useUiStore } from "../../stores/uiStore";
-import type { OpenedNodeRef } from "../../stores/uiStoreReducers";
+import type { OpenedNodeRef } from "../../shared/model/workbench";
 
 export function useFolderChildrenStat(node: RestNode) {
   const client = useApiClient();

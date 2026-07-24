@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../api/types";
-import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
-import { MAX_EDITOR_GROUPS, useUiStore } from "./uiStore";
+import { MAX_EDITOR_GROUPS, WORKBENCH_LAYOUT } from "../shared/model/workbench";
+import { useUiStore } from "./uiStore";
 import { LAST_ACTIVE_SPACE_KEY, MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistLastActiveSpace, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
 
 function resetStore() {

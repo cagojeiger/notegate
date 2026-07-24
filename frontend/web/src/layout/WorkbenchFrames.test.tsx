@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { AuxiliarySidebarFrame, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
-import { WORKBENCH_LAYOUT } from "./workbenchLayout";
+import { WORKBENCH_LAYOUT } from "../shared/model/workbench";
 
 describe("WorkbenchFrames", () => {
   it("docks the primary sidebar with the user's saved width", () => {
