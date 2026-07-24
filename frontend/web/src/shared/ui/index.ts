@@ -4,7 +4,6 @@ export { Card } from "./Card";
 export { CopyableCodeBlock } from "./CopyableCodeBlock";
 export { EmptyState } from "./EmptyState";
 export { IconButton } from "./IconButton";
-export { Markdown } from "./Markdown";
 export { MenuButton } from "./MenuButton";
 export { MetaRow } from "./MetaRow";
 export { Modal } from "./Modal";

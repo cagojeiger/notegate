@@ -3,13 +3,13 @@ import { useEffect, useMemo, useRef, useState, type ComponentProps, type MouseEv
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { formatCodeBlockLabel } from "../../features/editor/codeBlockLanguage";
-import { MermaidBlock } from "../../features/editor/MermaidBlock";
-import { ShikiCodeBlock } from "../../features/editor/ShikiCodeBlock";
-import { CopyableCodeBlock } from "./CopyableCodeBlock";
-import { formatFrontmatterValue, parseMarkdownDocument } from "../lib/markdownDocument";
-import { classifyMarkdownLink, safeMarkdownUrlTransform, type MarkdownImagePolicy, type MarkdownLinkPolicy } from "../lib/markdownLinks";
-import { useResetHorizontalScrollOnGrow } from "../../features/editor/useResetHorizontalScrollOnGrow";
+import { CopyableCodeBlock } from "../../shared/ui/CopyableCodeBlock";
+import { formatFrontmatterValue, parseMarkdownDocument } from "../../shared/lib/markdownDocument";
+import { classifyMarkdownLink, safeMarkdownUrlTransform, type MarkdownImagePolicy, type MarkdownLinkPolicy } from "../../shared/lib/markdownLinks";
+import { formatCodeBlockLabel } from "./codeBlockLanguage";
+import { MermaidBlock } from "./MermaidBlock";
+import { ShikiCodeBlock } from "./ShikiCodeBlock";
+import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 type HastElementNode = {
   type?: string;
