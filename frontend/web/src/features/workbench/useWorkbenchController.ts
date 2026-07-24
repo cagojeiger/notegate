@@ -4,6 +4,7 @@ import type { Me } from "../../api/types";
 import { canCreateSpace, canManageSpace, canWriteSpace } from "../../auth/permissions";
 import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { useUiStore } from "../../stores/uiStore";
+import { useOpenedNodeCache } from "../editor/useEditorQueries";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 import { useWorkbenchPersistence } from "./useWorkbenchPersistence";
 import { useSpacesQuery } from "./useWorkbenchQueries";
@@ -28,7 +29,9 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const mobileTreeOpen = useUiStore((state) => state.mobileTreeOpen);
   const mobileAuxOpen = useUiStore((state) => state.mobileAuxOpen);
   const isMobile = useIsMobile();
-  const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
+  const activeNodeRef = editorGroups[activeGroupIndex]?.nodeRef ?? null;
+  const activeNodeQuery = useOpenedNodeCache(activeNodeRef);
+  const activeNode = activeNodeQuery.data ?? null;
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
   const canCreateSpaceForCaller = canCreateSpace(me);
   const canWriteActiveSpace = canWriteSpace(activeSpace);

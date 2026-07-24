@@ -24,7 +24,8 @@ frontend/web/src
 | spaces/nodes/text/file/metadata | React Query |
 | active space id | UI store |
 | editor groups | UI store |
-| opened node snapshot | UI store |
+| opened node detail | React Query |
+| opened node identity (`spaceId`, `nodeId`) | UI store |
 | sidebar visibility/size | UI store |
 | Files/Recent ratio | UI store |
 | theme | UI store |
@@ -84,6 +85,7 @@ Zustand가 소유하는 것:
 Zustand가 소유하지 않는 것:
 
 - node collection.
+- node detail, name, path, metadata.
 - text body.
 - file content.
 - API key secret.

@@ -53,7 +53,7 @@ describe("App auth boundary", () => {
     await screen.findByText("Continue to NoteGate");
     await waitFor(() => expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull());
     expect(useUiStore.getState().activeSpaceId).toBeNull();
-    expect(useUiStore.getState().editorGroups[0]?.node).toBeNull();
+    expect(useUiStore.getState().editorGroups[0]?.nodeRef).toBeNull();
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
   });
 
@@ -65,7 +65,7 @@ describe("App auth boundary", () => {
 
     await screen.findByText("Continue to NoteGate");
     await waitFor(() => expect(useUiStore.getState().activeSpaceId).toBeNull());
-    expect(useUiStore.getState().editorGroups[0]?.node).toBeNull();
+    expect(useUiStore.getState().editorGroups[0]?.nodeRef).toBeNull();
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
   });
 
@@ -101,7 +101,7 @@ describe("App auth boundary", () => {
 
     await screen.findByText("Continue to NoteGate");
     expect(useUiStore.getState().activeSpaceId).toBeNull();
-    expect(useUiStore.getState().editorGroups[0]?.node).toBeNull();
+    expect(useUiStore.getState().editorGroups[0]?.nodeRef).toBeNull();
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
   });
 });
@@ -110,11 +110,11 @@ function seedAuthenticatedWorkbench() {
   const openedNode = node();
   useUiStore.setState({
     activeSpaceId: "space-1",
-    editorGroups: [{ id: 4, node: openedNode, mode: "preview" }],
+    editorGroups: [{ id: 4, nodeRef: { nodeId: openedNode.id, spaceId: openedNode.space_id }, mode: "preview" }],
     activeGroupIndex: 0,
     nextGroupId: 5
   });
-  persistSpaceWorkbench("space-1", [{ id: 4, node: openedNode, mode: "preview" }], 0);
+  persistSpaceWorkbench("space-1", [{ id: 4, nodeRef: { nodeId: openedNode.id, spaceId: openedNode.space_id }, mode: "preview" }], 0);
   persistLastActiveSpace("space-1");
 }
 

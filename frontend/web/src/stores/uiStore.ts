@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
 import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
-import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
+import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, type EditorGroup } from "./uiStoreReducers";
 import { persistSpaceWorkbench, persistWorkbenchPanelState, readLastActiveSpace, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
 
 export { MAX_EDITOR_GROUPS };
@@ -50,7 +50,6 @@ type UiState = {
   addGroup: () => void;
   closeGroup: (index: number) => void;
   focusGroup: (index: number) => void;
-  updateGroupsNode: (node: RestNode) => void;
   clearGroupsWithNode: (nodeId: string) => void;
   setGroupMode: (index: number, mode: "preview" | "edit") => void;
   resetGroups: () => void;
@@ -108,7 +107,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   addGroup: () => set((state) => addEditorGroupState(state)),
   closeGroup: (index) => set((state) => closeEditorGroupState(state, index)),
   focusGroup: (index) => set({ activeGroupIndex: index }),
-  updateGroupsNode: (node) => set((state) => ({ editorGroups: updateEditorGroupNodeState(state.editorGroups, node) })),
   clearGroupsWithNode: (nodeId) => set((state) => ({ editorGroups: clearEditorGroupNodeState(state.editorGroups, nodeId) })),
   setGroupMode: (index, mode) => set((state) => ({ editorGroups: setEditorGroupModeState(state.editorGroups, index, mode) })),
   resetGroups: () => set((state) => resetEditorGroupsState(state)),
