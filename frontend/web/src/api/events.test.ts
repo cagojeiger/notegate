@@ -19,4 +19,12 @@ describe("events api", () => {
 
     expect(client.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/file-change-events?limit=50&node_id=node-1&cursor=cursor-2");
   });
+
+  it("allows freshness checks to request only the latest event", async () => {
+    const client = { get: vi.fn().mockResolvedValue({ events: [] }) } as unknown as ApiClient;
+
+    await listFileChangeEvents(client, "space-1", { limit: 1 });
+
+    expect(client.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/file-change-events?limit=1");
+  });
 });

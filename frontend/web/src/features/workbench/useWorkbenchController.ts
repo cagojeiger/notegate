@@ -7,6 +7,7 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 import { useWorkbenchPersistence } from "./useWorkbenchPersistence";
 import { useSpacesQuery } from "./useWorkbenchQueries";
+import { useSpaceChangeSync } from "./useSpaceChangeSync";
 
 type WorkbenchControllerProps = {
   me: Me;
@@ -35,6 +36,7 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const canManageActiveSpace = canManageSpace(me, activeSpace);
   const showAuxiliary = auxiliaryOpen;
 
+  useSpaceChangeSync(activeSpace?.id ?? null);
   useWorkbenchPersistence(theme, activeSpace, activeSpaceId);
 
   const { settingsOpen, dialog, actions } = useWorkbenchActions({

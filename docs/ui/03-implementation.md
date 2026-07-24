@@ -51,19 +51,20 @@ frontend/web/src
 
 ## External sync
 
-Dashboard sync는 polling + focus/reconnect refetch만 사용한다.
+Dashboard sync는 active Space 단위 polling + focus/reconnect refetch만 사용한다.
 WebSocket과 SSE는 사용하지 않는다.
 
 Polling은 `document.visibilityState === "visible"`일 때만 돈다.
 
 | Query | Interval |
 |---|---:|
-| opened node freshness | 30s ±5s |
-| Recent list | 60s ±10s |
-| visible/expanded folder children | 60s ±10s |
+| active Space latest file-change event | 30s ±5s |
 
 규칙:
 
+- active Space마다 최신 event 한 건만 확인한다.
+- event ID가 바뀔 때만 Space 하위 resource query를 invalidate한다.
+- opened node, Recent, expanded folder는 개별 polling을 하지 않는다.
 - opened node freshness는 folder/text/file 모두에 적용한다.
 - opened node가 404면 editor group을 비운다.
 - text body는 직접 polling하지 않는다.

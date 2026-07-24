@@ -1,5 +1,5 @@
 import type { Components } from "react-markdown";
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent, type Ref, type RefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent, type Ref, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -132,7 +132,7 @@ function TableBlock({ children, ...props }: ComponentProps<"table">) {
 // Renders optional leading YAML frontmatter as preview-only Properties, then
 // renders the remaining CommonMark + GitHub-flavored markdown. Raw HTML is
 // intentionally not enabled (no rehype-raw), so embedded HTML is escaped.
-export function Markdown({
+export const Markdown = memo(function Markdown({
   content,
   linkPolicy,
   imagePolicy,
@@ -143,7 +143,7 @@ export function Markdown({
   imagePolicy?: MarkdownImagePolicy;
   imageViewportRoot?: RefObject<Element | null>;
 }) {
-  const document = parseMarkdownDocument(content);
+  const document = useMemo(() => parseMarkdownDocument(content), [content]);
   const components = useMemo(
     () => createComponents(linkPolicy, imagePolicy, imageViewportRoot),
     [imagePolicy, imageViewportRoot, linkPolicy]
@@ -155,7 +155,7 @@ export function Markdown({
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={safeMarkdownUrlTransform}>{document.body}</ReactMarkdown>
     </div>
   );
-}
+});
 
 type MarkdownImageState =
   | { status: "idle" }

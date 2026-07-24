@@ -8,6 +8,7 @@ export const queryKeys = {
   connections: (spaceId: string) => ["spaces", spaceId, "connections"] as const,
   spaces: ["spaces"] as const,
   space: (spaceId: string) => ["spaces", spaceId] as const,
+  spaceChangeSignal: (spaceId: string) => ["sync", "space-change", spaceId] as const,
   fileChangeEvents: (spaceId: string, nodeId?: string | null) => ["spaces", spaceId, "file-change-events", nodeId ?? "space"] as const,
   children: (spaceId: string, nodeId: string) => ["spaces", spaceId, "children", nodeId] as const,
   recent: (spaceId: string) => ["spaces", spaceId, "recent"] as const,

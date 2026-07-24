@@ -12,9 +12,9 @@ export function listAuditEvents(client: ApiClient, cursor?: string | null): Prom
 export function listFileChangeEvents(
   client: ApiClient,
   spaceId: string,
-  options: { nodeId?: string | null; cursor?: string | null } = {}
+  options: { nodeId?: string | null; cursor?: string | null; limit?: number } = {}
 ): Promise<FileChangeEventListResponse> {
-  const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
+  const params = new URLSearchParams({ limit: String(options.limit ?? DEFAULT_EVENT_LIMIT) });
   if (options.nodeId) params.set("node_id", options.nodeId);
   if (options.cursor) params.set("cursor", options.cursor);
   return client.get<FileChangeEventListResponse>(`/api/v1/spaces/${spaceId}/file-change-events?${params}`);
