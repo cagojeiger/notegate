@@ -233,6 +233,15 @@ impl FilesRepo {
         .await
     }
 
+    pub async fn sync_file_change_events(
+        &self,
+        space_id: Uuid,
+        after_id: Option<i64>,
+        limit: i64,
+    ) -> Result<crate::FileChangeSyncRows> {
+        file_change_event_repo::sync_file_change_events(&self.pool, space_id, after_id, limit).await
+    }
+
     pub async fn search_node_candidates(
         &self,
         space_id: Uuid,

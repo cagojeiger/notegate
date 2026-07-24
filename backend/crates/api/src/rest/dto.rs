@@ -19,7 +19,8 @@ mod events;
 mod nodes;
 
 pub(crate) use events::{
-    AuditEventListResponse, AuditEventOut, FileChangeEventListResponse, FileChangeEventOut,
+    AuditEventListResponse, AuditEventOut, FileChangeDeltaOut, FileChangeEventListResponse,
+    FileChangeEventOut, FileChangeSyncResponse,
 };
 pub use nodes::{NodeOut, NodeRef, attribution_ids, parse_kind};
 

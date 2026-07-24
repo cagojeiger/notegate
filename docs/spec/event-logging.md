@@ -18,7 +18,7 @@ file_change_events
 
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
-Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, file change event는 `GET /api/v1/spaces/{space_id}/file-change-events`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
 
 ## Common rules
 
@@ -194,6 +194,11 @@ byte_len_after: integer
 line_count_before: integer
 line_count_after: integer
 ```
+
+Create/text/metadata/update event는 현재 `parent_node_id`를 기록한다. Move는
+`parent_node_id_before`와 `parent_node_id_after`, delete는
+`parent_node_id_before`를 기록한다. 이 값은 UI delta sync의 cache
+invalidation 범위이며 전체 path는 저장하지 않는다.
 
 `item_name`은 변경 시점의 node name만 저장한다. Content body나 전체 path는 event metadata에 저장하지 않는다.
 

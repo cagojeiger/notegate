@@ -123,10 +123,13 @@ pub async fn soft_delete_node(
         &mut tx,
         file_change_events::context(deleted_by, space_id),
         node_id,
-        &node.kind,
-        &node.name,
-        subtree,
-        recursive,
+        file_change_events::NodeDeleted {
+            item_kind: &node.kind,
+            item_name: &node.name,
+            parent_node_id_before: node.parent_id,
+            deleted_nodes: subtree,
+            recursive,
+        },
     )
     .await?;
 

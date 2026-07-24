@@ -24,8 +24,8 @@ use notegate_model::{FileEncryptionMode, NodeKind};
 use notegate_service::files::{
     AppendText, BeginObjectUpload, ChildrenCursor, CopyNode, CreateFolder, CreateText, DeleteNode,
     Edit, EditText, FilesService, LineEdit, ListFileChangeEvents, ListNodesRequest, MoveNode,
-    NodeListSort, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget, WriteText,
-    WriteTextBody,
+    NodeListSort, PatchMode, PatchText, ReadText, ReadTextBody, SyncFileChanges, WriteTarget,
+    WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -167,6 +167,71 @@ async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::er
         .await
         .expect_err("invalid cursor should be rejected");
     assert!(err.to_string().contains("invalid cursor"));
+
+    let baseline = files
+        .sync_file_changes(
+            owner,
+            ws,
+            SyncFileChanges {
+                after_id: None,
+                limit: Some(1),
+            },
+        )
+        .await?;
+    assert!(baseline.items.is_empty());
+    assert!(!baseline.resync_required);
+
+    for name in ["after-a", "after-b"] {
+        files
+            .create_folder(
+                owner,
+                ws,
+                CreateFolder {
+                    parent_node_id: root,
+                    name: name.to_owned(),
+                },
+            )
+            .await?;
+    }
+    let forward_first = files
+        .sync_file_changes(
+            owner,
+            ws,
+            SyncFileChanges {
+                after_id: Some(baseline.next_after_id),
+                limit: Some(1),
+            },
+        )
+        .await?;
+    assert_eq!(forward_first.items.len(), 1);
+    assert!(forward_first.has_more);
+    let forward_second = files
+        .sync_file_changes(
+            owner,
+            ws,
+            SyncFileChanges {
+                after_id: Some(forward_first.next_after_id),
+                limit: Some(1),
+            },
+        )
+        .await?;
+    assert_eq!(forward_second.items.len(), 1);
+    assert!(!forward_second.has_more);
+    assert!(forward_first.items[0].id < forward_second.items[0].id);
+
+    let invalid = files
+        .sync_file_changes(
+            owner,
+            ws,
+            SyncFileChanges {
+                after_id: Some(forward_second.next_after_id + 1000),
+                limit: None,
+            },
+        )
+        .await?;
+    assert!(invalid.resync_required);
+    assert!(invalid.items.is_empty());
+    assert_eq!(invalid.next_after_id, forward_second.next_after_id);
 
     db.cleanup().await;
     Ok(())

@@ -28,7 +28,8 @@ pub use notegate_model::files::{
     WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::{
-    FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, ListFileChangeEvents,
+    FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
+    ListFileChangeEvents, SyncFileChanges,
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;

@@ -6,6 +6,7 @@ Node API는 Space tree의 node 속성을 다룬다. Content body는 Text/File ca
 GET    /api/v1/spaces/{space_id}/paths/resolve?path=/notes/state.json
 GET    /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&kind=text&limit=50&cursor=...
 GET    /api/v1/spaces/{space_id}/file-change-events?node_id=...&limit=50&cursor=...
+GET    /api/v1/spaces/{space_id}/file-change-sync?after_id=...&limit=100
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/children?limit=100&cursor=...
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
@@ -26,6 +27,7 @@ DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 GET /paths/resolve              -> RestNode
 GET /nodes                      -> { nodes: RestNode[], page: Page }
 GET /file-change-events         -> { events: FileChangeEvent[], page: Page }
+GET /file-change-sync           -> FileChangeSyncResponse
 GET /nodes/{node_id}            -> RestNode
 GET /nodes/{node_id}/children   -> { parent: NodeRef, children: RestNode[], page: Page }
 GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
@@ -65,6 +67,8 @@ Rules:
 ## List file change events
 
 `GET /file-change-events`는 Space의 파일/폴더/문서 변경 이력을 최신순으로 반환한다. 자세한 response shape와 metadata 규칙은 `events.md`를 따른다.
+
+`GET /file-change-sync`는 UI 동기화를 위한 오름차순 delta API다. 과거 이력 조회와 별도 계약이며 자세한 token 규칙은 `events.md`를 따른다.
 
 Rules:
 

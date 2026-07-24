@@ -169,12 +169,19 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     );
     assert_eq!(events[5].metadata["byte_len_before"], json!(5));
     assert_eq!(events[5].metadata["byte_len_after"], json!(11));
+    assert_eq!(events[5].metadata["parent_node_id"], json!(root_id));
     assert_eq!(events[6].node_id, Some(file_node.id));
     assert_eq!(events[6].metadata["byte_len_after"], json!(5));
     assert!(events[6].metadata.get("line_count_after").is_none());
     assert_eq!(events[1].node_id, Some(copied_node.id));
     assert_eq!(events[1].metadata["item_kind"], json!("text"));
     assert_eq!(events[1].metadata["copied_from_node_id"], json!(node.id));
+    assert_eq!(
+        events[0].metadata["parent_node_id_before"],
+        json!(folder.id)
+    );
+    assert_eq!(events[3].metadata["parent_node_id"], json!(root_id));
+    assert_eq!(events[4].metadata["parent_node_id"], json!(root_id));
     assert!(events[5].metadata.get("content_sha256_before").is_none());
     assert!(events[5].metadata.get("content_sha256_after").is_none());
 
@@ -187,6 +194,49 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
             .iter()
             .all(|event| event.node_id == Some(node.id))
     );
+
+    let baseline = repo.sync_file_change_events(space_id, None, 3).await?;
+    assert!(baseline.events.is_empty());
+    assert!(baseline.token_valid);
+    assert_eq!(baseline.latest_id, events[0].id);
+
+    repo.insert_folder(
+        space_id,
+        &CreateFolder {
+            parent_node_id: root_id,
+            name: "after-a".to_owned(),
+        },
+        account,
+    )
+    .await?;
+    repo.insert_folder(
+        space_id,
+        &CreateFolder {
+            parent_node_id: root_id,
+            name: "after-b".to_owned(),
+        },
+        account,
+    )
+    .await?;
+    let forward = repo
+        .sync_file_change_events(space_id, Some(baseline.latest_id), 3)
+        .await?;
+    assert!(forward.token_valid);
+    assert_eq!(forward.events.len(), 2);
+    assert!(forward.events[0].id < forward.events[1].id);
+    assert!(
+        forward
+            .events
+            .iter()
+            .all(|event| event.metadata["parent_node_id"] == json!(root_id))
+    );
+
+    let invalid = repo
+        .sync_file_change_events(space_id, Some(forward.latest_id + 1000), 3)
+        .await?;
+    assert!(!invalid.token_valid);
+    assert!(invalid.events.is_empty());
+    assert_eq!(invalid.latest_id, forward.latest_id);
 
     db.cleanup().await;
     Ok(())

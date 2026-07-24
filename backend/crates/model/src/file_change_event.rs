@@ -34,3 +34,17 @@ pub struct FileChangeEventPage {
     pub has_more: bool,
     pub next_cursor: Option<String>,
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncFileChanges {
+    pub after_id: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileChangeSyncPage {
+    pub items: Vec<FileChangeEvent>,
+    pub next_after_id: i64,
+    pub has_more: bool,
+    pub resync_required: bool,
+}

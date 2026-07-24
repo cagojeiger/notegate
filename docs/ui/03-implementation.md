@@ -48,7 +48,8 @@ frontend/web/src
 - node mutation은 Recent와 영향받은 parent children family만 invalidate한다.
 - folder rename/move/recursive delete는 descendant path가 바뀌므로 해당 Space의 node/children/path cache family를 invalidate한다.
 - 동일 node가 node/Recent/children/path cache에 있으면 공통 cache updater로 함께 갱신한다.
-- active Space 전체 invalidation은 수동 refresh와 아직 parent 범위를 알 수 없는 external sync fallback에만 사용한다.
+- external sync는 typed parent 범위로 invalidate하고, 유효하지 않은 token만 file-related cache family fallback을 사용한다.
+- active Space 전체 invalidation은 수동 refresh에만 사용한다.
 - global mutation error는 toast로 보여준다.
 - session query는 중복 401 처리를 피한다.
 
@@ -61,17 +62,19 @@ Polling은 `document.visibilityState === "visible"`일 때만 돈다.
 
 | Query | Interval |
 |---|---:|
-| active Space latest file-change event | 30s ±5s |
+| active Space forward file-change sync | 30s ±5s |
 
 규칙:
 
-- active Space마다 최신 event 한 건만 확인한다.
-- event ID가 바뀔 때만 Space 하위 resource query를 invalidate한다.
+- 첫 요청은 현재 latest event ID를 baseline token으로 설정하고 과거 이력을 재생하지 않는다.
+- 이후에는 마지막 적용 ID 이후의 event를 오름차순으로 모두 가져온다.
+- 여러 page는 전부 받은 뒤 token을 전진시키며 같은 parent invalidation은 한 번으로 병합한다.
+- token이 retention 범위를 벗어나면 node/children/text/metadata/file/path/preview cache만 한 번 재동기화한다.
 - opened node, Recent, expanded folder는 개별 polling을 하지 않는다.
 - opened node freshness는 folder/text/file 모두에 적용한다.
 - opened node가 404면 editor group을 비운다.
 - text body는 직접 polling하지 않는다.
-- text hash가 바뀔 때만 text content를 다시 읽는다.
+- text change event가 해당 node의 text content query를 invalidate한다.
 
 ## Zustand
 
