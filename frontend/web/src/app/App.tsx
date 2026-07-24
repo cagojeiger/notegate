@@ -10,6 +10,7 @@ import { UploadProvider } from "../features/uploads/UploadProvider";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
+import { useUiStore } from "../stores/uiStore";
 
 const DEV_API_KEY_FALLBACK_ENABLED =
   import.meta.env.DEV || import.meta.env.MODE === "test" || import.meta.env.VITE_NOTEGATE_ENABLE_DEV_API_KEY === "true";
@@ -17,6 +18,7 @@ const DEV_API_KEY_FALLBACK_ENABLED =
 export function App() {
   const [apiKey, setApiKey] = useState(() => (DEV_API_KEY_FALLBACK_ENABLED ? readDevApiKey() : null));
   const [sessionRevision, setSessionRevision] = useState(0);
+  const showToast = useUiStore((state) => state.showToast);
 
   // A 401 from any non-session query, or an explicit sign-out, means the
   // authenticated session is no longer trustworthy. Bump the revision so /me
@@ -39,7 +41,12 @@ export function App() {
   const authCacheKey = `${apiKey ?? "browser-session"}:${sessionRevision}`;
 
   return (
-    <ApiProvider apiKey={apiKey} authCacheKey={authCacheKey} onUnauthorized={resetSession}>
+    <ApiProvider
+      apiKey={apiKey}
+      authCacheKey={authCacheKey}
+      onUnauthorized={resetSession}
+      onMutationError={showToast}
+    >
       <AuthBoundary
         apiKey={apiKey}
         sessionRevision={sessionRevision}
