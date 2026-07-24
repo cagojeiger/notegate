@@ -1,3 +1,4 @@
+import pdfiumWasmUrl from "@embedpdf/pdfium/pdfium.wasm?url";
 import { PDFViewer } from "@embedpdf/react-pdf-viewer";
 import type {
   DocumentManagerPlugin,
@@ -10,6 +11,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useUiStore } from "../../stores/uiStore";
 import { observeEmbedPdfAccessibility } from "./embedPdfAccessibility";
+
+const absolutePdfiumWasmUrl = new URL(pdfiumWasmUrl, window.location.origin).href;
 
 const NOTE_GATE_THEME: Partial<ThemeColors> = {
   background: {
@@ -63,6 +66,7 @@ export function PdfPreview({
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const config = useMemo<PDFViewerConfig>(() => ({
     src: url,
+    wasmUrl: absolutePdfiumWasmUrl,
     tabBar: "never",
     disabledCategories: [
       "annotation",
@@ -77,6 +81,7 @@ export function PdfPreview({
     export: { defaultFileName: name },
     fontFallback: null,
     fonts: { ui: null, signature: null },
+    stamp: { defaultLibrary: false, manifests: [] },
     theme: {
       preference: theme,
       light: NOTE_GATE_THEME,

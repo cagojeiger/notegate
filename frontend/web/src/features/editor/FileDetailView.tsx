@@ -38,7 +38,9 @@ export function FileDetailView({ node }: { node: RestNode }) {
     }
 
     setPreviewRecovery({ nodeId: node.id, retried: true, failedUrl: previewUrl });
-    void preview.refetch().then(() => {
+    void preview.refetch().then((result) => {
+      const refreshedUrl = result.data?.url;
+      if (!result.isSuccess || !refreshedUrl || refreshedUrl === previewUrl) return;
       setPreviewRecovery((current) => current.nodeId === node.id
         ? { ...current, failedUrl: null }
         : current);

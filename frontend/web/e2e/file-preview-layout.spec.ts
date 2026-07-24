@@ -1,9 +1,29 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
 
 const apiKey = process.env.NOTEGATE_WEB_E2E_API_KEY;
+
+type SpaceCleanupFixtures = {
+  registerSpaceForCleanup: (spaceId: string) => void;
+};
+
+const test = base.extend<SpaceCleanupFixtures>({
+  registerSpaceForCleanup: async ({ request }, use) => {
+    const spaceIds = new Set<string>();
+    await use((spaceId) => {
+      spaceIds.add(spaceId);
+    });
+
+    for (const spaceId of spaceIds) {
+      const cleanup = await request.delete(`/api/v1/spaces/${spaceId}`, {
+        headers: { authorization: `Bearer ${apiKey}` }
+      });
+      expect([204, 404]).toContain(cleanup.status());
+    }
+  }
+});
 
 const space: Space = {
   id: "space-1",
@@ -168,66 +188,56 @@ test("PDF reading mode focuses the active editor when split panes would be too n
   expect((await preview.boundingBox())?.width).toBeGreaterThanOrEqual(480);
 });
 
-test("an uploaded PDF renders through the real presigned storage URL and browser CORS", async ({ page, request }) => {
+test("an uploaded PDF renders through the real presigned storage URL and browser CORS", async ({ page, registerSpaceForCleanup }) => {
   test.skip(!apiKey, "set NOTEGATE_WEB_E2E_API_KEY to run the storage PDF e2e");
   test.slow();
   const suffix = Date.now().toString(36);
   const spaceName = `pdf-e2e-${suffix}`;
   const fileName = `document-${suffix}.pdf`;
-  let createdSpaceId: string | null = null;
 
-  try {
-    await page.goto("/");
-    await page.getByText("Developer API key fallback").click();
-    await page.getByLabel("User API key").fill(apiKey!);
-    await page.getByRole("button", { name: "Open with API key" }).click();
-    await page.locator('button[aria-label="Add space"]:visible').click();
-    await page.getByLabel("Space name").fill(spaceName);
-    const createResponsePromise = page.waitForResponse((response) => (
-      response.request().method() === "POST"
-      && new URL(response.url()).pathname === "/api/v1/spaces"
-    ));
-    await page.getByRole("button", { name: "Create", exact: true }).click();
-    const createResponse = await createResponsePromise;
-    expect(createResponse.status()).toBe(201);
-    const createdSpace = await createResponse.json() as Space;
-    createdSpaceId = createdSpace.id;
-    await page.getByTitle(`${spaceName} · drag to reorder`, { exact: true }).click();
-    await expect(page.getByRole("banner")).toContainText(`/ ${spaceName}`);
+  await page.goto("/");
+  await page.getByText("Developer API key fallback").click();
+  await page.getByLabel("User API key").fill(apiKey!);
+  await page.getByRole("button", { name: "Open with API key" }).click();
+  await page.locator('button[aria-label="Add space"]:visible').click();
+  await page.getByLabel("Space name").fill(spaceName);
+  const createResponsePromise = page.waitForResponse((response) => (
+    response.request().method() === "POST"
+    && new URL(response.url()).pathname === "/api/v1/spaces"
+  ));
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const createResponse = await createResponsePromise;
+  expect(createResponse.status()).toBe(201);
+  const createdSpace = await createResponse.json() as Space;
+  registerSpaceForCleanup(createdSpace.id);
+  await page.getByRole("button", { name: spaceName, exact: true }).click();
+  await expect(page.getByRole("banner")).toContainText(`/ ${spaceName}`);
 
-    await page.getByLabel("Create node").click();
-    const primarySidebar = page.getByRole("complementary").filter({ has: page.getByLabel("Create node") });
-    await primarySidebar.locator('input[type="file"]').setInputFiles({
-      name: fileName,
-      mimeType: "application/pdf",
-      buffer: createPreviewPdf()
-    });
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await page.getByLabel("Create node").click();
+  const primarySidebar = page.getByRole("complementary").filter({ has: page.getByLabel("Create node") });
+  await primarySidebar.locator('input[type="file"]').setInputFiles({
+    name: fileName,
+    mimeType: "application/pdf",
+    buffer: createPreviewPdf()
+  });
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
 
-    const fileNode = page.getByRole("button", { name: fileName, exact: true });
-    await expect(fileNode).toBeVisible();
-    const storageResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.searchParams.get("response-content-type") === "application/pdf"
-        && url.searchParams.has("X-Amz-Signature");
-    });
-    await fileNode.click();
+  const fileNode = page.getByRole("button", { name: fileName, exact: true });
+  await expect(fileNode).toBeVisible();
+  const storageResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.searchParams.get("response-content-type") === "application/pdf"
+      && url.searchParams.has("X-Amz-Signature");
+  });
+  await fileNode.click();
 
-    const preview = page.getByRole("region", { name: `PDF preview: ${fileName}` });
-    await expect(preview.locator('img[src^="blob:"]').first()).toBeVisible();
-    const storageResponse = await storageResponsePromise;
-    expect(storageResponse.ok()).toBe(true);
-    const appOrigin = new URL(page.url()).origin;
-    expect((await storageResponse.request().allHeaders()).origin).toBe(appOrigin);
-    expect([appOrigin, "*"]).toContain(await storageResponse.headerValue("access-control-allow-origin"));
-  } finally {
-    if (createdSpaceId) {
-      const cleanup = await request.delete(`/api/v1/spaces/${createdSpaceId}`, {
-        headers: { authorization: `Bearer ${apiKey}` }
-      });
-      expect([204, 404]).toContain(cleanup.status());
-    }
-  }
+  const preview = page.getByRole("region", { name: `PDF preview: ${fileName}` });
+  await expect(preview.locator('img[src^="blob:"]').first()).toBeVisible();
+  const storageResponse = await storageResponsePromise;
+  expect(storageResponse.ok()).toBe(true);
+  const appOrigin = new URL(page.url()).origin;
+  expect((await storageResponse.request().allHeaders()).origin).toBe(appOrigin);
+  expect([appOrigin, "*"]).toContain(await storageResponse.headerValue("access-control-allow-origin"));
 });
 
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {
@@ -236,6 +246,7 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
   ).toString("base64");
   const previewPdf = createPreviewPdf().toString("base64");
 
+  await page.route("https://cdn.jsdelivr.net/**", (route) => route.abort());
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const response = responseFor(url, previewSvg, previewPdf);

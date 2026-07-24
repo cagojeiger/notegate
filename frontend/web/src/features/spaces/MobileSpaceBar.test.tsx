@@ -46,7 +46,7 @@ describe("MobileSpaceBar", () => {
       />
     );
 
-    await user.click(screen.getByTitle("Work"));
+    await user.click(screen.getByRole("button", { name: "Work" }));
     await user.click(screen.getByRole("button", { name: "Add space" }));
     await user.click(screen.getByRole("button", { name: "History" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));

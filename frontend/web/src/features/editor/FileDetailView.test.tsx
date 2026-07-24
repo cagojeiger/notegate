@@ -139,8 +139,12 @@ describe("FileDetailView", () => {
     expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 
-  it("refreshes a failed preview URL once before showing an error", async () => {
-    const refetch = vi.fn().mockResolvedValue({});
+  it("keeps the preview error visible when URL refresh fails", async () => {
+    const refetch = vi.fn().mockResolvedValue({
+      isSuccess: false,
+      data: undefined,
+      error: new ApiError("storage unavailable", 503)
+    });
     vi.mocked(useFilePreviewUrl).mockReturnValue({
       data: {
         url: "https://storage.example/broken.png",
@@ -153,10 +157,65 @@ describe("FileDetailView", () => {
 
     fireEvent.error(screen.getByRole("img", { name: "image.png" }));
     await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
-    fireEvent.error(await screen.findByRole("img", { name: "image.png" }));
 
     expect(screen.queryByRole("img", { name: "image.png" })).not.toBeInTheDocument();
     expect(screen.getByText("Image cannot be displayed")).toBeInTheDocument();
+  });
+
+  it("keeps the preview error visible when URL refresh returns the failed URL", async () => {
+    const previewData = {
+      url: "https://storage.example/broken.png",
+      media_type: "image/png",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const refetch = vi.fn().mockResolvedValue({
+      isSuccess: true,
+      data: previewData
+    });
+    vi.mocked(useFilePreviewUrl).mockReturnValue({
+      data: previewData,
+      refetch
+    } as never);
+    render(<FileDetailView node={fileNode()} />);
+
+    fireEvent.error(screen.getByRole("img", { name: "image.png" }));
+    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByRole("img", { name: "image.png" })).not.toBeInTheDocument();
+    expect(screen.getByText("Image cannot be displayed")).toBeInTheDocument();
+  });
+
+  it("recovers only when URL refresh returns a new preview URL", async () => {
+    let previewUrl = "https://storage.example/broken.png";
+    const refetch = vi.fn().mockImplementation(async () => {
+      previewUrl = "https://storage.example/refreshed.png";
+      return {
+        isSuccess: true,
+        data: {
+          url: previewUrl,
+          media_type: "image/png",
+          expires_at: "2026-06-13T00:15:00Z"
+        }
+      };
+    });
+    vi.mocked(useFilePreviewUrl).mockImplementation(() => ({
+      data: {
+        url: previewUrl,
+        media_type: "image/png",
+        expires_at: "2026-06-13T00:15:00Z"
+      },
+      refetch
+    } as never));
+    render(<FileDetailView node={fileNode()} />);
+
+    fireEvent.error(screen.getByRole("img", { name: "image.png" }));
+
+    expect(await screen.findByRole("img", { name: "image.png" })).toHaveAttribute(
+      "src",
+      "https://storage.example/refreshed.png"
+    );
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Image cannot be displayed")).not.toBeInTheDocument();
   });
 });
 

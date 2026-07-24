@@ -27,11 +27,13 @@ describe("PdfPreview", () => {
     const props = pdfViewerMock.mock.calls[pdfViewerMock.mock.calls.length - 1][0];
     expect(props.config).toMatchObject({
       src: "https://storage.example/document.pdf",
+      wasmUrl: expect.stringMatching(/pdfium.*\.wasm/),
       tabBar: "never",
       disabledCategories: expect.arrayContaining(["annotation", "redaction", "insert", "document-open", "panel-comment"]),
       export: { defaultFileName: "document.pdf" },
       fontFallback: null,
       fonts: { ui: null, signature: null },
+      stamp: { defaultLibrary: false, manifests: [] },
       theme: { preference: "light" }
     });
   });
