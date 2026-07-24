@@ -1,27 +1,24 @@
-import { useEffect } from "react";
 import { Moon, ShieldCheck, Sun } from "lucide-react";
 
-import { persistTheme, useUiStore } from "../stores/uiStore";
+import type { ThemeMode } from "../design/tokens";
 import { BrandLockup, Button, Card, IconButton, TextField } from "../shared/ui";
 import { useDevAuthGateController, type DevAuthGateControllerProps } from "./useDevAuthGateController";
 
-type DevAuthGateProps = DevAuthGateControllerProps & { devApiKeyFallbackEnabled: boolean };
+type DevAuthGateProps = DevAuthGateControllerProps & {
+  devApiKeyFallbackEnabled: boolean;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+};
 
-export function DevAuthGate({ devApiKeyFallbackEnabled, ...controllerProps }: DevAuthGateProps) {
+export function DevAuthGate({ devApiKeyFallbackEnabled, theme, onToggleTheme, ...controllerProps }: DevAuthGateProps) {
   const auth = useDevAuthGateController(controllerProps);
-  const theme = useUiStore((state) => state.theme);
-  const toggleTheme = useUiStore((state) => state.toggleTheme);
-
-  useEffect(() => {
-    persistTheme(theme);
-  }, [theme]);
 
   return (
     <main className="ng-auth-screen grid h-full overflow-y-auto px-6 py-10 text-text">
       <AuthBackdropMark />
 
       <div className="absolute right-4 top-4 z-10">
-        <IconButton label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={toggleTheme}>
+        <IconButton label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={onToggleTheme}>
           {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
         </IconButton>
       </div>
