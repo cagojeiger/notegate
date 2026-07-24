@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { downloadFile } from "../../api/files";
+import { updateNodeCaches } from "../../api/nodeCache";
 import { getNode, listChildren } from "../../api/nodes";
-import { invalidateSpaceResources } from "../../api/queryInvalidation";
+import { invalidateRecentNodes, invalidateText } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { RestNode } from "../../api/types";
@@ -45,18 +46,21 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
     mutationFn: (force: boolean) => replaceText(client, node.space_id, node.id, draft, force ? undefined : sha),
     onMutate: () => setSaveState("saving"),
     onSuccess: (response) => {
-      updateGroupsNode({
+      const updatedNode = {
         ...node,
         content_sha256: response.text.content_sha256,
         byte_len: response.text.byte_len,
         line_count: response.text.line_count,
         updated_by: response.text.updated_by,
         updated_at: response.text.updated_at
-      });
+      };
+      updateGroupsNode(updatedNode);
+      updateNodeCaches(queryClient, updatedNode, () => updatedNode);
       setSaveState("saved");
       showToast("Saved");
       onSaved();
-      invalidateSpaceResources(queryClient, node.space_id);
+      invalidateText(queryClient, node.space_id, node.id);
+      invalidateRecentNodes(queryClient, node.space_id);
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {

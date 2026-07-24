@@ -5,6 +5,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import type { ApiClient } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
+import { updateNodeCaches } from "../../api/nodeCache";
 import { resolveNodePath } from "../../api/nodes";
 import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
@@ -95,19 +96,9 @@ function refreshDiscoveredPreviewState(
   detectedMediaType: string | null
 ) {
   if (node.preview_available !== undefined) return;
-  const updatePreviewFields = (current: RestNode | undefined): RestNode => ({
-    ...(current ?? node),
-    detected_media_type: detectedMediaType ?? current?.detected_media_type ?? node.detected_media_type,
+  updateNodeCaches(queryClient, node, (current) => ({
+    ...current,
+    detected_media_type: detectedMediaType ?? current.detected_media_type ?? node.detected_media_type,
     preview_available: detectedMediaType !== null
-  });
-  queryClient.setQueryData<RestNode>(queryKeys.node(node.space_id, node.id), updatePreviewFields);
-  queryClient.setQueryData<RestNode>(
-    queryKeys.markdownImageNode(node.space_id, node.path),
-    updatePreviewFields
-  );
-  void queryClient.invalidateQueries({ queryKey: queryKeys.node(node.space_id, node.id) });
-  void queryClient.invalidateQueries({ queryKey: queryKeys.recent(node.space_id) });
-  if (node.parent_id) {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.children(node.space_id, node.parent_id) });
-  }
+  }));
 }

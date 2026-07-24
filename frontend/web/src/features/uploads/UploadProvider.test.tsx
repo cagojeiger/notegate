@@ -59,8 +59,14 @@ describe("UploadProvider", () => {
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
 
     expect(mocks.completeFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1", undefined);
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces"], exact: true });
-    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces", "space-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["spaces", "space-1", "recent"],
+      exact: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["spaces", "space-1", "children", "parent-1"]
+    });
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it("removes a transfer when the user cancels it", async () => {
