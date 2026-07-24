@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RestNode } from "../../api/types";
+import type { RestNode } from "../../../api/types";
 import { DialogHost } from "./DialogHost";
 
 const textNode: RestNode = {

@@ -2,8 +2,8 @@ import type { Dispatch, SetStateAction } from "react";
 
 import type { Space } from "../../api/types";
 import { canWriteSpace } from "../../auth/permissions";
-import type { AppDialog } from "../../layout/dialogs/DialogHost";
-import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "../../layout/dialogs/appDialogs";
+import type { AppDialog } from "./dialogs/DialogHost";
+import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "./dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
 import { clearPersistedSpaceWorkbench } from "../../stores/workbenchStorage";
 import { useCreateSpaceMutation, useDeleteSpaceMutation, useReorderSpacesMutation, useUpdateSpaceMutation } from "./useWorkbenchQueries";

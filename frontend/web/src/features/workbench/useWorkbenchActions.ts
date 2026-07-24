@@ -1,7 +1,7 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { Space, RestNode } from "../../api/types";
-import type { AppDialog } from "../../layout/dialogs/DialogHost";
+import type { AppDialog } from "./dialogs/DialogHost";
 import { usePointerDrag } from "../../shared/hooks/usePointerDrag";
 import { useUiStore } from "../../stores/uiStore";
 import { clearPersistedWorkbenches } from "../../stores/workbenchStorage";
