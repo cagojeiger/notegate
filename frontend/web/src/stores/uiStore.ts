@@ -1,12 +1,16 @@
 import { create } from "zustand";
 
-import type { RestNode } from "../entities/node/model";
+import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
-import { WORKBENCH_LAYOUT, type EditorGroup, type SaveState } from "../shared/model/workbench";
-import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState } from "./uiStoreReducers";
-import { persistSpaceWorkbench, persistWorkbenchPanelState, readLastActiveSpace, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
+import { WORKBENCH_LAYOUT } from "../layout/workbenchLayout";
+import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, MAX_EDITOR_GROUPS, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
+import { persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
+
+export { MAX_EDITOR_GROUPS };
+export type { EditorGroup };
 
 const THEME_KEY = "notegate.theme";
+const LAST_SPACE_KEY = "notegate.lastActiveSpaceId";
 
 function initialTheme(): ThemeMode {
   if (typeof window === "undefined") return "dark";
@@ -15,10 +19,12 @@ function initialTheme(): ThemeMode {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-const initialThemeMode = initialTheme();
-if (typeof document !== "undefined") document.documentElement.dataset.theme = initialThemeMode;
+function initialActiveSpaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(LAST_SPACE_KEY);
+}
 
-const initialSpaceId = readLastActiveSpace();
+const initialSpaceId = initialActiveSpaceId();
 const initialEditorState = initialSpaceId ? restoreSpaceWorkbench(initialSpaceId, 0) : resetEditorGroupsState({ nextGroupId: 0 });
 const initialPanelState = restoreWorkbenchPanelState();
 type UiState = {
@@ -38,7 +44,7 @@ type UiState = {
   mobileTreeOpen: boolean;
   mobileAuxOpen: boolean;
   toast: string | null;
-  saveState: SaveState;
+  saveState: "idle" | "saving" | "saved" | "error" | "conflict";
   toggleTheme: () => void;
   setActiveSpaceId: (id: string | null) => void;
   openInActiveGroup: (node: RestNode) => void;
@@ -47,6 +53,7 @@ type UiState = {
   addGroup: () => void;
   closeGroup: (index: number) => void;
   focusGroup: (index: number) => void;
+  updateGroupsNode: (node: RestNode) => void;
   clearGroupsWithNode: (nodeId: string) => void;
   setGroupMode: (index: number, mode: "preview" | "edit") => void;
   resetGroups: () => void;
@@ -65,12 +72,11 @@ type UiState = {
   closeMobile: () => void;
   showToast: (message: string) => void;
   clearToast: () => void;
-  setSaveState: (saveState: SaveState) => void;
-  resetWorkbenchSession: () => void;
+  setSaveState: (saveState: "idle" | "saving" | "saved" | "error" | "conflict") => void;
 };
 
 export const useUiStore = create<UiState>((set, get) => ({
-  theme: initialThemeMode,
+  theme: initialTheme(),
   activeSpaceId: initialSpaceId,
   editorGroups: initialEditorState.editorGroups,
   activeGroupIndex: initialEditorState.activeGroupIndex,
@@ -104,6 +110,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   addGroup: () => set((state) => addEditorGroupState(state)),
   closeGroup: (index) => set((state) => closeEditorGroupState(state, index)),
   focusGroup: (index) => set({ activeGroupIndex: index }),
+  updateGroupsNode: (node) => set((state) => ({ editorGroups: updateEditorGroupNodeState(state.editorGroups, node) })),
   clearGroupsWithNode: (nodeId) => set((state) => ({ editorGroups: clearEditorGroupNodeState(state.editorGroups, nodeId) })),
   setGroupMode: (index, mode) => set((state) => ({ editorGroups: setEditorGroupModeState(state.editorGroups, index, mode) })),
   resetGroups: () => set((state) => resetEditorGroupsState(state)),
@@ -143,26 +150,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   closeMobile: () => set({ mobileTreeOpen: false, mobileAuxOpen: false }),
   showToast: (toast) => set({ toast }),
   clearToast: () => set({ toast: null }),
-  setSaveState: (saveState) => set({ saveState }),
-  resetWorkbenchSession: () => set((state) => ({
-    activeSpaceId: null,
-    ...resetEditorGroupsState({ nextGroupId: state.nextGroupId }),
-    expandedFolderIds: new Set(),
-    primarySidebarOpen: true,
-    primaryWidth: WORKBENCH_LAYOUT.defaultPrimaryWidth,
-    treeRatio: WORKBENCH_LAYOUT.defaultTreeRatio,
-    treeSectionOpen: true,
-    recentSectionOpen: true,
-    recentDensity: "list",
-    auxiliaryOpen: true,
-    mobileTreeOpen: false,
-    mobileAuxOpen: false,
-    toast: null,
-    saveState: "idle"
-  }))
+  setSaveState: (saveState) => set({ saveState })
 }));
 
 export function persistTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;
   window.localStorage.setItem(THEME_KEY, theme);
+}
+
+export function persistLastSpace(spaceId: string): void {
+  window.localStorage.setItem(LAST_SPACE_KEY, spaceId);
 }

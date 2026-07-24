@@ -1,10 +1,9 @@
 import { useMemo } from "react";
 
-import type { Me } from "../../entities/account/model";
+import type { Me } from "../../api/types";
 import { canCreateSpace, canManageSpace, canWriteSpace } from "../../auth/permissions";
 import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { useUiStore } from "../../stores/uiStore";
-import { useOpenedNodeCache } from "../editor/useEditorQueries";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 import { useWorkbenchPersistence } from "./useWorkbenchPersistence";
 import { useSpacesQuery } from "./useWorkbenchQueries";
@@ -28,19 +27,15 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const primaryWidth = useUiStore((state) => state.primaryWidth);
   const mobileTreeOpen = useUiStore((state) => state.mobileTreeOpen);
   const mobileAuxOpen = useUiStore((state) => state.mobileAuxOpen);
-  const toast = useUiStore((state) => state.toast);
-  const saveState = useUiStore((state) => state.saveState);
   const isMobile = useIsMobile();
-  const activeNodeRef = editorGroups[activeGroupIndex]?.nodeRef ?? null;
-  const activeNodeQuery = useOpenedNodeCache(activeNodeRef);
-  const activeNode = activeNodeQuery.data ?? null;
+  const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
   const canCreateSpaceForCaller = canCreateSpace(me);
   const canWriteActiveSpace = canWriteSpace(activeSpace);
   const canManageActiveSpace = canManageSpace(me, activeSpace);
   const showAuxiliary = auxiliaryOpen;
 
-  useWorkbenchPersistence(activeSpace, activeSpaceId);
+  useWorkbenchPersistence(theme, activeSpace, activeSpaceId);
 
   const { settingsOpen, dialog, actions } = useWorkbenchActions({
     activeSpace,
@@ -69,8 +64,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
     primaryWidth,
     mobileTreeOpen,
     mobileAuxOpen,
-    toast,
-    saveState,
     showAuxiliary,
     isMobile,
     settingsOpen,

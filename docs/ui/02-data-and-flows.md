@@ -21,7 +21,7 @@
 | 서버 자원 | React Query | cache only |
 | active space id | UI store | local storage |
 | editor groups, active group, mode | UI store | space별 local storage snapshot |
-| opened node identity (`spaceId`, `nodeId`) | UI store | space별 local storage snapshot |
+| opened node snapshot | UI store | space별 local storage snapshot |
 | primary/aux sidebar visibility | UI store | local storage |
 | primary sidebar width | UI store | session only |
 | Files/Recent ratio, section open, density | UI store | session only |
@@ -33,7 +33,7 @@
 규칙:
 
 - 서버 collection은 UI store에 복제하지 않는다.
-- EditorGroup은 열린 pane 복원을 위해 `spaceId`와 `nodeId`만 보관한다. 이름, 경로, metadata 등 node detail의 정본은 React Query다.
+- EditorGroup은 열린 pane 복원을 위해 현재 열린 node snapshot만 보관할 수 있다.
 - text body와 file content는 UI store에 보관하지 않는다.
 - space별 workbench snapshot은 browser-local best-effort 상태다. 계정/서버 정본이 아니며 다른 브라우저로 동기화하지 않는다.
 - workbench snapshot은 최근 20개 space까지만 유지한다. 손상됐거나 현재 space와 맞지 않는 snapshot은 폐기한다.
@@ -54,7 +54,6 @@ App load
 Logout
 -> POST /auth/logout
 -> clear local API key fallback
--> clear in-memory workbench and browser-local pane snapshots
 -> reset session
 -> AuthScreen
 ```
@@ -62,13 +61,11 @@ Logout
 ```text
 any /api/v1/* returns 401
 -> clear local API key fallback
--> clear in-memory workbench and browser-local pane snapshots
 -> reset session
 -> AuthScreen
 ```
 
 Browser session refresh는 server-side flow다. FE는 refresh token을 저장하거나 직접 refresh endpoint를 호출하지 않는다. `/api/v1/me` 401은 재로그인 필요 상태로 처리하고, 503 `auth_unavailable`은 세션을 지우지 않는 일시 장애/재시도 상태로 처리한다.
-인증 상태를 정리해도 theme은 이 브라우저의 UI 선호로 유지한다.
 
 ## Space
 
@@ -225,7 +222,7 @@ select file
 rename
 -> PATCH /nodes/{node_id}
 -> refresh node, children, recent
--> update opened node query cache
+-> update opened node snapshot
 ```
 
 ### Move
@@ -234,7 +231,7 @@ rename
 move into folder
 -> POST /nodes/{node_id}/move
 -> refresh old/new parents, reveal, recent
--> update opened node query cache
+-> update opened node snapshot
 ```
 
 ### Delete
@@ -254,15 +251,13 @@ node kind별 데이터:
 ```text
 folder -> node detail
 text   -> node detail + text content
-file   -> node detail + supported inline preview + file metadata/download
+file   -> node detail + file metadata/download
 ```
 
 규칙:
 
 - header에는 node name만 표시한다.
 - path와 metrics는 Inspector에 둔다.
-- 10 MiB 이하의 서버 검증 raster image와 PDF는 file detail 안에서 미리보기한다.
-- PDF는 앱 내부의 lazy-loaded PDFium viewer로 표시한다. 검색, 페이지 이동, 확대/축소, 인쇄, 전체화면을 제공하고 편집 도구와 외부 폰트 요청은 비활성화한다. 검증된 PDF의 가용 폭이 480 px 미만이면 active editor를 우선하고 Inspector와 Files를 필요한 만큼만 접으며, 사용자는 title bar에서 다시 열 수 있다. URL 만료나 렌더링 실패 시 한 번 재발급한 뒤 download action을 유지한다.
 - text preview가 기본이다.
 - plain text는 단순 메모처럼 보여준다.
 - markdown은 GFM, code highlight, Mermaid를 지원한다.
@@ -276,8 +271,7 @@ file   -> node detail + supported inline preview + file metadata/download
 
 ```text
 open node
--> cache selected node detail in React Query
--> set active EditorGroup node identity
+-> set active EditorGroup node snapshot
 -> fetch detail/content by kind
 -> show Inspector for active node
 ```
@@ -303,7 +297,7 @@ edit text
 
 ```text
 visible tab polling
--> opened node changed: refresh node query cache
+-> opened node changed: refresh snapshot
 -> text hash changed: refetch text
 -> opened node 404: clear editor group
 ```

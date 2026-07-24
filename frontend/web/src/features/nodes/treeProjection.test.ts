@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { findAdjacentNodeRowIndex, projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
 
 describe("projectVisibleTree", () => {

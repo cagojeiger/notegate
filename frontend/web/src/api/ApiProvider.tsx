@@ -3,6 +3,7 @@ import { createContext, ReactNode, useContext, useMemo, useRef } from "react";
 
 import { createApiClient, type ApiClient } from "./client";
 import { ApiError } from "./errors";
+import { useUiStore } from "../stores/uiStore";
 
 const ApiClientContext = createContext<ApiClient | null>(null);
 
@@ -12,16 +13,13 @@ type ApiProviderProps = {
   // Called when any request returns 401 so the app can drop the dead key and
   // send the user back to the login gate instead of silently failing.
   onUnauthorized?: () => void;
-  onMutationError?: (message: string) => void;
   children: ReactNode;
 };
 
-export function ApiProvider({ apiKey, authCacheKey, onUnauthorized, onMutationError, children }: ApiProviderProps) {
+export function ApiProvider({ apiKey, authCacheKey, onUnauthorized, children }: ApiProviderProps) {
   const client = useMemo(() => createApiClient(() => apiKey), [apiKey]);
   const onUnauthorizedRef = useRef(onUnauthorized);
-  const onMutationErrorRef = useRef(onMutationError);
   onUnauthorizedRef.current = onUnauthorized;
-  onMutationErrorRef.current = onMutationError;
 
   const queryClient = useMemo(
     () => {
@@ -60,7 +58,7 @@ export function ApiProvider({ apiKey, authCacheKey, onUnauthorized, onMutationEr
             // opt out of the global toast via meta.silentError.
             if (mutation.options.meta?.silentError) return;
             const message = error instanceof Error ? error.message : "Request failed";
-            onMutationErrorRef.current?.(message);
+            useUiStore.getState().showToast(message);
           }
         })
       });

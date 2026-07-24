@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 import { buildSpaceSortOrderUpdates, reorderSpacesByDrop } from "./spaceReorder";
 
 function space(id: string, sort_order = 0): Space {

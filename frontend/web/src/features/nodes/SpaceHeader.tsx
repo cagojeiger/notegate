@@ -1,6 +1,6 @@
 import { FileText, Folder, MoreHorizontal, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 import { Card, IconButton, MenuButton } from "../../shared/ui";
 import { useRefreshSpace } from "./useNodeQueries";
 

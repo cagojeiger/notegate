@@ -7,8 +7,7 @@ import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../entities/node/model";
-import { filePreviewKind } from "../../shared/lib/filePreview";
+import type { RestNode } from "../../api/types";
 import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
 
 const FILE_PREVIEW_CACHE_GC_MS = 15 * 60 * 1_000;
@@ -18,7 +17,7 @@ export function useFilePreviewUrl(node: RestNode) {
   const queryClient = useQueryClient();
   return useQuery({
     ...filePreviewQueryOptions(client, queryClient, node),
-    enabled: isFilePreviewCandidate(node)
+    enabled: isImagePreviewCandidate(node)
   });
 }
 
@@ -46,7 +45,6 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
     try {
       const query = filePreviewQueryOptions(client, queryClient, imageNode);
       const preview = await queryClient.fetchQuery(options.forceRefresh ? { ...query, staleTime: 0 } : query);
-      if (filePreviewKind(preview.media_type) !== "image") return { status: "unsupported" };
       return { status: "loaded", url: preview.url };
     } catch (error) {
       return {
@@ -57,14 +55,10 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
 }
 
 function isRenderableMarkdownImage(sourceSpaceId: string, imageNode: RestNode): boolean {
-  if (imageNode.space_id !== sourceSpaceId || !isFilePreviewCandidate(imageNode)) return false;
-  if (imageNode.detected_media_type) {
-    return filePreviewKind(imageNode.detected_media_type) === "image";
-  }
-  return true;
+  return imageNode.space_id === sourceSpaceId && isImagePreviewCandidate(imageNode);
 }
 
-function isFilePreviewCandidate(node: RestNode): boolean {
+function isImagePreviewCandidate(node: RestNode): boolean {
   if (node.kind !== "file" || node.encryption_mode === "client") return false;
   if (node.preview_available !== undefined) return node.preview_available;
   return true;

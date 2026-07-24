@@ -1,23 +1,14 @@
 import { Database, FileText, Folder, Image as ImageIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { nodeIcon } from "./nodeDisplay";
 
 describe("nodeIcon", () => {
   it("uses an image icon only for server-verified previewable files", () => {
     expect(nodeIcon(node({ kind: "folder" }))).toBe(Folder);
     expect(nodeIcon(node({ kind: "text" }))).toBe(FileText);
-    expect(nodeIcon(node({
-      kind: "file",
-      detected_media_type: "image/png",
-      preview_available: true
-    }))).toBe(ImageIcon);
-    expect(nodeIcon(node({
-      kind: "file",
-      detected_media_type: "application/pdf",
-      preview_available: true
-    }))).toBe(FileText);
+    expect(nodeIcon(node({ kind: "file", preview_available: true }))).toBe(ImageIcon);
     expect(nodeIcon(node({ kind: "file", preview_available: false }))).toBe(Database);
     expect(nodeIcon(node({ kind: "file", preview_available: undefined }))).toBe(Database);
   });

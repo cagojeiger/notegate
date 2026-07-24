@@ -3,22 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import { resolveNodePath } from "../../api/nodes";
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
+import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
 const mocks = vi.hoisted(() => ({
   downloadFile: vi.fn(),
-  setQueryData: vi.fn(),
   revealNode: vi.fn(),
   startUpload: vi.fn()
 }));
-
-vi.mock("@tanstack/react-query", async () => {
-  const actual = await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query");
-  return { ...actual, useQueryClient: () => ({ setQueryData: mocks.setQueryData }) };
-});
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => ({})
@@ -54,7 +47,6 @@ describe("useWorkbenchNodeActions", () => {
     useUiStore.setState(useUiStore.getInitialState(), true);
     vi.mocked(resolveNodePath).mockReset();
     mocks.downloadFile.mockReset().mockResolvedValue(undefined);
-    mocks.setQueryData.mockReset();
     mocks.revealNode.mockReset();
     mocks.startUpload.mockReset();
   });
@@ -82,8 +74,7 @@ describe("useWorkbenchNodeActions", () => {
     });
 
     expect(resolveNodePath).toHaveBeenCalledWith(expect.anything(), activeSpace.id, targetNode.path);
-    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe(targetNode.id);
-    expect(mocks.setQueryData).toHaveBeenCalledWith(["spaces", activeSpace.id, "nodes", targetNode.id], targetNode);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
   });
 
@@ -106,7 +97,7 @@ describe("useWorkbenchNodeActions", () => {
       await result.current.openMarkdownLink(groupId, sourceNode, "/missing.md");
     });
 
-    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe(sourceNode.id);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
     expect(useUiStore.getState().toast).toBe("Linked node not found");
   });
 
@@ -131,7 +122,7 @@ describe("useWorkbenchNodeActions", () => {
       await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
     });
 
-    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe(targetNode.id);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
   });
 
@@ -166,8 +157,8 @@ describe("useWorkbenchNodeActions", () => {
     });
 
     const state = useUiStore.getState();
-    expect(state.editorGroups[0].nodeRef?.nodeId).toBe(targetNode.id);
-    expect(state.editorGroups[1].nodeRef?.nodeId).toBe(otherNode.id);
+    expect(state.editorGroups[0].node?.id).toBe(targetNode.id);
+    expect(state.editorGroups[1].node?.id).toBe(otherNode.id);
     expect(state.activeGroupIndex).toBe(1);
   });
 
@@ -198,7 +189,7 @@ describe("useWorkbenchNodeActions", () => {
       await openPromise;
     });
 
-    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe(replacementNode.id);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacementNode.id);
     expect(mocks.revealNode).not.toHaveBeenCalled();
   });
 
@@ -222,7 +213,7 @@ describe("useWorkbenchNodeActions", () => {
       await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
     });
 
-    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe(sourceNode.id);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
     expect(useUiStore.getState().toast).toBe("Could not open linked node");
   });
 
@@ -244,7 +235,7 @@ describe("useWorkbenchNodeActions", () => {
       await result.current.openNode(targetNode);
     });
 
-    expect(useUiStore.getState().editorGroups[0].nodeRef?.nodeId).toBe(targetNode.id);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
   });
 

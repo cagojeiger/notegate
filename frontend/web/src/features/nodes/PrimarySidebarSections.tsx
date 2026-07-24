@@ -1,5 +1,4 @@
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
+import type { RestNode, Space } from "../../api/types";
 import { RecentSection } from "./RecentSection";
 import { TreeSection } from "./TreeSection";
 import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";

@@ -1,6 +1,5 @@
 import type { ApiClient } from "./client";
-import type { RestNode } from "../entities/node/model";
-import type { MetadataResponse } from "./types";
+import type { MetadataResponse, RestNode } from "./types";
 
 export function getMetadata(client: ApiClient, spaceId: string, nodeId: string): Promise<MetadataResponse> {
   return client.get<MetadataResponse>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/metadata`);

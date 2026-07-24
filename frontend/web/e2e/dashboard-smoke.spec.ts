@@ -16,7 +16,7 @@ test("dev API key dashboard supports space, text, metadata, and file basics", as
   await page.getByText("Developer API key fallback").click();
   await page.getByLabel("User API key").fill(apiKey!);
   await page.getByRole("button", { name: "Open with API key" }).click();
-  await expect(page.locator('button[aria-label="Add space"]:visible')).toBeVisible();
+  await expect(page.getByText("Notegate", { exact: true })).toBeVisible();
 
   await page.locator('button[aria-label="Add space"]:visible').click();
   await page.getByLabel("Space name").fill(spaceName);

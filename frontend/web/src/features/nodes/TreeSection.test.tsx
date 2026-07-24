@@ -1,8 +1,7 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
+import type { RestNode, Space } from "../../api/types";
 import { TreeSection } from "./TreeSection";
 import type { TreeKeyboardNavigation } from "./types";
 

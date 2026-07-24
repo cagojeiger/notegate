@@ -1,9 +1,8 @@
 import { useState, type MouseEvent } from "react";
 import { nodeIcon } from "../nodes/nodeDisplay";
 
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
-import { MAX_EDITOR_GROUPS, type EditorGroup, type EditorPresentation, type OpenedNodeRef } from "../../shared/model/workbench";
+import type { RestNode, Space } from "../../api/types";
+import { MAX_EDITOR_GROUPS, type EditorGroup } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EmptyEditor } from "./EmptyEditor";
 import { FileDetailView } from "./FileDetailView";
@@ -13,6 +12,7 @@ import { NodeContextMenu } from "../nodes/NodeContextMenu";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { TextEditorView } from "./TextEditorView";
 import type { EditorNavigationActions, NodeActions } from "./types";
+import type { EditorPresentation } from "../../layout/workbenchLayout";
 
 type EditorAreaProps = NodeActions & {
   groups: EditorGroup[];
@@ -36,7 +36,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; node: RestNode; groupIndex: number } | null>(null);
   const visibleRange = editorGroupVisibleRange(groups.length, activeGroupIndex, visibleGroupCount);
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+    <div className="relative flex min-w-0 flex-1">
       {groups.map((group, index) => {
         const active = index === activeGroupIndex;
         const outsideVisibleRange = index < visibleRange.start || index >= visibleRange.end;
@@ -47,12 +47,12 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
             data-editor-group
             data-active={active ? "true" : "false"}
             onMouseDown={() => onFocusGroup(index)}
-            className={`${hidden ? "hidden" : "flex"} min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active || presentation === "focused" ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
+            className={`${hidden ? "hidden" : "flex"} min-w-0 flex-1 flex-col bg-[var(--ng-editor)] ${index > 0 ? "border-l border-seam" : ""} ${active || presentation === "focused" ? "" : "max-md:hidden"} ${multiple ? (active ? "relative z-10 outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]" : "outline outline-1 -outline-offset-1 outline-transparent") : ""}`}
           >
             <GroupBody
               active={active}
               groupId={group.id}
-              nodeRef={group.nodeRef}
+              node={group.node}
               mode={group.mode}
               activeSpace={activeSpace}
               canWriteActiveSpace={canWriteActiveSpace}
@@ -106,8 +106,8 @@ function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visib
   return { start, end: start + count };
 }
 
-function GroupBody({ active, groupId, nodeRef, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; nodeRef: OpenedNodeRef | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
-  if (!nodeRef) {
+function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+  if (!node) {
     return (
       <>
         <EditorGroupHeader title="Open a node" canClose={canClose} onClose={onClose} active={active} />
@@ -116,7 +116,7 @@ function GroupBody({ active, groupId, nodeRef, mode, activeSpace, canWriteActive
     );
   }
   return (
-    <OpenedNodeGuard nodeRef={nodeRef}>
+    <OpenedNodeGuard node={node}>
       {(freshNode) => (
         <NodeGroupContent
           active={active}

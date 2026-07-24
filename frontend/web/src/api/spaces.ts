@@ -1,6 +1,5 @@
 import type { ApiClient } from "./client";
-import type { Space } from "../entities/space/model";
-import type { SpacesListResponse } from "./types";
+import type { Space, SpacesListResponse } from "./types";
 
 export function listSpaces(client: ApiClient): Promise<SpacesListResponse> {
   return client.get<SpacesListResponse>("/api/v1/spaces?limit=100");

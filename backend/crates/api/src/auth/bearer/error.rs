@@ -124,7 +124,7 @@ fn message_for_error(error: &AuthError) -> &'static str {
         AuthError::MissingToken => "missing or malformed bearer token",
         AuthError::InvalidToken => "invalid token",
         AuthError::NotRegistered => {
-            "This account is authenticated but not registered in NoteGate yet. Open login_url once, then reconnect your MCP client."
+            "This authgate account is authenticated but not registered in notegate yet. Open login_url once, then reconnect your MCP client."
         }
         AuthError::Inactive => "inactive account",
         AuthError::Unavailable => "auth service temporarily unavailable",

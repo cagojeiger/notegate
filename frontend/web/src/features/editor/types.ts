@@ -1,4 +1,4 @@
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 
 export type NodeActions = {
   onRenameNode: (node: RestNode) => void;

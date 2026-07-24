@@ -1,5 +1,4 @@
-import type { Me } from "../entities/account/model";
-import type { Space } from "../entities/space/model";
+import type { Me, Space } from "../api/types";
 
 const DEFAULT_CAPABILITIES: Me["capabilities"] = {
   can_create_space: false,

@@ -1,6 +1,6 @@
 import { FileText } from "lucide-react";
 
-import type { Space } from "../../entities/space/model";
+import type { Space } from "../../api/types";
 import { Button, Card } from "../../shared/ui";
 
 export function EmptyEditor({ activeSpace, canWriteActiveSpace, onCreateFolder, onCreateText, onFileSelected }: { activeSpace: Space | null; canWriteActiveSpace: boolean; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void }) {

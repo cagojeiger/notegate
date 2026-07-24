@@ -1,7 +1,7 @@
 import { Copy, Download, FilePlus, FolderPlus, Move, PanelRightOpen, Pencil, Trash2, Upload, X } from "lucide-react";
 import { useEffect } from "react";
 
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";

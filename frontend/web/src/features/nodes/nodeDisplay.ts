@@ -1,19 +1,11 @@
 import { Database, FileText, Folder, Image as ImageIcon, type LucideIcon } from "lucide-react";
 
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
-import { filePreviewKind } from "../../shared/lib/filePreview";
+import type { RestNode, Space } from "../../api/types";
 
 export function nodeIcon(node: RestNode): LucideIcon {
   if (node.kind === "folder") return Folder;
   if (node.kind === "text") return FileText;
-  if (node.preview_available === true && filePreviewKind(node.detected_media_type) === "image") {
-    return ImageIcon;
-  }
-  if (node.preview_available === true && filePreviewKind(node.detected_media_type) === "pdf") {
-    return FileText;
-  }
-  return Database;
+  return node.preview_available === true ? ImageIcon : Database;
 }
 
 export function fmtBytes(bytes = 0): string {

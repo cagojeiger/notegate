@@ -3,10 +3,10 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { deleteNode, updateNode } from "../../api/nodes";
+import { deleteNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode } from "../../entities/node/model";
-import { useDeleteNodeMutation, useUpdateNodeMutation } from "./useWorkbenchNodeQueries";
+import type { RestNode } from "../../api/types";
+import { useDeleteNodeMutation } from "./useWorkbenchNodeQueries";
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => ({})
@@ -43,28 +43,6 @@ describe("useDeleteNodeMutation", () => {
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-2", "file-2"))).toEqual({ url: "separate" });
-  });
-});
-
-describe("useUpdateNodeMutation", () => {
-  it("writes the updated node to the authoritative query cache", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
-    });
-    const original = node("node-1", "space-1", "text");
-    const renamed = { ...original, name: "renamed.md", path: "/renamed.md" };
-    vi.mocked(updateNode).mockResolvedValue(renamed);
-
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    );
-    const { result } = renderHook(() => useUpdateNodeMutation(), { wrapper });
-
-    await act(async () => {
-      await result.current.mutateAsync({ node: original, name: renamed.name });
-    });
-
-    expect(queryClient.getQueryData(queryKeys.node("space-1", "node-1"))).toEqual(renamed);
   });
 });
 

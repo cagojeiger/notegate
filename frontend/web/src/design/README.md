@@ -1,6 +1,6 @@
 # Frontend design system
 
-NoteGate uses a compact design system anchored by the brand's ink and paper colors, shallow depth, and explicit shared UI primitives.
+Notegate uses a small Lovable-inspired design system: warm neutral surfaces, shallow depth, and explicit shared UI primitives.
 
 ## Source of truth
 
@@ -40,9 +40,6 @@ Prefer `shared/ui` instead of repeating:
 
 ## Theme policy
 
-- Light theme uses paper and cool-neutral surfaces.
-- Dark theme uses ink and graphite surfaces instead of a blue IDE palette.
-- Normal text targets WCAG 2.2 AA contrast of at least 4.5:1.
-- Meaningful controls and focus indicators target at least 3:1.
-- Brand assets identify NoteGate; Lucide icons represent actions and objects.
+- Light theme uses warm cream surfaces inspired by Lovable.
+- Dark theme keeps the same warm-neutral hue instead of a blue IDE palette.
 - Theme is local UI state; it does not change backend data.

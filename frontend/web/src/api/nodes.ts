@@ -1,6 +1,5 @@
 import type { ApiClient } from "./client";
-import type { NodeKind, RestNode } from "../entities/node/model";
-import type { ChildrenResponse, NodeRevealResponse, RestNodeListResponse } from "./types";
+import type { ChildrenResponse, NodeKind, NodeRevealResponse, RestNode, RestNodeListResponse } from "./types";
 
 export function getNode(client: ApiClient, spaceId: string, nodeId: string): Promise<RestNode> {
   return client.get<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`);

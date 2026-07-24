@@ -1,11 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 
-import { useUiStore } from "../../stores/uiStore";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 
 export function MermaidBlock({ code }: { code: string }) {
   const reactId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const theme = useUiStore((state) => state.theme);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,7 +18,7 @@ export function MermaidBlock({ code }: { code: string }) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: theme === "dark" ? "dark" : "neutral"
+          theme: "neutral"
         });
         const result = await mermaid.render(`ng-mermaid-${reactId}`, code);
         if (active) setSvg(result.svg);
@@ -33,7 +31,7 @@ export function MermaidBlock({ code }: { code: string }) {
     return () => {
       active = false;
     };
-  }, [code, reactId, theme]);
+  }, [code, reactId]);
 
   if (svg) {
     return <div className="ng-mermaid" dangerouslySetInnerHTML={{ __html: svg }} />;

@@ -1,7 +1,6 @@
 import { useState } from "react";
 
-import type { RestNode } from "../../entities/node/model";
-import type { Space } from "../../entities/space/model";
+import type { RestNode, Space } from "../../api/types";
 import { NodeContextMenu } from "./NodeContextMenu";
 import { SpaceHeader } from "./SpaceHeader";
 import { PrimarySidebarSections } from "./PrimarySidebarSections";

@@ -2,7 +2,7 @@ import type { DragEvent } from "react";
 import { useRef } from "react";
 import { ChevronRight } from "lucide-react";
 
-import type { RestNode } from "../../entities/node/model";
+import type { RestNode } from "../../api/types";
 import { nodeIcon } from "./nodeDisplay";
 import type { NodeContextHandler } from "./types";
 
@@ -78,7 +78,7 @@ export function NodeRow({
       style={{ paddingLeft: `${8 + depth * 14}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >
-      {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={() => onToggleFolder?.(node.id)}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
+      {node.kind === "folder" ? <button className="grid size-4 place-items-center" onClick={() => onToggleFolder?.(node.id)}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-4" />}
       <button data-node-open className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50" onClick={handleOpen}>
         <Icon size={15} className="shrink-0" />
         <span className="min-w-0 flex-1">

@@ -11,7 +11,7 @@ function FieldShell({ label, children, className }: { label: string; children: R
   );
 }
 
-const controlClass = "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-text outline-none transition placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-50";
+const controlClass = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-text outline-none transition placeholder:text-faint focus:shadow-[var(--ng-focus-shadow)] disabled:cursor-not-allowed disabled:opacity-50";
 
 export function TextField({ label, className, inputClassName, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string; inputClassName?: string }) {
   return (
