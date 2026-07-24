@@ -6,7 +6,8 @@ import {
   invalidateFolderSubtree,
   invalidateNodeLists,
   invalidateSpaceResources,
-  removeMarkdownImageNodeQueries,
+  removeMarkdownImageQueries,
+  removeMarkdownImagePreviewQuery,
   removeDeletedNodeQueries,
   removeDeletedSpaceQueries
 } from "./queryInvalidation";
@@ -45,7 +46,7 @@ describe("query invalidation", () => {
   it("invalidates descendant-bearing cache families after a folder path change", () => {
     const queryClient = new QueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    const pathKey = queryKeys.markdownImageNode("space-1", "/folder/image.png");
+    const pathKey = queryKeys.markdownImagePreview("space-1", "/folder/image.png");
     queryClient.setQueryData(pathKey, { id: "image-1" });
 
     invalidateFolderSubtree(queryClient, "space-1");
@@ -137,17 +138,30 @@ describe("query invalidation", () => {
     expect(queryClient.getQueryState(previewKey)?.isInvalidated).toBe(false);
   });
 
-  it("removes path resolution caches only for the changed space", () => {
+  it("removes markdown preview caches only for the changed space", () => {
     const queryClient = new QueryClient();
-    const changed = queryKeys.markdownImageNode("space-1", "/old/image.png");
-    const other = queryKeys.markdownImageNode("space-2", "/other/image.png");
+    const changed = queryKeys.markdownImagePreview("space-1", "/old/image.png");
+    const other = queryKeys.markdownImagePreview("space-2", "/other/image.png");
     queryClient.setQueryData(changed, { id: "image-1" });
     queryClient.setQueryData(other, { id: "image-2" });
 
-    removeMarkdownImageNodeQueries(queryClient, "space-1");
+    removeMarkdownImageQueries(queryClient, "space-1");
 
     expect(queryClient.getQueryData(changed)).toBeUndefined();
     expect(queryClient.getQueryData(other)).toEqual({ id: "image-2" });
+  });
+
+  it("removes only the affected markdown preview path for a local file move", () => {
+    const queryClient = new QueryClient();
+    const changed = queryKeys.markdownImagePreview("space-1", "/old/image.png");
+    const sibling = queryKeys.markdownImagePreview("space-1", "/other/image.png");
+    queryClient.setQueryData(changed, { id: "image-1" });
+    queryClient.setQueryData(sibling, { id: "image-2" });
+
+    removeMarkdownImagePreviewQuery(queryClient, "space-1", "/old/image.png");
+
+    expect(queryClient.getQueryData(changed)).toBeUndefined();
+    expect(queryClient.getQueryData(sibling)).toEqual({ id: "image-2" });
   });
 
   it("removes only the deleted node resources for a non-recursive delete", async () => {
@@ -163,7 +177,7 @@ describe("query invalidation", () => {
       queryKeys.text("space-1", "file-1"),
       queryKeys.file("space-1", "file-1"),
       queryKeys.metadata("space-1", "file-1"),
-      queryKeys.markdownImageNode("space-1", "/file-1"),
+      queryKeys.markdownImagePreview("space-1", "/file-1"),
       queryKeys.filePreviewUrl("space-1", "file-1")
     ];
     deletedKeys.forEach((queryKey) => queryClient.setQueryData(queryKey, { cached: true }));
@@ -182,17 +196,23 @@ describe("query invalidation", () => {
     const otherSpaceNode = queryKeys.node("space-2", "file-2");
     const deletedSpacePreview = queryKeys.filePreviewUrl("space-1", "file-1");
     const otherSpacePreview = queryKeys.filePreviewUrl("space-2", "file-2");
+    const deletedMarkdownPreview = queryKeys.markdownImagePreview("space-1", "/image.png");
+    const otherMarkdownPreview = queryKeys.markdownImagePreview("space-2", "/image.png");
     queryClient.setQueryData(deletedSpaceNode, { cached: true });
     queryClient.setQueryData(otherSpaceNode, { cached: true });
     queryClient.setQueryData(deletedSpacePreview, { cached: true });
     queryClient.setQueryData(otherSpacePreview, { cached: true });
+    queryClient.setQueryData(deletedMarkdownPreview, { status: "ready" });
+    queryClient.setQueryData(otherMarkdownPreview, { status: "ready" });
 
     await removeDeletedSpaceQueries(queryClient, "space-1");
 
     expect(queryClient.getQueryData(deletedSpaceNode)).toBeUndefined();
     expect(queryClient.getQueryData(deletedSpacePreview)).toBeUndefined();
+    expect(queryClient.getQueryData(deletedMarkdownPreview)).toBeUndefined();
     expect(queryClient.getQueryData(otherSpaceNode)).toEqual({ cached: true });
     expect(queryClient.getQueryData(otherSpacePreview)).toEqual({ cached: true });
+    expect(queryClient.getQueryData(otherMarkdownPreview)).toEqual({ status: "ready" });
   });
 });
 

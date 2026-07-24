@@ -8,7 +8,7 @@ import {
   invalidateFolderSubtree,
   invalidateNodeLists,
   removeDeletedNodeQueries,
-  removeMarkdownImageNodeQueries
+  removeMarkdownImagePreviewQuery
 } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
@@ -34,13 +34,13 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ node, name }: { node: RestNode; name: string }) => updateNode(client, node.space_id, node.id, { name }),
-    onSuccess: (node) => {
+    onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
       if (node.kind === "folder") {
         invalidateFolderSubtree(queryClient, node.space_id);
       } else {
         invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
-        removeMarkdownImageNodeQueries(queryClient, node.space_id);
+        removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
       onUpdated(node);
     }
@@ -58,7 +58,7 @@ export function useMoveNodeMutation(onMoved: (node: RestNode) => void) {
         invalidateFolderSubtree(queryClient, node.space_id);
       } else {
         invalidateNodeLists(queryClient, node.space_id, [previousNode.parent_id, node.parent_id]);
-        removeMarkdownImageNodeQueries(queryClient, node.space_id);
+        removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
       onMoved(node);
     }

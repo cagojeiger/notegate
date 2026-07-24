@@ -23,7 +23,6 @@ describe("updateNodeCaches", () => {
     };
     queryClient.setQueryData(queryKeys.recent("space-1"), recent);
     queryClient.setQueryData(queryKeys.children("space-1", "root-1"), children);
-    queryClient.setQueryData(queryKeys.markdownImageNode("space-1", target.path), target);
 
     updateNodeCaches(queryClient, target, (current) => ({
       ...current,
@@ -32,8 +31,6 @@ describe("updateNodeCaches", () => {
     }));
 
     expect(queryClient.getQueryData<RestNode>(queryKeys.node("space-1", "file-1")))
-      .toMatchObject({ detected_media_type: "image/png", preview_available: true });
-    expect(queryClient.getQueryData<RestNode>(queryKeys.markdownImageNode("space-1", target.path)))
       .toMatchObject({ detected_media_type: "image/png", preview_available: true });
     const updatedRecent = queryClient.getQueryData<RestNodeListResponse>(queryKeys.recent("space-1"));
     expect(updatedRecent?.nodes[0]).toMatchObject({ preview_available: true });
@@ -45,7 +42,7 @@ describe("updateNodeCaches", () => {
     expect(updatedChildren?.pages[1]).toBe(children.pages[1]);
   });
 
-  it("does not create collection or path entries that were not already cached", () => {
+  it("does not create collection entries that were not already cached", () => {
     const queryClient = new QueryClient();
     const target = node("file-1");
 
@@ -54,7 +51,6 @@ describe("updateNodeCaches", () => {
     expect(queryClient.getQueryData(queryKeys.node("space-1", "file-1"))).toMatchObject({
       preview_available: true
     });
-    expect(queryClient.getQueryData(queryKeys.markdownImageNode("space-1", target.path))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.recent("space-1"))).toBeUndefined();
   });
 

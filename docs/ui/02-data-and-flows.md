@@ -276,6 +276,18 @@ open node
 -> show Inspector for active node
 ```
 
+### Markdown image preview
+
+```text
+near-viewport image paths
+-> same microtask requests coalesce
+-> POST /file-previews:batchResolve
+-> cache each ordered path result and each ready node preview URL
+-> render ready results; isolate missing, unsupported, and transient failures per image
+```
+
+로컬 단일 file rename/move는 이전 path cache만 제거한다. Folder 변경과 외부 path change event는 영향받은 하위 path를 직접 알 수 없으므로 active Space의 Markdown image preview cache를 제거한다. 만료된 presigned URL은 해당 path만 다시 배치 조회한다.
+
 ### Split
 
 ```text

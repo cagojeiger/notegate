@@ -75,6 +75,9 @@ Polling은 `document.visibilityState === "visible"`일 때만 돈다.
 - opened node가 404면 editor group을 비운다.
 - text body는 직접 polling하지 않는다.
 - text change event가 해당 node의 text content query를 invalidate한다.
+- 같은 렌더 단계에서 요청된 Markdown image path는 64개 또는 UTF-8 16 KiB 단위로 합쳐 한 번에 조회한다.
+- Markdown image 결과는 path별 query cache에 저장하고, ready URL은 node ID별 preview cache에도 공유한다.
+- batch 응답 순서와 개수가 요청 계약과 다르면 결과를 캐시하지 않는다.
 
 ## Zustand
 
