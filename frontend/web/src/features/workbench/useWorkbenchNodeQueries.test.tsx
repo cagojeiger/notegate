@@ -3,10 +3,10 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { deleteNode } from "../../api/nodes";
+import { deleteNode, moveNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
-import { useDeleteNodeMutation } from "./useWorkbenchNodeQueries";
+import { useDeleteNodeMutation, useMoveNodeMutation } from "./useWorkbenchNodeQueries";
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => ({})
@@ -20,12 +20,13 @@ vi.mock("../../api/nodes", () => ({
   updateNode: vi.fn()
 }));
 
-describe("useDeleteNodeMutation", () => {
+describe("workbench node mutations", () => {
   it("removes every preview URL cached for a recursively deleted folder", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
     });
     const folder = node("folder-1", "space-1", "folder");
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "child-1"), { url: "child" });
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "other-1"), { url: "other" });
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-2", "file-2"), { url: "separate" });
@@ -43,6 +44,77 @@ describe("useDeleteNodeMutation", () => {
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-2", "file-2"))).toEqual({ url: "separate" });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.nodes("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+  });
+
+  it("invalidates only the old and new parent when moving a node", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const source = node("file-1", "space-1", "file");
+    const moved = { ...source, parent_id: "folder-2", path: "/folder-2/file-1" };
+    vi.mocked(moveNode).mockResolvedValue(moved);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useMoveNodeMutation(vi.fn()), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ node: source, parentId: "folder-2" });
+    });
+
+    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.children("space-1", "space-1-root")
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
+      queryKey: queryKeys.children("space-1", "folder-2")
+    });
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+  });
+
+  it("invalidates descendant cache families when moving a folder", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const source = node("folder-1", "space-1", "folder");
+    const moved = { ...source, parent_id: "folder-2", path: "/folder-2/folder-1" };
+    vi.mocked(moveNode).mockResolvedValue(moved);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useMoveNodeMutation(vi.fn()), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ node: source, parentId: "folder-2" });
+    });
+
+    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
+      queryKey: queryKeys.nodes("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
   });
 });
 

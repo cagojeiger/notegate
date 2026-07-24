@@ -169,7 +169,7 @@ describe("useFilePreviewUrl", () => {
     vi.mocked(getFilePreviewUrl).mockReset();
   });
 
-  it("refreshes node collections after legacy preview metadata is discovered", async () => {
+  it("patches node collections without refetching after legacy preview metadata is discovered", async () => {
     const queryClient = createQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const imageNode = fileNode({
@@ -179,15 +179,35 @@ describe("useFilePreviewUrl", () => {
       preview_available: undefined
     });
     vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
+    const page = { limit: 100, returned: 1, has_more: false, next_cursor: null };
+    queryClient.setQueryData(queryKeys.recent("space-1"), { nodes: [imageNode], page });
+    queryClient.setQueryData(queryKeys.children("space-1", "folder-1"), {
+      pages: [{
+        parent: { id: "folder-1", path: "/docs" },
+        children: [imageNode],
+        page
+      }],
+      pageParams: [null]
+    });
+    queryClient.setQueryData(
+      queryKeys.markdownImageNode("space-1", "/docs/image.png"),
+      imageNode
+    );
 
     const { result } = renderHook(() => useFilePreviewUrl(imageNode), {
       wrapper: createQueryWrapper(queryClient)
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.node("space-1", "legacy-image") });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.recent("space-1") });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.children("space-1", "folder-1") });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData<{ nodes: RestNode[] }>(queryKeys.recent("space-1"))?.nodes[0])
+      .toMatchObject({ detected_media_type: "image/png", preview_available: true });
+    expect(queryClient.getQueryData<{ pages: Array<{ children: RestNode[] }> }>(
+      queryKeys.children("space-1", "folder-1")
+    )?.pages[0]?.children[0]).toMatchObject({
+      detected_media_type: "image/png",
+      preview_available: true
+    });
     expect(queryClient.getQueryData(queryKeys.markdownImageNode("space-1", "/docs/image.png")))
       .toMatchObject({ detected_media_type: "image/png", preview_available: true });
   });

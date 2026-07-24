@@ -198,7 +198,7 @@ select file
 -> single: PUT all bytes to the presigned URL
 -> multipart: request part URLs, PUT at most 4 parts concurrently
 -> POST /file-uploads/{upload_id}/complete with multipart ETags
--> refresh the source space
+-> cache completed node + refresh destination children/recent
 ```
 
 규칙:
@@ -289,7 +289,7 @@ split
 ```text
 edit text
 -> PUT /text/{node_id} with expected_sha256
--> success: preview mode + refresh node/text
+-> success: preview mode + patch cached node representations + refresh text/recent
 -> conflict: show conflict state
 ```
 

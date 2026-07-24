@@ -45,7 +45,10 @@ frontend/web/src
 ## React Query
 
 - query key는 `api/queryKeys.ts`에 둔다.
-- mutation 후 영향 범위 query를 invalidate/refetch한다.
+- node mutation은 Recent와 영향받은 parent children family만 invalidate한다.
+- folder rename/move/recursive delete는 descendant path가 바뀌므로 해당 Space의 node/children/path cache family를 invalidate한다.
+- 동일 node가 node/Recent/children/path cache에 있으면 공통 cache updater로 함께 갱신한다.
+- active Space 전체 invalidation은 수동 refresh와 아직 parent 범위를 알 수 없는 external sync fallback에만 사용한다.
 - global mutation error는 toast로 보여준다.
 - session query는 중복 401 처리를 피한다.
 

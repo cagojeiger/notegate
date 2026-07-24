@@ -7,13 +7,38 @@ export function invalidateAuditEvents(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.auditEvents });
 }
 
-export function invalidateSpaceResources(queryClient: QueryClient, spaceId: string) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.space(spaceId) });
+export function invalidateNodeLists(
+  queryClient: QueryClient,
+  spaceId: string,
+  parentIds: Iterable<string | null | undefined>
+) {
+  invalidateRecentNodes(queryClient, spaceId);
+  for (const parentId of new Set([...parentIds].filter((id): id is string => Boolean(id)))) {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.children(spaceId, parentId) });
+  }
 }
 
-export function invalidateSpace(queryClient: QueryClient, spaceId: string) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.spaces, exact: true });
-  invalidateSpaceResources(queryClient, spaceId);
+export function invalidateRecentNodes(queryClient: QueryClient, spaceId: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.recent(spaceId), exact: true });
+}
+
+export function invalidateFolderSubtree(queryClient: QueryClient, spaceId: string) {
+  invalidateRecentNodes(queryClient, spaceId);
+  void queryClient.invalidateQueries({ queryKey: queryKeys.childrenFamily(spaceId) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.nodes(spaceId) });
+  removeMarkdownImageNodeQueries(queryClient, spaceId);
+}
+
+export function invalidateText(queryClient: QueryClient, spaceId: string, nodeId: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.text(spaceId, nodeId), exact: true });
+}
+
+export function removeMarkdownImageNodeQueries(queryClient: QueryClient, spaceId: string) {
+  queryClient.removeQueries({ queryKey: queryKeys.markdownImageNodes(spaceId) });
+}
+
+export function invalidateSpaceResources(queryClient: QueryClient, spaceId: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.space(spaceId) });
 }
 
 export function removeDeletedNodeQueries(
