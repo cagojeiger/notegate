@@ -1,11 +1,7 @@
 export const POLLING = {
-  openedNodeMs: 30_000,
-  openedNodeJitterMs: 5_000,
-  recentMs: 60_000,
-  recentJitterMs: 10_000,
   usagePendingMs: 3_000,
-  treeChildrenMs: 60_000,
-  treeChildrenJitterMs: 10_000
+  spaceChangesMs: 30_000,
+  spaceChangesJitterMs: 5_000
 } as const;
 
 export function withPollingJitter(baseMs: number, jitterMs: number): number {

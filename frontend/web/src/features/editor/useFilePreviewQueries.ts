@@ -6,6 +6,7 @@ import type { ApiClient } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { resolveNodePath } from "../../api/nodes";
+import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
@@ -32,7 +33,7 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
         queryKey: queryKeys.markdownImageNode(sourceNode.space_id, path),
         queryFn: () => resolveNodePath(client, sourceNode.space_id, path),
         retry: false,
-        staleTime: 5_000
+        staleTime: POLLING.spaceChangesMs
       });
     } catch (error) {
       return { status: error instanceof ApiError && error.status === 404 ? "not-found" : "error" };

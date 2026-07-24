@@ -296,7 +296,8 @@ edit text
 ### External sync
 
 ```text
-visible tab polling
+visible tab: poll latest active-space change event
+-> event id changed: invalidate active-space resource cache
 -> opened node changed: refresh snapshot
 -> text hash changed: refetch text
 -> opened node 404: clear editor group
