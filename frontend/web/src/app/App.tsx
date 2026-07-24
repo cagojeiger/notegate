@@ -3,14 +3,16 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
 import type { Me } from "../api/types";
-import { clearAuthenticatedClientState, resetWorkbenchClientState } from "../auth/clientSession";
 import { DevAuthGate } from "../auth/DevAuthGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
 import { clearDevApiKey, readDevApiKey } from "../auth/session";
+import type { ThemeMode } from "../design/tokens";
 import { UploadProvider } from "../features/uploads/UploadProvider";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
+import { persistTheme, useUiStore } from "../stores/uiStore";
+import { clearAuthenticatedClientState, resetWorkbenchClientState } from "./clientSession";
 
 const DEV_API_KEY_FALLBACK_ENABLED =
   import.meta.env.DEV || import.meta.env.MODE === "test" || import.meta.env.VITE_NOTEGATE_ENABLE_DEV_API_KEY === "true";
@@ -22,6 +24,13 @@ export function App() {
     return null;
   });
   const [sessionRevision, setSessionRevision] = useState(0);
+  const theme = useUiStore((state) => state.theme);
+  const toggleTheme = useUiStore((state) => state.toggleTheme);
+  const showToast = useUiStore((state) => state.showToast);
+
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
 
   const clearClientSession = useCallback(() => {
     clearAuthenticatedClientState();
@@ -50,11 +59,18 @@ export function App() {
   const authCacheKey = `${apiKey ?? "browser-session"}:${sessionRevision}`;
 
   return (
-    <ApiProvider apiKey={apiKey} authCacheKey={authCacheKey} onUnauthorized={resetSession}>
+    <ApiProvider
+      apiKey={apiKey}
+      authCacheKey={authCacheKey}
+      onUnauthorized={resetSession}
+      onMutationError={showToast}
+    >
       <AuthBoundary
         apiKey={apiKey}
         sessionRevision={sessionRevision}
+        theme={theme}
         devApiKeyFallbackEnabled={DEV_API_KEY_FALLBACK_ENABLED}
+        onToggleTheme={toggleTheme}
         onAuthenticated={handleApiKeyAuthenticated}
         onBrowserSessionAuthenticated={handleBrowserSessionAuthenticated}
         onBrowserSessionInvalidated={clearClientSession}
@@ -67,7 +83,9 @@ export function App() {
 function AuthBoundary({
   apiKey,
   sessionRevision,
+  theme,
   devApiKeyFallbackEnabled,
+  onToggleTheme,
   onAuthenticated,
   onBrowserSessionAuthenticated,
   onBrowserSessionInvalidated,
@@ -75,7 +93,9 @@ function AuthBoundary({
 }: {
   apiKey: string | null;
   sessionRevision: number;
+  theme: ThemeMode;
   devApiKeyFallbackEnabled: boolean;
+  onToggleTheme: () => void;
   onAuthenticated: (apiKey: string) => void;
   onBrowserSessionAuthenticated: () => void;
   onBrowserSessionInvalidated: () => void;
@@ -118,6 +138,8 @@ function AuthBoundary({
     return (
       <DevAuthGate
         devApiKeyFallbackEnabled={devApiKeyFallbackEnabled}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
         onAuthenticated={onAuthenticated}
         onSessionAuthenticated={async () => {
           const result = await meQuery.refetch();

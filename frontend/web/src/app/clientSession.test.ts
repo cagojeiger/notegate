@@ -11,7 +11,7 @@ import {
   workbenchSpaceKey
 } from "../stores/workbenchStorage";
 import { clearAuthenticatedClientState, resetWorkbenchClientState } from "./clientSession";
-import { writeDevApiKey } from "./session";
+import { writeDevApiKey } from "../auth/session";
 
 describe("clearAuthenticatedClientState", () => {
   beforeEach(() => {
