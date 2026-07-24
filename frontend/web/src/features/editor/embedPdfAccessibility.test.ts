@@ -1,9 +1,18 @@
 import { waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { observeEmbedPdfAccessibility } from "./embedPdfAccessibility";
 
 describe("observeEmbedPdfAccessibility", () => {
+  beforeEach(() => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => (
+      window.setTimeout(() => callback(performance.now()), 0)
+    ));
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => window.clearTimeout(id));
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
   it("repairs the viewer semantics and observes newly rendered pages", async () => {
     const root = document.createElement("div").attachShadow({ mode: "open" });
     root.innerHTML = `
@@ -30,6 +39,33 @@ describe("observeEmbedPdfAccessibility", () => {
     nextPage.src = "blob:next";
     root.append(nextPage);
     await waitFor(() => expect(nextPage).toHaveAttribute("role", "presentation"));
+
+    const viewButton = root.querySelector("button");
+    if (!viewButton) throw new Error("view button missing");
+    viewButton.textContent = "";
+    await waitFor(() => expect(viewButton).toHaveAttribute("aria-label", "More PDF options"));
+
+    disconnect();
+  });
+
+  it("batches mutations and scans only the added subtrees", async () => {
+    const root = document.createElement("div").attachShadow({ mode: "open" });
+    const queryAll = vi.spyOn(root, "querySelectorAll");
+    const disconnect = observeEmbedPdfAccessibility(root);
+    expect(queryAll).toHaveBeenCalledTimes(1);
+
+    const firstPage = document.createElement("div");
+    firstPage.innerHTML = '<img src="blob:first">';
+    const secondPage = document.createElement("div");
+    secondPage.innerHTML = '<button><svg role="img"></svg></button>';
+    root.append(firstPage);
+    root.append(secondPage);
+
+    await waitFor(() => {
+      expect(firstPage.querySelector("img")).toHaveAttribute("role", "presentation");
+      expect(secondPage.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    });
+    expect(queryAll).toHaveBeenCalledTimes(1);
 
     disconnect();
   });

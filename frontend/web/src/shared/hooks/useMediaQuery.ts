@@ -20,10 +20,20 @@ export function useIsMobile(): boolean {
 export function useViewportWidth(): number {
   const [width, setWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   useEffect(() => {
-    const update = () => setWidth(window.innerWidth);
-    update();
+    let animationFrame: number | null = null;
+    const update = () => {
+      if (animationFrame !== null) return;
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = null;
+        setWidth((current) => current === window.innerWidth ? current : window.innerWidth);
+      });
+    };
+    setWidth((current) => current === window.innerWidth ? current : window.innerWidth);
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+    };
   }, []);
   return width;
 }

@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
 
+const apiKey = process.env.NOTEGATE_WEB_E2E_API_KEY;
+
 const space: Space = {
   id: "space-1",
   name: "Daily",
@@ -164,6 +166,68 @@ test("PDF reading mode focuses the active editor when split panes would be too n
   await expect(preview.locator('img[src^="blob:"]').first()).toBeVisible();
   await expect(page.locator("[data-editor-group]:visible")).toHaveCount(1);
   expect((await preview.boundingBox())?.width).toBeGreaterThanOrEqual(480);
+});
+
+test("an uploaded PDF renders through the real presigned storage URL and browser CORS", async ({ page, request }) => {
+  test.skip(!apiKey, "set NOTEGATE_WEB_E2E_API_KEY to run the storage PDF e2e");
+  test.slow();
+  const suffix = Date.now().toString(36);
+  const spaceName = `pdf-e2e-${suffix}`;
+  const fileName = `document-${suffix}.pdf`;
+  let createdSpaceId: string | null = null;
+
+  try {
+    await page.goto("/");
+    await page.getByText("Developer API key fallback").click();
+    await page.getByLabel("User API key").fill(apiKey!);
+    await page.getByRole("button", { name: "Open with API key" }).click();
+    await page.locator('button[aria-label="Add space"]:visible').click();
+    await page.getByLabel("Space name").fill(spaceName);
+    const createResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && new URL(response.url()).pathname === "/api/v1/spaces"
+    ));
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    const createResponse = await createResponsePromise;
+    expect(createResponse.status()).toBe(201);
+    const createdSpace = await createResponse.json() as Space;
+    createdSpaceId = createdSpace.id;
+    await page.getByTitle(`${spaceName} · drag to reorder`, { exact: true }).click();
+    await expect(page.getByRole("banner")).toContainText(`/ ${spaceName}`);
+
+    await page.getByLabel("Create node").click();
+    const primarySidebar = page.getByRole("complementary").filter({ has: page.getByLabel("Create node") });
+    await primarySidebar.locator('input[type="file"]').setInputFiles({
+      name: fileName,
+      mimeType: "application/pdf",
+      buffer: createPreviewPdf()
+    });
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+
+    const fileNode = page.getByRole("button", { name: fileName, exact: true });
+    await expect(fileNode).toBeVisible();
+    const storageResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.searchParams.get("response-content-type") === "application/pdf"
+        && url.searchParams.has("X-Amz-Signature");
+    });
+    await fileNode.click();
+
+    const preview = page.getByRole("region", { name: `PDF preview: ${fileName}` });
+    await expect(preview.locator('img[src^="blob:"]').first()).toBeVisible();
+    const storageResponse = await storageResponsePromise;
+    expect(storageResponse.ok()).toBe(true);
+    const appOrigin = new URL(page.url()).origin;
+    expect((await storageResponse.request().allHeaders()).origin).toBe(appOrigin);
+    expect([appOrigin, "*"]).toContain(await storageResponse.headerValue("access-control-allow-origin"));
+  } finally {
+    if (createdSpaceId) {
+      const cleanup = await request.delete(`/api/v1/spaces/${createdSpaceId}`, {
+        headers: { authorization: `Bearer ${apiKey}` }
+      });
+      expect([204, 404]).toContain(cleanup.status());
+    }
+  }
 });
 
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {
