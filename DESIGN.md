@@ -68,7 +68,7 @@
 ## Responsive behavior
 
 - Supported breakpoints/devices: Existing desktop/tablet/mobile layout policy remains authoritative.
-- Layout adaptations: Login stays centered and bounded. The PDF viewer collapses its controls responsively; on tablet, opening a PDF initially folds the Inspector to preserve at least 480 px of reading width, while its title-bar toggle remains available.
+- Layout adaptations: Login stays centered and bounded. The PDF viewer collapses its controls responsively; when docked panels or split editors would leave less than 480 px, a verified PDF initially focuses the active editor and folds side panels only as needed. Title-bar panel toggles remain available.
 - Touch/hover differences: Essential actions do not depend on hover; mobile controls keep touch-safe spacing.
 
 ## Interaction states
@@ -92,7 +92,7 @@
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
 - Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. Inline image and PDF previews are limited to 10 MiB. The PDF viewer is lazy-loaded, processes bytes in a worker, and does not request external fonts or font fallbacks.
 - Compatibility constraints: Preserve the current OAuth popup and developer API-key fallback behavior.
-- Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, and light/dark login screenshots. PDF preview tests use a valid document and cover rendered desktop, tablet, and mobile layouts.
+- Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, and light/dark login screenshots. PDF preview tests use a valid document and cover rendered desktop, 768/900/1024 px boundary layouts, split editors, theme changes, and mobile.
 
 ## Open questions
 

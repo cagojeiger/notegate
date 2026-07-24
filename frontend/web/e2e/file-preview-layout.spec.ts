@@ -49,11 +49,21 @@ const pdfNode: RestNode = {
   detected_media_type: "application/pdf"
 };
 
-for (const viewport of [
+const fileViewports = [
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
   { name: "mobile", width: 390, height: 844, mobile: true }
-]) {
+] as const;
+
+const pdfViewports = [
+  { name: "desktop", width: 1440, height: 900, mobile: false, minimumWidth: 480 },
+  { name: "tablet-min", width: 768, height: 1024, mobile: false, minimumWidth: 480 },
+  { name: "tablet", width: 900, height: 1024, mobile: false, minimumWidth: 480 },
+  { name: "desktop-edge", width: 1024, height: 900, mobile: false, minimumWidth: 480 },
+  { name: "mobile", width: 390, height: 844, mobile: true, minimumWidth: 320 }
+] as const;
+
+for (const viewport of fileViewports) {
   test(`tall file previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockFilePreviewApi(page);
@@ -94,7 +104,9 @@ for (const viewport of [
       })).toBe(true);
     }
   });
+}
 
+for (const viewport of pdfViewports) {
   test(`PDF previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockFilePreviewApi(page);
@@ -116,7 +128,7 @@ for (const viewport of [
     ]);
     expect(previewBox).not.toBeNull();
     expect(scrollerBox).not.toBeNull();
-    expect(previewBox!.width).toBeGreaterThanOrEqual(viewport.name === "tablet" ? 480 : 320);
+    expect(previewBox!.width).toBeGreaterThanOrEqual(viewport.minimumWidth);
     expect(previewBox!.height).toBeGreaterThan(300);
     expect(previewBox!.x).toBeGreaterThanOrEqual(scrollerBox!.x);
     expect(previewBox!.x + previewBox!.width).toBeLessThanOrEqual(
@@ -127,8 +139,32 @@ for (const viewport of [
     await download.scrollIntoViewIfNeeded();
     await expect(download).toBeVisible();
     await expectNoAccessibilityViolations(page);
+
+    if (viewport.name === "desktop") {
+      const initialScheme = await preview.locator("embedpdf-container").getAttribute("data-color-scheme");
+      await page.getByRole("button", { name: "Toggle theme" }).click();
+      await expect(preview.locator("embedpdf-container")).toHaveAttribute(
+        "data-color-scheme",
+        initialScheme === "dark" ? "light" : "dark"
+      );
+    }
   });
 }
+
+test("PDF reading mode focuses the active editor when split panes would be too narrow", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 1024 });
+  await mockFilePreviewApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: imageNode.name }).first().click();
+  await page.getByRole("button", { name: pdfNode.name }).first().click({ button: "right" });
+  await page.getByRole("menu").getByRole("button", { name: "Open in new group" }).click();
+
+  const preview = page.getByRole("region", { name: `PDF preview: ${pdfNode.name}` });
+  await expect(preview.locator('img[src^="blob:"]').first()).toBeVisible();
+  await expect(page.locator("[data-editor-group]:visible")).toHaveCount(1);
+  expect((await preview.boundingBox())?.width).toBeGreaterThanOrEqual(480);
+});
 
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {
   const previewSvg = Buffer.from(

@@ -59,6 +59,7 @@ export function PdfPreview({
 }) {
   const theme = useUiStore((state) => state.theme);
   const accessibilityCleanupRef = useRef<(() => void) | null>(null);
+  const containerRef = useRef<EmbedPdfContainer | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const config = useMemo<PDFViewerConfig>(() => ({
     src: url,
@@ -91,14 +92,20 @@ export function PdfPreview({
 
   const handleInit = useCallback((container: EmbedPdfContainer) => {
     accessibilityCleanupRef.current?.();
+    containerRef.current = container;
     const root = container.shadowRoot;
     if (!root) return;
     accessibilityCleanupRef.current = observeEmbedPdfAccessibility(root);
   }, []);
 
+  useEffect(() => {
+    containerRef.current?.setTheme(theme);
+  }, [theme]);
+
   useEffect(() => () => {
     accessibilityCleanupRef.current?.();
     accessibilityCleanupRef.current = null;
+    containerRef.current = null;
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
   }, []);

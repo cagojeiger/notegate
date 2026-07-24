@@ -80,7 +80,7 @@ describe("AppShell history", () => {
 });
 
 describe("AppShell PDF layout", () => {
-  it("folds the Inspector locally when a PDF opens on tablet", async () => {
+  it("folds the Inspector locally when a verified PDF needs more reading width", async () => {
     const user = userEvent.setup();
     const toggleAuxiliary = vi.fn();
     mocks.useWorkbenchController.mockReturnValue(workbench({
@@ -89,11 +89,12 @@ describe("AppShell PDF layout", () => {
         id: "pdf-1",
         name: "document.pdf",
         kind: "file",
-        media_type: "application/pdf"
+        media_type: "application/pdf",
+        detected_media_type: "application/pdf",
+        preview_available: true
       },
       auxiliaryOpen: true,
       showAuxiliary: true,
-      isTablet: true,
       actions: { toggleAuxiliary }
     }));
     mocks.useUploadManager.mockReturnValue(uploadManager());
@@ -105,6 +106,33 @@ describe("AppShell PDF layout", () => {
     await user.click(inspectorToggle);
     await waitFor(() => expect(inspectorToggle).toHaveAttribute("aria-pressed", "true"));
     expect(toggleAuxiliary).not.toHaveBeenCalled();
+  });
+
+  it("keeps normal panel behavior for an unverified declared PDF", async () => {
+    const user = userEvent.setup();
+    const toggleAuxiliary = vi.fn();
+    mocks.useWorkbenchController.mockReturnValue(workbench({
+      activeNode: {
+        ...activeNode,
+        id: "declared-pdf",
+        name: "declared.pdf",
+        kind: "file",
+        media_type: "application/pdf",
+        detected_media_type: undefined,
+        preview_available: false
+      },
+      auxiliaryOpen: true,
+      showAuxiliary: true,
+      actions: { toggleAuxiliary }
+    }));
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    const inspectorToggle = screen.getByRole("button", { name: "Toggle right sidebar" });
+    expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
+    await user.click(inspectorToggle);
+    expect(toggleAuxiliary).toHaveBeenCalledOnce();
   });
 });
 
@@ -136,7 +164,6 @@ function workbench(overrides: Record<string, unknown> = {}) {
     mobileAuxOpen: false,
     showAuxiliary: false,
     isMobile: false,
-    isTablet: false,
     settingsOpen: false,
     dialog: null,
     actions: {},

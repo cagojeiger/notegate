@@ -63,4 +63,17 @@ describe("PdfPreview", () => {
     unmount();
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
+
+  it("updates the mounted viewer when the NoteGate theme changes", () => {
+    const setTheme = vi.fn();
+    render(<PdfPreview name="document.pdf" onError={vi.fn()} url="https://storage.example/document.pdf" />);
+    const props = pdfViewerMock.mock.calls[pdfViewerMock.mock.calls.length - 1][0];
+
+    act(() => {
+      props.onInit({ setTheme, shadowRoot: null });
+      useUiStore.getState().toggleTheme();
+    });
+
+    expect(setTheme).toHaveBeenLastCalledWith("dark");
+  });
 });

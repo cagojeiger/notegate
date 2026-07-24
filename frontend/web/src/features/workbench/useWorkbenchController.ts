@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import type { Me } from "../../api/types";
 import { canCreateSpace, canManageSpace, canWriteSpace } from "../../auth/permissions";
-import { useIsMobile, useIsTablet } from "../../shared/hooks/useMediaQuery";
+import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 import { useWorkbenchPersistence } from "./useWorkbenchPersistence";
@@ -28,7 +28,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const mobileTreeOpen = useUiStore((state) => state.mobileTreeOpen);
   const mobileAuxOpen = useUiStore((state) => state.mobileAuxOpen);
   const isMobile = useIsMobile();
-  const isTablet = useIsTablet();
   const activeNode = editorGroups[activeGroupIndex]?.node ?? null;
   const activeSpace = useMemo(() => spaces.find((space) => space.id === activeSpaceId) ?? spaces[0] ?? null, [activeSpaceId, spaces]);
   const canCreateSpaceForCaller = canCreateSpace(me);
@@ -67,7 +66,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
     mobileAuxOpen,
     showAuxiliary,
     isMobile,
-    isTablet,
     settingsOpen,
     dialog,
     actions
