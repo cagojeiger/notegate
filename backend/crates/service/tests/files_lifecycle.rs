@@ -103,6 +103,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
                 space_id: ws,
                 name: None,
                 sort_order: None,
+                pinned: None,
                 default_search_enabled: None,
                 default_text_encryption_enabled: Some(true),
             },

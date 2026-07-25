@@ -470,6 +470,7 @@ pub mod node {
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
+                       n.search_enabled, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
                 FROM nodes n \
