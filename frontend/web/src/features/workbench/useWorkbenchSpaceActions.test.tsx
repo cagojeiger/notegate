@@ -23,6 +23,7 @@ function space(id: string, permission: Space["permission"] = "write"): Space {
     id,
     name: id,
     sort_order: 0,
+    pinned: true,
     permission,
     root_node_id: `${id}-root`,
     created_at: "2026-06-13T00:00:00Z",

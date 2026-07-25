@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/TextLayer.css";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 import { IconButton } from "../../shared/ui";
@@ -123,6 +124,9 @@ export function PdfPreview({
         </Document>
       </div>
       <div className="flex h-12 shrink-0 items-center justify-center gap-2 border-t border-seam bg-panel px-2">
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {pageCount > 0 ? `Page ${pageNumber} of ${pageCount}` : "PDF page count unavailable"}
+        </p>
         <div className="flex items-center gap-1 rounded-lg border border-seam bg-[var(--ng-editor)] px-1 py-0.5 shadow-sm">
           <IconButton
             label="Previous page"
@@ -224,7 +228,7 @@ function BoundedPdfPage({
       devicePixelRatio={PDF_DEVICE_PIXEL_RATIO}
       renderMode={pageSize ? "canvas" : "none"}
       renderAnnotationLayer={false}
-      renderTextLayer={false}
+      renderTextLayer
       loading={<PdfStatus>Loading page…</PdfStatus>}
       onLoadSuccess={(page) => setPageSize(pageViewportSize(page))}
       onLoadError={onError}
@@ -249,5 +253,5 @@ function boundedPageWidth(requestedWidth: number, sourceWidth: number, sourceHei
 }
 
 function PdfStatus({ children }: { children: string }) {
-  return <div className="grid min-h-48 place-items-center text-sm text-muted">{children}</div>;
+  return <div className="grid min-h-48 place-items-center text-sm text-muted" role="status">{children}</div>;
 }

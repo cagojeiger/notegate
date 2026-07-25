@@ -1,18 +1,30 @@
-import { History, Plus, Settings } from "lucide-react";
+import { History, LayoutGrid, Plus, Settings } from "lucide-react";
 
 import type { Space } from "../../api/types";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
 // Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 01-layout).
-export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSpace, onCreateSpace, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenHistory: () => void; onOpenSettings: () => void }) {
+export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSpace, onCreateSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenLibrary?: () => void; libraryActive?: boolean; onOpenHistory: () => void; onOpenSettings: () => void }) {
   return (
     <nav aria-label="Spaces" className="flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
+      {onOpenLibrary ? (
+        <button
+          type="button"
+          aria-label="Open space library"
+          aria-pressed={libraryActive}
+          onClick={onOpenLibrary}
+          className={`grid size-9 shrink-0 place-items-center rounded-xl transition ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+        >
+          <LayoutGrid size={16} />
+        </button>
+      ) : null}
       <div className="flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto">
         {spaces.map((space) => (
           <button
             key={space.id}
             type="button"
             title={space.name}
+            aria-label={space.name}
             onClick={() => onSelectSpace(space)}
             className={`grid size-9 shrink-0 place-items-center rounded-xl text-sm font-semibold transition ${activeSpace?.id === space.id ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
           >

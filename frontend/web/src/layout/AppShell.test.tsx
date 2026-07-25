@@ -21,6 +21,9 @@ vi.mock("../features/uploads/UploadProvider", () => ({
 vi.mock("../features/editor/EditorArea", () => ({ EditorArea: () => null }));
 vi.mock("../features/nodes/PrimarySidebar", () => ({ PrimarySidebar: () => null }));
 vi.mock("../features/spaces/MobileSpaceBar", () => ({ MobileSpaceBar: () => null }));
+vi.mock("../features/spaces/SpaceLibrary", () => ({
+  SpaceLibrary: ({ spaces }: { spaces: Space[] }) => <div data-testid="space-library">{spaces.map((item) => item.name).join(",")}</div>
+}));
 vi.mock("./AuxiliarySidebar", () => ({ AuxiliarySidebar: () => null }));
 vi.mock("../features/events/EventHistoryModal", () => ({
   EventHistoryModal: ({ spaces, initialSpaceId, canViewAuditEvents }: { spaces: Space[]; initialSpaceId: string | null; canViewAuditEvents: boolean }) => (
@@ -37,6 +40,7 @@ const space: Space = {
   id: "space-1",
   name: "Daily",
   sort_order: 0,
+  pinned: true,
   permission: "write",
   root_node_id: "root-1",
   created_at: "2026-07-01T00:00:00Z",
@@ -59,6 +63,14 @@ const activeNode: RestNode = {
   updated_at: "2026-07-10T02:12:00Z"
 };
 
+const privateSpace: Space = {
+  ...space,
+  id: "space-2",
+  name: "Private",
+  pinned: false,
+  root_node_id: "root-2"
+};
+
 describe("AppShell history", () => {
   it.each([
     ["user", true],
@@ -76,6 +88,32 @@ describe("AppShell history", () => {
     expect(modal).toHaveAttribute("data-space-id", space.id);
     expect(modal).toHaveAttribute("data-space-count", "1");
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
+  });
+
+  it("keeps unpinned spaces out of the user rail while showing all spaces in the library", async () => {
+    const user = userEvent.setup();
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), spaces: [space, privateSpace] });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Daily" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Private" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open space library" }));
+
+    expect(screen.getByTestId("space-library")).toHaveTextContent("Daily,Private");
+  });
+
+  it("keeps connected spaces in the agent rail and does not expose the pin library", () => {
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), spaces: [space, privateSpace] });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("agent")} onSignOut={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Daily" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Private" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open space library" })).not.toBeInTheDocument();
   });
 });
 

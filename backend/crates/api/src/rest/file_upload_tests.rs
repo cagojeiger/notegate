@@ -15,9 +15,14 @@ use axum::http::{
 };
 use notegate_core::S3Config;
 use notegate_core::limits::{BROWSER_FILE_MAX_BYTES, SINGLE_PUT_MAX_BYTES};
-use notegate_db::{FilesRepo, ObjectStorageRepo, test_support::TestDb};
+use notegate_db::{
+    AccountRepo, AgentRepo, ConnectionRepo, FilesRepo, ObjectStorageRepo, SpaceRepo,
+    test_support::TestDb,
+};
 use notegate_model::files::{BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration};
-use notegate_model::{Caller, FileEncryptionMode};
+use notegate_model::{
+    Caller, CallerIdentity, Channel, ConnectAgent, CreateAgent, FileEncryptionMode, Permission,
+};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -60,6 +65,21 @@ struct BegunUpload {
     id: Uuid,
     url: String,
     headers: BTreeMap<String, String>,
+}
+
+fn transfer_continuation(op: &str, upload_id: String) -> FileTransferInput {
+    FileTransferInput {
+        op: op.to_owned(),
+        target: None,
+        byte_len: None,
+        media_type: None,
+        original_filename: None,
+        encryption_mode: None,
+        encryption_metadata: None,
+        upload_id: Some(upload_id),
+        part_numbers: (op == "prepare_parts").then_some(vec![1]),
+        completed_parts: None,
+    }
 }
 
 async fn begin_upload(
@@ -1382,6 +1402,130 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
             part_numbers: None,
             completed_parts: None,
         },
+    )
+    .await?
+    .0;
+    assert_eq!(aborted["next_action"]["kind"], "done");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, crate::state::test_s3_config());
+    let (mut user_caller, space_id, _root_id) = caller_and_space(&state).await?;
+    user_caller.channel = Channel::Mcp;
+    let owner_id = user_caller.account_id();
+    let spaces = SpaceRepo::new(db.pool.clone());
+    spaces
+        .update_space(space_id, owner_id, None, None, Some(true))
+        .await?;
+    let (mut user_parts, _) = Request::new(()).into_parts();
+    user_parts.extensions.insert(user_caller);
+
+    let begun = transfers::call(
+        &state,
+        &user_parts,
+        FileTransferInput {
+            op: "begin_upload".to_owned(),
+            target: Some("rest-test:/pin-revoked.bin".to_owned()),
+            byte_len: Some(4),
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: None,
+            part_numbers: None,
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    let upload_id = begun["upload_id"].as_str().ok_or("upload id")?.to_owned();
+    spaces
+        .update_space(space_id, owner_id, None, None, Some(false))
+        .await?;
+
+    for op in ["prepare_parts", "complete_upload", "abort_upload"] {
+        let error = match transfers::call(
+            &state,
+            &user_parts,
+            transfer_continuation(op, upload_id.clone()),
+        )
+        .await
+        {
+            Ok(_) => panic!("unpinned user upload continuation must be hidden"),
+            Err(error) => error,
+        };
+        let data = error.data.expect("not-found error data");
+        assert_eq!(data["kind"], "not_found");
+    }
+
+    let agent = AgentRepo::new(db.pool.clone())
+        .insert_agent(
+            &CreateAgent {
+                name: "pin-independent-transfer-agent".to_owned(),
+            },
+            owner_id,
+        )
+        .await?;
+    ConnectionRepo::new(db.pool.clone())
+        .upsert_connection(
+            &ConnectAgent {
+                space_id,
+                agent_id: agent.id,
+                permission: Permission::Write,
+            },
+            owner_id,
+        )
+        .await?;
+    let agent_account = AccountRepo::with_crypto_and_default_user_tier(
+        db.pool.clone(),
+        state.security.clone(),
+        state.config.default_user_tier,
+    )
+    .find_account(agent.id)
+    .await?
+    .ok_or("agent account")?;
+    let agent_caller = Caller {
+        account: agent_account,
+        identity: CallerIdentity::Agent(agent),
+        channel: Channel::Mcp,
+    };
+    let (mut agent_parts, _) = Request::new(()).into_parts();
+    agent_parts.extensions.insert(agent_caller);
+
+    let begun = transfers::call(
+        &state,
+        &agent_parts,
+        FileTransferInput {
+            op: "begin_upload".to_owned(),
+            target: Some("rest-test:/agent-unpinned.bin".to_owned()),
+            byte_len: Some(4),
+            media_type: None,
+            original_filename: None,
+            encryption_mode: None,
+            encryption_metadata: None,
+            upload_id: None,
+            part_numbers: None,
+            completed_parts: None,
+        },
+    )
+    .await?
+    .0;
+    let upload_id = begun["upload_id"]
+        .as_str()
+        .ok_or("agent upload id")?
+        .to_owned();
+    let aborted = transfers::call(
+        &state,
+        &agent_parts,
+        transfer_continuation("abort_upload", upload_id),
     )
     .await?
     .0;

@@ -372,6 +372,10 @@ mod tests {
             "integer"
         );
         assert_eq!(
+            value["components"]["schemas"]["SpaceOut"]["properties"]["pinned"]["type"],
+            "boolean"
+        );
+        assert_eq!(
             value["paths"]["/api/v1/spaces/{space_id}"]["patch"]["requestBody"]["content"]["application/json"]
                 ["schema"]["$ref"],
             "#/components/schemas/UpdateBody"
@@ -382,6 +386,13 @@ mod tests {
                 .expect("UpdateBody properties")
                 .contains_key("sort_order"),
             "UpdateBody must expose sort_order"
+        );
+        assert!(
+            value["components"]["schemas"]["UpdateBody"]["properties"]
+                .as_object()
+                .expect("UpdateBody properties")
+                .contains_key("pinned"),
+            "UpdateBody must expose pinned"
         );
     }
 

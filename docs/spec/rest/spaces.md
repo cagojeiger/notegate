@@ -10,6 +10,7 @@ GET /api/v1/spaces?limit=50&cursor=...
 
 - User caller: 자신이 소유한 live space 목록.
 - Agent caller: 자신에게 연결된 live space 목록.
+- `pinned`는 owner user의 MCP 공개 상태다. REST 목록에는 Pinned와 Unpinned를 모두 반환한다.
 - 정렬: `sort_order ASC, name ASC, id ASC`.
 - Pagination: opaque `cursor`; client는 해석하지 않고 다음 호출에 그대로 전달한다.
 
@@ -31,7 +32,7 @@ root node '/'
 space_usage(live_node_count=1, live_text_bytes=0, live_file_bytes=0)
 ```
 
-즉 새 space는 기본적으로 현재 목록의 마지막에 추가된다.
+즉 새 space는 기본적으로 현재 목록의 마지막에 Unpinned 상태로 추가된다.
 
 Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. `:`는 MCP compact target(`<space>:/path`) 파싱을 위해 예약한다.
 
@@ -52,10 +53,14 @@ PATCH /api/v1/spaces/{space_id}
 Owner user만 가능하다.
 
 ```json
-{"name":"personal","sort_order":0}
+{"name":"personal","sort_order":0,"pinned":true}
 ```
 
-`name` 또는 `sort_order` 중 하나 이상을 보낸다. `sort_order`는 중복 가능하며 동률은 `name`, `id`로 안정 정렬한다.
+`name`, `sort_order`, `pinned` 중 하나 이상을 보낸다. `sort_order`는 중복 가능하며 동률은 `name`, `id`로 안정 정렬한다.
+
+- `pinned: true`: owner user의 MCP 목록과 접근 범위에 포함한다.
+- `pinned: false`: owner user의 MCP에서 목록·조회·검색·쓰기·전송을 모두 숨긴다.
+- Pin은 Agent 권한에 영향을 주지 않는다. Agent는 명시적인 Space connection만 따른다.
 
 ## Delete space
 

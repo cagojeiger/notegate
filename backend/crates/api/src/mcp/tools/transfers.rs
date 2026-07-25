@@ -2,7 +2,7 @@
 
 use axum::http::request::Parts;
 use notegate_model::FileEncryptionMode;
-use notegate_model::files::BeginObjectUpload;
+use notegate_model::files::{BeginObjectUpload, PendingObjectUpload};
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -151,6 +151,7 @@ async fn prepare_parts(
         .object_upload_by_id(caller.account_id(), upload_id)
         .await
         .map_err(service_error)?;
+    require_upload_space_visible(state, caller.account_id(), &upload).await?;
     let transfers = prepare_upload_parts(
         state,
         caller.account_id(),
@@ -214,6 +215,7 @@ async fn complete_upload(
         .object_upload_by_id(caller.account_id(), upload_id)
         .await
         .map_err(service_error)?;
+    require_upload_space_visible(state, caller.account_id(), &upload).await?;
     let completed_parts = input.completed_parts.map(|parts| {
         parts
             .into_iter()
@@ -247,6 +249,7 @@ async fn abort_upload(
         .object_upload_by_id(caller.account_id(), upload_id)
         .await
         .map_err(service_error)?;
+    require_upload_space_visible(state, caller.account_id(), &upload).await?;
     abort_object_upload(state, caller.account_id(), &upload)
         .await
         .map_err(flow_error)?;
@@ -257,6 +260,24 @@ async fn abort_upload(
             "kind": "done",
         },
     })))
+}
+
+async fn require_upload_space_visible(
+    state: &AppState,
+    caller_account_id: Uuid,
+    upload: &PendingObjectUpload,
+) -> Result<(), ErrorData> {
+    match state
+        .spaces
+        .find_mcp_visible_by_id(caller_account_id, upload.space_id)
+        .await
+        .map_err(service_error)?
+    {
+        Some(_) => Ok(()),
+        None => Err(service_error(notegate_service::ServiceError::NotFound(
+            "space not found".to_owned(),
+        ))),
+    }
 }
 
 async fn prepare_download(

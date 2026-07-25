@@ -9,7 +9,7 @@ export function createSpace(client: ApiClient, name: string): Promise<Space> {
   return client.post<Space>("/api/v1/spaces", { name });
 }
 
-export function updateSpace(client: ApiClient, spaceId: string, input: { name?: string; sort_order?: number }): Promise<Space> {
+export function updateSpace(client: ApiClient, spaceId: string, input: { name?: string; sort_order?: number; pinned?: boolean }): Promise<Space> {
   return client.patch<Space>(`/api/v1/spaces/${spaceId}`, input);
 }
 

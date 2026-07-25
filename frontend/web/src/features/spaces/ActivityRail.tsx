@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, History, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { Copy, History, LayoutGrid, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -24,11 +24,13 @@ type ActivityRailProps = {
   onCreateSpace: () => void;
   onRenameSpace: (space: Space) => void;
   onDeleteSpace: (space: Space) => void;
+  onOpenLibrary?: () => void;
+  libraryActive?: boolean;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenHistory, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
@@ -41,6 +43,20 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
 
   return (
     <aside className="hidden w-[52px] shrink-0 min-h-0 flex-col border-r border-seam bg-surface md:flex">
+      {onOpenLibrary ? (
+        <div className="border-b border-seam p-2">
+          <button
+            type="button"
+            onClick={onOpenLibrary}
+            className={`grid size-9 place-items-center rounded-xl transition ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+            aria-label="Open space library"
+            aria-pressed={libraryActive}
+            title="Space library"
+          >
+            <LayoutGrid size={16} />
+          </button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto py-3">
         {spaces.map((space) => {
           const active = activeSpace?.id === space.id;
@@ -85,7 +101,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
             >
               {dropBefore ? <span className="absolute left-2 right-2 -top-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}
               {active ? <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
-              <button type="button" onClick={() => onSelectSpace(space)} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
+              <button type="button" onClick={() => onSelectSpace(space)} aria-label={space.name} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
                 {space.name.slice(0, 1).toUpperCase()}
               </button>
               {dropAfter ? <span className="absolute left-2 right-2 -bottom-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}

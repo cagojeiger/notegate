@@ -56,6 +56,7 @@ pub(crate) struct CreateBody {
 pub(crate) struct UpdateBody {
     name: Option<String>,
     sort_order: Option<i32>,
+    pinned: Option<bool>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -161,6 +162,7 @@ pub(crate) async fn update(
                 space_id,
                 name: body.name,
                 sort_order: body.sort_order,
+                pinned: body.pinned,
             },
         )
         .await?;

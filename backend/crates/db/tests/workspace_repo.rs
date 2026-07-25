@@ -109,6 +109,103 @@ async fn create_space_appends_sort_order() -> Result<(), Box<dyn std::error::Err
 }
 
 #[tokio::test]
+async fn mcp_space_visibility_pins_users_but_not_connected_agents()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = create_user(&db, "owner-pins@example.com").await?;
+    common::set_user_tier(&db.pool, owner, "system_max").await?;
+    let space_repo = SpaceRepo::new(db.pool.clone());
+    let connection_repo = ConnectionRepo::new(db.pool.clone());
+    let agent = create_agent(&db, owner, "pin-independent-agent").await?;
+
+    let pinned = space_repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "pinned".to_owned(),
+            },
+        )
+        .await?;
+    let unpinned = space_repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "unpinned".to_owned(),
+            },
+        )
+        .await?;
+    assert!(pinned.pinned_at.is_none());
+    assert!(unpinned.pinned_at.is_none());
+
+    space_repo
+        .update_space(pinned.id, owner, None, None, Some(true))
+        .await?;
+    connection_repo
+        .upsert_connection(
+            &ConnectAgent {
+                space_id: unpinned.id,
+                agent_id: agent,
+                permission: Permission::Read,
+            },
+            owner,
+        )
+        .await?;
+
+    let dashboard_names: Vec<_> = space_repo
+        .list_space_views_for(owner, 10, None)
+        .await?
+        .into_iter()
+        .map(|view| view.space.name)
+        .collect();
+    assert_eq!(dashboard_names, vec!["pinned", "unpinned"]);
+
+    let user_mcp_names: Vec<_> = space_repo
+        .list_mcp_space_views_for(owner, 10, None)
+        .await?
+        .into_iter()
+        .map(|view| view.space.name)
+        .collect();
+    assert_eq!(user_mcp_names, vec!["pinned"]);
+    assert!(
+        space_repo
+            .find_mcp_space_view_for(owner, pinned.id)
+            .await?
+            .is_some()
+    );
+    assert!(
+        space_repo
+            .find_mcp_space_view_for(owner, unpinned.id)
+            .await?
+            .is_none()
+    );
+    assert!(
+        space_repo
+            .list_mcp_space_views_by_name_case_insensitive_for(owner, "UNPINNED", 5)
+            .await?
+            .is_empty()
+    );
+
+    let agent_mcp_names: Vec<_> = space_repo
+        .list_mcp_space_views_for(agent, 10, None)
+        .await?
+        .into_iter()
+        .map(|view| view.space.name)
+        .collect();
+    assert_eq!(agent_mcp_names, vec!["unpinned"]);
+    assert!(
+        space_repo
+            .find_mcp_space_view_for(agent, unpinned.id)
+            .await?
+            .is_some()
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn agent_connection_grants_and_disconnects_permission()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -174,7 +271,8 @@ async fn list_spaces_uses_manual_order_name_id_cursor() -> Result<(), Box<dyn st
         },
     )
     .await?;
-    repo.update_space(zeta.id, owner, None, Some(-10)).await?;
+    repo.update_space(zeta.id, owner, None, Some(-10), None)
+        .await?;
 
     let first_page = repo.list_space_views_for(owner, 1, None).await?;
     let first = first_page.first().ok_or("first page missing")?;
