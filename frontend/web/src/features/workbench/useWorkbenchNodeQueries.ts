@@ -66,7 +66,6 @@ export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) =>
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
-      invalidateText(queryClient, node.space_id, node.id);
       onUpdated(node);
     }
   });
@@ -81,6 +80,7 @@ export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => v
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
+      invalidateText(queryClient, node.space_id, node.id);
       onUpdated(node);
     }
   });
