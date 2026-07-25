@@ -113,7 +113,9 @@ function cacheBatchResult(
       ...current,
       detected_media_type: mediaType,
       preview_available: item.status === "ready",
-      file_preview_kind: item.status === "ready" ? "image" : undefined
+      file_preview_kind: item.status === "ready"
+        ? "image"
+        : mediaType === "application/pdf" ? "pdf" : undefined
     }));
   }
 }
