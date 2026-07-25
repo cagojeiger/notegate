@@ -56,4 +56,13 @@ describe("EditorArea", () => {
     expect(groups[1]).toHaveClass("flex");
     expect(groups[2]).toHaveClass("hidden");
   });
+
+  it("clips editor groups to the workbench viewport", () => {
+    const { container } = renderEditorArea();
+
+    expect(container.firstElementChild).toHaveClass("min-h-0", "overflow-hidden");
+    for (const group of container.querySelectorAll("[data-editor-group]")) {
+      expect(group).toHaveClass("min-h-0", "overflow-hidden");
+    }
+  });
 });

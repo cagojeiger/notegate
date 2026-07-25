@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:contrast": "node scripts/check-theme-contrast.mjs",
+    "export:icons": "bash scripts/export-brand-icons.sh",
     "lint": "eslint src --max-warnings 0",
+    "test:lighthouse": "pnpm build && node scripts/run-lighthouse.mjs",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test"
@@ -27,7 +30,9 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^10.0.1",
+    "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

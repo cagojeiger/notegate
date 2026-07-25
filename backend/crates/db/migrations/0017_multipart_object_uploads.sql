@@ -1,5 +1,5 @@
 -- Large object files use S3 multipart uploads while retaining the existing
--- Notegate upload ledger and cleanup lifecycle.
+-- NoteGate upload ledger and cleanup lifecycle.
 
 ALTER TABLE file_objects
     DROP CONSTRAINT file_objects_byte_len_check,

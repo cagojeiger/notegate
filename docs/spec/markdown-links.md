@@ -1,6 +1,6 @@
 # 마크다운 링크
 
-Notegate Markdown Text는 활성 Space 안의 node를 가리키는 링크에 대해 보수적인 GitHub 스타일 path 모델을 사용한다.
+NoteGate Markdown Text는 활성 Space 안의 node를 가리키는 링크에 대해 보수적인 GitHub 스타일 path 모델을 사용한다.
 
 이 문서는 path 해석 규칙만 정의한다. backlink, Obsidian wikilink, title search, shortest-path lookup, cross-Space linking은 정의하지 않는다.
 

@@ -214,11 +214,11 @@ browser_sessions.expires_at=now()+30d
 
 - Browser session token 원문은 HttpOnly cookie에만 발급한다.
 - Refresh token은 browser client에 노출하지 않고 서버가 암호화 저장한다.
-- AuthGate는 refresh token의 canonical state를 관리한다. Notegate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
+- AuthGate는 refresh token의 canonical state를 관리한다. NoteGate는 브라우저 세션 갱신을 위해 발급받은 값을 보관한다.
 
 ### 갱신
 
-요청의 browser session이 `validated_until`을 넘으면 Notegate는 저장된 refresh token으로 authgate refresh-token grant를 호출한다.
+요청의 browser session이 `validated_until`을 넘으면 NoteGate는 저장된 refresh token으로 authgate refresh-token grant를 호출한다.
 
 ```text
 success:

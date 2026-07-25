@@ -38,7 +38,7 @@ describe("TitleBar", () => {
     const user = userEvent.setup();
     const props = renderTitleBar();
 
-    expect(screen.getByText("Notegate")).toBeInTheDocument();
+    expect(screen.getByText("NoteGate")).toBeInTheDocument();
     expect(screen.getByText("/ Personal")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Toggle left sidebar" }));
