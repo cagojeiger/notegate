@@ -42,7 +42,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
 
   const archiveCard = grid.getByRole("listitem").filter({ hasText: "Archive" });
-  await archiveCard.getByTitle("Search default off").click();
+  await archiveCard.getByTitle("Search default on").click();
   await expect(page.getByRole("button", { name: "Inspect Archive" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Inspect Daily" }).click();
 
