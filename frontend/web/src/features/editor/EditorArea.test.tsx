@@ -16,9 +16,9 @@ vi.mock("./FileDetailView", () => ({
 
 function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> = {}) {
   const groups: EditorGroup[] = [
-    { id: 0, node: null, mode: "preview" },
-    { id: 1, node: null, mode: "preview" },
-    { id: 2, node: null, mode: "preview" }
+    { id: 0, node: null, mode: "preview", back: [], forward: [] },
+    { id: 1, node: null, mode: "preview", back: [], forward: [] },
+    { id: 2, node: null, mode: "preview", back: [], forward: [] }
   ];
 
   return render(
@@ -30,6 +30,8 @@ function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> =
       activeSpace={null}
       canWriteActiveSpace={false}
       onFocusGroup={vi.fn()}
+      onNavigateEditorGroup={vi.fn()}
+      navigatingGroupIds={new Set()}
       onOpenNode={vi.fn()}
       onOpenNodeInNewGroup={vi.fn()}
       onOpenMarkdownLink={vi.fn()}
@@ -80,7 +82,7 @@ describe("EditorArea", () => {
     const node = fileNode();
     const onDownloadFile = vi.fn();
     renderEditorArea({
-      groups: [{ id: 0, node, mode: "preview" }],
+      groups: [{ id: 0, node, mode: "preview", back: [], forward: [] }],
       activeGroupIndex: 0,
       onDownloadFile
     });
@@ -88,6 +90,32 @@ describe("EditorArea", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
 
     expect(onDownloadFile).toHaveBeenCalledWith(node);
+  });
+
+  it("shows per-group navigation controls after the title", () => {
+    const current = fileNode();
+    const onNavigateEditorGroup = vi.fn();
+    renderEditorArea({
+      groups: [{
+        id: 7,
+        node: current,
+        mode: "preview",
+        back: [{ spaceId: current.space_id, nodeId: "previous", nameSnapshot: "previous.md", kind: "text" }],
+        forward: []
+      }],
+      activeGroupIndex: 0,
+      onNavigateEditorGroup
+    });
+
+    const title = screen.getByText(current.name);
+    const back = screen.getByRole("button", { name: "Back to previous.md" });
+    const forward = screen.getByRole("button", { name: "Forward" });
+    expect(title.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(back).toBeEnabled();
+    expect(forward).toBeDisabled();
+
+    fireEvent.click(back);
+    expect(onNavigateEditorGroup).toHaveBeenCalledWith(7, "back");
   });
 });
 

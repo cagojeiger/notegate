@@ -1,5 +1,5 @@
 import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import type { RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -16,7 +16,7 @@ import { useMarkdownImageLoader } from "./useFilePreviewQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 import { useTextEditorSession } from "./useTextEditorSession";
 
-export function TextEditorView({ active, groupId, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
+export function TextEditorView({ active, groupId, navigationActions, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const loadMarkdownImage = useMarkdownImageLoader(node);
   const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
   const [structuredMode, setStructuredMode] = useState<StructuredPreviewMode>("tree");
@@ -123,7 +123,7 @@ export function TextEditorView({ active, groupId, node, latestNode, mode, canWri
   );
   return (
     <>
-      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} />
+      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} />
       {textQuery.isLoading ? (
         <div className="p-10 text-muted">Loading text…</div>
       ) : textQuery.isError ? (

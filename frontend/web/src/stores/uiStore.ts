@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
 import { WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
-import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup } from "./uiStoreReducers";
+import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, discardEditorNavigationTargetState, navigateEditorGroupState, navigationTarget, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup, type EditorNavigationDirection } from "./uiStoreReducers";
 import { persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
 
 export type { EditorGroup };
@@ -58,6 +58,8 @@ type UiState = {
   focusGroup: (index: number) => void;
   updateGroupsNode: (node: RestNode) => void;
   clearGroupsWithNode: (nodeId: string) => void;
+  navigateGroup: (groupId: number, direction: EditorNavigationDirection, expectedNodeId: string, node: RestNode) => boolean;
+  discardNavigationTarget: (groupId: number, direction: EditorNavigationDirection, expectedNodeId: string) => boolean;
   setGroupMode: (index: number, mode: "preview" | "edit") => void;
   resetGroups: () => void;
   toggleFolder: (id: string) => void;
@@ -127,6 +129,20 @@ export const useUiStore = create<UiState>((set, get) => ({
   focusGroup: (index) => set({ activeGroupIndex: index }),
   updateGroupsNode: (node) => set((state) => ({ editorGroups: updateEditorGroupNodeState(state.editorGroups, node) })),
   clearGroupsWithNode: (nodeId) => set((state) => ({ editorGroups: clearEditorGroupNodeState(state.editorGroups, nodeId) })),
+  navigateGroup: (groupId, direction, expectedNodeId, node) => {
+    const state = get();
+    const group = state.editorGroups.find((candidate) => candidate.id === groupId);
+    if (!group || navigationTarget(group, direction)?.nodeId !== expectedNodeId) return false;
+    set({ editorGroups: navigateEditorGroupState(state.editorGroups, groupId, direction, expectedNodeId, node) });
+    return true;
+  },
+  discardNavigationTarget: (groupId, direction, expectedNodeId) => {
+    const state = get();
+    const group = state.editorGroups.find((candidate) => candidate.id === groupId);
+    if (!group || navigationTarget(group, direction)?.nodeId !== expectedNodeId) return false;
+    set({ editorGroups: discardEditorNavigationTargetState(state.editorGroups, groupId, direction, expectedNodeId) });
+    return true;
+  },
   setGroupMode: (index, mode) => set((state) => ({ editorGroups: setEditorGroupModeState(state.editorGroups, index, mode) })),
   resetGroups: () => set((state) => resetEditorGroupsState(state)),
   toggleFolder: (id) =>

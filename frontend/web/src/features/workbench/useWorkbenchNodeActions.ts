@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { downloadFile } from "../../api/files";
@@ -10,6 +10,7 @@ import type { NodeSummary, RestNode, Space } from "../../api/types";
 import type { AppDialog } from "./dialogs/dialogTypes";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
+import type { EditorNavigationDirection } from "../../stores/uiStoreReducers";
 import { useUploadActions } from "../uploads/UploadProvider";
 import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation } from "./useWorkbenchQueries";
 
@@ -28,11 +29,15 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   const openInNewGroup = useUiStore((state) => state.openInNewGroup);
   const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
+  const navigateGroup = useUiStore((state) => state.navigateGroup);
+  const discardNavigationTarget = useUiStore((state) => state.discardNavigationTarget);
   const addExpanded = useUiStore((state) => state.addExpanded);
   const setExpanded = useUiStore((state) => state.setExpanded);
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
   const { startUpload } = useUploadActions();
+  const navigatingGroupsRef = useRef(new Set<number>());
+  const [navigatingGroupIds, setNavigatingGroupIds] = useState<ReadonlySet<number>>(new Set());
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
     addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
@@ -81,6 +86,54 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     openInGroup(groupId, node);
     closeMobile();
     await revealNodeBestEffort(node);
+  }
+
+  async function navigateEditorGroup(groupId: number, direction: EditorNavigationDirection) {
+    if (!activeSpace || navigatingGroupsRef.current.has(groupId)) return;
+    const spaceId = activeSpace.id;
+    setGroupNavigationPending(groupId, true);
+
+    try {
+      while (true) {
+        const state = useUiStore.getState();
+        if (state.activeSpaceId !== spaceId) return;
+        const group = state.editorGroups.find((candidate) => candidate.id === groupId);
+        const entries = group?.[direction] ?? [];
+        const target = entries[entries.length - 1];
+        if (!target || target.spaceId !== spaceId) return;
+
+        let node: RestNode;
+        try {
+          node = await queryClient.fetchQuery({
+            queryKey: queryKeys.node(spaceId, target.nodeId),
+            queryFn: () => getNode(client, spaceId, target.nodeId),
+            staleTime: 0
+          });
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            if (!discardNavigationTarget(groupId, direction, target.nodeId)) return;
+            continue;
+          }
+          showToast("Could not navigate to node");
+          return;
+        }
+
+        if (node.space_id !== spaceId || !navigateGroup(groupId, direction, target.nodeId, node)) return;
+        closeMobile();
+        await revealNodeBestEffort(node);
+        return;
+      }
+    } finally {
+      setGroupNavigationPending(groupId, false);
+    }
+  }
+
+  function setGroupNavigationPending(groupId: number, pending: boolean) {
+    const next = new Set(navigatingGroupsRef.current);
+    if (pending) next.add(groupId);
+    else next.delete(groupId);
+    navigatingGroupsRef.current = next;
+    setNavigatingGroupIds(next);
   }
 
   function isCurrentMarkdownLinkSource(spaceId: string, groupId: number, sourceNode: RestNode): boolean {
@@ -221,6 +274,8 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     openNode,
     openNodeInNewGroup,
     openMarkdownLink,
+    navigateEditorGroup,
+    navigatingGroupIds,
     promptCreateNode,
     promptCreateInFolder,
     handleFileSelected,

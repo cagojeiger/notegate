@@ -20,7 +20,7 @@
 |---|---|---|
 | 서버 자원 | React Query | cache only |
 | active space id | UI store | local storage |
-| editor groups, active group, mode | UI store | space별 local storage snapshot |
+| editor groups, active group, mode, navigation history | UI store | space별 local storage snapshot |
 | opened node snapshot | UI store | space별 local storage snapshot |
 | primary/aux sidebar visibility | UI store | local storage |
 | primary sidebar width | UI store | session only |
@@ -33,7 +33,8 @@
 규칙:
 
 - 서버 collection은 UI store에 복제하지 않는다.
-- EditorGroup은 열린 pane 복원을 위해 현재 열린 node snapshot만 보관할 수 있다.
+- EditorGroup은 현재 열린 node snapshot과 해당 pane의 최근 navigation history를 보관한다.
+- navigation history는 node ID, 당시 이름, kind만 저장하며 현재 node를 포함해 최대 50개다.
 - text body와 file content는 UI store에 보관하지 않는다.
 - space별 workbench snapshot은 browser-local best-effort 상태다. 계정/서버 정본이 아니며 다른 브라우저로 동기화하지 않는다.
 - workbench snapshot은 최근 20개 space까지만 유지한다. 손상됐거나 현재 space와 맞지 않는 snapshot은 폐기한다.
@@ -252,7 +253,7 @@ delete
 -> confirm
 -> DELETE /nodes/{node_id}
 -> refresh children/recent
--> clear opened editor group if deleted node was open
+-> clear deleted node from opened editor groups and navigation history
 ```
 
 ## EditorArea
@@ -267,7 +268,7 @@ file   -> node detail + file metadata/download
 
 규칙:
 
-- header에는 node name만 표시한다.
+- header 왼쪽에는 node name과 pane별 Back/Forward를 표시한다.
 - path와 metrics는 Inspector에 둔다.
 - text preview가 기본이다.
 - plain text는 단순 메모처럼 보여준다.
@@ -282,10 +283,34 @@ file   -> node detail + file metadata/download
 
 ```text
 open node
+-> push current node reference to the active EditorGroup back history
+-> clear forward history
 -> set active EditorGroup node snapshot
 -> fetch detail/content by kind
 -> show Inspector for active node
 ```
+
+같은 node를 다시 열면 history에 중복 추가하지 않는다.
+
+### Back/Forward
+
+```text
+click Back/Forward
+-> read the nearest node reference from that EditorGroup
+-> GET canonical node detail
+-> success: move current node reference to the opposite history and open target
+-> 404: discard missing reference and continue in the same direction
+-> other failure: keep current node and both histories, then show toast
+```
+
+규칙:
+
+- history는 EditorGroup별로 독립적이다.
+- 새 node를 연 뒤에는 forward history를 비운다.
+- 새 group은 현재 node 또는 선택한 node만 가지며 기존 group history를 복사하지 않는다.
+- space 전환과 reload 후에도 space별 workbench snapshot에서 복원한다.
+- node rename/move는 저장된 이름 snapshot을 갱신하고 delete는 해당 reference를 제거한다.
+- 요청 중 group이나 space가 바뀌면 늦게 도착한 응답을 적용하지 않는다.
 
 ### Markdown image preview
 
@@ -304,7 +329,7 @@ near-viewport image paths
 ```text
 split
 -> if group count < 3: add group to the right
--> new group starts with current active node or empty state
+-> new group starts with current active node or empty state and empty navigation history
 ```
 
 ### Save text

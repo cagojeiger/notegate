@@ -250,6 +250,117 @@ describe("useWorkbenchNodeActions", () => {
     expect(getNode).toHaveBeenCalledOnce();
   });
 
+  it("navigates backward using a fresh canonical node", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const second = node("second", activeSpace.id, "/second.md");
+    const third = node("third", activeSpace.id, "/third.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, second);
+    useUiStore.getState().openInGroup(groupId, third);
+    vi.mocked(getNode).mockResolvedValue(second);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: second });
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: third,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(getNode).toHaveBeenCalledWith(expect.anything(), activeSpace.id, second.id);
+    expect(group.node?.id).toBe(second.id);
+    expect(group.back.map((entry) => entry.nodeId)).toEqual([first.id]);
+    expect(group.forward.map((entry) => entry.nodeId)).toEqual([third.id]);
+  });
+
+  it("skips deleted navigation entries and continues in the same direction", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const deleted = node("deleted", activeSpace.id, "/deleted.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, deleted);
+    useUiStore.getState().openInGroup(groupId, current);
+    vi.mocked(getNode)
+      .mockRejectedValueOnce(new ApiError("not found", 404))
+      .mockResolvedValueOnce(first);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: first });
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: current,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(first.id);
+    expect(group.back).toEqual([]);
+    expect(group.forward.map((entry) => entry.nodeId)).toEqual([current.id]);
+    expect(getNode).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps navigation history when the target cannot be verified", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, current);
+    vi.mocked(getNode).mockRejectedValue(new ApiError("unavailable", 503));
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: current,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(current.id);
+    expect(group.back.map((entry) => entry.nodeId)).toEqual([first.id]);
+    expect(useUiStore.getState().toast).toBe("Could not navigate to node");
+  });
+
+  it("does not apply a navigation result after the group changes", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const replacement = node("replacement", activeSpace.id, "/replacement.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, current);
+    const pending = deferred<RestNode>();
+    vi.mocked(getNode).mockReturnValue(pending.promise);
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: current,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    const navigation = result.current.navigateEditorGroup(groupId, "back");
+    act(() => {
+      useUiStore.getState().openInGroup(groupId, replacement);
+      pending.resolve(first);
+    });
+    await act(async () => {
+      await navigation;
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacement.id);
+    expect(mocks.revealNode).not.toHaveBeenCalled();
+  });
+
   it("queues a selected file with the current space snapshot", async () => {
     const activeSpace = space("space-1");
     const destinationFolder = node("reports", activeSpace.id, "/Reports", "folder");
