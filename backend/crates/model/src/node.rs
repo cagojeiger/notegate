@@ -52,3 +52,16 @@ pub struct Node {
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
+
+/// Compact node fields used by paginated collection views. Large metadata and
+/// attribution fields remain available from the canonical node endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeSummary {
+    pub id: Uuid,
+    pub space_id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub kind: NodeKind,
+    pub sort_order: i32,
+    pub updated_at: DateTime<Utc>,
+}

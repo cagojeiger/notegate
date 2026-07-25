@@ -132,14 +132,15 @@ explicit delete
 데이터:
 
 ```text
-GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?limit=100&cursor=...
+GET /api/v1/spaces/{space_id}/nodes/{folder_id}/children?view=summary&limit=100&cursor=...
+POST /api/v1/spaces/{space_id}/nodes:batchListChildren
 GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 ```
 
 규칙:
 
 - root `/`는 보이지 않는다.
-- folder row click은 folder node를 열고 expand/collapse도 수행한다.
+- folder row click은 editor node를 열지 않고 expand/collapse만 수행한다.
 - text/file row click은 active EditorGroup에 연다.
 - drag/drop은 node를 folder 안으로 이동한다.
 - sibling manual reorder는 하지 않는다.
@@ -148,6 +149,10 @@ GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 ### Files load more
 
 ```text
+restore root and multiple expanded folders with missing cache
+-> fetch their first pages in batches of at most 16 parents
+-> seed each folder's existing children query cache
+
 expand root/folder
 -> fetch first children page for that folder
 -> scroll near folder page end
@@ -158,23 +163,29 @@ expand root/folder
 규칙:
 
 - children pagination은 folder별로 독립적이다.
+- cold tree 복원만 first-page batch API를 사용한다. Batch 실패 시 기존 folder별 query로 복구한다.
 - root와 각 expanded folder는 같은 children API cursor를 사용한다.
 - 자동 load-more는 visible sentinel이 viewport 근처에 들어올 때 수행한다.
+- 구조 변경 후 이미 여러 page가 열린 folder는 기존 continuation page를
+  버리고 첫 page만 다시 읽는다. 이전 cursor로 모든 page를 순차 refetch하지 않는다.
 
 ### RecentSection
 
 데이터:
 
 ```text
-GET /api/v1/spaces/{space_id}/nodes?sort=updated_at_desc&limit=50
+GET /api/v1/spaces/{space_id}/nodes?view=summary&sort=updated_at_desc&limit=50&cursor=...
 ```
 
 규칙:
 
 - Recent는 항상 PrimarySidebar에 있다.
 - generic node-list API를 사용한다.
-- 현재 UI는 첫 page만 표시한다.
+- visible load-more sentinel을 통해 cursor page를 이어서 표시한다.
+- invalidation 시 기존 continuation page를 버리고 첫 page만 다시 읽는다.
 - row 선택 시 node를 열고 Files reveal을 시도한다.
+- summary row를 열 때 canonical node query를 한 번 조회하고 이후 open은 같은
+  query cache를 재사용한다.
 - reveal 실패는 open을 막지 않는다.
 
 ## Node actions

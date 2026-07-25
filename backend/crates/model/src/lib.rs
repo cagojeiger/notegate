@@ -24,7 +24,7 @@ pub use file_change_event::{
     ListFileChangeEvents, SyncFileChanges,
 };
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
-pub use node::{Node, NodeKind};
+pub use node::{Node, NodeKind, NodeSummary};
 pub use space::{
     ConnectAgent, ConnectionPage, CreateSpace, ListConnections, ListSpaces, Permission, Space,
     SpaceAgentConnection, SpaceCursor, SpacePage, SpaceView, UpdateSpace,

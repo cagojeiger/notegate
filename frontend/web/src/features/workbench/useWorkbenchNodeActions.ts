@@ -1,11 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { downloadFile } from "../../api/files";
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
-import { resolveNodePath } from "../../api/nodes";
-import type { RestNode, Space } from "../../api/types";
-import type { AppDialog } from "./dialogs/DialogHost";
+import { getNode, resolveNodePath } from "../../api/nodes";
+import { queryKeys } from "../../api/queryKeys";
+import type { NodeSummary, RestNode, Space } from "../../api/types";
+import type { AppDialog } from "./dialogs/dialogTypes";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
 import { useUploadActions } from "../uploads/UploadProvider";
@@ -20,6 +22,7 @@ type NodeActionsProps = {
 
 export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog }: NodeActionsProps) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const openInActiveGroup = useUiStore((state) => state.openInActiveGroup);
   const openInGroup = useUiStore((state) => state.openInGroup);
   const openInNewGroup = useUiStore((state) => state.openInNewGroup);
@@ -41,13 +44,17 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
   const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
   const revealNodeInSpace = useRevealNode();
 
-  async function openNode(node: RestNode) {
+  async function openNode(summary: NodeSummary) {
+    const node = await loadCanonicalNode(summary, "Could not open node");
+    if (!node) return;
     openInActiveGroup(node);
     closeMobile();
     await revealNodeBestEffort(node);
   }
 
-  async function openNodeInNewGroup(node: RestNode) {
+  async function openNodeInNewGroup(summary: NodeSummary) {
+    const node = await loadCanonicalNode(summary, "Could not open node");
+    if (!node) return;
     openInNewGroup(node);
     closeMobile();
     await revealNodeBestEffort(node);
@@ -81,7 +88,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     return state.activeSpaceId === spaceId && state.editorGroups.some((group) => group.id === groupId && group.node?.id === sourceNode.id);
   }
 
-  async function revealNodeBestEffort(node: RestNode) {
+  async function revealNodeBestEffort(node: NodeSummary) {
     try {
       await revealNode(node);
     } catch {
@@ -89,7 +96,7 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     }
   }
 
-  async function revealNode(node: RestNode) {
+  async function revealNode(node: NodeSummary) {
     if (!activeSpace || node.parent_id === null) return;
     const reveal = await revealNodeInSpace(activeSpace.id, node.id);
     addExpanded(reveal.ancestors.map((ancestor) => ancestor.id));
@@ -110,14 +117,14 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     }));
   }
 
-  function promptCreateInFolder(folder: RestNode, kind: "folder" | "text") {
+  function promptCreateInFolder(folder: NodeSummary, kind: "folder" | "text") {
     if (!canWriteActiveSpace) return;
     setDialog(createNodeDialog(folder.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
   }
 
-  function uploadInFolder(folder: RestNode, file: File | null) {
+  function uploadInFolder(folder: NodeSummary, file: File | null) {
     if (!canWriteActiveSpace || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
     promptUpload(activeSpace, folder.id, folder.path, file);
   }
@@ -126,26 +133,26 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     if (activeSpace) setExpanded([activeSpace.root_node_id]);
   }
 
-  function promptRenameNode(node: RestNode) {
+  function promptRenameNode(node: NodeSummary) {
     if (!canWriteActiveSpace || node.parent_id === null) return;
     setDialog(renameNodeDialog(node, async (renamedNode, name) => {
       await updateNodeMutation.mutateAsync({ node: renamedNode, name });
     }));
   }
 
-  function promptMoveNode(node: RestNode) {
+  function promptMoveNode(node: NodeSummary) {
     if (!canWriteActiveSpace || node.parent_id === null || !activeSpace) return;
     setDialog(moveNodeDialog(node, activeSpace, async (movedNode, parentId) => {
       await moveNodeMutation.mutateAsync({ node: movedNode, parentId }, { onSuccess: () => addExpanded([parentId]) });
     }));
   }
 
-  function moveNodeToFolder(node: RestNode, folder: RestNode) {
+  function moveNodeToFolder(node: NodeSummary, folder: NodeSummary) {
     if (!canWriteActiveSpace || node.parent_id === null || folder.kind !== "folder" || node.id === folder.id) return;
     moveNodeMutation.mutate({ node, parentId: folder.id }, { onSuccess: () => addExpanded([folder.id]) });
   }
 
-  function confirmDeleteNode(node: RestNode) {
+  function confirmDeleteNode(node: NodeSummary) {
     if (!canWriteActiveSpace || node.parent_id === null) return;
     setDialog(deleteNodeDialog(node, async (deletedNode, recursive) => {
       await deleteNodeMutation.mutateAsync({ node: deletedNode, recursive });
@@ -174,9 +181,16 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     }));
   }
 
-  async function downloadFileNode(node: RestNode) {
+  async function downloadFileNode(node: NodeSummary) {
     if (node.kind !== "file") return;
-    await downloadFile(client, node.space_id, node.id, node.original_filename ?? node.name);
+    const canonicalNode = await loadCanonicalNode(node, "Could not download file");
+    if (!canonicalNode) return;
+    await downloadFile(
+      client,
+      canonicalNode.space_id,
+      canonicalNode.id,
+      canonicalNode.original_filename ?? canonicalNode.name
+    );
   }
 
   function promptReplaceMetadata() {
@@ -185,6 +199,22 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     setDialog(metadataDialog(node, async (metadataNode, metadata) => {
       await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
     }));
+  }
+
+  async function loadCanonicalNode(
+    summary: NodeSummary,
+    failureMessage: string
+  ): Promise<RestNode | null> {
+    try {
+      return await queryClient.fetchQuery({
+        queryKey: queryKeys.node(summary.space_id, summary.id),
+        queryFn: () => getNode(client, summary.space_id, summary.id),
+        staleTime: Number.POSITIVE_INFINITY
+      });
+    } catch {
+      showToast(failureMessage);
+      return null;
+    }
   }
 
   return {

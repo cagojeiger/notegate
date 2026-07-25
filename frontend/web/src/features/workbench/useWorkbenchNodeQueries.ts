@@ -7,11 +7,12 @@ import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../../
 import {
   invalidateFolderSubtree,
   invalidateNodeLists,
+  invalidateRecentNodes,
   removeDeletedNodeQueries,
   removeMarkdownImagePreviewQuery
 } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
-import type { RestNode, Space } from "../../api/types";
+import type { NodeSummary, RestNode, Space } from "../../api/types";
 
 export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (node: RestNode) => void) {
   const client = useApiClient();
@@ -33,7 +34,7 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ node, name }: { node: RestNode; name: string }) => updateNode(client, node.space_id, node.id, { name }),
+    mutationFn: ({ node, name }: { node: NodeSummary; name: string }) => updateNode(client, node.space_id, node.id, { name }),
     onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
       if (node.kind === "folder") {
@@ -51,7 +52,7 @@ export function useMoveNodeMutation(onMoved: (node: RestNode) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ node, parentId }: { node: RestNode; parentId: string }) => moveNode(client, node.space_id, node.id, { new_parent_id: parentId, expected_parent_id: node.parent_id }),
+    mutationFn: ({ node, parentId }: { node: NodeSummary; parentId: string }) => moveNode(client, node.space_id, node.id, { new_parent_id: parentId, expected_parent_id: node.parent_id }),
     onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
       if (node.kind === "folder") {
@@ -65,11 +66,11 @@ export function useMoveNodeMutation(onMoved: (node: RestNode) => void) {
   });
 }
 
-export function useDeleteNodeMutation(onDeleted: (node: RestNode) => void) {
+export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ node, recursive }: { node: RestNode; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive).then(() => node),
+    mutationFn: ({ node, recursive }: { node: NodeSummary; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive).then(() => node),
     onSuccess: async (node, { recursive }) => {
       await removeDeletedNodeQueries(queryClient, node, recursive);
       onDeleted(node);
@@ -89,7 +90,7 @@ export function useReplaceMetadataMutation(onReplaced: (node: RestNode) => void)
     mutationFn: ({ node, metadata }: { node: RestNode; metadata: Record<string, unknown> }) => replaceMetadata(client, node.space_id, node.id, metadata),
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
-      invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
+      invalidateRecentNodes(queryClient, node.space_id);
       onReplaced(node);
     }
   });

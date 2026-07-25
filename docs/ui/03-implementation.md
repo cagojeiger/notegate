@@ -8,8 +8,8 @@ frontend/web/src
 ├─ api/        # REST client, query keys, API types
 ├─ auth/       # session/login helpers
 ├─ design/     # tokens and global theme styles
-├─ layout/     # AppShell, frames, Settings, dialogs
-├─ features/   # spaces, nodes, editor, workbench behavior
+├─ layout/     # AppShell and responsive frames
+├─ features/   # spaces, nodes, editor, settings, dialogs, workbench behavior
 ├─ stores/     # UI/draft stores
 └─ shared/     # shared UI and utilities
 ```
@@ -45,9 +45,15 @@ frontend/web/src
 ## React Query
 
 - query key는 `api/queryKeys.ts`에 둔다.
-- node mutation은 Recent와 영향받은 parent children family만 invalidate한다.
+- cold tree 복원은 cache가 없는 root/expanded folder의 첫 page를 최대 16개씩 batch 조회하고, 요청 중 children invalidation이 없었던 경우에만 기존 folder별 children cache에 채운다.
+- children query는 local mutation과 forward sync가 명시적으로 reset하므로 observer mount만으로 재조회하지 않는다.
+- 구조 변경은 Recent와 영향받은 parent children의 continuation page를 버리고
+  활성 observer의 첫 page만 다시 읽는다.
 - folder rename/move/recursive delete는 descendant path가 바뀌므로 해당 Space의 node/children/path cache family를 invalidate한다.
-- 동일 node가 node/Recent/children/path cache에 있으면 공통 cache updater로 함께 갱신한다.
+- 동일 node가 node/Recent/children/path cache에 있으면 공통 cache updater로
+  함께 갱신한다. Collection cache에는 compact summary field만 유지한다.
+- tree/Recent collection은 `view=summary`를 사용한다. Editor store에는 summary를
+  넣지 않고 canonical node query 결과만 넣는다.
 - external sync는 typed parent 범위로 invalidate하고, 유효하지 않은 token만 file-related cache family fallback을 사용한다.
 - active Space 전체 invalidation은 수동 refresh에만 사용한다.
 - global mutation error는 toast로 보여준다.

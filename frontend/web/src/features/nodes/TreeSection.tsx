@@ -3,13 +3,14 @@ import { ChevronsDownUp, Folder } from "lucide-react";
 import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { RestNode, Space } from "../../api/types";
+import type { NodeSummary, Space } from "../../api/types";
 import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { findAdjacentNodeRowIndex, projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
 import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
 import { useNodeChildrenQuery } from "./useNodeQueries";
+import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
 
 const TREE_ROW_SIZE = 36;
 const TREE_OVERSCAN = 8;
@@ -19,9 +20,9 @@ type TreeProps = {
   activeNodeId: string | null;
   expandedFolderIds: Set<string>;
   onToggleFolder: (nodeId: string) => void;
-  onOpenNode: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
-  onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
+  onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
   canWriteActiveSpace: boolean;
 };
 
@@ -86,11 +87,16 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
   const scrollRef = useRef<HTMLDivElement>(null);
   const fetchNextPageByParent = useRef(new Map<string, () => void>());
   const [snapshots, setSnapshots] = useState<Map<string, TreeFolderSnapshot>>(() => new Map());
-  const [draggedNode, setDraggedNode] = useState<RestNode | null>(null);
+  const [draggedNode, setDraggedNode] = useState<NodeSummary | null>(null);
   const [dropFolderId, setDropFolderId] = useState<string | null>(null);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState<string | null>(null);
   const root = makeRootNode(activeSpace);
+  const restoringTree = useTreeRestoreBatch(
+    activeSpace.id,
+    root.id,
+    expandedFolderIds
+  );
   const visibleTree = useMemo(
     () => projectVisibleTree(root.id, snapshots, expandedFolderIds),
     [expandedFolderIds, root.id, snapshots]
@@ -194,14 +200,14 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
     setDropFolderId(null);
   }
 
-  function handleDragOver(node: RestNode, event: DragEvent<HTMLDivElement>) {
+  function handleDragOver(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
     if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     setDropFolderId(node.id);
   }
 
-  function handleDrop(node: RestNode, event: DragEvent<HTMLDivElement>) {
+  function handleDrop(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
     if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
     event.preventDefault();
     onMoveNodeToFolder(draggedNode, node);
@@ -280,7 +286,7 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
           })}
         </div>
       </div>
-      {visibleTree.queryParentIds.map((parentId) => (
+      {restoringTree ? null : visibleTree.queryParentIds.map((parentId) => (
         <FolderQueryBridge
           key={parentId}
           spaceId={activeSpace.id}
@@ -353,11 +359,11 @@ function VirtualTreeRow({
   fetchNextPage?: () => void;
   scrollRef: RefObject<HTMLDivElement | null>;
   onToggleFolder: (nodeId: string) => void;
-  onOpenNode: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
-  onDragStartNode: (node: RestNode) => void;
-  onDragOverNode: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
-  onDropOnNode: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
+  onDragStartNode: (node: NodeSummary) => void;
+  onDragOverNode: (node: NodeSummary, event: DragEvent<HTMLDivElement>) => void;
+  onDropOnNode: (node: NodeSummary, event: DragEvent<HTMLDivElement>) => void;
   onDragEndNode: () => void;
   canWriteActiveSpace: boolean;
 }) {

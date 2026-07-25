@@ -1,5 +1,5 @@
-import type { RestNode, Space } from "../../../api/types";
-import type { AppDialog } from "./DialogHost";
+import type { NodeSummary, RestNode, Space } from "../../../api/types";
+import type { AppDialog } from "./dialogTypes";
 
 export function newSpaceDialog(onCreate: (name: string) => void): AppDialog {
   return { kind: "prompt", title: "New space", label: "Space name", initial: "", submitLabel: "Create", onSubmit: onCreate };
@@ -51,7 +51,7 @@ export function uploadFileDialog(parentId: string, file: File, onUpload: (input:
   };
 }
 
-export function renameNodeDialog(node: RestNode, onRename: (node: RestNode, name: string) => void): AppDialog {
+export function renameNodeDialog(node: NodeSummary, onRename: (node: NodeSummary, name: string) => void): AppDialog {
   return {
     kind: "prompt",
     title: "Rename",
@@ -64,11 +64,11 @@ export function renameNodeDialog(node: RestNode, onRename: (node: RestNode, name
   };
 }
 
-export function moveNodeDialog(node: RestNode, space: Space, onMove: (node: RestNode, parentId: string) => void): AppDialog {
+export function moveNodeDialog(node: NodeSummary, space: Space, onMove: (node: NodeSummary, parentId: string) => void): AppDialog {
   return { kind: "move", node, space, onMove: (parentId) => onMove(node, parentId) };
 }
 
-export function deleteNodeDialog(node: RestNode, onDelete: (node: RestNode, recursive: boolean) => void): AppDialog {
+export function deleteNodeDialog(node: NodeSummary, onDelete: (node: NodeSummary, recursive: boolean) => void): AppDialog {
   const recursive = node.kind === "folder";
   return {
     kind: "confirm",

@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from "react";
 import { nodeIcon } from "../nodes/nodeDisplay";
 
-import type { RestNode, Space } from "../../api/types";
+import type { NodeSummary, RestNode, Space } from "../../api/types";
 import { MAX_EDITOR_GROUPS, type EditorPresentation } from "../../shared/model/workbenchLayout";
 import type { EditorGroup } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
@@ -21,13 +21,13 @@ type EditorAreaProps = NodeActions & {
   visibleGroupCount?: number;
   activeSpace: Space | null;
   onFocusGroup: (index: number) => void;
-  onOpenNode: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
   onCloseGroup: (index: number) => void;
   onSetGroupMode: (index: number, mode: "preview" | "edit") => void;
   onCreateFolder: () => void;
   onCreateText: () => void;
   onFileSelected: (file: File | null) => void;
-  onDownloadFile: (node: RestNode) => void;
+  onDownloadFile: (node: NodeSummary) => void;
   canWriteActiveSpace: boolean;
 } & EditorNavigationActions;
 

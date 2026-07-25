@@ -1,8 +1,8 @@
 import { Database, FileText, Folder, Image as ImageIcon, type LucideIcon } from "lucide-react";
 
-import type { RestNode, Space } from "../../api/types";
+import type { NodeSummary, RestNode, Space } from "../../api/types";
 
-export function nodeIcon(node: RestNode): LucideIcon {
+export function nodeIcon(node: NodeSummary): LucideIcon {
   if (node.kind === "folder") return Folder;
   if (node.kind === "text") return FileText;
   return node.preview_available === true ? ImageIcon : Database;
@@ -14,7 +14,7 @@ export function fmtBytes(bytes = 0): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 
-export function nodeMetaSuffix(node: RestNode): string | undefined {
+export function nodeMetaSuffix(node: NodeSummary): string | undefined {
   if (node.kind === "text" && node.line_count !== undefined) return `${node.line_count}l`;
   if (node.kind === "file" && node.byte_len !== undefined) return fmtBytes(node.byte_len);
   return undefined;

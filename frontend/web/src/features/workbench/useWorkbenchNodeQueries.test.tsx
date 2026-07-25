@@ -27,6 +27,7 @@ describe("workbench node mutations", () => {
     });
     const folder = node("folder-1", "space-1", "folder");
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "child-1"), { url: "child" });
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "other-1"), { url: "other" });
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-2", "file-2"), { url: "separate" });
@@ -44,17 +45,18 @@ describe("workbench node mutations", () => {
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-2", "file-2"))).toEqual({ url: "separate" });
-    expect(invalidateQueries).toHaveBeenCalledWith({
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenCalledWith({
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.childrenFamily("space-1")
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.nodes("space-1")
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(resetQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledOnce();
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {
@@ -64,7 +66,7 @@ describe("workbench node mutations", () => {
     const source = node("file-1", "space-1", "file");
     const moved = { ...source, parent_id: "folder-2", path: "/folder-2/file-1" };
     vi.mocked(moveNode).mockResolvedValue(moved);
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
@@ -74,17 +76,17 @@ describe("workbench node mutations", () => {
       await result.current.mutateAsync({ node: source, parentId: "folder-2" });
     });
 
-    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+    expect(resetQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+    expect(resetQueries).toHaveBeenNthCalledWith(2, {
       queryKey: queryKeys.children("space-1", "space-1-root")
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
+    expect(resetQueries).toHaveBeenNthCalledWith(3, {
       queryKey: queryKeys.children("space-1", "folder-2")
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(resetQueries).toHaveBeenCalledTimes(3);
   });
 
   it("invalidates descendant cache families when moving a folder", async () => {
@@ -95,6 +97,7 @@ describe("workbench node mutations", () => {
     const moved = { ...source, parent_id: "folder-2", path: "/folder-2/folder-1" };
     vi.mocked(moveNode).mockResolvedValue(moved);
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
@@ -104,17 +107,18 @@ describe("workbench node mutations", () => {
       await result.current.mutateAsync({ node: source, parentId: "folder-2" });
     });
 
-    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+    expect(resetQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+    expect(resetQueries).toHaveBeenNthCalledWith(2, {
       queryKey: queryKeys.childrenFamily("space-1")
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
+    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.nodes("space-1")
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(resetQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledOnce();
   });
 });
 

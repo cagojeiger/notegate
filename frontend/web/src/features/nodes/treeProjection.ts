@@ -1,14 +1,14 @@
-import type { RestNode } from "../../api/types";
+import type { NodeSummary } from "../../api/types";
 
 export type TreeFolderSnapshot = {
-  children: RestNode[];
+  children: NodeSummary[];
   isLoading: boolean;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
 };
 
 export type TreeRow =
-  | { type: "node"; key: string; node: RestNode; depth: number }
+  | { type: "node"; key: string; node: NodeSummary; depth: number }
   | { type: "loading"; key: string; parentId: string; depth: number }
   | { type: "load-more"; key: string; parentId: string; depth: number; loaded: number; isFetching: boolean }
   | { type: "empty"; key: string; depth: number };

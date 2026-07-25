@@ -22,7 +22,7 @@ pub(crate) use events::{
     AuditEventListResponse, AuditEventOut, FileChangeDeltaOut, FileChangeEventListResponse,
     FileChangeEventOut, FileChangeSyncResponse,
 };
-pub use nodes::{NodeOut, NodeRef, attribution_ids, parse_kind};
+pub use nodes::{NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_kind};
 
 /// A lightweight account reference: `{id, kind, display_name}`.
 #[derive(Debug, Clone, Serialize, ToSchema)]

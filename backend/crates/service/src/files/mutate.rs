@@ -313,6 +313,23 @@ impl FilesService {
         Ok(())
     }
 
+    pub async fn record_detected_file_media_types(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        detected_media_types: &[(Uuid, String)],
+    ) -> ServiceResult<()> {
+        if detected_media_types.is_empty() {
+            return Ok(());
+        }
+        self.authorize(space_id, caller_account_id, FileCommand::Read)
+            .await?;
+        self.store
+            .set_detected_file_media_types(space_id, detected_media_types)
+            .await?;
+        Ok(())
+    }
+
     /// Replace a text's content (`write`/`save`). Requires write permission.
     ///
     /// [`WriteTarget::Existing`] replaces an existing text (the `create=false`

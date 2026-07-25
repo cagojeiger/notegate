@@ -147,6 +147,25 @@ describe("useUiStore", () => {
     expect(state.editorGroups[0]).toMatchObject({ node: third, mode: "preview" });
   });
 
+  it("keeps expanded folders scoped to the active space", () => {
+    useUiStore.getState().setActiveSpaceId("space-a");
+    useUiStore.getState().addExpanded(["space-a-root", "space-a-folder"]);
+
+    useUiStore.getState().setActiveSpaceId("space-b");
+    expect([...useUiStore.getState().expandedFolderIds]).toEqual([]);
+
+    useUiStore.getState().addExpanded(["space-b-root"]);
+    useUiStore.getState().setActiveSpaceId("space-a");
+    expect(useUiStore.getState().expandedFolderIds).toEqual(
+      new Set(["space-a-root", "space-a-folder"])
+    );
+
+    useUiStore.getState().setActiveSpaceId("space-b");
+    expect(useUiStore.getState().expandedFolderIds).toEqual(
+      new Set(["space-b-root"])
+    );
+  });
+
   it("restores a persisted workbench snapshot when activating a space", () => {
     const first = node("node-1");
     const wrongSpaceNode = node("node-2", "wrong.md", "other-space");

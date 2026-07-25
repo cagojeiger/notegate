@@ -33,6 +33,7 @@ type UiState = {
   activeGroupIndex: number;
   nextGroupId: number;
   expandedFolderIds: Set<string>;
+  expandedFolderIdsBySpace: Record<string, string[]>;
   primarySidebarOpen: boolean;
   primaryWidth: number;
   treeRatio: number;
@@ -81,6 +82,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   activeGroupIndex: initialEditorState.activeGroupIndex,
   nextGroupId: initialEditorState.nextGroupId,
   expandedFolderIds: new Set(),
+  expandedFolderIdsBySpace: {},
   primarySidebarOpen: initialPanelState.primarySidebarOpen,
   primaryWidth: WORKBENCH_LAYOUT.defaultPrimaryWidth,
   treeRatio: WORKBENCH_LAYOUT.defaultTreeRatio,
@@ -97,11 +99,22 @@ export const useUiStore = create<UiState>((set, get) => ({
     const state = get();
     if (state.activeSpaceId === activeSpaceId) return;
     if (state.activeSpaceId) persistSpaceWorkbench(state.activeSpaceId, state.editorGroups, state.activeGroupIndex);
+    const expandedFolderIdsBySpace = rememberExpandedFolders(state);
     if (!activeSpaceId) {
-      set({ activeSpaceId, ...resetEditorGroupsState({ nextGroupId: state.nextGroupId }) });
+      set({
+        activeSpaceId,
+        expandedFolderIds: new Set(),
+        expandedFolderIdsBySpace,
+        ...resetEditorGroupsState({ nextGroupId: state.nextGroupId })
+      });
       return;
     }
-    set({ activeSpaceId, ...restoreSpaceWorkbench(activeSpaceId, state.nextGroupId) });
+    set({
+      activeSpaceId,
+      expandedFolderIds: new Set(expandedFolderIdsBySpace[activeSpaceId] ?? []),
+      expandedFolderIdsBySpace,
+      ...restoreSpaceWorkbench(activeSpaceId, state.nextGroupId)
+    });
   },
   openInActiveGroup: (node) => set((state) => openNodeInActiveGroupState(state, node)),
   openInGroup: (groupId, node) => set((state) => openNodeInGroupState(state, groupId, node)),
@@ -151,6 +164,16 @@ export const useUiStore = create<UiState>((set, get) => ({
   clearToast: () => set({ toast: null }),
   setSaveState: (saveState) => set({ saveState })
 }));
+
+function rememberExpandedFolders(
+  state: Pick<UiState, "activeSpaceId" | "expandedFolderIds" | "expandedFolderIdsBySpace">
+): Record<string, string[]> {
+  if (!state.activeSpaceId) return state.expandedFolderIdsBySpace;
+  return {
+    ...state.expandedFolderIdsBySpace,
+    [state.activeSpaceId]: [...state.expandedFolderIds]
+  };
+}
 
 export function persistTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;

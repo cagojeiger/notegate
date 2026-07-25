@@ -1,4 +1,4 @@
-import type { RestNode, Space } from "../../api/types";
+import type { NodeSummary, Space } from "../../api/types";
 import { RecentSection } from "./RecentSection";
 import { TreeSection } from "./TreeSection";
 import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
@@ -21,9 +21,9 @@ export function PrimarySidebarSections({
   expandedFolderIds: Set<string>;
   canWriteActiveSpace: boolean;
   onToggleFolder: (nodeId: string) => void;
-  onOpenNode: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
-  onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
+  onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
   onCollapseTree: () => void;
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {

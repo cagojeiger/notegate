@@ -83,7 +83,7 @@ pub async fn list(
 
         let page = state
             .files
-            .children(
+            .canonical_children(
                 account_id,
                 space_id,
                 folder.node.id,

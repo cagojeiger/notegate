@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use notegate_model::{AccountRef as ModelAccountRef, FileEncryptionMode, NodeKind};
-use notegate_service::files::NodeView;
+use notegate_service::files::{NodeSummaryView, NodeView};
 use serde::Serialize;
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -99,6 +99,55 @@ impl NodeOut {
             created_by: AccountRef::resolve(node.created_by_account_id, refs),
             updated_by: AccountRef::resolve(node.updated_by_account_id, refs),
             created_at: node.created_at,
+            updated_at: node.updated_at,
+        }
+    }
+}
+
+/// Compact node output for paginated tree and list collections.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct NodeSummaryOut {
+    pub id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub kind: String,
+    pub path: String,
+    pub has_children: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub byte_len: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_available: Option<bool>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<&NodeSummaryView> for NodeSummaryOut {
+    fn from(view: &NodeSummaryView) -> Self {
+        let node = &view.node;
+        Self {
+            id: node.id,
+            parent_id: node.parent_id,
+            name: node.name.clone(),
+            kind: node.kind.as_str().to_owned(),
+            path: view.path.clone(),
+            has_children: view.has_children,
+            byte_len: view
+                .text
+                .as_ref()
+                .map(|text| text.byte_len)
+                .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
+            line_count: view.text.as_ref().map(|text| text.line_count),
+            preview_available: view.file.as_ref().and_then(|file| {
+                if file.encryption_mode != FileEncryptionMode::None
+                    || !is_preview_size_allowed(file.byte_len)
+                {
+                    return Some(false);
+                }
+                file.detected_media_type
+                    .as_deref()
+                    .map(is_previewable_image_type)
+            }),
             updated_at: node.updated_at,
         }
     }

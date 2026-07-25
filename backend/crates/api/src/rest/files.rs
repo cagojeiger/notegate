@@ -165,20 +165,23 @@ pub(crate) async fn preview_url(
         .files
         .file_for_download(caller.account_id(), space_id, node_id)
         .await?;
-    let preview = prepare_preview(
-        &state,
-        caller.account_id(),
-        space_id,
-        node_id,
-        &file_view.file,
-    )
-    .await
-    .map_err(|error| match error {
-        PreviewPreparationError::Unsupported => {
-            ApiError::not_found("file preview is not available")
-        }
-        PreviewPreparationError::Storage(error) => error,
-    })?;
+    let prepared = prepare_preview(&state, &file_view.file).await;
+    let detected_media_type = match &prepared {
+        Ok(prepared) => prepared.detected_media_type.clone(),
+        Err(error) => error.detected_media_type().map(str::to_owned),
+    };
+    if let Some(media_type) = detected_media_type {
+        persist_detected_media_type(&state, caller.account_id(), space_id, node_id, &media_type)
+            .await;
+    }
+    let preview = prepared
+        .map(|prepared| prepared.preview)
+        .map_err(|error| match error {
+            PreviewPreparationError::Unsupported { .. } => {
+                ApiError::not_found("file preview is not available")
+            }
+            PreviewPreparationError::Storage { error, .. } => error,
+        })?;
     Ok((
         [(CACHE_CONTROL, HeaderValue::from_static("private, no-store"))],
         Json(preview),
@@ -208,14 +211,31 @@ pub(crate) async fn batch_preview_urls(
         .files
         .batch_preview_candidates(caller.account_id(), space_id, request.paths)
         .await?;
-    let account_id = caller.account_id();
-    let results = stream::iter(candidates.into_iter().map(|candidate| {
-        let state = state.clone();
-        async move { batch_preview_item(&state, account_id, space_id, candidate).await }
-    }))
-    .buffered(BATCH_PREVIEW_CONCURRENCY)
-    .collect()
-    .await;
+    let outcomes: Vec<BatchPreviewOutcome> =
+        stream::iter(candidates.into_iter().map(|candidate| {
+            let state = state.clone();
+            async move { batch_preview_item(&state, space_id, candidate).await }
+        }))
+        .buffered(BATCH_PREVIEW_CONCURRENCY)
+        .collect()
+        .await;
+    let detected_media_types = outcomes
+        .iter()
+        .filter_map(|outcome| outcome.detected_media_type.clone())
+        .collect::<Vec<_>>();
+    if let Err(error) = state
+        .files
+        .record_detected_file_media_types(caller.account_id(), space_id, &detected_media_types)
+        .await
+    {
+        tracing::warn!(
+            event = "file.detected_media_types_persist_failed",
+            %space_id,
+            count = detected_media_types.len(),
+            ?error,
+        );
+    }
+    let results = outcomes.into_iter().map(|outcome| outcome.item).collect();
 
     Ok((
         [(CACHE_CONTROL, HeaderValue::from_static("private, no-store"))],
@@ -225,24 +245,52 @@ pub(crate) async fn batch_preview_urls(
 }
 
 enum PreviewPreparationError {
-    Unsupported,
-    Storage(ApiError),
+    Unsupported {
+        detected_media_type: Option<String>,
+    },
+    Storage {
+        error: ApiError,
+        detected_media_type: Option<String>,
+    },
+}
+
+impl PreviewPreparationError {
+    fn detected_media_type(&self) -> Option<&str> {
+        match self {
+            Self::Unsupported {
+                detected_media_type,
+            }
+            | Self::Storage {
+                detected_media_type,
+                ..
+            } => detected_media_type.as_deref(),
+        }
+    }
+}
+
+struct PreparedPreview {
+    preview: FilePreviewUrlResponse,
+    detected_media_type: Option<String>,
+}
+
+struct BatchPreviewOutcome {
+    item: BatchFilePreviewItem,
+    detected_media_type: Option<(Uuid, String)>,
 }
 
 async fn prepare_preview(
     state: &AppState,
-    account_id: Uuid,
-    space_id: Uuid,
-    node_id: Uuid,
     file: &FileObject,
-) -> Result<FilePreviewUrlResponse, PreviewPreparationError> {
+) -> Result<PreparedPreview, PreviewPreparationError> {
     if file.encryption_mode == FileEncryptionMode::Client || !is_preview_size_allowed(file.byte_len)
     {
-        return Err(PreviewPreparationError::Unsupported);
+        return Err(PreviewPreparationError::Unsupported {
+            detected_media_type: None,
+        });
     }
 
-    let media_type = match file.detected_media_type.as_deref() {
-        Some(media_type) => media_type.to_owned(),
+    let (media_type, detected_media_type) = match file.detected_media_type.as_deref() {
+        Some(media_type) => (media_type.to_owned(), None),
         None => {
             let media_type = detect_object_media_type(
                 &state.object_storage,
@@ -251,25 +299,20 @@ async fn prepare_preview(
                 file.encryption_mode,
             )
             .await
-            .map_err(|error| PreviewPreparationError::Storage(error.into()))?
-            .ok_or(PreviewPreparationError::Unsupported)?;
-            if let Err(error) = state
-                .files
-                .record_detected_file_media_type(account_id, space_id, node_id, &media_type)
-                .await
-            {
-                tracing::warn!(
-                    event = "file.detected_media_type_persist_failed",
-                    %space_id,
-                    %node_id,
-                    ?error,
-                );
-            }
-            media_type
+            .map_err(|error| PreviewPreparationError::Storage {
+                error: error.into(),
+                detected_media_type: None,
+            })?
+            .ok_or(PreviewPreparationError::Unsupported {
+                detected_media_type: None,
+            })?;
+            (media_type.clone(), Some(media_type))
         }
     };
     if !is_previewable_image_type(&media_type) {
-        return Err(PreviewPreparationError::Unsupported);
+        return Err(PreviewPreparationError::Unsupported {
+            detected_media_type,
+        });
     }
 
     let ttl = std::time::Duration::from_secs(PREVIEW_URL_TTL_SECONDS as u64);
@@ -277,28 +320,39 @@ async fn prepare_preview(
         .object_storage
         .presign_inline_get(&file.object_key, &media_type, ttl)
         .await
-        .map_err(|error| PreviewPreparationError::Storage(error.into()))?;
-    Ok(FilePreviewUrlResponse {
-        url,
-        media_type,
-        expires_at: Utc::now() + TimeDelta::seconds(PREVIEW_URL_TTL_SECONDS),
+        .map_err(|error| PreviewPreparationError::Storage {
+            error: error.into(),
+            detected_media_type: detected_media_type.clone(),
+        })?;
+    Ok(PreparedPreview {
+        preview: FilePreviewUrlResponse {
+            url,
+            media_type,
+            expires_at: Utc::now() + TimeDelta::seconds(PREVIEW_URL_TTL_SECONDS),
+        },
+        detected_media_type,
     })
 }
 
 async fn batch_preview_item(
     state: &AppState,
-    account_id: Uuid,
     space_id: Uuid,
     candidate: BatchPreviewCandidate,
-) -> BatchFilePreviewItem {
+) -> BatchPreviewOutcome {
     let Some(node) = candidate.node else {
-        return batch_item(candidate.path, BatchFilePreviewStatus::NotFound, None, None);
+        return batch_outcome(
+            batch_item(candidate.path, BatchFilePreviewStatus::NotFound, None, None),
+            None,
+        );
     };
     if node.kind != NodeKind::File {
-        return batch_item(
-            candidate.path,
-            BatchFilePreviewStatus::Unsupported,
-            Some(node.id),
+        return batch_outcome(
+            batch_item(
+                candidate.path,
+                BatchFilePreviewStatus::Unsupported,
+                Some(node.id),
+                None,
+            ),
             None,
         );
     }
@@ -308,43 +362,104 @@ async fn batch_preview_item(
             %space_id,
             node_id = %node.id,
         );
-        return batch_item(
-            candidate.path,
-            BatchFilePreviewStatus::Error,
-            Some(node.id),
+        return batch_outcome(
+            batch_item(
+                candidate.path,
+                BatchFilePreviewStatus::Error,
+                Some(node.id),
+                None,
+            ),
             None,
         );
     };
 
-    match prepare_preview(state, account_id, space_id, node.id, &file).await {
-        Ok(preview) => BatchFilePreviewItem {
-            path: candidate.path,
-            status: BatchFilePreviewStatus::Ready,
-            node_id: Some(node.id),
-            media_type: Some(preview.media_type),
-            url: Some(preview.url),
-            expires_at: Some(preview.expires_at),
-        },
-        Err(PreviewPreparationError::Unsupported) => batch_item(
-            candidate.path,
-            BatchFilePreviewStatus::Unsupported,
-            Some(node.id),
-            file.detected_media_type,
-        ),
-        Err(PreviewPreparationError::Storage(error)) => {
+    match prepare_preview(state, &file).await {
+        Ok(prepared) => {
+            let detection = prepared
+                .detected_media_type
+                .clone()
+                .map(|media_type| (node.id, media_type));
+            batch_outcome(
+                BatchFilePreviewItem {
+                    path: candidate.path,
+                    status: BatchFilePreviewStatus::Ready,
+                    node_id: Some(node.id),
+                    media_type: Some(prepared.preview.media_type),
+                    url: Some(prepared.preview.url),
+                    expires_at: Some(prepared.preview.expires_at),
+                },
+                detection,
+            )
+        }
+        Err(PreviewPreparationError::Unsupported {
+            detected_media_type,
+        }) => {
+            let media_type = file
+                .detected_media_type
+                .or_else(|| detected_media_type.clone());
+            let detection = detected_media_type.map(|media_type| (node.id, media_type));
+            batch_outcome(
+                batch_item(
+                    candidate.path,
+                    BatchFilePreviewStatus::Unsupported,
+                    Some(node.id),
+                    media_type,
+                ),
+                detection,
+            )
+        }
+        Err(PreviewPreparationError::Storage {
+            error,
+            detected_media_type,
+        }) => {
             tracing::warn!(
                 event = "file.batch_preview_failed",
                 %space_id,
                 node_id = %node.id,
                 ?error,
             );
-            batch_item(
-                candidate.path,
-                BatchFilePreviewStatus::Error,
-                Some(node.id),
-                None,
+            let detection = detected_media_type.map(|media_type| (node.id, media_type));
+            batch_outcome(
+                batch_item(
+                    candidate.path,
+                    BatchFilePreviewStatus::Error,
+                    Some(node.id),
+                    None,
+                ),
+                detection,
             )
         }
+    }
+}
+
+fn batch_outcome(
+    item: BatchFilePreviewItem,
+    detected_media_type: Option<(Uuid, String)>,
+) -> BatchPreviewOutcome {
+    BatchPreviewOutcome {
+        item,
+        detected_media_type,
+    }
+}
+
+async fn persist_detected_media_type(
+    state: &AppState,
+    account_id: Uuid,
+    space_id: Uuid,
+    node_id: Uuid,
+    media_type: &str,
+) {
+    if let Err(error) = state
+        .files
+        .record_detected_file_media_type(account_id, space_id, node_id, media_type)
+        .await
+    {
+        tracing::warn!(
+            event = "file.detected_media_type_persist_failed",
+            %space_id,
+            %node_id,
+            ?error,
+        );
     }
 }
 
@@ -361,5 +476,20 @@ fn batch_item(
         media_type,
         url: None,
         expires_at: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_error_retains_a_detected_media_type() {
+        let error = PreviewPreparationError::Storage {
+            error: ApiError::object_storage_unavailable(),
+            detected_media_type: Some("image/png".to_owned()),
+        };
+
+        assert_eq!(error.detected_media_type(), Some("image/png"));
     }
 }

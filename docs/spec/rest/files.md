@@ -82,4 +82,4 @@ Permission: `read`.
 
 SVG, PDF, HTML, 알 수 없는 형식, client-encrypted file, 10 MiB 초과 file은 preview 대상이 아니며 `404`를 반환한다. 원본 download는 형식과 무관하게 기존 `/content` endpoint로 가능하다. Preview URL에는 Notegate credential이 포함되지 않는다.
 
-Markdown 본문의 여러 image path는 `POST /file-previews:batchResolve`로 한 번에 조회한다. 요청은 중복 없는 정규화 path 1~64개, UTF-8 합계 16 KiB 이하이며 응답 순서는 요청 순서와 같다. 각 결과는 `ready`, `not_found`, `unsupported`, `error` 중 하나이므로 일부 object storage 실패가 전체 요청을 실패시키지 않는다. 서버는 Space read 권한을 한 번 확인하고 path와 file metadata를 고정된 수의 DB query로 읽으며, presigned URL 생성은 최대 4개씩 처리한다. 응답은 단일 preview와 동일하게 `Cache-Control: private, no-store`다.
+Markdown 본문의 여러 image path는 `POST /file-previews:batchResolve`로 한 번에 조회한다. 요청은 중복 없는 정규화 path 1~64개, UTF-8 합계 16 KiB 이하이며 응답 순서는 요청 순서와 같다. 각 결과는 `ready`, `not_found`, `unsupported`, `error` 중 하나이므로 일부 object storage 실패가 전체 요청을 실패시키지 않는다. 서버는 후보 조회 전에 Space read 권한을 한 번 확인하고 path와 file metadata를 고정된 수의 DB query로 읽으며, presigned URL 생성은 최대 4개씩 처리한다. 기존 file의 감지된 media type을 기록할 때는 별도의 read 권한 확인 한 번과 batch write 한 번을 수행한다. 응답은 단일 preview와 동일하게 `Cache-Control: private, no-store`다.

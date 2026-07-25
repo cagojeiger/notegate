@@ -45,7 +45,7 @@ describe("UploadProvider", () => {
       return transfer.promise;
     });
     const { result, queryClient } = renderUploadManager();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
     act(() => { result.current.startUpload(input()); });
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("uploading"));
@@ -59,14 +59,14 @@ describe("UploadProvider", () => {
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
 
     expect(mocks.completeFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1", undefined);
-    expect(invalidateQueries).toHaveBeenCalledWith({
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: ["spaces", "space-1", "recent"],
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenCalledWith({
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: ["spaces", "space-1", "children", "parent-1"]
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(resetQueries).toHaveBeenCalledTimes(2);
   });
 
   it("removes a transfer when the user cancels it", async () => {

@@ -21,12 +21,13 @@ mod read;
 mod view;
 
 pub use notegate_model::files::{
-    AppendText, BeginObjectUpload, ChildrenCursor, ChildrenPage, ChildrenRequest, CopyCounts,
-    CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit, EditText,
-    FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor, NodeListPage,
-    NodeListSort, NodeReveal, NodeView, PatchMode, PatchResult, PatchText, PendingObjectUpload,
-    ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent, TextStats, TextView,
-    WriteTarget, WriteText, WriteTextBody,
+    AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload,
+    CanonicalChildrenPage, CanonicalNodeListPage, ChildrenCursor, ChildrenPage, ChildrenRequest,
+    CopyCounts, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode, DeleteResult, Edit,
+    EditText, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor,
+    NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode, PatchResult,
+    PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
+    TextStats, TextView, WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::{
     FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
@@ -35,6 +36,7 @@ pub use notegate_model::{
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;
 pub use preview::{BatchPreviewCandidate, MAX_BATCH_PREVIEW_PATH_BYTES, MAX_BATCH_PREVIEW_PATHS};
+pub use read::MAX_BATCH_CHILDREN_PARENTS;
 pub use target::{Target, parse_target};
 pub use validation::FilesValidationError;
 pub(crate) use view::hydrate_node_views;

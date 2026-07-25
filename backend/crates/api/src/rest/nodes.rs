@@ -23,13 +23,14 @@ use crate::error::ApiError;
 use crate::page::Page;
 use crate::rest::dto::{
     FileChangeDeltaOut, FileChangeEventListResponse, FileChangeEventOut, FileChangeSyncResponse,
-    NodeOut, NodeRef, attribution_ids, parse_kind,
+    NodeOut, NodeRef, NodeSummaryOut, attribution_ids, parse_kind,
 };
 use crate::state::AppState;
 
 use notegate_service::files::{
-    ChildrenRequest, CreateFolder, CreateText, DeleteNode, ListFileChangeEvents, ListNodesRequest,
-    MoveNode, NodeListSort, SyncFileChanges, WriteTarget, WriteText, WriteTextBody,
+    BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
+    DeleteNode, ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, SyncFileChanges,
+    WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -52,6 +53,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/children",
             get(children),
+        )
+        .route(
+            "/v1/spaces/{space_id}/nodes:batchListChildren",
+            post(batch_children),
         )
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/metadata",
@@ -229,13 +234,21 @@ pub(crate) async fn get_node(
 pub(crate) struct ListNodesQuery {
     kind: Option<String>,
     sort: Option<String>,
+    view: Option<String>,
     limit: Option<i64>,
     cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub(crate) enum NodeCollectionOut {
+    Full(Box<NodeOut>),
+    Summary(NodeSummaryOut),
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct NodesListResponse {
-    nodes: Vec<NodeOut>,
+    nodes: Vec<NodeCollectionOut>,
     page: Page,
 }
 
@@ -247,6 +260,7 @@ pub(crate) struct NodesListResponse {
         ("space_id" = Uuid, Path),
         ("kind" = Option<String>, Query, description = "Optional kind filter: folder, text, or file"),
         ("sort" = Option<String>, Query, description = "updated_at_desc (default) or name_asc"),
+        ("view" = Option<String>, Query, description = "summary for compact collection nodes; omitted returns full nodes"),
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
@@ -262,18 +276,33 @@ pub(crate) async fn list(
     let kind = query.kind.as_deref().map(parse_kind).transpose()?;
     let sort = NodeListSort::parse(query.sort.as_deref().unwrap_or("updated_at_desc"))
         .ok_or_else(|| ApiError::invalid_field("sort must be 'updated_at_desc' or 'name_asc'"))?;
+    let summary = parse_collection_view(query.view.as_deref())?;
+    let request = ListNodesRequest {
+        kind,
+        sort,
+        limit: query.limit,
+        cursor: query.cursor,
+    };
+    if summary {
+        let page = state
+            .files
+            .list_node_summaries(caller.account_id(), space_id, request)
+            .await?;
+        let nodes = page
+            .items
+            .iter()
+            .map(NodeSummaryOut::from)
+            .map(NodeCollectionOut::Summary)
+            .collect();
+        return Ok(Json(NodesListResponse {
+            nodes,
+            page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
+        }));
+    }
+
     let page = state
         .files
-        .list_nodes(
-            caller.account_id(),
-            space_id,
-            ListNodesRequest {
-                kind,
-                sort,
-                limit: query.limit,
-                cursor: query.cursor,
-            },
-        )
+        .list_nodes(caller.account_id(), space_id, request)
         .await?;
     let refs = state
         .accounts
@@ -282,9 +311,9 @@ pub(crate) async fn list(
     let nodes = page
         .items
         .iter()
-        .map(|view| NodeOut::from_view(view, &refs))
+        .map(|view| Box::new(NodeOut::from_view(view, &refs)))
+        .map(NodeCollectionOut::Full)
         .collect();
-
     Ok(Json(NodesListResponse {
         nodes,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
@@ -293,6 +322,7 @@ pub(crate) async fn list(
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ChildrenQuery {
+    view: Option<String>,
     limit: Option<i64>,
     cursor: Option<String>,
 }
@@ -300,8 +330,36 @@ pub(crate) struct ChildrenQuery {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ChildrenResponse {
     parent: NodeRef,
-    children: Vec<NodeOut>,
+    children: Vec<NodeCollectionOut>,
     page: Page,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct BatchChildrenRequestBody {
+    parent_ids: Vec<Uuid>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum BatchChildrenStatus {
+    Ready,
+    NotFound,
+    NotFolder,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BatchChildrenItem {
+    parent_id: Uuid,
+    status: BatchChildrenStatus,
+    parent: Option<NodeRef>,
+    children: Vec<NodeSummaryOut>,
+    page: Option<Page>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BatchChildrenResponse {
+    results: Vec<BatchChildrenItem>,
 }
 
 #[utoipa::path(
@@ -311,6 +369,7 @@ pub(crate) struct ChildrenResponse {
     params(
         ("space_id" = Uuid, Path),
         ("node_id" = Uuid, Path),
+        ("view" = Option<String>, Query, description = "summary for compact collection nodes; omitted returns full nodes"),
         ("limit" = Option<i64>, Query, description = "Page size"),
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
@@ -323,37 +382,199 @@ pub(crate) async fn children(
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<ChildrenQuery>,
 ) -> Result<Json<ChildrenResponse>, ApiError> {
+    let summary = parse_collection_view(query.view.as_deref())?;
+    let request = ChildrenRequest {
+        limit: query.limit,
+        cursor: query.cursor,
+    };
+    if summary {
+        let page = state
+            .files
+            .children(caller.account_id(), space_id, node_id, request)
+            .await?;
+        return Ok(Json(children_summary_response(&page)));
+    }
+
     let page = state
         .files
-        .children(
+        .canonical_children(caller.account_id(), space_id, node_id, request)
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids(page.items.iter()))
+        .await?;
+    Ok(Json(ChildrenResponse {
+        parent: NodeRef::from(&page.parent),
+        children: page
+            .items
+            .iter()
+            .map(|view| Box::new(NodeOut::from_view(view, &refs)))
+            .map(NodeCollectionOut::Full)
+            .collect(),
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/spaces/{space_id}/nodes:batchListChildren",
+    tag = "nodes",
+    params(("space_id" = Uuid, Path)),
+    request_body = BatchChildrenRequestBody,
+    responses(
+        (status = 200, description = "List the first children page for each requested parent", body = BatchChildrenResponse),
+        (status = 400, description = "Invalid, duplicate, or excessive parent input")
+    ),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn batch_children(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(space_id): Path<Uuid>,
+    Json(request): Json<BatchChildrenRequestBody>,
+) -> Result<Json<BatchChildrenResponse>, ApiError> {
+    let results = state
+        .files
+        .batch_children(
             caller.account_id(),
             space_id,
-            node_id,
-            ChildrenRequest {
-                limit: query.limit,
-                cursor: query.cursor,
+            BatchChildrenRequest {
+                parent_node_ids: request.parent_ids,
+                limit: request.limit,
             },
         )
         .await?;
-
-    let mut all = vec![&page.parent];
-    all.extend(page.items.iter());
-    let refs = state
-        .accounts
-        .find_account_refs(&attribution_ids(all))
-        .await?;
-
-    let children = page
-        .items
+    let results = results
         .iter()
-        .map(|view| NodeOut::from_view(view, &refs))
+        .map(|result| match result {
+            BatchChildrenResult::Ready(page) => BatchChildrenItem {
+                parent_id: page.parent.node.id,
+                status: BatchChildrenStatus::Ready,
+                parent: Some(NodeRef::from(&page.parent)),
+                children: page.items.iter().map(NodeSummaryOut::from).collect(),
+                page: Some(Page::from_items(
+                    page.limit,
+                    &page.items,
+                    page.has_more,
+                    page.next_cursor.clone(),
+                )),
+            },
+            BatchChildrenResult::NotFound { parent_node_id } => BatchChildrenItem {
+                parent_id: *parent_node_id,
+                status: BatchChildrenStatus::NotFound,
+                parent: None,
+                children: Vec::new(),
+                page: None,
+            },
+            BatchChildrenResult::NotFolder { parent_node_id } => BatchChildrenItem {
+                parent_id: *parent_node_id,
+                status: BatchChildrenStatus::NotFolder,
+                parent: None,
+                children: Vec::new(),
+                page: None,
+            },
+        })
         .collect();
+    Ok(Json(BatchChildrenResponse { results }))
+}
 
-    Ok(Json(ChildrenResponse {
+fn children_summary_response(page: &notegate_service::files::ChildrenPage) -> ChildrenResponse {
+    ChildrenResponse {
         parent: NodeRef::from(&page.parent),
-        children,
-        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
-    }))
+        children: page
+            .items
+            .iter()
+            .map(NodeSummaryOut::from)
+            .map(NodeCollectionOut::Summary)
+            .collect(),
+        page: Page::from_items(
+            page.limit,
+            &page.items,
+            page.has_more,
+            page.next_cursor.clone(),
+        ),
+    }
+}
+
+fn parse_collection_view(view: Option<&str>) -> Result<bool, ApiError> {
+    match view {
+        None => Ok(false),
+        Some("summary") => Ok(true),
+        Some(_) => Err(ApiError::invalid_field(
+            "view must be 'summary' when provided",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod collection_response_tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::*;
+
+    #[test]
+    fn maximum_batch_summary_response_stays_below_two_mib() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let updated_at = Utc
+            .with_ymd_and_hms(2026, 7, 25, 0, 0, 0)
+            .single()
+            .ok_or("invalid test timestamp")?;
+        let mut results = Vec::new();
+        for parent_index in 0..16_u128 {
+            let parent_id = Uuid::from_u128(10 + parent_index);
+            let children = (0..100_u128)
+                .map(|child_index| NodeSummaryOut {
+                    id: Uuid::from_u128(1_000 + parent_index * 100 + child_index),
+                    parent_id: Some(parent_id),
+                    name: "n".repeat(128),
+                    kind: "file".to_owned(),
+                    path: format!("/{}", "p".repeat(902)),
+                    has_children: false,
+                    byte_len: Some(i64::MAX),
+                    line_count: None,
+                    preview_available: Some(true),
+                    updated_at,
+                })
+                .collect();
+            results.push(BatchChildrenItem {
+                parent_id,
+                status: BatchChildrenStatus::Ready,
+                parent: Some(NodeRef {
+                    id: parent_id,
+                    path: format!("/{}", "p".repeat(902)),
+                    kind: "folder".to_owned(),
+                }),
+                children,
+                page: Some(Page::new(100, 100, true, Some("c".repeat(256)))),
+            });
+        }
+        let response = BatchChildrenResponse { results };
+        let bytes = serde_json::to_vec(&response)?;
+
+        assert!(
+            bytes.len() < 2 * 1024 * 1024,
+            "maximum compact batch was {} bytes",
+            bytes.len()
+        );
+        assert!(
+            !bytes
+                .windows(b"metadata".len())
+                .any(|window| window == b"metadata")
+        );
+        assert!(
+            !bytes
+                .windows(b"space_id".len())
+                .any(|window| window == b"space_id")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn collection_summary_view_is_explicit_and_bounded() {
+        assert_eq!(parse_collection_view(None).ok(), Some(false));
+        assert_eq!(parse_collection_view(Some("summary")).ok(), Some(true));
+        assert!(parse_collection_view(Some("full")).is_err());
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
