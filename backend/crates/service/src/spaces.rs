@@ -3,11 +3,15 @@
 //! Spaces are user-owned. The owner user has implicit write permission; agents
 //! only see spaces through explicit connections.
 
+use std::collections::HashSet;
+
 use notegate_core::limits;
 use notegate_core::validation::validate_space_name;
 use notegate_db::SpaceRepo;
 use notegate_model::{AccountKind, Permission};
-pub use notegate_model::{CreateSpace, ListSpaces, SpaceCursor, SpacePage, SpaceView, UpdateSpace};
+pub use notegate_model::{
+    CreateSpace, ListSpaces, SpaceCursor, SpaceOrderUpdate, SpacePage, SpaceView, UpdateSpace,
+};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -84,6 +88,38 @@ impl SpaceService {
         })
     }
 
+    pub async fn list_mcp(
+        &self,
+        caller_account_id: Uuid,
+        request: ListSpaces,
+    ) -> ServiceResult<SpacePage> {
+        let (items, limit, has_more, next_cursor) = paginate_keyset(
+            request.limit,
+            limits::SPACES_DEFAULT_LIMIT,
+            limits::SPACES_MAX_LIMIT,
+            request.cursor.as_deref(),
+            |limit, cursor: Option<SpaceCursor>| async move {
+                Ok(self
+                    .store
+                    .list_mcp_space_views_for(caller_account_id, limit, cursor.as_ref())
+                    .await?)
+            },
+            |view| SpaceCursor {
+                sort_order: view.space.sort_order,
+                name: view.space.name.clone(),
+                id: view.space.id,
+            },
+        )
+        .await?;
+
+        Ok(SpacePage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
+    }
+
     pub async fn find_visible_by_id(
         &self,
         caller_account_id: Uuid,
@@ -92,6 +128,17 @@ impl SpaceService {
         Ok(self
             .store
             .find_space_view_for(caller_account_id, space_id)
+            .await?)
+    }
+
+    pub async fn find_mcp_visible_by_id(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+    ) -> ServiceResult<Option<SpaceView>> {
+        Ok(self
+            .store
+            .find_mcp_space_view_for(caller_account_id, space_id)
             .await?)
     }
 
@@ -123,6 +170,34 @@ impl SpaceService {
             .await?)
     }
 
+    pub async fn find_mcp_visible_by_name(
+        &self,
+        caller_account_id: Uuid,
+        name: &str,
+        limit: i64,
+    ) -> ServiceResult<Vec<SpaceView>> {
+        validate_space_name(name)?;
+        let limit = clamp_limit(Some(limit), 1, limits::SPACES_MAX_LIMIT);
+        Ok(self
+            .store
+            .list_mcp_space_views_by_name_for(caller_account_id, name, limit)
+            .await?)
+    }
+
+    pub async fn find_mcp_visible_by_name_case_insensitive(
+        &self,
+        caller_account_id: Uuid,
+        name: &str,
+        limit: i64,
+    ) -> ServiceResult<Vec<SpaceView>> {
+        validate_space_name(name)?;
+        let limit = clamp_limit(Some(limit), 1, limits::SPACES_MAX_LIMIT);
+        Ok(self
+            .store
+            .list_mcp_space_views_by_name_case_insensitive_for(caller_account_id, name, limit)
+            .await?)
+    }
+
     pub async fn update(
         &self,
         caller_kind: AccountKind,
@@ -130,9 +205,9 @@ impl SpaceService {
         command: UpdateSpace,
     ) -> ServiceResult<SpaceView> {
         require_user_caller(caller_kind)?;
-        if command.name.is_none() && command.sort_order.is_none() {
+        if command.name.is_none() && command.sort_order.is_none() && command.pinned.is_none() {
             return Err(ServiceError::InvalidInput(
-                "provide name and/or sort_order to update".to_owned(),
+                "provide name, sort_order, and/or pinned to update".to_owned(),
             ));
         }
         if let Some(name) = command.name.as_deref() {
@@ -148,6 +223,7 @@ impl SpaceService {
                 caller_account_id,
                 command.name.as_deref(),
                 command.sort_order,
+                command.pinned,
             )
             .await?;
         let root_node_id = self
@@ -161,6 +237,37 @@ impl SpaceService {
             permission: Permission::Write,
             root_node_id,
         })
+    }
+
+    pub async fn reorder(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        updates: Vec<SpaceOrderUpdate>,
+    ) -> ServiceResult<()> {
+        require_user_caller(caller_kind)?;
+        if updates.is_empty() {
+            return Err(ServiceError::InvalidInput(
+                "provide at least one space order update".to_owned(),
+            ));
+        }
+        if updates.len() > limits::OWNED_SPACES_MAX {
+            return Err(ServiceError::InvalidInput(format!(
+                "at most {} spaces may be reordered at once",
+                limits::OWNED_SPACES_MAX
+            )));
+        }
+        let unique_ids: HashSet<_> = updates.iter().map(|update| update.space_id).collect();
+        if unique_ids.len() != updates.len() {
+            return Err(ServiceError::InvalidInput(
+                "space order updates must contain unique space ids".to_owned(),
+            ));
+        }
+
+        self.store
+            .reorder_spaces(caller_account_id, &updates)
+            .await?;
+        Ok(())
     }
 
     pub async fn delete(

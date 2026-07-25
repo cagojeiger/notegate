@@ -83,14 +83,14 @@ async fn select_space(
     validate_space_name(name).map_err(|error| invalid_input_error(error.to_string()))?;
     let mut matches = state
         .spaces
-        .find_visible_by_name(caller.account_id(), name, 2)
+        .find_mcp_visible_by_name(caller.account_id(), name, 2)
         .await
         .map_err(service_error)?;
     match matches.len() {
         0 => {
             let suggestions = state
                 .spaces
-                .find_visible_by_name_case_insensitive(
+                .find_mcp_visible_by_name_case_insensitive(
                     caller.account_id(),
                     name,
                     SPACE_SUGGESTION_LIMIT,
@@ -321,6 +321,7 @@ mod tests {
                 id: Uuid::new_v4(),
                 name: name.to_owned(),
                 sort_order: 0,
+                pinned_at: None,
                 owner_user_id: owner,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -548,13 +549,18 @@ mod tests {
                 name: "Space Suggest".to_owned(),
             })
             .await?;
-        SpaceRepo::new(db.pool.clone())
+        let space_repo = SpaceRepo::new(db.pool.clone());
+        let account_id = account.id;
+        let space = space_repo
             .create_space(
-                account.id,
+                account_id,
                 &CreateSpace {
                     name: "Beringlab".to_owned(),
                 },
             )
+            .await?;
+        space_repo
+            .update_space(space.id, account_id, None, None, Some(true))
             .await?;
         let caller = Caller {
             account,
@@ -582,6 +588,16 @@ mod tests {
         let (resolved, path) = resolve_target(&state, &caller, "Beringlab:/").await?;
         assert_eq!(resolved.name(), "Beringlab");
         assert_eq!(path, "/");
+
+        space_repo
+            .update_space(space.id, account_id, None, None, Some(false))
+            .await?;
+        let error = resolve_target(&state, &caller, "Beringlab:/")
+            .await
+            .unwrap_err();
+        let data = error.data.expect("unpinned target carries not-found data");
+        assert_eq!(data["kind"], "not_found");
+        assert_eq!(data["suggestions"], json!([]));
 
         db.cleanup().await;
         Ok(())

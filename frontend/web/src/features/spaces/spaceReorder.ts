@@ -30,3 +30,14 @@ export function buildSpaceSortOrderUpdates(spaces: Space[]): SpaceSortOrderUpdat
     .filter((update) => update.sort_order !== update.current)
     .map(({ spaceId, sort_order }) => ({ spaceId, sort_order }));
 }
+
+export function mergeVisibleSpaceOrder(allSpaces: Space[], orderedVisibleSpaces: Space[]): Space[] {
+  const visibleIds = new Set(orderedVisibleSpaces.map((space) => space.id));
+  let visibleIndex = 0;
+  return allSpaces.map((space) => {
+    if (!visibleIds.has(space.id)) return space;
+    const replacement = orderedVisibleSpaces[visibleIndex];
+    visibleIndex += 1;
+    return replacement ?? space;
+  });
+}

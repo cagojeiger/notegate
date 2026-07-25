@@ -1,8 +1,8 @@
 //! Spaces category: lifecycle and manual usage reconciliation requests.
 //!
 //! `GET /api/v1/spaces` (paginated, default 50, max 100), `POST` to create,
-//! `GET`/`PATCH`/`DELETE /{space_id}`, and queued usage reconciliation. Each
-//! handler resolves the caller
+//! `POST /api/v1/spaces:reorder` for atomic ordering, `GET`/`PATCH`/`DELETE
+//! `/{space_id}`, and queued usage reconciliation. Each handler resolves the caller
 //! from the auth middleware and delegates to the space service, which owns
 //! authorization (no live permission ⇒ 404, insufficient permission ⇒ 403).
 
@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use notegate_model::Caller;
-use notegate_service::spaces::{CreateSpace, ListSpaces, UpdateSpace};
+use notegate_service::spaces::{CreateSpace, ListSpaces, SpaceOrderUpdate, UpdateSpace};
 use notegate_service::usage::UsageReconciliationOutcome;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -25,6 +25,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/spaces", get(list).post(create))
+        .route("/v1/spaces:reorder", post(reorder))
         .route(
             "/v1/spaces/{space_id}",
             get(get_one).patch(update).delete(delete),
@@ -56,6 +57,18 @@ pub(crate) struct CreateBody {
 pub(crate) struct UpdateBody {
     name: Option<String>,
     sort_order: Option<i32>,
+    pinned: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct ReorderBody {
+    updates: Vec<ReorderItem>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct ReorderItem {
+    space_id: Uuid,
+    sort_order: i32,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -161,10 +174,41 @@ pub(crate) async fn update(
                 space_id,
                 name: body.name,
                 sort_order: body.sort_order,
+                pinned: body.pinned,
             },
         )
         .await?;
     Ok(Json(SpaceOut::from(&view)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/spaces:reorder",
+    tag = "spaces",
+    request_body = ReorderBody,
+    responses((status = 204, description = "Atomically reorder spaces")),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn reorder(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Json(body): Json<ReorderBody>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .spaces
+        .reorder(
+            caller.account.kind,
+            caller.account_id(),
+            body.updates
+                .into_iter()
+                .map(|update| SpaceOrderUpdate {
+                    space_id: update.space_id,
+                    sort_order: update.sort_order,
+                })
+                .collect(),
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

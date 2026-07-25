@@ -849,7 +849,8 @@ mod tests {
             })
             .await?;
         let space_name = "files-tools".to_owned();
-        let space = SpaceRepo::new(state.db.clone())
+        let space_repo = SpaceRepo::new(state.db.clone());
+        let space = space_repo
             .create_space(
                 account.id,
                 &CreateSpace {
@@ -857,10 +858,10 @@ mod tests {
                 },
             )
             .await?;
-        let root_id = SpaceRepo::new(state.db.clone())
-            .root_node_id(space.id)
-            .await?
-            .expect("root node");
+        let space = space_repo
+            .update_space(space.id, account.id, None, None, Some(true))
+            .await?;
+        let root_id = space_repo.root_node_id(space.id).await?.expect("root node");
         let caller = Caller {
             account,
             identity: CallerIdentity::User(user),

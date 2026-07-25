@@ -27,7 +27,7 @@ pub async fn list(
 
     let page = state
         .spaces
-        .list(caller.account_id(), ListSpaces { limit, cursor })
+        .list_mcp(caller.account_id(), ListSpaces { limit, cursor })
         .await
         .map_err(service_error)?;
 

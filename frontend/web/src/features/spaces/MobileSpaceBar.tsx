@@ -1,24 +1,47 @@
-import { History, Plus, Settings } from "lucide-react";
+import { History, LayoutGrid, Plus, Settings } from "lucide-react";
 
 import type { Space } from "../../api/types";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
 // Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 01-layout).
-export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSpace, onCreateSpace, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenHistory: () => void; onOpenSettings: () => void }) {
+export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSpace, onCreateSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenLibrary?: () => void; libraryActive?: boolean; onOpenHistory: () => void; onOpenSettings: () => void }) {
   return (
     <nav aria-label="Spaces" className="flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
-      <div className="flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto">
-        {spaces.map((space) => (
+      {onOpenLibrary ? (
+        <div className="relative shrink-0">
+          {libraryActive ? <span data-active-indicator className="absolute -top-2 left-2 right-2 h-[3px] rounded-b-full bg-primary" aria-hidden="true" /> : null}
           <button
-            key={space.id}
             type="button"
-            title={space.name}
-            onClick={() => onSelectSpace(space)}
-            className={`grid size-9 shrink-0 place-items-center rounded-xl text-sm font-semibold transition ${activeSpace?.id === space.id ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+            aria-label="Open space library"
+            aria-pressed={libraryActive}
+            aria-current={libraryActive ? "page" : undefined}
+            onClick={onOpenLibrary}
+            className={`grid size-9 place-items-center rounded-xl transition active:bg-[var(--ng-selection)] ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
           >
-            {space.name.slice(0, 1).toUpperCase()}
+            <LayoutGrid size={16} />
           </button>
-        ))}
+        </div>
+      ) : null}
+      <div className="flex min-w-0 flex-[0_1_auto] items-center gap-2 overflow-x-auto">
+        {spaces.map((space) => {
+          const active = !libraryActive && activeSpace?.id === space.id;
+          return (
+            <div key={space.id} className="relative shrink-0">
+              {active ? <span data-active-indicator className="absolute -top-2 left-2 right-2 h-[3px] rounded-b-full bg-primary" aria-hidden="true" /> : null}
+              <button
+                type="button"
+              title={`${space.name}${onOpenLibrary && !space.pinned ? " · unpinned" : ""}`}
+              aria-label={space.name}
+              aria-description={onOpenLibrary && !space.pinned ? "Unpinned; hidden from user MCP" : undefined}
+                aria-current={active ? "page" : undefined}
+                onClick={() => onSelectSpace(space)}
+                className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+              >
+                {space.name.slice(0, 1).toUpperCase()}
+              </button>
+            </div>
+          );
+        })}
       </div>
       {canCreateSpace ? (
         <div className="shrink-0 border-l border-seam pl-2">

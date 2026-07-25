@@ -106,13 +106,25 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
         )
         .await?;
     let updated = repo
-        .update_space(space.id, owner, Some("audit-renamed"), Some(2000))
+        .update_space(
+            space.id,
+            owner,
+            Some("audit-renamed"),
+            Some(2000),
+            Some(true),
+        )
         .await?;
     let no_op_same_values = repo
-        .update_space(space.id, owner, Some("audit-renamed"), Some(2000))
+        .update_space(
+            space.id,
+            owner,
+            Some("audit-renamed"),
+            Some(2000),
+            Some(true),
+        )
         .await?;
     assert_eq!(no_op_same_values.updated_at, updated.updated_at);
-    let no_op_empty_update = repo.update_space(space.id, owner, None, None).await?;
+    let no_op_empty_update = repo.update_space(space.id, owner, None, None, None).await?;
     assert_eq!(no_op_empty_update.updated_at, updated.updated_at);
     repo.delete_space(space.id, owner, owner).await?;
 
@@ -130,7 +142,7 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
     }
     assert_eq!(
         rows[1].metadata["changed_fields"],
-        serde_json::json!(["name", "sort_order"])
+        serde_json::json!(["name", "sort_order", "pinned"])
     );
 
     db.cleanup().await;

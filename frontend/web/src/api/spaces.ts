@@ -9,8 +9,14 @@ export function createSpace(client: ApiClient, name: string): Promise<Space> {
   return client.post<Space>("/api/v1/spaces", { name });
 }
 
-export function updateSpace(client: ApiClient, spaceId: string, input: { name?: string; sort_order?: number }): Promise<Space> {
+export function updateSpace(client: ApiClient, spaceId: string, input: { name?: string; sort_order?: number; pinned?: boolean }): Promise<Space> {
   return client.patch<Space>(`/api/v1/spaces/${spaceId}`, input);
+}
+
+export function reorderSpaces(client: ApiClient, updates: Array<{ spaceId: string; sort_order: number }>): Promise<void> {
+  return client.post<void>("/api/v1/spaces:reorder", {
+    updates: updates.map(({ spaceId, sort_order }) => ({ space_id: spaceId, sort_order }))
+  });
 }
 
 export function deleteSpace(client: ApiClient, spaceId: string): Promise<void> {

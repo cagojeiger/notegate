@@ -1,11 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { queryKeys } from "../../api/queryKeys";
 import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
-import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
+import { queryKeys } from "../../api/queryKeys";
+import {
+  createSpace,
+  deleteSpace,
+  listSpaces,
+  reorderSpaces as reorderSpacesRequest,
+  updateSpace
+} from "../../api/spaces";
 import type { Space, SpacesListResponse } from "../../api/types";
-import { buildSpaceSortOrderUpdates } from "../spaces/spaceReorder";
+import { buildSpaceSortOrderUpdates } from "./spaceReorder";
 
 export function useSpacesQuery() {
   const client = useApiClient();
@@ -29,8 +35,12 @@ export function useUpdateSpaceMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ spaceId, name, sort_order }: { spaceId: string; name?: string; sort_order?: number }) => updateSpace(client, spaceId, { name, sort_order }),
-    onSuccess: () => {
+    mutationFn: ({ spaceId, name, sort_order, pinned }: { spaceId: string; name?: string; sort_order?: number; pinned?: boolean }) => updateSpace(client, spaceId, { name, sort_order, pinned }),
+    onSuccess: (updatedSpace) => {
+      queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, (current) => current ? {
+        ...current,
+        spaces: current.spaces.map((space) => space.id === updatedSpace.id ? updatedSpace : space)
+      } : current);
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
       invalidateAuditEvents(queryClient);
     }
@@ -43,7 +53,7 @@ export function useReorderSpacesMutation() {
   return useMutation({
     mutationFn: async ({ spaces }: { spaces: Space[] }) => {
       const updates = buildSpaceSortOrderUpdates(spaces);
-      await Promise.all(updates.map((update) => updateSpace(client, update.spaceId, { sort_order: update.sort_order })));
+      if (updates.length > 0) await reorderSpacesRequest(client, updates);
     },
     onMutate: async ({ spaces }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.spaces });

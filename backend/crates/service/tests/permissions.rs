@@ -10,7 +10,7 @@ use common::TestDb;
 use notegate_db::{ConnectionRepo, FilesRepo, SpaceRepo};
 use notegate_model::files::{CreateFolder, DeleteNode};
 use notegate_model::{
-    AccountKind, ConnectAgent, CreateAgent, CreateSpace, Permission, UpdateSpace,
+    AccountKind, ConnectAgent, CreateAgent, CreateSpace, Permission, SpaceOrderUpdate, UpdateSpace,
 };
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
@@ -188,10 +188,44 @@ async fn connected_agent_write_cannot_manage_space_or_connections()
                 space_id: space.id,
                 name: Some("renamed".to_owned()),
                 sort_order: None,
+                pinned: None,
             },
         )
         .await;
     assert!(rename.is_err(), "agent must not rename spaces");
+
+    let reorder = spaces
+        .reorder(
+            AccountKind::Agent,
+            agent,
+            vec![SpaceOrderUpdate {
+                space_id: space.id,
+                sort_order: 1000,
+            }],
+        )
+        .await;
+    assert!(reorder.is_err(), "agent must not reorder spaces");
+
+    let duplicate_reorder = spaces
+        .reorder(
+            AccountKind::User,
+            owner,
+            vec![
+                SpaceOrderUpdate {
+                    space_id: space.id,
+                    sort_order: 1000,
+                },
+                SpaceOrderUpdate {
+                    space_id: space.id,
+                    sort_order: 2000,
+                },
+            ],
+        )
+        .await;
+    assert!(
+        duplicate_reorder.is_err(),
+        "space reorder ids must be unique"
+    );
 
     let delete = spaces.delete(AccountKind::Agent, agent, space.id).await;
     assert!(delete.is_err(), "agent must not delete spaces");

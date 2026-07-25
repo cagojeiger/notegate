@@ -14,7 +14,9 @@ const pdfMock = vi.hoisted(() => ({
   page: undefined as undefined | {
     devicePixelRatio?: number;
     pageNumber: number;
+    renderAnnotationLayer?: boolean;
     renderMode?: "canvas" | "custom" | "none";
+    renderTextLayer?: boolean;
     width?: number;
   }
 }));
@@ -41,17 +43,21 @@ vi.mock("react-pdf", () => ({
     devicePixelRatio,
     onLoadSuccess,
     pageNumber,
+    renderAnnotationLayer,
     renderMode,
+    renderTextLayer,
     width
   }: {
     devicePixelRatio?: number;
     onLoadSuccess: (page: { getViewport: () => { width: number; height: number } }) => void;
     pageNumber: number;
+    renderAnnotationLayer?: boolean;
     renderMode?: "canvas" | "custom" | "none";
+    renderTextLayer?: boolean;
     width?: number;
   }) => {
     pdfMock.pageLoadSuccess = onLoadSuccess;
-    pdfMock.page = { devicePixelRatio, pageNumber, renderMode, width };
+    pdfMock.page = { devicePixelRatio, pageNumber, renderAnnotationLayer, renderMode, renderTextLayer, width };
     return <div>Rendered page {pageNumber}</div>;
   }
 }));
@@ -90,13 +96,17 @@ describe("PdfPreview", () => {
     expect(screen.getByRole("region", { name: "document.pdf PDF pages" })).toHaveAttribute("tabindex", "0");
     expect(pdfMock.options).toEqual({ disableRange: true, disableStream: true });
     expect(pdfMock.page?.devicePixelRatio).toBeLessThanOrEqual(2);
+    expect(pdfMock.page?.renderTextLayer).toBe(true);
+    expect(pdfMock.page?.renderAnnotationLayer).toBe(false);
     expect(screen.getByText("Rendered page 1")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Page 1 of 3");
     expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
 
     expect(screen.getByRole("spinbutton", { name: "Page number" })).toHaveValue(2);
     expect(screen.getByText("Rendered page 2")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Page 2 of 3");
   });
 
   it("supports direct page entry and clamps it to the document", () => {

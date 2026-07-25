@@ -27,7 +27,7 @@ pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use node::{Node, NodeKind, NodeSummary};
 pub use space::{
     ConnectAgent, ConnectionPage, CreateSpace, ListConnections, ListSpaces, Permission, Space,
-    SpaceAgentConnection, SpaceCursor, SpacePage, SpaceView, UpdateSpace,
+    SpaceAgentConnection, SpaceCursor, SpaceOrderUpdate, SpacePage, SpaceView, UpdateSpace,
 };
 pub use text::{FileEncryptionMode, FileObject, TextObject, TextStorageFormat};
 pub use user::User;

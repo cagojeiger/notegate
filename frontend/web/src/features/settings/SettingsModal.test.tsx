@@ -12,6 +12,7 @@ const space: Space = {
   id: "space-1",
   name: "Personal",
   sort_order: 0,
+  pinned: true,
   permission: "write",
   root_node_id: "root-1",
   created_at: "2026-06-13T00:00:00Z",

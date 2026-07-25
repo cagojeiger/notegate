@@ -29,6 +29,7 @@ export type Space = {
   id: string;
   name: string;
   sort_order: number;
+  pinned: boolean;
   permission: SpacePermission;
   root_node_id: string;
   created_at: string;

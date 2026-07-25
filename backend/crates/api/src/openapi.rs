@@ -34,6 +34,7 @@ use crate::state::AppState;
         rest::spaces::create,
         rest::spaces::get_one,
         rest::spaces::update,
+        rest::spaces::reorder,
         rest::spaces::delete,
         rest::spaces::request_usage_reconciliation,
         rest::nodes::resolve_path,
@@ -372,6 +373,10 @@ mod tests {
             "integer"
         );
         assert_eq!(
+            value["components"]["schemas"]["SpaceOut"]["properties"]["pinned"]["type"],
+            "boolean"
+        );
+        assert_eq!(
             value["paths"]["/api/v1/spaces/{space_id}"]["patch"]["requestBody"]["content"]["application/json"]
                 ["schema"]["$ref"],
             "#/components/schemas/UpdateBody"
@@ -382,6 +387,18 @@ mod tests {
                 .expect("UpdateBody properties")
                 .contains_key("sort_order"),
             "UpdateBody must expose sort_order"
+        );
+        assert!(
+            value["components"]["schemas"]["UpdateBody"]["properties"]
+                .as_object()
+                .expect("UpdateBody properties")
+                .contains_key("pinned"),
+            "UpdateBody must expose pinned"
+        );
+        assert_eq!(
+            value["paths"]["/api/v1/spaces:reorder"]["post"]["requestBody"]["content"]["application/json"]
+                ["schema"]["$ref"],
+            "#/components/schemas/ReorderBody"
         );
     }
 
@@ -482,6 +499,7 @@ mod tests {
             "/api/v1/me/keys/{key_id}",
             "/api/v1/me/audit-events",
             "/api/v1/spaces",
+            "/api/v1/spaces:reorder",
             "/api/v1/spaces/{space_id}",
             "/api/v1/spaces/{space_id}/paths/resolve",
             "/api/v1/spaces/{space_id}/nodes",
@@ -565,6 +583,7 @@ mod tests {
             "POST /api/v1/me/keys",
             "POST /api/v1/me/keys/{key_id}",
             "POST /api/v1/spaces",
+            "POST /api/v1/spaces:reorder",
             "POST /api/v1/spaces/{space_id}/file-uploads",
             "POST /api/v1/spaces/{space_id}/file-previews:batchResolve",
             "POST /api/v1/spaces/{space_id}/file-uploads/{upload_id}/complete",

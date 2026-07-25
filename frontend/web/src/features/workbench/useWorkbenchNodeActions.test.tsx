@@ -457,6 +457,7 @@ function space(id: string): Space {
     id,
     name: id,
     sort_order: 0,
+    pinned: true,
     permission: "write",
     root_node_id: `${id}-root`,
     created_at: "2026-06-13T00:00:00Z",

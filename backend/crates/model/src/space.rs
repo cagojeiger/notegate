@@ -10,6 +10,7 @@ pub struct Space {
     pub id: Uuid,
     pub name: String,
     pub sort_order: i32,
+    pub pinned_at: Option<DateTime<Utc>>,
     pub owner_user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -69,6 +70,13 @@ pub struct UpdateSpace {
     pub space_id: Uuid,
     pub name: Option<String>,
     pub sort_order: Option<i32>,
+    pub pinned: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpaceOrderUpdate {
+    pub space_id: Uuid,
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Clone, Default)]

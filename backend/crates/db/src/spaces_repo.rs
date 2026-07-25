@@ -1,10 +1,12 @@
 //! Space lifecycle persistence.
 
+use std::collections::HashMap;
+
 use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, object_storage_repo, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
-use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
+use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceOrderUpdate, SpaceView};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -24,6 +26,7 @@ struct SpaceRow {
     id: Uuid,
     name: String,
     sort_order: i32,
+    pinned_at: Option<DateTime<Utc>>,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -38,6 +41,7 @@ impl From<SpaceRow> for Space {
             id: row.id,
             name: row.name,
             sort_order: row.sort_order,
+            pinned_at: row.pinned_at,
             owner_user_id: row.owner_user_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -53,6 +57,7 @@ struct SpaceViewRow {
     id: Uuid,
     name: String,
     sort_order: i32,
+    pinned_at: Option<DateTime<Utc>>,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -73,6 +78,7 @@ impl SpaceViewRow {
                 id: self.id,
                 name: self.name,
                 sort_order: self.sort_order,
+                pinned_at: self.pinned_at,
                 owner_user_id: self.owner_user_id,
                 created_at: self.created_at,
                 updated_at: self.updated_at,
@@ -86,13 +92,13 @@ impl SpaceViewRow {
     }
 }
 
-const SPACE_COLUMNS: &str = "id, name, sort_order, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
-const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
+const SPACE_COLUMNS: &str = "id, name, sort_order, pinned_at, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
+const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.owner_user_id, s.created_at, s.updated_at, \
                                        s.deleted_at, s.deleted_by_user_id, s.purge_after";
-const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
+const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
      'write'::text AS permission, root.id AS root_node_id";
-const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.owner_user_id, s.created_at, s.updated_at, \
+const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
      c.permission AS permission, root.id AS root_node_id";
 
@@ -169,11 +175,17 @@ impl SpaceRepo {
         Ok(row.map(Space::from))
     }
 
-    pub async fn find_space_view_for(
+    async fn find_space_view(
         &self,
         account_id: Uuid,
         space_id: Uuid,
+        user_pinned_only: bool,
     ) -> Result<Option<SpaceView>> {
+        let user_pin_predicate = if user_pinned_only {
+            "AND s.pinned_at IS NOT NULL"
+        } else {
+            ""
+        };
         let row = sqlx::query_as::<_, SpaceViewRow>(&format!(
             "SELECT {SPACE_VIEW_BASE_COLUMNS}, \
                     CASE WHEN acc.kind = 'user' THEN 'write'::text ELSE c.permission END AS permission, \
@@ -184,7 +196,7 @@ impl SpaceRepo {
              LEFT JOIN space_agent_connections c \
                ON c.space_id = s.id AND c.agent_id = acc.id AND c.disconnected_at IS NULL \
              WHERE acc.id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
-               AND ((acc.kind = 'user' AND s.owner_user_id = acc.id) \
+               AND ((acc.kind = 'user' AND s.owner_user_id = acc.id {user_pin_predicate}) \
                     OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL))"
         ))
         .bind(account_id)
@@ -195,17 +207,39 @@ impl SpaceRepo {
         row.map(SpaceViewRow::into_view).transpose()
     }
 
+    pub async fn find_space_view_for(
+        &self,
+        account_id: Uuid,
+        space_id: Uuid,
+    ) -> Result<Option<SpaceView>> {
+        self.find_space_view(account_id, space_id, false).await
+    }
+
+    pub async fn find_mcp_space_view_for(
+        &self,
+        account_id: Uuid,
+        space_id: Uuid,
+    ) -> Result<Option<SpaceView>> {
+        self.find_space_view(account_id, space_id, true).await
+    }
+
     async fn list_space_views_by_name(
         &self,
         account_id: Uuid,
         name: &str,
         limit: i64,
         case_insensitive: bool,
+        user_pinned_only: bool,
     ) -> Result<Vec<SpaceView>> {
         let name_predicate = if case_insensitive {
             "lower(s.name) = lower($2)"
         } else {
             "s.name = $2"
+        };
+        let user_pin_predicate = if user_pinned_only {
+            "AND s.pinned_at IS NOT NULL"
+        } else {
+            ""
         };
         let rows = sqlx::query_as::<_, SpaceViewRow>(&format!(
             "SELECT * FROM ( \
@@ -214,6 +248,7 @@ impl SpaceRepo {
                  JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
+                   {user_pin_predicate} \
                    AND {name_predicate} \
                  UNION ALL \
                  SELECT {AGENT_SPACE_VIEW_COLUMNS} \
@@ -241,7 +276,7 @@ impl SpaceRepo {
         name: &str,
         limit: i64,
     ) -> Result<Vec<SpaceView>> {
-        self.list_space_views_by_name(account_id, name, limit, false)
+        self.list_space_views_by_name(account_id, name, limit, false, false)
             .await
     }
 
@@ -251,18 +286,44 @@ impl SpaceRepo {
         name: &str,
         limit: i64,
     ) -> Result<Vec<SpaceView>> {
-        self.list_space_views_by_name(account_id, name, limit, true)
+        self.list_space_views_by_name(account_id, name, limit, true, false)
             .await
     }
 
-    pub async fn list_space_views_for(
+    pub async fn list_mcp_space_views_by_name_for(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        limit: i64,
+    ) -> Result<Vec<SpaceView>> {
+        self.list_space_views_by_name(account_id, name, limit, false, true)
+            .await
+    }
+
+    pub async fn list_mcp_space_views_by_name_case_insensitive_for(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        limit: i64,
+    ) -> Result<Vec<SpaceView>> {
+        self.list_space_views_by_name(account_id, name, limit, true, true)
+            .await
+    }
+
+    async fn list_space_views(
         &self,
         account_id: Uuid,
         limit: i64,
         cursor: Option<&SpaceCursor>,
+        user_pinned_only: bool,
     ) -> Result<Vec<SpaceView>> {
         let cursor_clause = if cursor.is_some() {
             "WHERE (sort_order, name, id) > ($2, $3, $4)"
+        } else {
+            ""
+        };
+        let user_pin_predicate = if user_pinned_only {
+            "AND s.pinned_at IS NOT NULL"
         } else {
             ""
         };
@@ -273,6 +334,7 @@ impl SpaceRepo {
                  JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
+                   {user_pin_predicate} \
                  UNION ALL \
                  SELECT {AGENT_SPACE_VIEW_COLUMNS} \
                  FROM accounts acc \
@@ -308,12 +370,32 @@ impl SpaceRepo {
         rows.into_iter().map(SpaceViewRow::into_view).collect()
     }
 
+    pub async fn list_space_views_for(
+        &self,
+        account_id: Uuid,
+        limit: i64,
+        cursor: Option<&SpaceCursor>,
+    ) -> Result<Vec<SpaceView>> {
+        self.list_space_views(account_id, limit, cursor, false)
+            .await
+    }
+
+    pub async fn list_mcp_space_views_for(
+        &self,
+        account_id: Uuid,
+        limit: i64,
+        cursor: Option<&SpaceCursor>,
+    ) -> Result<Vec<SpaceView>> {
+        self.list_space_views(account_id, limit, cursor, true).await
+    }
+
     pub async fn update_space(
         &self,
         space_id: Uuid,
         owner_user_id: Uuid,
         name: Option<&str>,
         sort_order: Option<i32>,
+        pinned: Option<bool>,
     ) -> Result<Space> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         let current = sqlx::query_as::<_, SpaceRow>(&format!(
@@ -330,20 +412,28 @@ impl SpaceRepo {
 
         let name_changed = name.is_some_and(|value| value != current.name);
         let sort_order_changed = sort_order.is_some_and(|value| value != current.sort_order);
-        if !name_changed && !sort_order_changed {
+        let pinned_changed = pinned.is_some_and(|value| value != current.pinned_at.is_some());
+        if !name_changed && !sort_order_changed && !pinned_changed {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Space::from(current));
         }
 
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
             "UPDATE spaces \
-             SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), updated_at = now() \
+             SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), \
+                 pinned_at = CASE \
+                     WHEN $5::boolean IS NULL THEN pinned_at \
+                     WHEN $5 THEN COALESCE(pinned_at, now()) \
+                     ELSE NULL \
+                 END, \
+                 updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
         ))
         .bind(space_id)
         .bind(owner_user_id)
         .bind(name)
         .bind(sort_order)
+        .bind(pinned)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_constraint_error)?
@@ -356,12 +446,68 @@ impl SpaceRepo {
         if sort_order_changed {
             changed_fields.push("sort_order");
         }
+        if pinned_changed {
+            changed_fields.push("pinned");
+        }
         let audit_ctx = AuditContext::rest(owner_user_id);
         audit_events::space_updated(&mut tx, audit_ctx, owner_user_id, space_id, &changed_fields)
             .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
+    }
+
+    pub async fn reorder_spaces(
+        &self,
+        owner_user_id: Uuid,
+        updates: &[SpaceOrderUpdate],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let space_ids: Vec<_> = updates.iter().map(|update| update.space_id).collect();
+        let current_orders: HashMap<_, _> = sqlx::query_as::<_, (Uuid, i32)>(
+            "SELECT id, sort_order FROM spaces \
+             WHERE owner_user_id = $1 AND deleted_at IS NULL AND id = ANY($2) \
+             ORDER BY id FOR UPDATE",
+        )
+        .bind(owner_user_id)
+        .bind(&space_ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .into_iter()
+        .collect();
+
+        if current_orders.len() != updates.len() {
+            return Err(Error::not_found("space not found"));
+        }
+
+        let audit_ctx = AuditContext::rest(owner_user_id);
+        for update in updates {
+            if current_orders.get(&update.space_id) == Some(&update.sort_order) {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE spaces SET sort_order = $3, updated_at = now() \
+                 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
+            )
+            .bind(update.space_id)
+            .bind(owner_user_id)
+            .bind(update.sort_order)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_constraint_error)?;
+            audit_events::space_updated(
+                &mut tx,
+                audit_ctx,
+                owner_user_id,
+                update.space_id,
+                &["sort_order"],
+            )
+            .await?;
+        }
+
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
     }
 
     pub async fn delete_space(

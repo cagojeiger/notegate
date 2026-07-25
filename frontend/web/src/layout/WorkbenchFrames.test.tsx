@@ -44,6 +44,16 @@ describe("WorkbenchFrames", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("keeps the resize target wide without adding a second default seam", () => {
+    const { container } = render(
+      <PrimarySidebarResizeHandle visible onPointerDown={vi.fn()} />
+    );
+
+    const handle = container.firstElementChild;
+    expect(handle).toHaveClass("w-1", "bg-transparent");
+    expect(handle).not.toHaveClass("bg-seam");
+  });
+
   it("uses safe-area offsets for mobile overlays", () => {
     const { container } = render(
       <PrimarySidebarFrame mode="overlay" width={300}>
