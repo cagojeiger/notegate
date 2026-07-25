@@ -1,4 +1,4 @@
-//! Durable coordination between Notegate file nodes and S3-compatible objects.
+//! Durable coordination between NoteGate file nodes and S3-compatible objects.
 
 use notegate_core::limits::{self, Limits};
 use notegate_core::{Error, Result};

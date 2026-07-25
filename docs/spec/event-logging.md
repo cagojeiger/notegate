@@ -1,12 +1,12 @@
 # Event logging spec
 
-이 문서는 Notegate의 durable operation history 계약을 정의한다. 무엇을 기록하는지, payload에 무엇을 담는지, 어떤 조회 축을 지원하는지를 정한다. DB schema 정본은 `docs/spec/db.md`, payload 보안 원칙은 `docs/spec/security.md`가 정본이다. Repository-level transaction wiring, helper API, rollout 순서는 구현 detail로 둔다.
+이 문서는 NoteGate의 durable operation history 계약을 정의한다. 무엇을 기록하는지, payload에 무엇을 담는지, 어떤 조회 축을 지원하는지를 정한다. DB schema 정본은 `docs/spec/db.md`, payload 보안 원칙은 `docs/spec/security.md`가 정본이다. Repository-level transaction wiring, helper API, rollout 순서는 구현 detail로 둔다.
 
 ## Purpose
 
 Event log는 B2C product self-review를 위한 변경 이력이다. 사용자는 자기 계정과 space에 어떤 관리 변경과 파일 변경이 있었는지 확인하고, agent owner는 agent가 수행한 변경을 되돌아본다. Tamper-evident compliance audit log나 금융권 수준의 forensic log는 이 문서의 범위가 아니다.
 
-Notegate는 관리 변경과 파일트리 변경을 별도 stream으로 기록한다.
+NoteGate는 관리 변경과 파일트리 변경을 별도 stream으로 기록한다.
 
 ```text
 audit_events

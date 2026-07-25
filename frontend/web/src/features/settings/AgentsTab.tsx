@@ -139,7 +139,7 @@ function SpaceAccessRow({ space, agent }: { space: Space; agent: Agent }) {
       ) : (
         <select
           aria-label={`${space.name} permission`}
-          className="h-9 w-36 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text outline-none transition focus:shadow-[var(--ng-focus-shadow)] disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
+          className="h-9 w-36 shrink-0 rounded-lg border border-border-strong bg-surface px-3 text-sm text-text outline-none transition disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
           value={access}
           disabled={setAccessMutation.isPending}
           onChange={(event) => updateAccess(event.currentTarget.value as AgentSpaceAccessValue)}

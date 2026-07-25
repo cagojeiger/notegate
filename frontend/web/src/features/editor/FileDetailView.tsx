@@ -41,30 +41,32 @@ export function FileDetailView({ node }: { node: RestNode }) {
     });
   }
   return (
-    <article className="mx-auto max-w-[44rem] px-10 py-14">
-      <p className="text-sm text-muted">{node.path}</p>
-      <h1 className="mt-4 text-4xl font-semibold tracking-tight">{node.name}</h1>
-      {previewUrl && !previewFailed ? (
-        <img
-          className="mt-8 max-h-[65vh] max-w-full object-contain"
-          src={previewUrl}
-          alt={node.name}
-          loading="lazy"
-          decoding="async"
-          onError={handlePreviewError}
-        />
-      ) : null}
-      {previewFailed || previewRequestFailed ? <p className="mt-8 text-sm text-muted">Image cannot be displayed</p> : null}
-      <Card className="mt-8">
-        <dl className="space-y-3">
-          <MetaRow label="Media type" value={node.media_type ?? "unknown"} />
-          {node.detected_media_type || preview.data?.media_type ? (
-            <MetaRow label="Detected type" value={node.detected_media_type ?? preview.data?.media_type ?? "unknown"} />
-          ) : null}
-          <MetaRow label="Bytes" value={node.byte_len ?? 0} />
-        </dl>
-      </Card>
-      <Button className="mt-8" onClick={handleDownload}><Download size={16} /> Download</Button>
+    <article className="min-h-0 w-full flex-1 overflow-y-auto" data-file-detail-scroll>
+      <div className="mx-auto max-w-[44rem] px-6 py-10 sm:px-10 sm:py-14">
+        <p className="text-sm text-muted">{node.path}</p>
+        <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{node.name}</h1>
+        {previewUrl && !previewFailed ? (
+          <img
+            className="mt-8 max-h-[65vh] max-w-full object-contain"
+            src={previewUrl}
+            alt={node.name}
+            loading="lazy"
+            decoding="async"
+            onError={handlePreviewError}
+          />
+        ) : null}
+        {previewFailed || previewRequestFailed ? <p className="mt-8 text-sm text-muted">Image cannot be displayed</p> : null}
+        <Card className="mt-8">
+          <dl className="space-y-3">
+            <MetaRow label="Media type" value={node.media_type ?? "unknown"} />
+            {node.detected_media_type || preview.data?.media_type ? (
+              <MetaRow label="Detected type" value={node.detected_media_type ?? preview.data?.media_type ?? "unknown"} />
+            ) : null}
+            <MetaRow label="Bytes" value={node.byte_len ?? 0} />
+          </dl>
+        </Card>
+        <Button className="mt-8" onClick={handleDownload}><Download size={16} /> Download</Button>
+      </div>
     </article>
   );
 }

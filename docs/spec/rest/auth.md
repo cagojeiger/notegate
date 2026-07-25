@@ -18,9 +18,9 @@ authgate OAuth/OIDC authorization-code + PKCE login으로 redirect한다. Browse
 GET /auth/callback?code=...&state=...
 ```
 
-`state`/`nonce`를 검증하고 authgate token을 교환한 뒤 lifecycle 정책에 따라 active local user를 생성하거나 갱신한다. 최초 생성이면 `account.create`, browser session 생성에 성공하면 `session.login` audit event를 같은 transaction에서 기록한다. authgate가 발급한 refresh token은 Notegate browser session 갱신용 credential로 암호화 저장한다. 그 다음 opaque browser session cookie를 발급하고 `/auth/success`로 redirect한다. Inactive local account는 자동 재활성화하지 않는다.
+`state`/`nonce`를 검증하고 authgate token을 교환한 뒤 lifecycle 정책에 따라 active local user를 생성하거나 갱신한다. 최초 생성이면 `account.create`, browser session 생성에 성공하면 `session.login` audit event를 같은 transaction에서 기록한다. authgate가 발급한 refresh token은 NoteGate browser session 갱신용 credential로 암호화 저장한다. 그 다음 opaque browser session cookie를 발급하고 `/auth/success`로 redirect한다. Inactive local account는 자동 재활성화하지 않는다.
 
-AuthGate는 refresh token의 canonical state, rotation, revoke 여부를 관리한다. Notegate는 해당 refresh token 값을 브라우저 세션 갱신에 다시 제출할 수 있도록 저장할 뿐이며, browser client에는 refresh token을 노출하지 않는다.
+AuthGate는 refresh token의 canonical state, rotation, revoke 여부를 관리한다. NoteGate는 해당 refresh token 값을 브라우저 세션 갱신에 다시 제출할 수 있도록 저장할 뿐이며, browser client에는 refresh token을 노출하지 않는다.
 
 ## Login success
 
@@ -55,7 +55,7 @@ request with browser session cookie
    -> transient authgate/userinfo failure: store rotated refresh token if token exchange returned one, clear refresh claim, return 503
 ```
 
-Browser session absolute lifetime은 30일이다. Local validation lease는 1시간이다. 30일이 지나면 refresh token이 authgate에서 아직 유효하더라도 Notegate browser session은 재로그인을 요구한다.
+Browser session absolute lifetime은 30일이다. Local validation lease는 1시간이다. 30일이 지나면 refresh token이 authgate에서 아직 유효하더라도 NoteGate browser session은 재로그인을 요구한다.
 
 ## OAuth metadata
 

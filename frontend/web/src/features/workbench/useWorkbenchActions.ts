@@ -47,6 +47,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
       await logoutSession();
     } finally {
       clearDevApiKey();
+      clearPersistedWorkbenches();
       onSignOut();
     }
   }
