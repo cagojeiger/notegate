@@ -1,7 +1,6 @@
 import {
   closestCenter,
   DndContext,
-  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
@@ -11,7 +10,6 @@ import {
   arrayMove,
   rectSortingStrategy,
   SortableContext,
-  sortableKeyboardCoordinates,
   useSortable
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -45,10 +43,7 @@ export function SortableSpaceGrid({
   onTogglePin,
   onReorder
 }: SortableSpaceGridProps) {
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   function moveSpace(spaceId: string, offset: -1 | 1) {
     const currentIndex = spaces.findIndex((space) => space.id === spaceId);
@@ -65,30 +60,11 @@ export function SortableSpaceGrid({
     onReorder(arrayMove(spaces, currentIndex, nextIndex));
   }
 
-  const spaceName = (id: string | number) => spaces.find((space) => space.id === id)?.name ?? "Space";
-
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
-      accessibility={{
-        screenReaderInstructions: {
-          draggable: "To reorder a Space, press Space or Enter. Use the arrow keys to choose a new position, then press Space or Enter to drop. Press Escape to cancel."
-        },
-        announcements: {
-          onDragStart: ({ active }) => `Picked up ${spaceName(active.id)}.`,
-          onDragOver: ({ active, over }) => over
-            ? `${spaceName(active.id)} is over ${spaceName(over.id)}.`
-            : `${spaceName(active.id)} is no longer over a drop target.`,
-          onDragEnd: ({ active, over }) => over
-            ? active.id === over.id
-              ? `${spaceName(active.id)} was not moved.`
-              : `${spaceName(active.id)} was moved to the position of ${spaceName(over.id)}.`
-            : `${spaceName(active.id)} was not moved.`,
-          onDragCancel: ({ active }) => `Reordering ${spaceName(active.id)} was cancelled.`
-        }
-      }}
     >
       <SortableContext items={spaces.map((space) => space.id)} strategy={rectSortingStrategy}>
         <ul aria-label="All spaces" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -167,18 +143,21 @@ function SortableSpaceCard({
         ].join(" ")}
       >
       <div className="flex items-center justify-between gap-3 px-3 pt-3">
-        <button
+        <span
           ref={setActivatorNodeRef}
-          type="button"
-          className="grid size-10 touch-none place-items-center rounded-xl text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={reorderPending}
+          className={[
+            "grid size-10 touch-none place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
+            reorderPending ? "cursor-not-allowed opacity-40" : "cursor-grab active:cursor-grabbing"
+          ].join(" ")}
           {...attributes}
           {...listeners}
-          aria-label={`Reorder ${space.name}`}
-          aria-roledescription="sortable Space"
+          role="presentation"
+          tabIndex={-1}
+          aria-hidden="true"
+          data-testid={`drag-handle-${space.id}`}
         >
           <GripVertical size={17} />
-        </button>
+        </span>
         <span className="grid size-10 place-items-center rounded-xl bg-panel-strong text-sm font-semibold text-text" aria-hidden="true">
           {space.name.slice(0, 1).toUpperCase()}
         </span>

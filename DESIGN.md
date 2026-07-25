@@ -61,9 +61,9 @@
 ## Accessibility
 
 - Target standard: WCAG 2.2 Level AA.
-- Keyboard/focus behavior: 2 px visible outline with offset on links, buttons, fields, summaries, and explicit focus targets. Space reordering supports keyboard drag and dedicated earlier/later buttons.
+- Keyboard/focus behavior: 2 px visible outline with offset on links, buttons, fields, summaries, and explicit focus targets. Space reordering uses native keyboard activation on dedicated earlier/later buttons; the drag handle is pointer/touch only.
 - Contrast/readability: 4.5:1 for normal text, 3:1 for large text and meaningful UI boundaries; light and dark themes are tested separately.
-- Screen-reader semantics: Decorative marks are hidden; identity images have concise names; async feedback and reordering use live status regions; icon-only buttons and drag handles have contextual accessible labels.
+- Screen-reader semantics: Decorative marks are hidden; identity images have concise names; async feedback uses live status regions; icon-only earlier/later buttons have contextual accessible labels, while pointer-only drag handles are hidden from assistive technology.
 - Pointer alternatives: Dragging is never the only way to reorder. Earlier/later buttons provide a single-click and single-tap alternative.
 - Reduced motion and sensory considerations: Disable nonessential animation for `prefers-reduced-motion`; never use color as the only status signal.
 

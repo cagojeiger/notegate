@@ -42,12 +42,15 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Hide Private Journal from user MCP" })).toBeVisible();
   expect(await cardNames(grid)).toEqual(orderBeforePin);
 
-  await page.getByRole("button", { name: "Move Daily later" }).click();
+  const moveDailyLater = page.getByRole("button", { name: "Move Daily later" });
+  await expect(moveDailyLater).toBeEnabled();
+  await moveDailyLater.focus();
+  await moveDailyLater.press("Enter");
   await expect.poll(() => cardNames(grid)).toEqual(["Research", "Daily", "Private Journal", "Archive"]);
   expect(api.patchCount()).toBeGreaterThan(0);
 
-  const handle = page.getByRole("button", { name: "Reorder Archive" });
-  const target = page.getByRole("button", { name: "Reorder Daily" });
+  const handle = page.getByTestId("drag-handle-archive");
+  const target = page.getByTestId("drag-handle-daily");
   const [handleBox, targetBox] = await Promise.all([handle.boundingBox(), target.boundingBox()]);
   expect(handleBox).not.toBeNull();
   expect(targetBox).not.toBeNull();
@@ -56,14 +59,6 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 8 });
   await page.mouse.up();
   await expect.poll(() => cardNames(grid)).toEqual(["Research", "Archive", "Daily", "Private Journal"]);
-
-  const keyboardHandle = page.getByRole("button", { name: "Reorder Research" });
-  await expect(keyboardHandle).toBeEnabled();
-  await keyboardHandle.focus();
-  await keyboardHandle.press("Space");
-  await keyboardHandle.press("ArrowRight");
-  await keyboardHandle.press("Space");
-  await expect.poll(() => cardNames(grid)).toEqual(["Archive", "Research", "Daily", "Private Journal"]);
 
   const undersizedTargets = await grid.locator("button").evaluateAll((buttons) => buttons
     .filter((button) => {
