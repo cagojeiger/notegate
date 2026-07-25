@@ -7,10 +7,10 @@ export function EditorGroupHeader({ title, icon, navigationActions, titleActions
   return (
     <div onContextMenu={onContextMenu} className={`flex h-10 items-center justify-between border-b px-4 ${active ? "border-[var(--ng-active-border)] bg-[var(--ng-active-surface)]" : "border-seam"}`}>
       <div className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+        {navigationActions ? <div className="flex shrink-0 items-center gap-1">{navigationActions}</div> : null}
         {icon}
         <span className="min-w-0 truncate">{title}</span>
         {dirty ? <span className="size-1.5 shrink-0 rounded-full bg-warning" title="Unsaved changes" /> : null}
-        {navigationActions ? <div className="flex shrink-0 items-center gap-1">{navigationActions}</div> : null}
         {titleActions ? <div className="ml-1 flex shrink-0 items-center gap-1">{titleActions}</div> : null}
       </div>
       <div className="flex items-center gap-1">
