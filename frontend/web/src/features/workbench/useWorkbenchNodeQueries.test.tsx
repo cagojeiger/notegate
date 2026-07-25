@@ -28,9 +28,10 @@ describe("workbench node mutations", () => {
     const folder = node("folder-1", "space-1", "folder");
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
-    queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "child-1"), { url: "child" });
-    queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "other-1"), { url: "other" });
-    queryClient.setQueryData(queryKeys.filePreviewUrl("space-2", "file-2"), { url: "separate" });
+    queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "image"), { url: "child" });
+    queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "pdf"), { url: "child-pdf" });
+    queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "other-1", "image"), { url: "other" });
+    queryClient.setQueryData(queryKeys.filePreviewUrl("space-2", "file-2", "pdf"), { url: "separate" });
     vi.mocked(deleteNode).mockResolvedValue(undefined);
 
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -42,9 +43,10 @@ describe("workbench node mutations", () => {
       await result.current.mutateAsync({ node: folder, recursive: true });
     });
 
-    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1"))).toBeUndefined();
-    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1"))).toBeUndefined();
-    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-2", "file-2"))).toEqual({ url: "separate" });
+    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "image"))).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "pdf"))).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1", "image"))).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-2", "file-2", "pdf"))).toEqual({ url: "separate" });
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),
       exact: true

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../api/client";
 import { batchResolveFilePreviews } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
+import type { RestNode } from "../../api/types";
 import { createMarkdownPreviewBatcher } from "./markdownPreviewBatcher";
 
 vi.mock("../../api/files", () => ({
@@ -60,10 +61,10 @@ describe("createMarkdownPreviewBatcher", () => {
 
     expect(results.every(({ status }) => status === "rejected")).toBe(true);
     expect(queryClient.getQueryData(
-      queryKeys.filePreviewUrl("space-1", "node-1")
+      queryKeys.filePreviewUrl("space-1", "node-1", "image")
     )).toBeUndefined();
     expect(queryClient.getQueryData(
-      queryKeys.filePreviewUrl("space-1", "node-2")
+      queryKeys.filePreviewUrl("space-1", "node-2", "image")
     )).toBeUndefined();
   });
 
@@ -85,6 +86,39 @@ describe("createMarkdownPreviewBatcher", () => {
     expect(results.map(({ path }) => path)).toEqual(paths);
     expect(vi.mocked(batchResolveFilePreviews).mock.calls[0]?.[2]).toHaveLength(64);
     expect(vi.mocked(batchResolveFilePreviews).mock.calls[1]?.[2]).toHaveLength(1);
+  });
+
+  it("preserves PDF detail preview metadata when Markdown image resolution rejects it", async () => {
+    vi.mocked(batchResolveFilePreviews).mockResolvedValue({
+      results: [{
+        path: "/document.pdf",
+        status: "unsupported",
+        node_id: "pdf-1",
+        media_type: "application/pdf",
+        url: null,
+        expires_at: null
+      }]
+    });
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      queryKeys.node("space-1", "pdf-1"),
+      { id: "pdf-1", space_id: "space-1", kind: "file" } as RestNode
+    );
+    const load = createMarkdownPreviewBatcher(
+      {} as ApiClient,
+      queryClient,
+      "space-1"
+    );
+
+    await load("/document.pdf");
+
+    expect(queryClient.getQueryData<RestNode>(
+      queryKeys.node("space-1", "pdf-1")
+    )).toMatchObject({
+      detected_media_type: "application/pdf",
+      preview_available: false,
+      file_preview_kind: "pdf"
+    });
   });
 });
 

@@ -530,9 +530,10 @@ mod collection_response_tests {
                     kind: "file".to_owned(),
                     path: format!("/{}", "p".repeat(902)),
                     has_children: false,
-                    byte_len: Some(i64::MAX),
+                    byte_len: Some(crate::file_preview::PREVIEW_MAX_BYTES),
                     line_count: None,
                     preview_available: Some(true),
+                    file_preview_kind: Some(crate::file_preview::FilePreviewKind::Image),
                     updated_at,
                 })
                 .collect();

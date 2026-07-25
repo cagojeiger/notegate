@@ -1,3 +1,5 @@
+import type { FilePreviewKind } from "./types";
+
 export const queryKeys = {
   me: ["me"] as const,
   usage: ["me", "usage"] as const,
@@ -31,5 +33,8 @@ export const queryKeys = {
   markdownImagePreviews: (spaceId: string) => ["spaces", spaceId, "markdown-image-preview"] as const,
   markdownImagePreview: (spaceId: string, path: string) => ["spaces", spaceId, "markdown-image-preview", path] as const,
   filePreviewUrls: (spaceId: string) => ["file-preview-urls", spaceId] as const,
-  filePreviewUrl: (spaceId: string, nodeId: string) => ["file-preview-urls", spaceId, nodeId] as const
+  filePreviewNode: (spaceId: string, nodeId: string) => ["file-preview-urls", spaceId, nodeId] as const,
+  filePreviewUrl: (spaceId: string, nodeId: string, kind: FilePreviewKind) => (
+    ["file-preview-urls", spaceId, nodeId, kind] as const
+  )
 };

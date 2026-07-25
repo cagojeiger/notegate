@@ -4,20 +4,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
 import { FileDetailView } from "./FileDetailView";
-import { useFileDownload } from "./useEditorQueries";
 import { useFilePreviewUrl } from "./useFilePreviewQueries";
 
-vi.mock("./useEditorQueries", () => ({
-  useFileDownload: vi.fn()
+vi.mock("./useFilePreviewQueries", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./useFilePreviewQueries")>(),
+  useFilePreviewUrl: vi.fn()
 }));
 
-vi.mock("./useFilePreviewQueries", () => ({
-  useFilePreviewUrl: vi.fn()
+vi.mock("./PdfPreview", () => ({
+  PdfPreview: ({ url, name, onError }: { url: string; name: string; onError: () => void }) => (
+    <button type="button" data-testid="pdf-preview" data-url={url} onClick={onError}>{name} PDF preview</button>
+  )
 }));
 
 describe("FileDetailView", () => {
   beforeEach(() => {
-    vi.mocked(useFileDownload).mockReturnValue(vi.fn());
     vi.mocked(useFilePreviewUrl).mockReturnValue({ data: undefined } as never);
   });
 
@@ -40,15 +41,42 @@ describe("FileDetailView", () => {
       "src",
       "https://storage.example/image.png"
     );
-    expect(screen.getByRole("article")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
-    expect(screen.getByText("image/png")).toBeInTheDocument();
+    expect(screen.queryByText("image/png")).not.toBeInTheDocument();
   });
 
-  it("keeps download and metadata available without a preview", () => {
-    render(<FileDetailView node={fileNode({ media_type: "application/pdf" })} />);
+  it("keeps metadata available without a preview", () => {
+    render(<FileDetailView node={fileNode({
+      media_type: "application/pdf",
+      preview_available: false
+    })} />);
 
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
+    expect(screen.getByText("application/pdf")).toBeInTheDocument();
+  });
+
+  it("renders a verified PDF from its preview URL", async () => {
+    vi.mocked(useFilePreviewUrl).mockReturnValue({
+      data: {
+        url: "https://storage.example/document.pdf",
+        media_type: "application/pdf",
+        expires_at: "2026-06-13T00:15:00Z"
+      }
+    } as never);
+
+    render(<FileDetailView node={fileNode({
+      name: "document.pdf",
+      path: "/document.pdf",
+      media_type: "application/pdf",
+      detected_media_type: "application/pdf",
+      preview_available: false,
+      file_preview_kind: "pdf"
+    })} />);
+
+    expect(await screen.findByTestId("pdf-preview")).toHaveAttribute(
+      "data-url",
+      "https://storage.example/document.pdf"
+    );
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
   it("shows an error when preview URL issuance fails", () => {
@@ -61,7 +89,22 @@ describe("FileDetailView", () => {
     render(<FileDetailView node={fileNode()} />);
 
     expect(screen.getByText("Image cannot be displayed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
+  });
+
+  it("uses PDF copy for PDF preview failures", () => {
+    vi.mocked(useFilePreviewUrl).mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: new ApiError("storage unavailable", 503)
+    } as never);
+
+    render(<FileDetailView node={fileNode({
+      media_type: "application/pdf",
+      preview_available: false,
+      file_preview_kind: "pdf"
+    })} />);
+
+    expect(screen.getByText("PDF cannot be displayed")).toBeInTheDocument();
   });
 
   it("does not show an error when the file is not previewable", () => {
@@ -74,24 +117,23 @@ describe("FileDetailView", () => {
     render(<FileDetailView node={fileNode({ preview_available: undefined })} />);
 
     expect(screen.queryByText("Image cannot be displayed")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 
-  it("refreshes a failed preview URL once before showing an error", async () => {
-    const refetch = vi.fn().mockResolvedValue({});
+  it("keeps a failed preview hidden when refresh returns the same URL", async () => {
+    const previewData = {
+      url: "https://storage.example/broken.png",
+      media_type: "image/png",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const refetch = vi.fn().mockResolvedValue({ isSuccess: true, data: previewData });
     vi.mocked(useFilePreviewUrl).mockReturnValue({
-      data: {
-        url: "https://storage.example/broken.png",
-        media_type: "image/png",
-        expires_at: "2026-06-13T00:15:00Z"
-      },
+      data: previewData,
       refetch
     } as never);
     render(<FileDetailView node={fileNode()} />);
 
     fireEvent.error(screen.getByRole("img", { name: "image.png" }));
     await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
-    fireEvent.error(await screen.findByRole("img", { name: "image.png" }));
 
     expect(screen.queryByRole("img", { name: "image.png" })).not.toBeInTheDocument();
     expect(screen.getByText("Image cannot be displayed")).toBeInTheDocument();

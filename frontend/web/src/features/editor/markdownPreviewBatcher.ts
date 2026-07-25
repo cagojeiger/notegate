@@ -101,7 +101,7 @@ function cacheBatchResult(
 ) {
   if (!item.node_id) return;
   if (item.status === "ready" && item.url && item.media_type && item.expires_at) {
-    queryClient.setQueryData(queryKeys.filePreviewUrl(spaceId, item.node_id), {
+    queryClient.setQueryData(queryKeys.filePreviewUrl(spaceId, item.node_id, "image"), {
       url: item.url,
       media_type: item.media_type,
       expires_at: item.expires_at
@@ -112,7 +112,10 @@ function cacheBatchResult(
     updateExistingNodeCaches(queryClient, spaceId, item.node_id, (current) => ({
       ...current,
       detected_media_type: mediaType,
-      preview_available: item.status === "ready"
+      preview_available: item.status === "ready",
+      file_preview_kind: item.status === "ready"
+        ? "image"
+        : mediaType === "application/pdf" ? "pdf" : undefined
     }));
   }
 }

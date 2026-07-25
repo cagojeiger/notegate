@@ -1,8 +1,10 @@
+import { Download } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { nodeIcon } from "../nodes/nodeDisplay";
 
 import type { NodeSummary, RestNode, Space } from "../../api/types";
 import { MAX_EDITOR_GROUPS, type EditorPresentation } from "../../shared/model/workbenchLayout";
+import { IconButton } from "../../shared/ui";
 import type { EditorGroup } from "../../stores/uiStore";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EmptyEditor } from "./EmptyEditor";
@@ -65,6 +67,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
               onCreateFolder={onCreateFolder}
               onCreateText={onCreateText}
               onFileSelected={onFileSelected}
+              onDownloadFile={onDownloadFile}
               onRenameNode={onRenameNode}
               onMoveNode={onMoveNode}
               onDeleteNode={onDeleteNode}
@@ -106,7 +109,7 @@ function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visib
   return { start, end: start + count };
 }
 
-function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (!node) {
     return (
       <>
@@ -130,6 +133,7 @@ function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpa
           onSetMode={onSetMode}
           onOpenNodeInNewGroup={onOpenNodeInNewGroup}
           onOpenMarkdownLink={onOpenMarkdownLink}
+          onDownloadFile={onDownloadFile}
           onRenameNode={onRenameNode}
           onMoveNode={onMoveNode}
           onDeleteNode={onDeleteNode}
@@ -140,7 +144,7 @@ function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpa
   );
 }
 
-function NodeGroupContent({ active, groupId, node, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function NodeGroupContent({ active, groupId, node, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (node.kind === "text") {
     return <TextEditorView active={active} groupId={groupId} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onOpenMarkdownLink={onOpenMarkdownLink} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
   }
@@ -154,7 +158,16 @@ function NodeGroupContent({ active, groupId, node, mode, canWriteActiveSpace, ca
         canClose={canClose}
         onClose={onClose}
         onContextMenu={(event) => onHeaderContextMenu(node, event)}
-        actions={<NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />}
+        actions={(
+          <>
+            {node.kind === "file" ? (
+              <IconButton label="Download" size="sm" onClick={() => onDownloadFile(node)}>
+                <Download size={15} />
+              </IconButton>
+            ) : null}
+            <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />
+          </>
+        )}
       />
       {node.kind === "file" ? <FileDetailView node={node} /> : <FolderDetailView node={node} />}
     </>

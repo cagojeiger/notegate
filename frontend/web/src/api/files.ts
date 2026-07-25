@@ -4,6 +4,7 @@ import type {
   BatchFilePreviewResponse,
   BeginFileUploadResponse,
   CompletedFileUploadPart,
+  FilePreviewKind,
   FilePreviewUrlResponse,
   FileResponse,
   PreparedFileUploadPart
@@ -111,8 +112,14 @@ export function abortFileUpload(client: ApiClient, spaceId: string, uploadId: st
   return client.delete<void>(`/api/v1/spaces/${spaceId}/file-uploads/${uploadId}`);
 }
 
-export function getFilePreviewUrl(client: ApiClient, spaceId: string, nodeId: string): Promise<FilePreviewUrlResponse> {
-  return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/preview-url`);
+export function getFilePreviewUrl(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  kind: FilePreviewKind = "image"
+): Promise<FilePreviewUrlResponse> {
+  const suffix = kind === "pdf" ? "pdf-preview-url" : "preview-url";
+  return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/${suffix}`);
 }
 
 export function batchResolveFilePreviews(

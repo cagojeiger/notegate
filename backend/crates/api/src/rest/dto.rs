@@ -144,6 +144,8 @@ mod tests {
     use notegate_service::files::{FileChangeEvent, FileStats, NodeView, TextStats};
     use serde_json::json;
 
+    use crate::file_preview::FilePreviewKind;
+
     use super::*;
 
     fn base_node(kind: NodeKind) -> Node {
@@ -209,6 +211,8 @@ mod tests {
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
         assert!(out.encryption_metadata.is_none());
+        assert!(out.preview_available.is_none());
+        assert!(out.file_preview_kind.is_none());
     }
 
     #[test]
@@ -225,6 +229,8 @@ mod tests {
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
         assert!(out.encryption_metadata.is_none());
+        assert!(out.preview_available.is_none());
+        assert!(out.file_preview_kind.is_none());
     }
 
     #[test]
@@ -240,6 +246,7 @@ mod tests {
         assert_eq!(out.media_type, Some("image/png".to_owned()));
         assert_eq!(out.detected_media_type, Some("image/png".to_owned()));
         assert_eq!(out.preview_available, Some(false));
+        assert_eq!(out.file_preview_kind, None);
         assert_eq!(out.original_filename, Some("photo.png".to_owned()));
         assert_eq!(out.encryption_mode, Some("client".to_owned()));
         assert_eq!(out.encryption_metadata, Some(json!({"iv": "abc"})));
@@ -259,6 +266,7 @@ mod tests {
         assert!(out.encryption_metadata.is_none());
         assert_eq!(out.encryption_mode, Some("none".to_owned()));
         assert_eq!(out.preview_available, Some(true));
+        assert_eq!(out.file_preview_kind, Some(FilePreviewKind::Image));
     }
 
     #[test]
@@ -272,6 +280,7 @@ mod tests {
         let out = NodeOut::from_view(&view, &HashMap::new());
 
         assert_eq!(out.preview_available, Some(false));
+        assert_eq!(out.file_preview_kind, None);
     }
 
     #[test]
@@ -287,6 +296,22 @@ mod tests {
 
         assert_eq!(out.detected_media_type, None);
         assert_eq!(out.preview_available, Some(false));
+        assert_eq!(out.file_preview_kind, None);
+    }
+
+    #[test]
+    fn node_out_exposes_pdf_preview_kind_without_image_preview() {
+        let mut view = base_view(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.media_type = "application/pdf".to_owned();
+        stats.detected_media_type = Some("application/pdf".to_owned());
+        view.file = Some(stats);
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert_eq!(out.preview_available, Some(false));
+        assert_eq!(out.file_preview_kind, Some(FilePreviewKind::Pdf));
     }
 
     #[test]
