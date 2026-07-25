@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { batchResolveFilePreviews, getFilePreviewUrl } from "../../api/files";
 import { ApiError } from "../../api/errors";
+import { getNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import {
@@ -23,6 +24,10 @@ vi.mock("../../api/files", () => ({
   batchResolveFilePreviews: vi.fn(),
   filePreviewStaleTime: vi.fn(() => 60_000),
   getFilePreviewUrl: vi.fn()
+}));
+
+vi.mock("../../api/nodes", () => ({
+  getNode: vi.fn()
 }));
 
 const sourceNode: RestNode = {
@@ -133,6 +138,7 @@ describe("useMarkdownImageLoader", () => {
 describe("useFilePreviewUrl", () => {
   beforeEach(() => {
     vi.mocked(getFilePreviewUrl).mockReset();
+    vi.mocked(getNode).mockReset();
   });
 
   it("patches node collections without refetching after legacy preview metadata is discovered", async () => {
@@ -241,6 +247,11 @@ describe("useFilePreviewUrl", () => {
       file_preview_kind: "pdf"
     });
     vi.mocked(getFilePreviewUrl).mockRejectedValue(new ApiError("not previewable", 404));
+    vi.mocked(getNode).mockResolvedValue({
+      ...pdfNode,
+      preview_available: false,
+      file_preview_kind: undefined
+    });
 
     const { result } = renderHook(() => useFilePreviewUrl(pdfNode), {
       wrapper: createQueryWrapper(queryClient)
@@ -254,6 +265,42 @@ describe("useFilePreviewUrl", () => {
       preview_available: false,
       file_preview_kind: undefined
     });
+  });
+
+  it("refreshes the node after a declared PDF is detected as an image", async () => {
+    const queryClient = createQueryClient();
+    const declaredPdf = fileNode({
+      name: "document.pdf",
+      media_type: "application/pdf",
+      detected_media_type: undefined,
+      preview_available: undefined,
+      file_preview_kind: undefined
+    });
+    const detectedImage = {
+      ...declaredPdf,
+      detected_media_type: "image/png",
+      preview_available: true,
+      file_preview_kind: "image" as const
+    };
+    vi.mocked(getFilePreviewUrl).mockRejectedValue(new ApiError("not a PDF", 404));
+    vi.mocked(getNode).mockResolvedValue(detectedImage);
+
+    const { result } = renderHook(() => useFilePreviewUrl(declaredPdf), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(getNode).toHaveBeenCalledWith(mockClient, "space-1", "file-1");
+    const refreshedNode = queryClient.getQueryData<RestNode>(
+      queryKeys.node("space-1", "file-1")
+    );
+    expect(refreshedNode).toMatchObject({
+      detected_media_type: "image/png",
+      preview_available: true,
+      file_preview_kind: "image"
+    });
+    expect(filePreviewKindForNode(refreshedNode!)).toBe("image");
   });
 });
 

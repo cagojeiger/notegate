@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
+import type { PDFPageProxy } from "pdfjs-dist";
 
 import { IconButton } from "../../shared/ui";
 
@@ -14,6 +15,8 @@ const PAGE_HORIZONTAL_PADDING = 32;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.25;
+const MAX_CANVAS_PIXELS = 16 * 1024 * 1024;
+const MAX_CANVAS_DIMENSION = 8192;
 const PDF_DEVICE_PIXEL_RATIO = typeof window === "undefined"
   ? 1
   : Math.min(window.devicePixelRatio || 1, 2);
@@ -89,33 +92,36 @@ export function PdfPreview({
       role="region"
       aria-label={`${name} PDF preview`}
     >
-      <Document
-        className="min-h-0 flex-1 overflow-auto bg-bg p-4 sm:p-6"
-        file={url}
-        options={PDF_LOAD_OPTIONS}
-        loading={<PdfStatus>Loading PDF…</PdfStatus>}
-        error={<PdfStatus>PDF cannot be displayed</PdfStatus>}
-        onLoadSuccess={({ numPages }) => {
-          setPageCount(numPages);
-          setPageNumber(1);
-          setPageInput("1");
-        }}
-        onLoadError={reportError}
-        onSourceError={reportError}
+      <div
+        className="min-h-0 flex-1 overflow-auto bg-bg p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 sm:p-6"
+        role="region"
+        aria-label={`${name} PDF pages`}
+        tabIndex={0}
       >
-        {pageWidth ? (
-          <Page
-            className="mx-auto w-fit overflow-hidden rounded-sm border border-seam bg-white shadow-md"
-            pageNumber={pageNumber}
-            width={pageWidth}
-            devicePixelRatio={PDF_DEVICE_PIXEL_RATIO}
-            renderAnnotationLayer={false}
-            renderTextLayer={false}
-            loading={<PdfStatus>Loading page…</PdfStatus>}
-            onRenderError={reportError}
-          />
-        ) : null}
-      </Document>
+        <Document
+          className="min-h-full"
+          file={url}
+          options={PDF_LOAD_OPTIONS}
+          loading={<PdfStatus>Loading PDF…</PdfStatus>}
+          error={<PdfStatus>PDF cannot be displayed</PdfStatus>}
+          onLoadSuccess={({ numPages }) => {
+            setPageCount(numPages);
+            setPageNumber(1);
+            setPageInput("1");
+          }}
+          onLoadError={reportError}
+          onSourceError={reportError}
+        >
+          {pageWidth ? (
+            <BoundedPdfPage
+              key={pageNumber}
+              pageNumber={pageNumber}
+              requestedWidth={pageWidth}
+              onError={reportError}
+            />
+          ) : null}
+        </Document>
+      </div>
       <div className="flex h-12 shrink-0 items-center justify-center gap-2 border-t border-seam bg-panel px-2">
         <div className="flex items-center gap-1 rounded-lg border border-seam bg-[var(--ng-editor)] px-1 py-0.5 shadow-sm">
           <IconButton
@@ -190,6 +196,56 @@ export function PdfPreview({
       </div>
     </div>
   );
+}
+
+function BoundedPdfPage({
+  pageNumber,
+  requestedWidth,
+  onError
+}: {
+  pageNumber: number;
+  requestedWidth: number;
+  onError: () => void;
+}) {
+  const [pageSize, setPageSize] = useState<{ width: number; height: number } | null>(null);
+  const pageWidth = pageSize
+    ? boundedPageWidth(requestedWidth, pageSize.width, pageSize.height)
+    : undefined;
+
+  if (pageWidth === null) {
+    return <PdfStatus>PDF page is too large to display</PdfStatus>;
+  }
+
+  return (
+    <Page
+      className="mx-auto w-fit overflow-hidden rounded-sm border border-seam bg-white shadow-md"
+      pageNumber={pageNumber}
+      width={pageWidth}
+      devicePixelRatio={PDF_DEVICE_PIXEL_RATIO}
+      renderMode={pageSize ? "canvas" : "none"}
+      renderAnnotationLayer={false}
+      renderTextLayer={false}
+      loading={<PdfStatus>Loading page…</PdfStatus>}
+      onLoadSuccess={(page) => setPageSize(pageViewportSize(page))}
+      onLoadError={onError}
+      onRenderError={onError}
+    />
+  );
+}
+
+function pageViewportSize(page: PDFPageProxy) {
+  const viewport = page.getViewport({ scale: 1 });
+  return { width: viewport.width, height: viewport.height };
+}
+
+function boundedPageWidth(requestedWidth: number, sourceWidth: number, sourceHeight: number) {
+  const aspectRatio = sourceHeight / sourceWidth;
+  const pixelRatio = PDF_DEVICE_PIXEL_RATIO;
+  const maxByArea = Math.sqrt(MAX_CANVAS_PIXELS / (aspectRatio * pixelRatio * pixelRatio));
+  const maxByWidth = MAX_CANVAS_DIMENSION / pixelRatio;
+  const maxByHeight = MAX_CANVAS_DIMENSION / (aspectRatio * pixelRatio);
+  const width = Math.min(requestedWidth, maxByArea, maxByWidth, maxByHeight);
+  return width >= 1 ? width : null;
 }
 
 function PdfStatus({ children }: { children: string }) {

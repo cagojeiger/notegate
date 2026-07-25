@@ -7,8 +7,16 @@ import { PdfPreview } from "./PdfPreview";
 const pdfMock = vi.hoisted(() => ({
   loadSuccess: undefined as undefined | ((document: { numPages: number }) => void),
   loadError: undefined as undefined | (() => void),
+  pageLoadSuccess: undefined as undefined | ((page: {
+    getViewport: () => { width: number; height: number };
+  }) => void),
   options: undefined as undefined | { disableRange?: boolean; disableStream?: boolean },
-  page: undefined as undefined | { devicePixelRatio?: number; pageNumber: number; width?: number }
+  page: undefined as undefined | {
+    devicePixelRatio?: number;
+    pageNumber: number;
+    renderMode?: "canvas" | "custom" | "none";
+    width?: number;
+  }
 }));
 
 vi.mock("react-pdf", () => ({
@@ -29,8 +37,21 @@ vi.mock("react-pdf", () => ({
     pdfMock.options = options;
     return <div>{children}</div>;
   },
-  Page: ({ devicePixelRatio, pageNumber, width }: { devicePixelRatio?: number; pageNumber: number; width?: number }) => {
-    pdfMock.page = { devicePixelRatio, pageNumber, width };
+  Page: ({
+    devicePixelRatio,
+    onLoadSuccess,
+    pageNumber,
+    renderMode,
+    width
+  }: {
+    devicePixelRatio?: number;
+    onLoadSuccess: (page: { getViewport: () => { width: number; height: number } }) => void;
+    pageNumber: number;
+    renderMode?: "canvas" | "custom" | "none";
+    width?: number;
+  }) => {
+    pdfMock.pageLoadSuccess = onLoadSuccess;
+    pdfMock.page = { devicePixelRatio, pageNumber, renderMode, width };
     return <div>Rendered page {pageNumber}</div>;
   }
 }));
@@ -53,6 +74,7 @@ describe("PdfPreview", () => {
   beforeEach(() => {
     pdfMock.loadSuccess = undefined;
     pdfMock.loadError = undefined;
+    pdfMock.pageLoadSuccess = undefined;
     pdfMock.options = undefined;
     pdfMock.page = undefined;
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
@@ -61,10 +83,11 @@ describe("PdfPreview", () => {
   it("renders one page and navigates within the document", () => {
     render(<PdfPreview url="https://storage.example/document.pdf" name="document.pdf" onError={vi.fn()} />);
 
-    act(() => pdfMock.loadSuccess?.({ numPages: 3 }));
+    loadPdf(3);
 
     expect(screen.getByRole("spinbutton", { name: "Page number" })).toHaveValue(1);
     expect(screen.getByText("/ 3")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "document.pdf PDF pages" })).toHaveAttribute("tabindex", "0");
     expect(pdfMock.options).toEqual({ disableRange: true, disableStream: true });
     expect(pdfMock.page?.devicePixelRatio).toBeLessThanOrEqual(2);
     expect(screen.getByText("Rendered page 1")).toBeInTheDocument();
@@ -78,7 +101,7 @@ describe("PdfPreview", () => {
 
   it("supports direct page entry and clamps it to the document", () => {
     render(<PdfPreview url="https://storage.example/document.pdf" name="document.pdf" onError={vi.fn()} />);
-    act(() => pdfMock.loadSuccess?.({ numPages: 12 }));
+    loadPdf(12);
 
     const pageInput = screen.getByRole("spinbutton", { name: "Page number" });
     fireEvent.change(pageInput, { target: { value: "7" } });
@@ -94,7 +117,7 @@ describe("PdfPreview", () => {
 
   it("zooms from the fitted page width and resets to fit", () => {
     render(<PdfPreview url="https://storage.example/document.pdf" name="document.pdf" onError={vi.fn()} />);
-    act(() => pdfMock.loadSuccess?.({ numPages: 2 }));
+    loadPdf(2);
 
     expect(pdfMock.page?.width).toBe(768);
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
@@ -119,6 +142,27 @@ describe("PdfPreview", () => {
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
   });
 
+  it("bounds the canvas dimensions for pages with extreme aspect ratios", () => {
+    render(<PdfPreview url="https://storage.example/document.pdf" name="document.pdf" onError={vi.fn()} />);
+    loadPdf(1, 100, 100_000);
+
+    const width = pdfMock.page?.width ?? 0;
+    const pixelRatio = pdfMock.page?.devicePixelRatio ?? 1;
+    const height = width * 1_000;
+
+    expect(pdfMock.page?.renderMode).toBe("canvas");
+    expect(width * pixelRatio).toBeLessThanOrEqual(8192);
+    expect(height * pixelRatio).toBeLessThanOrEqual(8192);
+    expect(width * height * pixelRatio * pixelRatio).toBeLessThanOrEqual(16 * 1024 * 1024);
+  });
+
+  it("does not render a canvas when no safe page width is available", () => {
+    render(<PdfPreview url="https://storage.example/document.pdf" name="document.pdf" onError={vi.fn()} />);
+    loadPdf(1, 1, 100_000);
+
+    expect(screen.getByText("PDF page is too large to display")).toBeInTheDocument();
+  });
+
   it("reports document errors once", () => {
     const onError = vi.fn();
     render(<PdfPreview url="https://storage.example/document.pdf" name="document.pdf" onError={onError} />);
@@ -131,3 +175,10 @@ describe("PdfPreview", () => {
     expect(onError).toHaveBeenCalledTimes(1);
   });
 });
+
+function loadPdf(numPages: number, pageWidth = 612, pageHeight = 792) {
+  act(() => pdfMock.loadSuccess?.({ numPages }));
+  act(() => pdfMock.pageLoadSuccess?.({
+    getViewport: () => ({ width: pageWidth, height: pageHeight })
+  }));
+}

@@ -204,7 +204,7 @@ async fn preview_response(
         Err(error) => error.detected_media_type().map(str::to_owned),
     };
     if let Some(media_type) = detected_media_type {
-        persist_detected_media_type(&state, caller.account_id(), space_id, node_id, &media_type)
+        persist_detected_media_type(state, caller.account_id(), space_id, node_id, &media_type)
             .await;
     }
     let preview = prepared

@@ -6,6 +6,7 @@ import type { ApiClient } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { updateNodeCaches } from "../../api/nodeCache";
+import { getNode } from "../../api/nodes";
 import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import type { BatchFilePreviewItem, FilePreviewKind, RestNode } from "../../api/types";
@@ -75,7 +76,7 @@ function filePreviewQueryOptions(
         return preview;
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
-          refreshDiscoveredPreviewState(queryClient, node, null, null);
+          await refreshPreviewNodeAfterNotFound(client, queryClient, node);
         }
         throw error;
       }
@@ -87,6 +88,19 @@ function filePreviewQueryOptions(
       query.state.dataUpdatedAt
     )
   });
+}
+
+async function refreshPreviewNodeAfterNotFound(
+  client: ApiClient,
+  queryClient: QueryClient,
+  node: RestNode
+) {
+  const refreshedNode = await queryClient.fetchQuery({
+    queryKey: queryKeys.node(node.space_id, node.id),
+    queryFn: () => getNode(client, node.space_id, node.id),
+    staleTime: 0
+  }).catch(() => null);
+  if (refreshedNode) updateNodeCaches(queryClient, refreshedNode, () => refreshedNode);
 }
 
 function markdownPreviewQueryOptions(
