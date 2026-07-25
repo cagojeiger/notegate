@@ -33,6 +33,7 @@ const imageNode: RestNode = {
   path: "/tall-preview.png",
   sort_order: 0,
   metadata: {},
+  search_enabled: true,
   has_children: false,
   byte_len: 1024,
   media_type: "image/png",
