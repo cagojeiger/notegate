@@ -134,6 +134,11 @@ describe("SpaceLibrary", () => {
       spaceId: "private",
       navigation_pinned: true
     });
+    expect(screen.getByRole("button", { name: "Inspect Daily" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByTitle("Search default off"));
+    expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("keeps access and new-item defaults in the inspector", async () => {

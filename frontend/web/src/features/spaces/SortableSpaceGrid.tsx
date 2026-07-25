@@ -159,18 +159,25 @@ function SortableSpaceCard({
       <Card
         padding="none"
         className={[
-          "h-full transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/45",
+          "relative h-full transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/45",
           selected
-            ? "relative z-10 bg-[var(--ng-selection)] outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]"
+            ? "z-10 bg-[var(--ng-selection)] outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]"
             : "hover:border-border-strong",
           isDragging ? "shadow-[var(--ng-focus-shadow)]" : ""
         ].join(" ")}
       >
+        <button
+          type="button"
+          className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] outline-none"
+          onClick={onSelect}
+          aria-pressed={selected}
+          aria-label={`Inspect ${space.name}`}
+        />
         <div className="flex items-center gap-2 px-3 pt-3">
           <span
             ref={setActivatorNodeRef}
             className={[
-              "grid size-8 touch-none place-items-center rounded-lg text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
+              "relative z-10 grid size-8 touch-none place-items-center rounded-lg text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
               reorderPending ? "cursor-not-allowed opacity-40" : "cursor-grab active:cursor-grabbing"
             ].join(" ")}
             {...attributes}
@@ -188,32 +195,31 @@ function SortableSpaceCard({
           >
             {space.name.slice(0, 1).toUpperCase()}
           </span>
-          <button
-            type="button"
-            className="min-w-0 flex-1 py-1 text-left outline-none"
-            onClick={onSelect}
-            aria-pressed={selected}
-            aria-label={`Inspect ${space.name}`}
-          >
+          <div className="min-w-0 flex-1 py-1 text-left">
             <span className="block truncate font-semibold">{space.name}</span>
             <span className="mt-0.5 block truncate text-xs text-muted">
               {usage
                 ? `${usage.items.used.toLocaleString()} items · ${formatBytes(usage.text_bytes.used + usage.file_bytes.used)}`
                 : "Usage unavailable"}
             </span>
-          </button>
-          <IconButton
-            label={`${space.navigation_pinned ? "Unpin" : "Pin"} ${space.name} ${space.navigation_pinned ? "from" : "to"} navigation`}
-            size="sm"
-            pressed={space.navigation_pinned}
-            disabled={updatePending}
-            onClick={onToggleNavigationPin}
-          >
-            <Pin size={14} />
-          </IconButton>
+          </div>
+          <span className="relative z-10">
+            <IconButton
+              label={`${space.navigation_pinned ? "Unpin" : "Pin"} ${space.name} ${space.navigation_pinned ? "from" : "to"} navigation`}
+              size="sm"
+              pressed={space.navigation_pinned}
+              disabled={updatePending}
+              onClick={onToggleNavigationPin}
+            >
+              <Pin size={14} />
+            </IconButton>
+          </span>
         </div>
 
-        <div className="flex items-center gap-1 px-4 pb-3 pt-2">
+        <div
+          className="relative z-10 flex cursor-pointer items-center gap-1 px-4 pb-3 pt-2"
+          onClick={onSelect}
+        >
           <StatusItem
             description={`Search default ${space.default_search_enabled ? "on" : "off"}`}
             active={space.default_search_enabled}
@@ -237,10 +243,10 @@ function SortableSpaceCard({
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-seam px-3 py-2">
-          <Button size="sm" variant="ghost" onClick={onOpen}>
+          <Button size="sm" variant="ghost" className="relative z-10" onClick={onOpen}>
             Open
           </Button>
-          <div className="flex items-center gap-1">
+          <div className="relative z-10 flex items-center gap-1">
             <IconButton
               label={`Move ${space.name} earlier`}
               size="sm"
