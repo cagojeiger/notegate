@@ -58,6 +58,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await expect.poll(() => cardNames(grid)).toEqual(["Research", "Archive", "Daily", "Private Journal"]);
 
   const keyboardHandle = page.getByRole("button", { name: "Reorder Research" });
+  await expect(keyboardHandle).toBeEnabled();
   await keyboardHandle.focus();
   await keyboardHandle.press("Space");
   await keyboardHandle.press("ArrowRight");
