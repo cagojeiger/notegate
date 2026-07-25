@@ -10,7 +10,8 @@ type AuxiliarySidebarProps = {
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   textEncryptionAvailable: boolean;
-  settingsPending: boolean;
+  searchPolicyPending: boolean;
+  textEncryptionPending: boolean;
   onReplaceMetadata: () => void;
   onSearchEnabledChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
@@ -21,7 +22,8 @@ export function AuxiliarySidebar({
   canWriteActiveSpace,
   canManageActiveSpace,
   textEncryptionAvailable,
-  settingsPending,
+  searchPolicyPending,
+  textEncryptionPending,
   onReplaceMetadata,
   onSearchEnabledChange,
   onTextEncryptionEnabledChange
@@ -63,7 +65,7 @@ export function AuxiliarySidebar({
                   disabled={
                     !canManageActiveSpace
                     || activeNode.parent_id === null
-                    || settingsPending
+                    || searchPolicyPending
                   }
                   onChange={onSearchEnabledChange}
                 />
@@ -75,7 +77,7 @@ export function AuxiliarySidebar({
                     checked={serverEncrypted}
                     disabled={
                       !canManageActiveSpace
-                      || settingsPending
+                      || textEncryptionPending
                       || (!textEncryptionAvailable && !serverEncrypted)
                     }
                     onChange={onTextEncryptionEnabledChange}

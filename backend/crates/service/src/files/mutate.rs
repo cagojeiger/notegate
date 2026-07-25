@@ -808,13 +808,6 @@ impl FilesService {
     ) -> ServiceResult<NodeView> {
         self.authorize_space_owner_user(caller_kind, caller_account_id, space_id)
             .await?;
-        let node = self.load_node(space_id, command.node_id).await?;
-        if node.parent_id.is_none() {
-            return Err(ServiceError::Conflict(
-                "search policy cannot be changed on the root node".to_owned(),
-            ));
-        }
-
         let updated = self
             .store
             .update_node_search_policy(space_id, &command, caller_account_id)
@@ -831,13 +824,6 @@ impl FilesService {
     ) -> ServiceResult<NodeView> {
         self.authorize_space_owner_user(caller_kind, caller_account_id, space_id)
             .await?;
-        let node = self.load_node(space_id, command.node_id).await?;
-        if node.kind != NodeKind::Text {
-            return Err(ServiceError::InvalidInput(
-                "text encryption applies only to text nodes".to_owned(),
-            ));
-        }
-
         let updated = self
             .store
             .update_text_encryption(space_id, &command, caller_account_id)

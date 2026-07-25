@@ -75,6 +75,7 @@ describe("workbench node mutations", () => {
       text_encryption_enabled: true
     };
     vi.mocked(updateTextEncryption).mockResolvedValue(updated);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const onUpdated = vi.fn();
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -95,6 +96,10 @@ describe("workbench node mutations", () => {
       true
     );
     expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.text(current.space_id, current.id),
+      exact: true
+    });
     expect(onUpdated).toHaveBeenCalledWith(updated);
   });
 

@@ -16,6 +16,7 @@ import {
   invalidateFolderSubtree,
   invalidateNodeLists,
   invalidateRecentNodes,
+  invalidateText,
   removeDeletedNodeQueries,
   removeMarkdownImagePreviewQuery
 } from "../../api/queryInvalidation";
@@ -65,6 +66,7 @@ export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) =>
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
+      invalidateText(queryClient, node.space_id, node.id);
       onUpdated(node);
     }
   });

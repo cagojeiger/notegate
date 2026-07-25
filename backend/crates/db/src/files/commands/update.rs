@@ -20,6 +20,24 @@ use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::MetadataMutationKind;
 
+async fn lock_live_node(
+    tx: &mut Transaction<'_, Postgres>,
+    space_id: Uuid,
+    node_id: Uuid,
+) -> Result<NodeRow> {
+    sqlx::query_as::<_, NodeRow>(&format!(
+        "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+         FOR UPDATE"
+    ))
+    .bind(space_id)
+    .bind(node_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::not_found("node not found"))
+}
+
 pub async fn update_node(
     pool: &PgPool,
     space_id: Uuid,
@@ -30,17 +48,7 @@ pub async fn update_node(
 
     checks::lock_space(&mut tx, space_id).await?;
 
-    let current = sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(command.node_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
     let node_kind = current.kind.clone();
     let parent_id = current.parent_id;
 
@@ -118,17 +126,7 @@ pub async fn update_node_search_policy(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_space(&mut tx, space_id).await?;
-    let current = sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(command.node_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
 
     if current.parent_id.is_none() {
         return Err(Error::conflict(
@@ -187,17 +185,7 @@ pub async fn update_text_encryption(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
-    let current = sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(command.node_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
     if current.kind != "text" {
         return Err(Error::validation(
             "text encryption applies only to text nodes",
@@ -335,17 +323,7 @@ pub async fn replace_node_metadata(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_space(&mut tx, space_id).await?;
-    let current = sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(node_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
+    let current = lock_live_node(&mut tx, space_id, node_id).await?;
     let node_kind = current.kind.clone();
     if current.metadata == *metadata {
         tx.commit().await.map_err(map_sqlx_error)?;

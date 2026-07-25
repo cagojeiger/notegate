@@ -213,7 +213,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   canWriteActiveSpace={workbench.canWriteActiveSpace}
                   canManageActiveSpace={workbench.canManageActiveSpace}
                   textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}
-                  settingsPending={actions.nodeSettingsPending}
+                  searchPolicyPending={actions.nodeSearchPolicyPending}
+                  textEncryptionPending={actions.textEncryptionPending}
                   onReplaceMetadata={actions.promptReplaceMetadata}
                   onSearchEnabledChange={actions.setNodeSearchEnabled}
                   onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}

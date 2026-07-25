@@ -13,7 +13,8 @@ describe("AuxiliarySidebar", () => {
         canWriteActiveSpace={false}
         canManageActiveSpace={false}
         textEncryptionAvailable={false}
-        settingsPending={false}
+        searchPolicyPending={false}
+        textEncryptionPending={false}
         onReplaceMetadata={vi.fn()}
         onSearchEnabledChange={vi.fn()}
         onTextEncryptionEnabledChange={vi.fn()}
@@ -34,7 +35,8 @@ describe("AuxiliarySidebar", () => {
         canWriteActiveSpace
         canManageActiveSpace
         textEncryptionAvailable
-        settingsPending={false}
+        searchPolicyPending={false}
+        textEncryptionPending={false}
         onReplaceMetadata={vi.fn()}
         onSearchEnabledChange={onSearchEnabledChange}
         onTextEncryptionEnabledChange={onTextEncryptionEnabledChange}
@@ -67,7 +69,8 @@ describe("AuxiliarySidebar", () => {
         canWriteActiveSpace
         canManageActiveSpace
         textEncryptionAvailable={false}
-        settingsPending={false}
+        searchPolicyPending={false}
+        textEncryptionPending={false}
         onReplaceMetadata={vi.fn()}
         onSearchEnabledChange={vi.fn()}
         onTextEncryptionEnabledChange={onTextEncryptionEnabledChange}
@@ -88,7 +91,8 @@ describe("AuxiliarySidebar", () => {
         canWriteActiveSpace
         canManageActiveSpace={false}
         textEncryptionAvailable
-        settingsPending={false}
+        searchPolicyPending={false}
+        textEncryptionPending={false}
         onReplaceMetadata={vi.fn()}
         onSearchEnabledChange={vi.fn()}
         onTextEncryptionEnabledChange={vi.fn()}
@@ -98,6 +102,25 @@ describe("AuxiliarySidebar", () => {
     expect(screen.getByRole("button", { name: "Edit metadata" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Encrypt stored text" })).toBeDisabled();
+  });
+
+  it("tracks search and encryption requests independently", () => {
+    render(
+      <AuxiliarySidebar
+        activeNode={textNode}
+        canWriteActiveSpace
+        canManageActiveSpace
+        textEncryptionAvailable
+        searchPolicyPending
+        textEncryptionPending={false}
+        onReplaceMetadata={vi.fn()}
+        onSearchEnabledChange={vi.fn()}
+        onTextEncryptionEnabledChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Encrypt stored text" })).toBeEnabled();
   });
 });
 

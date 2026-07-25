@@ -278,7 +278,6 @@ export function useWorkbenchNodeActions({
       || !activeNode
       || activeNode.parent_id === null
       || updateNodeSearchPolicyMutation.isPending
-      || updateTextEncryptionMutation.isPending
     ) return;
     updateNodeSearchPolicyMutation.mutate({
       node: activeNode,
@@ -291,7 +290,6 @@ export function useWorkbenchNodeActions({
       !canManageActiveSpace
       || !activeNode
       || activeNode.kind !== "text"
-      || updateNodeSearchPolicyMutation.isPending
       || updateTextEncryptionMutation.isPending
     ) return;
     updateTextEncryptionMutation.mutate({
@@ -334,8 +332,8 @@ export function useWorkbenchNodeActions({
     promptReplaceMetadata,
     setNodeSearchEnabled,
     setTextEncryptionEnabled,
-    nodeSettingsPending:
-      updateNodeSearchPolicyMutation.isPending || updateTextEncryptionMutation.isPending,
+    nodeSearchPolicyPending: updateNodeSearchPolicyMutation.isPending,
+    textEncryptionPending: updateTextEncryptionMutation.isPending,
     downloadFileNode
   };
 }
