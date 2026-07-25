@@ -37,6 +37,14 @@ impl TextAtRestEncryption {
 }
 
 impl TextStorageFormat {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "plain" => Some(Self::Plain),
+            "encrypted" => Some(Self::Encrypted),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Plain => "plain",
@@ -82,7 +90,6 @@ pub struct TextObject {
     pub media_type: String,
     pub encoding: String,
     pub storage_format: TextStorageFormat,
-    pub encryption_enabled: bool,
     pub at_rest_encryption: TextAtRestEncryption,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,

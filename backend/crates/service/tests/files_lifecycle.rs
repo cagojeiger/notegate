@@ -120,8 +120,8 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
             },
         )
         .await?;
-    let immediately_encrypted: (Option<String>, Option<Vec<u8>>, String, bool) = sqlx::query_as(
-        "SELECT content_text, content_ciphertext, at_rest_encryption, encryption_enabled \
+    let immediately_encrypted: (Option<String>, Option<Vec<u8>>, String) = sqlx::query_as(
+        "SELECT content_text, content_ciphertext, at_rest_encryption \
              FROM text_objects WHERE space_id = $1 AND node_id = $2",
     )
     .bind(ws)
@@ -131,19 +131,6 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
     assert!(immediately_encrypted.0.is_none());
     assert!(immediately_encrypted.1.is_some());
     assert_eq!(immediately_encrypted.2, "server");
-    assert!(immediately_encrypted.3);
-    assert!(
-        sqlx::query(
-            "UPDATE text_objects SET encryption_enabled = false \
-             WHERE space_id = $1 AND node_id = $2",
-        )
-        .bind(ws)
-        .bind(node_id)
-        .execute(&db.pool)
-        .await
-        .is_err(),
-        "encryption policy cannot drift from the stored representation"
-    );
 
     sqlx::query("UPDATE users SET tier = 'tier0' WHERE id = $1")
         .bind(owner)
@@ -160,8 +147,8 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
             },
         )
         .await?;
-    let decrypted: (Option<String>, Option<Vec<u8>>, String, bool) = sqlx::query_as(
-        "SELECT content_text, content_ciphertext, at_rest_encryption, encryption_enabled \
+    let decrypted: (Option<String>, Option<Vec<u8>>, String) = sqlx::query_as(
+        "SELECT content_text, content_ciphertext, at_rest_encryption \
          FROM text_objects WHERE space_id = $1 AND node_id = $2",
     )
     .bind(ws)
@@ -171,7 +158,6 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
     assert_eq!(decrypted.0.as_deref(), Some("existing plaintext"));
     assert!(decrypted.1.is_none());
     assert_eq!(decrypted.2, "none");
-    assert!(!decrypted.3);
 
     db.cleanup().await;
     Ok(())
@@ -279,16 +265,14 @@ async fn write_agent_cannot_change_node_settings() -> Result<(), Box<dyn std::er
         .await;
     assert!(matches!(disable, Err(ServiceError::Forbidden(_))));
 
-    let stored: (String, bool) = sqlx::query_as(
-        "SELECT at_rest_encryption, encryption_enabled \
-         FROM text_objects WHERE space_id = $1 AND node_id = $2",
+    let stored: String = sqlx::query_scalar(
+        "SELECT at_rest_encryption FROM text_objects WHERE space_id = $1 AND node_id = $2",
     )
     .bind(ws)
     .bind(node_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(stored.0, "server");
-    assert!(stored.1);
+    assert_eq!(stored, "server");
 
     db.cleanup().await;
     Ok(())
@@ -350,8 +334,8 @@ async fn server_encrypted_text_stays_readable_and_searchable()
         )
         .await?;
 
-    let stored: (Option<String>, Option<Vec<u8>>, String, bool) = sqlx::query_as(
-        "SELECT content_text, content_ciphertext, at_rest_encryption, encryption_enabled \
+    let stored: (Option<String>, Option<Vec<u8>>, String) = sqlx::query_as(
+        "SELECT content_text, content_ciphertext, at_rest_encryption \
          FROM text_objects WHERE space_id = $1 AND node_id = $2",
     )
     .bind(ws)
@@ -361,7 +345,6 @@ async fn server_encrypted_text_stays_readable_and_searchable()
     assert!(stored.0.is_none());
     assert!(stored.1.is_some());
     assert_eq!(stored.2, "server");
-    assert!(stored.3);
 
     let read = files
         .read_text(
@@ -431,16 +414,14 @@ async fn server_encrypted_text_stays_readable_and_searchable()
         )
         .await?;
     assert!(hidden.items.is_empty());
-    let still_encrypted: (String, bool) = sqlx::query_as(
-        "SELECT at_rest_encryption, encryption_enabled \
-         FROM text_objects WHERE space_id = $1 AND node_id = $2",
+    let still_encrypted: String = sqlx::query_scalar(
+        "SELECT at_rest_encryption FROM text_objects WHERE space_id = $1 AND node_id = $2",
     )
     .bind(ws)
     .bind(node_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(still_encrypted.0, "server");
-    assert!(still_encrypted.1);
+    assert_eq!(still_encrypted, "server");
     files
         .update_node_search_policy(
             AccountKind::User,

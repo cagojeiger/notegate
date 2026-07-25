@@ -281,7 +281,6 @@ space_usage_reconcile_executions
   outcome text check ('succeeded','deferred','failed','cancelled')
   error_message text null
   metadata jsonb not null default '{}'
-  search_enabled bool not null default true
 ```
 
 `space_usage_reconcile_executions`는 worker 처리 1회를 append-only로 기록한다. Job은 완료 후 삭제하므로 `job_id`에 FK를 두지 않는다. 실패한 execution만 `error_message`를 가지며, 3개월이 지난 행은 worker가 정리한다.
@@ -337,7 +336,6 @@ text_objects
   storage_format text not null check ('plain','encrypted')
   content_text text null
   encrypted_payload jsonb null
-  encryption_enabled bool not null default false
   at_rest_encryption text not null check ('none','server')
   content_ciphertext bytea null
   content_nonce bytea null
@@ -429,8 +427,8 @@ Text 암호화 정책:
 - MCP `read op=read`, `write op=write/append/patch/edit`, `search op=grep`은 plain Text만 대상으로 한다. 서버 관리 at-rest 암호화는 서버에서 투명하게 복호화한다.
 - plain Text의 `content_sha256`, `byte_len`, `line_count`는 plaintext 기준이다.
 - encrypted Text의 `content_sha256`, `byte_len`은 서버 canonical JSON serialization 기준이고 `line_count=0`이다.
-- `encryption_enabled` 변경과 기존 plain Text 본문 변환은 같은 transaction에서 처리한다.
-- `encryption_enabled=true`와 `at_rest_encryption='server'`는 항상 함께 유지한다.
+- `at_rest_encryption` 변경과 기존 plain Text 본문 변환은 같은 transaction에서 처리한다.
+- `at_rest_encryption`은 서버 관리 암호화의 유일한 Text 저장 상태다.
 
 Node-content invariant:
 

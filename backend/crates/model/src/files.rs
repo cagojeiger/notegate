@@ -284,7 +284,7 @@ pub struct TextStats {
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
-    pub encryption_enabled: bool,
+    pub storage_format: TextStorageFormat,
     pub at_rest_encryption: TextAtRestEncryption,
 }
 

@@ -99,7 +99,6 @@ pub struct TextRow {
     pub media_type: String,
     pub encoding: String,
     pub storage_format: String,
-    pub encryption_enabled: bool,
     pub at_rest_encryption: String,
     pub content_ciphertext: Option<Vec<u8>>,
     pub content_nonce: Option<Vec<u8>>,
@@ -113,15 +112,12 @@ pub struct TextRow {
 
 impl TextRow {
     pub fn into_text(self, crypto: &PiiCrypto) -> Result<TextObject> {
-        let storage_format = match self.storage_format.as_str() {
-            "plain" => TextStorageFormat::Plain,
-            "encrypted" => TextStorageFormat::Encrypted,
-            value => {
-                return Err(Error::internal(format!(
-                    "unknown text storage format: {value}"
-                )));
-            }
-        };
+        let storage_format = TextStorageFormat::parse(&self.storage_format).ok_or_else(|| {
+            Error::internal(format!(
+                "unknown text storage format: {}",
+                self.storage_format
+            ))
+        })?;
         let at_rest_encryption =
             TextAtRestEncryption::parse(&self.at_rest_encryption).ok_or_else(|| {
                 Error::internal(format!(
@@ -164,7 +160,6 @@ impl TextRow {
             media_type: self.media_type,
             encoding: self.encoding,
             storage_format,
-            encryption_enabled: self.encryption_enabled,
             at_rest_encryption,
             created_by_account_id: self.created_by_account_id,
             updated_by_account_id: self.updated_by_account_id,
@@ -183,7 +178,7 @@ pub const NODE_SUMMARY_COLUMNS: &str =
 
 /// Selectable columns of `text_objects`, in [`TextRow`] order.
 pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, encrypted_payload, content_sha256, \
-     byte_len, line_count, media_type, encoding, storage_format, encryption_enabled, at_rest_encryption, \
+     byte_len, line_count, media_type, encoding, storage_format, at_rest_encryption, \
      content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
      created_by_account_id, updated_by_account_id, created_at, updated_at";
 

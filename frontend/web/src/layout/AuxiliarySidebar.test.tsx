@@ -44,7 +44,7 @@ describe("AuxiliarySidebar", () => {
     );
 
     const search = screen.getByRole("switch", { name: "Include in search" });
-    const encryption = screen.getByRole("switch", { name: "Encrypt stored text" });
+    const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
     expect(search).toBeChecked();
     expect(encryption).not.toBeChecked();
 
@@ -63,7 +63,6 @@ describe("AuxiliarySidebar", () => {
       <AuxiliarySidebar
         activeNode={{
           ...textNode,
-          text_encryption_enabled: true,
           text_at_rest_encryption: "server"
         }}
         canWriteActiveSpace
@@ -77,7 +76,7 @@ describe("AuxiliarySidebar", () => {
       />
     );
 
-    const encryption = screen.getByRole("switch", { name: "Encrypt stored text" });
+    const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
     expect(encryption).toBeChecked();
     expect(encryption).toBeEnabled();
     await user.click(encryption);
@@ -101,7 +100,7 @@ describe("AuxiliarySidebar", () => {
 
     expect(screen.getByRole("button", { name: "Edit metadata" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Encrypt stored text" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeDisabled();
   });
 
   it("tracks search and encryption requests independently", () => {
@@ -120,7 +119,31 @@ describe("AuxiliarySidebar", () => {
     );
 
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Encrypt stored text" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
+  });
+
+  it("shows client-encrypted text as encrypted without offering a server rewrite", () => {
+    render(
+      <AuxiliarySidebar
+        activeNode={{
+          ...textNode,
+          text_storage_format: "encrypted"
+        }}
+        canWriteActiveSpace
+        canManageActiveSpace
+        textEncryptionAvailable
+        searchPolicyPending={false}
+        textEncryptionPending={false}
+        onReplaceMetadata={vi.fn()}
+        onSearchEnabledChange={vi.fn()}
+        onTextEncryptionEnabledChange={vi.fn()}
+      />
+    );
+
+    const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
+    expect(encryption).toBeChecked();
+    expect(encryption).toBeDisabled();
+    expect(screen.getByText("Client")).toBeInTheDocument();
   });
 });
 
@@ -135,7 +158,7 @@ const textNode: RestNode = {
   metadata: {},
   search_enabled: true,
   has_children: false,
-  text_encryption_enabled: false,
+  text_storage_format: "plain",
   text_at_rest_encryption: "none",
   created_by: { id: "user-1", kind: "user", display_name: "User" },
   updated_by: { id: "user-1", kind: "user", display_name: "User" },

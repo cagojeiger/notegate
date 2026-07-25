@@ -72,7 +72,7 @@ describe("workbench node mutations", () => {
     const current = node("text-1", "space-1", "text");
     const updated = {
       ...current,
-      text_encryption_enabled: true
+      text_at_rest_encryption: "server" as const
     };
     vi.mocked(updateTextEncryption).mockResolvedValue(updated);
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");

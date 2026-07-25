@@ -71,7 +71,7 @@ export type RestNode = NodeSummary & {
   metadata: Record<string, unknown>;
   search_enabled: boolean;
   content_sha256?: string;
-  text_encryption_enabled?: boolean;
+  text_storage_format?: "plain" | "encrypted";
   text_at_rest_encryption?: "none" | "server";
   media_type?: string;
   detected_media_type?: string;

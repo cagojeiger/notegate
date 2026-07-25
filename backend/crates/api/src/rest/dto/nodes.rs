@@ -33,7 +33,7 @@ pub struct NodeOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_encryption_enabled: Option<bool>,
+    pub text_storage_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_at_rest_encryption: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,7 +79,10 @@ impl NodeOut {
                 .map(|text| text.byte_len)
                 .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
             line_count: view.text.as_ref().map(|text| text.line_count),
-            text_encryption_enabled: view.text.as_ref().map(|text| text.encryption_enabled),
+            text_storage_format: view
+                .text
+                .as_ref()
+                .map(|text| text.storage_format.as_str().to_owned()),
             text_at_rest_encryption: view
                 .text
                 .as_ref()

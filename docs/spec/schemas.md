@@ -78,7 +78,7 @@ type RestNode = {
 
   // text node에서만 존재
   line_count?: number
-  text_encryption_enabled?: boolean
+  text_storage_format?: "plain" | "encrypted"
   text_at_rest_encryption?: "none" | "server"
 
   // file node에서만 존재
@@ -138,7 +138,7 @@ type McpNodeSummary = {
 
   // text node에서만 존재
   line_count?: number
-  text_encryption_enabled?: boolean
+  text_storage_format?: "plain" | "encrypted"
   text_at_rest_encryption?: "none" | "server"
 
   // file node에서만 존재

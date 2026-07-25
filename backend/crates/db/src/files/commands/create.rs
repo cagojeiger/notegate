@@ -121,9 +121,9 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
     let doc_row = sqlx::query_as::<_, TextRow>(&format!(
             "INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
-             encryption_enabled, at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
+             at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
              created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14) \
          RETURNING {TEXT_COLUMNS}"
         ))
         .bind(node_row.id)
@@ -134,7 +134,6 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         .bind(&content.content_sha256)
         .bind(content.byte_len)
         .bind(content.line_count)
-        .bind(locked.default_text_encryption_enabled)
         .bind(stored.at_rest_encryption)
         .bind(stored.content_ciphertext)
         .bind(stored.content_nonce)

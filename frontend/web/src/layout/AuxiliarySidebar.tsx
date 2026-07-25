@@ -29,6 +29,7 @@ export function AuxiliarySidebar({
   onTextEncryptionEnabledChange
 }: AuxiliarySidebarProps) {
   const metadata = activeNode?.metadata ?? {};
+  const clientEncrypted = activeNode?.text_storage_format === "encrypted";
   const serverEncrypted = activeNode?.text_at_rest_encryption === "server";
 
   return (
@@ -72,11 +73,12 @@ export function AuxiliarySidebar({
                 {activeNode.kind === "text" ? (
                   <SettingToggle
                     icon={<LockKeyhole size={16} />}
-                    label="Encrypt stored text"
-                    badge={!textEncryptionAvailable ? "Max" : undefined}
-                    checked={serverEncrypted}
+                    label="Stored text encryption"
+                    badge={clientEncrypted ? "Client" : !textEncryptionAvailable ? "Max" : undefined}
+                    checked={clientEncrypted || serverEncrypted}
                     disabled={
                       !canManageActiveSpace
+                      || clientEncrypted
                       || textEncryptionPending
                       || (!textEncryptionAvailable && !serverEncrypted)
                     }

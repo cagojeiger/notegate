@@ -202,7 +202,8 @@ pub async fn update_text_encryption(
     .await
     .map_err(map_sqlx_error)?
     .ok_or_else(|| Error::internal("text node has no text object"))?;
-    if command.enabled == current_text.encryption_enabled {
+    let currently_encrypted = current_text.at_rest_encryption == "server";
+    if command.enabled == currently_encrypted {
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
@@ -287,15 +288,14 @@ async fn rewrite_text_encryption(
 
     sqlx::query(
         "UPDATE text_objects \
-         SET encryption_enabled = $3, storage_format = $4, content_text = $5, \
-             encrypted_payload = $6, at_rest_encryption = $7, content_ciphertext = $8, \
-             content_nonce = $9, content_enc_key_id = $10, content_enc_version = $11, \
-             updated_by_account_id = $12, updated_at = now() \
+         SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
+             at_rest_encryption = $6, content_ciphertext = $7, \
+             content_nonce = $8, content_enc_key_id = $9, content_enc_version = $10, \
+             updated_by_account_id = $11, updated_at = now() \
          WHERE space_id = $1 AND node_id = $2",
     )
     .bind(space_id)
     .bind(node_id)
-    .bind(enabled)
     .bind(stored.storage_format)
     .bind(stored.content_text)
     .bind(stored.encrypted_payload)
