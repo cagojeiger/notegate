@@ -36,6 +36,7 @@ export type Space = {
 };
 
 export type NodeKind = "folder" | "text" | "file";
+export type FilePreviewKind = "image" | "pdf";
 
 export type AccountRef = {
   id: string;
@@ -54,6 +55,7 @@ export type NodeSummary = {
   byte_len?: number;
   line_count?: number;
   preview_available?: boolean;
+  file_preview_kind?: FilePreviewKind;
   updated_at: string;
 };
 

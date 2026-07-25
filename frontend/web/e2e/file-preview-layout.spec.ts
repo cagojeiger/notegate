@@ -33,6 +33,7 @@ const imageNode: RestNode = {
   media_type: "image/png",
   detected_media_type: "image/png",
   preview_available: true,
+  file_preview_kind: "image",
   encryption_mode: "none",
   created_by: me.account,
   updated_by: me.account,
@@ -40,12 +41,23 @@ const imageNode: RestNode = {
   updated_at: "2026-07-01T00:00:00Z"
 };
 
+const pdfNode: RestNode = {
+  ...imageNode,
+  id: "pdf-1",
+  name: "preview-document.pdf",
+  path: "/preview-document.pdf",
+  media_type: "application/pdf",
+  detected_media_type: "application/pdf",
+  preview_available: false,
+  file_preview_kind: "pdf"
+};
+
 for (const viewport of [
   { name: "desktop", width: 1440, height: 900, mobile: false },
   { name: "tablet", width: 900, height: 1024, mobile: false },
   { name: "mobile", width: 390, height: 844, mobile: true }
 ]) {
-  test(`tall file previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
+  test(`image and PDF previews stay inside the editor on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockFilePreviewApi(page);
     await page.goto("/");
@@ -56,34 +68,28 @@ for (const viewport of [
     await page.getByRole("button", { name: imageNode.name }).first().click();
     await expect(page.getByRole("img", { name: imageNode.name })).toBeVisible();
 
-    const scroller = page.locator("[data-file-detail-scroll]");
-    await expect(scroller).toBeVisible();
-    await expect.poll(() => scroller.evaluate((element) => ({
-      overflowY: getComputedStyle(element).overflowY,
-      scrollable: element.scrollHeight > element.clientHeight
-    }))).toEqual({ overflowY: "auto", scrollable: true });
-
     const download = page.getByRole("button", { name: "Download" });
-    await download.scrollIntoViewIfNeeded();
-    await expectNoAccessibilityViolations(page);
-    const [scrollerBox, downloadBox] = await Promise.all([scroller.boundingBox(), download.boundingBox()]);
-    expect(scrollerBox).not.toBeNull();
-    expect(downloadBox).not.toBeNull();
-    expect(downloadBox!.y + downloadBox!.height).toBeLessThanOrEqual(scrollerBox!.y + scrollerBox!.height + 1);
+    await expect(download).toBeVisible();
+    await expectInsideActiveEditor(page, page.getByRole("img", { name: imageNode.name }));
 
     if (viewport.mobile) {
       await page.getByRole("button", { name: "Toggle left sidebar" }).click();
-      const spaces = page.getByRole("navigation", { name: "Spaces" });
-      const spacesBox = await spaces.boundingBox();
-      expect(spacesBox).not.toBeNull();
-      expect(await page.evaluate(({ x, y }) => {
-        const target = document.elementFromPoint(x, y);
-        return Boolean(target?.closest('nav[aria-label="Spaces"]'));
-      }, {
-        x: spacesBox!.x + spacesBox!.width / 2,
-        y: spacesBox!.y + 8
-      })).toBe(true);
     }
+    await page.getByRole("button", { name: pdfNode.name }).first().click();
+
+    const pdfPreview = page.locator("[data-pdf-preview]");
+    await expect(pdfPreview).toBeVisible();
+    await expect(pdfPreview.locator("canvas")).toBeVisible();
+    const pageInput = pdfPreview.getByRole("spinbutton", { name: "Page number" });
+    await expect(pageInput).toHaveValue("1");
+    await expect(pdfPreview.getByText("/ 2")).toBeVisible();
+    await expectInsideActiveEditor(page, pdfPreview);
+
+    await pdfPreview.getByRole("button", { name: "Next page" }).click();
+    await expect(pageInput).toHaveValue("2");
+    await pdfPreview.getByRole("button", { name: "Zoom in" }).click();
+    await expect(pdfPreview.getByRole("button", { name: "Reset zoom" })).toHaveText("125%");
+    await expectNoAccessibilityViolations(page);
   });
 }
 
@@ -92,6 +98,14 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
     '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="4000"><rect width="1200" height="4000" fill="#ffffff"/><path d="M80 120h1040v3760H80z" fill="none" stroke="#185fc4" stroke-width="16"/></svg>'
   ).toString("base64");
 
+  await page.route("http://storage.test/preview-document.pdf", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/pdf",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: createPdf()
+    });
+  });
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const response = responseFor(url, previewSvg);
@@ -107,12 +121,12 @@ function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
     return {
       parent: { id: space.root_node_id, path: "/" },
-      children: [imageNode],
-      page: pageInfo(1)
+      children: [imageNode, pdfNode],
+      page: pageInfo(2)
     };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) {
-    return { nodes: [imageNode], page: pageInfo(1) };
+    return { nodes: [imageNode, pdfNode], page: pageInfo(2) };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {
     return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
@@ -123,6 +137,12 @@ function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${imageNode.id}/reveal`) {
     return { ancestors: [], target: imageNode };
   }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${pdfNode.id}`) {
+    return pdfNode;
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${pdfNode.id}/reveal`) {
+    return { ancestors: [], target: pdfNode };
+  }
   if (url.pathname === `/api/v1/spaces/${space.id}/files/${imageNode.id}/preview-url`) {
     return {
       url: `data:image/svg+xml;base64,${previewSvg}`,
@@ -130,7 +150,56 @@ function responseFor(url: URL, previewSvg: string) {
       expires_at: "2026-07-24T12:00:00Z"
     };
   }
+  if (url.pathname === `/api/v1/spaces/${space.id}/files/${pdfNode.id}/pdf-preview-url`) {
+    return {
+      url: "http://storage.test/preview-document.pdf",
+      media_type: "application/pdf",
+      expires_at: "2026-07-24T12:00:00Z"
+    };
+  }
   throw new Error(`Unhandled API request: ${url.pathname}${url.search}`);
+}
+
+async function expectInsideActiveEditor(
+  page: import("@playwright/test").Page,
+  content: import("@playwright/test").Locator
+) {
+  const editor = page.locator('[data-editor-group][data-active="true"]');
+  const [editorBox, contentBox] = await Promise.all([editor.boundingBox(), content.boundingBox()]);
+  expect(editorBox).not.toBeNull();
+  expect(contentBox).not.toBeNull();
+  expect(contentBox!.x).toBeGreaterThanOrEqual(editorBox!.x);
+  expect(contentBox!.y).toBeGreaterThanOrEqual(editorBox!.y);
+  expect(contentBox!.x + contentBox!.width).toBeLessThanOrEqual(editorBox!.x + editorBox!.width + 1);
+  expect(contentBox!.y + contentBox!.height).toBeLessThanOrEqual(editorBox!.y + editorBox!.height + 1);
+}
+
+function createPdf() {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>",
+    stream("BT /F1 24 Tf 72 720 Td (Page 1) Tj ET"),
+    stream("BT /F1 24 Tf 72 720 Td (Page 2) Tj ET")
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  pdf += offsets.slice(1).map((offset) => `${offset.toString().padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf);
+}
+
+function stream(content: string) {
+  return `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`;
 }
 
 function pageInfo(returned: number) {

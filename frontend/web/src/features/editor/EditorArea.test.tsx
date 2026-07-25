@@ -1,8 +1,18 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { EditorArea } from "./EditorArea";
+import type { RestNode } from "../../api/types";
 import type { EditorGroup } from "../../stores/uiStore";
+
+vi.mock("./OpenedNodeGuard", () => ({
+  OpenedNodeGuard: ({ node, children }: { node: RestNode; children: (node: RestNode) => ReactNode }) => children(node)
+}));
+
+vi.mock("./FileDetailView", () => ({
+  FileDetailView: () => <div>File detail</div>
+}));
 
 function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> = {}) {
   const groups: EditorGroup[] = [
@@ -65,4 +75,42 @@ describe("EditorArea", () => {
       expect(group).toHaveClass("min-h-0", "overflow-hidden");
     }
   });
+
+  it("downloads files from the editor header", () => {
+    const node = fileNode();
+    const onDownloadFile = vi.fn();
+    renderEditorArea({
+      groups: [{ id: 0, node, mode: "preview" }],
+      activeGroupIndex: 0,
+      onDownloadFile
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+    expect(onDownloadFile).toHaveBeenCalledWith(node);
+  });
 });
+
+function fileNode(): RestNode {
+  return {
+    id: "file-1",
+    space_id: "space-1",
+    parent_id: "root-1",
+    name: "document.pdf",
+    kind: "file",
+    path: "/document.pdf",
+    sort_order: 0,
+    metadata: {},
+    has_children: false,
+    byte_len: 29,
+    media_type: "application/pdf",
+    detected_media_type: "application/pdf",
+    preview_available: false,
+    file_preview_kind: "pdf",
+    encryption_mode: "none",
+    created_by: { id: "user-1", kind: "user", display_name: "User" },
+    updated_by: { id: "user-1", kind: "user", display_name: "User" },
+    created_at: "2026-06-13T00:00:00Z",
+    updated_at: "2026-06-13T00:00:00Z"
+  };
+}

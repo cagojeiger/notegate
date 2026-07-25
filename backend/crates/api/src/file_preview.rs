@@ -1,11 +1,21 @@
 use notegate_model::FileEncryptionMode;
+use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::object_storage::{ObjectStorage, ObjectStorageError};
 
 pub const PREVIEW_URL_TTL_SECONDS: i64 = 15 * 60;
 pub const PREVIEW_MAX_BYTES: i64 = 10 * 1024 * 1024;
+const PDF_MEDIA_TYPE: &str = "application/pdf";
 const MEDIA_TYPE_SNIFF_BYTES: usize = 8 * 1024;
 const UNKNOWN_MEDIA_TYPE: &str = "application/octet-stream";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FilePreviewKind {
+    Image,
+    Pdf,
+}
 
 pub async fn detect_object_media_type(
     storage: &ObjectStorage,
@@ -40,9 +50,34 @@ pub fn is_previewable_image_type(media_type: &str) -> bool {
     )
 }
 
+pub fn is_previewable_pdf_type(media_type: &str) -> bool {
+    media_type == PDF_MEDIA_TYPE
+}
+
+pub fn file_preview_kind(
+    byte_len: i64,
+    encryption_mode: FileEncryptionMode,
+    detected_media_type: Option<&str>,
+) -> Option<FilePreviewKind> {
+    if encryption_mode != FileEncryptionMode::None || !is_preview_size_allowed(byte_len) {
+        return None;
+    }
+
+    match detected_media_type {
+        Some(media_type) if is_previewable_image_type(media_type) => Some(FilePreviewKind::Image),
+        Some(media_type) if is_previewable_pdf_type(media_type) => Some(FilePreviewKind::Pdf),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PREVIEW_MAX_BYTES, is_preview_size_allowed, is_previewable_image_type};
+    use notegate_model::FileEncryptionMode;
+
+    use super::{
+        FilePreviewKind, PREVIEW_MAX_BYTES, file_preview_kind, is_preview_size_allowed,
+        is_previewable_image_type, is_previewable_pdf_type,
+    };
 
     #[test]
     fn only_safe_raster_image_types_are_previewable() {
@@ -66,9 +101,49 @@ mod tests {
     }
 
     #[test]
+    fn only_pdf_type_is_previewable_pdf() {
+        assert!(is_previewable_pdf_type("application/pdf"));
+        for media_type in ["image/png", "text/html", "application/octet-stream"] {
+            assert!(!is_previewable_pdf_type(media_type), "{media_type}");
+        }
+    }
+
+    #[test]
     fn preview_size_is_limited_to_ten_mib() {
         assert!(!is_preview_size_allowed(0));
         assert!(is_preview_size_allowed(PREVIEW_MAX_BYTES));
         assert!(!is_preview_size_allowed(PREVIEW_MAX_BYTES + 1));
+    }
+
+    #[test]
+    fn file_preview_kind_uses_verified_media_type_and_file_policy() {
+        assert_eq!(
+            file_preview_kind(1024, FileEncryptionMode::None, Some("image/png")),
+            Some(FilePreviewKind::Image)
+        );
+        assert_eq!(
+            file_preview_kind(1024, FileEncryptionMode::None, Some("application/pdf")),
+            Some(FilePreviewKind::Pdf)
+        );
+        assert_eq!(
+            file_preview_kind(1024, FileEncryptionMode::Client, Some("application/pdf")),
+            None
+        );
+        assert_eq!(
+            file_preview_kind(
+                PREVIEW_MAX_BYTES + 1,
+                FileEncryptionMode::None,
+                Some("application/pdf")
+            ),
+            None
+        );
+        assert_eq!(
+            file_preview_kind(1024, FileEncryptionMode::None, Some("text/html")),
+            None
+        );
+        assert_eq!(
+            file_preview_kind(1024, FileEncryptionMode::None, None),
+            None
+        );
     }
 }

@@ -8,7 +8,7 @@ import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
 import { updateNodeCaches } from "../../api/nodeCache";
 import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
-import type { BatchFilePreviewItem, RestNode } from "../../api/types";
+import type { BatchFilePreviewItem, FilePreviewKind, RestNode } from "../../api/types";
 import type { MarkdownImageLoadOptions, MarkdownImageLoadResult } from "../../shared/lib/markdownLinks";
 import { createMarkdownPreviewBatcher } from "./markdownPreviewBatcher";
 
@@ -17,9 +17,10 @@ const FILE_PREVIEW_CACHE_GC_MS = 15 * 60 * 1_000;
 export function useFilePreviewUrl(node: RestNode) {
   const client = useApiClient();
   const queryClient = useQueryClient();
+  const previewKind = filePreviewKindForNode(node);
   return useQuery({
-    ...filePreviewQueryOptions(client, queryClient, node),
-    enabled: isImagePreviewCandidate(node)
+    ...filePreviewQueryOptions(client, queryClient, node, previewKind ?? "image"),
+    enabled: previewKind !== null
   });
 }
 
@@ -48,23 +49,33 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
   }, [batchLoad, queryClient, sourceNode.space_id]);
 }
 
-function isImagePreviewCandidate(node: RestNode): boolean {
-  if (node.kind !== "file" || node.encryption_mode === "client") return false;
-  if (node.preview_available !== undefined) return node.preview_available;
-  return true;
+export function filePreviewKindForNode(node: RestNode): FilePreviewKind | null {
+  if (node.kind !== "file" || node.encryption_mode === "client") return null;
+  if (node.file_preview_kind) return node.file_preview_kind;
+  if (node.preview_available === true) return "image";
+  if (node.preview_available === false) return null;
+  if (node.detected_media_type === "application/pdf" || node.media_type === "application/pdf") {
+    return "pdf";
+  }
+  return "image";
 }
 
-function filePreviewQueryOptions(client: ApiClient, queryClient: QueryClient, node: RestNode) {
+function filePreviewQueryOptions(
+  client: ApiClient,
+  queryClient: QueryClient,
+  node: RestNode,
+  previewKind: FilePreviewKind
+) {
   return queryOptions({
-    queryKey: queryKeys.filePreviewUrl(node.space_id, node.id),
+    queryKey: queryKeys.filePreviewUrl(node.space_id, node.id, previewKind),
     queryFn: async () => {
       try {
-        const preview = await getFilePreviewUrl(client, node.space_id, node.id);
-        refreshDiscoveredPreviewState(queryClient, node, preview.media_type);
+        const preview = await getFilePreviewUrl(client, node.space_id, node.id, previewKind);
+        refreshDiscoveredPreviewState(queryClient, node, preview.media_type, previewKind);
         return preview;
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
-          refreshDiscoveredPreviewState(queryClient, node, null);
+          refreshDiscoveredPreviewState(queryClient, node, null, null);
         }
         throw error;
       }
@@ -110,12 +121,19 @@ function markdownImageResult(result: BatchFilePreviewItem): MarkdownImageLoadRes
 function refreshDiscoveredPreviewState(
   queryClient: QueryClient,
   node: RestNode,
-  detectedMediaType: string | null
+  detectedMediaType: string | null,
+  previewKind: FilePreviewKind | null
 ) {
-  if (node.preview_available !== undefined) return;
+  const previewAvailable = previewKind === "image";
+  const nextPreviewKind = previewKind ?? undefined;
+  if (node.preview_available === previewAvailable
+    && node.file_preview_kind === nextPreviewKind
+    && (!detectedMediaType || node.detected_media_type === detectedMediaType)) return;
+
   updateNodeCaches(queryClient, node, (current) => ({
     ...current,
     detected_media_type: detectedMediaType ?? current.detected_media_type ?? node.detected_media_type,
-    preview_available: detectedMediaType !== null
+    preview_available: previewAvailable,
+    file_preview_kind: nextPreviewKind
   }));
 }

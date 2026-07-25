@@ -1,15 +1,15 @@
-import { Download } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
-import { Button, Card, MetaRow } from "../../shared/ui";
-import { useFileDownload } from "./useEditorQueries";
-import { useFilePreviewUrl } from "./useFilePreviewQueries";
+import { Card, MetaRow } from "../../shared/ui";
+import { filePreviewKindForNode, useFilePreviewUrl } from "./useFilePreviewQueries";
+
+const PdfPreview = lazy(() => import("./PdfPreview").then((module) => ({ default: module.PdfPreview })));
 
 export function FileDetailView({ node }: { node: RestNode }) {
-  const download = useFileDownload(node);
   const preview = useFilePreviewUrl(node);
+  const previewKind = filePreviewKindForNode(node);
   const [previewRecovery, setPreviewRecovery] = useState<{
     nodeId: string;
     retried: boolean;
@@ -18,14 +18,14 @@ export function FileDetailView({ node }: { node: RestNode }) {
   const currentRecovery = previewRecovery.nodeId === node.id
     ? previewRecovery
     : { nodeId: node.id, retried: false, failedUrl: null };
-  const previewUrl = preview.data?.url;
+  const isPdfPreview = previewKind === "pdf";
+  const previewUrl = previewKind === null ? undefined : preview.data?.url;
   const previewFailed = Boolean(previewUrl && previewUrl === currentRecovery.failedUrl);
   const previewRequestFailed = !previewUrl
     && preview.isError
     && !(preview.error instanceof ApiError && preview.error.status === 404);
-  async function handleDownload() {
-    await download();
-  }
+  const previewFailureLabel = isPdfPreview ? "PDF" : "Image";
+
   function handlePreviewError() {
     if (!previewUrl) return;
     if (currentRecovery.retried) {
@@ -34,28 +34,54 @@ export function FileDetailView({ node }: { node: RestNode }) {
     }
 
     setPreviewRecovery({ nodeId: node.id, retried: true, failedUrl: previewUrl });
-    void preview.refetch().then(() => {
+    void preview.refetch().then((result) => {
+      const nextUrl = result.data?.url;
+      if (!result.isSuccess || !nextUrl || nextUrl === previewUrl) return;
       setPreviewRecovery((current) => current.nodeId === node.id
         ? { ...current, failedUrl: null }
         : current);
     });
   }
+
+  if (previewUrl && !previewFailed && isPdfPreview) {
+    return (
+      <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted">Preparing PDF…</div>}>
+        <PdfPreview
+          key={previewUrl}
+          url={previewUrl}
+          name={node.name}
+          onError={handlePreviewError}
+        />
+      </Suspense>
+    );
+  }
+
+  if (previewUrl && !previewFailed) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
+        <img
+          className="max-h-full max-w-full object-contain"
+          src={previewUrl}
+          alt={node.name}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={handlePreviewError}
+        />
+      </div>
+    );
+  }
+
+  if (previewKind !== null && preview.isLoading) {
+    return <div className="grid min-h-0 flex-1 place-items-center text-sm text-muted">Loading preview…</div>;
+  }
+
   return (
     <article className="min-h-0 w-full flex-1 overflow-y-auto" data-file-detail-scroll>
       <div className="mx-auto max-w-[44rem] px-6 py-10 sm:px-10 sm:py-14">
         <p className="text-sm text-muted">{node.path}</p>
         <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{node.name}</h1>
-        {previewUrl && !previewFailed ? (
-          <img
-            className="mt-8 max-h-[65vh] max-w-full object-contain"
-            src={previewUrl}
-            alt={node.name}
-            loading="lazy"
-            decoding="async"
-            onError={handlePreviewError}
-          />
-        ) : null}
-        {previewFailed || previewRequestFailed ? <p className="mt-8 text-sm text-muted">Image cannot be displayed</p> : null}
+        {previewFailed || previewRequestFailed ? <p className="mt-8 text-sm text-muted">{previewFailureLabel} cannot be displayed</p> : null}
         <Card className="mt-8">
           <dl className="space-y-3">
             <MetaRow label="Media type" value={node.media_type ?? "unknown"} />
@@ -65,7 +91,6 @@ export function FileDetailView({ node }: { node: RestNode }) {
             <MetaRow label="Bytes" value={node.byte_len ?? 0} />
           </dl>
         </Card>
-        <Button className="mt-8" onClick={handleDownload}><Download size={16} /> Download</Button>
       </div>
     </article>
   );

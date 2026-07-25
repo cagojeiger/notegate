@@ -148,7 +148,7 @@ export function removeDeletedNodeQueries(
 ) {
   const previewQueryKey = recursive && node.kind === "folder"
     ? queryKeys.filePreviewUrls(node.space_id)
-    : queryKeys.filePreviewUrl(node.space_id, node.id);
+    : queryKeys.filePreviewNode(node.space_id, node.id);
 
   return cancelAndRemoveQueries(queryClient, [
     queryKeys.node(node.space_id, node.id),
@@ -187,7 +187,7 @@ async function removeExternalDeletedNode(
 
   const previewKey = change.subtree_changed
     ? queryKeys.filePreviewUrls(spaceId)
-    : queryKeys.filePreviewUrl(spaceId, change.node_id);
+    : queryKeys.filePreviewNode(spaceId, change.node_id);
   await cancelAndRemoveQueries(queryClient, [
     queryKeys.node(spaceId, change.node_id),
     queryKeys.text(spaceId, change.node_id),

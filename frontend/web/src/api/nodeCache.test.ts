@@ -31,18 +31,29 @@ describe("updateNodeCaches", () => {
     updateNodeCaches(queryClient, target, (current) => ({
       ...current,
       detected_media_type: "image/png",
-      preview_available: true
+      preview_available: true,
+      file_preview_kind: "image"
     }));
 
     expect(queryClient.getQueryData<RestNode>(queryKeys.node("space-1", "file-1")))
-      .toMatchObject({ detected_media_type: "image/png", preview_available: true });
+      .toMatchObject({
+        detected_media_type: "image/png",
+        preview_available: true,
+        file_preview_kind: "image"
+      });
     const updatedRecent = queryClient.getQueryData<InfiniteData<RestNodeListResponse>>(queryKeys.recent("space-1"));
-    expect(updatedRecent?.pages[0]?.nodes[0]).toMatchObject({ preview_available: true });
+    expect(updatedRecent?.pages[0]?.nodes[0]).toMatchObject({
+      preview_available: true,
+      file_preview_kind: "image"
+    });
     expect(updatedRecent?.pages[0]?.nodes[1]).toBe(unrelated);
     const updatedChildren = queryClient.getQueryData<InfiniteData<ChildrenResponse>>(
       queryKeys.children("space-1", "root-1")
     );
-    expect(updatedChildren?.pages[0]?.children[0]).toMatchObject({ preview_available: true });
+    expect(updatedChildren?.pages[0]?.children[0]).toMatchObject({
+      preview_available: true,
+      file_preview_kind: "image"
+    });
     expect(updatedChildren?.pages[1]).toBe(children.pages[1]);
     expect(queryClient.getQueryData(queryKeys.childrenRevision("space-1"))).toBe(1);
   });

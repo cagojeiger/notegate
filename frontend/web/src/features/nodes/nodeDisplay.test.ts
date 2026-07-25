@@ -8,6 +8,8 @@ describe("nodeIcon", () => {
   it("uses an image icon only for server-verified previewable files", () => {
     expect(nodeIcon(node({ kind: "folder" }))).toBe(Folder);
     expect(nodeIcon(node({ kind: "text" }))).toBe(FileText);
+    expect(nodeIcon(node({ kind: "file", file_preview_kind: "image" }))).toBe(ImageIcon);
+    expect(nodeIcon(node({ kind: "file", file_preview_kind: "pdf" }))).toBe(FileText);
     expect(nodeIcon(node({ kind: "file", preview_available: true }))).toBe(ImageIcon);
     expect(nodeIcon(node({ kind: "file", preview_available: false }))).toBe(Database);
     expect(nodeIcon(node({ kind: "file", preview_available: undefined }))).toBe(Database);

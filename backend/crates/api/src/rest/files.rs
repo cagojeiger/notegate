@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::file_preview::{
     PREVIEW_URL_TTL_SECONDS, detect_object_media_type, is_preview_size_allowed,
-    is_previewable_image_type,
+    is_previewable_image_type, is_previewable_pdf_type,
 };
 use crate::rest::dto::{NodeOut, attribution_ids};
 use crate::state::AppState;
@@ -35,6 +35,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/files/{node_id}/preview-url",
             get(preview_url),
+        )
+        .route(
+            "/v1/spaces/{space_id}/files/{node_id}/pdf-preview-url",
+            get(pdf_preview_url),
         )
         .route(
             "/v1/spaces/{space_id}/file-previews:batchResolve",
@@ -161,11 +165,40 @@ pub(crate) async fn preview_url(
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Response, ApiError> {
+    preview_response(&state, &caller, space_id, node_id, PreviewPolicy::Image).await
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/files/{node_id}/pdf-preview-url",
+    tag = "files",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses(
+        (status = 200, description = "Short-lived URL for a detected PDF up to 10 MiB", body = FilePreviewUrlResponse),
+        (status = 404, description = "File has no supported PDF preview or exceeds 10 MiB")
+    ),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn pdf_preview_url(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Response, ApiError> {
+    preview_response(&state, &caller, space_id, node_id, PreviewPolicy::Pdf).await
+}
+
+async fn preview_response(
+    state: &AppState,
+    caller: &Caller,
+    space_id: Uuid,
+    node_id: Uuid,
+    policy: PreviewPolicy,
+) -> Result<Response, ApiError> {
     let file_view = state
         .files
         .file_for_download(caller.account_id(), space_id, node_id)
         .await?;
-    let prepared = prepare_preview(&state, &file_view.file).await;
+    let prepared = prepare_preview(state, &file_view.file, policy).await;
     let detected_media_type = match &prepared {
         Ok(prepared) => prepared.detected_media_type.clone(),
         Err(error) => error.detected_media_type().map(str::to_owned),
@@ -178,7 +211,7 @@ pub(crate) async fn preview_url(
         .map(|prepared| prepared.preview)
         .map_err(|error| match error {
             PreviewPreparationError::Unsupported { .. } => {
-                ApiError::not_found("file preview is not available")
+                ApiError::not_found(policy.unavailable_message())
             }
             PreviewPreparationError::Storage { error, .. } => error,
         })?;
@@ -278,9 +311,32 @@ struct BatchPreviewOutcome {
     detected_media_type: Option<(Uuid, String)>,
 }
 
+#[derive(Clone, Copy)]
+enum PreviewPolicy {
+    Image,
+    Pdf,
+}
+
+impl PreviewPolicy {
+    fn allows(self, media_type: &str) -> bool {
+        match self {
+            Self::Image => is_previewable_image_type(media_type),
+            Self::Pdf => is_previewable_pdf_type(media_type),
+        }
+    }
+
+    fn unavailable_message(self) -> &'static str {
+        match self {
+            Self::Image => "file preview is not available",
+            Self::Pdf => "pdf preview is not available",
+        }
+    }
+}
+
 async fn prepare_preview(
     state: &AppState,
     file: &FileObject,
+    policy: PreviewPolicy,
 ) -> Result<PreparedPreview, PreviewPreparationError> {
     if file.encryption_mode == FileEncryptionMode::Client || !is_preview_size_allowed(file.byte_len)
     {
@@ -309,7 +365,7 @@ async fn prepare_preview(
             (media_type.clone(), Some(media_type))
         }
     };
-    if !is_previewable_image_type(&media_type) {
+    if !policy.allows(&media_type) {
         return Err(PreviewPreparationError::Unsupported {
             detected_media_type,
         });
@@ -373,7 +429,7 @@ async fn batch_preview_item(
         );
     };
 
-    match prepare_preview(state, &file).await {
+    match prepare_preview(state, &file, PreviewPolicy::Image).await {
         Ok(prepared) => {
             let detection = prepared
                 .detected_media_type

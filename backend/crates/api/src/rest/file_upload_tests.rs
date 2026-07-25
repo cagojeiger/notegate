@@ -158,6 +158,7 @@ async fn verified_raster_images_receive_inline_preview_urls()
     assert_eq!(completed["node"]["media_type"], "text/plain");
     assert_eq!(completed["node"]["detected_media_type"], "image/png");
     assert_eq!(completed["node"]["preview_available"], true);
+    assert_eq!(completed["node"]["file_preview_kind"], "image");
     let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
 
     let preview_response = rest_app(state.clone(), caller.clone())
@@ -246,7 +247,7 @@ async fn verified_raster_images_receive_inline_preview_urls()
 }
 
 #[tokio::test]
-async fn non_image_bytes_do_not_receive_preview_urls() -> Result<(), Box<dyn std::error::Error>> {
+async fn pdf_bytes_use_the_dedicated_preview_url() -> Result<(), Box<dyn std::error::Error>> {
     let Some(s3) = test_s3_config() else {
         return Ok(());
     };
@@ -271,6 +272,7 @@ async fn non_image_bytes_do_not_receive_preview_urls() -> Result<(), Box<dyn std
     assert_eq!(status, StatusCode::CREATED, "{completed}");
     assert_eq!(completed["node"]["detected_media_type"], "application/pdf");
     assert_eq!(completed["node"]["preview_available"], false);
+    assert_eq!(completed["node"]["file_preview_kind"], "pdf");
     let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
 
     let (status, body) = empty_request(
@@ -280,6 +282,51 @@ async fn non_image_bytes_do_not_receive_preview_urls() -> Result<(), Box<dyn std
     )
     .await?;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    let pdf_preview_response = rest_app(state.clone(), caller.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/v1/spaces/{space_id}/files/{node_id}/pdf-preview-url"
+                ))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(pdf_preview_response.status(), StatusCode::OK);
+    assert_eq!(
+        pdf_preview_response.headers().get(CACHE_CONTROL),
+        Some(&axum::http::HeaderValue::from_static("private, no-store"))
+    );
+    let preview: Value =
+        serde_json::from_slice(&to_bytes(pdf_preview_response.into_body(), usize::MAX).await?)?;
+    assert_eq!(preview["media_type"], "application/pdf");
+    let response = reqwest::get(preview["url"].as_str().ok_or("preview url")?).await?;
+    assert!(response.status().is_success());
+    assert_eq!(
+        response.headers().get(reqwest::header::CONTENT_TYPE),
+        Some(&reqwest::header::HeaderValue::from_static(
+            "application/pdf"
+        ))
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("inline")
+    );
+
+    let (status, batch) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-previews:batchResolve"),
+        json!({ "paths": ["/document.png"] }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    assert_eq!(batch["results"][0]["status"], "unsupported");
+    assert_eq!(batch["results"][0]["media_type"], "application/pdf");
+    assert!(batch["results"][0]["url"].is_null());
 
     delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
     db.cleanup().await;

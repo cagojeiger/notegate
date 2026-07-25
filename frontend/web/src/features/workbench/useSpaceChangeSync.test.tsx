@@ -78,7 +78,7 @@ describe("useSpaceChangeSync", () => {
         affected_parent_ids: ["parent-1"]
       })]));
     const queryClient = createQueryClient();
-    const previewKey = queryKeys.filePreviewUrl("space-1", "file-1");
+    const previewKey = queryKeys.filePreviewUrl("space-1", "file-1", "pdf");
     queryClient.setQueryData(previewKey, { url: "https://storage.example/stale" });
 
     renderHook(() => useSpaceChangeSync("space-1"), { wrapper: createWrapper(queryClient) });

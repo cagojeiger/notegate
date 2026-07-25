@@ -246,7 +246,7 @@ describe("files api", () => {
     expect(api.post).toHaveBeenCalledTimes(1);
   });
 
-  it("requests the dedicated file preview URL", async () => {
+  it("requests the dedicated image preview URL", async () => {
     const response = {
       url: "https://objects.test/preview",
       media_type: "image/png",
@@ -256,6 +256,18 @@ describe("files api", () => {
 
     await expect(getFilePreviewUrl(api, "space-1", "file-1")).resolves.toEqual(response);
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/preview-url");
+  });
+
+  it("requests the dedicated PDF preview URL", async () => {
+    const response = {
+      url: "https://objects.test/preview",
+      media_type: "application/pdf",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const api = { get: vi.fn().mockResolvedValue(response) } as unknown as ApiClient;
+
+    await expect(getFilePreviewUrl(api, "space-1", "file-1", "pdf")).resolves.toEqual(response);
+    expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/pdf-preview-url");
   });
 
   it("resolves ordered file previews in one request", async () => {

@@ -243,12 +243,12 @@ describe("query invalidation", () => {
 
   it("keeps file preview URLs outside space resource invalidation", () => {
     const queryClient = new QueryClient();
-    const previewKey = queryKeys.filePreviewUrl("space-1", "file-1");
+    const previewKey = queryKeys.filePreviewUrl("space-1", "file-1", "image");
     queryClient.setQueryData(previewKey, { url: "https://storage.example/preview" });
 
     invalidateSpaceResources(queryClient, "space-1");
 
-    expect(previewKey).toEqual(["file-preview-urls", "space-1", "file-1"]);
+    expect(previewKey).toEqual(["file-preview-urls", "space-1", "file-1", "image"]);
     expect(queryClient.getQueryState(previewKey)?.isInvalidated).toBe(false);
   });
 
@@ -292,10 +292,11 @@ describe("query invalidation", () => {
       queryKeys.file("space-1", "file-1"),
       queryKeys.metadata("space-1", "file-1"),
       queryKeys.markdownImagePreview("space-1", "/file-1"),
-      queryKeys.filePreviewUrl("space-1", "file-1")
+      queryKeys.filePreviewUrl("space-1", "file-1", "image"),
+      queryKeys.filePreviewUrl("space-1", "file-1", "pdf")
     ];
     deletedKeys.forEach((queryKey) => queryClient.setQueryData(queryKey, { cached: true }));
-    const unrelatedPreviewKey = queryKeys.filePreviewUrl("space-1", "file-2");
+    const unrelatedPreviewKey = queryKeys.filePreviewUrl("space-1", "file-2", "image");
     queryClient.setQueryData(unrelatedPreviewKey, { cached: true });
 
     await removeDeletedNodeQueries(queryClient, deletedNode, false);
@@ -308,8 +309,8 @@ describe("query invalidation", () => {
     const queryClient = new QueryClient();
     const deletedSpaceNode = queryKeys.node("space-1", "file-1");
     const otherSpaceNode = queryKeys.node("space-2", "file-2");
-    const deletedSpacePreview = queryKeys.filePreviewUrl("space-1", "file-1");
-    const otherSpacePreview = queryKeys.filePreviewUrl("space-2", "file-2");
+    const deletedSpacePreview = queryKeys.filePreviewUrl("space-1", "file-1", "image");
+    const otherSpacePreview = queryKeys.filePreviewUrl("space-2", "file-2", "image");
     const deletedMarkdownPreview = queryKeys.markdownImagePreview("space-1", "/image.png");
     const otherMarkdownPreview = queryKeys.markdownImagePreview("space-2", "/image.png");
     queryClient.setQueryData(deletedSpaceNode, { cached: true });

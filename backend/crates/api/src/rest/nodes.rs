@@ -533,6 +533,7 @@ mod collection_response_tests {
                     byte_len: Some(i64::MAX),
                     line_count: None,
                     preview_available: Some(true),
+                    file_preview_kind: Some(crate::file_preview::FilePreviewKind::Image),
                     updated_at,
                 })
                 .collect();

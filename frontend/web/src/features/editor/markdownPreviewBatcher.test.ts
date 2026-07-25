@@ -60,10 +60,10 @@ describe("createMarkdownPreviewBatcher", () => {
 
     expect(results.every(({ status }) => status === "rejected")).toBe(true);
     expect(queryClient.getQueryData(
-      queryKeys.filePreviewUrl("space-1", "node-1")
+      queryKeys.filePreviewUrl("space-1", "node-1", "image")
     )).toBeUndefined();
     expect(queryClient.getQueryData(
-      queryKeys.filePreviewUrl("space-1", "node-2")
+      queryKeys.filePreviewUrl("space-1", "node-2", "image")
     )).toBeUndefined();
   });
 

@@ -5,7 +5,9 @@ import type { NodeSummary, RestNode, Space } from "../../api/types";
 export function nodeIcon(node: NodeSummary): LucideIcon {
   if (node.kind === "folder") return Folder;
   if (node.kind === "text") return FileText;
-  return node.preview_available === true ? ImageIcon : Database;
+  if (node.file_preview_kind === "pdf") return FileText;
+  if (node.file_preview_kind === "image" || node.preview_available === true) return ImageIcon;
+  return Database;
 }
 
 export function fmtBytes(bytes = 0): string {

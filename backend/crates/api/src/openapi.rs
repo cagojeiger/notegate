@@ -61,6 +61,7 @@ use crate::state::AppState;
         rest::files::stat,
         rest::files::download,
         rest::files::preview_url,
+        rest::files::pdf_preview_url,
         rest::files::batch_preview_urls,
         rest::connections::list,
         rest::connections::connect,

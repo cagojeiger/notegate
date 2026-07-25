@@ -9,7 +9,9 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::AccountRef;
-use crate::file_preview::{is_preview_size_allowed, is_previewable_image_type};
+use crate::file_preview::{
+    FilePreviewKind, file_preview_kind, is_preview_size_allowed, is_previewable_image_type,
+};
 
 /// Node output: tree metadata, derived `path`, and attribution refs.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -35,6 +37,8 @@ pub struct NodeOut {
     pub detected_media_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_preview_kind: Option<FilePreviewKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_filename: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,6 +88,13 @@ impl NodeOut {
                     .as_deref()
                     .map(is_previewable_image_type)
             }),
+            file_preview_kind: view.file.as_ref().and_then(|file| {
+                file_preview_kind(
+                    file.byte_len,
+                    file.encryption_mode,
+                    file.detected_media_type.as_deref(),
+                )
+            }),
             original_filename: view
                 .file
                 .as_ref()
@@ -119,6 +130,8 @@ pub struct NodeSummaryOut {
     pub line_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_preview_kind: Option<FilePreviewKind>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -147,6 +160,13 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
                 file.detected_media_type
                     .as_deref()
                     .map(is_previewable_image_type)
+            }),
+            file_preview_kind: view.file.as_ref().and_then(|file| {
+                file_preview_kind(
+                    file.byte_len,
+                    file.encryption_mode,
+                    file.detected_media_type.as_deref(),
+                )
             }),
             updated_at: node.updated_at,
         }

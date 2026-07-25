@@ -116,6 +116,7 @@ function toNodeSummary(node: CachedNodeReference): NodeSummary {
     byte_len: node.byte_len,
     line_count: node.line_count,
     preview_available: node.preview_available,
+    file_preview_kind: node.file_preview_kind,
     updated_at: node.updated_at
   };
 }

@@ -4,9 +4,14 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { batchResolveFilePreviews, getFilePreviewUrl } from "../../api/files";
+import { ApiError } from "../../api/errors";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
-import { useFilePreviewUrl, useMarkdownImageLoader } from "./useFilePreviewQueries";
+import {
+  filePreviewKindForNode,
+  useFilePreviewUrl,
+  useMarkdownImageLoader
+} from "./useFilePreviewQueries";
 
 const mockClient = vi.hoisted(() => ({}));
 
@@ -159,13 +164,20 @@ describe("useFilePreviewUrl", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getFilePreviewUrl).toHaveBeenCalledWith(mockClient, "space-1", "legacy-image", "image");
     expect(invalidate).not.toHaveBeenCalled();
     expect(queryClient.getQueryData<{ pages: Array<{ nodes: RestNode[] }> }>(
       queryKeys.recent("space-1")
-    )?.pages[0]?.nodes[0]).toMatchObject({ preview_available: true });
+    )?.pages[0]?.nodes[0]).toMatchObject({
+      preview_available: true,
+      file_preview_kind: "image"
+    });
     expect(queryClient.getQueryData<{ pages: Array<{ children: RestNode[] }> }>(
       queryKeys.children("space-1", "folder-1")
-    )?.pages[0]?.children[0]).toMatchObject({ preview_available: true });
+    )?.pages[0]?.children[0]).toMatchObject({
+      preview_available: true,
+      file_preview_kind: "image"
+    });
   });
 
   it("shares a preview URL across stale node snapshots of the same immutable file", async () => {
@@ -179,7 +191,7 @@ describe("useFilePreviewUrl", () => {
     });
     await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
     const cachedPreview = queryClient.getQueryCache().find({
-      queryKey: queryKeys.filePreviewUrl("space-1", "file-1"),
+      queryKey: queryKeys.filePreviewUrl("space-1", "file-1", "image"),
       exact: true
     });
     expect(cachedPreview?.options.gcTime).toBe(15 * 60 * 1_000);
@@ -190,6 +202,81 @@ describe("useFilePreviewUrl", () => {
     await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
 
     expect(getFilePreviewUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the PDF endpoint and cache key for PDF file previews", async () => {
+    const queryClient = createQueryClient();
+    const pdfNode = fileNode({
+      name: "document.pdf",
+      media_type: "application/pdf",
+      detected_media_type: "application/pdf",
+      preview_available: false,
+      file_preview_kind: "pdf"
+    });
+    vi.mocked(getFilePreviewUrl).mockResolvedValue({
+      url: "https://storage.example/document.pdf",
+      media_type: "application/pdf",
+      expires_at: "2026-06-13T00:15:00Z"
+    });
+
+    const { result } = renderHook(() => useFilePreviewUrl(pdfNode), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(getFilePreviewUrl).toHaveBeenCalledWith(mockClient, "space-1", "file-1", "pdf");
+    expect(queryClient.getQueryData(
+      queryKeys.filePreviewUrl("space-1", "file-1", "pdf")
+    )).toMatchObject({ media_type: "application/pdf" });
+  });
+
+  it("clears stale PDF preview metadata when the backend rejects it", async () => {
+    const queryClient = createQueryClient();
+    const pdfNode = fileNode({
+      name: "document.pdf",
+      media_type: "application/pdf",
+      detected_media_type: "application/pdf",
+      preview_available: false,
+      file_preview_kind: "pdf"
+    });
+    vi.mocked(getFilePreviewUrl).mockRejectedValue(new ApiError("not previewable", 404));
+
+    const { result } = renderHook(() => useFilePreviewUrl(pdfNode), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(queryClient.getQueryData<RestNode>(
+      queryKeys.node("space-1", "file-1")
+    )).toMatchObject({
+      preview_available: false,
+      file_preview_kind: undefined
+    });
+  });
+});
+
+describe("filePreviewKindForNode", () => {
+  it("uses backend preview kind when available", () => {
+    const imageNode = fileNode({ preview_available: true, file_preview_kind: "image" });
+    const pdfNode = fileNode({ preview_available: false, file_preview_kind: "pdf" });
+
+    expect(filePreviewKindForNode(imageNode)).toBe("image");
+    expect(filePreviewKindForNode(pdfNode)).toBe("pdf");
+  });
+
+  it("keeps legacy image probing and recognizes declared PDFs before discovery", () => {
+    expect(filePreviewKindForNode(fileNode({ preview_available: undefined }))).toBe("image");
+    expect(filePreviewKindForNode(fileNode({
+      media_type: "application/pdf",
+      preview_available: undefined
+    }))).toBe("pdf");
+  });
+
+  it("does not preview encrypted or known unsupported files", () => {
+    expect(filePreviewKindForNode(fileNode({ encryption_mode: "client" }))).toBeNull();
+    expect(filePreviewKindForNode(fileNode({ preview_available: false }))).toBeNull();
   });
 });
 
