@@ -92,7 +92,7 @@ describe("EditorArea", () => {
     expect(onDownloadFile).toHaveBeenCalledWith(node);
   });
 
-  it("shows per-group navigation controls after the title", () => {
+  it("shows per-group navigation controls before the title", () => {
     const current = fileNode();
     const onNavigateEditorGroup = vi.fn();
     renderEditorArea({
@@ -110,7 +110,7 @@ describe("EditorArea", () => {
     const title = screen.getByText(current.name);
     const back = screen.getByRole("button", { name: "Back to previous.md" });
     const forward = screen.getByRole("button", { name: "Forward" });
-    expect(title.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(back).toBeEnabled();
     expect(forward).toBeDisabled();
 
