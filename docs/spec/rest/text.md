@@ -6,6 +6,7 @@ Text는 content node다. plain Text는 read/write/patch 대상이고, encrypted 
 GET   /api/v1/spaces/{space_id}/text/{node_id}?start_line=1&max_lines=200&max_bytes=65536&if_none_match_sha256=...
 PUT   /api/v1/spaces/{space_id}/text/{node_id}
 PATCH /api/v1/spaces/{space_id}/text/{node_id}
+PUT   /api/v1/spaces/{space_id}/text/{node_id}/encryption
 ```
 
 공통 schema는 `../schemas.md`를 따른다.
@@ -16,6 +17,7 @@ PATCH /api/v1/spaces/{space_id}/text/{node_id}
 GET   /text/{node_id} -> RestTextReadResponse
 PUT   /text/{node_id} -> { node: NodeRef, text: TextMeta }
 PATCH /text/{node_id} -> { node: NodeRef, text: PatchTextMeta }
+PUT   /text/{node_id}/encryption -> RestNode
 ```
 
 ```ts
@@ -71,3 +73,17 @@ type PatchTextMeta = TextMeta & {
 - `expected_count`가 있으면 현재 match 수와 일치해야 한다.
 - `expected_sha256`이 있으면 저장된 content hash와 일치해야 한다.
 - encrypted Text는 patch 대상이 아니다.
+
+## Server-managed encryption
+
+```ts
+type UpdateTextEncryptionBody = {
+  enabled: boolean
+}
+```
+
+- `PUT /text/{node_id}/encryption`은 Space owner User만 사용할 수 있다. Agent와 MCP에는 노출하지 않는다.
+- `enabled=true`는 plain Text와 Space owner의 `text_encryption` capability가 필요하다.
+- `enabled=false`는 owner tier가 낮아진 뒤에도 사용할 수 있다.
+- 설정 변경과 기존 본문의 암호화 또는 복호화는 같은 transaction에서 즉시 처리한다.
+- 같은 값을 반복해서 보내면 현재 상태를 그대로 반환한다.

@@ -8,7 +8,7 @@ mod common;
 
 use common::TestDb;
 use notegate_db::{ConnectionRepo, FilesRepo, SpaceRepo};
-use notegate_model::files::{CreateFolder, DeleteNode};
+use notegate_model::files::{CreateFolder, DeleteNode, UpdateNode};
 use notegate_model::{
     AccountKind, ConnectAgent, CreateAgent, CreateSpace, Permission, SpaceOrderUpdate, UpdateSpace,
 };
@@ -132,6 +132,19 @@ async fn connected_agent_write_can_mutate_files() -> Result<(), Box<dyn std::err
         )
         .await
         .expect("create folder");
+    let renamed = files
+        .update_node(
+            agent,
+            space.id,
+            UpdateNode {
+                node_id: folder.node.id,
+                name: Some("renamed".to_owned()),
+                sort_order: None,
+            },
+        )
+        .await
+        .expect("rename folder");
+    assert_eq!(renamed.node.name, "renamed");
     files
         .delete_node(
             agent,

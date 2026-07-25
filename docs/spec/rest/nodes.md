@@ -13,6 +13,7 @@ POST   /api/v1/spaces/{space_id}/nodes:batchListChildren
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
+PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
@@ -35,6 +36,7 @@ POST /nodes:batchListChildren   -> { results: BatchChildrenResult[] }
 GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
 POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
+PUT /nodes/{node_id}/search-policy -> RestNode
 PUT/PATCH /nodes/{id}/metadata  -> RestNode
 POST /nodes/{node_id}/move      -> RestNode
 DELETE /nodes/{node_id}         -> 204 No Content
@@ -137,8 +139,10 @@ type CreateNodeBody = {
 type UpdateNodeBody = {
   name?: string
   sort_order?: number
-  search_enabled?: boolean
-  text_encryption_enabled?: boolean
+}
+
+type UpdateNodeSearchPolicyBody = {
+  enabled: boolean
 }
 
 type MoveNodeBody = {
@@ -148,10 +152,11 @@ type MoveNodeBody = {
 }
 ```
 
-- `PATCH /nodes/{node_id}`는 rename, reorder, 검색 포함 여부, Text 암호화 정책을 원자적으로 변경한다.
+- `PATCH /nodes/{node_id}`는 rename과 reorder를 처리한다. write Agent도 사용할 수 있다.
+- `PUT /nodes/{node_id}/search-policy`는 검색 포함 여부를 변경하며 Space owner User만 사용할 수 있다.
 - `search_enabled`는 non-root folder/text/file에 적용한다. Folder의 값은 자식에게 상속되지 않는다.
-- `text_encryption_enabled`는 Text에만 적용하며 기존 본문을 즉시 다시 쓰지 않는다. 실제 저장 형식은 다음 성공한 저장부터 바뀐다.
-- `text_encryption_enabled=true`는 Space owner의 `text_encryption` capability가 필요하며 client-side encrypted Text에는 적용할 수 없다.
+- Agent는 write 권한이 있어도 검색 정책을 변경할 수 없다.
+- Text 암호화는 Text API의 `PUT /text/{node_id}/encryption`으로 변경한다.
 - Root node는 rename/move/delete할 수 없다.
 - `POST /nodes/{node_id}/move`는 같은 Space 안에서만 parent/name을 변경한다.
 - Folder 삭제는 `recursive=true`가 필요하다.

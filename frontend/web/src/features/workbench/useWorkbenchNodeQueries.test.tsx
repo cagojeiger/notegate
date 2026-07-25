@@ -3,10 +3,16 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { deleteNode, moveNode } from "../../api/nodes";
+import { deleteNode, moveNode, updateNodeSearchPolicy } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
+import { updateTextEncryption } from "../../api/text";
 import type { RestNode } from "../../api/types";
-import { useDeleteNodeMutation, useMoveNodeMutation } from "./useWorkbenchNodeQueries";
+import {
+  useDeleteNodeMutation,
+  useMoveNodeMutation,
+  useUpdateNodeSearchPolicyMutation,
+  useUpdateTextEncryptionMutation
+} from "./useWorkbenchNodeQueries";
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => ({})
@@ -17,10 +23,81 @@ vi.mock("../../api/nodes", () => ({
   deleteNode: vi.fn(),
   moveNode: vi.fn(),
   revealNode: vi.fn(),
-  updateNode: vi.fn()
+  updateNode: vi.fn(),
+  updateNodeSearchPolicy: vi.fn()
+}));
+
+vi.mock("../../api/text", () => ({
+  updateTextEncryption: vi.fn()
 }));
 
 describe("workbench node mutations", () => {
+  it("updates search policy through its dedicated endpoint", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    const updated = {
+      ...current,
+      search_enabled: false
+    };
+    vi.mocked(updateNodeSearchPolicy).mockResolvedValue(updated);
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeSearchPolicyMutation(onUpdated), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        node: current,
+        enabled: false
+      });
+    });
+
+    expect(updateNodeSearchPolicy).toHaveBeenCalledWith(
+      expect.anything(),
+      current.space_id,
+      current.id,
+      false
+    );
+    expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
+    expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  it("updates text encryption through the text policy endpoint", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    const updated = {
+      ...current,
+      text_encryption_enabled: true
+    };
+    vi.mocked(updateTextEncryption).mockResolvedValue(updated);
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateTextEncryptionMutation(onUpdated), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        node: current,
+        enabled: true
+      });
+    });
+
+    expect(updateTextEncryption).toHaveBeenCalledWith(
+      expect.anything(),
+      current.space_id,
+      current.id,
+      true
+    );
+    expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
+    expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
   it("removes every preview URL cached for a recursively deleted folder", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
@@ -134,6 +211,7 @@ function node(id: string, spaceId: string, kind: RestNode["kind"]): RestNode {
     path: `/${id}`,
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: kind === "folder",
     created_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_by: { id: "user-1", kind: "user", display_name: "User" },

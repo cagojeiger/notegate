@@ -10,4 +10,5 @@ export { MetaRow } from "./MetaRow";
 export { Modal } from "./Modal";
 export { SectionHeader } from "./SectionHeader";
 export { SelectField, TextAreaField, TextField } from "./Field";
+export { SettingToggle } from "./SettingToggle";
 export { Tabs } from "./Tabs";

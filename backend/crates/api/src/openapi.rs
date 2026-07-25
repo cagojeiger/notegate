@@ -45,6 +45,7 @@ use crate::state::AppState;
         rest::nodes::get_node,
         rest::nodes::reveal,
         rest::nodes::update,
+        rest::nodes::update_search_policy,
         rest::nodes::delete,
         rest::nodes::children,
         rest::nodes::batch_children,
@@ -55,6 +56,7 @@ use crate::state::AppState;
         rest::text::read,
         rest::text::replace,
         rest::text::patch,
+        rest::text::update_encryption,
         rest::file_uploads::begin,
         rest::file_uploads::parts,
         rest::file_uploads::complete,
@@ -519,8 +521,10 @@ mod tests {
             "/api/v1/spaces/{space_id}/nodes/{node_id}",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/move",
             "/api/v1/spaces/{space_id}/text/{node_id}",
+            "/api/v1/spaces/{space_id}/text/{node_id}/encryption",
             "/api/v1/spaces/{space_id}/files/{node_id}",
             "/api/v1/spaces/{space_id}/files/{node_id}/content",
             "/api/v1/spaces/{space_id}/files/{node_id}/preview-url",
@@ -606,6 +610,8 @@ mod tests {
             "PUT /api/v1/spaces/{space_id}/agents/{agent_id}",
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
             "PUT /api/v1/spaces/{space_id}/text/{node_id}",
+            "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
+            "PUT /api/v1/spaces/{space_id}/text/{node_id}/encryption",
         ];
         expected.sort();
 

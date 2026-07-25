@@ -110,6 +110,7 @@ function node(id: string, kind: RestNode["kind"], parentId: string): RestNode {
     path: `/${id}`,
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: kind === "folder",
     created_by: { id: "user", kind: "user", display_name: "User" },
     updated_by: { id: "user", kind: "user", display_name: "User" },

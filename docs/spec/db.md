@@ -311,6 +311,7 @@ nodes
   kind text not null check ('folder','text','file')
   sort_order int not null default 0
   metadata jsonb not null default '{}'
+  search_enabled bool not null default true
   created_by_account_id uuid not null references accounts(id)
   updated_by_account_id uuid not null references accounts(id)
   deleted_by_account_id uuid null references accounts(id)
@@ -325,6 +326,7 @@ nodes
 - Non-root node name은 1~128자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다.
 - 같은 parent 안 live node name은 unique다.
 - `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다.
+- `search_enabled`는 해당 node만 검색 결과에 포함할지를 나타낸다. Folder 자식에게 상속되지 않는다.
 - `deleted_at`, `deleted_by_account_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 - Full path는 저장하지 않는다.
 
@@ -427,7 +429,8 @@ Text 암호화 정책:
 - MCP `read op=read`, `write op=write/append/patch/edit`, `search op=grep`은 plain Text만 대상으로 한다. 서버 관리 at-rest 암호화는 서버에서 투명하게 복호화한다.
 - plain Text의 `content_sha256`, `byte_len`, `line_count`는 plaintext 기준이다.
 - encrypted Text의 `content_sha256`, `byte_len`은 서버 canonical JSON serialization 기준이고 `line_count=0`이다.
-- `encryption_enabled`는 다음 저장에 적용할 정책이고 `at_rest_encryption`은 현재 저장 상태다.
+- `encryption_enabled` 변경과 기존 plain Text 본문 변환은 같은 transaction에서 처리한다.
+- `encryption_enabled=true`와 `at_rest_encryption='server'`는 항상 함께 유지한다.
 
 Node-content invariant:
 

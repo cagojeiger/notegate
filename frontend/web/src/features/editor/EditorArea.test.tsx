@@ -129,6 +129,7 @@ function fileNode(): RestNode {
     path: "/document.pdf",
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: false,
     byte_len: 29,
     media_type: "application/pdf",

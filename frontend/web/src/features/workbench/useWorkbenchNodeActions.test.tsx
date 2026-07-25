@@ -40,6 +40,8 @@ vi.mock("./useWorkbenchQueries", () => {
     useMoveNodeMutation: mutation,
     useReplaceMetadataMutation: mutation,
     useUpdateNodeMutation: mutation,
+    useUpdateNodeSearchPolicyMutation: mutation,
+    useUpdateTextEncryptionMutation: mutation,
     useRevealNode: () => mocks.revealNode
   };
 });
@@ -427,7 +429,8 @@ describe("useWorkbenchNodeActions", () => {
 });
 
 function renderNodeActions(
-  props: Parameters<typeof useWorkbenchNodeActions>[0]
+  props: Omit<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace">
+    & Partial<Pick<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace">>
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
@@ -435,7 +438,10 @@ function renderNodeActions(
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  return renderHook(() => useWorkbenchNodeActions(props), { wrapper });
+  return renderHook(
+    () => useWorkbenchNodeActions({ canManageActiveSpace: true, ...props }),
+    { wrapper }
+  );
 }
 
 function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
@@ -479,6 +485,7 @@ function node(id: string, spaceId: string, path: string, kind: RestNode["kind"] 
     path,
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: false,
     created_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_by: { id: "user-1", kind: "user", display_name: "User" },

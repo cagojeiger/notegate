@@ -27,10 +27,11 @@ pub use notegate_model::files::{
     EditText, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor,
     NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode, PatchResult,
     PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
-    TextStats, TextView, UpdateNode, WriteTarget, WriteText, WriteTextBody,
+    TextStats, TextView, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTarget,
+    WriteText, WriteTextBody,
 };
 pub use notegate_model::{
-    FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
+    AccountKind, FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
     ListFileChangeEvents, SyncFileChanges,
 };
 pub use patch::{PatchError, apply_edits};
@@ -92,6 +93,24 @@ impl FilesService {
             .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
         policy::require(permission, command)?;
         Ok(permission)
+    }
+
+    pub(super) async fn authorize_space_owner_user(
+        &self,
+        caller_kind: AccountKind,
+        account_id: Uuid,
+        space_id: Uuid,
+    ) -> ServiceResult<()> {
+        if caller_kind != AccountKind::User {
+            return Err(ServiceError::Forbidden(
+                "only the space owner user can change node policy".to_owned(),
+            ));
+        }
+        self.store
+            .permission_for(space_id, account_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        Ok(())
     }
 
     pub(super) async fn effective_limits(&self, space_id: Uuid) -> ServiceResult<Limits> {

@@ -12,16 +12,32 @@ import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, ren
 import { useUiStore } from "../../stores/uiStore";
 import type { EditorNavigationDirection } from "../../stores/uiStoreReducers";
 import { useUploadActions } from "../uploads/UploadProvider";
-import { useCreateNodeMutation, useDeleteNodeMutation, useMoveNodeMutation, useReplaceMetadataMutation, useRevealNode, useUpdateNodeMutation } from "./useWorkbenchQueries";
+import {
+  useCreateNodeMutation,
+  useDeleteNodeMutation,
+  useMoveNodeMutation,
+  useReplaceMetadataMutation,
+  useRevealNode,
+  useUpdateNodeMutation,
+  useUpdateNodeSearchPolicyMutation,
+  useUpdateTextEncryptionMutation
+} from "./useWorkbenchQueries";
 
 type NodeActionsProps = {
   activeSpace: Space | null;
   activeNode: RestNode | null;
   canWriteActiveSpace: boolean;
+  canManageActiveSpace: boolean;
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;
 };
 
-export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiveSpace, setDialog }: NodeActionsProps) {
+export function useWorkbenchNodeActions({
+  activeSpace,
+  activeNode,
+  canWriteActiveSpace,
+  canManageActiveSpace,
+  setDialog
+}: NodeActionsProps) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const openInActiveGroup = useUiStore((state) => state.openInActiveGroup);
@@ -44,6 +60,8 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     openInActiveGroup(node);
   });
   const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
+  const updateNodeSearchPolicyMutation = useUpdateNodeSearchPolicyMutation(updateGroupsNode);
+  const updateTextEncryptionMutation = useUpdateTextEncryptionMutation(updateGroupsNode);
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
   const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
@@ -254,6 +272,34 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     }));
   }
 
+  function setNodeSearchEnabled(searchEnabled: boolean) {
+    if (
+      !canManageActiveSpace
+      || !activeNode
+      || activeNode.parent_id === null
+      || updateNodeSearchPolicyMutation.isPending
+      || updateTextEncryptionMutation.isPending
+    ) return;
+    updateNodeSearchPolicyMutation.mutate({
+      node: activeNode,
+      enabled: searchEnabled
+    });
+  }
+
+  function setTextEncryptionEnabled(textEncryptionEnabled: boolean) {
+    if (
+      !canManageActiveSpace
+      || !activeNode
+      || activeNode.kind !== "text"
+      || updateNodeSearchPolicyMutation.isPending
+      || updateTextEncryptionMutation.isPending
+    ) return;
+    updateTextEncryptionMutation.mutate({
+      node: activeNode,
+      enabled: textEncryptionEnabled
+    });
+  }
+
   async function loadCanonicalNode(
     summary: NodeSummary,
     failureMessage: string
@@ -286,6 +332,10 @@ export function useWorkbenchNodeActions({ activeSpace, activeNode, canWriteActiv
     moveNodeToFolder,
     confirmDeleteNode,
     promptReplaceMetadata,
+    setNodeSearchEnabled,
+    setTextEncryptionEnabled,
+    nodeSettingsPending:
+      updateNodeSearchPolicyMutation.isPending || updateTextEncryptionMutation.isPending,
     downloadFileNode
   };
 }

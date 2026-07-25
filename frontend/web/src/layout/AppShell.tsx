@@ -208,7 +208,16 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 canWriteActiveSpace={workbench.canWriteActiveSpace}
               />
               <AuxiliarySidebarFrame mode={layout.auxiliaryMode}>
-                <AuxiliarySidebar activeNode={workbench.activeNode} canWriteActiveSpace={workbench.canWriteActiveSpace} onReplaceMetadata={actions.promptReplaceMetadata} />
+                <AuxiliarySidebar
+                  activeNode={workbench.activeNode}
+                  canWriteActiveSpace={workbench.canWriteActiveSpace}
+                  canManageActiveSpace={workbench.canManageActiveSpace}
+                  textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}
+                  settingsPending={actions.nodeSettingsPending}
+                  onReplaceMetadata={actions.promptReplaceMetadata}
+                  onSearchEnabledChange={actions.setNodeSearchEnabled}
+                  onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}
+                />
               </AuxiliarySidebarFrame>
               <PanelOverlay visible={mobileOverlayVisible} onClose={closeMobilePanels} />
             </>

@@ -20,6 +20,7 @@ function node(id: string, name = `${id}.md`, spaceId = "space-1"): RestNode {
     path: `/${name}`,
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: false,
     created_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_by: { id: "user-1", kind: "user", display_name: "User" },
@@ -251,6 +252,8 @@ describe("useUiStore", () => {
 
   it("restores a persisted workbench snapshot when activating a space", () => {
     const first = node("node-1");
+    const legacyFirst: Partial<RestNode> = { ...first };
+    delete legacyFirst.search_enabled;
     const wrongSpaceNode = node("node-2", "wrong.md", "other-space");
     const malformedNode = { ...node("node-3"), created_by: undefined };
     window.localStorage.setItem(workbenchSpaceKey("space-1"), JSON.stringify({
@@ -258,7 +261,7 @@ describe("useUiStore", () => {
       spaceId: "space-1",
       updatedAt: 1,
       groups: [
-        { node: first, mode: "edit" },
+        { node: legacyFirst, mode: "edit" },
         { node: wrongSpaceNode, mode: "edit" },
         { node: malformedNode, mode: "edit" }
       ],

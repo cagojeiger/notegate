@@ -32,6 +32,7 @@ export function makeRootNode(space: Space): RestNode {
     path: "/",
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: true,
     created_by: { id: "", kind: "user", display_name: "" },
     updated_by: { id: "", kind: "user", display_name: "" },

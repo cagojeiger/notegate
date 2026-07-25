@@ -74,9 +74,9 @@ Client-side encrypted Text에서 서버는 원문, 비밀번호, 복호화 키�
 
 서버 관리 암호화는 `storage_format='plain'`에만 적용한다. Ciphertext는 Space id, Node id, key id, version을 AEAD AAD로 묶는다. API read, write, patch와 `grep`은 서버에서 복호화한 plain content를 사용한다. Node metadata, `content_sha256`, `byte_len`, `line_count`는 암호화하지 않는다.
 
-`text_objects.encryption_enabled`는 다음 저장에 적용할 정책이고 `at_rest_encryption`은 현재 저장 상태다. 정책 변경만으로 기존 row를 다시 쓰지 않는다. 활성화 후 다음 저장부터 암호화하고, 비활성화 후 다음 저장부터 평문으로 저장한다. Space 기본값은 새 Text에만 복사하며 기존 Text를 바꾸지 않는다.
+`text_objects.encryption_enabled`는 서버 관리 암호화 설정이고 `at_rest_encryption`은 실제 저장 상태다. 설정을 변경하면 기존 plain Text 본문을 같은 transaction에서 즉시 암호화하거나 복호화한다. 두 값은 항상 일치해야 한다. Space 기본값은 새 Text에만 복사하며 기존 Text를 바꾸지 않는다.
 
-서버 관리 암호화 활성화와 암호화 저장은 Space owner의 tier capability `text_encryption`이 필요하다. 현재 `system_max`만 허용한다. Tier가 낮아져도 기존 ciphertext는 읽기와 검색이 가능하지만 새 암호화 저장은 거부한다. 서버는 tier 변경을 이유로 ciphertext를 자동 복호화 저장하지 않는다.
+서버 관리 암호화 설정 변경은 Space owner User만 할 수 있다. Agent는 write 권한이 있어도 활성화하거나 비활성화할 수 없다. 암호화 활성화와 암호화 저장은 Space owner의 tier capability `text_encryption`이 필요하다. 현재 `system_max`만 허용한다. Tier가 낮아져도 기존 ciphertext는 읽기와 검색이 가능하지만 새 암호화 저장은 거부한다. 서버는 tier 변경을 이유로 ciphertext를 자동 복호화 저장하지 않는다.
 
 ```text
 plain content_sha256 = SHA256(plaintext bytes)

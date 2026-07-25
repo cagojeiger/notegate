@@ -54,7 +54,7 @@ export function restoreSpaceWorkbench(spaceId: string, nextGroupId: number): Edi
 
   const editorGroups = saved.groups.slice(0, MAX_EDITOR_GROUPS).map((group, index) => {
     const savedGroup = group && typeof group === "object" ? group as Partial<PersistedEditorGroup> : {};
-    const node = isRestNodeForSpace(savedGroup.node, spaceId) ? savedGroup.node : null;
+    const node = restoreRestNodeForSpace(savedGroup.node, spaceId);
     const history = restoreNavigationHistory(savedGroup, spaceId);
     return {
       id: nextGroupId + index,
@@ -218,10 +218,10 @@ function isPersistedWorkbenchPanelState(value: unknown): value is PersistedWorkb
   return state.version === WORKBENCH_VERSION && typeof state.primarySidebarOpen === "boolean" && typeof state.auxiliaryOpen === "boolean";
 }
 
-function isRestNodeForSpace(value: unknown, spaceId: string): value is RestNode {
-  if (!value || typeof value !== "object") return false;
+function restoreRestNodeForSpace(value: unknown, spaceId: string): RestNode | null {
+  if (!value || typeof value !== "object") return null;
   const node = value as Partial<RestNode>;
-  return (
+  const valid = (
     node.space_id === spaceId &&
     typeof node.id === "string" &&
     typeof node.name === "string" &&
@@ -238,6 +238,11 @@ function isRestNodeForSpace(value: unknown, spaceId: string): value is RestNode 
     typeof node.created_at === "string" &&
     typeof node.updated_at === "string"
   );
+  if (!valid) return null;
+  return {
+    ...node,
+    search_enabled: typeof node.search_enabled === "boolean" ? node.search_enabled : true
+  } as RestNode;
 }
 
 function isAccountRef(value: unknown): boolean {
