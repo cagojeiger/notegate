@@ -95,6 +95,21 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(undersizedTargets).toEqual([]);
 });
 
+test("Space Library expands the card grid when the desktop inspector closes", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await mockSpaceLibraryApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  const grid = page.getByRole("list", { name: "All spaces" });
+  const widthWithInspector = await grid.evaluate((element) => element.getBoundingClientRect().width);
+  await page.getByRole("button", { name: "Toggle space inspector" }).click();
+
+  await expect.poll(
+    async () => grid.evaluate((element) => element.getBoundingClientRect().width)
+  ).toBeGreaterThan(widthWithInspector + 250);
+});
+
 test("opening an unpinned Space does not add it to navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockSpaceLibraryApi(page);

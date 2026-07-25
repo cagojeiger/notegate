@@ -66,7 +66,7 @@ export function SpaceLibrary({
     <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
-          <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-3">
+          <div className="flex h-full w-full items-center justify-between gap-3">
             <h1 className="text-xl font-semibold">
               Spaces <span className="font-normal text-muted">{spaces.length}</span>
             </h1>
@@ -75,7 +75,7 @@ export function SpaceLibrary({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
-          <div className="mx-auto max-w-7xl">
+          <div className="w-full">
             {spaces.length === 0 ? (
               <Card className="grid min-h-56 place-items-center border-dashed text-center">
                 <div>
