@@ -159,25 +159,25 @@ function SortableSpaceCard({
       <Card
         padding="none"
         className={[
-          "relative h-full transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/45",
+          "h-full cursor-pointer transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/45",
           selected
-            ? "z-10 bg-[var(--ng-selection)] outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]"
+            ? "relative z-10 bg-[var(--ng-selection)] outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]"
             : "hover:border-border-strong",
           isDragging ? "shadow-[var(--ng-focus-shadow)]" : ""
         ].join(" ")}
+        onClick={(event) => {
+          if (
+            event.target instanceof Element
+            && event.target.closest("button, [data-space-drag-handle]")
+          ) return;
+          onSelect();
+        }}
       >
-        <button
-          type="button"
-          className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] outline-none"
-          onClick={onSelect}
-          aria-pressed={selected}
-          aria-label={`Inspect ${space.name}`}
-        />
         <div className="flex items-center gap-2 px-3 pt-3">
           <span
             ref={setActivatorNodeRef}
             className={[
-              "relative z-10 grid size-8 touch-none place-items-center rounded-lg text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
+              "grid size-8 touch-none place-items-center rounded-lg text-muted transition hover:bg-[var(--ng-hover)] hover:text-text",
               reorderPending ? "cursor-not-allowed opacity-40" : "cursor-grab active:cursor-grabbing"
             ].join(" ")}
             {...attributes}
@@ -186,6 +186,7 @@ function SortableSpaceCard({
             tabIndex={-1}
             aria-hidden="true"
             data-testid={`drag-handle-${space.id}`}
+            data-space-drag-handle
           >
             <GripVertical size={16} />
           </span>
@@ -195,31 +196,32 @@ function SortableSpaceCard({
           >
             {space.name.slice(0, 1).toUpperCase()}
           </span>
-          <div className="min-w-0 flex-1 py-1 text-left">
+          <button
+            type="button"
+            className="min-w-0 flex-1 py-1 text-left outline-none"
+            onClick={onSelect}
+            aria-pressed={selected}
+            aria-label={`Inspect ${space.name}`}
+          >
             <span className="block truncate font-semibold">{space.name}</span>
             <span className="mt-0.5 block truncate text-xs text-muted">
               {usage
                 ? `${usage.items.used.toLocaleString()} items · ${formatBytes(usage.text_bytes.used + usage.file_bytes.used)}`
                 : "Usage unavailable"}
             </span>
-          </div>
-          <span className="relative z-10">
-            <IconButton
-              label={`${space.navigation_pinned ? "Unpin" : "Pin"} ${space.name} ${space.navigation_pinned ? "from" : "to"} navigation`}
-              size="sm"
-              pressed={space.navigation_pinned}
-              disabled={updatePending}
-              onClick={onToggleNavigationPin}
-            >
-              <Pin size={14} />
-            </IconButton>
-          </span>
+          </button>
+          <IconButton
+            label={`${space.navigation_pinned ? "Unpin" : "Pin"} ${space.name} ${space.navigation_pinned ? "from" : "to"} navigation`}
+            size="sm"
+            pressed={space.navigation_pinned}
+            disabled={updatePending}
+            onClick={onToggleNavigationPin}
+          >
+            <Pin size={14} />
+          </IconButton>
         </div>
 
-        <div
-          className="relative z-10 flex cursor-pointer items-center gap-1 px-4 pb-3 pt-2"
-          onClick={onSelect}
-        >
+        <div className="flex items-center gap-1 px-4 pb-3 pt-2">
           <StatusItem
             description={`Search default ${space.default_search_enabled ? "on" : "off"}`}
             active={space.default_search_enabled}
@@ -243,10 +245,10 @@ function SortableSpaceCard({
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-seam px-3 py-2">
-          <Button size="sm" variant="ghost" className="relative z-10" onClick={onOpen}>
+          <Button size="sm" variant="ghost" onClick={onOpen}>
             Open
           </Button>
-          <div className="relative z-10 flex items-center gap-1">
+          <div className="flex items-center gap-1">
             <IconButton
               label={`Move ${space.name} earlier`}
               size="sm"

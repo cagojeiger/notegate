@@ -41,19 +41,10 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[1].y).toBe(cardBoxes[2].y);
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
 
-  const selectionCoverage = await grid
-    .getByRole("button", { name: /^Inspect / })
-    .evaluateAll((buttons) => buttons.map((button) => {
-      const buttonBox = button.getBoundingClientRect();
-      const cardBox = button.parentElement?.getBoundingClientRect();
-      return {
-        widthDifference: Math.abs(buttonBox.width - (cardBox?.width ?? 0)),
-        heightDifference: Math.abs(buttonBox.height - (cardBox?.height ?? 0))
-      };
-    }));
-  expect(selectionCoverage.every(
-    ({ widthDifference, heightDifference }) => widthDifference < 1 && heightDifference < 1
-  )).toBe(true);
+  const archiveCard = grid.getByRole("listitem").filter({ hasText: "Archive" });
+  await archiveCard.getByTitle("Search default off").click();
+  await expect(page.getByRole("button", { name: "Inspect Archive" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Inspect Daily" }).click();
 
   const inspectorToggle = page.getByRole("button", { name: "Toggle space inspector" });
   await expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
