@@ -54,7 +54,6 @@ export type NodeSummary = {
   byte_len?: number;
   line_count?: number;
   preview_available?: boolean;
-  original_filename?: string;
   updated_at: string;
 };
 
@@ -64,6 +63,7 @@ export type RestNode = NodeSummary & {
   content_sha256?: string;
   media_type?: string;
   detected_media_type?: string;
+  original_filename?: string;
   encryption_mode?: "none" | "client";
   encryption_metadata?: Record<string, unknown>;
   created_by: AccountRef;

@@ -47,11 +47,11 @@ export function useTreeRestoreBatch(
   const requestKey = missingParentIds.join(",");
   // Keep the failed query dormant for its current tree revision, then give
   // React Query a fresh key when a later revision makes batching useful again.
-  const retryEpoch =
-    failedRestoreKey.current === null ? 0 : childrenRevision + 1;
+  const attemptKey =
+    failedRestoreKey.current === null ? "initial" : restoreKey;
   const [hydratedKey, setHydratedKey] = useState<string | null>(null);
   const batch = useQuery({
-    queryKey: queryKeys.treeRestore(spaceId, retryEpoch, missingParentIds),
+    queryKey: queryKeys.treeRestore(spaceId, attemptKey, missingParentIds),
     queryFn: async () => {
       try {
         const responses = await Promise.all(

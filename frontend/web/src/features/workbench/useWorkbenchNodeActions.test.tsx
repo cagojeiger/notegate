@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import { getNode, resolveNodePath } from "../../api/nodes";
-import type { NodeSummary, RestNode, Space } from "../../api/types";
+import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
@@ -281,12 +281,16 @@ describe("useWorkbenchNodeActions", () => {
 
   it("downloads a file through the browser download path", async () => {
     const activeSpace = space("space-1");
+    const fileSummary = node(
+      "file-1",
+      activeSpace.id,
+      "/Reports/report.pdf",
+      "file"
+    );
     const fileNode = {
-      ...node("file-1", activeSpace.id, "/Reports/report.pdf", "file"),
+      ...fileSummary,
       original_filename: "source-report.pdf"
     };
-    const fileSummary: NodeSummary = { ...fileNode };
-    delete fileSummary.original_filename;
     vi.mocked(getNode).mockResolvedValue(fileNode);
     const { result } = renderNodeActions({
         activeSpace,

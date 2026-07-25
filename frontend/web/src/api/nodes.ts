@@ -15,7 +15,7 @@ export function getNode(client: ApiClient, spaceId: string, nodeId: string): Pro
   return client.get<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`);
 }
 
-type WireNodeSummary = Omit<NodeSummary, "space_id" | "original_filename">;
+type WireNodeSummary = Omit<NodeSummary, "space_id">;
 type WireChildrenResponse = Omit<ChildrenResponse, "children"> & {
   children: WireNodeSummary[];
 };
