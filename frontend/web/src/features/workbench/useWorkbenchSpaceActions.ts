@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import type { Space } from "../../api/types";
 import { canWriteSpace } from "../../auth/permissions";
-import type { AppDialog } from "./dialogs/DialogHost";
+import type { AppDialog } from "./dialogs/dialogTypes";
 import { deleteSpaceDialog, newSpaceDialog, renameSpaceDialog } from "./dialogs/appDialogs";
 import { useUiStore } from "../../stores/uiStore";
 import { clearPersistedSpaceWorkbench } from "../../stores/workbenchStorage";

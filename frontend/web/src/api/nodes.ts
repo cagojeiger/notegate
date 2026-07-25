@@ -1,25 +1,86 @@
 import type { ApiClient } from "./client";
-import type { ChildrenResponse, NodeKind, NodeRevealResponse, RestNode, RestNodeListResponse } from "./types";
+import type {
+  BatchChildrenResponse,
+  ChildrenResponse,
+  NodeKind,
+  NodeRevealResponse,
+  NodeSummary,
+  RestNode,
+  RestNodeListResponse
+} from "./types";
+
+export const MAX_BATCH_CHILDREN_PARENTS = 16;
 
 export function getNode(client: ApiClient, spaceId: string, nodeId: string): Promise<RestNode> {
   return client.get<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`);
 }
 
-export function listChildren(client: ApiClient, spaceId: string, nodeId: string, cursor?: string | null): Promise<ChildrenResponse> {
-  const params = new URLSearchParams({ limit: "100" });
+type WireNodeSummary = Omit<NodeSummary, "space_id" | "original_filename">;
+type WireChildrenResponse = Omit<ChildrenResponse, "children"> & {
+  children: WireNodeSummary[];
+};
+type WireNodeListResponse = Omit<RestNodeListResponse, "nodes"> & {
+  nodes: WireNodeSummary[];
+};
+type WireBatchChildrenResponse = Omit<BatchChildrenResponse, "results"> & {
+  results: Array<Omit<BatchChildrenResponse["results"][number], "children"> & {
+    children: WireNodeSummary[];
+  }>;
+};
+
+export async function listChildren(client: ApiClient, spaceId: string, nodeId: string, cursor?: string | null): Promise<ChildrenResponse> {
+  const params = new URLSearchParams({ limit: "100", view: "summary" });
   if (cursor) params.set("cursor", cursor);
-  return client.get<ChildrenResponse>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/children?${params}`);
+  const response = await client.get<WireChildrenResponse>(
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/children?${params}`
+  );
+  return {
+    ...response,
+    children: withSpaceId(spaceId, response.children)
+  };
 }
 
-export function listNodes(
+export async function batchListChildren(
+  client: ApiClient,
+  spaceId: string,
+  parentIds: string[]
+): Promise<BatchChildrenResponse> {
+  const response = await client.post<WireBatchChildrenResponse>(
+    `/api/v1/spaces/${spaceId}/nodes:batchListChildren`,
+    { parent_ids: parentIds, limit: 100 }
+  );
+  return {
+    ...response,
+    results: response.results.map((result) => ({
+      ...result,
+      children: withSpaceId(spaceId, result.children)
+    }))
+  };
+}
+
+export async function listNodes(
   client: ApiClient,
   spaceId: string,
   options: { kind?: NodeKind; sort?: "updated_at_desc" | "name_asc"; cursor?: string | null } = {}
 ): Promise<RestNodeListResponse> {
-  const params = new URLSearchParams({ limit: "50", sort: options.sort ?? "updated_at_desc" });
+  const params = new URLSearchParams({
+    limit: "50",
+    sort: options.sort ?? "updated_at_desc",
+    view: "summary"
+  });
   if (options.kind) params.set("kind", options.kind);
   if (options.cursor) params.set("cursor", options.cursor);
-  return client.get<RestNodeListResponse>(`/api/v1/spaces/${spaceId}/nodes?${params}`);
+  const response = await client.get<WireNodeListResponse>(
+    `/api/v1/spaces/${spaceId}/nodes?${params}`
+  );
+  return {
+    ...response,
+    nodes: withSpaceId(spaceId, response.nodes)
+  };
+}
+
+function withSpaceId(spaceId: string, nodes: WireNodeSummary[]): NodeSummary[] {
+  return nodes.map((node) => ({ ...node, space_id: spaceId }));
 }
 
 export function revealNode(client: ApiClient, spaceId: string, nodeId: string): Promise<NodeRevealResponse> {

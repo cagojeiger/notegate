@@ -21,7 +21,11 @@ describe("updateNodeCaches", () => {
       ],
       pageParams: [null, "next"]
     };
-    queryClient.setQueryData(queryKeys.recent("space-1"), recent);
+    const recentPages: InfiniteData<RestNodeListResponse> = {
+      pages: [recent],
+      pageParams: [null]
+    };
+    queryClient.setQueryData(queryKeys.recent("space-1"), recentPages);
     queryClient.setQueryData(queryKeys.children("space-1", "root-1"), children);
 
     updateNodeCaches(queryClient, target, (current) => ({
@@ -32,9 +36,9 @@ describe("updateNodeCaches", () => {
 
     expect(queryClient.getQueryData<RestNode>(queryKeys.node("space-1", "file-1")))
       .toMatchObject({ detected_media_type: "image/png", preview_available: true });
-    const updatedRecent = queryClient.getQueryData<RestNodeListResponse>(queryKeys.recent("space-1"));
-    expect(updatedRecent?.nodes[0]).toMatchObject({ preview_available: true });
-    expect(updatedRecent?.nodes[1]).toBe(unrelated);
+    const updatedRecent = queryClient.getQueryData<InfiniteData<RestNodeListResponse>>(queryKeys.recent("space-1"));
+    expect(updatedRecent?.pages[0]?.nodes[0]).toMatchObject({ preview_available: true });
+    expect(updatedRecent?.pages[0]?.nodes[1]).toBe(unrelated);
     const updatedChildren = queryClient.getQueryData<InfiniteData<ChildrenResponse>>(
       queryKeys.children("space-1", "root-1")
     );

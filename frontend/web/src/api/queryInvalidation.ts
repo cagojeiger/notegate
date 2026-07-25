@@ -13,18 +13,16 @@ export function invalidateNodeLists(
   parentIds: Iterable<string | null | undefined>
 ) {
   invalidateRecentNodes(queryClient, spaceId);
-  for (const parentId of new Set([...parentIds].filter((id): id is string => Boolean(id)))) {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.children(spaceId, parentId) });
-  }
+  invalidateParentChildren(queryClient, spaceId, parentIds);
 }
 
 export function invalidateRecentNodes(queryClient: QueryClient, spaceId: string) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.recent(spaceId), exact: true });
+  void queryClient.resetQueries({ queryKey: queryKeys.recent(spaceId), exact: true });
 }
 
 export function invalidateFolderSubtree(queryClient: QueryClient, spaceId: string) {
   invalidateRecentNodes(queryClient, spaceId);
-  void queryClient.invalidateQueries({ queryKey: queryKeys.childrenFamily(spaceId) });
+  invalidateAllChildren(queryClient, spaceId);
   void queryClient.invalidateQueries({ queryKey: queryKeys.nodes(spaceId) });
   removeMarkdownImageQueries(queryClient, spaceId);
 }
@@ -99,11 +97,9 @@ export async function applyExternalFileChanges(
 
   invalidateRecentNodes(queryClient, spaceId);
   if (missingParent) {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.childrenFamily(spaceId) });
+    invalidateAllChildren(queryClient, spaceId);
   } else {
-    for (const parentId of parentIds) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.children(spaceId, parentId) });
-    }
+    invalidateParentChildren(queryClient, spaceId, parentIds);
   }
   if (pathChanged) {
     removeMarkdownImageQueries(queryClient, spaceId);
@@ -203,4 +199,35 @@ async function removeExternalDeletedNode(
 async function cancelAndRemoveQueries(queryClient: QueryClient, keys: QueryKey[]) {
   await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
   keys.forEach((queryKey) => queryClient.removeQueries({ queryKey }));
+}
+
+function invalidateParentChildren(
+  queryClient: QueryClient,
+  spaceId: string,
+  parentIds: Iterable<string | null | undefined>
+) {
+  const uniqueParentIds = new Set(
+    [...parentIds].filter((id): id is string => Boolean(id))
+  );
+  if (uniqueParentIds.size === 0) return;
+  advanceChildrenRevision(queryClient, spaceId);
+  for (const parentId of uniqueParentIds) {
+    void queryClient.resetQueries({
+      queryKey: queryKeys.children(spaceId, parentId)
+    });
+  }
+}
+
+function invalidateAllChildren(queryClient: QueryClient, spaceId: string) {
+  advanceChildrenRevision(queryClient, spaceId);
+  void queryClient.resetQueries({
+    queryKey: queryKeys.childrenFamily(spaceId)
+  });
+}
+
+function advanceChildrenRevision(queryClient: QueryClient, spaceId: string) {
+  queryClient.setQueryData<number>(
+    queryKeys.childrenRevision(spaceId),
+    (revision = 0) => revision + 1
+  );
 }

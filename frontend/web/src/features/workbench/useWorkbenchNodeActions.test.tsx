@@ -1,9 +1,11 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import { resolveNodePath } from "../../api/nodes";
-import type { RestNode, Space } from "../../api/types";
+import { getNode, resolveNodePath } from "../../api/nodes";
+import type { NodeSummary, RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
@@ -18,6 +20,7 @@ vi.mock("../../api/ApiProvider", () => ({
 }));
 
 vi.mock("../../api/nodes", () => ({
+  getNode: vi.fn(),
   resolveNodePath: vi.fn()
 }));
 
@@ -46,6 +49,7 @@ describe("useWorkbenchNodeActions", () => {
     window.localStorage.clear();
     useUiStore.setState(useUiStore.getInitialState(), true);
     vi.mocked(resolveNodePath).mockReset();
+    vi.mocked(getNode).mockReset();
     mocks.downloadFile.mockReset().mockResolvedValue(undefined);
     mocks.revealNode.mockReset();
     mocks.startUpload.mockReset();
@@ -60,14 +64,12 @@ describe("useWorkbenchNodeActions", () => {
     vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
     mocks.revealNode.mockResolvedValue({ ancestors: [folder], target: targetNode });
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: sourceNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     await act(async () => {
       await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
@@ -84,14 +86,12 @@ describe("useWorkbenchNodeActions", () => {
     const groupId = openSourceGroup(activeSpace, sourceNode);
     vi.mocked(resolveNodePath).mockRejectedValue(new ApiError("not found", 404));
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: sourceNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     await act(async () => {
       await result.current.openMarkdownLink(groupId, sourceNode, "/missing.md");
@@ -109,14 +109,12 @@ describe("useWorkbenchNodeActions", () => {
     vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
     mocks.revealNode.mockRejectedValue(new Error("reveal failed"));
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: sourceNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     await act(async () => {
       await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
@@ -138,14 +136,12 @@ describe("useWorkbenchNodeActions", () => {
     vi.mocked(resolveNodePath).mockReturnValue(pending.promise);
     mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: sourceNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     const openPromise = result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
     act(() => {
@@ -171,14 +167,12 @@ describe("useWorkbenchNodeActions", () => {
     const pending = deferred<RestNode>();
     vi.mocked(resolveNodePath).mockReturnValue(pending.promise);
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: sourceNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     const openPromise = result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
     act(() => {
@@ -200,14 +194,12 @@ describe("useWorkbenchNodeActions", () => {
     const groupId = openSourceGroup(activeSpace, sourceNode);
     vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: sourceNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     await act(async () => {
       await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
@@ -220,16 +212,15 @@ describe("useWorkbenchNodeActions", () => {
   it("opens regular nodes even when tree reveal fails", async () => {
     const activeSpace = space("space-1");
     const targetNode = node("target", activeSpace.id, "/target.md");
+    vi.mocked(getNode).mockResolvedValue(targetNode);
     mocks.revealNode.mockRejectedValue(new Error("reveal failed"));
 
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: targetNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
-    );
+      });
 
     await act(async () => {
       await result.current.openNode(targetNode);
@@ -239,19 +230,37 @@ describe("useWorkbenchNodeActions", () => {
     expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
   });
 
+  it("reuses the canonical node query when the same summary is opened again", async () => {
+    const activeSpace = space("space-1");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    vi.mocked(getNode).mockResolvedValue(targetNode);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: null,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    await act(async () => {
+      await result.current.openNode(targetNode);
+      await result.current.openNode(targetNode);
+    });
+
+    expect(getNode).toHaveBeenCalledOnce();
+  });
+
   it("queues a selected file with the current space snapshot", async () => {
     const activeSpace = space("space-1");
     const destinationFolder = node("reports", activeSpace.id, "/Reports", "folder");
     const setDialog = vi.fn();
     const file = new File(["data"], "source.bin", { type: "application/octet-stream" });
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: destinationFolder,
         canWriteActiveSpace: true,
         setDialog
-      })
-    );
+      });
 
     act(() => { result.current.handleFileSelected(file); });
     const dialog = setDialog.mock.calls[0]?.[0];
@@ -276,17 +285,23 @@ describe("useWorkbenchNodeActions", () => {
       ...node("file-1", activeSpace.id, "/Reports/report.pdf", "file"),
       original_filename: "source-report.pdf"
     };
-    const { result } = renderHook(() =>
-      useWorkbenchNodeActions({
+    const fileSummary: NodeSummary = { ...fileNode };
+    delete fileSummary.original_filename;
+    vi.mocked(getNode).mockResolvedValue(fileNode);
+    const { result } = renderNodeActions({
         activeSpace,
         activeNode: fileNode,
         canWriteActiveSpace: true,
         setDialog: vi.fn()
-      })
+      });
+
+    await act(async () => { await result.current.downloadFileNode(fileSummary); });
+
+    expect(getNode).toHaveBeenCalledWith(
+      expect.anything(),
+      activeSpace.id,
+      fileNode.id
     );
-
-    await act(async () => { await result.current.downloadFileNode(fileNode); });
-
     expect(mocks.downloadFile).toHaveBeenCalledWith(
       expect.anything(),
       activeSpace.id,
@@ -295,6 +310,18 @@ describe("useWorkbenchNodeActions", () => {
     );
   });
 });
+
+function renderNodeActions(
+  props: Parameters<typeof useWorkbenchNodeActions>[0]
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return renderHook(() => useWorkbenchNodeActions(props), { wrapper });
+}
 
 function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
   useUiStore.getState().setActiveSpaceId(activeSpace.id);

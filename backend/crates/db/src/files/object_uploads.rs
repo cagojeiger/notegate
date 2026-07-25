@@ -379,3 +379,27 @@ pub async fn set_detected_media_type(
     .map_err(map_sqlx_error)?;
     Ok(())
 }
+
+pub async fn set_detected_media_types(
+    pool: &PgPool,
+    space_id: Uuid,
+    detected_media_types: &[(Uuid, String)],
+) -> Result<()> {
+    if detected_media_types.is_empty() {
+        return Ok(());
+    }
+    let (node_ids, media_types): (Vec<_>, Vec<_>) = detected_media_types.iter().cloned().unzip();
+    sqlx::query(
+        "UPDATE file_objects AS file SET detected_media_type = detected.media_type \
+         FROM UNNEST($2::uuid[], $3::text[]) AS detected(node_id, media_type) \
+         WHERE file.space_id = $1 AND file.node_id = detected.node_id \
+           AND file.detected_media_type IS NULL",
+    )
+    .bind(space_id)
+    .bind(node_ids)
+    .bind(media_types)
+    .execute(pool)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}

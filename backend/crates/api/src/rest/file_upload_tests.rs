@@ -196,6 +196,10 @@ async fn verified_raster_images_receive_inline_preview_urls()
         Some("private, no-store, max-age=0")
     );
 
+    sqlx::query("UPDATE file_objects SET detected_media_type = NULL WHERE node_id = $1")
+        .bind(node_id)
+        .execute(&db.pool)
+        .await?;
     let (status, batch) = json_request(
         rest_app(state.clone(), caller.clone()),
         "POST",
@@ -211,6 +215,12 @@ async fn verified_raster_images_receive_inline_preview_urls()
     assert_eq!(batch["results"][1]["node_id"], node_id.to_string());
     assert_eq!(batch["results"][1]["media_type"], "image/png");
     assert!(batch["results"][1]["url"].as_str().is_some());
+    let batch_detected: Option<String> =
+        sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
+            .bind(node_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(batch_detected.as_deref(), Some("image/png"));
 
     sqlx::query("UPDATE file_objects SET detected_media_type = NULL WHERE node_id = $1")
         .bind(node_id)

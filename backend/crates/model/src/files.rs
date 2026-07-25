@@ -5,12 +5,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{FileEncryptionMode, FileObject, Node, NodeKind, TextObject, TextStorageFormat};
+use crate::{
+    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextObject, TextStorageFormat,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenRequest {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchChildrenRequest {
+    pub parent_node_ids: Vec<Uuid>,
+    pub limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,6 +286,15 @@ pub struct NodeView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeSummaryView {
+    pub node: NodeSummary,
+    pub path: String,
+    pub has_children: bool,
+    pub text: Option<TextStats>,
+    pub file: Option<FileStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextView {
     pub node: NodeView,
     pub text: TextObject,
@@ -314,6 +331,15 @@ pub enum NodeListCursor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildrenPage {
     pub parent: NodeView,
+    pub items: Vec<NodeSummaryView>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalChildrenPage {
+    pub parent: NodeView,
     pub items: Vec<NodeView>,
     pub limit: i64,
     pub has_more: bool,
@@ -321,7 +347,33 @@ pub struct ChildrenPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchChildrenResult {
+    Ready(Box<ChildrenPage>),
+    NotFound { parent_node_id: Uuid },
+    NotFolder { parent_node_id: Uuid },
+}
+
+impl BatchChildrenResult {
+    pub fn parent_node_id(&self) -> Uuid {
+        match self {
+            Self::Ready(page) => page.parent.node.id,
+            Self::NotFound { parent_node_id } | Self::NotFolder { parent_node_id } => {
+                *parent_node_id
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeListPage {
+    pub items: Vec<NodeSummaryView>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalNodeListPage {
     pub items: Vec<NodeView>,
     pub limit: i64,
     pub has_more: bool,

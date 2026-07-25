@@ -9,7 +9,13 @@ export const queryKeys = {
   spaces: ["spaces"] as const,
   space: (spaceId: string) => ["spaces", spaceId] as const,
   childrenFamily: (spaceId: string) => ["spaces", spaceId, "children"] as const,
+  childrenRevision: (spaceId: string) => ["spaces", spaceId, "children-revision"] as const,
   spaceChangeSignal: (spaceId: string) => ["sync", "space-change", spaceId] as const,
+  treeRestore: (
+    spaceId: string,
+    retryEpoch: number,
+    parentIds: readonly string[]
+  ) => ["tree-restore", spaceId, retryEpoch, parentIds] as const,
   fileChangeEventsFamily: (spaceId: string) => ["spaces", spaceId, "file-change-events"] as const,
   fileChangeEvents: (spaceId: string, nodeId?: string | null) => ["spaces", spaceId, "file-change-events", nodeId ?? "space"] as const,
   children: (spaceId: string, nodeId: string) => ["spaces", spaceId, "children", nodeId] as const,

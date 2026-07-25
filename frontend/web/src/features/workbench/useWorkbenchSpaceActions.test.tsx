@@ -2,7 +2,7 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode, Space } from "../../api/types";
-import type { AppDialog } from "./dialogs/DialogHost";
+import type { AppDialog } from "./dialogs/dialogTypes";
 import { useUiStore } from "../../stores/uiStore";
 import { persistSpaceWorkbench, workbenchSpaceKey } from "../../stores/workbenchStorage";
 import { useWorkbenchSpaceActions } from "./useWorkbenchSpaceActions";
