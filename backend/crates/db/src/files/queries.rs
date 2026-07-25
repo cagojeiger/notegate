@@ -34,7 +34,7 @@ pub mod text {
 
         row.map(
             |(content_sha256, byte_len, line_count, storage_format, at_rest)| {
-                text_stats(
+                parse_text_stats(
                     content_sha256,
                     byte_len,
                     line_count,
@@ -77,7 +77,7 @@ pub mod text {
                 |(node_id, content_sha256, byte_len, line_count, storage_format, at_rest)| {
                     Ok((
                         node_id,
-                        text_stats(
+                        parse_text_stats(
                             content_sha256,
                             byte_len,
                             line_count,
@@ -90,7 +90,7 @@ pub mod text {
             .collect::<Result<HashMap<_, _>>>()
     }
 
-    fn text_stats(
+    fn parse_text_stats(
         content_sha256: String,
         byte_len: i64,
         line_count: i32,
