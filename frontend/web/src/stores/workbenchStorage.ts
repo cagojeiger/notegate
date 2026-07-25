@@ -1,6 +1,6 @@
 import type { RestNode } from "../api/types";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
-import { resetEditorGroupsState, type EditorGroup, type EditorGroupState } from "./uiStoreReducers";
+import { MAX_EDITOR_NAVIGATION_ENTRIES, resetEditorGroupsState, type EditorGroup, type EditorGroupState, type EditorNavigationEntry } from "./uiStoreReducers";
 
 const WORKBENCH_VERSION = 1;
 const WORKBENCH_INDEX_KEY = "notegate.workbench.v1.index";
@@ -11,6 +11,8 @@ const MAX_WORKBENCH_SNAPSHOTS = 20;
 type PersistedEditorGroup = {
   node: RestNode | null;
   mode: "preview" | "edit";
+  back?: EditorNavigationEntry[];
+  forward?: EditorNavigationEntry[];
 };
 
 type PersistedSpaceWorkbench = {
@@ -53,10 +55,12 @@ export function restoreSpaceWorkbench(spaceId: string, nextGroupId: number): Edi
   const editorGroups = saved.groups.slice(0, MAX_EDITOR_GROUPS).map((group, index) => {
     const savedGroup = group && typeof group === "object" ? group as Partial<PersistedEditorGroup> : {};
     const node = isRestNodeForSpace(savedGroup.node, spaceId) ? savedGroup.node : null;
+    const history = restoreNavigationHistory(savedGroup, spaceId);
     return {
       id: nextGroupId + index,
       node,
-      mode: node && savedGroup.mode === "edit" ? "edit" as const : "preview" as const
+      mode: node && savedGroup.mode === "edit" ? "edit" as const : "preview" as const,
+      ...history
     };
   });
 
@@ -73,7 +77,9 @@ export function persistSpaceWorkbench(spaceId: string, editorGroups: EditorGroup
   const updatedAt = Date.now();
   const groups = editorGroups.slice(0, MAX_EDITOR_GROUPS).map((group) => ({
     node: group.node?.space_id === spaceId ? group.node : null,
-    mode: group.node && group.mode === "edit" ? "edit" as const : "preview" as const
+    mode: group.node && group.mode === "edit" ? "edit" as const : "preview" as const,
+    back: group.back.filter((entry) => entry.spaceId === spaceId),
+    forward: group.forward.filter((entry) => entry.spaceId === spaceId)
   }));
   const snapshot: PersistedSpaceWorkbench = {
     version: WORKBENCH_VERSION,
@@ -238,6 +244,35 @@ function isAccountRef(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const account = value as Partial<RestNode["created_by"]>;
   return typeof account.id === "string" && (account.kind === "user" || account.kind === "agent") && typeof account.display_name === "string";
+}
+
+function restoreNavigationHistory(
+  group: Partial<PersistedEditorGroup>,
+  spaceId: string
+): Pick<EditorGroup, "back" | "forward"> {
+  const limit = MAX_EDITOR_NAVIGATION_ENTRIES - 1;
+  const back = normalizeNavigationEntries(group.back, spaceId).slice(-limit);
+  const forwardLimit = Math.max(0, limit - back.length);
+  const forward = forwardLimit > 0
+    ? normalizeNavigationEntries(group.forward, spaceId).slice(-forwardLimit)
+    : [];
+  return { back, forward };
+}
+
+function normalizeNavigationEntries(value: unknown, spaceId: string): EditorNavigationEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is EditorNavigationEntry => isNavigationEntryForSpace(entry, spaceId));
+}
+
+function isNavigationEntryForSpace(value: unknown, spaceId: string): value is EditorNavigationEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<EditorNavigationEntry>;
+  return (
+    entry.spaceId === spaceId &&
+    typeof entry.nodeId === "string" &&
+    typeof entry.nameSnapshot === "string" &&
+    (entry.kind === "folder" || entry.kind === "text" || entry.kind === "file")
+  );
 }
 
 function clampIndex(index: number, length: number): number {

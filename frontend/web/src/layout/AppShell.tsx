@@ -118,6 +118,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           visibleGroupCount={layout.visibleEditorGroupCount}
           activeSpace={workbench.activeSpace}
           onFocusGroup={actions.focusGroup}
+          onNavigateEditorGroup={(groupId, direction) => { void actions.navigateEditorGroup(groupId, direction); }}
+          navigatingGroupIds={actions.navigatingGroupIds}
           onOpenNode={(node) => { void openNode(node); }}
           onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
           onOpenMarkdownLink={(groupId, node, path) => { void actions.openMarkdownLink(groupId, node, path); }}

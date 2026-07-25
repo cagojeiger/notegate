@@ -1,12 +1,14 @@
 import { Download } from "lucide-react";
-import { useState, type MouseEvent } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { nodeIcon } from "../nodes/nodeDisplay";
 
 import type { NodeSummary, RestNode, Space } from "../../api/types";
 import { MAX_EDITOR_GROUPS, type EditorPresentation } from "../../shared/model/workbenchLayout";
 import { IconButton } from "../../shared/ui";
 import type { EditorGroup } from "../../stores/uiStore";
+import type { EditorNavigationDirection } from "../../stores/uiStoreReducers";
 import { EditorGroupHeader } from "./EditorGroupHeader";
+import { EditorNavigationControls } from "./EditorNavigationControls";
 import { EmptyEditor } from "./EmptyEditor";
 import { FileDetailView } from "./FileDetailView";
 import { FolderDetailView } from "./FolderDetailView";
@@ -23,6 +25,8 @@ type EditorAreaProps = NodeActions & {
   visibleGroupCount?: number;
   activeSpace: Space | null;
   onFocusGroup: (index: number) => void;
+  onNavigateEditorGroup: (groupId: number, direction: EditorNavigationDirection) => void;
+  navigatingGroupIds: ReadonlySet<number>;
   onOpenNode: (node: NodeSummary) => void;
   onCloseGroup: (index: number) => void;
   onSetGroupMode: (index: number, mode: "preview" | "edit") => void;
@@ -33,7 +37,7 @@ type EditorAreaProps = NodeActions & {
   canWriteActiveSpace: boolean;
 } & EditorNavigationActions;
 
-export function EditorArea({ groups, activeGroupIndex, presentation = "split", visibleGroupCount = groups.length, activeSpace, canWriteActiveSpace, onFocusGroup, onOpenNode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
+export function EditorArea({ groups, activeGroupIndex, presentation = "split", visibleGroupCount = groups.length, activeSpace, canWriteActiveSpace, onFocusGroup, onNavigateEditorGroup, navigatingGroupIds, onOpenNode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
   const multiple = groups.length > 1;
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; node: RestNode; groupIndex: number } | null>(null);
   const visibleRange = editorGroupVisibleRange(groups.length, activeGroupIndex, visibleGroupCount);
@@ -54,6 +58,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
             <GroupBody
               active={active}
               groupId={group.id}
+              navigationActions={<EditorNavigationControls group={group} pending={navigatingGroupIds.has(group.id)} onNavigate={onNavigateEditorGroup} />}
               node={group.node}
               mode={group.mode}
               activeSpace={activeSpace}
@@ -109,11 +114,11 @@ function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visib
   return { start, end: start + count };
 }
 
-function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function GroupBody({ active, groupId, navigationActions, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions: ReactNode; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (!node) {
     return (
       <>
-        <EditorGroupHeader title="Open a node" canClose={canClose} onClose={onClose} active={active} />
+        <EditorGroupHeader title="Open a node" navigationActions={navigationActions} canClose={canClose} onClose={onClose} active={active} />
         <EmptyEditor activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} />
       </>
     );
@@ -124,6 +129,7 @@ function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpa
         <NodeGroupContent
           active={active}
           groupId={groupId}
+          navigationActions={navigationActions}
           node={freshNode}
           mode={mode}
           canWriteActiveSpace={canWriteActiveSpace}
@@ -144,9 +150,9 @@ function GroupBody({ active, groupId, node, mode, activeSpace, canWriteActiveSpa
   );
 }
 
-function NodeGroupContent({ active, groupId, node, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function NodeGroupContent({ active, groupId, navigationActions, node, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions: ReactNode; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (node.kind === "text") {
-    return <TextEditorView active={active} groupId={groupId} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onOpenMarkdownLink={onOpenMarkdownLink} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
+    return <TextEditorView active={active} groupId={groupId} navigationActions={navigationActions} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onOpenMarkdownLink={onOpenMarkdownLink} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
   }
   const Icon = nodeIcon(node);
   return (
@@ -155,6 +161,7 @@ function NodeGroupContent({ active, groupId, node, mode, canWriteActiveSpace, ca
         active={active}
         title={node.name}
         icon={<Icon size={17} />}
+        navigationActions={navigationActions}
         canClose={canClose}
         onClose={onClose}
         onContextMenu={(event) => onHeaderContextMenu(node, event)}

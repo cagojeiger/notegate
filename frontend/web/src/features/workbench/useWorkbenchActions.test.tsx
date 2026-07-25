@@ -40,7 +40,7 @@ function renderActions(onSignOut = vi.fn()) {
 }
 
 function persistBrowserWorkspace() {
-  persistSpaceWorkbench("space-1", [{ id: 1, node: null, mode: "preview" }], 0);
+  persistSpaceWorkbench("space-1", [{ id: 1, node: null, mode: "preview", back: [], forward: [] }], 0);
   persistWorkbenchPanelState({ primarySidebarOpen: true, auxiliaryOpen: false });
   writeDevApiKey("dev-key");
 }

@@ -23,7 +23,7 @@ frontend/web/src
 | `/api/v1/me` | React Query |
 | spaces/nodes/text/file/metadata | React Query |
 | active space id | UI store |
-| editor groups | UI store |
+| editor groups and pane navigation history | UI store |
 | opened node snapshot | UI store |
 | sidebar visibility/size | UI store |
 | Files/Recent ratio | UI store |
