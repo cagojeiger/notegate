@@ -21,6 +21,10 @@ async fn rest_reorder_spaces_is_atomic() -> Result<(), Box<dyn std::error::Error
     };
     let state = state(&db);
     let (owner, first_id, _) = caller_and_space(&state).await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner.account_id())
+        .execute(&db.pool)
+        .await?;
     let second = state
         .spaces
         .create(
