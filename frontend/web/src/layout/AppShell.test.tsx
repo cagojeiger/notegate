@@ -115,6 +115,15 @@ describe("AppShell history", () => {
     expect(screen.getByRole("button", { name: "Private" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open space library" })).not.toBeInTheDocument();
   });
+
+  it("leaves horizontal shell boundaries to the title and status bars", () => {
+    mocks.useWorkbenchController.mockReturnValue(workbench());
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(view.container.querySelector("main")).not.toHaveClass("border-y", "border-seam");
+  });
 });
 
 function me(kind: Me["account"]["kind"]): Me {

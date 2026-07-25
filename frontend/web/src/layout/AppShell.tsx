@@ -110,7 +110,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         onTogglePrimarySidebar={workbench.isMobile ? actions.toggleMobileTree : actions.togglePrimarySidebar}
         onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
       />
-      <main className="relative flex min-h-0 flex-1 border-y border-seam">
+      <main className="relative flex min-h-0 flex-1">
         <ActivityRail spaces={railSpaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={selectWorkbenchSpace} onReorderSpaces={reorderRailSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenLibrary={libraryAvailable ? openLibrary : undefined} libraryActive={libraryOpen} onOpenHistory={openHistory} onOpenSettings={openSettings} />
         {libraryOpen ? (
           <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted" role="status">Preparing space library…</div>}>

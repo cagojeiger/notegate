@@ -1,5 +1,5 @@
-import { FolderOpen } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CircleHelp, FolderOpen } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
@@ -18,6 +18,10 @@ type SpaceLibraryProps = {
 
 export function SpaceLibrary({ spaces, activeSpace, onOpenSpace, onCreateSpace }: SpaceLibraryProps) {
   const [selectedSpaceId, setSelectedSpaceId] = useState(activeSpace?.id ?? spaces[0]?.id ?? null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpId = useId();
+  const helpRef = useRef<HTMLDivElement>(null);
+  const helpButtonRef = useRef<HTMLButtonElement>(null);
   const usageQuery = useUsageQuery();
   const updateSpace = useUpdateSpaceMutation();
   const reorderSpaces = useReorderSpacesMutation();
@@ -33,6 +37,26 @@ export function SpaceLibrary({ spaces, activeSpace, onOpenSpace, onCreateSpace }
     setSelectedSpaceId(activeSpace?.id ?? spaces[0]?.id ?? null);
   }, [activeSpace?.id, selectedSpaceId, spaces]);
 
+  useEffect(() => {
+    if (!helpOpen) return;
+
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!helpRef.current?.contains(event.target as Node)) setHelpOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setHelpOpen(false);
+      helpButtonRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [helpOpen]);
+
   const togglePin = (space: Space) => {
     updateSpace.mutate({ spaceId: space.id, pinned: !space.pinned });
   };
@@ -41,15 +65,41 @@ export function SpaceLibrary({ spaces, activeSpace, onOpenSpace, onCreateSpace }
     <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
       <section className="min-w-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
         <div className="mx-auto max-w-7xl">
-          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Space Library</p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight">Your spaces</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-                Pinned spaces are available to your user MCP. Unpinned spaces stay private to the dashboard. Agent connections are unchanged.
-              </p>
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Spaces <span className="font-normal text-muted">{spaces.length}</span>
+            </h1>
+            <div className="flex items-center gap-2">
+              <div ref={helpRef} className="relative">
+                <button
+                  ref={helpButtonRef}
+                  type="button"
+                  className="grid size-9 place-items-center rounded-[10px] text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+                  aria-label="About spaces"
+                  aria-expanded={helpOpen}
+                  aria-controls={helpId}
+                  onClick={() => setHelpOpen((open) => !open)}
+                >
+                  <CircleHelp size={17} />
+                </button>
+                {helpOpen ? (
+                  <section
+                    id={helpId}
+                    aria-label="About spaces"
+                    className="fixed left-5 right-5 top-28 z-30 rounded-xl border border-border bg-panel p-4 text-sm shadow-[var(--ng-focus-shadow)] sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-80"
+                  >
+                    <h2 className="font-semibold text-text">About spaces</h2>
+                    <ul className="mt-2 space-y-2 leading-5 text-muted">
+                      <li>Pinned spaces are available in your user MCP.</li>
+                      <li>Unpinned spaces remain available in this dashboard.</li>
+                      <li>Pinning does not affect Agent connections.</li>
+                      <li>Drag cards or use the arrow buttons to reorder.</li>
+                    </ul>
+                  </section>
+                ) : null}
+              </div>
+              <Button onClick={onCreateSpace}>Create space</Button>
             </div>
-            <Button onClick={onCreateSpace}>Create space</Button>
           </div>
 
           {spaces.length === 0 ? (
@@ -61,13 +111,7 @@ export function SpaceLibrary({ spaces, activeSpace, onOpenSpace, onCreateSpace }
               </div>
             </Card>
           ) : (
-            <section aria-labelledby="space-library-all">
-              <div className="mb-3">
-                <h2 id="space-library-all" className="text-sm font-semibold">
-                  All spaces <span className="font-normal text-muted">{spaces.length}</span>
-                </h2>
-                <p className="mt-1 text-xs text-muted">Drag to reorder. Pin controls user MCP access without changing the card position.</p>
-              </div>
+            <section aria-label="Spaces">
               <SortableSpaceGrid
                 spaces={spaces}
                 selectedSpaceId={selectedSpace?.id ?? null}

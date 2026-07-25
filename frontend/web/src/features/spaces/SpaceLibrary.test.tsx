@@ -74,15 +74,33 @@ describe("SpaceLibrary", () => {
     const user = userEvent.setup();
     render(<SpaceLibrary spaces={spaces} activeSpace={spaces[0]} onOpenSpace={vi.fn()} onCreateSpace={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "All spaces 2" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Spaces 2" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "All spaces" })).toBeInTheDocument();
     expect(screen.getAllByText("12 items · 6 KB").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "Inspect Private" }));
     expect(screen.getAllByText("Unpinned").length).toBeGreaterThan(1);
 
-    await user.click(screen.getByRole("button", { name: "Pin Private" }));
+    await user.click(screen.getByRole("button", { name: "Make Private available in user MCP" }));
     expect(mocks.mutate).toHaveBeenCalledWith({ spaceId: "private", pinned: true });
+  });
+
+  it("keeps optional guidance behind an accessible help button", async () => {
+    const user = userEvent.setup();
+    render(<SpaceLibrary spaces={spaces} activeSpace={spaces[0]} onOpenSpace={vi.fn()} onCreateSpace={vi.fn()} />);
+
+    expect(screen.queryByRole("region", { name: "About spaces" })).not.toBeInTheDocument();
+
+    const help = screen.getByRole("button", { name: "About spaces" });
+    await user.click(help);
+
+    expect(help).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "About spaces" })).toHaveTextContent("Pinned spaces are available in your user MCP.");
+
+    await user.keyboard("{Escape}");
+
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    expect(help).toHaveFocus();
   });
 
   it("offers single-click ordering controls as an alternative to dragging", async () => {

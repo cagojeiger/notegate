@@ -80,4 +80,24 @@ describe("MobileSpaceBar", () => {
     expect(nav).toHaveClass("h-[calc(3.5rem+env(safe-area-inset-bottom))]");
     expect(nav).toHaveClass("pb-[calc(0.5rem+env(safe-area-inset-bottom))]");
   });
+
+  it("marks only the current mobile destination", () => {
+    const view = render(
+      <MobileSpaceBar
+        spaces={spaces}
+        activeSpace={spaces[0]}
+        canCreateSpace
+        onSelectSpace={vi.fn()}
+        onCreateSpace={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        libraryActive
+        onOpenHistory={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Open space library" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Daily" })).not.toHaveAttribute("aria-current");
+    expect(view.container.querySelectorAll("[data-active-indicator]")).toHaveLength(1);
+  });
 });

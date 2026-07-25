@@ -77,12 +77,13 @@ export function NodeRow({
       onTouchMove={clearLongPress}
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
-      className={`group flex w-full items-center gap-1 rounded-[9px] py-1.5 pr-2 text-sm transition ${selected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`group relative flex w-full items-center gap-1 rounded-[9px] py-1.5 pr-2 text-sm transition active:bg-[var(--ng-selection)] active:text-text ${selected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{ paddingLeft: `${8 + depth * 14}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >
+      {selected ? <span data-active-indicator className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
       {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={() => onToggleFolder?.(node.id)}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
-      <button data-node-open className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50" onClick={handleOpen}>
+      <button data-node-open aria-current={selected ? "page" : undefined} className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50" onClick={handleOpen}>
         <Icon size={15} className="shrink-0" />
         <span className="min-w-0 flex-1">
           <span className="block truncate">{node.name}</span>

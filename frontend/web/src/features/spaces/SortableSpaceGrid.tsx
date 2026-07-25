@@ -225,7 +225,8 @@ function SortableSpaceCard({
             variant="ghost"
             disabled={pinPending}
             onClick={onTogglePin}
-            aria-label={`${space.pinned ? "Unpin" : "Pin"} ${space.name}`}
+            aria-label={`${space.pinned ? "Hide" : "Make"} ${space.name} ${space.pinned ? "from" : "available in"} user MCP`}
+            title={space.pinned ? "Hide from user MCP" : "Make available in user MCP"}
           >
             {space.pinned ? <PinOff size={14} /> : <Pin size={14} />}
             {space.pinned ? "Unpin" : "Pin"}

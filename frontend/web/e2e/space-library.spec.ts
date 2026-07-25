@@ -26,7 +26,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   const grid = page.getByRole("list", { name: "All spaces" });
   await expect(grid).toBeVisible();
   await expect(grid.getByRole("listitem")).toHaveCount(4);
-  await expect(page.getByRole("heading", { name: "All spaces 4" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
   await expectNoAccessibilityViolations(page);
 
   const cardBoxes = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => {
@@ -38,8 +38,8 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
 
   const orderBeforePin = await cardNames(grid);
-  await page.getByRole("button", { name: "Pin Private Journal" }).click();
-  await expect(page.getByRole("button", { name: "Unpin Private Journal" })).toBeVisible();
+  await page.getByRole("button", { name: "Make Private Journal available in user MCP" }).click();
+  await expect(page.getByRole("button", { name: "Hide Private Journal from user MCP" })).toBeVisible();
   expect(await cardNames(grid)).toEqual(orderBeforePin);
 
   await page.getByRole("button", { name: "Move Daily later" }).click();

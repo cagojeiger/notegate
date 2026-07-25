@@ -37,6 +37,7 @@
 
 - Reading first: The editor is the cleanest surface and Markdown typography receives more contrast than surrounding chrome.
 - Identity is structural: Use the NoteGate mark at product entry points, not as decoration throughout the workbench.
+- Progressive disclosure: Keep primary surfaces self-explanatory and move uncommon concepts into contextual help or the relevant Inspector.
 - Meaning survives color: Pair status color with text, shape, or icon.
 - One visual grammar: Brand assets identify the product; Lucide icons represent actions and objects.
 - Tradeoffs: Compact desktop density is retained, but interactive targets remain at least 24 CSS px and visible focus is never removed.
@@ -45,8 +46,8 @@
 
 - Color: Brand ink `#17212b` and paper `#f7f9fb` anchor neutral surfaces. Blue is reserved for links, selection, focus, and primary actions. Status colors are semantic and contrast-safe.
 - Typography: Apple/system sans for UI and reading; system monospace for code, paths, identifiers, and structured data.
-- Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; generous Markdown reading padding.
-- Shape/radius/elevation: 8–10 px controls, 12–16 px panels, no shadow except floating or modal surfaces.
+- Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; 48 px aligned workbench body headers; generous Markdown reading padding.
+- Shape/radius/elevation: 8–10 px controls, 12–16 px panels, no shadow except floating or modal surfaces. Each panel boundary has one 1 px seam; resize handles may use a wider invisible hit target without adding another default line.
 - Motion: Short color/opacity transitions plus transform-only card reordering; preserve scroll position and respect reduced motion.
 - Imagery/iconography: Official NoteGate SVG/PNG assets for identity. Lucide only for functional icons, normally 16 px with 1.75 px stroke. Auth and onboarding may use a low-contrast Gate Field mark at the screen edge; content surfaces remain flat and undecorated.
 
@@ -74,6 +75,7 @@
 
 ## Interaction states
 
+- Active/current: The current surface, Space, and opened node use a primary edge indicator plus a selection background and semantic current/selected state. Only one surface or Space is current within its navigation scope.
 - Loading: Branded but quiet, with visible text and an activity indicator.
 - Empty: Explain the next available action without decorative illustration.
 - Error: Pair semantic color with a clear message and recovery action.
@@ -85,7 +87,7 @@
 
 - Tone: Short, direct, calm.
 - Terminology: `NoteGate`, `Google`, `space`, `node`, `Files`, `Recent`, and `Inspector`.
-- Microcopy rules: State the user action, not the authentication plumbing. The login CTA is `Continue with Google`; AuthGate is not presented as a user-facing provider.
+- Microcopy rules: State the user action, not the authentication plumbing. Avoid persistent instructional copy when placement, labels, and contextual help can explain the interaction. The login CTA is `Continue with Google`; AuthGate is not presented as a user-facing provider.
 
 ## Implementation constraints
 
