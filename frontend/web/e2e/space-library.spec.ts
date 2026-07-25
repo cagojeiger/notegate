@@ -27,6 +27,10 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await expect(grid).toBeVisible();
   await expect(grid.getByRole("listitem")).toHaveCount(4);
   await expect(page.getByRole("heading", { name: "Spaces 4" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Space navigation" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Space inspector" })).toBeVisible();
+  await expect(page.locator("footer").getByText("ready", { exact: true })).toBeVisible();
+  await expect(page.locator("footer").getByText("Daily", { exact: true })).toBeVisible();
   await expectNoAccessibilityViolations(page);
 
   const cardBoxes = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => {
@@ -131,6 +135,8 @@ for (const viewport of [
     } else {
       expect(boxes[1].y).toBeGreaterThan(boxes[0].y);
       if (viewport.mobile) {
+        await expect(page.getByRole("navigation", { name: "Spaces" })).toBeVisible();
+        await expect(page.getByRole("complementary", { name: "Space navigation" })).toBeHidden();
         await expect(page.getByText("Space Inspector", { exact: true })).toBeHidden();
         await page.getByRole("button", { name: "Inspect Daily" }).click();
         await expect(page.getByRole("dialog", { name: "Space Inspector" })).toBeVisible();

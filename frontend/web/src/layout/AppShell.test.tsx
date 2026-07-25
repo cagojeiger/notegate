@@ -108,6 +108,7 @@ describe("AppShell history", () => {
     await user.click(screen.getByRole("button", { name: "Open space library" }));
 
     expect(screen.getByTestId("space-library")).toHaveTextContent("Daily,Private");
+    expect(screen.getByText("ready")).toBeInTheDocument();
   });
 
   it("keeps the active navigation-unpinned space out of the user rail", () => {
@@ -142,6 +143,27 @@ describe("AppShell history", () => {
     const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
 
     expect(view.container.querySelector("main")).not.toHaveClass("border-y", "border-seam");
+  });
+
+  it("keeps global shell regions mounted while changing surfaces", async () => {
+    const user = userEvent.setup();
+    mocks.useWorkbenchController.mockReturnValue(workbench());
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+    const titleBar = screen.getByText("NoteGate").closest("header");
+    const activityRail = screen.getByRole("complementary", { name: "Space navigation" });
+    const statusBar = screen.getByText("ready").closest("footer");
+    const surface = view.container.querySelector("main");
+
+    expect(surface).not.toContainElement(activityRail);
+    expect(surface?.parentElement).toContainElement(activityRail);
+
+    await user.click(screen.getByRole("button", { name: "Open space library" }));
+
+    expect(screen.getByText("NoteGate").closest("header")).toBe(titleBar);
+    expect(screen.getByRole("complementary", { name: "Space navigation" })).toBe(activityRail);
+    expect(screen.getByText("ready").closest("footer")).toBe(statusBar);
   });
 });
 

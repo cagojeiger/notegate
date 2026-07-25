@@ -42,7 +42,10 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
   }
 
   return (
-    <aside className="hidden w-[52px] shrink-0 min-h-0 flex-col border-r border-seam bg-surface md:flex">
+    <aside
+      aria-label="Space navigation"
+      className="hidden w-[52px] shrink-0 min-h-0 flex-col border-r border-seam bg-surface md:flex"
+    >
       {onOpenLibrary ? (
         <div className="relative flex h-12 shrink-0 items-center justify-center border-b border-seam">
           {libraryActive ? <span data-active-indicator className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}

@@ -64,43 +64,47 @@ export function SpaceLibrary({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
-      <section className="min-w-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-6 flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
+          <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-3">
+            <h1 className="text-xl font-semibold">
               Spaces <span className="font-normal text-muted">{spaces.length}</span>
             </h1>
             <Button onClick={onCreateSpace}>Create space</Button>
           </div>
+        </header>
 
-          {spaces.length === 0 ? (
-            <Card className="grid min-h-56 place-items-center border-dashed text-center">
-              <div>
-                <FolderOpen className="mx-auto text-muted" size={28} />
-                <h2 className="mt-3 font-semibold">No spaces yet</h2>
-                <p className="mt-1 text-sm text-muted">Create a space to start organizing your notes and files.</p>
-              </div>
-            </Card>
-          ) : (
-            <section aria-label="Spaces">
-              <SortableSpaceGrid
-                spaces={spaces}
-                selectedSpaceId={selectedSpace?.id ?? null}
-                usageBySpaceId={usageBySpaceId}
-                updatePending={updateSpace.isPending || reorderSpaces.isPending}
-                reorderPending={reorderSpaces.isPending || updateSpace.isPending}
-                onSelect={inspectSpace}
-                onOpen={onOpenSpace}
-                onToggleNavigationPin={toggleNavigationPin}
-                onReorder={(orderedSpaces) => reorderSpaces.mutate({ spaces: orderedSpaces })}
-              />
-            </section>
-          )}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
+          <div className="mx-auto max-w-7xl">
+            {spaces.length === 0 ? (
+              <Card className="grid min-h-56 place-items-center border-dashed text-center">
+                <div>
+                  <FolderOpen className="mx-auto text-muted" size={28} />
+                  <h2 className="mt-3 font-semibold">No spaces yet</h2>
+                  <p className="mt-1 text-sm text-muted">Create a space to start organizing your notes and files.</p>
+                </div>
+              </Card>
+            ) : (
+              <section aria-label="Spaces">
+                <SortableSpaceGrid
+                  spaces={spaces}
+                  selectedSpaceId={selectedSpace?.id ?? null}
+                  usageBySpaceId={usageBySpaceId}
+                  updatePending={updateSpace.isPending || reorderSpaces.isPending}
+                  reorderPending={reorderSpaces.isPending || updateSpace.isPending}
+                  onSelect={inspectSpace}
+                  onOpen={onOpenSpace}
+                  onToggleNavigationPin={toggleNavigationPin}
+                  onReorder={(orderedSpaces) => reorderSpaces.mutate({ spaces: orderedSpaces })}
+                />
+              </section>
+            )}
+          </div>
         </div>
       </section>
 
       {!isMobile && inspectorOpen ? (
-        <aside className="w-80 shrink-0">
+        <aside aria-label="Space inspector" className="w-80 shrink-0">
           <SpaceInspector
             space={selectedSpace}
             usage={selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined}
