@@ -11,7 +11,8 @@ use crate::files::validation;
 use crate::files::{
     AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
     DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
-    PendingObjectUpload, StoredContent, TextView, WriteTarget, WriteText, WriteTextBody, content,
+    PendingObjectUpload, StoredContent, TextView, UpdateNode, WriteTarget, WriteText,
+    WriteTextBody, content,
 };
 
 use super::view::{file_view_at_path, text_view_at_path};
@@ -758,22 +759,34 @@ impl FilesService {
         &self,
         caller_account_id: Uuid,
         space_id: Uuid,
-        node_id: Uuid,
-        new_name: Option<String>,
-        new_sort_order: Option<i32>,
+        command: UpdateNode,
     ) -> ServiceResult<NodeView> {
         self.authorize(space_id, caller_account_id, FileCommand::Mv)
             .await?;
 
-        if new_name.is_none() && new_sort_order.is_none() {
+        if command.name.is_none()
+            && command.sort_order.is_none()
+            && command.search_enabled.is_none()
+            && command.text_encryption_enabled.is_none()
+        {
             return Err(ServiceError::InvalidInput(
-                "provide name and/or sort_order to update".to_owned(),
+                "provide at least one node field to update".to_owned(),
             ));
         }
 
-        let node = self.load_node(space_id, node_id).await?;
+        let node = self.load_node(space_id, command.node_id).await?;
+        if command.search_enabled.is_some() && node.parent_id.is_none() {
+            return Err(ServiceError::Conflict(
+                "search policy cannot be changed on the root node".to_owned(),
+            ));
+        }
+        if command.text_encryption_enabled.is_some() && node.kind != NodeKind::Text {
+            return Err(ServiceError::InvalidInput(
+                "text_encryption_enabled applies only to text nodes".to_owned(),
+            ));
+        }
 
-        if let Some(ref name) = new_name {
+        if let Some(ref name) = command.name {
             if node.parent_id.is_none() {
                 return Err(ServiceError::Conflict(
                     "cannot rename the root node".to_owned(),
@@ -799,13 +812,7 @@ impl FilesService {
 
         let updated = self
             .store
-            .update_node_metadata(
-                space_id,
-                node_id,
-                new_name.as_deref(),
-                new_sort_order,
-                caller_account_id,
-            )
+            .update_node(space_id, &command, caller_account_id)
             .await?;
         self.node_view(space_id, updated).await
     }

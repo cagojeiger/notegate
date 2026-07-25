@@ -7,14 +7,14 @@
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.
 - OAuth refresh token은 browser client에 노출하지 않고 서버에서 암호화 저장한다.
-- Text content는 plain 또는 client-side encrypted payload로 저장한다.
+- Text content는 서버가 읽는 plain content 또는 client-side encrypted payload로 저장한다. `system_max` Space는 plain content를 서버 관리 방식으로 추가 암호화할 수 있다.
 - Node metadata는 content가 아니며 암호화 대상이 아니다.
 - Markdown frontmatter는 Text content 안의 YAML block이다. encrypted Text 안에 있으면 content와 함께 client-side encrypted payload에 포함된다.
 
 ## Root key domains
 
 ```text
-ENC_ROOT     PII 암호화용
+ENC_ROOT     PII, browser refresh token, 서버 관리 Text 암호화용
 LOOKUP_ROOT  provider/email/API key/browser session lookup HMAC와 session signing용
 ```
 
@@ -60,14 +60,23 @@ refresh_token     = AEAD_ENCRYPT(ENC_SUBKEY, authgate_refresh_token, aad)
 
 ## Text content encryption
 
-Text content는 두 저장 방식을 가진다.
+Text content의 API 저장 형식과 DB at-rest 암호화 상태는 별도 값이다.
 
 ```text
-plain      = 서버가 읽을 수 있는 UTF-8 content
-encrypted  = client-side encrypted payload
+storage_format='plain'     = 서버가 읽을 수 있는 UTF-8 content
+storage_format='encrypted' = client-side encrypted payload
+
+at_rest_encryption='none'   = plain content를 content_text에 저장
+at_rest_encryption='server' = plain content를 서버가 AEAD 암호화해 저장
 ```
 
-Encrypted Text에서 서버는 원문, 비밀번호, 복호화 키를 받거나 저장하지 않는다. 서버는 encrypted payload를 opaque JSON object로 저장하고 반환한다. Encrypted payload metric은 서버의 canonical JSON serialization 기준으로 계산한다. Canonical JSON은 UTF-8, object key 정렬, 불필요한 whitespace 없음, 동일 JSON value의 동일 byte serialization을 의미한다.
+Client-side encrypted Text에서 서버는 원문, 비밀번호, 복호화 키를 받거나 저장하지 않는다. 서버는 encrypted payload를 opaque JSON object로 저장하고 반환한다. Encrypted payload metric은 서버의 canonical JSON serialization 기준으로 계산한다. Canonical JSON은 UTF-8, object key 정렬, 불필요한 whitespace 없음, 동일 JSON value의 동일 byte serialization을 의미한다.
+
+서버 관리 암호화는 `storage_format='plain'`에만 적용한다. Ciphertext는 Space id, Node id, key id, version을 AEAD AAD로 묶는다. API read, write, patch와 `grep`은 서버에서 복호화한 plain content를 사용한다. Node metadata, `content_sha256`, `byte_len`, `line_count`는 암호화하지 않는다.
+
+`text_objects.encryption_enabled`는 다음 저장에 적용할 정책이고 `at_rest_encryption`은 현재 저장 상태다. 정책 변경만으로 기존 row를 다시 쓰지 않는다. 활성화 후 다음 저장부터 암호화하고, 비활성화 후 다음 저장부터 평문으로 저장한다. Space 기본값은 새 Text에만 복사하며 기존 Text를 바꾸지 않는다.
+
+서버 관리 암호화 활성화와 암호화 저장은 Space owner의 tier capability `text_encryption`이 필요하다. 현재 `system_max`만 허용한다. Tier가 낮아져도 기존 ciphertext는 읽기와 검색이 가능하지만 새 암호화 저장은 거부한다. 서버는 tier 변경을 이유로 ciphertext를 자동 복호화 저장하지 않는다.
 
 ```text
 plain content_sha256 = SHA256(plaintext bytes)
@@ -79,7 +88,7 @@ encrypted byte_len       = canonical encrypted payload JSON byte length
 encrypted line_count     = 0
 ```
 
-REST는 encrypted payload 저장/조회가 가능하다. MCP Text content operation과 `search op=grep`은 plain Text만 대상으로 한다.
+REST는 client-side encrypted payload 저장/조회가 가능하다. MCP Text content operation과 `search op=grep`은 `storage_format='plain'`만 대상으로 하며, 서버 관리 암호화 여부는 이 동작을 바꾸지 않는다.
 
 
 ## File content encryption

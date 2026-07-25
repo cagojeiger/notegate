@@ -5,8 +5,11 @@ use std::collections::HashMap;
 use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, object_storage_repo, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
+use notegate_core::tier::{TierFeatures, UserTier};
 use notegate_core::{Error, Result, limits};
-use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceOrderUpdate, SpaceView};
+use notegate_model::{
+    CreateSpace, Permission, Space, SpaceCursor, SpaceOrderUpdate, SpaceView, UpdateSpace,
+};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -27,6 +30,8 @@ struct SpaceRow {
     name: String,
     sort_order: i32,
     pinned_at: Option<DateTime<Utc>>,
+    default_search_enabled: bool,
+    default_text_encryption_enabled: bool,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -42,6 +47,8 @@ impl From<SpaceRow> for Space {
             name: row.name,
             sort_order: row.sort_order,
             pinned_at: row.pinned_at,
+            default_search_enabled: row.default_search_enabled,
+            default_text_encryption_enabled: row.default_text_encryption_enabled,
             owner_user_id: row.owner_user_id,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -58,6 +65,8 @@ struct SpaceViewRow {
     name: String,
     sort_order: i32,
     pinned_at: Option<DateTime<Utc>>,
+    default_search_enabled: bool,
+    default_text_encryption_enabled: bool,
     owner_user_id: Uuid,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -66,6 +75,7 @@ struct SpaceViewRow {
     purge_after: Option<DateTime<Utc>>,
     permission: String,
     root_node_id: Uuid,
+    owner_tier: String,
 }
 
 impl SpaceViewRow {
@@ -73,12 +83,15 @@ impl SpaceViewRow {
         let permission = Permission::parse(&self.permission).ok_or_else(|| {
             Error::internal(format!("unknown space permission: {}", self.permission))
         })?;
+        let owner_tier = UserTier::parse_db(&self.owner_tier)?;
         Ok(SpaceView {
             space: Space {
                 id: self.id,
                 name: self.name,
                 sort_order: self.sort_order,
                 pinned_at: self.pinned_at,
+                default_search_enabled: self.default_search_enabled,
+                default_text_encryption_enabled: self.default_text_encryption_enabled,
                 owner_user_id: self.owner_user_id,
                 created_at: self.created_at,
                 updated_at: self.updated_at,
@@ -88,19 +101,20 @@ impl SpaceViewRow {
             },
             permission,
             root_node_id: self.root_node_id,
+            features: owner_tier.features(),
         })
     }
 }
 
-const SPACE_COLUMNS: &str = "id, name, sort_order, pinned_at, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
-const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.owner_user_id, s.created_at, s.updated_at, \
+const SPACE_COLUMNS: &str = "id, name, sort_order, pinned_at, default_search_enabled, default_text_encryption_enabled, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
+const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
                                        s.deleted_at, s.deleted_by_user_id, s.purge_after";
-const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.owner_user_id, s.created_at, s.updated_at, \
+const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
-     'write'::text AS permission, root.id AS root_node_id";
-const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.owner_user_id, s.created_at, s.updated_at, \
+     'write'::text AS permission, root.id AS root_node_id, owner.tier AS owner_tier";
+const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
-     c.permission AS permission, root.id AS root_node_id";
+     c.permission AS permission, root.id AS root_node_id, owner.tier AS owner_tier";
 
 impl SpaceRepo {
     pub async fn permission_for(
@@ -112,6 +126,16 @@ impl SpaceRepo {
     }
 
     pub async fn create_space(&self, owner_user_id: Uuid, command: &CreateSpace) -> Result<Space> {
+        self.create_space_with_features(owner_user_id, command)
+            .await
+            .map(|(space, _)| space)
+    }
+
+    pub async fn create_space_with_features(
+        &self,
+        owner_user_id: Uuid,
+        command: &CreateSpace,
+    ) -> Result<(Space, TierFeatures)> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         let owner_tier = tier_lookup::lock_active_user_tier(
@@ -161,7 +185,7 @@ impl SpaceRepo {
         audit_events::space_created(&mut tx, audit_ctx, owner_user_id, row.id).await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(Space::from(row))
+        Ok((Space::from(row), owner_tier.features()))
     }
 
     pub async fn find_space(&self, space_id: Uuid) -> Result<Option<Space>> {
@@ -189,9 +213,10 @@ impl SpaceRepo {
         let row = sqlx::query_as::<_, SpaceViewRow>(&format!(
             "SELECT {SPACE_VIEW_BASE_COLUMNS}, \
                     CASE WHEN acc.kind = 'user' THEN 'write'::text ELSE c.permission END AS permission, \
-                    root.id AS root_node_id \
+                    root.id AS root_node_id, owner.tier AS owner_tier \
              FROM accounts acc \
              JOIN spaces s ON s.id = $2 AND s.deleted_at IS NULL \
+             JOIN users owner ON owner.id = s.owner_user_id \
              JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
              LEFT JOIN space_agent_connections c \
                ON c.space_id = s.id AND c.agent_id = acc.id AND c.disconnected_at IS NULL \
@@ -246,6 +271,7 @@ impl SpaceRepo {
                  SELECT {USER_SPACE_VIEW_COLUMNS} \
                  FROM accounts acc \
                  JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
+                 JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
                    {user_pin_predicate} \
@@ -255,6 +281,7 @@ impl SpaceRepo {
                  FROM accounts acc \
                  JOIN space_agent_connections c ON c.agent_id = acc.id AND c.disconnected_at IS NULL \
                  JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
+                 JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'agent' AND acc.is_active = true AND acc.deleted_at IS NULL \
                    AND {name_predicate} \
@@ -332,6 +359,7 @@ impl SpaceRepo {
                  SELECT {USER_SPACE_VIEW_COLUMNS} \
                  FROM accounts acc \
                  JOIN spaces s ON s.owner_user_id = acc.id AND s.deleted_at IS NULL \
+                 JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
                    {user_pin_predicate} \
@@ -340,6 +368,7 @@ impl SpaceRepo {
                  FROM accounts acc \
                  JOIN space_agent_connections c ON c.agent_id = acc.id AND c.disconnected_at IS NULL \
                  JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL \
+                 JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'agent' AND acc.is_active = true AND acc.deleted_at IS NULL \
              ) visible_spaces \
@@ -397,25 +426,77 @@ impl SpaceRepo {
         sort_order: Option<i32>,
         pinned: Option<bool>,
     ) -> Result<Space> {
+        self.update_space_with_features(
+            owner_user_id,
+            &UpdateSpace {
+                space_id,
+                name: name.map(str::to_owned),
+                sort_order,
+                pinned,
+                default_search_enabled: None,
+                default_text_encryption_enabled: None,
+            },
+        )
+        .await
+        .map(|(space, _)| space)
+    }
+
+    pub async fn update_space_with_features(
+        &self,
+        owner_user_id: Uuid,
+        command: &UpdateSpace,
+    ) -> Result<(Space, TierFeatures)> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let owner_tier = tier_lookup::lock_active_user_tier(
+            &mut tx,
+            owner_user_id,
+            "space owner user account not found",
+        )
+        .await?;
         let current = sqlx::query_as::<_, SpaceRow>(&format!(
             "SELECT {SPACE_COLUMNS} FROM spaces \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL \
              FOR UPDATE"
         ))
-        .bind(space_id)
+        .bind(command.space_id)
         .bind(owner_user_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?
         .ok_or_else(|| Error::not_found("space not found"))?;
 
-        let name_changed = name.is_some_and(|value| value != current.name);
-        let sort_order_changed = sort_order.is_some_and(|value| value != current.sort_order);
-        let pinned_changed = pinned.is_some_and(|value| value != current.pinned_at.is_some());
-        if !name_changed && !sort_order_changed && !pinned_changed {
+        if command.default_text_encryption_enabled == Some(true)
+            && !owner_tier.features().text_encryption
+        {
+            return Err(Error::conflict(
+                "text encryption is not available for the space owner's tier",
+            ));
+        }
+
+        let name_changed = command
+            .name
+            .as_deref()
+            .is_some_and(|value| value != current.name);
+        let sort_order_changed = command
+            .sort_order
+            .is_some_and(|value| value != current.sort_order);
+        let pinned_changed = command
+            .pinned
+            .is_some_and(|value| value != current.pinned_at.is_some());
+        let default_search_changed = command
+            .default_search_enabled
+            .is_some_and(|value| value != current.default_search_enabled);
+        let default_encryption_changed = command
+            .default_text_encryption_enabled
+            .is_some_and(|value| value != current.default_text_encryption_enabled);
+        if !name_changed
+            && !sort_order_changed
+            && !pinned_changed
+            && !default_search_changed
+            && !default_encryption_changed
+        {
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(Space::from(current));
+            return Ok((Space::from(current), owner_tier.features()));
         }
 
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
@@ -426,14 +507,18 @@ impl SpaceRepo {
                      WHEN $5 THEN COALESCE(pinned_at, now()) \
                      ELSE NULL \
                  END, \
+                 default_search_enabled = COALESCE($6, default_search_enabled), \
+                 default_text_encryption_enabled = COALESCE($7, default_text_encryption_enabled), \
                  updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
         ))
-        .bind(space_id)
+        .bind(command.space_id)
         .bind(owner_user_id)
-        .bind(name)
-        .bind(sort_order)
-        .bind(pinned)
+        .bind(command.name.as_deref())
+        .bind(command.sort_order)
+        .bind(command.pinned)
+        .bind(command.default_search_enabled)
+        .bind(command.default_text_encryption_enabled)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_constraint_error)?
@@ -449,12 +534,24 @@ impl SpaceRepo {
         if pinned_changed {
             changed_fields.push("pinned");
         }
+        if default_search_changed {
+            changed_fields.push("default_search_enabled");
+        }
+        if default_encryption_changed {
+            changed_fields.push("default_text_encryption_enabled");
+        }
         let audit_ctx = AuditContext::rest(owner_user_id);
-        audit_events::space_updated(&mut tx, audit_ctx, owner_user_id, space_id, &changed_fields)
-            .await?;
+        audit_events::space_updated(
+            &mut tx,
+            audit_ctx,
+            owner_user_id,
+            command.space_id,
+            &changed_fields,
+        )
+        .await?;
 
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(Space::from(row))
+        Ok((Space::from(row), owner_tier.features()))
     }
 
     pub async fn reorder_spaces(

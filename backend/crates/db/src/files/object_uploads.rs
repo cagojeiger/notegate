@@ -289,25 +289,25 @@ pub async fn attach(
     let parent_id = upload
         .parent_node_id
         .ok_or_else(|| Error::not_found("upload parent no longer exists"))?;
-    let (gate, effective_limits) =
-        checks::lock_space_with_limits(&mut tx, space_id, limits).await?;
-    create::prepare_create(&mut tx, space_id, parent_id, &upload.name, effective_limits).await?;
+    let locked = checks::lock_space_context(&mut tx, space_id, limits).await?;
+    create::prepare_create(&mut tx, space_id, parent_id, &upload.name, locked.limits).await?;
     space_usage::apply_quota_delta(
         &mut tx,
-        &gate,
+        &locked.gate,
         UsageDelta::file(1, upload.declared_byte_len),
-        effective_limits,
+        locked.limits,
     )
     .await?;
 
     let node = sqlx::query_as::<_, NodeRow>(&format!(
         "INSERT INTO nodes \
-         (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, 'file', $4, $4) RETURNING {NODE_COLUMNS}"
+         (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, $3, 'file', $4, $5, $5) RETURNING {NODE_COLUMNS}"
     ))
     .bind(space_id)
     .bind(parent_id)
     .bind(&upload.name)
+    .bind(locked.default_search_enabled)
     .bind(requested_by)
     .fetch_one(&mut *tx)
     .await

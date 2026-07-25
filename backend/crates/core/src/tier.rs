@@ -15,6 +15,12 @@ pub enum UserTier {
     SystemMax,
 }
 
+/// Product capabilities granted by a user tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TierFeatures {
+    pub text_encryption: bool,
+}
+
 impl UserTier {
     pub const DEFAULT: Self = Self::Tier0;
 
@@ -57,6 +63,17 @@ impl UserTier {
                 connections_per_space: limits::CONNECTIONS_PER_SPACE_MAX,
                 connected_spaces_per_agent: limits::CONNECTED_SPACES_PER_AGENT_MAX,
                 file_tree: Limits::default(),
+            },
+        }
+    }
+
+    pub const fn features(self) -> TierFeatures {
+        match self {
+            Self::Tier0 => TierFeatures {
+                text_encryption: false,
+            },
+            Self::SystemMax => TierFeatures {
+                text_encryption: true,
             },
         }
     }
@@ -112,6 +129,12 @@ mod tests {
     #[test]
     fn default_tier_is_tier0() {
         assert_eq!(UserTier::DEFAULT, UserTier::Tier0);
+    }
+
+    #[test]
+    fn text_encryption_is_feature_gated() {
+        assert!(!UserTier::Tier0.features().text_encryption);
+        assert!(UserTier::SystemMax.features().text_encryption);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Spaces and agent connections.
 
 use chrono::{DateTime, Utc};
+use notegate_core::tier::TierFeatures;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -11,6 +12,8 @@ pub struct Space {
     pub name: String,
     pub sort_order: i32,
     pub pinned_at: Option<DateTime<Utc>>,
+    pub default_search_enabled: bool,
+    pub default_text_encryption_enabled: bool,
     pub owner_user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -71,6 +74,8 @@ pub struct UpdateSpace {
     pub name: Option<String>,
     pub sort_order: Option<i32>,
     pub pinned: Option<bool>,
+    pub default_search_enabled: Option<bool>,
+    pub default_text_encryption_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +103,7 @@ pub struct SpaceView {
     pub space: Space,
     pub permission: Permission,
     pub root_node_id: Uuid,
+    pub features: TierFeatures,
 }
 
 #[derive(Debug, Clone)]

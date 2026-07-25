@@ -27,7 +27,7 @@ pub use notegate_model::files::{
     EditText, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor,
     NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode, PatchResult,
     PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
-    TextStats, TextView, WriteTarget, WriteText, WriteTextBody,
+    TextStats, TextView, UpdateNode, WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::{
     FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,

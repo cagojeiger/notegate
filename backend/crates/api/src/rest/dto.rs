@@ -114,8 +114,16 @@ pub struct SpaceOut {
     pub pinned: bool,
     pub permission: String,
     pub root_node_id: Uuid,
+    pub default_search_enabled: bool,
+    pub default_text_encryption_enabled: bool,
+    pub features: SpaceFeaturesOut,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SpaceFeaturesOut {
+    pub text_encryption: bool,
 }
 
 impl From<&SpaceView> for SpaceOut {
@@ -127,6 +135,11 @@ impl From<&SpaceView> for SpaceOut {
             pinned: view.space.pinned_at.is_some(),
             permission: view.permission.as_str().to_owned(),
             root_node_id: view.root_node_id,
+            default_search_enabled: view.space.default_search_enabled,
+            default_text_encryption_enabled: view.space.default_text_encryption_enabled,
+            features: SpaceFeaturesOut {
+                text_encryption: view.features.text_encryption,
+            },
             created_at: view.space.created_at,
             updated_at: view.space.updated_at,
         }
@@ -142,7 +155,9 @@ mod tests {
         clippy::panic,
         clippy::unwrap_in_result
     )]
-    use notegate_model::{AccountKind, AuditEvent, FileEncryptionMode, Node, NodeKind};
+    use notegate_model::{
+        AccountKind, AuditEvent, FileEncryptionMode, Node, NodeKind, TextAtRestEncryption,
+    };
     use notegate_service::files::{FileChangeEvent, FileStats, NodeView, TextStats};
     use serde_json::json;
 
@@ -160,6 +175,7 @@ mod tests {
             kind,
             sort_order: 0,
             metadata: json!({"pinned": true}),
+            search_enabled: true,
             created_by_account_id: Uuid::new_v4(),
             updated_by_account_id: Uuid::new_v4(),
             deleted_by_account_id: None,
@@ -185,6 +201,8 @@ mod tests {
             content_sha256: "text-sha".to_owned(),
             byte_len: 42,
             line_count: 3,
+            encryption_enabled: true,
+            at_rest_encryption: TextAtRestEncryption::Server,
         }
     }
 
@@ -206,9 +224,12 @@ mod tests {
 
         assert_eq!(out.kind, "folder");
         assert_eq!(out.path, "/docs/note.md");
+        assert!(out.search_enabled);
         assert!(out.content_sha256.is_none());
         assert!(out.byte_len.is_none());
         assert!(out.line_count.is_none());
+        assert!(out.text_encryption_enabled.is_none());
+        assert!(out.text_at_rest_encryption.is_none());
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
@@ -227,6 +248,8 @@ mod tests {
         assert_eq!(out.content_sha256, Some("text-sha".to_owned()));
         assert_eq!(out.byte_len, Some(42));
         assert_eq!(out.line_count, Some(3));
+        assert_eq!(out.text_encryption_enabled, Some(true));
+        assert_eq!(out.text_at_rest_encryption, Some("server".to_owned()));
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
         assert!(out.encryption_mode.is_none());
@@ -245,6 +268,8 @@ mod tests {
         assert!(out.content_sha256.is_none());
         assert_eq!(out.byte_len, Some(1024));
         assert!(out.line_count.is_none());
+        assert!(out.text_encryption_enabled.is_none());
+        assert!(out.text_at_rest_encryption.is_none());
         assert_eq!(out.media_type, Some("image/png".to_owned()));
         assert_eq!(out.detected_media_type, Some("image/png".to_owned()));
         assert_eq!(out.preview_available, Some(false));

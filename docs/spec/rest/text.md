@@ -1,6 +1,6 @@
 # REST Text
 
-Text는 content node다. plain Text는 read/write/patch 대상이고, encrypted Text는 client-side encrypted payload로 저장/조회한다.
+Text는 content node다. plain Text는 read/write/patch 대상이고, encrypted Text는 client-side encrypted payload로 저장/조회한다. 서버 관리 at-rest 암호화는 plain Text의 DB 저장 방식이며 REST content shape를 바꾸지 않는다.
 
 ```http
 GET   /api/v1/spaces/{space_id}/text/{node_id}?start_line=1&max_lines=200&max_bytes=65536&if_none_match_sha256=...

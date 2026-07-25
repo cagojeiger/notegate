@@ -253,6 +253,11 @@ pub fn space_summary(view: &SpaceView) -> serde_json::Value {
         "name": view.space.name,
         "sort_order": view.space.sort_order,
         "permission": view.permission.as_str(),
+        "default_search_enabled": view.space.default_search_enabled,
+        "default_text_encryption_enabled": view.space.default_text_encryption_enabled,
+        "features": {
+            "text_encryption": view.features.text_encryption,
+        },
     })
 }
 
@@ -265,6 +270,7 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         "kind": view.node.kind.as_str(),
         "has_children": view.has_children,
         "sort_order": view.node.sort_order,
+        "search_enabled": view.node.search_enabled,
         "created_at": view.node.created_at,
         "updated_at": view.node.updated_at,
     });
@@ -274,6 +280,14 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         object.insert("content_sha256".to_owned(), json!(text.content_sha256));
         object.insert("byte_len".to_owned(), json!(text.byte_len));
         object.insert("line_count".to_owned(), json!(text.line_count));
+        object.insert(
+            "text_encryption_enabled".to_owned(),
+            json!(text.encryption_enabled),
+        );
+        object.insert(
+            "text_at_rest_encryption".to_owned(),
+            json!(text.at_rest_encryption.as_str()),
+        );
     }
     if let Some(file) = &view.file
         && let Some(object) = value.as_object_mut()
@@ -307,6 +321,7 @@ mod tests {
     use chrono::Utc;
     use notegate_core::Config;
     use notegate_core::security::PiiCrypto;
+    use notegate_core::tier::UserTier;
     use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo, SpaceRepo, test_support::TestDb};
     use notegate_model::{CallerIdentity, Channel, CreateSpace, Permission, ResolveAttrs, Space};
     use notegate_service::files::parse_target;
@@ -322,6 +337,8 @@ mod tests {
                 name: name.to_owned(),
                 sort_order: 0,
                 pinned_at: None,
+                default_search_enabled: true,
+                default_text_encryption_enabled: false,
                 owner_user_id: owner,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
@@ -331,6 +348,7 @@ mod tests {
             },
             permission: Permission::Read,
             root_node_id: Uuid::new_v4(),
+            features: UserTier::Tier0.features(),
         }
     }
 

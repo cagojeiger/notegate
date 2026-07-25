@@ -29,6 +29,8 @@ Search는 scope folder 아래를 deterministic DFS pre-order로 순회한다.
 sibling order = sort_order, name, id
 ```
 
+`nodes.search_enabled=false`인 node는 `find` 결과에서 제외한다. Text node는 `grep`에서도 제외한다. Folder의 값은 자식에게 상속되지 않으며 traversal 자체를 막지 않는다. 따라서 제외된 folder 아래의 검색 허용 node는 계속 검색할 수 있다.
+
 순회 cursor는 마지막 match가 아니라 마지막으로 소비한 candidate 위치를 가리킨다. Cursor는 opaque이며 다음 조건에 묶인다.
 
 ```text
@@ -130,6 +132,8 @@ DB candidate scan은 raw recursive CTE 반환 순서에 의존하지 않는다. 
 for each node candidate in DFS order:
   if node is root:
     skip result
+  if search_enabled is false:
+    skip result
   if kind filter mismatches:
     continue
   if include/exclude path filter mismatches:
@@ -160,12 +164,14 @@ Glob과 regex는 명시적으로 선택한다. 예를 들어 `*.md`는 glob mode
 
 ```text
 nodes.kind = 'text'
+nodes.search_enabled = true
 text_objects.storage_format = 'plain'
-text_objects.content_text
+복호화된 plain content
 ```
 
 - File은 grep 대상이 아니다.
-- Encrypted Text는 grep 대상이 아니다.
+- Client-side encrypted Text는 grep 대상이 아니다.
+- 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 grep한다.
 - `grep`은 `nodes.metadata`를 검색하지 않는다.
 - Match된 Text의 실제 내용은 `read op=read`로 조회한다.
 

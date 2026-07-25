@@ -7,21 +7,23 @@
 use std::collections::HashMap;
 
 use notegate_core::limits::{self, Limits};
+use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
-use notegate_model::Node;
-use notegate_model::files::CopyCounts;
+use notegate_model::files::{CopyCounts, StoredContent, WriteTextBody};
+use notegate_model::{Node, TextStorageFormat};
 use serde_json::Value;
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-use super::checks;
+use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::space_usage::{self, UsageDelta};
 
 pub struct CopyNodeArgs<'a> {
     pub pool: &'a PgPool,
+    pub crypto: &'a PiiCrypto,
     pub space_id: Uuid,
     pub source_node_id: Uuid,
     pub new_parent_id: Uuid,
@@ -34,6 +36,7 @@ pub struct CopyNodeArgs<'a> {
 pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     let CopyNodeArgs {
         pool,
+        crypto,
         space_id,
         source_node_id,
         new_parent_id,
@@ -43,7 +46,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         caps,
     } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
+    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
 
     let source = checks::live_node(&mut tx, space_id, source_node_id)
         .await?
@@ -58,7 +61,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
 
     checks::require_live_folder(&mut tx, space_id, new_parent_id).await?;
     checks::require_sibling_unique(&mut tx, space_id, new_parent_id, new_name, None).await?;
-    checks::require_fanout(&mut tx, space_id, new_parent_id, caps).await?;
+    checks::require_fanout(&mut tx, space_id, new_parent_id, locked.limits).await?;
 
     let snapshot = load_subtree(&mut tx, space_id, source_node_id).await?;
     if snapshot.iter().any(|node| node.kind == "file") {
@@ -91,9 +94,9 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         .map_err(|_error| Error::internal("copied node count exceeds bigint"))?;
     space_usage::apply_quota_delta(
         &mut tx,
-        &gate,
+        &locked.gate,
         UsageDelta::subtree(copied_nodes, text_bytes, 0),
-        caps,
+        locked.limits,
     )
     .await?;
 
@@ -118,7 +121,16 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         let node =
             insert_copied_node(&mut tx, space_id, new_parent, name, &source, created_by).await?;
         id_map.insert(source.id, node.id);
-        copy_content(&mut tx, space_id, source.id, &node, created_by).await?;
+        copy_content(
+            &mut tx,
+            crypto,
+            locked.owner_tier,
+            space_id,
+            source.id,
+            &node,
+            created_by,
+        )
+        .await?;
         if source.id == source_node_id {
             copied_root = Some(node);
         }
@@ -150,6 +162,7 @@ struct CopyNodeRow {
     kind: String,
     sort_order: i32,
     metadata: Value,
+    search_enabled: bool,
     depth: i32,
 }
 
@@ -160,14 +173,14 @@ async fn load_subtree(
 ) -> Result<Vec<CopyNodeRow>> {
     sqlx::query_as(
         "WITH RECURSIVE subtree AS ( \
-                SELECT id, parent_id, name, kind, sort_order, metadata, 0 AS depth \
+                SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, 0 AS depth \
                 FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, s.depth + 1 \
+                SELECT n.id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, s.depth + 1 \
                 FROM nodes n JOIN subtree s ON n.parent_id = s.id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
-             SELECT id, parent_id, name, kind, sort_order, metadata, depth \
+             SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, depth \
              FROM subtree ORDER BY depth, sort_order, name, id",
     )
     .bind(space_id)
@@ -210,8 +223,8 @@ async fn insert_copied_node(
 ) -> Result<Node> {
     let row = sqlx::query_as::<_, NodeRow>(&format!(
             "INSERT INTO nodes \
-             (space_id, parent_id, name, kind, sort_order, metadata, created_by_account_id, updated_by_account_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $7) RETURNING {NODE_COLUMNS}"
+             (space_id, parent_id, name, kind, sort_order, metadata, search_enabled, created_by_account_id, updated_by_account_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) RETURNING {NODE_COLUMNS}"
         ))
         .bind(space_id)
         .bind(parent_id)
@@ -219,6 +232,7 @@ async fn insert_copied_node(
         .bind(&source.kind)
         .bind(source.sort_order)
         .bind(&source.metadata)
+        .bind(source.search_enabled)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await
@@ -228,6 +242,8 @@ async fn insert_copied_node(
 
 async fn copy_content(
     tx: &mut PgConnection,
+    crypto: &PiiCrypto,
+    owner_tier: notegate_core::tier::UserTier,
     space_id: Uuid,
     source_node_id: Uuid,
     new_node: &Node,
@@ -235,7 +251,18 @@ async fn copy_content(
 ) -> Result<()> {
     match new_node.kind.as_str() {
         "folder" => Ok(()),
-        "text" => copy_text(tx, space_id, source_node_id, new_node.id, created_by).await,
+        "text" => {
+            copy_text(
+                tx,
+                crypto,
+                owner_tier,
+                space_id,
+                source_node_id,
+                new_node.id,
+                created_by,
+            )
+            .await
+        }
         "file" => Err(Error::internal("file copy passed the preflight check")),
         _ => Err(Error::internal("unknown node kind during copy")),
     }
@@ -243,6 +270,8 @@ async fn copy_content(
 
 async fn copy_text(
     tx: &mut PgConnection,
+    crypto: &PiiCrypto,
+    owner_tier: notegate_core::tier::UserTier,
     space_id: Uuid,
     source_node_id: Uuid,
     new_node_id: Uuid,
@@ -257,22 +286,59 @@ async fn copy_text(
     .await
     .map_err(map_sqlx_error)?;
 
+    let source = source.into_text(crypto)?;
+    let content = StoredContent {
+        body: match source.storage_format {
+            TextStorageFormat::Plain => WriteTextBody::Plain(
+                source
+                    .content
+                    .clone()
+                    .ok_or_else(|| Error::internal("plain text has no content"))?,
+            ),
+            TextStorageFormat::Encrypted => WriteTextBody::Encrypted(
+                source
+                    .encrypted_payload
+                    .clone()
+                    .ok_or_else(|| Error::internal("encrypted text has no payload"))?,
+            ),
+        },
+        content_sha256: source.content_sha256.clone(),
+        byte_len: source.byte_len,
+        line_count: source.line_count,
+    };
+    let stored = stored_text_parts(
+        &content,
+        source.encryption_enabled,
+        owner_tier,
+        crypto,
+        space_id,
+        new_node_id,
+    )?;
+
     sqlx::query(&format!(
             "INSERT INTO text_objects \
              (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
-              media_type, encoding, created_by_account_id, updated_by_account_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11) RETURNING {TEXT_COLUMNS}"
+              media_type, encoding, encryption_enabled, at_rest_encryption, content_ciphertext, content_nonce, \
+              content_enc_key_id, content_enc_version, created_by_account_id, updated_by_account_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17) \
+             RETURNING {TEXT_COLUMNS}"
         ))
         .bind(new_node_id)
         .bind(space_id)
-        .bind(source.storage_format)
-        .bind(source.content)
-        .bind(source.encrypted_payload)
+        .bind(stored.storage_format)
+        .bind(stored.content_text)
+        .bind(stored.encrypted_payload)
         .bind(source.content_sha256)
         .bind(source.byte_len)
         .bind(source.line_count)
         .bind(source.media_type)
         .bind(source.encoding)
+        .bind(source.encryption_enabled)
+        .bind(stored.at_rest_encryption)
+        .bind(stored.content_ciphertext)
+        .bind(stored.content_nonce)
+        .bind(stored.content_enc_key_id)
+        .bind(stored.content_enc_version)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await

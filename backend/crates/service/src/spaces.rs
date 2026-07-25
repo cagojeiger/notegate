@@ -36,7 +36,10 @@ impl SpaceService {
         require_user_caller(caller_kind)?;
         validate_space_name(&command.name)?;
 
-        let space = self.store.create_space(caller_account_id, &command).await?;
+        let (space, features) = self
+            .store
+            .create_space_with_features(caller_account_id, &command)
+            .await?;
         let root_node_id =
             self.store.root_node_id(space.id).await?.ok_or_else(|| {
                 ServiceError::Internal("space root node was not created".to_owned())
@@ -46,6 +49,7 @@ impl SpaceService {
             space,
             permission: Permission::Write,
             root_node_id,
+            features,
         })
     }
 
@@ -205,26 +209,31 @@ impl SpaceService {
         command: UpdateSpace,
     ) -> ServiceResult<SpaceView> {
         require_user_caller(caller_kind)?;
-        if command.name.is_none() && command.sort_order.is_none() && command.pinned.is_none() {
+        if command.name.is_none()
+            && command.sort_order.is_none()
+            && command.pinned.is_none()
+            && command.default_search_enabled.is_none()
+            && command.default_text_encryption_enabled.is_none()
+        {
             return Err(ServiceError::InvalidInput(
-                "provide name, sort_order, and/or pinned to update".to_owned(),
+                "provide at least one space field to update".to_owned(),
             ));
         }
         if let Some(name) = command.name.as_deref() {
             validate_space_name(name)?;
         }
-        self.require_write(command.space_id, caller_account_id)
-            .await?;
+        let current = self.get(caller_account_id, command.space_id).await?;
+        if command.default_text_encryption_enabled == Some(true)
+            && !current.features.text_encryption
+        {
+            return Err(ServiceError::Forbidden(
+                "text encryption is not available for this space".to_owned(),
+            ));
+        }
 
-        let space = self
+        let (space, features) = self
             .store
-            .update_space(
-                command.space_id,
-                caller_account_id,
-                command.name.as_deref(),
-                command.sort_order,
-                command.pinned,
-            )
+            .update_space_with_features(caller_account_id, &command)
             .await?;
         let root_node_id = self
             .store
@@ -236,6 +245,7 @@ impl SpaceService {
             space,
             permission: Permission::Write,
             root_node_id,
+            features,
         })
     }
 

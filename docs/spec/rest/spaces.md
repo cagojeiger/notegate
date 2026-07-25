@@ -44,6 +44,20 @@ GET /api/v1/spaces/{space_id}
 
 Caller가 볼 수 있는 space 하나를 반환한다.
 
+Space 응답은 다음 정책과 capability를 포함한다.
+
+```ts
+type SpacePolicy = {
+  default_search_enabled: boolean
+  default_text_encryption_enabled: boolean
+  features: {
+    text_encryption: boolean
+  }
+}
+```
+
+기본값은 새 node 생성 시에만 복사한다. `default_search_enabled`는 새 folder/text/file에 적용하고 `default_text_encryption_enabled`는 새 Text에만 적용한다.
+
 ## Update space
 
 ```http
@@ -53,10 +67,16 @@ PATCH /api/v1/spaces/{space_id}
 Owner user만 가능하다.
 
 ```json
-{"name":"personal","sort_order":0,"pinned":true}
+{
+  "name":"personal",
+  "sort_order":0,
+  "pinned":true,
+  "default_search_enabled":true,
+  "default_text_encryption_enabled":false
+}
 ```
 
-`name`, `sort_order`, `pinned` 중 하나 이상을 보낸다. `sort_order`는 중복 가능하며 동률은 `name`, `id`로 안정 정렬한다.
+필드 하나 이상을 보낸다. `sort_order`는 중복 가능하며 동률은 `name`, `id`로 안정 정렬한다. 기본값 변경은 기존 node를 갱신하지 않는다. `default_text_encryption_enabled=true`는 Space owner의 `text_encryption` capability가 필요하다.
 
 - `pinned: true`: owner user의 MCP 목록과 접근 범위에 포함한다.
 - `pinned: false`: owner user의 MCP에서 목록·조회·검색·쓰기·전송을 모두 숨긴다.

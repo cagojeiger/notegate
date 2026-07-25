@@ -30,7 +30,7 @@ use crate::state::AppState;
 use notegate_service::files::{
     BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
     DeleteNode, ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, SyncFileChanges,
-    WriteTarget, WriteText, WriteTextBody,
+    UpdateNode, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -718,6 +718,10 @@ pub(crate) struct UpdateNodeBody {
     name: Option<String>,
     #[serde(default)]
     sort_order: Option<i32>,
+    #[serde(default)]
+    search_enabled: Option<bool>,
+    #[serde(default)]
+    text_encryption_enabled: Option<bool>,
 }
 
 #[utoipa::path(
@@ -740,9 +744,13 @@ pub(crate) async fn update(
         .update_node(
             caller.account_id(),
             space_id,
-            node_id,
-            body.name,
-            body.sort_order,
+            UpdateNode {
+                node_id,
+                name: body.name,
+                sort_order: body.sort_order,
+                search_enabled: body.search_enabled,
+                text_encryption_enabled: body.text_encryption_enabled,
+            },
         )
         .await?;
     let refs = state

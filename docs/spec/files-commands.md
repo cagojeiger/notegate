@@ -48,7 +48,7 @@ edit   line 기반 insert/replace/delete 적용
 
 - Text command는 plain UTF-8 content를 대상으로 한다.
 - `read`, `write`, `append`, `patch`, `edit`은 `nodes.kind='text'`에만 적용한다.
-- Encrypted Text content는 MCP/CLI read/write/append/patch/edit 대상이 아니다.
+- Client-side encrypted Text content는 MCP/CLI read/write/append/patch/edit 대상이 아니다.
 - `write`는 전체 content replacement다.
 - 빈 Text 생성은 `write`에 `create=true`, `content=""`를 사용한다.
 - `append`는 기본적으로 정확한 EOF append다. 줄 구분이 필요하면 호출자가 newline을 포함하거나 `ensure_newline` 옵션을 사용한다.
@@ -94,7 +94,7 @@ find        folder/text/file node name/kind/scope 검색
 grep        plain Text content가 query를 포함하는 text node 후보 검색
 ```
 
-`grep`은 기본적으로 Text node 후보만 반환한다. 요청 옵션으로 첫 matching line 또는 모든 matching line number를 받을 수 있다. Context와 snippet은 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Encrypted Text와 File은 grep 대상이 아니다.
+`grep`은 기본적으로 Text node 후보만 반환한다. 요청 옵션으로 첫 matching line 또는 모든 matching line number를 받을 수 있다. Context와 snippet은 반환하지 않는다. Match된 Text 내용은 `read`로 조회한다. Client-side encrypted Text와 File은 grep 대상이 아니다. 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 검색한다.
 
 
 ## list

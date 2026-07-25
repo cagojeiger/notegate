@@ -69,6 +69,15 @@ system_max
   folder_max_children = 1000
 ```
 
+Tier feature:
+
+```text
+tier0       text_encryption = false
+system_max  text_encryption = true
+```
+
+`text_encryption`은 Space owner tier에서 계산한다. Agent caller의 tier는 연결된 Space의 기능을 바꾸지 않는다.
+
 API key 개수와 TTL, 요청 크기, node/content 단위 제한은 security/product safety limit으로 tier별로 나누지 않는다.
 
 ## Tree and content limits

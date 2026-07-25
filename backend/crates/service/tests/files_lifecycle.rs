@@ -20,12 +20,12 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
-use notegate_model::{FileEncryptionMode, NodeKind};
+use notegate_model::{FileEncryptionMode, NodeKind, TextAtRestEncryption, UpdateSpace};
 use notegate_service::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload, ChildrenCursor,
     CopyNode, CreateFolder, CreateText, DeleteNode, Edit, EditText, FilesService, LineEdit,
     ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, PatchMode, PatchText, ReadText,
-    ReadTextBody, SyncFileChanges, WriteTarget, WriteText, WriteTextBody,
+    ReadTextBody, SyncFileChanges, UpdateNode, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -51,6 +51,237 @@ async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uui
         .expect("root id query")
         .expect("root id present");
     (ws.id, root)
+}
+
+#[tokio::test]
+async fn server_encrypted_text_stays_readable_and_searchable()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files_repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(files_repo.clone());
+    let search = SearchService::new(files_repo);
+    let owner =
+        insert_user_account(&db.pool, "encrypted-owner", "encrypted-owner@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "encrypted").await;
+
+    let tier0_text = files
+        .create_text(
+            owner,
+            ws,
+            CreateText {
+                parent_node_id: root,
+                name: "tier0.md".to_owned(),
+            },
+        )
+        .await?;
+    let denied = files
+        .update_node(
+            owner,
+            ws,
+            UpdateNode {
+                node_id: tier0_text.node.node.id,
+                name: None,
+                sort_order: None,
+                search_enabled: None,
+                text_encryption_enabled: Some(true),
+            },
+        )
+        .await;
+    assert!(denied.is_err(), "tier0 cannot enable text encryption");
+
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    ws_repo
+        .update_space_with_features(
+            owner,
+            &UpdateSpace {
+                space_id: ws,
+                name: None,
+                sort_order: None,
+                default_search_enabled: None,
+                default_text_encryption_enabled: Some(true),
+            },
+        )
+        .await?;
+
+    let encrypted = files
+        .create_text(
+            owner,
+            ws,
+            CreateText {
+                parent_node_id: root,
+                name: "secret.md".to_owned(),
+            },
+        )
+        .await?;
+    let node_id = encrypted.node.node.id;
+    files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Existing { node_id },
+                body: WriteTextBody::Plain("searchable secret".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+
+    let stored: (Option<String>, Option<Vec<u8>>, String, bool) = sqlx::query_as(
+        "SELECT content_text, content_ciphertext, at_rest_encryption, encryption_enabled \
+         FROM text_objects WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(stored.0.is_none());
+    assert!(stored.1.is_some());
+    assert_eq!(stored.2, "server");
+    assert!(stored.3);
+
+    let read = files
+        .read_text(
+            owner,
+            ws,
+            ReadText {
+                node_id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    let ReadTextBody::Content(content) = read.body else {
+        panic!("server-encrypted text must be returned as plain content");
+    };
+    assert_eq!(content.content, "searchable secret");
+    assert_eq!(
+        read.node.text.expect("text stats").at_rest_encryption,
+        TextAtRestEncryption::Server
+    );
+
+    let grep = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "searchable secret".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(grep.items[0].node.node.id, node_id);
+
+    sqlx::query("UPDATE users SET tier = 'tier0' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    let read_after_downgrade = files
+        .read_text(
+            owner,
+            ws,
+            ReadText {
+                node_id,
+                start_line: None,
+                max_lines: None,
+                max_bytes: None,
+                if_none_match_sha256: None,
+            },
+        )
+        .await?;
+    assert!(matches!(
+        read_after_downgrade.body,
+        ReadTextBody::Content(ref content) if content.content == "searchable secret"
+    ));
+    let grep_after_downgrade = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "searchable secret".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(grep_after_downgrade.items[0].node.node.id, node_id);
+    assert!(
+        files
+            .write_text(
+                owner,
+                ws,
+                WriteText {
+                    target: WriteTarget::Existing { node_id },
+                    body: WriteTextBody::Plain("blocked after downgrade".to_owned()),
+                    expected_sha256: None,
+                },
+            )
+            .await
+            .is_err(),
+        "downgraded owner cannot create a new encrypted revision"
+    );
+
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    files
+        .update_node(
+            owner,
+            ws,
+            UpdateNode {
+                node_id,
+                name: None,
+                sort_order: None,
+                search_enabled: None,
+                text_encryption_enabled: Some(false),
+            },
+        )
+        .await?;
+    files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Existing { node_id },
+                body: WriteTextBody::Plain("searchable secret".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let stored: (Option<String>, Option<Vec<u8>>, String, bool) = sqlx::query_as(
+        "SELECT content_text, content_ciphertext, at_rest_encryption, encryption_enabled \
+         FROM text_objects WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(stored.0.as_deref(), Some("searchable secret"));
+    assert!(stored.1.is_none());
+    assert_eq!(stored.2, "none");
+    assert!(!stored.3);
+
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]

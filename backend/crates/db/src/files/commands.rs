@@ -7,15 +7,77 @@ pub mod move_node;
 pub mod save;
 pub mod update;
 
-fn stored_text_parts(
-    content: &notegate_model::files::StoredContent,
-) -> (&'static str, Option<&str>, Option<&serde_json::Value>) {
+use notegate_core::security::PiiCrypto;
+use notegate_core::tier::UserTier;
+use notegate_core::{Error, Result};
+use notegate_model::files::WriteTextBody;
+use serde_json::Value;
+use uuid::Uuid;
+
+struct StoredTextParts<'a> {
+    storage_format: &'static str,
+    content_text: Option<&'a str>,
+    encrypted_payload: Option<&'a Value>,
+    at_rest_encryption: &'static str,
+    content_ciphertext: Option<Vec<u8>>,
+    content_nonce: Option<Vec<u8>>,
+    content_enc_key_id: Option<String>,
+    content_enc_version: Option<i32>,
+}
+
+fn stored_text_parts<'a>(
+    content: &'a notegate_model::files::StoredContent,
+    encryption_enabled: bool,
+    owner_tier: UserTier,
+    crypto: &PiiCrypto,
+    space_id: Uuid,
+    node_id: Uuid,
+) -> Result<StoredTextParts<'a>> {
     match &content.body {
-        notegate_model::files::WriteTextBody::Plain(content) => {
-            ("plain", Some(content.as_str()), None)
+        WriteTextBody::Plain(content) if encryption_enabled => {
+            if !owner_tier.features().text_encryption {
+                return Err(Error::conflict(
+                    "text encryption is not available for the space owner's tier",
+                ));
+            }
+            let encrypted = crypto.encrypt_text_content(
+                &space_id.to_string(),
+                &node_id.to_string(),
+                content,
+            )?;
+            Ok(StoredTextParts {
+                storage_format: "plain",
+                content_text: None,
+                encrypted_payload: None,
+                at_rest_encryption: "server",
+                content_ciphertext: Some(encrypted.ciphertext),
+                content_nonce: Some(encrypted.nonce),
+                content_enc_key_id: Some(crypto.enc_key_id().to_owned()),
+                content_enc_version: Some(crypto.version()),
+            })
         }
-        notegate_model::files::WriteTextBody::Encrypted(payload) => {
-            ("encrypted", None, Some(payload))
-        }
+        WriteTextBody::Plain(content) => Ok(StoredTextParts {
+            storage_format: "plain",
+            content_text: Some(content),
+            encrypted_payload: None,
+            at_rest_encryption: "none",
+            content_ciphertext: None,
+            content_nonce: None,
+            content_enc_key_id: None,
+            content_enc_version: None,
+        }),
+        WriteTextBody::Encrypted(_) if encryption_enabled => Err(Error::conflict(
+            "server text encryption requires plain text storage",
+        )),
+        WriteTextBody::Encrypted(payload) => Ok(StoredTextParts {
+            storage_format: "encrypted",
+            content_text: None,
+            encrypted_payload: Some(payload),
+            at_rest_encryption: "none",
+            content_ciphertext: None,
+            content_nonce: None,
+            content_enc_key_id: None,
+            content_enc_version: None,
+        }),
     }
 }

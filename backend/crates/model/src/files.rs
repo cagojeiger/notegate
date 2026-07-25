@@ -6,7 +6,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
-    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextObject, TextStorageFormat,
+    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextAtRestEncryption, TextObject,
+    TextStorageFormat,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +170,15 @@ pub struct MoveNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateNode {
+    pub node_id: Uuid,
+    pub name: Option<String>,
+    pub sort_order: Option<i32>,
+    pub search_enabled: Option<bool>,
+    pub text_encryption_enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyNode {
     pub node_id: Uuid,
     pub new_parent_node_id: Uuid,
@@ -264,6 +274,8 @@ pub struct TextStats {
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
+    pub encryption_enabled: bool,
+    pub at_rest_encryption: TextAtRestEncryption,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

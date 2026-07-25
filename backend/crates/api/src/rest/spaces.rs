@@ -58,6 +58,8 @@ pub(crate) struct UpdateBody {
     name: Option<String>,
     sort_order: Option<i32>,
     pinned: Option<bool>,
+    default_search_enabled: Option<bool>,
+    default_text_encryption_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -175,6 +177,8 @@ pub(crate) async fn update(
                 name: body.name,
                 sort_order: body.sort_order,
                 pinned: body.pinned,
+                default_search_enabled: body.default_search_enabled,
+                default_text_encryption_enabled: body.default_text_encryption_enabled,
             },
         )
         .await?;

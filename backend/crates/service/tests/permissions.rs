@@ -189,6 +189,8 @@ async fn connected_agent_write_cannot_manage_space_or_connections()
                 name: Some("renamed".to_owned()),
                 sort_order: None,
                 pinned: None,
+                default_search_enabled: None,
+                default_text_encryption_enabled: None,
             },
         )
         .await;
