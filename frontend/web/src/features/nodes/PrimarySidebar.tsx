@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { RestNode, Space } from "../../api/types";
+import type { NodeSummary, Space } from "../../api/types";
 import { NodeContextMenu } from "./NodeContextMenu";
 import { SpaceHeader } from "./SpaceHeader";
 import { PrimarySidebarSections } from "./PrimarySidebarSections";
@@ -38,23 +38,23 @@ export function PrimarySidebar({
   canManageActiveSpace: boolean;
   canOpenInNewGroup: boolean;
   onToggleFolder: (nodeId: string) => void;
-  onOpenNode: (node: RestNode) => void;
-  onOpenNodeInNewGroup: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
+  onOpenNodeInNewGroup: (node: NodeSummary) => void;
   onCreateFolder: () => void;
   onCreateText: () => void;
   onFileSelected: (file: File | null) => void;
   onRenameSpace: () => void;
   onDeleteSpace: () => void;
-  onRenameNode: (node: RestNode) => void;
-  onMoveNode: (node: RestNode) => void;
-  onMoveNodeToFolder: (node: RestNode, folder: RestNode) => void;
-  onDeleteNode: (node: RestNode) => void;
-  onDownloadFile: (node: RestNode) => void;
+  onRenameNode: (node: NodeSummary) => void;
+  onMoveNode: (node: NodeSummary) => void;
+  onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
+  onDeleteNode: (node: NodeSummary) => void;
+  onDownloadFile: (node: NodeSummary) => void;
   onCollapseTree: () => void;
-  onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void;
-  onUploadInFolder: (folder: RestNode, file: File | null) => void;
+  onCreateInFolder: (folder: NodeSummary, kind: "folder" | "text") => void;
+  onUploadInFolder: (folder: NodeSummary, file: File | null) => void;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; node: RestNode } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; node: NodeSummary } | null>(null);
   const { asideRef, onSidebarKeyDown, registerTreeNavigation } = useSidebarKeyboardNavigation();
 
   const onNodeContextMenu: NodeContextHandler = (node, event) => {

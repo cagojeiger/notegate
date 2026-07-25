@@ -2,7 +2,7 @@ import type { DragEvent } from "react";
 import { useRef } from "react";
 import { ChevronRight } from "lucide-react";
 
-import type { RestNode } from "../../api/types";
+import type { NodeSummary } from "../../api/types";
 import { nodeIcon } from "./nodeDisplay";
 import type { NodeContextHandler } from "./types";
 
@@ -22,7 +22,7 @@ export function NodeRow({
   onDropOnNode,
   onDragEndNode
 }: {
-  node: RestNode;
+  node: NodeSummary;
   depth: number;
   selected: boolean;
   expanded?: boolean;
@@ -30,11 +30,11 @@ export function NodeRow({
   suffix?: string;
   dropTarget?: boolean;
   onToggleFolder?: (nodeId: string) => void;
-  onOpenNode: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
-  onDragStartNode?: (node: RestNode) => void;
-  onDragOverNode?: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
-  onDropOnNode?: (node: RestNode, event: DragEvent<HTMLDivElement>) => void;
+  onDragStartNode?: (node: NodeSummary) => void;
+  onDragOverNode?: (node: NodeSummary, event: DragEvent<HTMLDivElement>) => void;
+  onDropOnNode?: (node: NodeSummary, event: DragEvent<HTMLDivElement>) => void;
   onDragEndNode?: () => void;
 }) {
   const Icon = nodeIcon(node);
@@ -46,7 +46,10 @@ export function NodeRow({
     longPressRef.current = null;
   }
   function handleOpen() {
-    if (node.kind === "folder") onToggleFolder?.(node.id);
+    if (node.kind === "folder") {
+      onToggleFolder?.(node.id);
+      return;
+    }
     onOpenNode(node);
   }
   return (

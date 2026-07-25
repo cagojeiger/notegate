@@ -1,7 +1,7 @@
 import { Copy, Download, FilePlus, FolderPlus, Move, PanelRightOpen, Pencil, Trash2, Upload, X } from "lucide-react";
 import { useEffect } from "react";
 
-import type { RestNode } from "../../api/types";
+import type { NodeSummary } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { Card, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
@@ -22,20 +22,20 @@ export function NodeContextMenu({
   onCreateInFolder,
   onUploadInFolder
 }: {
-  menu: { x: number; y: number; node: RestNode };
+  menu: { x: number; y: number; node: NodeSummary };
   canWriteActiveSpace: boolean;
   canOpenInNewGroup?: boolean;
   showCreateActions?: boolean;
   onClose: () => void;
-  onOpenNode: (node: RestNode) => void;
-  onOpenInNewGroup?: (node: RestNode) => void;
+  onOpenNode: (node: NodeSummary) => void;
+  onOpenInNewGroup?: (node: NodeSummary) => void;
   onCloseGroup?: () => void;
-  onDownloadFile?: (node: RestNode) => void;
-  onRenameNode: (node: RestNode) => void;
-  onMoveNode: (node: RestNode) => void;
-  onDeleteNode: (node: RestNode) => void;
-  onCreateInFolder: (folder: RestNode, kind: "folder" | "text") => void;
-  onUploadInFolder: (folder: RestNode, file: File | null) => void;
+  onDownloadFile?: (node: NodeSummary) => void;
+  onRenameNode: (node: NodeSummary) => void;
+  onMoveNode: (node: NodeSummary) => void;
+  onDeleteNode: (node: NodeSummary) => void;
+  onCreateInFolder: (folder: NodeSummary, kind: "folder" | "text") => void;
+  onUploadInFolder: (folder: NodeSummary, file: File | null) => void;
 }) {
   const showToast = useUiStore((state) => state.showToast);
   const { node } = menu;

@@ -1,18 +1,23 @@
 use notegate_core::limits;
-use notegate_model::{Node, NodeKind};
+use notegate_model::{Node, NodeKind, NodeSummary};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::validation;
 use crate::files::{
+    BatchChildrenRequest, BatchChildrenResult, CanonicalChildrenPage, CanonicalNodeListPage,
     ChildrenCursor, ChildrenPage, ChildrenRequest, FileCommand, ListNodesRequest, NodeListCursor,
-    NodeListPage, NodeListSort, NodeReveal, NodeView, ReadContent, ReadResult, ReadText,
-    ReadTextBody,
+    NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, ReadContent, ReadResult,
+    ReadText, ReadTextBody,
 };
 use crate::pagination;
 
 use super::{FilesService, join_path};
+
+pub const MAX_BATCH_CHILDREN_PARENTS: usize = 16;
 
 impl FilesService {
     /// Metadata for a node (`stat`). Requires read permission.
@@ -70,28 +75,13 @@ impl FilesService {
         let parent_has_children = self.store.has_children(space_id, parent_node_id).await?;
 
         let limit = clamp_children_limit(request.limit);
-        let cursor = match request.cursor.as_deref() {
-            None => None,
-            Some(raw) => Some(cursor::decode::<ChildrenCursor>(raw)?),
-        };
+        let cursor = decode_children_cursor(request.cursor.as_deref(), space_id, parent_node_id)?;
         let (rows, has_more) = self
             .store
-            .paged_children(space_id, parent_node_id, limit, cursor.as_ref())
+            .paged_child_summaries(space_id, parent_node_id, limit, cursor.as_ref())
             .await?;
 
-        let next_cursor = if has_more {
-            rows.last()
-                .map(|node| ChildrenCursor {
-                    sort_order: node.sort_order,
-                    name: node.name.clone(),
-                    id: node.id,
-                })
-                .map(|cursor| cursor::encode(&cursor))
-                .transpose()
-                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
-        } else {
-            None
-        };
+        let next_cursor = encode_children_cursor(space_id, parent_node_id, rows.last(), has_more)?;
 
         let child_ids: Vec<Uuid> = rows.iter().map(|node| node.id).collect();
         let text_ids: Vec<Uuid> = rows
@@ -114,7 +104,7 @@ impl FilesService {
             let has_children = child_has_children.get(&node.id).copied().unwrap_or(false);
             let text = text_stats.get(&node.id).cloned();
             let file = file_stats.get(&node.id).cloned();
-            items.push(NodeView {
+            items.push(NodeSummaryView {
                 node,
                 path,
                 has_children,
@@ -138,9 +128,151 @@ impl FilesService {
         })
     }
 
+    /// Canonical child nodes for MCP/CLI list output. REST tree collections use
+    /// `children`, whose compact summaries deliberately omit canonical metadata.
+    pub async fn canonical_children(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        parent_node_id: Uuid,
+        request: ChildrenRequest,
+    ) -> ServiceResult<CanonicalChildrenPage> {
+        self.authorize(space_id, caller_account_id, FileCommand::Ls)
+            .await?;
+
+        let parent = self.load_node(space_id, parent_node_id).await?;
+        if parent.kind != NodeKind::Folder {
+            return Err(ServiceError::InvalidInput(
+                "cannot list children of a text".to_owned(),
+            ));
+        }
+        let parent_path = self.path_of(space_id, parent_node_id).await?;
+        let parent_has_children = self.store.has_children(space_id, parent_node_id).await?;
+        let limit = clamp_children_limit(request.limit);
+        let cursor = decode_children_cursor(request.cursor.as_deref(), space_id, parent_node_id)?;
+        let (rows, has_more) = self
+            .store
+            .paged_children(space_id, parent_node_id, limit, cursor.as_ref())
+            .await?;
+        let next_cursor =
+            encode_node_children_cursor(space_id, parent_node_id, rows.last(), has_more)?;
+        let rows = rows
+            .into_iter()
+            .map(|node| {
+                let path = join_path(&parent_path, &node.name);
+                (node, path)
+            })
+            .collect();
+        let items = super::view::hydrate_node_views(&self.store, space_id, rows).await?;
+
+        Ok(CanonicalChildrenPage {
+            parent: NodeView {
+                node: parent,
+                path: parent_path,
+                has_children: parent_has_children,
+                text: None,
+                file: None,
+            },
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
+    }
+
+    /// First children page for a bounded set of parents. One authorization
+    /// check and a constant number of database queries serve the whole batch.
+    pub async fn batch_children(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        request: BatchChildrenRequest,
+    ) -> ServiceResult<Vec<BatchChildrenResult>> {
+        let parent_node_ids = validate_batch_parent_ids(request.parent_node_ids)?;
+        self.authorize(space_id, caller_account_id, FileCommand::Ls)
+            .await?;
+
+        let limit = clamp_children_limit(request.limit);
+        let mut parents = self.store.find_nodes(space_id, &parent_node_ids).await?;
+        let folder_ids = parent_node_ids
+            .iter()
+            .filter(|parent_id| {
+                parents
+                    .get(parent_id)
+                    .is_some_and(|parent| parent.kind == NodeKind::Folder)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let paths = self.store.node_paths_many(space_id, &folder_ids).await?;
+        let (mut child_rows, parents_with_more) = self
+            .store
+            .first_children_pages(space_id, &folder_ids, limit)
+            .await?;
+
+        let mut next_cursors = HashMap::with_capacity(folder_ids.len());
+        let mut rows_with_paths = Vec::new();
+        for parent_id in &folder_ids {
+            let parent_path = paths
+                .get(parent_id)
+                .ok_or_else(|| ServiceError::Internal("folder path is missing".to_owned()))?;
+            let rows = child_rows.remove(parent_id).unwrap_or_default();
+            let has_more = parents_with_more.contains(parent_id);
+            next_cursors.insert(
+                *parent_id,
+                encode_children_cursor(space_id, *parent_id, rows.last(), has_more)?,
+            );
+            rows_with_paths.extend(rows.into_iter().map(|node| {
+                let path = join_path(parent_path, &node.name);
+                (node, path)
+            }));
+        }
+
+        let hydrated =
+            super::view::hydrate_node_summary_views(&self.store, space_id, rows_with_paths).await?;
+        let mut items_by_parent: HashMap<Uuid, Vec<NodeSummaryView>> = HashMap::new();
+        for view in hydrated {
+            let parent_id = view
+                .node
+                .parent_id
+                .ok_or_else(|| ServiceError::Internal("child has no parent".to_owned()))?;
+            items_by_parent.entry(parent_id).or_default().push(view);
+        }
+
+        parent_node_ids
+            .into_iter()
+            .map(|parent_node_id| {
+                let Some(parent) = parents.remove(&parent_node_id) else {
+                    return Ok(BatchChildrenResult::NotFound { parent_node_id });
+                };
+                if parent.kind != NodeKind::Folder {
+                    return Ok(BatchChildrenResult::NotFolder { parent_node_id });
+                }
+                let path = paths
+                    .get(&parent_node_id)
+                    .cloned()
+                    .ok_or_else(|| ServiceError::Internal("folder path is missing".to_owned()))?;
+                let items = items_by_parent.remove(&parent_node_id).unwrap_or_default();
+                let has_more = parents_with_more.contains(&parent_node_id);
+                Ok(BatchChildrenResult::Ready(Box::new(ChildrenPage {
+                    parent: NodeView {
+                        node: parent,
+                        path,
+                        has_children: has_more || !items.is_empty(),
+                        text: None,
+                        file: None,
+                    },
+                    items,
+                    limit,
+                    has_more,
+                    next_cursor: next_cursors.remove(&parent_node_id).flatten(),
+                })))
+            })
+            .collect()
+    }
+
     /// List live nodes across a space for list-style views such as Recent.
     /// Requires read permission.
-    pub async fn list_nodes(
+    pub async fn list_node_summaries(
         &self,
         caller_account_id: Uuid,
         space_id: Uuid,
@@ -154,21 +286,15 @@ impl FilesService {
             limits::NODES_DEFAULT_LIMIT,
             limits::NODES_MAX_LIMIT,
         );
-        let decoded_cursor = match request.cursor.as_deref() {
-            None => None,
-            Some(raw) => {
-                let cursor = cursor::decode::<NodeListCursor>(raw)?;
-                if !node_list_cursor_matches_query(&cursor, request.sort, request.kind) {
-                    return Err(ServiceError::InvalidInput(
-                        "cursor does not match node list query".to_owned(),
-                    ));
-                }
-                Some(cursor)
-            }
-        };
+        let decoded_cursor = decode_node_list_cursor(
+            request.cursor.as_deref(),
+            space_id,
+            request.sort,
+            request.kind,
+        )?;
         let (rows, has_more) = self
             .store
-            .paged_nodes(
+            .paged_node_summaries(
                 space_id,
                 request.kind,
                 request.sort,
@@ -179,7 +305,10 @@ impl FilesService {
 
         let next_cursor = if has_more {
             rows.last()
-                .map(|node| node_list_cursor(node, request.sort, request.kind))
+                .map(|node| ScopedNodeListCursor {
+                    space_id,
+                    position: node_list_cursor(node, request.sort, request.kind),
+                })
                 .map(|cursor| cursor::encode(&cursor))
                 .transpose()
                 .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
@@ -187,9 +316,72 @@ impl FilesService {
             None
         };
 
-        let items = self.node_views(space_id, rows).await?;
+        let node_ids: Vec<Uuid> = rows.iter().map(|node| node.id).collect();
+        let paths = self.store.node_paths_many(space_id, &node_ids).await?;
+        let rows = rows
+            .into_iter()
+            .map(|node| {
+                let path = paths
+                    .get(&node.id)
+                    .cloned()
+                    .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
+                Ok((node, path))
+            })
+            .collect::<ServiceResult<Vec<_>>>()?;
+        let items = super::view::hydrate_node_summary_views(&self.store, space_id, rows).await?;
 
         Ok(NodeListPage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
+    }
+
+    /// Full node collection for callers that have not opted into summaries.
+    pub async fn list_nodes(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        request: ListNodesRequest,
+    ) -> ServiceResult<CanonicalNodeListPage> {
+        self.authorize(space_id, caller_account_id, FileCommand::Ls)
+            .await?;
+        let limit = pagination::clamp_limit(
+            request.limit,
+            limits::NODES_DEFAULT_LIMIT,
+            limits::NODES_MAX_LIMIT,
+        );
+        let decoded_cursor = decode_node_list_cursor(
+            request.cursor.as_deref(),
+            space_id,
+            request.sort,
+            request.kind,
+        )?;
+        let (rows, has_more) = self
+            .store
+            .paged_nodes(
+                space_id,
+                request.kind,
+                request.sort,
+                limit,
+                decoded_cursor.as_ref(),
+            )
+            .await?;
+        let next_cursor = if has_more {
+            rows.last()
+                .map(|node| ScopedNodeListCursor {
+                    space_id,
+                    position: node_list_cursor_for_node(node, request.sort, request.kind),
+                })
+                .map(|cursor| cursor::encode(&cursor))
+                .transpose()
+                .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))?
+        } else {
+            None
+        };
+        let items = self.node_views(space_id, rows).await?;
+        Ok(CanonicalNodeListPage {
             items,
             limit,
             has_more,
@@ -317,8 +509,96 @@ fn clamp_children_limit(limit: Option<i64>) -> i64 {
     }
 }
 
+fn validate_batch_parent_ids(parent_node_ids: Vec<Uuid>) -> ServiceResult<Vec<Uuid>> {
+    if parent_node_ids.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "parent_node_ids must contain at least one item".to_owned(),
+        ));
+    }
+    if parent_node_ids.len() > MAX_BATCH_CHILDREN_PARENTS {
+        return Err(ServiceError::InvalidInput(format!(
+            "parent_node_ids must contain at most {MAX_BATCH_CHILDREN_PARENTS} items"
+        )));
+    }
+    let mut seen = HashSet::with_capacity(parent_node_ids.len());
+    if parent_node_ids
+        .iter()
+        .any(|parent_id| !seen.insert(*parent_id))
+    {
+        return Err(ServiceError::InvalidInput(
+            "parent_node_ids must be unique".to_owned(),
+        ));
+    }
+    Ok(parent_node_ids)
+}
+
+fn encode_children_cursor(
+    space_id: Uuid,
+    parent_node_id: Uuid,
+    last: Option<&NodeSummary>,
+    has_more: bool,
+) -> ServiceResult<Option<String>> {
+    if !has_more {
+        return Ok(None);
+    }
+    last.map(|node| ScopedChildrenCursor {
+        space_id,
+        parent_node_id,
+        position: ChildrenCursor {
+            sort_order: node.sort_order,
+            name: node.name.clone(),
+            id: node.id,
+        },
+    })
+    .map(|cursor| cursor::encode(&cursor))
+    .transpose()
+    .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
+}
+
+fn encode_node_children_cursor(
+    space_id: Uuid,
+    parent_node_id: Uuid,
+    last: Option<&Node>,
+    has_more: bool,
+) -> ServiceResult<Option<String>> {
+    if !has_more {
+        return Ok(None);
+    }
+    last.map(|node| ScopedChildrenCursor {
+        space_id,
+        parent_node_id,
+        position: ChildrenCursor {
+            sort_order: node.sort_order,
+            name: node.name.clone(),
+            id: node.id,
+        },
+    })
+    .map(|cursor| cursor::encode(&cursor))
+    .transpose()
+    .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
+}
+
+fn decode_children_cursor(
+    raw: Option<&str>,
+    space_id: Uuid,
+    parent_node_id: Uuid,
+) -> ServiceResult<Option<ChildrenCursor>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let cursor = cursor::decode::<ScopedChildrenCursor>(raw)?;
+    if cursor.space_id != space_id || cursor.parent_node_id != parent_node_id {
+        return Err(ServiceError::InvalidInput(
+            "cursor does not match children query".to_owned(),
+        ));
+    }
+    Ok(Some(cursor.position))
+}
+
 fn node_list_cursor_matches_query(
     cursor: &NodeListCursor,
+    cursor_space_id: Uuid,
+    space_id: Uuid,
     sort: NodeListSort,
     kind: Option<NodeKind>,
 ) -> bool {
@@ -334,12 +614,16 @@ fn node_list_cursor_matches_query(
                 kind: cursor_kind, ..
             },
             NodeListSort::NameAsc,
-        ) => *cursor_kind == kind,
+        ) => cursor_space_id == space_id && *cursor_kind == kind,
         _ => false,
     }
 }
 
-fn node_list_cursor(node: &Node, sort: NodeListSort, kind: Option<NodeKind>) -> NodeListCursor {
+fn node_list_cursor(
+    node: &NodeSummary,
+    sort: NodeListSort,
+    kind: Option<NodeKind>,
+) -> NodeListCursor {
     match sort {
         NodeListSort::UpdatedAtDesc => NodeListCursor::UpdatedAtDesc {
             kind,
@@ -352,6 +636,56 @@ fn node_list_cursor(node: &Node, sort: NodeListSort, kind: Option<NodeKind>) -> 
             id: node.id,
         },
     }
+}
+
+fn node_list_cursor_for_node(
+    node: &Node,
+    sort: NodeListSort,
+    kind: Option<NodeKind>,
+) -> NodeListCursor {
+    match sort {
+        NodeListSort::UpdatedAtDesc => NodeListCursor::UpdatedAtDesc {
+            kind,
+            updated_at: node.updated_at,
+            id: node.id,
+        },
+        NodeListSort::NameAsc => NodeListCursor::NameAsc {
+            kind,
+            name: node.name.clone(),
+            id: node.id,
+        },
+    }
+}
+
+fn decode_node_list_cursor(
+    raw: Option<&str>,
+    space_id: Uuid,
+    sort: NodeListSort,
+    kind: Option<NodeKind>,
+) -> ServiceResult<Option<NodeListCursor>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let cursor = cursor::decode::<ScopedNodeListCursor>(raw)?;
+    if !node_list_cursor_matches_query(&cursor.position, cursor.space_id, space_id, sort, kind) {
+        return Err(ServiceError::InvalidInput(
+            "cursor does not match node list query".to_owned(),
+        ));
+    }
+    Ok(Some(cursor.position))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ScopedChildrenCursor {
+    space_id: Uuid,
+    parent_node_id: Uuid,
+    position: ChildrenCursor,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ScopedNodeListCursor {
+    space_id: Uuid,
+    position: NodeListCursor,
 }
 
 /// Slice a text by a 1-based line range and a byte budget, reporting whether
@@ -515,5 +849,21 @@ mod tests {
         assert_eq!(content.returned_lines, limits::READ_MAX_LINES);
         assert!(content.truncated);
         assert_eq!(content.next_start_line, Some(limits::READ_MAX_LINES + 1));
+    }
+
+    #[test]
+    fn batch_parent_ids_are_bounded_and_unique() {
+        assert!(validate_batch_parent_ids(Vec::new()).is_err());
+        let repeated = Uuid::new_v4();
+        assert!(validate_batch_parent_ids(vec![repeated, repeated]).is_err());
+        assert!(
+            validate_batch_parent_ids(
+                (0..=MAX_BATCH_CHILDREN_PARENTS)
+                    .map(|_| Uuid::new_v4())
+                    .collect()
+            )
+            .is_err()
+        );
+        assert!(validate_batch_parent_ids(vec![Uuid::new_v4()]).is_ok());
     }
 }

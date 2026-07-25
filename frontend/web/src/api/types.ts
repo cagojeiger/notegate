@@ -43,29 +43,32 @@ export type AccountRef = {
   display_name: string;
 };
 
-export type RestNode = {
+export type NodeSummary = {
   id: string;
   space_id: string;
   parent_id: string | null;
   name: string;
   kind: NodeKind;
   path: string;
-  sort_order: number;
-  metadata: Record<string, unknown>;
   has_children: boolean;
-  content_sha256?: string;
   byte_len?: number;
   line_count?: number;
-  media_type?: string;
-  detected_media_type?: string;
   preview_available?: boolean;
   original_filename?: string;
+  updated_at: string;
+};
+
+export type RestNode = NodeSummary & {
+  sort_order: number;
+  metadata: Record<string, unknown>;
+  content_sha256?: string;
+  media_type?: string;
+  detected_media_type?: string;
   encryption_mode?: "none" | "client";
   encryption_metadata?: Record<string, unknown>;
   created_by: AccountRef;
   updated_by: AccountRef;
   created_at: string;
-  updated_at: string;
 };
 
 export type SpacesListResponse = {
@@ -74,7 +77,7 @@ export type SpacesListResponse = {
 };
 
 export type RestNodeListResponse = {
-  nodes: RestNode[];
+  nodes: NodeSummary[];
   page: Page;
 };
 
@@ -83,8 +86,20 @@ export type ChildrenResponse = {
     id: string;
     path: string;
   };
-  children: RestNode[];
+  children: NodeSummary[];
   page: Page;
+};
+
+export type BatchChildrenItem = {
+  parent_id: string;
+  status: "ready" | "not_found" | "not_folder";
+  parent: ChildrenResponse["parent"] | null;
+  children: NodeSummary[];
+  page: Page | null;
+};
+
+export type BatchChildrenResponse = {
+  results: BatchChildrenItem[];
 };
 
 export type NodeRevealResponse = {

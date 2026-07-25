@@ -9,6 +9,7 @@ GET    /api/v1/spaces/{space_id}/file-change-events?node_id=...&limit=50&cursor=
 GET    /api/v1/spaces/{space_id}/file-change-sync?after_id=...&limit=100
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/children?limit=100&cursor=...
+POST   /api/v1/spaces/{space_id}/nodes:batchListChildren
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
@@ -29,7 +30,8 @@ GET /nodes                      -> { nodes: RestNode[], page: Page }
 GET /file-change-events         -> { events: FileChangeEvent[], page: Page }
 GET /file-change-sync           -> FileChangeSyncResponse
 GET /nodes/{node_id}            -> RestNode
-GET /nodes/{node_id}/children   -> { parent: NodeRef, children: RestNode[], page: Page }
+GET /nodes/{node_id}/children   -> { parent: NodeRef, children: RestNode[] | NodeSummary[], page: Page }
+POST /nodes:batchListChildren   -> { results: BatchChildrenResult[] }
 GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
 POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
@@ -40,6 +42,35 @@ DELETE /nodes/{node_id}         -> 204 No Content
 
 `RestNode`는 UI용 resource shape이므로 metadata, attribution, text/file summary를 포함한다. Text/File content body는 포함하지 않는다.
 
+기존 collection API는 query에 `view`를 주지 않으면 `RestNode`를 반환한다.
+`view=summary`는 tree/Recent용 compact shape을 반환한다. `NodeSummary`는
+`id`, `parent_id`, `name`, `kind`, `path`, `has_children`, `byte_len`,
+`line_count`, `preview_available`, `updated_at`만 포함한다. `space_id`는 route
+scope와 중복되므로 wire response에 반복하지 않는다.
+
+## Batch list children
+
+`POST /nodes:batchListChildren`은 tree 복원 시 여러 folder의 첫 children page를 한 번에 읽는다.
+
+```ts
+type BatchChildrenRequest = {
+  parent_ids: string[] // 1..16, unique
+  limit?: number
+}
+
+type BatchChildrenResult =
+  | { parent_id: string; status: "ready"; parent: NodeRef; children: NodeSummary[]; page: Page }
+  | { parent_id: string; status: "not_found" | "not_folder"; parent: null; children: []; page: null }
+```
+
+Rules:
+
+- 결과 순서는 요청한 `parent_ids` 순서와 같다.
+- 각 parent는 독립적으로 `ready`, `not_found`, `not_folder`가 된다.
+- parent마다 첫 page만 반환한다. `page.next_cursor`가 있으면 기존 단일 children API로 이어서 읽는다.
+- Space read 권한은 요청 전체에 한 번 확인한다.
+- 빈 목록, 중복 ID, 16개 초과 요청은 `400 invalid_input`이다.
+
 ## List nodes
 
 `GET /nodes`는 tree children API가 아니라 Space 전체 node를 정렬/필터해 반환하는 목록 API다. UI의 최근 수정 목록 같은 list view에서 사용한다.
@@ -48,6 +79,7 @@ DELETE /nodes/{node_id}         -> 204 No Content
 type ListNodesQuery = {
   kind?: "folder" | "text" | "file"
   sort?: "updated_at_desc" | "name_asc" // default: updated_at_desc
+  view?: "summary"
   limit?: number
   cursor?: string
 }
@@ -55,13 +87,17 @@ type ListNodesQuery = {
 
 Rules:
 
-- 반환 body는 `{ nodes: RestNode[], page: Page }`다.
+- 기본 반환 body는 `{ nodes: RestNode[], page: Page }`다. `view=summary`이면
+  `{ nodes: NodeSummary[], page: Page }`다.
 - `sort=updated_at_desc`는 최근 수정 목록의 기본 정렬이다.
 - `sort=name_asc`는 Space 전체 basename 정렬이다. Tree 구조 정렬은 children API가 담당한다.
 - `kind`가 없으면 folder/text/file을 모두 반환한다.
 - Space root node는 목록에서 제외한다. Root는 Space detail의 `root_node_id` 또는 path resolve로 접근한다.
 - Cursor는 opaque string이다. Client는 해석하지 않고 같은 `sort`/`kind` query와 함께 전달한다.
-- Cursor는 생성 당시 `sort`/`kind`에 묶인다. 다른 `sort` 또는 `kind`와 함께 재사용하면 `400 invalid_input`이다.
+- Cursor는 생성 당시 Space/`sort`/`kind`에 묶인다. 다른 Space, `sort`, 또는
+  `kind`와 함께 재사용하면 `400 invalid_input`이다.
+- Children cursor는 생성 당시 Space와 parent node에 묶인다. 다른 folder에서
+  재사용하면 `400 invalid_input`이다.
 - Content body는 반환하지 않는다.
 
 ## List file change events

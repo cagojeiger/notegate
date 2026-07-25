@@ -141,7 +141,10 @@ describe("useFilePreviewUrl", () => {
     });
     vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
     const page = { limit: 100, returned: 1, has_more: false, next_cursor: null };
-    queryClient.setQueryData(queryKeys.recent("space-1"), { nodes: [imageNode], page });
+    queryClient.setQueryData(queryKeys.recent("space-1"), {
+      pages: [{ nodes: [imageNode], page }],
+      pageParams: [null]
+    });
     queryClient.setQueryData(queryKeys.children("space-1", "folder-1"), {
       pages: [{
         parent: { id: "folder-1", path: "/docs" },
@@ -157,14 +160,12 @@ describe("useFilePreviewUrl", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(invalidate).not.toHaveBeenCalled();
-    expect(queryClient.getQueryData<{ nodes: RestNode[] }>(queryKeys.recent("space-1"))?.nodes[0])
-      .toMatchObject({ detected_media_type: "image/png", preview_available: true });
+    expect(queryClient.getQueryData<{ pages: Array<{ nodes: RestNode[] }> }>(
+      queryKeys.recent("space-1")
+    )?.pages[0]?.nodes[0]).toMatchObject({ preview_available: true });
     expect(queryClient.getQueryData<{ pages: Array<{ children: RestNode[] }> }>(
       queryKeys.children("space-1", "folder-1")
-    )?.pages[0]?.children[0]).toMatchObject({
-      detected_media_type: "image/png",
-      preview_available: true
-    });
+    )?.pages[0]?.children[0]).toMatchObject({ preview_available: true });
   });
 
   it("shares a preview URL across stale node snapshots of the same immutable file", async () => {

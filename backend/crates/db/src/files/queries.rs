@@ -330,12 +330,13 @@ pub mod node {
     use chrono::{DateTime, Utc};
     use notegate_core::{Error, Result};
     use notegate_model::files::NodeListSort;
-    use notegate_model::{Node, NodeKind};
+    use notegate_model::{Node, NodeKind, NodeSummary};
     use sqlx::PgPool;
+    use std::collections::{HashMap, HashSet};
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
-    use super::super::rows::{NODE_COLUMNS, NodeRow};
+    use super::super::rows::{NODE_COLUMNS, NODE_SUMMARY_COLUMNS, NodeRow, NodeSummaryRow};
     use crate::to_usize;
 
     pub async fn permission_for(
@@ -358,6 +359,33 @@ pub mod node {
         .await
         .map_err(map_sqlx_error)?;
         row.map(NodeRow::into_node).transpose()
+    }
+
+    /// Load a bounded set of live nodes by id within a space.
+    pub async fn find_nodes(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, Node>> {
+        if node_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes \
+             WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL"
+        ))
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut nodes = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let node = row.into_node()?;
+            nodes.insert(node.id, node);
+        }
+        Ok(nodes)
     }
 
     /// The derived absolute display path of a live node (root = `/`), or `None`.
@@ -556,6 +584,60 @@ pub mod node {
 
     /// A page of live direct children, keyset-ordered by `(sort_order, name, id)`.
     /// Fetches `limit + 1` rows to detect whether more follow.
+    pub async fn paged_child_summaries(
+        pool: &PgPool,
+        space_id: Uuid,
+        parent_node_id: Uuid,
+        limit: i64,
+        cursor: Option<(i32, &str, Uuid)>,
+    ) -> Result<(Vec<NodeSummary>, bool)> {
+        let fetch = limit + 1;
+        let rows: Vec<NodeSummaryRow> = match cursor {
+            None => {
+                sqlx::query_as::<_, NodeSummaryRow>(&format!(
+                    "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                 ORDER BY sort_order, name, id \
+                 LIMIT $3"
+                ))
+                .bind(space_id)
+                .bind(parent_node_id)
+                .bind(fetch)
+                .fetch_all(pool)
+                .await
+            }
+            Some((sort_order, name, id)) => {
+                sqlx::query_as::<_, NodeSummaryRow>(&format!(
+                    "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                   AND (sort_order, name, id) > ($3, $4, $5) \
+                 ORDER BY sort_order, name, id \
+                 LIMIT $6"
+                ))
+                .bind(space_id)
+                .bind(parent_node_id)
+                .bind(sort_order)
+                .bind(name)
+                .bind(id)
+                .bind(fetch)
+                .fetch_all(pool)
+                .await
+            }
+        }
+        .map_err(map_sqlx_error)?;
+
+        let has_more = rows.len() as i64 > limit;
+        let mut nodes: Vec<NodeSummary> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(NodeSummaryRow::into_summary)
+            .collect::<Result<_>>()?;
+        nodes.shrink_to_fit();
+        Ok((nodes, has_more))
+    }
+
+    /// Canonical child nodes for internal tree traversal. Collection endpoints
+    /// use `paged_child_summaries` to avoid loading large metadata columns.
     pub async fn paged_children(
         pool: &PgPool,
         space_id: Uuid,
@@ -568,9 +650,9 @@ pub mod node {
             None => {
                 sqlx::query_as::<_, NodeRow>(&format!(
                     "SELECT {NODE_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
-                 ORDER BY sort_order, name, id \
-                 LIMIT $3"
+                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                     ORDER BY sort_order, name, id \
+                     LIMIT $3"
                 ))
                 .bind(space_id)
                 .bind(parent_node_id)
@@ -581,10 +663,10 @@ pub mod node {
             Some((sort_order, name, id)) => {
                 sqlx::query_as::<_, NodeRow>(&format!(
                     "SELECT {NODE_COLUMNS} FROM nodes \
-                 WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
-                   AND (sort_order, name, id) > ($3, $4, $5) \
-                 ORDER BY sort_order, name, id \
-                 LIMIT $6"
+                     WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
+                       AND (sort_order, name, id) > ($3, $4, $5) \
+                     ORDER BY sort_order, name, id \
+                     LIMIT $6"
                 ))
                 .bind(space_id)
                 .bind(parent_node_id)
@@ -608,18 +690,72 @@ pub mod node {
         Ok((nodes, has_more))
     }
 
+    /// First children page for each parent in a bounded ordered set.
+    pub async fn first_children_pages(
+        pool: &PgPool,
+        space_id: Uuid,
+        parent_node_ids: &[Uuid],
+        limit: i64,
+    ) -> Result<(HashMap<Uuid, Vec<NodeSummary>>, HashSet<Uuid>)> {
+        if parent_node_ids.is_empty() {
+            return Ok((HashMap::new(), HashSet::new()));
+        }
+        let fetch = limit + 1;
+        let rows: Vec<NodeSummaryRow> = sqlx::query_as(&format!(
+            "SELECT child.* \
+                 FROM UNNEST($2::uuid[]) WITH ORDINALITY AS requested(parent_id, position) \
+                 CROSS JOIN LATERAL ( \
+                   SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+                   WHERE space_id = $1 \
+                     AND parent_id = requested.parent_id \
+                     AND deleted_at IS NULL \
+                   ORDER BY sort_order, name, id \
+                   LIMIT $3 \
+                 ) AS child \
+                 ORDER BY requested.position, child.sort_order, child.name, child.id"
+        ))
+        .bind(space_id)
+        .bind(parent_node_ids.to_vec())
+        .bind(fetch)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut children_by_parent = HashMap::with_capacity(parent_node_ids.len());
+        for row in rows {
+            let node = row.into_summary()?;
+            if let Some(parent_id) = node.parent_id {
+                children_by_parent
+                    .entry(parent_id)
+                    .or_insert_with(Vec::new)
+                    .push(node);
+            }
+        }
+
+        let mut parents_with_more = HashSet::new();
+        for parent_id in parent_node_ids {
+            let children = children_by_parent.entry(*parent_id).or_default();
+            if children.len() as i64 > limit {
+                children.truncate(limit as usize);
+                children.shrink_to_fit();
+                parents_with_more.insert(*parent_id);
+            }
+        }
+        Ok((children_by_parent, parents_with_more))
+    }
+
     /// A page of live non-root nodes in a space, ordered for list-style views.
     ///
     /// This is intentionally space-wide and does not replace `paged_children`,
     /// which remains the tree/navigation query.
-    pub async fn paged_nodes(
+    pub async fn paged_node_summaries(
         pool: &PgPool,
         space_id: Uuid,
         kind: Option<NodeKind>,
         sort: NodeListSort,
         limit: i64,
         cursor: Option<NodeListDbCursor<'_>>,
-    ) -> Result<(Vec<Node>, bool)> {
+    ) -> Result<(Vec<NodeSummary>, bool)> {
         let fetch = limit + 1;
         let kind = kind.map(|kind| kind.as_str().to_owned());
 
@@ -640,6 +776,72 @@ pub mod node {
         let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
 
         let sql = format!(
+            "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
+             WHERE space_id = $1 \
+               AND deleted_at IS NULL \
+               AND parent_id IS NOT NULL \
+               AND ($2::text IS NULL OR kind = $2) \
+               {cursor_predicate}\
+             ORDER BY {order_by} \
+             LIMIT {limit_placeholder}"
+        );
+        let query = sqlx::query_as::<_, NodeSummaryRow>(&sql)
+            .bind(space_id)
+            .bind(kind.as_deref());
+
+        let rows: Vec<NodeSummaryRow> = match cursor {
+            None => query.bind(fetch).fetch_all(pool).await,
+            Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {
+                query
+                    .bind(updated_at)
+                    .bind(id)
+                    .bind(fetch)
+                    .fetch_all(pool)
+                    .await
+            }
+            Some(NodeListDbCursor::NameAsc { name, id }) => {
+                query.bind(name).bind(id).bind(fetch).fetch_all(pool).await
+            }
+        }
+        .map_err(map_sqlx_error)?;
+
+        let has_more = rows.len() as i64 > limit;
+        let mut nodes: Vec<NodeSummary> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(NodeSummaryRow::into_summary)
+            .collect::<Result<_>>()?;
+        nodes.shrink_to_fit();
+        Ok((nodes, has_more))
+    }
+
+    /// Canonical nodes for the backward-compatible full REST collection view.
+    pub async fn paged_nodes(
+        pool: &PgPool,
+        space_id: Uuid,
+        kind: Option<NodeKind>,
+        sort: NodeListSort,
+        limit: i64,
+        cursor: Option<NodeListDbCursor<'_>>,
+    ) -> Result<(Vec<Node>, bool)> {
+        let fetch = limit + 1;
+        let kind = kind.map(|kind| kind.as_str().to_owned());
+        let order_by = match sort {
+            NodeListSort::UpdatedAtDesc => "updated_at DESC, id DESC",
+            NodeListSort::NameAsc => "name, id",
+        };
+        let cursor_predicate = match (sort, cursor) {
+            (NodeListSort::UpdatedAtDesc, None) | (NodeListSort::NameAsc, None) => "",
+            (NodeListSort::UpdatedAtDesc, Some(NodeListDbCursor::UpdatedAtDesc { .. })) => {
+                "AND (updated_at, id) < ($3, $4) "
+            }
+            (NodeListSort::NameAsc, Some(NodeListDbCursor::NameAsc { .. })) => {
+                "AND (name, id) > ($3, $4) "
+            }
+            _ => return Err(Error::internal("node list cursor sort mismatch")),
+        };
+        let limit_placeholder = if cursor.is_some() { "$5" } else { "$3" };
+        let sql = format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
              WHERE space_id = $1 \
                AND deleted_at IS NULL \
@@ -652,7 +854,6 @@ pub mod node {
         let query = sqlx::query_as::<_, NodeRow>(&sql)
             .bind(space_id)
             .bind(kind.as_deref());
-
         let rows: Vec<NodeRow> = match cursor {
             None => query.bind(fetch).fetch_all(pool).await,
             Some(NodeListDbCursor::UpdatedAtDesc { updated_at, id }) => {

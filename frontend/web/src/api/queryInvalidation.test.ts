@@ -1,10 +1,11 @@
-import { QueryClient } from "@tanstack/react-query";
+import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   applyExternalFileChanges,
   invalidateFolderSubtree,
   invalidateNodeLists,
+  invalidateRecentNodes,
   invalidateSpaceResources,
   removeMarkdownImageQueries,
   removeMarkdownImagePreviewQuery,
@@ -16,21 +17,117 @@ import { queryKeys } from "./queryKeys";
 describe("query invalidation", () => {
   it("invalidates only Recent and the affected parent folders for a node change", () => {
     const queryClient = new QueryClient();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+    const statKey = [
+      ...queryKeys.children("space-1", "parent-1"),
+      "stat"
+    ] as const;
+    const movePickerKey = [
+      ...queryKeys.children("space-1", "parent-1"),
+      "move-picker"
+    ] as const;
+    queryClient.setQueryData(statKey, { children: ["stale"] });
+    queryClient.setQueryData(movePickerKey, { children: ["stale"] });
 
     invalidateNodeLists(queryClient, "space-1", ["parent-1", "parent-2", "parent-1", null]);
 
-    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+    expect(resetQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+    expect(resetQueries).toHaveBeenNthCalledWith(2, {
       queryKey: queryKeys.children("space-1", "parent-1")
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
+    expect(resetQueries).toHaveBeenNthCalledWith(3, {
       queryKey: queryKeys.children("space-1", "parent-2")
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(resetQueries).toHaveBeenCalledTimes(3);
+    expect(queryClient.getQueryData(statKey)).toBeUndefined();
+    expect(queryClient.getQueryData(movePickerKey)).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
+    ).toBe(1);
+  });
+
+  it("resets a multi-page Recent cache and refetches only its first page", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const key = queryKeys.recent("space-1");
+    const page = (id: string, hasMore: boolean, nextCursor: string | null) => ({
+      nodes: [{ id }],
+      page: { limit: 50, returned: 1, has_more: hasMore, next_cursor: nextCursor }
+    });
+    queryClient.setQueryData(key, {
+      pages: [
+        page("node-1", true, "cursor-1"),
+        page("node-2", true, "cursor-2"),
+        page("node-3", false, null)
+      ],
+      pageParams: [null, "cursor-1", "cursor-2"]
+    });
+    const queryFn = vi.fn().mockResolvedValue(page("fresh-1", true, "fresh-cursor"));
+    const observer = new InfiniteQueryObserver(queryClient, {
+      queryKey: key,
+      queryFn,
+      initialPageParam: null as string | null,
+      getNextPageParam: (lastPage) =>
+        lastPage.page.has_more ? lastPage.page.next_cursor : undefined,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+
+    invalidateRecentNodes(queryClient, "space-1");
+
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data?.pages).toHaveLength(1)
+    );
+    expect(queryFn).toHaveBeenCalledWith(
+      expect.objectContaining({ pageParam: null })
+    );
+    unsubscribe();
+  });
+
+  it("resets an affected multi-page folder and refetches only its first page", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const key = queryKeys.children("space-1", "folder-1");
+    const page = (id: string, hasMore: boolean, nextCursor: string | null) => ({
+      parent: { id: "folder-1", path: "/folder" },
+      children: [{ id }],
+      page: { limit: 100, returned: 1, has_more: hasMore, next_cursor: nextCursor }
+    });
+    queryClient.setQueryData(key, {
+      pages: [
+        page("node-1", true, "cursor-1"),
+        page("node-2", true, "cursor-2"),
+        page("node-3", false, null)
+      ],
+      pageParams: [null, "cursor-1", "cursor-2"]
+    });
+    const queryFn = vi.fn().mockResolvedValue(page("fresh-1", true, "fresh-cursor"));
+    const observer = new InfiniteQueryObserver(queryClient, {
+      queryKey: key,
+      queryFn,
+      initialPageParam: null as string | null,
+      getNextPageParam: (lastPage) =>
+        lastPage.page.has_more ? lastPage.page.next_cursor : undefined,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+
+    invalidateNodeLists(queryClient, "space-1", ["folder-1"]);
+
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data?.pages).toHaveLength(1)
+    );
+    expect(queryFn).toHaveBeenCalledWith(
+      expect.objectContaining({ pageParam: null })
+    );
+    unsubscribe();
   });
 
   it("can refresh a space subtree without invalidating the spaces list", () => {
@@ -46,28 +143,39 @@ describe("query invalidation", () => {
   it("invalidates descendant-bearing cache families after a folder path change", () => {
     const queryClient = new QueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const pathKey = queryKeys.markdownImagePreview("space-1", "/folder/image.png");
+    const canonicalNodeKey = queryKeys.node("space-1", "child-1");
     queryClient.setQueryData(pathKey, { id: "image-1" });
+    queryClient.setQueryData(canonicalNodeKey, { id: "child-1" });
 
     invalidateFolderSubtree(queryClient, "space-1");
 
-    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+    expect(resetQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+    expect(resetQueries).toHaveBeenNthCalledWith(2, {
       queryKey: queryKeys.childrenFamily("space-1")
     });
-    expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
+    expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.nodes("space-1")
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(resetQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledOnce();
     expect(queryClient.getQueryData(pathKey)).toBeUndefined();
+    expect(queryClient.getQueryState(canonicalNodeKey)?.isInvalidated).toBe(
+      true
+    );
+    expect(
+      queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
+    ).toBe(1);
   });
 
   it("coalesces multiple external changes into one list refresh per affected parent", async () => {
     const queryClient = new QueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
     await applyExternalFileChanges(queryClient, "space-1", [
       delta(11, "text-1", ["parent-1"]),
@@ -82,30 +190,36 @@ describe("query invalidation", () => {
       queryKey: queryKeys.node("space-1", "text-2"),
       exact: true
     });
-    expect(invalidateQueries).toHaveBeenCalledWith({
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });
     expect(
-      invalidateQueries.mock.calls.filter(
+      resetQueries.mock.calls.filter(
         ([filters]) =>
           JSON.stringify(filters?.queryKey) ===
           JSON.stringify(queryKeys.children("space-1", "parent-1"))
       )
     ).toHaveLength(1);
+    expect(
+      queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
+    ).toBe(1);
   });
 
   it("falls back to the children family when an external event has no parent context", async () => {
     const queryClient = new QueryClient();
-    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
     await applyExternalFileChanges(queryClient, "space-1", [
       delta(11, "text-1", [])
     ]);
 
-    expect(invalidateQueries).toHaveBeenCalledWith({
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.childrenFamily("space-1")
     });
+    expect(
+      queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
+    ).toBe(1);
   });
 
   it("drops descendant content caches after an external recursive folder delete", async () => {

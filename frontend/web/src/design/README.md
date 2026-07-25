@@ -36,7 +36,6 @@ Prefer `shared/ui` instead of repeating:
 - `TextField`, `TextAreaField`, `SelectField`
 - `Tabs`
 - `Badge`, `MetaRow`
-- `Markdown`
 
 ## Theme policy
 

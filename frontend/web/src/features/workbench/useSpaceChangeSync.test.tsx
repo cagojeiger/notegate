@@ -36,6 +36,7 @@ describe("useSpaceChangeSync", () => {
       ]));
     const queryClient = createQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const reset = vi.spyOn(queryClient, "resetQueries");
     let renderCount = 0;
 
     renderHook(() => {
@@ -55,10 +56,10 @@ describe("useSpaceChangeSync", () => {
     await refetchSignal(queryClient);
     await waitForSignal(queryClient, 12);
     await waitFor(() => {
-      expect(invalidate).toHaveBeenCalledWith({
+      expect(reset).toHaveBeenCalledWith({
         queryKey: queryKeys.children("space-1", "parent-1")
       });
-      expect(invalidate).toHaveBeenCalledWith({
+      expect(reset).toHaveBeenCalledWith({
         queryKey: queryKeys.children("space-1", "parent-2")
       });
       expect(invalidate).not.toHaveBeenCalledWith({
@@ -98,6 +99,7 @@ describe("useSpaceChangeSync", () => {
       });
     const queryClient = createQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const reset = vi.spyOn(queryClient, "resetQueries");
 
     renderHook(() => useSpaceChangeSync("space-1"), { wrapper: createWrapper(queryClient) });
 
@@ -106,7 +108,7 @@ describe("useSpaceChangeSync", () => {
     await waitForSignal(queryClient, 40);
 
     await waitFor(() => {
-      expect(invalidate).toHaveBeenCalledWith({
+      expect(reset).toHaveBeenCalledWith({
         queryKey: queryKeys.childrenFamily("space-1")
       });
       expect(invalidate).toHaveBeenCalledWith({

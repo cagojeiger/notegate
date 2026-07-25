@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode, Space } from "../../api/types";
@@ -12,18 +12,39 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./useNodeQueries", () => ({ useNodeChildrenQuery: mocks.useNodeChildrenQuery }));
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({ count, getItemKey }: { count: number; getItemKey: (index: number) => string | number }) => ({
+vi.mock("./useTreeRestoreBatch", () => ({ useTreeRestoreBatch: () => false }));
+vi.mock("@tanstack/react-virtual", () => {
+  let count = 0;
+  let getItemKey = (index: number): string | number => index;
+  const virtualizer = {
     getTotalSize: () => count * 36,
-    getVirtualItems: () => Array.from({ length: Math.min(Math.max(count - mocks.virtualStart, 0), 20) }, (_, offset) => ({
-      index: mocks.virtualStart + offset,
-      key: getItemKey(mocks.virtualStart + offset),
-      size: 36,
-      start: (mocks.virtualStart + offset) * 36
-    })),
+    getVirtualItems: () => Array.from(
+      { length: Math.min(Math.max(count - mocks.virtualStart, 0), 20) },
+      (_, offset) => ({
+        index: mocks.virtualStart + offset,
+        key: getItemKey(mocks.virtualStart + offset),
+        size: 36,
+        start: (mocks.virtualStart + offset) * 36
+      })
+    ),
     scrollToIndex: mocks.scrollToIndex
-  })
-}));
+  };
+  return {
+    defaultRangeExtractor: ({ startIndex, endIndex }: { startIndex: number; endIndex: number }) =>
+      Array.from(
+        { length: endIndex - startIndex + 1 },
+        (_, index) => startIndex + index
+      ),
+    useVirtualizer: (options: {
+      count: number;
+      getItemKey: (index: number) => string | number;
+    }) => {
+      count = options.count;
+      getItemKey = options.getItemKey;
+      return virtualizer;
+    }
+  };
+});
 
 const space: Space = {
   id: "space-1",
@@ -68,6 +89,39 @@ describe("TreeSection", () => {
 
     await waitFor(() => expect(queriedNodeIds()).toContain(folder.id));
     expect(new Set(queriedNodeIds())).toEqual(new Set([space.root_node_id, folder.id]));
+  });
+
+  it("expands a folder without opening it as a canonical editor node", async () => {
+    const folder = node("folder-1", "folder");
+    const rootQuery = query([folder]);
+    const emptyQuery = query([]);
+    mocks.useNodeChildrenQuery.mockImplementation((_spaceId, nodeId) =>
+      nodeId === space.root_node_id ? rootQuery : emptyQuery
+    );
+    const onToggleFolder = vi.fn();
+    const onOpenNode = vi.fn();
+    const view = render(
+      <TreeSection
+        activeSpace={space}
+        activeNodeId={null}
+        expandedFolderIds={new Set()}
+        open
+        onToggle={vi.fn()}
+        onCollapseTree={vi.fn()}
+        onToggleFolder={onToggleFolder}
+        onOpenNode={onOpenNode}
+        onNodeContextMenu={vi.fn()}
+        onMoveNodeToFolder={vi.fn()}
+        onTreeNavigationChange={vi.fn()}
+        canWriteActiveSpace
+      />
+    );
+
+    await waitFor(() => expect(view.getByRole("button", { name: folder.name })).toBeTruthy());
+    fireEvent.click(view.getByRole("button", { name: folder.name }));
+
+    expect(onToggleFolder).toHaveBeenCalledWith(folder.id);
+    expect(onOpenNode).not.toHaveBeenCalled();
   });
 
   it("renders only the rows returned by the virtualizer", async () => {

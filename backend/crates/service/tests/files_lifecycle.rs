@@ -22,10 +22,10 @@ use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::{FileEncryptionMode, NodeKind};
 use notegate_service::files::{
-    AppendText, BeginObjectUpload, ChildrenCursor, CopyNode, CreateFolder, CreateText, DeleteNode,
-    Edit, EditText, FilesService, LineEdit, ListFileChangeEvents, ListNodesRequest, MoveNode,
-    NodeListSort, PatchMode, PatchText, ReadText, ReadTextBody, SyncFileChanges, WriteTarget,
-    WriteText, WriteTextBody,
+    AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload, ChildrenCursor,
+    CopyNode, CreateFolder, CreateText, DeleteNode, Edit, EditText, FilesService, LineEdit,
+    ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, PatchMode, PatchText, ReadText,
+    ReadTextBody, SyncFileChanges, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -1434,6 +1434,155 @@ async fn batch_preview_candidates_preserve_path_order_and_partial_results()
     Ok(())
 }
 
+#[tokio::test]
+async fn batch_children_returns_ordered_independent_first_pages()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let files = FilesService::new(FilesRepo::new(db.pool.clone()));
+    let owner =
+        insert_user_account(&db.pool, "batch-tree-owner", "batch-tree@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "batch-tree").await;
+    let folder = mkdir(&files, owner, ws, root, "folder").await;
+    let text = mktext(&files, owner, ws, root, "root.md", "root").await;
+    mktext(&files, owner, ws, folder, "a.md", "a").await;
+    mktext(&files, owner, ws, folder, "b.md", "b").await;
+    let missing = Uuid::new_v4();
+
+    let results = files
+        .batch_children(
+            owner,
+            ws,
+            BatchChildrenRequest {
+                parent_node_ids: vec![root, folder, text, missing],
+                limit: Some(1),
+            },
+        )
+        .await?;
+
+    assert_eq!(
+        results
+            .iter()
+            .map(BatchChildrenResult::parent_node_id)
+            .collect::<Vec<_>>(),
+        vec![root, folder, text, missing]
+    );
+    let BatchChildrenResult::Ready(root_page) = &results[0] else {
+        panic!("root page should be ready");
+    };
+    assert_eq!(root_page.items.len(), 1);
+    assert!(root_page.has_more);
+    assert!(root_page.next_cursor.is_some());
+
+    let BatchChildrenResult::Ready(folder_page) = &results[1] else {
+        panic!("folder page should be ready");
+    };
+    assert_eq!(folder_page.items.len(), 1);
+    assert_eq!(folder_page.items[0].node.name, "a.md");
+    assert!(folder_page.has_more);
+    let next = files
+        .children(
+            owner,
+            ws,
+            folder,
+            notegate_service::files::ChildrenRequest {
+                limit: Some(1),
+                cursor: folder_page.next_cursor.clone(),
+            },
+        )
+        .await?;
+    assert_eq!(next.items[0].node.name, "b.md");
+
+    let wrong_parent = files
+        .children(
+            owner,
+            ws,
+            root,
+            notegate_service::files::ChildrenRequest {
+                limit: Some(1),
+                cursor: folder_page.next_cursor.clone(),
+            },
+        )
+        .await
+        .expect_err("children cursor must be bound to its parent");
+    assert!(wrong_parent.to_string().contains("children query"));
+
+    assert!(matches!(
+        results[2],
+        BatchChildrenResult::NotFolder { parent_node_id } if parent_node_id == text
+    ));
+    assert!(matches!(
+        results[3],
+        BatchChildrenResult::NotFound { parent_node_id } if parent_node_id == missing
+    ));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn detected_preview_media_types_are_recorded_in_one_batch_write()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let ws_repo = SpaceRepo::new(db.pool.clone());
+    let repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(repo.clone());
+    let owner = insert_user_account(
+        &db.pool,
+        "preview-batch-owner",
+        "preview-batch@example.test",
+    )
+    .await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "preview-media-batch").await;
+    let mut detections = Vec::new();
+
+    for (name, media_type) in [("first.bin", "image/png"), ("second.bin", "image/jpeg")] {
+        let upload_id = Uuid::new_v4();
+        let upload = BeginObjectUpload {
+            parent_node_id: root,
+            name: name.to_owned(),
+            byte_len: 8,
+            media_type: "application/octet-stream".to_owned(),
+            original_filename: Some(name.to_owned()),
+            encryption_mode: FileEncryptionMode::None,
+            encryption_metadata: None,
+        };
+        files.prepare_object_upload(owner, ws, &upload).await?;
+        files
+            .record_object_upload(upload_id, &format!("objects/{name}"), owner, ws, &upload)
+            .await?;
+        let uploaded = files
+            .complete_object_upload(owner, ws, upload_id, None)
+            .await?;
+        detections.push((uploaded.node.node.id, media_type.to_owned()));
+    }
+
+    files
+        .record_detected_file_media_types(owner, ws, &detections)
+        .await?;
+    let node_ids = detections
+        .iter()
+        .map(|(node_id, _)| *node_id)
+        .collect::<Vec<_>>();
+    let stored = repo.find_files(ws, &node_ids).await?;
+
+    for (node_id, media_type) in detections {
+        assert_eq!(
+            stored
+                .get(&node_id)
+                .and_then(|file| file.detected_media_type.as_deref()),
+            Some(media_type.as_str())
+        );
+    }
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// The DB-side candidate scan returns the whole subtree in DFS pre-order, and the
 /// `sort_path` keyset cursor pages through it exactly once with no repeats. The
 /// cursor is bound to its query, so reusing it under a different query is rejected.
@@ -1725,6 +1874,64 @@ async fn list_nodes_filters_pages_and_binds_cursor_to_kind()
         .await
         .expect_err("cursor must be bound to the original kind filter");
     assert!(mismatched_kind.to_string().contains("node list query"));
+
+    let summary_first = files
+        .list_node_summaries(
+            owner,
+            ws,
+            ListNodesRequest {
+                kind: Some(NodeKind::Text),
+                sort: NodeListSort::NameAsc,
+                limit: Some(1),
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(summary_first.items[0].path, "/a.md");
+    let summary_second = files
+        .list_node_summaries(
+            owner,
+            ws,
+            ListNodesRequest {
+                kind: Some(NodeKind::Text),
+                sort: NodeListSort::NameAsc,
+                limit: Some(1),
+                cursor: summary_first.next_cursor,
+            },
+        )
+        .await?;
+    assert_eq!(summary_second.items[0].path, "/b.md");
+
+    let other_owner = insert_user_account(
+        &db.pool,
+        "other-node-list-owner",
+        "other-node-list@example.test",
+    )
+    .await?;
+    let (other_ws, other_root) = setup_space(&ws_repo, other_owner, "other-node-list").await;
+    mktext(
+        &files,
+        other_owner,
+        other_ws,
+        other_root,
+        "other.md",
+        "other",
+    )
+    .await;
+    let cross_space = files
+        .list_nodes(
+            other_owner,
+            other_ws,
+            ListNodesRequest {
+                kind: Some(NodeKind::Text),
+                sort: NodeListSort::NameAsc,
+                limit: Some(1),
+                cursor: first_page.next_cursor,
+            },
+        )
+        .await
+        .expect_err("node list cursor must be bound to its space");
+    assert!(cross_space.to_string().contains("node list query"));
 
     db.cleanup().await;
     Ok(())

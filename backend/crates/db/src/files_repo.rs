@@ -15,10 +15,10 @@ use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::tier::effective_file_tree_limits;
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
-use notegate_model::{FileObject, Node, NodeKind, Permission, TextObject};
+use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, TextObject};
 use serde_json::Value;
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::file_change_event_repo;
@@ -88,6 +88,14 @@ impl FilesRepo {
 
     pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
         queries::node::find_node(&self.pool, space_id, node_id).await
+    }
+
+    pub async fn find_nodes(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, Node>> {
+        queries::node::find_nodes(&self.pool, space_id, node_ids).await
     }
 
     pub async fn node_path(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<String>> {
@@ -208,6 +216,53 @@ impl FilesRepo {
     ) -> Result<(Vec<Node>, bool)> {
         let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
         queries::node::paged_children(&self.pool, space_id, parent_node_id, limit, cursor).await
+    }
+
+    pub async fn paged_child_summaries(
+        &self,
+        space_id: Uuid,
+        parent_node_id: Uuid,
+        limit: i64,
+        cursor: Option<&ChildrenCursor>,
+    ) -> Result<(Vec<NodeSummary>, bool)> {
+        let cursor = cursor.map(|c| (c.sort_order, c.name.as_str(), c.id));
+        queries::node::paged_child_summaries(&self.pool, space_id, parent_node_id, limit, cursor)
+            .await
+    }
+
+    pub async fn first_children_pages(
+        &self,
+        space_id: Uuid,
+        parent_node_ids: &[Uuid],
+        limit: i64,
+    ) -> Result<(HashMap<Uuid, Vec<NodeSummary>>, HashSet<Uuid>)> {
+        queries::node::first_children_pages(&self.pool, space_id, parent_node_ids, limit).await
+    }
+
+    pub async fn paged_node_summaries(
+        &self,
+        space_id: Uuid,
+        kind: Option<NodeKind>,
+        sort: NodeListSort,
+        limit: i64,
+        cursor: Option<&NodeListCursor>,
+    ) -> Result<(Vec<NodeSummary>, bool)> {
+        let cursor = match cursor {
+            Some(NodeListCursor::UpdatedAtDesc { updated_at, id, .. }) => {
+                Some(queries::node::NodeListDbCursor::UpdatedAtDesc {
+                    updated_at: *updated_at,
+                    id: *id,
+                })
+            }
+            Some(NodeListCursor::NameAsc { name, id, .. }) => {
+                Some(queries::node::NodeListDbCursor::NameAsc {
+                    name: name.as_str(),
+                    id: *id,
+                })
+            }
+            None => None,
+        };
+        queries::node::paged_node_summaries(&self.pool, space_id, kind, sort, limit, cursor).await
     }
 
     pub async fn paged_nodes(
@@ -451,6 +506,19 @@ impl FilesRepo {
             space_id,
             node_id,
             detected_media_type,
+        )
+        .await
+    }
+
+    pub async fn set_detected_file_media_types(
+        &self,
+        space_id: Uuid,
+        detected_media_types: &[(Uuid, String)],
+    ) -> Result<()> {
+        crate::files::object_uploads::set_detected_media_types(
+            &self.pool,
+            space_id,
+            detected_media_types,
         )
         .await
     }

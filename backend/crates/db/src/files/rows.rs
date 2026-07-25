@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result};
 use notegate_model::{
-    FileEncryptionMode, FileObject, Node, NodeKind, TextObject, TextStorageFormat,
+    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextObject, TextStorageFormat,
 };
 use serde_json::Value;
 use sqlx::FromRow;
@@ -50,6 +50,34 @@ impl NodeRow {
             created_at: self.created_at,
             updated_at: self.updated_at,
             deleted_at: self.deleted_at,
+        })
+    }
+}
+
+/// Compact row for paginated tree and list collections.
+#[derive(Debug, FromRow)]
+pub struct NodeSummaryRow {
+    pub id: Uuid,
+    pub space_id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub name: String,
+    pub kind: String,
+    pub sort_order: i32,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl NodeSummaryRow {
+    pub fn into_summary(self) -> Result<NodeSummary> {
+        let kind = NodeKind::parse(&self.kind)
+            .ok_or_else(|| Error::internal(format!("unknown node kind: {}", self.kind)))?;
+        Ok(NodeSummary {
+            id: self.id,
+            space_id: self.space_id,
+            parent_id: self.parent_id,
+            name: self.name,
+            kind,
+            sort_order: self.sort_order,
+            updated_at: self.updated_at,
         })
     }
 }
@@ -106,6 +134,9 @@ impl TextRow {
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
 pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, \
      created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
+
+pub const NODE_SUMMARY_COLUMNS: &str =
+    "id, space_id, parent_id, name, kind, sort_order, updated_at";
 
 /// Selectable columns of `text_objects`, in [`TextRow`] order.
 pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, encrypted_payload, content_sha256, \

@@ -1,16 +1,18 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 
-import type { ChildrenResponse, RestNode, RestNodeListResponse } from "./types";
+import type { ChildrenResponse, NodeSummary, RestNode, RestNodeListResponse } from "./types";
 import { queryKeys } from "./queryKeys";
+
+type CachedNodeReference = NodeSummary & Partial<RestNode>;
 
 export function updateNodeCaches(
   queryClient: QueryClient,
   node: RestNode,
-  update: (current: RestNode) => RestNode
+  update: (current: CachedNodeReference) => CachedNodeReference
 ) {
   queryClient.setQueryData<RestNode>(
     queryKeys.node(node.space_id, node.id),
-    (current) => update(current ?? node)
+    (current) => ({ ...(current ?? node), ...update(current ?? node) })
   );
   updateNodeReferences(queryClient, node.space_id, node.id, update);
 }
@@ -19,11 +21,14 @@ export function updateExistingNodeCaches(
   queryClient: QueryClient,
   spaceId: string,
   nodeId: string,
-  update: (current: RestNode) => RestNode
+  update: (current: CachedNodeReference) => CachedNodeReference
 ) {
   const canonicalKey = queryKeys.node(spaceId, nodeId);
   if (queryClient.getQueryState(canonicalKey)) {
-    queryClient.setQueryData<RestNode>(canonicalKey, (current) => current ? update(current) : current);
+    queryClient.setQueryData<RestNode>(
+      canonicalKey,
+      (current) => current ? { ...current, ...update(current) } : current
+    );
   }
   updateNodeReferences(queryClient, spaceId, nodeId, update);
 }
@@ -32,11 +37,11 @@ function updateNodeReferences(
   queryClient: QueryClient,
   spaceId: string,
   nodeId: string,
-  update: (current: RestNode) => RestNode
+  update: (current: CachedNodeReference) => CachedNodeReference
 ) {
-  queryClient.setQueryData<RestNodeListResponse>(
+  queryClient.setQueryData<InfiniteData<RestNodeListResponse>>(
     queryKeys.recent(spaceId),
-    (current) => current ? replaceListNode(current, nodeId, update) : current
+    (current) => current ? replaceListPages(current, nodeId, update) : current
   );
   queryClient.setQueriesData<InfiniteData<ChildrenResponse>>(
     {
@@ -50,19 +55,25 @@ function updateNodeReferences(
   );
 }
 
-function replaceListNode(
-  current: RestNodeListResponse,
+function replaceListPages(
+  current: InfiniteData<RestNodeListResponse>,
   nodeId: string,
-  update: (current: RestNode) => RestNode
-): RestNodeListResponse {
-  const nodes = replaceNode(current.nodes, nodeId, update);
-  return nodes === current.nodes ? current : { ...current, nodes };
+  update: (current: CachedNodeReference) => CachedNodeReference
+): InfiniteData<RestNodeListResponse> {
+  let changed = false;
+  const pages = current.pages.map((page) => {
+    const nodes = replaceNode(page.nodes, nodeId, update);
+    if (nodes === page.nodes) return page;
+    changed = true;
+    return { ...page, nodes };
+  });
+  return changed ? { ...current, pages } : current;
 }
 
 function replaceChildrenNode(
   current: InfiniteData<ChildrenResponse>,
   nodeId: string,
-  update: (current: RestNode) => RestNode
+  update: (current: CachedNodeReference) => CachedNodeReference
 ): InfiniteData<ChildrenResponse> {
   let changed = false;
   const pages = current.pages.map((page) => {
@@ -75,17 +86,40 @@ function replaceChildrenNode(
 }
 
 function replaceNode(
-  nodes: RestNode[],
+  nodes: NodeSummary[],
   nodeId: string,
-  update: (current: RestNode) => RestNode
-): RestNode[] {
+  update: (current: CachedNodeReference) => CachedNodeReference
+): NodeSummary[] {
   const index = nodes.findIndex((node) => node.id === nodeId);
   if (index < 0) return nodes;
   const current = nodes[index];
   if (!current) return nodes;
-  const updated = update(current);
-  if (updated === current) return nodes;
+  const updated = toNodeSummary(update(current));
+  if (sameNodeSummary(updated, current)) return nodes;
   const next = [...nodes];
   next[index] = updated;
   return next;
+}
+
+function toNodeSummary(node: CachedNodeReference): NodeSummary {
+  return {
+    id: node.id,
+    space_id: node.space_id,
+    parent_id: node.parent_id,
+    name: node.name,
+    kind: node.kind,
+    path: node.path,
+    has_children: node.has_children,
+    byte_len: node.byte_len,
+    line_count: node.line_count,
+    preview_available: node.preview_available,
+    original_filename: node.original_filename,
+    updated_at: node.updated_at
+  };
+}
+
+function sameNodeSummary(left: NodeSummary, right: NodeSummary): boolean {
+  return Object.keys(left).every((key) =>
+    left[key as keyof NodeSummary] === right[key as keyof NodeSummary]
+  );
 }

@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { listChildren, listNodes } from "../../api/nodes";
@@ -12,15 +12,26 @@ export function useNodeChildrenQuery(spaceId: string, nodeId: string, enabled: b
     queryFn: ({ pageParam }) => listChildren(client, spaceId, nodeId, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => (lastPage.page.has_more ? lastPage.page.next_cursor : undefined),
-    enabled
+    enabled,
+    // Forward file-change sync and local mutations explicitly invalidate this
+    // key, so cached folders do not need time-based refetch fan-out.
+    staleTime: Number.POSITIVE_INFINITY
   });
 }
 
 export function useRecentNodesQuery(spaceId: string) {
   const client = useApiClient();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.recent(spaceId),
-    queryFn: () => listNodes(client, spaceId, { sort: "updated_at_desc" })
+    queryFn: ({ pageParam }) =>
+      listNodes(client, spaceId, {
+        sort: "updated_at_desc",
+        cursor: pageParam
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_cursor : undefined,
+    staleTime: Number.POSITIVE_INFINITY
   });
 }
 
