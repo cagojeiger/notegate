@@ -250,8 +250,6 @@ pub async fn update_text_encryption(
         command.enabled,
         locked.owner_tier,
         crypto,
-        space_id,
-        command.node_id,
         updated_by,
     )
     .await?;
@@ -284,10 +282,10 @@ async fn rewrite_text_encryption(
     enabled: bool,
     owner_tier: notegate_core::tier::UserTier,
     crypto: &PiiCrypto,
-    space_id: Uuid,
-    node_id: Uuid,
     updated_by: Uuid,
 ) -> Result<()> {
+    let space_id = current.space_id;
+    let node_id = current.node_id;
     let text = current.into_text(crypto)?;
     let content = StoredContent {
         body: WriteTextBody::Plain(text.content.ok_or_else(|| {
