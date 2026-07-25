@@ -1,10 +1,12 @@
 //! Space lifecycle persistence.
 
+use std::collections::HashMap;
+
 use crate::audit_events::{self, AuditContext};
 use crate::{map_sqlx_error, object_storage_repo, space_permission, tier_lookup};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
-use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceView};
+use notegate_model::{CreateSpace, Permission, Space, SpaceCursor, SpaceOrderUpdate, SpaceView};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -453,6 +455,59 @@ impl SpaceRepo {
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Space::from(row))
+    }
+
+    pub async fn reorder_spaces(
+        &self,
+        owner_user_id: Uuid,
+        updates: &[SpaceOrderUpdate],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        let space_ids: Vec<_> = updates.iter().map(|update| update.space_id).collect();
+        let current_orders: HashMap<_, _> = sqlx::query_as::<_, (Uuid, i32)>(
+            "SELECT id, sort_order FROM spaces \
+             WHERE owner_user_id = $1 AND deleted_at IS NULL AND id = ANY($2) \
+             ORDER BY id FOR UPDATE",
+        )
+        .bind(owner_user_id)
+        .bind(&space_ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .into_iter()
+        .collect();
+
+        if current_orders.len() != updates.len() {
+            return Err(Error::not_found("space not found"));
+        }
+
+        let audit_ctx = AuditContext::rest(owner_user_id);
+        for update in updates {
+            if current_orders.get(&update.space_id) == Some(&update.sort_order) {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE spaces SET sort_order = $3, updated_at = now() \
+                 WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
+            )
+            .bind(update.space_id)
+            .bind(owner_user_id)
+            .bind(update.sort_order)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_constraint_error)?;
+            audit_events::space_updated(
+                &mut tx,
+                audit_ctx,
+                owner_user_id,
+                update.space_id,
+                &["sort_order"],
+            )
+            .await?;
+        }
+
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(())
     }
 
     pub async fn delete_space(

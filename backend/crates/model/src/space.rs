@@ -73,6 +73,12 @@ pub struct UpdateSpace {
     pub pinned: Option<bool>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpaceOrderUpdate {
+    pub space_id: Uuid,
+    pub sort_order: i32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ListSpaces {
     pub limit: Option<i64>,

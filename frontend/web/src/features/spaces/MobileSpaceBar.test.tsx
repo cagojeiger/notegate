@@ -100,4 +100,25 @@ describe("MobileSpaceBar", () => {
     expect(screen.getByRole("button", { name: "Daily" })).not.toHaveAttribute("aria-current");
     expect(view.container.querySelectorAll("[data-active-indicator]")).toHaveLength(1);
   });
+
+  it("describes an active unpinned user space without changing its name", () => {
+    const unpinned = { ...spaces[0], pinned: false };
+    render(
+      <MobileSpaceBar
+        spaces={[unpinned]}
+        activeSpace={unpinned}
+        canCreateSpace
+        onSelectSpace={vi.fn()}
+        onCreateSpace={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onOpenHistory={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Daily" })).toHaveAttribute(
+      "aria-description",
+      "Unpinned; hidden from user MCP"
+    );
+  });
 });

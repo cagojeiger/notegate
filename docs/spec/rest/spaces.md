@@ -62,6 +62,23 @@ Owner user만 가능하다.
 - `pinned: false`: owner user의 MCP에서 목록·조회·검색·쓰기·전송을 모두 숨긴다.
 - Pin은 Agent 권한에 영향을 주지 않는다. Agent는 명시적인 Space connection만 따른다.
 
+## Reorder spaces
+
+```http
+POST /api/v1/spaces:reorder
+```
+
+```json
+{
+  "updates": [
+    {"space_id":"...","sort_order":1000},
+    {"space_id":"...","sort_order":2000}
+  ]
+}
+```
+
+Owner user만 가능하다. 요청에 포함된 Space의 순서를 한 트랜잭션에서 변경하고 `204 No Content`를 반환한다. Space ID가 중복되거나 비어 있으면 `400`, 하나라도 caller 소유의 live Space가 아니면 전체 요청을 롤백하고 `404`를 반환한다.
+
 ## Delete space
 
 ```http

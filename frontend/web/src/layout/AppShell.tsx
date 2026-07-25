@@ -42,7 +42,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
   const railSpaces = me.account.kind === "user"
-    ? workbench.spaces.filter((space) => space.pinned)
+    ? workbench.spaces.filter((space) => space.pinned || space.id === workbench.activeSpace?.id)
     : workbench.spaces;
   const layout = useWorkbenchLayout({
     isMobile: workbench.isMobile,

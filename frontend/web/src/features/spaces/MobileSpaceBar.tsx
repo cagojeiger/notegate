@@ -30,8 +30,9 @@ export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, onSelectSp
               {active ? <span data-active-indicator className="absolute -top-2 left-2 right-2 h-[3px] rounded-b-full bg-primary" aria-hidden="true" /> : null}
               <button
                 type="button"
-                title={space.name}
-                aria-label={space.name}
+              title={`${space.name}${onOpenLibrary && !space.pinned ? " · unpinned" : ""}`}
+              aria-label={space.name}
+              aria-description={onOpenLibrary && !space.pinned ? "Unpinned; hidden from user MCP" : undefined}
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelectSpace(space)}
                 className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}

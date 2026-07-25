@@ -3,11 +3,15 @@
 //! Spaces are user-owned. The owner user has implicit write permission; agents
 //! only see spaces through explicit connections.
 
+use std::collections::HashSet;
+
 use notegate_core::limits;
 use notegate_core::validation::validate_space_name;
 use notegate_db::SpaceRepo;
 use notegate_model::{AccountKind, Permission};
-pub use notegate_model::{CreateSpace, ListSpaces, SpaceCursor, SpacePage, SpaceView, UpdateSpace};
+pub use notegate_model::{
+    CreateSpace, ListSpaces, SpaceCursor, SpaceOrderUpdate, SpacePage, SpaceView, UpdateSpace,
+};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -233,6 +237,37 @@ impl SpaceService {
             permission: Permission::Write,
             root_node_id,
         })
+    }
+
+    pub async fn reorder(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        updates: Vec<SpaceOrderUpdate>,
+    ) -> ServiceResult<()> {
+        require_user_caller(caller_kind)?;
+        if updates.is_empty() {
+            return Err(ServiceError::InvalidInput(
+                "provide at least one space order update".to_owned(),
+            ));
+        }
+        if updates.len() > limits::OWNED_SPACES_MAX {
+            return Err(ServiceError::InvalidInput(format!(
+                "at most {} spaces may be reordered at once",
+                limits::OWNED_SPACES_MAX
+            )));
+        }
+        let unique_ids: HashSet<_> = updates.iter().map(|update| update.space_id).collect();
+        if unique_ids.len() != updates.len() {
+            return Err(ServiceError::InvalidInput(
+                "space order updates must contain unique space ids".to_owned(),
+            ));
+        }
+
+        self.store
+            .reorder_spaces(caller_account_id, &updates)
+            .await?;
+        Ok(())
     }
 
     pub async fn delete(

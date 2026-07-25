@@ -136,6 +136,15 @@ async function mockSpaceLibraryApi(page: Page) {
         page: { limit: 100, returned: spaces.length, has_more: false, next_cursor: null }
       });
     }
+    if (url.pathname === "/api/v1/spaces:reorder" && request.method() === "POST") {
+      const input = request.postDataJSON() as { updates: Array<{ space_id: string; sort_order: number }> };
+      patchCount += 1;
+      spaces = spaces.map((item) => {
+        const update = input.updates.find((candidate) => candidate.space_id === item.id);
+        return update ? { ...item, sort_order: update.sort_order } : item;
+      });
+      return route.fulfill({ status: 204 });
+    }
     const spaceMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)$/);
     if (spaceMatch && request.method() === "PATCH") {
       patchCount += 1;

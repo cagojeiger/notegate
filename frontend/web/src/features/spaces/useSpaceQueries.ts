@@ -3,7 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "../../api/ApiProvider";
 import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
-import { createSpace, deleteSpace, listSpaces, updateSpace } from "../../api/spaces";
+import {
+  createSpace,
+  deleteSpace,
+  listSpaces,
+  reorderSpaces as reorderSpacesRequest,
+  updateSpace
+} from "../../api/spaces";
 import type { Space, SpacesListResponse } from "../../api/types";
 import { buildSpaceSortOrderUpdates } from "./spaceReorder";
 
@@ -47,7 +53,7 @@ export function useReorderSpacesMutation() {
   return useMutation({
     mutationFn: async ({ spaces }: { spaces: Space[] }) => {
       const updates = buildSpaceSortOrderUpdates(spaces);
-      await Promise.all(updates.map((update) => updateSpace(client, update.spaceId, { sort_order: update.sort_order })));
+      if (updates.length > 0) await reorderSpacesRequest(client, updates);
     },
     onMutate: async ({ spaces }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.spaces });

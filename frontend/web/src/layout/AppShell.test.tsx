@@ -90,7 +90,7 @@ describe("AppShell history", () => {
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
   });
 
-  it("keeps unpinned spaces out of the user rail while showing all spaces in the library", async () => {
+  it("keeps inactive unpinned spaces out of the user rail while showing all spaces in the library", async () => {
     const user = userEvent.setup();
     mocks.useWorkbenchController.mockReturnValue({ ...workbench(), spaces: [space, privateSpace] });
     mocks.useUploadManager.mockReturnValue(uploadManager());
@@ -103,6 +103,24 @@ describe("AppShell history", () => {
     await user.click(screen.getByRole("button", { name: "Open space library" }));
 
     expect(screen.getByTestId("space-library")).toHaveTextContent("Daily,Private");
+  });
+
+  it("keeps the active unpinned space visible in the user rail", () => {
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(),
+      spaces: [space, privateSpace],
+      activeSpace: privateSpace
+    });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Daily" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Private" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Private" })).toHaveAttribute(
+      "aria-description",
+      "Unpinned; hidden from user MCP"
+    );
   });
 
   it("keeps connected spaces in the agent rail and does not expose the pin library", () => {

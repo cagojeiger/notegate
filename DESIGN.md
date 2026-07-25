@@ -29,7 +29,7 @@
 
 ## Information architecture
 
-- Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings.
+- Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings. An active Unpinned Space remains in the rail until the user changes destination, without changing its user MCP visibility.
 - Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces.
 - Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; node content in the editor; details in the relevant Inspector; app state in the status bar or transient status surfaces. Pin is an MCP access state, not a Library grouping.
 
