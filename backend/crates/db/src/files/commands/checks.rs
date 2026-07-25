@@ -5,7 +5,7 @@
 //! node/content quota is enforced by the locked counter in `space_usage`.
 
 use notegate_core::limits::Limits;
-use notegate_core::tier::effective_file_tree_limits;
+use notegate_core::tier::{UserTier, effective_file_tree_limits};
 use notegate_core::{Error, Result};
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -13,6 +13,14 @@ use uuid::Uuid;
 use super::super::error::map_sqlx_error;
 use crate::space_usage::{self, MutationGate};
 use crate::{tier_lookup, to_usize};
+
+pub(crate) struct LockedSpace {
+    pub gate: MutationGate,
+    pub limits: Limits,
+    pub owner_tier: UserTier,
+    pub default_search_enabled: bool,
+    pub default_text_encryption_enabled: bool,
+}
 
 /// Exclude reconciliation, then serialize file-tree mutations in a Space.
 /// This closes quota races and keeps reconciliation from observing a partial
@@ -29,10 +37,34 @@ pub(crate) async fn lock_space_with_limits(
     space_id: Uuid,
     base_limits: Limits,
 ) -> Result<(MutationGate, Limits)> {
+    let locked = lock_space_context(tx, space_id, base_limits).await?;
+    Ok((locked.gate, locked.limits))
+}
+
+pub(crate) async fn lock_space_context(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    base_limits: Limits,
+) -> Result<LockedSpace> {
     let gate = space_usage::acquire_mutation_gate(tx, space_id).await?;
     let tier = tier_lookup::lock_active_space_owner_tier(tx, space_id, "space not found").await?;
-    lock_live_space(tx, space_id).await?;
-    Ok((gate, effective_file_tree_limits(tier, base_limits)))
+    let defaults: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT default_search_enabled, default_text_encryption_enabled \
+         FROM spaces WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    )
+    .bind(space_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    let (default_search_enabled, default_text_encryption_enabled) =
+        defaults.ok_or_else(|| Error::not_found("space not found"))?;
+    Ok(LockedSpace {
+        gate,
+        limits: effective_file_tree_limits(tier, base_limits),
+        owner_tier: tier,
+        default_search_enabled,
+        default_text_encryption_enabled,
+    })
 }
 
 async fn lock_live_space(tx: &mut PgConnection, space_id: Uuid) -> Result<()> {

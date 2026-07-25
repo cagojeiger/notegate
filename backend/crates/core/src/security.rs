@@ -24,6 +24,7 @@ const CRYPTO_VERSION: i32 = 1;
 const ENC_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/enc/epoch-verify/v1";
 const PII_FIELD_LABEL: &[u8] = b"notegate/enc/pii-field/v1";
 const BROWSER_REFRESH_TOKEN_FIELD_LABEL: &[u8] = b"notegate/enc/browser-refresh-token-field/v1";
+const TEXT_CONTENT_FIELD_LABEL: &[u8] = b"notegate/enc/text-content-field/v1";
 const LOOKUP_EPOCH_VERIFY_LABEL: &[u8] = b"notegate/lookup/epoch-verify/v1";
 const PROVIDER_SUB_HMAC_LABEL: &[u8] = b"notegate/lookup/provider-sub-hmac/v1";
 const EMAIL_HMAC_LABEL: &[u8] = b"notegate/lookup/email-hmac/v1";
@@ -78,6 +79,38 @@ pub struct PiiAad {
     version: i32,
 }
 
+/// Context bound to server-encrypted text content through AEAD AAD.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextContentAad {
+    space_id: String,
+    node_id: String,
+    key_id: String,
+    version: i32,
+}
+
+impl TextContentAad {
+    pub fn new(
+        space_id: impl Into<String>,
+        node_id: impl Into<String>,
+        key_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            space_id: space_id.into(),
+            node_id: node_id.into(),
+            key_id: key_id.into(),
+            version: CRYPTO_VERSION,
+        }
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        format!(
+            "app=notegate;field=text.content;space_id={};node_id={};key_id={};version={}",
+            self.space_id, self.node_id, self.key_id, self.version
+        )
+        .into_bytes()
+    }
+}
+
 impl PiiAad {
     pub fn new(
         field: PiiFieldKind,
@@ -113,6 +146,7 @@ pub struct PiiCrypto {
     lookup_epoch_verify_key: [u8; KEY_LEN],
     pii_field_key: [u8; KEY_LEN],
     browser_refresh_token_field_key: [u8; KEY_LEN],
+    text_content_field_key: [u8; KEY_LEN],
     provider_sub_hmac_key: [u8; KEY_LEN],
     email_hmac_key: [u8; KEY_LEN],
     api_key_hmac_key: [u8; KEY_LEN],
@@ -144,6 +178,7 @@ impl PiiCrypto {
             lookup_epoch_verify_key: hkdf_key(lookup_root, LOOKUP_EPOCH_VERIFY_LABEL)?,
             pii_field_key: hkdf_key(enc_root, PII_FIELD_LABEL)?,
             browser_refresh_token_field_key: hkdf_key(enc_root, BROWSER_REFRESH_TOKEN_FIELD_LABEL)?,
+            text_content_field_key: hkdf_key(enc_root, TEXT_CONTENT_FIELD_LABEL)?,
             provider_sub_hmac_key: hkdf_key(lookup_root, PROVIDER_SUB_HMAC_LABEL)?,
             email_hmac_key: hkdf_key(lookup_root, EMAIL_HMAC_LABEL)?,
             api_key_hmac_key: hkdf_key(lookup_root, API_KEY_HMAC_LABEL)?,
@@ -242,6 +277,45 @@ impl PiiCrypto {
             .map_err(|_error| Error::internal("invalid encrypted refresh token utf8"))
     }
 
+    pub fn encrypt_text_content(
+        &self,
+        space_id: &str,
+        node_id: &str,
+        plaintext: &str,
+    ) -> Result<EncryptedField> {
+        let aad = TextContentAad::new(space_id, node_id, &self.enc_key_id);
+        encrypt_with_key_and_aad(
+            &self.text_content_field_key,
+            plaintext.as_bytes(),
+            &aad.bytes(),
+        )
+    }
+
+    pub fn decrypt_text_content(
+        &self,
+        space_id: &str,
+        node_id: &str,
+        key_id: &str,
+        version: i32,
+        field: &EncryptedField,
+    ) -> Result<String> {
+        if key_id != self.enc_key_id {
+            return Err(Error::internal(format!(
+                "text content enc key mismatch: stored {key_id} != configured {}",
+                self.enc_key_id
+            )));
+        }
+        if version != CRYPTO_VERSION {
+            return Err(Error::internal(format!(
+                "text content enc version mismatch: stored {version} != current {CRYPTO_VERSION}"
+            )));
+        }
+        let aad = TextContentAad::new(space_id, node_id, key_id);
+        let bytes = decrypt_with_key_and_aad(&self.text_content_field_key, field, &aad.bytes())?;
+        String::from_utf8(bytes)
+            .map_err(|_error| Error::internal("invalid encrypted text content utf8"))
+    }
+
     pub fn provider_sub_hash(&self, provider: &str, subject: &str) -> Result<String> {
         hmac_hex(
             &self.provider_sub_hmac_key,
@@ -306,7 +380,7 @@ fn encrypt_with_key_and_aad(
                 aad,
             },
         )
-        .map_err(|_error| Error::internal("PII encryption failed"))?;
+        .map_err(|_error| Error::internal("field encryption failed"))?;
     Ok(EncryptedField {
         ciphertext,
         nonce: nonce.to_vec(),
@@ -331,7 +405,7 @@ fn decrypt_with_key_and_aad(
                 aad,
             },
         )
-        .map_err(|_error| Error::internal("PII decryption failed"))
+        .map_err(|_error| Error::internal("field decryption failed"))
 }
 
 fn hmac_hex(key: &[u8; KEY_LEN], value: &str) -> Result<String> {
@@ -425,6 +499,38 @@ mod tests {
             crypto
                 .decrypt_browser_refresh_token(
                     "session-2",
+                    crypto.enc_key_id(),
+                    crypto.version(),
+                    &encrypted,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn text_content_encrypt_decrypt_round_trips_and_binds_node() {
+        let crypto = PiiCrypto::test();
+        let encrypted = crypto
+            .encrypt_text_content("space-1", "node-1", "searchable secret")
+            .unwrap();
+        assert_ne!(encrypted.ciphertext, b"searchable secret");
+        assert_eq!(
+            crypto
+                .decrypt_text_content(
+                    "space-1",
+                    "node-1",
+                    crypto.enc_key_id(),
+                    crypto.version(),
+                    &encrypted,
+                )
+                .unwrap(),
+            "searchable secret"
+        );
+        assert!(
+            crypto
+                .decrypt_text_content(
+                    "space-1",
+                    "node-2",
                     crypto.enc_key_id(),
                     crypto.version(),
                     &encrypted,

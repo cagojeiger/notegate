@@ -42,7 +42,10 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
   }
 
   return (
-    <aside className="hidden w-[52px] shrink-0 min-h-0 flex-col border-r border-seam bg-surface md:flex">
+    <aside
+      aria-label="Space navigation"
+      className="hidden w-[52px] shrink-0 min-h-0 flex-col border-r border-seam bg-surface md:flex"
+    >
       {onOpenLibrary ? (
         <div className="relative flex h-12 shrink-0 items-center justify-center border-b border-seam">
           {libraryActive ? <span data-active-indicator className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
@@ -103,7 +106,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
             >
               {dropBefore ? <span className="absolute left-2 right-2 -top-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}
               {active ? <span data-active-indicator className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
-              <button type="button" onClick={() => onSelectSpace(space)} aria-label={space.name} aria-description={onOpenLibrary && !space.pinned ? "Unpinned; hidden from user MCP" : undefined} aria-current={active ? "page" : undefined} title={`${space.name}${onOpenLibrary && !space.pinned ? " · unpinned" : ""}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
+              <button type="button" onClick={() => onSelectSpace(space)} aria-label={space.name} aria-current={active ? "page" : undefined} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
                 {space.name.slice(0, 1).toUpperCase()}
               </button>
               {dropAfter ? <span className="absolute left-2 right-2 -bottom-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}

@@ -10,7 +10,11 @@ const spaces: Space[] = [
     id: "space-1",
     name: "Daily",
     sort_order: 0,
-    pinned: true,
+    navigation_pinned: true,
+    user_mcp_enabled: true,
+    default_search_enabled: true,
+    default_text_encryption_enabled: false,
+    features: { text_encryption: true },
     permission: "write",
     root_node_id: "root-1",
     created_at: "2026-06-13T00:00:00Z",
@@ -20,7 +24,11 @@ const spaces: Space[] = [
     id: "space-2",
     name: "Work",
     sort_order: 1,
-    pinned: true,
+    navigation_pinned: true,
+    user_mcp_enabled: true,
+    default_search_enabled: true,
+    default_text_encryption_enabled: false,
+    features: { text_encryption: true },
     permission: "write",
     root_node_id: "root-2",
     created_at: "2026-06-13T00:00:00Z",
@@ -101,24 +109,4 @@ describe("MobileSpaceBar", () => {
     expect(view.container.querySelectorAll("[data-active-indicator]")).toHaveLength(1);
   });
 
-  it("describes an active unpinned user space without changing its name", () => {
-    const unpinned = { ...spaces[0], pinned: false };
-    render(
-      <MobileSpaceBar
-        spaces={[unpinned]}
-        activeSpace={unpinned}
-        canCreateSpace
-        onSelectSpace={vi.fn()}
-        onCreateSpace={vi.fn()}
-        onOpenLibrary={vi.fn()}
-        onOpenHistory={vi.fn()}
-        onOpenSettings={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole("button", { name: "Daily" })).toHaveAttribute(
-      "aria-description",
-      "Unpinned; hidden from user MCP"
-    );
-  });
 });

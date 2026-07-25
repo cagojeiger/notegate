@@ -10,6 +10,7 @@ import {
   reorderSpaces as reorderSpacesRequest,
   updateSpace
 } from "../../api/spaces";
+import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space, SpacesListResponse } from "../../api/types";
 import { buildSpaceSortOrderUpdates } from "./spaceReorder";
 
@@ -35,7 +36,8 @@ export function useUpdateSpaceMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ spaceId, name, sort_order, pinned }: { spaceId: string; name?: string; sort_order?: number; pinned?: boolean }) => updateSpace(client, spaceId, { name, sort_order, pinned }),
+    mutationFn: ({ spaceId, ...input }: UpdateSpaceInput & { spaceId: string }) =>
+      updateSpace(client, spaceId, input),
     onSuccess: (updatedSpace) => {
       queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, (current) => current ? {
         ...current,

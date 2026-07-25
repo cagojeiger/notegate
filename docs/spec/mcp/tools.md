@@ -79,7 +79,7 @@ type SearchInput = {
 - `find`와 `grep` match는 Space 내부에서 대소문자를 구분하지 않는다.
 - `include`/`exclude`는 결과 path에 적용하는 glob list다.
 - `grep lines=none`은 line 정보를 반환하지 않는다. `first`는 첫 matching line number, `all`은 모든 matching line number를 반환한다. snippet은 반환하지 않는다.
-- File, encrypted Text, metadata는 `grep` 대상이 아니다.
+- File, client-side encrypted Text, metadata는 `grep` 대상이 아니다. 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 검색한다.
 
 필수 필드:
 

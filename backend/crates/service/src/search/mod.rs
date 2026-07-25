@@ -79,6 +79,8 @@ impl SearchService {
                 content_sha256: text.content_sha256.clone(),
                 byte_len: text.byte_len,
                 line_count: text.line_count,
+                encryption_enabled: text.encryption_enabled,
+                at_rest_encryption: text.at_rest_encryption,
             }),
             file: None,
         }

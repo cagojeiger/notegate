@@ -3,9 +3,10 @@
 pub mod text {
     //! Text reads: load live text content and metrics.
 
-    use notegate_core::Result;
+    use notegate_core::security::PiiCrypto;
+    use notegate_core::{Error, Result};
     use notegate_model::files::TextStats;
-    use notegate_model::{Node, TextObject};
+    use notegate_model::{Node, TextAtRestEncryption, TextObject};
     use sqlx::PgPool;
     use std::collections::HashMap;
     use uuid::Uuid;
@@ -19,8 +20,9 @@ pub mod text {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<TextStats>> {
-        let row: Option<(String, i64, i32)> = sqlx::query_as(
-            "SELECT d.content_sha256, d.byte_len, d.line_count FROM text_objects d \
+        let row: Option<(String, i64, i32, bool, String)> = sqlx::query_as(
+            "SELECT d.content_sha256, d.byte_len, d.line_count, d.encryption_enabled, d.at_rest_encryption \
+             FROM text_objects d \
          JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
          WHERE d.space_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL",
         )
@@ -30,11 +32,20 @@ pub mod text {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|(content_sha256, byte_len, line_count)| TextStats {
-            content_sha256,
-            byte_len,
-            line_count,
-        }))
+        row.map(
+            |(content_sha256, byte_len, line_count, encryption_enabled, at_rest)| {
+                Ok(TextStats {
+                    content_sha256,
+                    byte_len,
+                    line_count,
+                    encryption_enabled,
+                    at_rest_encryption: TextAtRestEncryption::parse(&at_rest).ok_or_else(|| {
+                        Error::internal(format!("unknown text at-rest encryption: {at_rest}"))
+                    })?,
+                })
+            },
+        )
+        .transpose()
     }
 
     /// Load live text metrics for a bounded set of node ids.
@@ -47,8 +58,9 @@ pub mod text {
             return Ok(HashMap::new());
         }
 
-        let rows: Vec<(Uuid, String, i64, i32)> = sqlx::query_as(
-            "SELECT d.node_id, d.content_sha256, d.byte_len, d.line_count \
+        let rows: Vec<(Uuid, String, i64, i32, bool, String)> = sqlx::query_as(
+            "SELECT d.node_id, d.content_sha256, d.byte_len, d.line_count, \
+                    d.encryption_enabled, d.at_rest_encryption \
              FROM text_objects d \
              JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
              WHERE d.space_id = $1 \
@@ -62,25 +74,35 @@ pub mod text {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(node_id, content_sha256, byte_len, line_count)| {
-                (
-                    node_id,
-                    TextStats {
-                        content_sha256,
-                        byte_len,
-                        line_count,
-                    },
-                )
-            })
-            .collect())
+        rows.into_iter()
+            .map(
+                |(node_id, content_sha256, byte_len, line_count, encryption_enabled, at_rest)| {
+                    Ok((
+                        node_id,
+                        TextStats {
+                            content_sha256,
+                            byte_len,
+                            line_count,
+                            encryption_enabled,
+                            at_rest_encryption: TextAtRestEncryption::parse(&at_rest).ok_or_else(
+                                || {
+                                    Error::internal(format!(
+                                        "unknown text at-rest encryption: {at_rest}"
+                                    ))
+                                },
+                            )?,
+                        },
+                    ))
+                },
+            )
+            .collect::<Result<HashMap<_, _>>>()
     }
 
     /// Load a live text (its node + content) by node id, or `None` when the node
     /// is missing, soft-deleted, or a folder.
     pub async fn find_text(
         pool: &PgPool,
+        crypto: &PiiCrypto,
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<(Node, TextObject)>> {
@@ -109,7 +131,7 @@ pub mod text {
         .map_err(map_sqlx_error)?;
 
         match doc_row {
-            Some(doc_row) => Ok(Some((node_row.into_node()?, doc_row.into_text()?))),
+            Some(doc_row) => Ok(Some((node_row.into_node()?, doc_row.into_text(crypto)?))),
             None => Ok(None),
         }
     }
@@ -120,6 +142,7 @@ pub mod text {
     /// text objects keyed by node id. Missing rows are omitted.
     pub async fn find_texts(
         pool: &PgPool,
+        crypto: &PiiCrypto,
         space_id: Uuid,
         node_ids: &[Uuid],
     ) -> Result<HashMap<Uuid, TextObject>> {
@@ -148,7 +171,7 @@ pub mod text {
 
         let mut texts = HashMap::with_capacity(rows.len());
         for row in rows {
-            let text = row.into_text()?;
+            let text = row.into_text(crypto)?;
             texts.insert(text.node_id, text);
         }
         Ok(texts)
@@ -447,6 +470,7 @@ pub mod node {
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
+                       n.search_enabled, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
                 FROM nodes n \
@@ -976,6 +1000,7 @@ pub mod search {
 
     use chrono::{DateTime, Utc};
     use notegate_core::Result;
+    use notegate_core::security::PiiCrypto;
     use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
     use serde_json::Value;
     use sqlx::FromRow;
@@ -996,6 +1021,7 @@ pub mod search {
         kind: String,
         sort_order: i32,
         metadata: Value,
+        search_enabled: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1014,6 +1040,7 @@ pub mod search {
         kind: String,
         sort_order: i32,
         metadata: Value,
+        search_enabled: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1035,6 +1062,7 @@ pub mod search {
                 kind: self.kind.clone(),
                 sort_order: self.sort_order,
                 metadata: self.metadata.clone(),
+                search_enabled: self.search_enabled,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
                 deleted_by_account_id: self.deleted_by_account_id,
@@ -1063,6 +1091,7 @@ pub mod search {
         kind: String,
         sort_order: i32,
         metadata: Value,
+        search_enabled: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1080,6 +1109,12 @@ pub mod search {
         text_media_type: String,
         text_encoding: String,
         text_storage_format: String,
+        text_encryption_enabled: bool,
+        text_at_rest_encryption: String,
+        text_content_ciphertext: Option<Vec<u8>>,
+        text_content_nonce: Option<Vec<u8>>,
+        text_content_enc_key_id: Option<String>,
+        text_content_enc_version: Option<i32>,
         text_created_by_account_id: Uuid,
         text_updated_by_account_id: Uuid,
         text_created_at: DateTime<Utc>,
@@ -1087,7 +1122,7 @@ pub mod search {
     }
 
     impl TextCandidateRow {
-        fn into_candidate(self) -> Result<SearchTextCandidate> {
+        fn into_candidate(self, crypto: &PiiCrypto) -> Result<SearchTextCandidate> {
             let node = NodeRow {
                 id: self.id,
                 space_id: self.space_id,
@@ -1096,6 +1131,7 @@ pub mod search {
                 kind: self.kind,
                 sort_order: self.sort_order,
                 metadata: self.metadata,
+                search_enabled: self.search_enabled,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
                 deleted_by_account_id: self.deleted_by_account_id,
@@ -1116,12 +1152,18 @@ pub mod search {
                 media_type: self.text_media_type,
                 encoding: self.text_encoding,
                 storage_format: self.text_storage_format,
+                encryption_enabled: self.text_encryption_enabled,
+                at_rest_encryption: self.text_at_rest_encryption,
+                content_ciphertext: self.text_content_ciphertext,
+                content_nonce: self.text_content_nonce,
+                content_enc_key_id: self.text_content_enc_key_id,
+                content_enc_version: self.text_content_enc_version,
                 created_by_account_id: self.text_created_by_account_id,
                 updated_by_account_id: self.text_updated_by_account_id,
                 created_at: self.text_created_at,
                 updated_at: self.text_updated_at,
             }
-            .into_text()?;
+            .into_text(crypto)?;
             Ok(SearchTextCandidate {
                 node,
                 path: self.path,
@@ -1246,6 +1288,7 @@ pub mod search {
                     kind: row.kind,
                     sort_order: row.sort_order,
                     metadata: row.metadata,
+                    search_enabled: row.search_enabled,
                     created_by_account_id: row.created_by_account_id,
                     updated_by_account_id: row.updated_by_account_id,
                     deleted_by_account_id: row.deleted_by_account_id,
@@ -1269,11 +1312,12 @@ pub mod search {
         limit: i64,
     ) -> Result<Vec<SearchNodeCandidate>> {
         let rows: Vec<NodeCandidateRow> = sqlx::query_as(&candidate_cte(
-            "SELECT id, space_id, parent_id, name, kind, sort_order, metadata, \
+            "SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, \
                         created_by_account_id, updated_by_account_id, deleted_by_account_id, \
                         purge_after, created_at, updated_at, deleted_at, path, sort_path \
                  FROM subtree \
-                 WHERE id <> $2 AND ($4::text IS NULL OR sort_path > $4) \
+                 WHERE id <> $2 AND search_enabled = true \
+                   AND ($4::text IS NULL OR sort_path > $4) \
                  ORDER BY sort_path \
                  LIMIT $5",
         ))
@@ -1293,6 +1337,7 @@ pub mod search {
 
     pub async fn text_candidates(
         pool: &PgPool,
+        crypto: &PiiCrypto,
         space_id: Uuid,
         scope_node_id: Uuid,
         scope_path: &str,
@@ -1301,7 +1346,7 @@ pub mod search {
     ) -> Result<Vec<SearchTextCandidate>> {
         let rows: Vec<TextCandidateRow> = sqlx::query_as(
             &candidate_cte(
-                "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, \
+                "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, s.search_enabled, \
                         s.created_by_account_id, s.updated_by_account_id, s.deleted_by_account_id, \
                         s.purge_after, s.created_at, s.updated_at, s.deleted_at, s.path, s.sort_path, \
                         t.content_text AS text_content, \
@@ -1312,6 +1357,12 @@ pub mod search {
                         t.media_type AS text_media_type, \
                         t.encoding AS text_encoding, \
                         t.storage_format AS text_storage_format, \
+                        t.encryption_enabled AS text_encryption_enabled, \
+                        t.at_rest_encryption AS text_at_rest_encryption, \
+                        t.content_ciphertext AS text_content_ciphertext, \
+                        t.content_nonce AS text_content_nonce, \
+                        t.content_enc_key_id AS text_content_enc_key_id, \
+                        t.content_enc_version AS text_content_enc_version, \
                         t.created_by_account_id AS text_created_by_account_id, \
                         t.updated_by_account_id AS text_updated_by_account_id, \
                         t.created_at AS text_created_at, \
@@ -1320,6 +1371,7 @@ pub mod search {
                  JOIN text_objects t ON t.space_id = s.space_id AND t.node_id = s.id \
                  WHERE s.id <> $2 \
                    AND s.kind = 'text' \
+                   AND s.search_enabled = true \
                    AND t.storage_format = 'plain' \
                    AND ($4::text IS NULL OR s.sort_path > $4) \
                  ORDER BY s.sort_path \
@@ -1336,14 +1388,14 @@ pub mod search {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter()
-            .map(TextCandidateRow::into_candidate)
+            .map(|row| row.into_candidate(crypto))
             .collect()
     }
 
     fn candidate_cte(select_sql: &str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
-                SELECT id, space_id, parent_id, name, kind, sort_order, metadata, \
+                SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, \
                        created_by_account_id, updated_by_account_id, deleted_by_account_id, \
                        purge_after, created_at, updated_at, deleted_at, \
                        $3::text AS path, \
@@ -1351,7 +1403,7 @@ pub mod search {
                 FROM nodes \
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
+                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, \
                        CASE WHEN s.path = '/' THEN '/' || n.name ELSE s.path || '/' || n.name END, \

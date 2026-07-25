@@ -12,6 +12,30 @@ pub enum TextStorageFormat {
     Encrypted,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAtRestEncryption {
+    None,
+    Server,
+}
+
+impl TextAtRestEncryption {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "server" => Some(Self::Server),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Server => "server",
+        }
+    }
+}
+
 impl TextStorageFormat {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -58,6 +82,8 @@ pub struct TextObject {
     pub media_type: String,
     pub encoding: String,
     pub storage_format: TextStorageFormat,
+    pub encryption_enabled: bool,
+    pub at_rest_encryption: TextAtRestEncryption,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub created_at: DateTime<Utc>,

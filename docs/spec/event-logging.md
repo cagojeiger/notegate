@@ -184,6 +184,10 @@ parent_node_id_before: uuid
 parent_node_id_after: uuid
 name_changed: bool
 sort_order_changed: bool
+search_enabled_changed: bool
+text_encryption_changed: bool
+search_enabled: bool
+text_encryption_enabled: bool | null
 recursive: bool
 copied_nodes: integer
 copied_texts: integer

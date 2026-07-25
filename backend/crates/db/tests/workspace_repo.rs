@@ -2,7 +2,9 @@ mod common;
 
 use common::TestDb;
 use notegate_db::{ConnectionRepo, SpaceRepo};
-use notegate_model::{ConnectAgent, CreateAgent, CreateSpace, Permission, SpaceOrderUpdate};
+use notegate_model::{
+    ConnectAgent, CreateAgent, CreateSpace, Permission, SpaceOrderUpdate, UpdateSpace,
+};
 use uuid::Uuid;
 
 async fn create_user(db: &TestDb, email: &str) -> Result<Uuid, Box<dyn std::error::Error>> {
@@ -183,7 +185,7 @@ async fn reorder_spaces_is_atomic() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
-async fn mcp_space_visibility_pins_users_but_not_connected_agents()
+async fn user_mcp_visibility_is_independent_from_navigation_and_agent_connections()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -194,32 +196,45 @@ async fn mcp_space_visibility_pins_users_but_not_connected_agents()
     let connection_repo = ConnectionRepo::new(db.pool.clone());
     let agent = create_agent(&db, owner, "pin-independent-agent").await?;
 
-    let pinned = space_repo
+    let mcp_enabled = space_repo
         .create_space(
             owner,
             &CreateSpace {
-                name: "pinned".to_owned(),
+                name: "mcp-enabled".to_owned(),
             },
         )
         .await?;
-    let unpinned = space_repo
+    let agent_only = space_repo
         .create_space(
             owner,
             &CreateSpace {
-                name: "unpinned".to_owned(),
+                name: "agent-only".to_owned(),
             },
         )
         .await?;
-    assert!(pinned.pinned_at.is_none());
-    assert!(unpinned.pinned_at.is_none());
+    assert!(mcp_enabled.navigation_pinned_at.is_some());
+    assert!(mcp_enabled.user_mcp_enabled_at.is_none());
+    assert!(agent_only.navigation_pinned_at.is_some());
+    assert!(agent_only.user_mcp_enabled_at.is_none());
 
     space_repo
-        .update_space(pinned.id, owner, None, None, Some(true))
+        .update_space_with_features(
+            owner,
+            &UpdateSpace {
+                space_id: mcp_enabled.id,
+                name: None,
+                sort_order: None,
+                navigation_pinned: Some(false),
+                user_mcp_enabled: Some(true),
+                default_search_enabled: None,
+                default_text_encryption_enabled: None,
+            },
+        )
         .await?;
     connection_repo
         .upsert_connection(
             &ConnectAgent {
-                space_id: unpinned.id,
+                space_id: agent_only.id,
                 agent_id: agent,
                 permission: Permission::Read,
             },
@@ -233,7 +248,13 @@ async fn mcp_space_visibility_pins_users_but_not_connected_agents()
         .into_iter()
         .map(|view| view.space.name)
         .collect();
-    assert_eq!(dashboard_names, vec!["pinned", "unpinned"]);
+    assert_eq!(dashboard_names, vec!["mcp-enabled", "agent-only"]);
+    let updated = space_repo
+        .find_space(mcp_enabled.id)
+        .await?
+        .ok_or("updated space missing")?;
+    assert!(updated.navigation_pinned_at.is_none());
+    assert!(updated.user_mcp_enabled_at.is_some());
 
     let user_mcp_names: Vec<_> = space_repo
         .list_mcp_space_views_for(owner, 10, None)
@@ -241,22 +262,22 @@ async fn mcp_space_visibility_pins_users_but_not_connected_agents()
         .into_iter()
         .map(|view| view.space.name)
         .collect();
-    assert_eq!(user_mcp_names, vec!["pinned"]);
+    assert_eq!(user_mcp_names, vec!["mcp-enabled"]);
     assert!(
         space_repo
-            .find_mcp_space_view_for(owner, pinned.id)
+            .find_mcp_space_view_for(owner, mcp_enabled.id)
             .await?
             .is_some()
     );
     assert!(
         space_repo
-            .find_mcp_space_view_for(owner, unpinned.id)
+            .find_mcp_space_view_for(owner, agent_only.id)
             .await?
             .is_none()
     );
     assert!(
         space_repo
-            .list_mcp_space_views_by_name_case_insensitive_for(owner, "UNPINNED", 5)
+            .list_mcp_space_views_by_name_case_insensitive_for(owner, "AGENT-ONLY", 5)
             .await?
             .is_empty()
     );
@@ -267,10 +288,10 @@ async fn mcp_space_visibility_pins_users_but_not_connected_agents()
         .into_iter()
         .map(|view| view.space.name)
         .collect();
-    assert_eq!(agent_mcp_names, vec!["unpinned"]);
+    assert_eq!(agent_mcp_names, vec!["agent-only"]);
     assert!(
         space_repo
-            .find_mcp_space_view_for(agent, unpinned.id)
+            .find_mcp_space_view_for(agent, agent_only.id)
             .await?
             .is_some()
     );

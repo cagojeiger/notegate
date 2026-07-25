@@ -236,6 +236,10 @@ spaces
   owner_user_id uuid not null references users(id)
   name text not null
   sort_order int not null default 0
+  navigation_pinned_at timestamptz null
+  user_mcp_enabled_at timestamptz null
+  default_search_enabled bool not null default true
+  default_text_encryption_enabled bool not null default false
   created_at timestamptz
   updated_at timestamptz
   deleted_at timestamptz null
@@ -243,7 +247,7 @@ spaces
   purge_after timestamptz null
 ```
 
-Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
+Live space name은 `(owner_user_id, name)` 기준 unique다. Space name은 1~63자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, `:`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다. Space 목록 기본 정렬은 `(sort_order, name, id)`다. 서비스 생성 경로는 새 space를 `max(owner live sort_order)+1000`으로 만들어 기본적으로 목록 끝에 추가한다. `navigation_pinned_at`은 탐색 영역 고정 상태이고 `user_mcp_enabled_at`은 User MCP 권한 상태이며 서로 독립적이다. `deleted_at`, `deleted_by_user_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 
 ```text
 space_usage
@@ -277,6 +281,7 @@ space_usage_reconcile_executions
   outcome text check ('succeeded','deferred','failed','cancelled')
   error_message text null
   metadata jsonb not null default '{}'
+  search_enabled bool not null default true
 ```
 
 `space_usage_reconcile_executions`는 worker 처리 1회를 append-only로 기록한다. Job은 완료 후 삭제하므로 `job_id`에 FK를 두지 않는다. 실패한 execution만 `error_message`를 가지며, 3개월이 지난 행은 worker가 정리한다.
@@ -330,6 +335,12 @@ text_objects
   storage_format text not null check ('plain','encrypted')
   content_text text null
   encrypted_payload jsonb null
+  encryption_enabled bool not null default false
+  at_rest_encryption text not null check ('none','server')
+  content_ciphertext bytea null
+  content_nonce bytea null
+  content_enc_key_id text null references crypto_key_epochs(key_id)
+  content_enc_version int null
   content_sha256 text not null
   byte_len bigint not null check 0..1048576
   line_count int not null check 0..5000
@@ -396,8 +407,13 @@ encryption_mode='client' -> encryption_metadata JSON object, bytes는 클라이�
 Text 저장 invariant:
 
 ```text
-storage_format='plain'     -> content_text IS NOT NULL, encrypted_payload IS NULL
-storage_format='encrypted' -> content_text IS NULL, encrypted_payload IS NOT NULL, encrypted_payload는 JSON object
+storage_format='plain', at_rest_encryption='none'
+  -> content_text IS NOT NULL, encrypted_payload와 content 암호화 필드는 NULL
+storage_format='plain', at_rest_encryption='server'
+  -> content_text와 encrypted_payload는 NULL, content 암호화 필드는 모두 non-NULL
+storage_format='encrypted'
+  -> at_rest_encryption='none', content_text와 content 암호화 필드는 NULL,
+     encrypted_payload는 JSON object
 byte_len                  -> 0..1048576
 line_count                -> 0..5000
 encoding                  -> 'utf-8'만 허용
@@ -405,12 +421,13 @@ encoding                  -> 'utf-8'만 허용
 
 Text 암호화 정책:
 
-- `storage_format='plain'`은 서버가 읽을 수 있는 UTF-8 content다.
+- `storage_format='plain'`은 서버가 읽을 수 있는 UTF-8 content다. `at_rest_encryption='server'`이면 DB에는 AEAD ciphertext로 저장한다.
 - `storage_format='encrypted'`는 client-side encrypted payload다. 서버는 원문과 복호화 키를 저장하지 않는다.
 - REST는 encrypted payload 저장/조회가 가능하다.
-- MCP `read op=read`, `write op=write/append/patch/edit`, `search op=grep`은 plain Text만 대상으로 한다.
+- MCP `read op=read`, `write op=write/append/patch/edit`, `search op=grep`은 plain Text만 대상으로 한다. 서버 관리 at-rest 암호화는 서버에서 투명하게 복호화한다.
 - plain Text의 `content_sha256`, `byte_len`, `line_count`는 plaintext 기준이다.
 - encrypted Text의 `content_sha256`, `byte_len`은 서버 canonical JSON serialization 기준이고 `line_count=0`이다.
+- `encryption_enabled`는 다음 저장에 적용할 정책이고 `at_rest_encryption`은 현재 저장 상태다.
 
 Node-content invariant:
 

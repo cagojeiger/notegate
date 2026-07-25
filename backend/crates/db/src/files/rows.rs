@@ -3,9 +3,11 @@
 //! path is derived via a recursive CTE (see `queries`).
 
 use chrono::{DateTime, Utc};
+use notegate_core::security::{EncryptedField, PiiCrypto};
 use notegate_core::{Error, Result};
 use notegate_model::{
-    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextObject, TextStorageFormat,
+    FileEncryptionMode, FileObject, Node, NodeKind, NodeSummary, TextAtRestEncryption, TextObject,
+    TextStorageFormat,
 };
 use serde_json::Value;
 use sqlx::FromRow;
@@ -21,6 +23,7 @@ pub struct NodeRow {
     pub kind: String,
     pub sort_order: i32,
     pub metadata: Value,
+    pub search_enabled: bool,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub deleted_by_account_id: Option<Uuid>,
@@ -43,6 +46,7 @@ impl NodeRow {
             kind,
             sort_order: self.sort_order,
             metadata: self.metadata,
+            search_enabled: self.search_enabled,
             created_by_account_id: self.created_by_account_id,
             updated_by_account_id: self.updated_by_account_id,
             deleted_by_account_id: self.deleted_by_account_id,
@@ -95,6 +99,12 @@ pub struct TextRow {
     pub media_type: String,
     pub encoding: String,
     pub storage_format: String,
+    pub encryption_enabled: bool,
+    pub at_rest_encryption: String,
+    pub content_ciphertext: Option<Vec<u8>>,
+    pub content_nonce: Option<Vec<u8>>,
+    pub content_enc_key_id: Option<String>,
+    pub content_enc_version: Option<i32>,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub created_at: DateTime<Utc>,
@@ -102,7 +112,7 @@ pub struct TextRow {
 }
 
 impl TextRow {
-    pub fn into_text(self) -> Result<TextObject> {
+    pub fn into_text(self, crypto: &PiiCrypto) -> Result<TextObject> {
         let storage_format = match self.storage_format.as_str() {
             "plain" => TextStorageFormat::Plain,
             "encrypted" => TextStorageFormat::Encrypted,
@@ -112,10 +122,41 @@ impl TextRow {
                 )));
             }
         };
+        let at_rest_encryption =
+            TextAtRestEncryption::parse(&self.at_rest_encryption).ok_or_else(|| {
+                Error::internal(format!(
+                    "unknown text at-rest encryption: {}",
+                    self.at_rest_encryption
+                ))
+            })?;
+        let content = match at_rest_encryption {
+            TextAtRestEncryption::None => self.content,
+            TextAtRestEncryption::Server => {
+                let ciphertext = self
+                    .content_ciphertext
+                    .ok_or_else(|| Error::internal("encrypted text has no ciphertext"))?;
+                let nonce = self
+                    .content_nonce
+                    .ok_or_else(|| Error::internal("encrypted text has no nonce"))?;
+                let key_id = self
+                    .content_enc_key_id
+                    .ok_or_else(|| Error::internal("encrypted text has no key id"))?;
+                let version = self
+                    .content_enc_version
+                    .ok_or_else(|| Error::internal("encrypted text has no version"))?;
+                Some(crypto.decrypt_text_content(
+                    &self.space_id.to_string(),
+                    &self.node_id.to_string(),
+                    &key_id,
+                    version,
+                    &EncryptedField { ciphertext, nonce },
+                )?)
+            }
+        };
         Ok(TextObject {
             node_id: self.node_id,
             space_id: self.space_id,
-            content: self.content,
+            content,
             encrypted_payload: self.encrypted_payload,
             content_sha256: self.content_sha256,
             byte_len: self.byte_len,
@@ -123,6 +164,8 @@ impl TextRow {
             media_type: self.media_type,
             encoding: self.encoding,
             storage_format,
+            encryption_enabled: self.encryption_enabled,
+            at_rest_encryption,
             created_by_account_id: self.created_by_account_id,
             updated_by_account_id: self.updated_by_account_id,
             created_at: self.created_at,
@@ -132,7 +175,7 @@ impl TextRow {
 }
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
-pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, \
+pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, \
      created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
 
 pub const NODE_SUMMARY_COLUMNS: &str =
@@ -140,7 +183,8 @@ pub const NODE_SUMMARY_COLUMNS: &str =
 
 /// Selectable columns of `text_objects`, in [`TextRow`] order.
 pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, encrypted_payload, content_sha256, \
-     byte_len, line_count, media_type, encoding, storage_format, \
+     byte_len, line_count, media_type, encoding, storage_format, encryption_enabled, at_rest_encryption, \
+     content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
      created_by_account_id, updated_by_account_id, created_at, updated_at";
 
 /// A row from `file_objects`; content bytes live in object storage.

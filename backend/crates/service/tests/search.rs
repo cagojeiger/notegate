@@ -20,7 +20,7 @@ mod common;
 use common::{TestDb, insert_user_account};
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_service::files::{
-    CreateFolder, CreateText, FilesService, WriteTarget, WriteText, WriteTextBody,
+    CreateFolder, CreateText, FilesService, UpdateNode, WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -108,6 +108,120 @@ async fn write_doc(
         .await
         .expect("write");
     node
+}
+
+#[tokio::test]
+async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner =
+        insert_user_account(&db.pool, "search-policy", "search-policy@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "search-policy").await;
+
+    let hidden_folder = mkdir(&files, owner, ws, root, "hidden-folder").await;
+    let visible_text = write_doc(
+        &files,
+        owner,
+        ws,
+        hidden_folder,
+        "visible.md",
+        "visible marker",
+    )
+    .await;
+    let hidden_text = write_doc(&files, owner, ws, root, "hidden.md", "hidden marker").await;
+
+    for node_id in [hidden_folder, hidden_text] {
+        files
+            .update_node(
+                owner,
+                ws,
+                UpdateNode {
+                    node_id,
+                    name: None,
+                    sort_order: None,
+                    search_enabled: Some(false),
+                    text_encryption_enabled: None,
+                },
+            )
+            .await?;
+    }
+
+    let folder_find = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "hidden".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert!(folder_find.items.is_empty());
+
+    let child_find = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "visible".to_owned(),
+                path: None,
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(child_find.items[0].node.id, visible_text);
+
+    let hidden_grep = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "hidden marker".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert!(hidden_grep.items.is_empty());
+
+    let visible_grep = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "visible marker".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(visible_grep.items[0].node.node.id, visible_text);
+
+    db.cleanup().await;
+    Ok(())
 }
 
 /// find matches by NAME; the `kind` filter and `scope` both work, and results

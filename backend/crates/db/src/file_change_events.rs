@@ -208,31 +208,33 @@ pub(crate) async fn node_metadata_replaced(
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
-fn node_updated_payload(
-    item_kind: &str,
-    item_name: &str,
-    parent_node_id: Option<Uuid>,
-    name_changed: bool,
-    sort_order_changed: bool,
-) -> (&'static str, Value) {
-    (
-        "item.update",
-        json!({
-            "item_kind": item_kind,
-            "item_name": item_name,
-            "parent_node_id": parent_node_id,
-            "name_changed": name_changed,
-            "sort_order_changed": sort_order_changed,
-        }),
-    )
-}
-
 pub(crate) struct NodeUpdated<'a> {
     pub item_kind: &'a str,
     pub item_name: &'a str,
     pub parent_node_id: Option<Uuid>,
     pub name_changed: bool,
     pub sort_order_changed: bool,
+    pub search_enabled_changed: bool,
+    pub text_encryption_changed: bool,
+    pub search_enabled: bool,
+    pub text_encryption_enabled: Option<bool>,
+}
+
+fn node_updated_payload(updated: &NodeUpdated<'_>) -> (&'static str, Value) {
+    (
+        "item.update",
+        json!({
+            "item_kind": updated.item_kind,
+            "item_name": updated.item_name,
+            "parent_node_id": updated.parent_node_id,
+            "name_changed": updated.name_changed,
+            "sort_order_changed": updated.sort_order_changed,
+            "search_enabled_changed": updated.search_enabled_changed,
+            "text_encryption_changed": updated.text_encryption_changed,
+            "search_enabled": updated.search_enabled,
+            "text_encryption_enabled": updated.text_encryption_enabled,
+        }),
+    )
 }
 
 pub(crate) async fn node_updated(
@@ -241,13 +243,7 @@ pub(crate) async fn node_updated(
     node_id: Uuid,
     updated: NodeUpdated<'_>,
 ) -> Result<()> {
-    let (op_type, metadata) = node_updated_payload(
-        updated.item_kind,
-        updated.item_name,
-        updated.parent_node_id,
-        updated.name_changed,
-        updated.sort_order_changed,
-    );
+    let (op_type, metadata) = node_updated_payload(&updated);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
@@ -476,8 +472,17 @@ mod tests {
     #[test]
     fn node_updated_builds_expected_payload() {
         let parent = Uuid::new_v4();
-        let (op_type, metadata) =
-            node_updated_payload("folder", "renamed", Some(parent), true, false);
+        let (op_type, metadata) = node_updated_payload(&NodeUpdated {
+            item_kind: "folder",
+            item_name: "renamed",
+            parent_node_id: Some(parent),
+            name_changed: true,
+            sort_order_changed: false,
+            search_enabled_changed: true,
+            text_encryption_changed: false,
+            search_enabled: false,
+            text_encryption_enabled: None,
+        });
         assert_eq!(op_type, "item.update");
         assert_eq!(
             metadata,
@@ -487,6 +492,10 @@ mod tests {
                 "parent_node_id": parent,
                 "name_changed": true,
                 "sort_order_changed": false,
+                "search_enabled_changed": true,
+                "text_encryption_changed": false,
+                "search_enabled": false,
+                "text_encryption_enabled": null,
             })
         );
     }

@@ -13,6 +13,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
+use notegate_core::security::PiiCrypto;
 use notegate_core::tier::effective_file_tree_limits;
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, TextObject};
@@ -34,6 +35,7 @@ use notegate_model::files::{
 pub struct FilesRepo {
     pool: PgPool,
     limits: Limits,
+    crypto: PiiCrypto,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -71,12 +73,22 @@ impl MetadataMutationKind {
 }
 
 impl FilesRepo {
+    #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
         Self::with_limits(pool, Limits::default())
     }
 
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_limits(pool: PgPool, limits: Limits) -> Self {
-        Self { pool, limits }
+        Self::with_limits_and_crypto(pool, limits, PiiCrypto::test())
+    }
+
+    pub fn with_limits_and_crypto(pool: PgPool, limits: Limits, crypto: PiiCrypto) -> Self {
+        Self {
+            pool,
+            limits,
+            crypto,
+        }
     }
 }
 
@@ -168,7 +180,7 @@ impl FilesRepo {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<(Node, TextObject)>> {
-        queries::text::find_text(&self.pool, space_id, node_id).await
+        queries::text::find_text(&self.pool, &self.crypto, space_id, node_id).await
     }
 
     pub async fn find_texts(
@@ -176,7 +188,7 @@ impl FilesRepo {
         space_id: Uuid,
         node_ids: &[Uuid],
     ) -> Result<HashMap<Uuid, TextObject>> {
-        queries::text::find_texts(&self.pool, space_id, node_ids).await
+        queries::text::find_texts(&self.pool, &self.crypto, space_id, node_ids).await
     }
 
     pub async fn file_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<FileStats>> {
@@ -342,6 +354,7 @@ impl FilesRepo {
     ) -> Result<Vec<SearchTextCandidate>> {
         queries::search::text_candidates(
             &self.pool,
+            &self.crypto,
             space_id,
             scope_node_id,
             scope_path,
@@ -393,15 +406,16 @@ impl FilesRepo {
         content: &StoredContent,
         created_by: Uuid,
     ) -> Result<(Node, TextObject)> {
-        commands::create::insert_text(
-            &self.pool,
+        commands::create::insert_text(commands::create::InsertTextArgs {
+            pool: &self.pool,
+            crypto: &self.crypto,
             space_id,
-            parent_node_id,
+            parent_id: parent_node_id,
             name,
             content,
             created_by,
-            self.limits,
-        )
+            caps: self.limits,
+        })
         .await
     }
 
@@ -534,6 +548,7 @@ impl FilesRepo {
     ) -> Result<(Node, TextObject)> {
         commands::save::save_text_content(commands::save::SaveTextContentArgs {
             pool: &self.pool,
+            crypto: &self.crypto,
             space_id,
             node_id,
             content,
@@ -572,6 +587,7 @@ impl FilesRepo {
     ) -> Result<(Node, CopyCounts)> {
         commands::copy_node::copy_node(commands::copy_node::CopyNodeArgs {
             pool: &self.pool,
+            crypto: &self.crypto,
             space_id,
             source_node_id: command.node_id,
             new_parent_id: command.new_parent_node_id,
@@ -591,13 +607,32 @@ impl FilesRepo {
         new_sort_order: Option<i32>,
         updated_by: Uuid,
     ) -> Result<Node> {
+        self.update_node(
+            space_id,
+            &notegate_model::files::UpdateNode {
+                node_id,
+                name: new_name.map(str::to_owned),
+                sort_order: new_sort_order,
+                search_enabled: None,
+                text_encryption_enabled: None,
+            },
+            updated_by,
+        )
+        .await
+    }
+
+    pub async fn update_node(
+        &self,
+        space_id: Uuid,
+        command: &notegate_model::files::UpdateNode,
+        updated_by: Uuid,
+    ) -> Result<Node> {
         commands::update::update_node_metadata(
             &self.pool,
             space_id,
-            node_id,
-            new_name,
-            new_sort_order,
+            command,
             updated_by,
+            self.limits,
         )
         .await
     }

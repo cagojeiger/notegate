@@ -6,6 +6,7 @@
 //! attribution = the caller.
 
 use notegate_core::limits::{self, Limits};
+use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::files::StoredContent;
 use notegate_model::{Node, TextObject};
@@ -29,17 +30,19 @@ pub async fn insert_folder(
 ) -> Result<Node> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
-    prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::nodes(1), caps).await?;
+    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    prepare_create(&mut tx, space_id, parent_id, name, locked.limits).await?;
+    space_usage::apply_quota_delta(&mut tx, &locked.gate, UsageDelta::nodes(1), locked.limits)
+        .await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
-            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, 'folder', $4, $4) RETURNING {NODE_COLUMNS}"
+            "INSERT INTO nodes (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, $3, 'folder', $4, $5, $5) RETURNING {NODE_COLUMNS}"
         ))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
+        .bind(locked.default_search_enabled)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await
@@ -60,49 +63,83 @@ pub async fn insert_folder(
 
 /// Insert a text node + its `text_objects` row, attributing both to
 /// `created_by`. `content` carries the pre-computed metrics from the service.
-pub async fn insert_text(
-    pool: &PgPool,
-    space_id: Uuid,
-    parent_id: Uuid,
-    name: &str,
-    content: &StoredContent,
-    created_by: Uuid,
-    caps: Limits,
-) -> Result<(Node, TextObject)> {
+pub struct InsertTextArgs<'a> {
+    pub pool: &'a PgPool,
+    pub crypto: &'a PiiCrypto,
+    pub space_id: Uuid,
+    pub parent_id: Uuid,
+    pub name: &'a str,
+    pub content: &'a StoredContent,
+    pub created_by: Uuid,
+    pub caps: Limits,
+}
+
+pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)> {
+    let InsertTextArgs {
+        pool,
+        crypto,
+        space_id,
+        parent_id,
+        name,
+        content,
+        created_by,
+        caps,
+    } = args;
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    let (gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
-    prepare_create(&mut tx, space_id, parent_id, name, caps).await?;
-    space_usage::apply_quota_delta(&mut tx, &gate, UsageDelta::text(1, content.byte_len), caps)
-        .await?;
+    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    prepare_create(&mut tx, space_id, parent_id, name, locked.limits).await?;
+    space_usage::apply_quota_delta(
+        &mut tx,
+        &locked.gate,
+        UsageDelta::text(1, content.byte_len),
+        locked.limits,
+    )
+    .await?;
 
     let node_row = sqlx::query_as::<_, NodeRow>(&format!(
-            "INSERT INTO nodes (space_id, parent_id, name, kind, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, 'text', $4, $4) RETURNING {NODE_COLUMNS}"
+            "INSERT INTO nodes (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, $3, 'text', $4, $5, $5) RETURNING {NODE_COLUMNS}"
         ))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
+        .bind(locked.default_search_enabled)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_constraint_error)?;
 
-    let (storage_format, content_text, encrypted_payload) = stored_text_parts(content);
+    let stored = stored_text_parts(
+        content,
+        locked.default_text_encryption_enabled,
+        locked.owner_tier,
+        crypto,
+        space_id,
+        node_row.id,
+    )?;
     let doc_row = sqlx::query_as::<_, TextRow>(&format!(
             "INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
+             encryption_enabled, at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
              created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) RETURNING {TEXT_COLUMNS}"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15) \
+         RETURNING {TEXT_COLUMNS}"
         ))
         .bind(node_row.id)
         .bind(space_id)
-        .bind(storage_format)
-        .bind(content_text)
-        .bind(encrypted_payload)
+        .bind(stored.storage_format)
+        .bind(stored.content_text)
+        .bind(stored.encrypted_payload)
         .bind(&content.content_sha256)
         .bind(content.byte_len)
         .bind(content.line_count)
+        .bind(locked.default_text_encryption_enabled)
+        .bind(stored.at_rest_encryption)
+        .bind(stored.content_ciphertext)
+        .bind(stored.content_nonce)
+        .bind(stored.content_enc_key_id)
+        .bind(stored.content_enc_version)
         .bind(created_by)
         .fetch_one(&mut *tx)
         .await
@@ -120,7 +157,7 @@ pub async fn insert_text(
     .await?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
-    Ok((node_row.into_node()?, doc_row.into_text()?))
+    Ok((node_row.into_node()?, doc_row.into_text(crypto)?))
 }
 
 /// Shared in-tx create pre-checks: parent live folder, depth, sibling-unique,

@@ -24,6 +24,7 @@ pub struct NodeOut {
     pub path: String,
     pub sort_order: i32,
     pub metadata: Value,
+    pub search_enabled: bool,
     pub has_children: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_sha256: Option<String>,
@@ -31,6 +32,10 @@ pub struct NodeOut {
     pub byte_len: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_encryption_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_at_rest_encryption: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,6 +70,7 @@ impl NodeOut {
             path: view.path.clone(),
             sort_order: node.sort_order,
             metadata: node.metadata.clone(),
+            search_enabled: node.search_enabled,
             has_children: view.has_children,
             content_sha256: view.text.as_ref().map(|text| text.content_sha256.clone()),
             byte_len: view
@@ -73,6 +79,11 @@ impl NodeOut {
                 .map(|text| text.byte_len)
                 .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
             line_count: view.text.as_ref().map(|text| text.line_count),
+            text_encryption_enabled: view.text.as_ref().map(|text| text.encryption_enabled),
+            text_at_rest_encryption: view
+                .text
+                .as_ref()
+                .map(|text| text.at_rest_encryption.as_str().to_owned()),
             media_type: view.file.as_ref().map(|file| file.media_type.clone()),
             detected_media_type: view
                 .file

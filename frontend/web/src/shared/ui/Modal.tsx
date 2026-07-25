@@ -14,11 +14,26 @@ const FOCUSABLE_SELECTOR = [
 
 // Shared modal shell matching the SettingsModal tone: soft backdrop + paper panel.
 // Escape and backdrop click both dismiss. Keep panels small and focused.
-export function Modal({ title, onClose, children, footer, width = "max-w-md" }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; width?: string }) {
+export function Modal({
+  title,
+  onClose,
+  children,
+  footer,
+  width = "max-w-md",
+  placement = "center"
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  width?: string;
+  placement?: "center" | "bottom";
+}) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const previousFocusRef = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const bottomSheet = placement === "bottom";
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -74,7 +89,7 @@ export function Modal({ title, onClose, children, footer, width = "max-w-md" }: 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={`fixed inset-0 z-50 flex ${bottomSheet ? "items-end" : "items-center justify-center p-4"}`}>
       <button type="button" aria-hidden="true" tabIndex={-1} className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         ref={dialogRef}
@@ -82,13 +97,17 @@ export function Modal({ title, onClose, children, footer, width = "max-w-md" }: 
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative max-h-[calc(100vh-2rem)] w-full ${width} overflow-y-auto rounded-2xl border border-border bg-panel p-6 shadow-[var(--ng-focus-shadow)]`}
+        className={`relative w-full ${width} border border-border bg-panel shadow-[var(--ng-focus-shadow)] ${
+          bottomSheet
+            ? "flex max-h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
+            : "max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl p-6"
+        }`}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
+        <div className={`flex items-center justify-between ${bottomSheet ? "h-12 shrink-0 border-b border-seam px-3" : "mb-4"}`}>
+          <h2 id={titleId} className={bottomSheet ? "text-sm font-medium" : "text-lg font-semibold"}>{title}</h2>
           <IconButton label="Close" onClick={onClose}><X size={16} /></IconButton>
         </div>
-        {children}
+        {bottomSheet ? <div className="min-h-0 flex-1 overflow-hidden">{children}</div> : children}
         {footer ? <div className="mt-5 flex justify-end gap-2">{footer}</div> : null}
       </div>
     </div>

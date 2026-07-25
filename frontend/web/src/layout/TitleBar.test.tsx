@@ -10,7 +10,11 @@ const space: Space = {
   id: "space-1",
   name: "Personal",
   sort_order: 0,
-  pinned: true,
+  navigation_pinned: true,
+  user_mcp_enabled: true,
+  default_search_enabled: true,
+  default_text_encryption_enabled: false,
+  features: { text_encryption: true },
   permission: "write",
   root_node_id: "root-1",
   created_at: "2026-06-13T00:00:00Z",
@@ -59,6 +63,17 @@ describe("TitleBar", () => {
 
     expect(split).toBeDisabled();
     expect(props.onAddGroup).not.toHaveBeenCalled();
+  });
+
+  it("keeps the inspector toggle when workbench-only controls are hidden", () => {
+    renderTitleBar({
+      showWorkbenchControls: false,
+      auxiliaryLabel: "Toggle space inspector"
+    });
+
+    expect(screen.queryByRole("button", { name: "Toggle left sidebar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Split editor/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle space inspector" })).toBeInTheDocument();
   });
 
   it("accounts for mobile top safe area", () => {

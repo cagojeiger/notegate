@@ -42,7 +42,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
   const railSpaces = me.account.kind === "user"
-    ? workbench.spaces.filter((space) => space.pinned || space.id === workbench.activeSpace?.id)
+    ? workbench.spaces.filter((space) => space.navigation_pinned)
     : workbench.spaces;
   const layout = useWorkbenchLayout({
     isMobile: workbench.isMobile,
@@ -53,6 +53,20 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
+  };
+  const openInspector = () => {
+    if (workbench.isMobile) {
+      if (!workbench.mobileAuxOpen) actions.toggleMobileAux();
+    } else if (!workbench.showAuxiliary) {
+      actions.toggleAuxiliary();
+    }
+  };
+  const closeInspector = () => {
+    if (workbench.isMobile) {
+      if (workbench.mobileAuxOpen) actions.toggleMobileAux();
+    } else if (workbench.showAuxiliary) {
+      actions.toggleAuxiliary();
+    }
   };
   const openSettings = () => {
     closeMobilePanels();
@@ -104,80 +118,118 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         theme={workbench.theme}
         primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
         auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+        auxiliaryLabel={libraryOpen ? "Toggle space inspector" : undefined}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
         onToggleTheme={actions.toggleTheme}
         onTogglePrimarySidebar={workbench.isMobile ? actions.toggleMobileTree : actions.togglePrimarySidebar}
         onToggleAuxiliary={workbench.isMobile ? actions.toggleMobileAux : actions.toggleAuxiliary}
       />
-      <main className="relative flex min-h-0 flex-1">
-        <ActivityRail spaces={railSpaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={selectWorkbenchSpace} onReorderSpaces={reorderRailSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenLibrary={libraryAvailable ? openLibrary : undefined} libraryActive={libraryOpen} onOpenHistory={openHistory} onOpenSettings={openSettings} />
-        {libraryOpen ? (
-          <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted" role="status">Preparing space library…</div>}>
-            <SpaceLibrary spaces={workbench.spaces} activeSpace={workbench.activeSpace} onOpenSpace={selectWorkbenchSpace} onCreateSpace={actions.promptCreateSpace} />
-          </Suspense>
-        ) : (
-          <>
-            <PrimarySidebarFrame mode={layout.primaryMode} width={workbench.primaryWidth}>
-              <PrimarySidebar
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <ActivityRail
+          spaces={railSpaces}
+          activeSpace={workbench.activeSpace}
+          canCreateSpace={workbench.canCreateSpace}
+          canManageSpaces={workbench.canCreateSpace}
+          onSelectSpace={selectWorkbenchSpace}
+          onReorderSpaces={reorderRailSpaces}
+          onCreateSpace={actions.promptCreateSpace}
+          onRenameSpace={actions.promptRenameSpace}
+          onDeleteSpace={actions.confirmDeleteSpace}
+          onOpenLibrary={libraryAvailable ? openLibrary : undefined}
+          libraryActive={libraryOpen}
+          onOpenHistory={openHistory}
+          onOpenSettings={openSettings}
+        />
+        <main className="relative flex min-h-0 min-w-0 flex-1">
+          {libraryOpen ? (
+            <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted" role="status">Preparing space library…</div>}>
+              <SpaceLibrary
+                spaces={workbench.spaces}
                 activeSpace={workbench.activeSpace}
-                activeNodeId={workbench.activeNode?.id ?? null}
-                expandedFolderIds={workbench.expandedFolderIds}
-                onToggleFolder={actions.toggleFolder}
+                isMobile={workbench.isMobile}
+                inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+                onOpenInspector={openInspector}
+                onCloseInspector={closeInspector}
+                onOpenSpace={selectWorkbenchSpace}
+                onCreateSpace={actions.promptCreateSpace}
+              />
+            </Suspense>
+          ) : (
+            <>
+              <PrimarySidebarFrame mode={layout.primaryMode} width={workbench.primaryWidth}>
+                <PrimarySidebar
+                  activeSpace={workbench.activeSpace}
+                  activeNodeId={workbench.activeNode?.id ?? null}
+                  expandedFolderIds={workbench.expandedFolderIds}
+                  onToggleFolder={actions.toggleFolder}
+                  onOpenNode={(node) => { void openNode(node); }}
+                  onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
+                  onCreateFolder={() => actions.promptCreateNode("folder")}
+                  onCreateText={() => actions.promptCreateNode("text")}
+                  onFileSelected={actions.handleFileSelected}
+                  onRenameSpace={actions.promptRenameSpace}
+                  onDeleteSpace={actions.confirmDeleteSpace}
+                  onRenameNode={actions.promptRenameNode}
+                  onMoveNode={actions.promptMoveNode}
+                  onMoveNodeToFolder={actions.moveNodeToFolder}
+                  onDeleteNode={actions.confirmDeleteNode}
+                  onDownloadFile={actions.downloadFileNode}
+                  onCollapseTree={actions.collapseTree}
+                  onCreateInFolder={actions.promptCreateInFolder}
+                  onUploadInFolder={actions.uploadInFolder}
+                  canWriteActiveSpace={workbench.canWriteActiveSpace}
+                  canManageActiveSpace={workbench.canManageActiveSpace}
+                  canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
+                />
+              </PrimarySidebarFrame>
+              <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} onPointerDown={actions.startPrimaryResize} />
+              <EditorArea
+                groups={workbench.editorGroups}
+                activeGroupIndex={workbench.activeGroupIndex}
+                presentation={layout.editorPresentation}
+                visibleGroupCount={layout.visibleEditorGroupCount}
+                activeSpace={workbench.activeSpace}
+                onFocusGroup={actions.focusGroup}
+                onNavigateEditorGroup={(groupId, direction) => { void actions.navigateEditorGroup(groupId, direction); }}
+                navigatingGroupIds={actions.navigatingGroupIds}
                 onOpenNode={(node) => { void openNode(node); }}
                 onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
+                onOpenMarkdownLink={(groupId, node, path) => { void actions.openMarkdownLink(groupId, node, path); }}
+                onCloseGroup={actions.closeGroup}
+                onSetGroupMode={actions.setGroupMode}
                 onCreateFolder={() => actions.promptCreateNode("folder")}
                 onCreateText={() => actions.promptCreateNode("text")}
                 onFileSelected={actions.handleFileSelected}
-                onRenameSpace={actions.promptRenameSpace}
-                onDeleteSpace={actions.confirmDeleteSpace}
                 onRenameNode={actions.promptRenameNode}
                 onMoveNode={actions.promptMoveNode}
-                onMoveNodeToFolder={actions.moveNodeToFolder}
                 onDeleteNode={actions.confirmDeleteNode}
                 onDownloadFile={actions.downloadFileNode}
-                onCollapseTree={actions.collapseTree}
-                onCreateInFolder={actions.promptCreateInFolder}
-                onUploadInFolder={actions.uploadInFolder}
                 canWriteActiveSpace={workbench.canWriteActiveSpace}
-                canManageActiveSpace={workbench.canManageActiveSpace}
-                canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
               />
-            </PrimarySidebarFrame>
-            <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} onPointerDown={actions.startPrimaryResize} />
-            <EditorArea
-              groups={workbench.editorGroups}
-              activeGroupIndex={workbench.activeGroupIndex}
-              presentation={layout.editorPresentation}
-              visibleGroupCount={layout.visibleEditorGroupCount}
-              activeSpace={workbench.activeSpace}
-              onFocusGroup={actions.focusGroup}
-              onNavigateEditorGroup={(groupId, direction) => { void actions.navigateEditorGroup(groupId, direction); }}
-              navigatingGroupIds={actions.navigatingGroupIds}
-              onOpenNode={(node) => { void openNode(node); }}
-              onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
-              onOpenMarkdownLink={(groupId, node, path) => { void actions.openMarkdownLink(groupId, node, path); }}
-              onCloseGroup={actions.closeGroup}
-              onSetGroupMode={actions.setGroupMode}
-              onCreateFolder={() => actions.promptCreateNode("folder")}
-              onCreateText={() => actions.promptCreateNode("text")}
-              onFileSelected={actions.handleFileSelected}
-              onRenameNode={actions.promptRenameNode}
-              onMoveNode={actions.promptMoveNode}
-              onDeleteNode={actions.confirmDeleteNode}
-              onDownloadFile={actions.downloadFileNode}
-              canWriteActiveSpace={workbench.canWriteActiveSpace}
-            />
-            <AuxiliarySidebarFrame mode={layout.auxiliaryMode}>
-              <AuxiliarySidebar activeNode={workbench.activeNode} canWriteActiveSpace={workbench.canWriteActiveSpace} onReplaceMetadata={actions.promptReplaceMetadata} />
-            </AuxiliarySidebarFrame>
-            <PanelOverlay visible={mobileOverlayVisible} onClose={closeMobilePanels} />
-          </>
-        )}
-      </main>
-      <UploadProgressDock />
-      <MobileSpaceBar spaces={railSpaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} onSelectSpace={selectWorkbenchSpace} onCreateSpace={actions.promptCreateSpace} onOpenLibrary={libraryAvailable ? openLibrary : undefined} libraryActive={libraryOpen} onOpenHistory={openHistory} onOpenSettings={openSettings} />
-      {libraryOpen ? null : <StatusBar activeSpace={workbench.activeSpace} />}
+              <AuxiliarySidebarFrame mode={layout.auxiliaryMode}>
+                <AuxiliarySidebar activeNode={workbench.activeNode} canWriteActiveSpace={workbench.canWriteActiveSpace} onReplaceMetadata={actions.promptReplaceMetadata} />
+              </AuxiliarySidebarFrame>
+              <PanelOverlay visible={mobileOverlayVisible} onClose={closeMobilePanels} />
+            </>
+          )}
+        </main>
+      </div>
+      <div className="shrink-0">
+        <UploadProgressDock />
+        <MobileSpaceBar
+          spaces={railSpaces}
+          activeSpace={workbench.activeSpace}
+          canCreateSpace={workbench.canCreateSpace}
+          onSelectSpace={selectWorkbenchSpace}
+          onCreateSpace={actions.promptCreateSpace}
+          onOpenLibrary={libraryAvailable ? openLibrary : undefined}
+          libraryActive={libraryOpen}
+          onOpenHistory={openHistory}
+          onOpenSettings={openSettings}
+        />
+        <StatusBar activeSpace={workbench.activeSpace} />
+      </div>
       <Toast />
       {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
       {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}

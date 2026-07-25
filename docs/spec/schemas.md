@@ -67,6 +67,7 @@ type RestNode = {
   path: string
   sort_order: number
   metadata: object
+  search_enabled: boolean
   has_children: boolean
 
   // text node에서만 존재
@@ -77,6 +78,8 @@ type RestNode = {
 
   // text node에서만 존재
   line_count?: number
+  text_encryption_enabled?: boolean
+  text_at_rest_encryption?: "none" | "server"
 
   // file node에서만 존재
   media_type?: string
@@ -122,6 +125,7 @@ type McpNodeSummary = {
   name: string
   kind: NodeKind
   sort_order: number
+  search_enabled: boolean
   has_children: boolean
   created_at: string
   updated_at: string
@@ -134,6 +138,8 @@ type McpNodeSummary = {
 
   // text node에서만 존재
   line_count?: number
+  text_encryption_enabled?: boolean
+  text_at_rest_encryption?: "none" | "server"
 
   // file node에서만 존재
   media_type?: string
@@ -232,4 +238,4 @@ type McpTextReadResult =
     }
 ```
 
-MCP는 encrypted Text를 읽지 않는다. Encrypted Text는 REST Text API에서만 저장/조회한다.
+MCP는 client-side encrypted Text를 읽지 않는다. Client-side encrypted Text는 REST Text API에서만 저장/조회한다. 서버 관리 방식으로 at-rest 암호화된 plain Text는 일반 plain Text와 같은 shape로 반환한다.
