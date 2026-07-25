@@ -1,6 +1,7 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
 import type { FileChangeDelta, RestNode } from "./types";
+import { advanceChildrenRevision } from "./childrenRevision";
 import { queryKeys } from "./queryKeys";
 
 export function invalidateAuditEvents(queryClient: QueryClient) {
@@ -223,11 +224,4 @@ function invalidateAllChildren(queryClient: QueryClient, spaceId: string) {
   void queryClient.resetQueries({
     queryKey: queryKeys.childrenFamily(spaceId)
   });
-}
-
-function advanceChildrenRevision(queryClient: QueryClient, spaceId: string) {
-  queryClient.setQueryData<number>(
-    queryKeys.childrenRevision(spaceId),
-    (revision = 0) => revision + 1
-  );
 }

@@ -44,6 +44,7 @@ describe("updateNodeCaches", () => {
     );
     expect(updatedChildren?.pages[0]?.children[0]).toMatchObject({ preview_available: true });
     expect(updatedChildren?.pages[1]).toBe(children.pages[1]);
+    expect(queryClient.getQueryData(queryKeys.childrenRevision("space-1"))).toBe(1);
   });
 
   it("does not create collection entries that were not already cached", () => {

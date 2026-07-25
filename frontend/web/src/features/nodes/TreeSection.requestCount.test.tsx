@@ -4,6 +4,7 @@ import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
+import { updateNodeCaches } from "../../api/nodeCache";
 import { applyExternalFileChanges } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import type { ChildrenResponse, RestNode, Space } from "../../api/types";
@@ -226,6 +227,44 @@ describe("TreeSection request count", () => {
       path_changed: false,
       subtree_changed: false
     }]);
+    await act(async () => {
+      resolveBatch?.(readyBatchResponse([staleFolder], [
+        space.root_node_id,
+        staleFolder.id
+      ]));
+    });
+
+    await waitFor(() =>
+      expect(view.getByRole("button", { name: "fresh-folder" })).toBeInTheDocument()
+    );
+    expect(view.queryByRole("button", { name: staleFolder.name })).not.toBeInTheDocument();
+    expect(mocks.get).toHaveBeenCalled();
+  });
+
+  it("discards a restore batch after a local summary cache update", async () => {
+    const staleFolder = node("folder-1", "folder", space.root_node_id);
+    const freshFolder = { ...staleFolder, name: "fresh-folder", path: "/fresh-folder" };
+    let resolveBatch: ((value: ReturnType<typeof readyBatchResponse>) => void) | null = null;
+    mocks.post.mockImplementation(
+      () =>
+        new Promise<ReturnType<typeof readyBatchResponse>>((resolve) => {
+          resolveBatch = resolve;
+        })
+    );
+    mocks.get.mockImplementation((path: string) =>
+      Promise.resolve(
+        childrenResponse(
+          path.includes(`/${space.root_node_id}/`) ? [freshFolder] : []
+        )
+      )
+    );
+    const queryClient = createQueryClient();
+    const view = renderTree(queryClient, new Set([staleFolder.id]));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledOnce());
+
+    act(() => {
+      updateNodeCaches(queryClient, freshFolder, () => freshFolder);
+    });
     await act(async () => {
       resolveBatch?.(readyBatchResponse([staleFolder], [
         space.root_node_id,

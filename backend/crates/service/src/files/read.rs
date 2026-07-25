@@ -65,15 +65,7 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Ls)
             .await?;
 
-        let parent = self.load_node(space_id, parent_node_id).await?;
-        if parent.kind != NodeKind::Folder {
-            return Err(ServiceError::InvalidInput(
-                "cannot list children of a text".to_owned(),
-            ));
-        }
-        let parent_path = self.path_of(space_id, parent_node_id).await?;
-        let parent_has_children = self.store.has_children(space_id, parent_node_id).await?;
-
+        let parent = self.folder_context(space_id, parent_node_id).await?;
         let limit = clamp_children_limit(request.limit);
         let cursor = decode_children_cursor(request.cursor.as_deref(), space_id, parent_node_id)?;
         let (rows, has_more) = self
@@ -100,7 +92,7 @@ impl FilesService {
 
         let mut items = Vec::with_capacity(rows.len());
         for node in rows {
-            let path = join_path(&parent_path, &node.name);
+            let path = join_path(&parent.path, &node.name);
             let has_children = child_has_children.get(&node.id).copied().unwrap_or(false);
             let text = text_stats.get(&node.id).cloned();
             let file = file_stats.get(&node.id).cloned();
@@ -115,9 +107,9 @@ impl FilesService {
 
         Ok(ChildrenPage {
             parent: NodeView {
-                node: parent,
-                path: parent_path,
-                has_children: parent_has_children,
+                node: parent.node,
+                path: parent.path,
+                has_children: parent.has_children,
                 text: None,
                 file: None,
             },
@@ -140,14 +132,7 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Ls)
             .await?;
 
-        let parent = self.load_node(space_id, parent_node_id).await?;
-        if parent.kind != NodeKind::Folder {
-            return Err(ServiceError::InvalidInput(
-                "cannot list children of a text".to_owned(),
-            ));
-        }
-        let parent_path = self.path_of(space_id, parent_node_id).await?;
-        let parent_has_children = self.store.has_children(space_id, parent_node_id).await?;
+        let parent = self.folder_context(space_id, parent_node_id).await?;
         let limit = clamp_children_limit(request.limit);
         let cursor = decode_children_cursor(request.cursor.as_deref(), space_id, parent_node_id)?;
         let (rows, has_more) = self
@@ -159,7 +144,7 @@ impl FilesService {
         let rows = rows
             .into_iter()
             .map(|node| {
-                let path = join_path(&parent_path, &node.name);
+                let path = join_path(&parent.path, &node.name);
                 (node, path)
             })
             .collect();
@@ -167,9 +152,9 @@ impl FilesService {
 
         Ok(CanonicalChildrenPage {
             parent: NodeView {
-                node: parent,
-                path: parent_path,
-                has_children: parent_has_children,
+                node: parent.node,
+                path: parent.path,
+                has_children: parent.has_children,
                 text: None,
                 file: None,
             },
@@ -410,6 +395,26 @@ impl FilesService {
         Ok(NodeReveal {
             ancestors: views,
             target,
+        })
+    }
+
+    async fn folder_context(
+        &self,
+        space_id: Uuid,
+        parent_node_id: Uuid,
+    ) -> ServiceResult<NodeView> {
+        let node = self.load_node(space_id, parent_node_id).await?;
+        if node.kind != NodeKind::Folder {
+            return Err(ServiceError::InvalidInput(
+                "cannot list children of a non-folder".to_owned(),
+            ));
+        }
+        Ok(NodeView {
+            node,
+            path: self.path_of(space_id, parent_node_id).await?,
+            has_children: self.store.has_children(space_id, parent_node_id).await?,
+            text: None,
+            file: None,
         })
     }
 

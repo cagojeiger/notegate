@@ -1,6 +1,7 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 
 import type { ChildrenResponse, NodeSummary, RestNode, RestNodeListResponse } from "./types";
+import { advanceChildrenRevision } from "./childrenRevision";
 import { queryKeys } from "./queryKeys";
 
 type CachedNodeReference = NodeSummary & Partial<RestNode>;
@@ -15,6 +16,7 @@ export function updateNodeCaches(
     (current) => ({ ...(current ?? node), ...update(current ?? node) })
   );
   updateNodeReferences(queryClient, node.space_id, node.id, update);
+  advanceChildrenRevision(queryClient, node.space_id);
 }
 
 export function updateExistingNodeCaches(
@@ -31,6 +33,7 @@ export function updateExistingNodeCaches(
     );
   }
   updateNodeReferences(queryClient, spaceId, nodeId, update);
+  advanceChildrenRevision(queryClient, spaceId);
 }
 
 function updateNodeReferences(
