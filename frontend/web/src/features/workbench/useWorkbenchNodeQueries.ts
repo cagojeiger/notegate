@@ -3,11 +3,20 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "../../api/ApiProvider";
 import { replaceMetadata } from "../../api/metadata";
 import { updateNodeCaches } from "../../api/nodeCache";
-import { createNode, deleteNode, moveNode, revealNode, updateNode } from "../../api/nodes";
+import {
+  createNode,
+  deleteNode,
+  moveNode,
+  revealNode,
+  updateNode,
+  updateNodeSearchPolicy
+} from "../../api/nodes";
+import { updateTextEncryption } from "../../api/text";
 import {
   invalidateFolderSubtree,
   invalidateNodeLists,
   invalidateRecentNodes,
+  invalidateText,
   removeDeletedNodeQueries,
   removeMarkdownImagePreviewQuery
 } from "../../api/queryInvalidation";
@@ -43,6 +52,35 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
         invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
         removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
+      onUpdated(node);
+    }
+  });
+}
+
+export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) => void) {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
+      updateNodeSearchPolicy(client, node.space_id, node.id, enabled),
+    onSuccess: (node) => {
+      updateNodeCaches(queryClient, node, () => node);
+      invalidateRecentNodes(queryClient, node.space_id);
+      onUpdated(node);
+    }
+  });
+}
+
+export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => void) {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
+      updateTextEncryption(client, node.space_id, node.id, enabled),
+    onSuccess: (node) => {
+      updateNodeCaches(queryClient, node, () => node);
+      invalidateRecentNodes(queryClient, node.space_id);
+      invalidateText(queryClient, node.space_id, node.id);
       onUpdated(node);
     }
   });

@@ -19,8 +19,10 @@ mod common;
 
 use common::{TestDb, insert_user_account};
 use notegate_db::{FilesRepo, SpaceRepo};
+use notegate_model::AccountKind;
 use notegate_service::files::{
-    CreateFolder, CreateText, FilesService, UpdateNode, WriteTarget, WriteText, WriteTextBody,
+    CreateFolder, CreateText, FilesService, UpdateNodeSearchPolicy, WriteTarget, WriteText,
+    WriteTextBody,
 };
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
@@ -134,15 +136,13 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
 
     for node_id in [hidden_folder, hidden_text] {
         files
-            .update_node(
+            .update_node_search_policy(
+                AccountKind::User,
                 owner,
                 ws,
-                UpdateNode {
+                UpdateNodeSearchPolicy {
                     node_id,
-                    name: None,
-                    sort_order: None,
-                    search_enabled: Some(false),
-                    text_encryption_enabled: None,
+                    enabled: false,
                 },
             )
             .await?;

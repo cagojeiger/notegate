@@ -1,115 +1,69 @@
-//! Update-metadata command (`PATCH /nodes/{id}`): rename and/or reorder a node
-//! in place, without changing its parent.
+//! Node property and policy updates.
 //!
-//! Runs in one transaction serialized by the space row: the node must exist
-//! and be live; the root cannot be renamed; a rename re-checks sibling-name
-//! uniqueness at the current parent. Only
-//! the supplied fields change (`NULL` leaves a column unchanged via `COALESCE`),
-//! plus attribution.
+//! Property updates rename or reorder a node. Policy updates change search
+//! visibility or Text encryption, rewriting encrypted content in the same
+//! transaction.
 
+use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::Node;
-use notegate_model::files::UpdateNode;
+use notegate_model::files::{
+    StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTextBody,
+};
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
-use super::super::rows::{NODE_COLUMNS, NodeRow};
-use super::checks;
+use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
+use super::{checks, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::MetadataMutationKind;
 
-/// Update `node_id`'s `name` and/or `sort_order` in place, attributing the change
-/// to `updated_by`. `None` fields are left unchanged.
-pub async fn update_node_metadata(
-    pool: &PgPool,
+async fn lock_live_node(
+    tx: &mut Transaction<'_, Postgres>,
     space_id: Uuid,
-    command: &UpdateNode,
-    updated_by: Uuid,
-    caps: notegate_core::limits::Limits,
-) -> Result<Node> {
-    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-
-    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
-
-    let current = sqlx::query_as::<_, NodeRow>(&format!(
+    node_id: Uuid,
+) -> Result<NodeRow> {
+    sqlx::query_as::<_, NodeRow>(&format!(
         "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
          FOR UPDATE"
     ))
     .bind(space_id)
-    .bind(command.node_id)
-    .fetch_optional(&mut *tx)
+    .bind(node_id)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
+    .ok_or_else(|| Error::not_found("node not found"))
+}
+
+pub async fn update_node(
+    pool: &PgPool,
+    space_id: Uuid,
+    command: &UpdateNode,
+    updated_by: Uuid,
+) -> Result<Node> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    checks::lock_space(&mut tx, space_id).await?;
+
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
     let node_kind = current.kind.clone();
     let parent_id = current.parent_id;
-    let current_name = current.name.clone();
-    let current_sort_order = current.sort_order;
 
     if command.name.is_some() && parent_id.is_none() {
         return Err(Error::conflict("cannot rename the root node"));
-    }
-    if command.search_enabled.is_some() && parent_id.is_none() {
-        return Err(Error::conflict(
-            "search policy cannot be changed on the root node",
-        ));
-    }
-    if command.text_encryption_enabled.is_some() && node_kind != "text" {
-        return Err(Error::validation(
-            "text_encryption_enabled applies only to text nodes",
-        ));
     }
 
     let name_changed = command
         .name
         .as_deref()
-        .is_some_and(|name| name != current_name);
+        .is_some_and(|name| name != current.name);
     let sort_order_changed = command
         .sort_order
-        .is_some_and(|sort_order| sort_order != current_sort_order);
-    let search_enabled_changed = command
-        .search_enabled
-        .is_some_and(|enabled| enabled != current.search_enabled);
-    let current_text_policy: Option<(String, bool)> = if node_kind == "text" {
-        sqlx::query_as(
-            "SELECT storage_format, encryption_enabled FROM text_objects \
-             WHERE space_id = $1 AND node_id = $2 FOR UPDATE",
-        )
-        .bind(space_id)
-        .bind(command.node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-    } else {
-        None
-    };
-    if node_kind == "text" && current_text_policy.is_none() {
-        return Err(Error::internal("text node has no text object"));
-    }
-    let text_encryption_changed = command.text_encryption_enabled.is_some_and(|enabled| {
-        current_text_policy
-            .as_ref()
-            .is_some_and(|(_, current)| enabled != *current)
-    });
-    if text_encryption_changed && command.text_encryption_enabled == Some(true) {
-        if !locked.owner_tier.features().text_encryption {
-            return Err(Error::conflict(
-                "text encryption is not available for the space owner's tier",
-            ));
-        }
-        if current_text_policy
-            .as_ref()
-            .is_some_and(|(format, _)| format != "plain")
-        {
-            return Err(Error::conflict(
-                "server text encryption requires plain text storage",
-            ));
-        }
-    }
-    if !name_changed && !sort_order_changed && !search_enabled_changed && !text_encryption_changed {
+        .is_some_and(|sort_order| sort_order != current.sort_order);
+    if !name_changed && !sort_order_changed {
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
@@ -128,35 +82,18 @@ pub async fn update_node_metadata(
         "UPDATE nodes \
          SET name = COALESCE($3, name), \
              sort_order = COALESCE($4, sort_order), \
-             search_enabled = COALESCE($5, search_enabled), \
-             updated_by_account_id = $6, updated_at = now() \
+             updated_by_account_id = $5, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
     ))
     .bind(space_id)
     .bind(command.node_id)
     .bind(command.name.as_deref())
     .bind(command.sort_order)
-    .bind(command.search_enabled)
     .bind(updated_by)
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_constraint_error)?
     .ok_or_else(|| Error::not_found("node not found"))?;
-
-    if text_encryption_changed {
-        sqlx::query(
-            "UPDATE text_objects \
-             SET encryption_enabled = $3, updated_by_account_id = $4, updated_at = now() \
-             WHERE space_id = $1 AND node_id = $2",
-        )
-        .bind(space_id)
-        .bind(command.node_id)
-        .bind(command.text_encryption_enabled)
-        .bind(updated_by)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-    }
 
     file_change_events::node_updated(
         &mut tx,
@@ -168,22 +105,210 @@ pub async fn update_node_metadata(
             parent_node_id: row.parent_id,
             name_changed,
             sort_order_changed,
-            search_enabled_changed,
-            text_encryption_changed,
+            search_enabled_changed: false,
+            text_encryption_changed: false,
             search_enabled: row.search_enabled,
-            text_encryption_enabled: if node_kind == "text" {
-                command
-                    .text_encryption_enabled
-                    .or_else(|| current_text_policy.as_ref().map(|(_, enabled)| *enabled))
-            } else {
-                None
-            },
+            text_encryption_enabled: None,
         },
     )
     .await?;
 
     tx.commit().await.map_err(map_sqlx_error)?;
     row.into_node()
+}
+
+pub async fn update_node_search_policy(
+    pool: &PgPool,
+    space_id: Uuid,
+    command: &UpdateNodeSearchPolicy,
+    updated_by: Uuid,
+) -> Result<Node> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    checks::lock_space(&mut tx, space_id).await?;
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+
+    if current.parent_id.is_none() {
+        return Err(Error::conflict(
+            "search policy cannot be changed on the root node",
+        ));
+    }
+    if command.enabled == current.search_enabled {
+        tx.commit().await.map_err(map_sqlx_error)?;
+        return current.into_node();
+    }
+
+    let row = sqlx::query_as::<_, NodeRow>(&format!(
+        "UPDATE nodes \
+         SET search_enabled = $3, updated_by_account_id = $4, updated_at = now() \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
+    ))
+    .bind(space_id)
+    .bind(command.node_id)
+    .bind(command.enabled)
+    .bind(updated_by)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::not_found("node not found"))?;
+
+    file_change_events::node_updated(
+        &mut tx,
+        file_change_events::context(updated_by, space_id),
+        command.node_id,
+        file_change_events::NodeUpdated {
+            item_kind: &row.kind,
+            item_name: &row.name,
+            parent_node_id: row.parent_id,
+            name_changed: false,
+            sort_order_changed: false,
+            search_enabled_changed: true,
+            text_encryption_changed: false,
+            search_enabled: row.search_enabled,
+            text_encryption_enabled: None,
+        },
+    )
+    .await?;
+
+    tx.commit().await.map_err(map_sqlx_error)?;
+    row.into_node()
+}
+
+pub async fn update_text_encryption(
+    pool: &PgPool,
+    crypto: &PiiCrypto,
+    space_id: Uuid,
+    command: &UpdateTextEncryption,
+    updated_by: Uuid,
+    caps: notegate_core::limits::Limits,
+) -> Result<Node> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+    if current.kind != "text" {
+        return Err(Error::validation(
+            "text encryption applies only to text nodes",
+        ));
+    }
+
+    let current_text = sqlx::query_as::<_, TextRow>(&format!(
+        "SELECT {TEXT_COLUMNS} FROM text_objects \
+         WHERE space_id = $1 AND node_id = $2 FOR UPDATE",
+    ))
+    .bind(space_id)
+    .bind(command.node_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::internal("text node has no text object"))?;
+    let currently_encrypted = current_text.at_rest_encryption == "server";
+    if command.enabled == currently_encrypted {
+        tx.commit().await.map_err(map_sqlx_error)?;
+        return current.into_node();
+    }
+    if command.enabled {
+        if !locked.owner_tier.features().text_encryption {
+            return Err(Error::conflict(
+                "text encryption is not available for the space owner's tier",
+            ));
+        }
+        if current_text.storage_format != "plain" {
+            return Err(Error::conflict(
+                "server text encryption requires plain text storage",
+            ));
+        }
+    }
+
+    let row = sqlx::query_as::<_, NodeRow>(&format!(
+        "UPDATE nodes \
+         SET updated_by_account_id = $3, updated_at = now() \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
+    ))
+    .bind(space_id)
+    .bind(command.node_id)
+    .bind(updated_by)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_constraint_error)?
+    .ok_or_else(|| Error::not_found("node not found"))?;
+
+    rewrite_text_encryption(
+        &mut tx,
+        current_text,
+        command.enabled,
+        locked.owner_tier,
+        crypto,
+        updated_by,
+    )
+    .await?;
+
+    file_change_events::node_updated(
+        &mut tx,
+        file_change_events::context(updated_by, space_id),
+        command.node_id,
+        file_change_events::NodeUpdated {
+            item_kind: &row.kind,
+            item_name: &row.name,
+            parent_node_id: row.parent_id,
+            name_changed: false,
+            sort_order_changed: false,
+            search_enabled_changed: false,
+            text_encryption_changed: true,
+            search_enabled: row.search_enabled,
+            text_encryption_enabled: Some(command.enabled),
+        },
+    )
+    .await?;
+
+    tx.commit().await.map_err(map_sqlx_error)?;
+    row.into_node()
+}
+
+async fn rewrite_text_encryption(
+    tx: &mut Transaction<'_, Postgres>,
+    current: TextRow,
+    enabled: bool,
+    owner_tier: notegate_core::tier::UserTier,
+    crypto: &PiiCrypto,
+    updated_by: Uuid,
+) -> Result<()> {
+    let space_id = current.space_id;
+    let node_id = current.node_id;
+    let text = current.into_text(crypto)?;
+    let content = StoredContent {
+        body: WriteTextBody::Plain(text.content.ok_or_else(|| {
+            Error::conflict("server text encryption requires plain text storage")
+        })?),
+        content_sha256: text.content_sha256,
+        byte_len: text.byte_len,
+        line_count: text.line_count,
+    };
+    let stored = stored_text_parts(&content, enabled, owner_tier, crypto, space_id, node_id)?;
+
+    sqlx::query(
+        "UPDATE text_objects \
+         SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
+             at_rest_encryption = $6, content_ciphertext = $7, \
+             content_nonce = $8, content_enc_key_id = $9, content_enc_version = $10, \
+             updated_by_account_id = $11, updated_at = now() \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(space_id)
+    .bind(node_id)
+    .bind(stored.storage_format)
+    .bind(stored.content_text)
+    .bind(stored.encrypted_payload)
+    .bind(stored.at_rest_encryption)
+    .bind(stored.content_ciphertext)
+    .bind(stored.content_nonce)
+    .bind(stored.content_enc_key_id)
+    .bind(stored.content_enc_version)
+    .bind(updated_by)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
 }
 
 /// Replace `node_id`'s metadata object in place.
@@ -198,17 +323,7 @@ pub async fn replace_node_metadata(
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
     checks::lock_space(&mut tx, space_id).await?;
-    let current = sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(node_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
+    let current = lock_live_node(&mut tx, space_id, node_id).await?;
     let node_kind = current.kind.clone();
     if current.metadata == *metadata {
         tx.commit().await.map_err(map_sqlx_error)?;

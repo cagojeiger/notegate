@@ -175,7 +175,7 @@ fn stats_from_text(text: &TextObject) -> TextStats {
         content_sha256: text.content_sha256.clone(),
         byte_len: text.byte_len,
         line_count: text.line_count,
-        encryption_enabled: text.encryption_enabled,
+        storage_format: text.storage_format,
         at_rest_encryption: text.at_rest_encryption,
     }
 }

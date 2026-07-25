@@ -27,14 +27,14 @@ struct StoredTextParts<'a> {
 
 fn stored_text_parts<'a>(
     content: &'a notegate_model::files::StoredContent,
-    encryption_enabled: bool,
+    encrypt_at_rest: bool,
     owner_tier: UserTier,
     crypto: &PiiCrypto,
     space_id: Uuid,
     node_id: Uuid,
 ) -> Result<StoredTextParts<'a>> {
     match &content.body {
-        WriteTextBody::Plain(content) if encryption_enabled => {
+        WriteTextBody::Plain(content) if encrypt_at_rest => {
             if !owner_tier.features().text_encryption {
                 return Err(Error::conflict(
                     "text encryption is not available for the space owner's tier",
@@ -66,7 +66,7 @@ fn stored_text_parts<'a>(
             content_enc_key_id: None,
             content_enc_version: None,
         }),
-        WriteTextBody::Encrypted(_) if encryption_enabled => Err(Error::conflict(
+        WriteTextBody::Encrypted(_) if encrypt_at_rest => Err(Error::conflict(
             "server text encryption requires plain text storage",
         )),
         WriteTextBody::Encrypted(payload) => Ok(StoredTextParts {

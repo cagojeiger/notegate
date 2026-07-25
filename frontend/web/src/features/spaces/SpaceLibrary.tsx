@@ -1,11 +1,11 @@
 import { Bot, FolderOpen, LockKeyhole, Pin, Search } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Badge, Button, Card, MetaRow, Modal, SectionHeader } from "../../shared/ui";
+import { Button, Card, MetaRow, Modal, SectionHeader, SettingToggle } from "../../shared/ui";
 import { useUsageQuery } from "../settings/useUsageQueries";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { useReorderSpacesMutation, useUpdateSpaceMutation } from "./useSpaceQueries";
@@ -66,7 +66,7 @@ export function SpaceLibrary({
     <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
-          <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-3">
+          <div className="flex h-full w-full items-center justify-between gap-3">
             <h1 className="text-xl font-semibold">
               Spaces <span className="font-normal text-muted">{spaces.length}</span>
             </h1>
@@ -75,7 +75,7 @@ export function SpaceLibrary({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7 lg:px-10">
-          <div className="mx-auto max-w-7xl">
+          <div className="w-full">
             {spaces.length === 0 ? (
               <Card className="grid min-h-56 place-items-center border-dashed text-center">
                 <div>
@@ -207,7 +207,11 @@ function SpaceInspector({
                 label="Text encryption"
                 badge={!space?.features.text_encryption ? "Max" : undefined}
                 checked={space?.default_text_encryption_enabled ?? false}
-                disabled={!space || pending || !space.features.text_encryption}
+                disabled={
+                  !space
+                  || pending
+                  || (!space.features.text_encryption && !space.default_text_encryption_enabled)
+                }
                 onChange={(checked) => onUpdate({ default_text_encryption_enabled: checked })}
               />
             </div>
@@ -225,51 +229,6 @@ function SpaceInspector({
           ) : null}
         </div>
       </div>
-    </div>
-  );
-}
-
-function SettingToggle({
-  icon,
-  label,
-  badge,
-  checked,
-  disabled,
-  onChange
-}: {
-  icon: ReactNode;
-  label: string;
-  badge?: string;
-  checked: boolean;
-  disabled: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <div className="flex min-h-8 items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="grid size-6 shrink-0 place-items-center text-muted" aria-hidden="true">
-          {icon}
-        </span>
-        <span className="text-sm font-medium text-text">{label}</span>
-        {badge ? <Badge>{badge}</Badge> : null}
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-label={label}
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className={`relative h-6 w-10 shrink-0 rounded-full outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-40 ${
-          checked ? "bg-primary" : "bg-panel-strong"
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 size-5 rounded-full bg-white shadow-sm transition ${
-            checked ? "left-[18px]" : "left-0.5"
-          }`}
-        />
-      </button>
     </div>
   );
 }

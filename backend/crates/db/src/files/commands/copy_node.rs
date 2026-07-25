@@ -10,7 +10,7 @@ use notegate_core::limits::{self, Limits};
 use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::files::{CopyCounts, StoredContent, WriteTextBody};
-use notegate_model::{Node, TextStorageFormat};
+use notegate_model::{Node, TextAtRestEncryption, TextStorageFormat};
 use serde_json::Value;
 use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
@@ -308,7 +308,7 @@ async fn copy_text(
     };
     let stored = stored_text_parts(
         &content,
-        source.encryption_enabled,
+        source.at_rest_encryption == TextAtRestEncryption::Server,
         owner_tier,
         crypto,
         space_id,
@@ -318,9 +318,9 @@ async fn copy_text(
     sqlx::query(&format!(
             "INSERT INTO text_objects \
              (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
-              media_type, encoding, encryption_enabled, at_rest_encryption, content_ciphertext, content_nonce, \
+              media_type, encoding, at_rest_encryption, content_ciphertext, content_nonce, \
               content_enc_key_id, content_enc_version, created_by_account_id, updated_by_account_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16) \
              RETURNING {TEXT_COLUMNS}"
         ))
         .bind(new_node_id)
@@ -333,7 +333,6 @@ async fn copy_text(
         .bind(source.line_count)
         .bind(source.media_type)
         .bind(source.encoding)
-        .bind(source.encryption_enabled)
         .bind(stored.at_rest_encryption)
         .bind(stored.content_ciphertext)
         .bind(stored.content_nonce)

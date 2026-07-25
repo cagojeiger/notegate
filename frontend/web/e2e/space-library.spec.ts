@@ -41,6 +41,11 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[1].y).toBe(cardBoxes[2].y);
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
 
+  const archiveCard = grid.getByRole("listitem").filter({ hasText: "Archive" });
+  await archiveCard.getByTitle("Search default on").click();
+  await expect(page.getByRole("button", { name: "Inspect Archive" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Inspect Daily" }).click();
+
   const inspectorToggle = page.getByRole("button", { name: "Toggle space inspector" });
   await expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
   await inspectorToggle.click();
@@ -93,6 +98,21 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
     .filter((target) => target.width > 0 && target.height > 0)
     .filter((target) => target.width < 24 || target.height < 24));
   expect(undersizedTargets).toEqual([]);
+});
+
+test("Space Library expands the card grid when the desktop inspector closes", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await mockSpaceLibraryApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  const grid = page.getByRole("list", { name: "All spaces" });
+  const widthWithInspector = await grid.evaluate((element) => element.getBoundingClientRect().width);
+  await page.getByRole("button", { name: "Toggle space inspector" }).click();
+
+  await expect.poll(
+    async () => grid.evaluate((element) => element.getBoundingClientRect().width)
+  ).toBeGreaterThan(widthWithInspector + 250);
 });
 
 test("opening an unpinned Space does not add it to navigation", async ({ page }) => {

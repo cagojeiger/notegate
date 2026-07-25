@@ -146,6 +146,7 @@ function fileNode(index: number): RestNode {
     path: `/${name}`,
     sort_order: index,
     metadata: {},
+    search_enabled: true,
     has_children: false,
     byte_len: index,
     media_type: "application/octet-stream",

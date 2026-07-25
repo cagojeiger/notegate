@@ -11,6 +11,11 @@ import type {
 
 export const MAX_BATCH_CHILDREN_PARENTS = 16;
 
+export type UpdateNodeInput = {
+  name?: string;
+  sort_order?: number;
+};
+
 export function getNode(client: ApiClient, spaceId: string, nodeId: string): Promise<RestNode> {
   return client.get<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`);
 }
@@ -100,8 +105,25 @@ export function createNode(
   return client.post<RestNode>(`/api/v1/spaces/${spaceId}/nodes`, input);
 }
 
-export function updateNode(client: ApiClient, spaceId: string, nodeId: string, input: { name?: string; sort_order?: number }): Promise<RestNode> {
+export function updateNode(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  input: UpdateNodeInput
+): Promise<RestNode> {
   return client.patch<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`, input);
+}
+
+export function updateNodeSearchPolicy(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  enabled: boolean
+): Promise<RestNode> {
+  return client.put<RestNode>(
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/search-policy`,
+    { enabled }
+  );
 }
 
 export function moveNode(

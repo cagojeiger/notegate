@@ -31,6 +31,7 @@ const node: RestNode = {
   path: "/large.md",
   sort_order: 0,
   metadata: {},
+  search_enabled: true,
   has_children: false,
   created_by: { id: "user-1", kind: "user", display_name: "User" },
   updated_by: { id: "user-1", kind: "user", display_name: "User" },

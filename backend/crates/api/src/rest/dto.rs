@@ -159,6 +159,7 @@ mod tests {
     )]
     use notegate_model::{
         AccountKind, AuditEvent, FileEncryptionMode, Node, NodeKind, TextAtRestEncryption,
+        TextStorageFormat,
     };
     use notegate_service::files::{FileChangeEvent, FileStats, NodeView, TextStats};
     use serde_json::json;
@@ -203,7 +204,7 @@ mod tests {
             content_sha256: "text-sha".to_owned(),
             byte_len: 42,
             line_count: 3,
-            encryption_enabled: true,
+            storage_format: TextStorageFormat::Plain,
             at_rest_encryption: TextAtRestEncryption::Server,
         }
     }
@@ -230,7 +231,7 @@ mod tests {
         assert!(out.content_sha256.is_none());
         assert!(out.byte_len.is_none());
         assert!(out.line_count.is_none());
-        assert!(out.text_encryption_enabled.is_none());
+        assert!(out.text_storage_format.is_none());
         assert!(out.text_at_rest_encryption.is_none());
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
@@ -250,7 +251,7 @@ mod tests {
         assert_eq!(out.content_sha256, Some("text-sha".to_owned()));
         assert_eq!(out.byte_len, Some(42));
         assert_eq!(out.line_count, Some(3));
-        assert_eq!(out.text_encryption_enabled, Some(true));
+        assert_eq!(out.text_storage_format.as_deref(), Some("plain"));
         assert_eq!(out.text_at_rest_encryption, Some("server".to_owned()));
         assert!(out.media_type.is_none());
         assert!(out.original_filename.is_none());
@@ -270,7 +271,7 @@ mod tests {
         assert!(out.content_sha256.is_none());
         assert_eq!(out.byte_len, Some(1024));
         assert!(out.line_count.is_none());
-        assert!(out.text_encryption_enabled.is_none());
+        assert!(out.text_storage_format.is_none());
         assert!(out.text_at_rest_encryption.is_none());
         assert_eq!(out.media_type, Some("image/png".to_owned()));
         assert_eq!(out.detected_media_type, Some("image/png".to_owned()));

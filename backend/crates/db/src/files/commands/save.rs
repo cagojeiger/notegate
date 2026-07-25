@@ -84,10 +84,9 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         ));
     }
 
+    let encrypt_at_rest = current_text.at_rest_encryption == "server";
     let target_at_rest = match &content.body {
-        notegate_model::files::WriteTextBody::Plain(_) if current_text.encryption_enabled => {
-            "server"
-        }
+        notegate_model::files::WriteTextBody::Plain(_) if encrypt_at_rest => "server",
         _ => "none",
     };
     let content_changed = current_text.storage_format
@@ -125,7 +124,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
 
     let stored = stored_text_parts(
         content,
-        current_text.encryption_enabled,
+        encrypt_at_rest,
         locked.owner_tier,
         crypto,
         space_id,

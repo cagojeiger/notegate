@@ -33,6 +33,7 @@ function renderActions(onSignOut = vi.fn()) {
       activeNode: null,
       canCreateSpace: false,
       canWriteActiveSpace: false,
+      canManageActiveSpace: false,
       primaryWidth: 280,
       onSignOut
     }))

@@ -1,10 +1,36 @@
+import { LockKeyhole, Search } from "lucide-react";
+
 import type { RestNode } from "../api/types";
-import { Button, MetaRow, SectionHeader } from "../shared/ui";
+import { Button, MetaRow, SectionHeader, SettingToggle } from "../shared/ui";
 
 const EMPTY = "—";
 
-export function AuxiliarySidebar({ activeNode, canWriteActiveSpace, onReplaceMetadata }: { activeNode: RestNode | null; canWriteActiveSpace: boolean; onReplaceMetadata: () => void }) {
+type AuxiliarySidebarProps = {
+  activeNode: RestNode | null;
+  canWriteActiveSpace: boolean;
+  canManageActiveSpace: boolean;
+  textEncryptionAvailable: boolean;
+  searchPolicyPending: boolean;
+  textEncryptionPending: boolean;
+  onReplaceMetadata: () => void;
+  onSearchEnabledChange: (enabled: boolean) => void;
+  onTextEncryptionEnabledChange: (enabled: boolean) => void;
+};
+
+export function AuxiliarySidebar({
+  activeNode,
+  canWriteActiveSpace,
+  canManageActiveSpace,
+  textEncryptionAvailable,
+  searchPolicyPending,
+  textEncryptionPending,
+  onReplaceMetadata,
+  onSearchEnabledChange,
+  onTextEncryptionEnabledChange
+}: AuxiliarySidebarProps) {
   const metadata = activeNode?.metadata ?? {};
+  const clientEncrypted = activeNode?.text_storage_format === "encrypted";
+  const serverEncrypted = activeNode?.text_at_rest_encryption === "server";
 
   return (
     <aside className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
@@ -28,6 +54,41 @@ export function AuxiliarySidebar({ activeNode, canWriteActiveSpace, onReplaceMet
             <SectionHeader title="Metadata" />
             <pre className="whitespace-pre-wrap font-mono text-xs text-muted">{JSON.stringify(metadata, null, 2)}</pre>
             <Button size="sm" secondary className="mt-3" onClick={onReplaceMetadata} disabled={!activeNode || !canWriteActiveSpace}>Edit metadata</Button>
+          </section>
+          <section className="p-4">
+            <SectionHeader title="Node settings" />
+            {activeNode ? (
+              <div className="space-y-3">
+                <SettingToggle
+                  icon={<Search size={16} />}
+                  label="Include in search"
+                  checked={activeNode.search_enabled}
+                  disabled={
+                    !canManageActiveSpace
+                    || activeNode.parent_id === null
+                    || searchPolicyPending
+                  }
+                  onChange={onSearchEnabledChange}
+                />
+                {activeNode.kind === "text" ? (
+                  <SettingToggle
+                    icon={<LockKeyhole size={16} />}
+                    label="Stored text encryption"
+                    badge={clientEncrypted ? "Client" : !textEncryptionAvailable ? "Max" : undefined}
+                    checked={clientEncrypted || serverEncrypted}
+                    disabled={
+                      !canManageActiveSpace
+                      || clientEncrypted
+                      || textEncryptionPending
+                      || (!textEncryptionAvailable && !serverEncrypted)
+                    }
+                    onChange={onTextEncryptionEnabledChange}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-xs text-muted">Select a node to manage its settings.</p>
+            )}
           </section>
           <section className="p-4">
             <SectionHeader title="Policy" />

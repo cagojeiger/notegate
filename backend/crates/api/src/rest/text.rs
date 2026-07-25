@@ -1,9 +1,11 @@
 //! Text category: read / replace / patch UTF-8 text content.
 //!
 //! `GET /text/{node_id}` (bounded range + conditional read), `PUT` to
-//! replace the whole text, and `PATCH` to apply exact targeted edits. All
+//! replace the whole text, `PATCH` to apply exact targeted edits, and
+//! `PUT /text/{node_id}/encryption` to change server-managed encryption. All
 //! delegate to the files service (no live permission ⇒ 404, insufficient
-//! permission ⇒ 403; write and patch require write permission).
+//! permission ⇒ 403; write and patch require write permission, while encryption
+//! policy requires the Space owner User).
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::routing::get;
@@ -15,19 +17,24 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::rest::dto::{AccountRef, NodeRef};
+use crate::rest::dto::{AccountRef, NodeOut, NodeRef, attribution_ids};
 use crate::state::AppState;
 
 use notegate_service::files::{
     Edit as ServiceEdit, NodeView, PatchMode, PatchResult, PatchText, ReadResult, ReadText,
-    ReadTextBody, TextView, WriteTarget, WriteText, WriteTextBody,
+    ReadTextBody, TextView, UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route(
-        "/v1/spaces/{space_id}/text/{node_id}",
-        get(read).put(replace).patch(patch),
-    )
+    Router::new()
+        .route(
+            "/v1/spaces/{space_id}/text/{node_id}",
+            get(read).put(replace).patch(patch),
+        )
+        .route(
+            "/v1/spaces/{space_id}/text/{node_id}/encryption",
+            axum::routing::put(update_encryption),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +192,46 @@ pub(crate) async fn replace(
         .await?;
     let updated_by = self_updated_by(&state, &view.node).await?;
     Ok(Json(text_response(&view, updated_by)))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UpdateEncryptionBody {
+    enabled: bool,
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/spaces/{space_id}/text/{node_id}/encryption",
+    tag = "text",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    request_body = UpdateEncryptionBody,
+    responses((status = 200, description = "Update text encryption", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn update_encryption(
+    State(state): State<AppState>,
+    Extension(caller): Extension<notegate_model::Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateEncryptionBody>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .update_text_encryption(
+            caller.account.kind,
+            caller.account_id(),
+            space_id,
+            UpdateTextEncryption {
+                node_id,
+                enabled: body.enabled,
+            },
+        )
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

@@ -1,6 +1,6 @@
 use notegate_core::limits;
 use notegate_db::{MetadataMutationKind, TextMutationKind};
-use notegate_model::NodeKind;
+use notegate_model::{AccountKind, NodeKind};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -11,8 +11,8 @@ use crate::files::validation;
 use crate::files::{
     AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
     DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
-    PendingObjectUpload, StoredContent, TextView, UpdateNode, WriteTarget, WriteText,
-    WriteTextBody, content,
+    PendingObjectUpload, StoredContent, TextView, UpdateNode, UpdateNodeSearchPolicy,
+    UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
 };
 
 use super::view::{file_view_at_path, text_view_at_path};
@@ -751,10 +751,7 @@ impl FilesService {
         self.node_view(space_id, moved).await
     }
 
-    /// Update a node's in-place metadata: rename and/or reorder (`PATCH`).
-    /// Requires write permission. The node keeps its parent. Renaming the root is
-    /// rejected; a rename validates the new basename and sibling-name uniqueness.
-    /// At least one of `new_name`/`new_sort_order` must be present.
+    /// Rename or reorder a node in place.
     pub async fn update_node(
         &self,
         caller_account_id: Uuid,
@@ -764,28 +761,13 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Mv)
             .await?;
 
-        if command.name.is_none()
-            && command.sort_order.is_none()
-            && command.search_enabled.is_none()
-            && command.text_encryption_enabled.is_none()
-        {
+        if command.name.is_none() && command.sort_order.is_none() {
             return Err(ServiceError::InvalidInput(
                 "provide at least one node field to update".to_owned(),
             ));
         }
 
         let node = self.load_node(space_id, command.node_id).await?;
-        if command.search_enabled.is_some() && node.parent_id.is_none() {
-            return Err(ServiceError::Conflict(
-                "search policy cannot be changed on the root node".to_owned(),
-            ));
-        }
-        if command.text_encryption_enabled.is_some() && node.kind != NodeKind::Text {
-            return Err(ServiceError::InvalidInput(
-                "text_encryption_enabled applies only to text nodes".to_owned(),
-            ));
-        }
-
         if let Some(ref name) = command.name {
             if node.parent_id.is_none() {
                 return Err(ServiceError::Conflict(
@@ -813,6 +795,38 @@ impl FilesService {
         let updated = self
             .store
             .update_node(space_id, &command, caller_account_id)
+            .await?;
+        self.node_view(space_id, updated).await
+    }
+
+    pub async fn update_node_search_policy(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: UpdateNodeSearchPolicy,
+    ) -> ServiceResult<NodeView> {
+        self.authorize_space_owner_user(caller_kind, caller_account_id, space_id)
+            .await?;
+        let updated = self
+            .store
+            .update_node_search_policy(space_id, &command, caller_account_id)
+            .await?;
+        self.node_view(space_id, updated).await
+    }
+
+    pub async fn update_text_encryption(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        command: UpdateTextEncryption,
+    ) -> ServiceResult<NodeView> {
+        self.authorize_space_owner_user(caller_kind, caller_account_id, space_id)
+            .await?;
+        let updated = self
+            .store
+            .update_text_encryption(space_id, &command, caller_account_id)
             .await?;
         self.node_view(space_id, updated).await
     }

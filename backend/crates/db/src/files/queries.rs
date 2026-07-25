@@ -6,7 +6,7 @@ pub mod text {
     use notegate_core::security::PiiCrypto;
     use notegate_core::{Error, Result};
     use notegate_model::files::TextStats;
-    use notegate_model::{Node, TextAtRestEncryption, TextObject};
+    use notegate_model::{Node, TextAtRestEncryption, TextObject, TextStorageFormat};
     use sqlx::PgPool;
     use std::collections::HashMap;
     use uuid::Uuid;
@@ -20,8 +20,8 @@ pub mod text {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<TextStats>> {
-        let row: Option<(String, i64, i32, bool, String)> = sqlx::query_as(
-            "SELECT d.content_sha256, d.byte_len, d.line_count, d.encryption_enabled, d.at_rest_encryption \
+        let row: Option<(String, i64, i32, String, String)> = sqlx::query_as(
+            "SELECT d.content_sha256, d.byte_len, d.line_count, d.storage_format, d.at_rest_encryption \
              FROM text_objects d \
          JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
          WHERE d.space_id = $1 AND d.node_id = $2 AND n.deleted_at IS NULL",
@@ -33,16 +33,14 @@ pub mod text {
         .map_err(map_sqlx_error)?;
 
         row.map(
-            |(content_sha256, byte_len, line_count, encryption_enabled, at_rest)| {
-                Ok(TextStats {
+            |(content_sha256, byte_len, line_count, storage_format, at_rest)| {
+                parse_text_stats(
                     content_sha256,
                     byte_len,
                     line_count,
-                    encryption_enabled,
-                    at_rest_encryption: TextAtRestEncryption::parse(&at_rest).ok_or_else(|| {
-                        Error::internal(format!("unknown text at-rest encryption: {at_rest}"))
-                    })?,
-                })
+                    &storage_format,
+                    &at_rest,
+                )
             },
         )
         .transpose()
@@ -58,9 +56,9 @@ pub mod text {
             return Ok(HashMap::new());
         }
 
-        let rows: Vec<(Uuid, String, i64, i32, bool, String)> = sqlx::query_as(
+        let rows: Vec<(Uuid, String, i64, i32, String, String)> = sqlx::query_as(
             "SELECT d.node_id, d.content_sha256, d.byte_len, d.line_count, \
-                    d.encryption_enabled, d.at_rest_encryption \
+                    d.storage_format, d.at_rest_encryption \
              FROM text_objects d \
              JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
              WHERE d.space_id = $1 \
@@ -76,26 +74,44 @@ pub mod text {
 
         rows.into_iter()
             .map(
-                |(node_id, content_sha256, byte_len, line_count, encryption_enabled, at_rest)| {
+                |(node_id, content_sha256, byte_len, line_count, storage_format, at_rest)| {
                     Ok((
                         node_id,
-                        TextStats {
+                        parse_text_stats(
                             content_sha256,
                             byte_len,
                             line_count,
-                            encryption_enabled,
-                            at_rest_encryption: TextAtRestEncryption::parse(&at_rest).ok_or_else(
-                                || {
-                                    Error::internal(format!(
-                                        "unknown text at-rest encryption: {at_rest}"
-                                    ))
-                                },
-                            )?,
-                        },
+                            &storage_format,
+                            &at_rest,
+                        )?,
                     ))
                 },
             )
             .collect::<Result<HashMap<_, _>>>()
+    }
+
+    fn parse_text_stats(
+        content_sha256: String,
+        byte_len: i64,
+        line_count: i32,
+        storage_format: &str,
+        at_rest_encryption: &str,
+    ) -> Result<TextStats> {
+        Ok(TextStats {
+            content_sha256,
+            byte_len,
+            line_count,
+            storage_format: TextStorageFormat::parse(storage_format).ok_or_else(|| {
+                Error::internal(format!("unknown text storage format: {storage_format}"))
+            })?,
+            at_rest_encryption: TextAtRestEncryption::parse(at_rest_encryption).ok_or_else(
+                || {
+                    Error::internal(format!(
+                        "unknown text at-rest encryption: {at_rest_encryption}"
+                    ))
+                },
+            )?,
+        })
     }
 
     /// Load a live text (its node + content) by node id, or `None` when the node
@@ -1109,7 +1125,6 @@ pub mod search {
         text_media_type: String,
         text_encoding: String,
         text_storage_format: String,
-        text_encryption_enabled: bool,
         text_at_rest_encryption: String,
         text_content_ciphertext: Option<Vec<u8>>,
         text_content_nonce: Option<Vec<u8>>,
@@ -1152,7 +1167,6 @@ pub mod search {
                 media_type: self.text_media_type,
                 encoding: self.text_encoding,
                 storage_format: self.text_storage_format,
-                encryption_enabled: self.text_encryption_enabled,
                 at_rest_encryption: self.text_at_rest_encryption,
                 content_ciphertext: self.text_content_ciphertext,
                 content_nonce: self.text_content_nonce,
@@ -1357,7 +1371,6 @@ pub mod search {
                         t.media_type AS text_media_type, \
                         t.encoding AS text_encoding, \
                         t.storage_format AS text_storage_format, \
-                        t.encryption_enabled AS text_encryption_enabled, \
                         t.at_rest_encryption AS text_at_rest_encryption, \
                         t.content_ciphertext AS text_content_ciphertext, \
                         t.content_nonce AS text_content_nonce, \

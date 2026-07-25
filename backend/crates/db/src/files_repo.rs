@@ -613,8 +613,6 @@ impl FilesRepo {
                 node_id,
                 name: new_name.map(str::to_owned),
                 sort_order: new_sort_order,
-                search_enabled: None,
-                text_encryption_enabled: None,
             },
             updated_by,
         )
@@ -627,8 +625,27 @@ impl FilesRepo {
         command: &notegate_model::files::UpdateNode,
         updated_by: Uuid,
     ) -> Result<Node> {
-        commands::update::update_node_metadata(
+        commands::update::update_node(&self.pool, space_id, command, updated_by).await
+    }
+
+    pub async fn update_node_search_policy(
+        &self,
+        space_id: Uuid,
+        command: &notegate_model::files::UpdateNodeSearchPolicy,
+        updated_by: Uuid,
+    ) -> Result<Node> {
+        commands::update::update_node_search_policy(&self.pool, space_id, command, updated_by).await
+    }
+
+    pub async fn update_text_encryption(
+        &self,
+        space_id: Uuid,
+        command: &notegate_model::files::UpdateTextEncryption,
+        updated_by: Uuid,
+    ) -> Result<Node> {
+        commands::update::update_text_encryption(
             &self.pool,
+            &self.crypto,
             space_id,
             command,
             updated_by,

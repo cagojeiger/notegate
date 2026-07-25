@@ -104,6 +104,7 @@ function textNode(): RestNode {
     path: "/note.md",
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: false,
     content_sha256: "sha-1",
     created_by: { id: "user-1", kind: "user", display_name: "User" },

@@ -371,11 +371,17 @@ Expand all / Collapse all
 - created/updated attribution.
 - byte/line metrics.
 - metadata JSON.
+- 현재 node의 검색 포함 여부.
+- Text의 현재 서버 관리 암호화 상태.
 - metadata privacy note.
 
 규칙:
 
 - 선택 node가 없어도 빈 Inspector를 렌더링한다.
+- 검색과 Text 암호화 설정은 서로 독립적으로 변경한다.
+- 검색 포함 여부는 `PUT /nodes/{node_id}/search-policy`로 변경한다.
+- Text 암호화는 `PUT /text/{node_id}/encryption`으로 변경한다.
+- Space의 기본값은 새 node 생성에만 적용하고 Inspector는 선택한 node의 현재 상태를 즉시 변경한다.
 - metadata는 encrypted content가 아니다.
 - metadata 수정은 명시 액션으로만 한다.
 

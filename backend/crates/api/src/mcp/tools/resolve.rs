@@ -281,8 +281,8 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         object.insert("byte_len".to_owned(), json!(text.byte_len));
         object.insert("line_count".to_owned(), json!(text.line_count));
         object.insert(
-            "text_encryption_enabled".to_owned(),
-            json!(text.encryption_enabled),
+            "text_storage_format".to_owned(),
+            json!(text.storage_format.as_str()),
         );
         object.insert(
             "text_at_rest_encryption".to_owned(),

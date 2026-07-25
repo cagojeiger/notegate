@@ -174,8 +174,18 @@ pub struct UpdateNode {
     pub node_id: Uuid,
     pub name: Option<String>,
     pub sort_order: Option<i32>,
-    pub search_enabled: Option<bool>,
-    pub text_encryption_enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateNodeSearchPolicy {
+    pub node_id: Uuid,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateTextEncryption {
+    pub node_id: Uuid,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,7 +284,7 @@ pub struct TextStats {
     pub content_sha256: String,
     pub byte_len: i64,
     pub line_count: i32,
-    pub encryption_enabled: bool,
+    pub storage_format: TextStorageFormat,
     pub at_rest_encryption: TextAtRestEncryption,
 }
 

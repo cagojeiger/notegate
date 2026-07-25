@@ -159,12 +159,19 @@ function SortableSpaceCard({
       <Card
         padding="none"
         className={[
-          "h-full transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/45",
+          "h-full cursor-pointer transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/45",
           selected
             ? "relative z-10 bg-[var(--ng-selection)] outline outline-1 -outline-offset-1 outline-[var(--ng-active-border)]"
             : "hover:border-border-strong",
           isDragging ? "shadow-[var(--ng-focus-shadow)]" : ""
         ].join(" ")}
+        onClick={(event) => {
+          if (
+            event.target instanceof Element
+            && event.target.closest("button, [data-space-drag-handle]")
+          ) return;
+          onSelect();
+        }}
       >
         <div className="flex items-center gap-2 px-3 pt-3">
           <span
@@ -179,6 +186,7 @@ function SortableSpaceCard({
             tabIndex={-1}
             aria-hidden="true"
             data-testid={`drag-handle-${space.id}`}
+            data-space-drag-handle
           >
             <GripVertical size={16} />
           </span>

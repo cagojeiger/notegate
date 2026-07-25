@@ -1,5 +1,5 @@
 import type { ApiClient } from "./client";
-import type { ReadTextResponse, TextResponse } from "./types";
+import type { ReadTextResponse, RestNode, TextResponse } from "./types";
 
 const TEXT_READ_MAX_LINES = 5_000;
 const TEXT_READ_MAX_BYTES = 1_048_576;
@@ -14,4 +14,16 @@ export function replaceText(client: ApiClient, spaceId: string, nodeId: string, 
     content,
     expected_sha256: expectedSha256
   });
+}
+
+export function updateTextEncryption(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  enabled: boolean
+): Promise<RestNode> {
+  return client.put<RestNode>(
+    `/api/v1/spaces/${spaceId}/text/${nodeId}/encryption`,
+    { enabled }
+  );
 }
