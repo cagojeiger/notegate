@@ -1358,7 +1358,10 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
         return Ok(());
     };
     let state = state_with_s3(&db, s3);
-    let (caller, _space_id, _root_id) = caller_and_space(&state).await?;
+    let (caller, space_id, _root_id) = caller_and_space(&state).await?;
+    SpaceRepo::new(db.pool.clone())
+        .update_space(space_id, caller.account_id(), None, None, Some(true))
+        .await?;
     let (mut request_parts, _) = Request::new(()).into_parts();
     request_parts.extensions.insert(caller);
 
@@ -1546,6 +1549,9 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     };
     let state = state_with_s3(&db, s3);
     let (caller, space_id, _root_id) = caller_and_space(&state).await?;
+    SpaceRepo::new(db.pool.clone())
+        .update_space(space_id, caller.account_id(), None, None, Some(true))
+        .await?;
     let (mut request_parts, _) = Request::new(()).into_parts();
     request_parts.extensions.insert(caller.clone());
     let byte_len = SINGLE_PUT_MAX_BYTES as i64 + 1;
