@@ -114,6 +114,9 @@ function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) {
     return { nodes: [imageNode], page: pageInfo(1) };
   }
+  if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {
+    return { changes: [], next_after_id: 0, has_more: false, resync_required: false };
+  }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${imageNode.id}`) {
     return imageNode;
   }
