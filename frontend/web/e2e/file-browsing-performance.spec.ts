@@ -267,6 +267,7 @@ function node(
     path,
     sort_order: 0,
     metadata: {},
+    search_enabled: true,
     has_children: kind === "folder",
     content_sha256: kind === "text" ? `sha-${id}` : undefined,
     created_by: me.account,
