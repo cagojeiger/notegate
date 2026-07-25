@@ -37,10 +37,27 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[1].y).toBe(cardBoxes[2].y);
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
 
+  const inspectorToggle = page.getByRole("button", { name: "Toggle space inspector" });
+  await expect(inspectorToggle).toHaveAttribute("aria-pressed", "true");
+  await inspectorToggle.click();
+  await expect(page.getByText("Space Inspector", { exact: true })).toBeHidden();
+  await expect.poll(async () => {
+    const boxes = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().y));
+    return new Set(boxes).size;
+  }).toBe(1);
+  await inspectorToggle.click();
+  await expect(page.getByText("Space Inspector", { exact: true })).toBeVisible();
+
   const orderBeforePin = await cardNames(grid);
-  await page.getByRole("button", { name: "Make Private Journal available in user MCP" }).click();
-  await expect(page.getByRole("button", { name: "Hide Private Journal from user MCP" })).toBeVisible();
+  await page.getByRole("button", { name: "Pin Private Journal to navigation" }).click();
+  await expect(page.getByRole("button", { name: "Unpin Private Journal from navigation" })).toBeVisible();
   expect(await cardNames(grid)).toEqual(orderBeforePin);
+
+  await page.getByRole("button", { name: "Inspect Private Journal" }).click();
+  await expect(page.getByRole("button", { name: "Inspect Private Journal" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Inspect Daily" })).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("switch", { name: "User MCP access" }).click();
+  await expect(page.getByTitle("User MCP access on")).toHaveCount(3);
 
   const moveDailyLater = page.getByRole("button", { name: "Move Daily later" });
   await expect(moveDailyLater).toBeEnabled();
@@ -60,7 +77,7 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await page.mouse.up();
   await expect.poll(() => cardNames(grid)).toEqual(["Research", "Archive", "Daily", "Private Journal"]);
 
-  const undersizedTargets = await grid.locator("button").evaluateAll((buttons) => buttons
+  const undersizedTargets = await page.locator("button").evaluateAll((buttons) => buttons
     .filter((button) => {
       const style = window.getComputedStyle(button);
       return style.visibility !== "hidden" && style.display !== "none";
@@ -69,14 +86,31 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
       const box = button.getBoundingClientRect();
       return { name: button.getAttribute("aria-label") ?? button.textContent?.trim(), width: box.width, height: box.height };
     })
+    .filter((target) => target.width > 0 && target.height > 0)
     .filter((target) => target.width < 24 || target.height < 24));
   expect(undersizedTargets).toEqual([]);
 });
 
+test("opening an unpinned Space does not add it to navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockSpaceLibraryApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  const privateCard = page
+    .getByRole("list", { name: "All spaces" })
+    .getByRole("listitem")
+    .filter({ hasText: "Private Journal" });
+  await privateCard.getByRole("button", { name: "Open" }).click();
+
+  await expect(page.getByText("/ Private Journal", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Private Journal" })).toHaveCount(0);
+});
+
 for (const viewport of [
-  { name: "tablet", width: 900, height: 1024, columns: 2 },
-  { name: "mobile", width: 390, height: 844, columns: 1 },
-  { name: "narrow mobile", width: 320, height: 800, columns: 1 }
+  { name: "tablet", width: 900, height: 1024, columns: 1, mobile: false },
+  { name: "mobile", width: 390, height: 844, columns: 1, mobile: true },
+  { name: "narrow mobile", width: 320, height: 800, columns: 1, mobile: true }
 ]) {
   test(`Space Library reflows to ${viewport.columns} column on ${viewport.name}`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -96,7 +130,13 @@ for (const viewport of [
       expect(boxes[2].y).toBeGreaterThan(boxes[0].y);
     } else {
       expect(boxes[1].y).toBeGreaterThan(boxes[0].y);
-      await expect(page.getByText("Space Inspector", { exact: true }).first()).toBeVisible();
+      if (viewport.mobile) {
+        await expect(page.getByText("Space Inspector", { exact: true })).toBeHidden();
+        await page.getByRole("button", { name: "Inspect Daily" }).click();
+        await expect(page.getByRole("dialog", { name: "Space Inspector" })).toBeVisible();
+      } else {
+        await expect(page.getByText("Space Inspector", { exact: true })).toBeVisible();
+      }
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
     await expectNoAccessibilityViolations(page);
@@ -143,26 +183,26 @@ async function mockSpaceLibraryApi(page: Page) {
     const spaceMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)$/);
     if (spaceMatch && request.method() === "PATCH") {
       patchCount += 1;
-      const input = request.postDataJSON() as { pinned?: boolean; sort_order?: number };
+      const input = request.postDataJSON() as Partial<Space>;
       const index = spaces.findIndex((item) => item.id === spaceMatch[1]);
       spaces[index] = { ...spaces[index], ...input, updated_at: "2026-07-25T01:00:00Z" };
       return respond(route, spaces[index]);
     }
-    const active = spaces[0];
-    if (url.pathname === `/api/v1/spaces/${active.id}/nodes/${active.root_node_id}/children`) {
+    const childrenMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)\/nodes\/([^/]+)\/children$/);
+    if (childrenMatch) {
       return respond(route, {
-        parent: { id: active.root_node_id, path: "/" },
+        parent: { id: childrenMatch[2], path: "/" },
         children: [],
         page: { limit: 100, returned: 0, has_more: false, next_cursor: null }
       });
     }
-    if (url.pathname === `/api/v1/spaces/${active.id}/nodes`) {
+    if (/^\/api\/v1\/spaces\/[^/]+\/nodes$/.test(url.pathname)) {
       return respond(route, {
         nodes: [],
         page: { limit: 50, returned: 0, has_more: false, next_cursor: null }
       });
     }
-    if (url.pathname === `/api/v1/spaces/${active.id}/file-change-sync`) {
+    if (/^\/api\/v1\/spaces\/[^/]+\/file-change-sync$/.test(url.pathname)) {
       return respond(route, { changes: [], next_after_id: 0, has_more: false, resync_required: false });
     }
     throw new Error(`Unhandled API request: ${request.method()} ${url.pathname}${url.search}`);
@@ -182,12 +222,16 @@ async function cardNames(grid: ReturnType<Page["getByRole"]>) {
   }));
 }
 
-function space(id: string, name: string, sortOrder: number, pinned: boolean): Space {
+function space(id: string, name: string, sortOrder: number, navigationPinned: boolean): Space {
   return {
     id,
     name,
     sort_order: sortOrder,
-    pinned,
+    navigation_pinned: navigationPinned,
+    user_mcp_enabled: navigationPinned,
+    default_search_enabled: true,
+    default_text_encryption_enabled: false,
+    features: { text_encryption: true },
     permission: "write",
     root_node_id: `${id}-root`,
     created_at: "2026-07-01T00:00:00Z",

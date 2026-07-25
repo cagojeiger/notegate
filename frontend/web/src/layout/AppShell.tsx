@@ -42,7 +42,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
   const railSpaces = me.account.kind === "user"
-    ? workbench.spaces.filter((space) => space.pinned || space.id === workbench.activeSpace?.id)
+    ? workbench.spaces.filter((space) => space.navigation_pinned)
     : workbench.spaces;
   const layout = useWorkbenchLayout({
     isMobile: workbench.isMobile,
@@ -53,6 +53,20 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const mobileOverlayVisible = workbench.isMobile && (layout.primaryMode === "overlay" || layout.auxiliaryMode === "overlay");
   const closeMobilePanels = () => {
     if (workbench.isMobile) actions.closeMobile();
+  };
+  const openInspector = () => {
+    if (workbench.isMobile) {
+      if (!workbench.mobileAuxOpen) actions.toggleMobileAux();
+    } else if (!workbench.showAuxiliary) {
+      actions.toggleAuxiliary();
+    }
+  };
+  const closeInspector = () => {
+    if (workbench.isMobile) {
+      if (workbench.mobileAuxOpen) actions.toggleMobileAux();
+    } else if (workbench.showAuxiliary) {
+      actions.toggleAuxiliary();
+    }
   };
   const openSettings = () => {
     closeMobilePanels();
@@ -104,6 +118,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         theme={workbench.theme}
         primarySidebarOpen={workbench.isMobile ? workbench.mobileTreeOpen : workbench.primarySidebarOpen}
         auxiliaryOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+        auxiliaryLabel={libraryOpen ? "Toggle space inspector" : undefined}
         editorGroupCount={workbench.editorGroups.length}
         onAddGroup={actions.addGroup}
         onToggleTheme={actions.toggleTheme}
@@ -114,7 +129,16 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         <ActivityRail spaces={railSpaces} activeSpace={workbench.activeSpace} canCreateSpace={workbench.canCreateSpace} canManageSpaces={workbench.canCreateSpace} onSelectSpace={selectWorkbenchSpace} onReorderSpaces={reorderRailSpaces} onCreateSpace={actions.promptCreateSpace} onRenameSpace={actions.promptRenameSpace} onDeleteSpace={actions.confirmDeleteSpace} onOpenLibrary={libraryAvailable ? openLibrary : undefined} libraryActive={libraryOpen} onOpenHistory={openHistory} onOpenSettings={openSettings} />
         {libraryOpen ? (
           <Suspense fallback={<div className="grid min-h-0 flex-1 place-items-center text-sm text-muted" role="status">Preparing space library…</div>}>
-            <SpaceLibrary spaces={workbench.spaces} activeSpace={workbench.activeSpace} onOpenSpace={selectWorkbenchSpace} onCreateSpace={actions.promptCreateSpace} />
+            <SpaceLibrary
+              spaces={workbench.spaces}
+              activeSpace={workbench.activeSpace}
+              isMobile={workbench.isMobile}
+              inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
+              onOpenInspector={openInspector}
+              onCloseInspector={closeInspector}
+              onOpenSpace={selectWorkbenchSpace}
+              onCreateSpace={actions.promptCreateSpace}
+            />
           </Suspense>
         ) : (
           <>

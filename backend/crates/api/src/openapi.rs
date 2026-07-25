@@ -373,7 +373,11 @@ mod tests {
             "integer"
         );
         assert_eq!(
-            value["components"]["schemas"]["SpaceOut"]["properties"]["pinned"]["type"],
+            value["components"]["schemas"]["SpaceOut"]["properties"]["navigation_pinned"]["type"],
+            "boolean"
+        );
+        assert_eq!(
+            value["components"]["schemas"]["SpaceOut"]["properties"]["user_mcp_enabled"]["type"],
             "boolean"
         );
         assert_eq!(
@@ -392,8 +396,15 @@ mod tests {
             value["components"]["schemas"]["UpdateBody"]["properties"]
                 .as_object()
                 .expect("UpdateBody properties")
-                .contains_key("pinned"),
-            "UpdateBody must expose pinned"
+                .contains_key("navigation_pinned"),
+            "UpdateBody must expose navigation_pinned"
+        );
+        assert!(
+            value["components"]["schemas"]["UpdateBody"]["properties"]
+                .as_object()
+                .expect("UpdateBody properties")
+                .contains_key("user_mcp_enabled"),
+            "UpdateBody must expose user_mcp_enabled"
         );
         assert_eq!(
             value["paths"]["/api/v1/spaces:reorder"]["post"]["requestBody"]["content"]["application/json"]

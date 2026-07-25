@@ -57,7 +57,8 @@ pub(crate) struct CreateBody {
 pub(crate) struct UpdateBody {
     name: Option<String>,
     sort_order: Option<i32>,
-    pinned: Option<bool>,
+    navigation_pinned: Option<bool>,
+    user_mcp_enabled: Option<bool>,
     default_search_enabled: Option<bool>,
     default_text_encryption_enabled: Option<bool>,
 }
@@ -176,7 +177,8 @@ pub(crate) async fn update(
                 space_id,
                 name: body.name,
                 sort_order: body.sort_order,
-                pinned: body.pinned,
+                navigation_pinned: body.navigation_pinned,
+                user_mcp_enabled: body.user_mcp_enabled,
                 default_search_enabled: body.default_search_enabled,
                 default_text_encryption_enabled: body.default_text_encryption_enabled,
             },

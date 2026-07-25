@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0019_file_change_sync.sql"),
     include_str!("../migrations/0020_space_pins.sql"),
     include_str!("../migrations/0021_text_security_policies.sql"),
+    include_str!("../migrations/0022_space_navigation_and_mcp.sql"),
 ];
 
 /// A throwaway schema-isolated database for one test.

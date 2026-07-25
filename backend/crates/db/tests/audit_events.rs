@@ -16,7 +16,9 @@ use notegate_db::browser_session_repo::InsertBrowserSession;
 use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, BrowserSessionRepo, ConnectionRepo, SpaceRepo,
 };
-use notegate_model::{ConnectAgent, CreateAgent, CreateApiKey, CreateSpace, Permission};
+use notegate_model::{
+    ConnectAgent, CreateAgent, CreateApiKey, CreateSpace, Permission, UpdateSpace,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -106,14 +108,20 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
         )
         .await?;
     let updated = repo
-        .update_space(
-            space.id,
+        .update_space_with_features(
             owner,
-            Some("audit-renamed"),
-            Some(2000),
-            Some(true),
+            &UpdateSpace {
+                space_id: space.id,
+                name: Some("audit-renamed".to_owned()),
+                sort_order: Some(2000),
+                navigation_pinned: Some(false),
+                user_mcp_enabled: Some(true),
+                default_search_enabled: None,
+                default_text_encryption_enabled: None,
+            },
         )
-        .await?;
+        .await?
+        .0;
     let no_op_same_values = repo
         .update_space(
             space.id,
@@ -142,7 +150,12 @@ async fn space_mutations_write_audit_events() -> Result<(), Box<dyn std::error::
     }
     assert_eq!(
         rows[1].metadata["changed_fields"],
-        serde_json::json!(["name", "sort_order", "pinned"])
+        serde_json::json!([
+            "name",
+            "sort_order",
+            "navigation_pinned",
+            "user_mcp_enabled"
+        ])
     );
 
     db.cleanup().await;

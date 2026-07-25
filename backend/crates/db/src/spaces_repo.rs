@@ -29,7 +29,8 @@ struct SpaceRow {
     id: Uuid,
     name: String,
     sort_order: i32,
-    pinned_at: Option<DateTime<Utc>>,
+    navigation_pinned_at: Option<DateTime<Utc>>,
+    user_mcp_enabled_at: Option<DateTime<Utc>>,
     default_search_enabled: bool,
     default_text_encryption_enabled: bool,
     owner_user_id: Uuid,
@@ -46,7 +47,8 @@ impl From<SpaceRow> for Space {
             id: row.id,
             name: row.name,
             sort_order: row.sort_order,
-            pinned_at: row.pinned_at,
+            navigation_pinned_at: row.navigation_pinned_at,
+            user_mcp_enabled_at: row.user_mcp_enabled_at,
             default_search_enabled: row.default_search_enabled,
             default_text_encryption_enabled: row.default_text_encryption_enabled,
             owner_user_id: row.owner_user_id,
@@ -64,7 +66,8 @@ struct SpaceViewRow {
     id: Uuid,
     name: String,
     sort_order: i32,
-    pinned_at: Option<DateTime<Utc>>,
+    navigation_pinned_at: Option<DateTime<Utc>>,
+    user_mcp_enabled_at: Option<DateTime<Utc>>,
     default_search_enabled: bool,
     default_text_encryption_enabled: bool,
     owner_user_id: Uuid,
@@ -89,7 +92,8 @@ impl SpaceViewRow {
                 id: self.id,
                 name: self.name,
                 sort_order: self.sort_order,
-                pinned_at: self.pinned_at,
+                navigation_pinned_at: self.navigation_pinned_at,
+                user_mcp_enabled_at: self.user_mcp_enabled_at,
                 default_search_enabled: self.default_search_enabled,
                 default_text_encryption_enabled: self.default_text_encryption_enabled,
                 owner_user_id: self.owner_user_id,
@@ -106,13 +110,13 @@ impl SpaceViewRow {
     }
 }
 
-const SPACE_COLUMNS: &str = "id, name, sort_order, pinned_at, default_search_enabled, default_text_encryption_enabled, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
-const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
+const SPACE_COLUMNS: &str = "id, name, sort_order, navigation_pinned_at, user_mcp_enabled_at, default_search_enabled, default_text_encryption_enabled, owner_user_id, created_at, updated_at, deleted_at, deleted_by_user_id, purge_after";
+const SPACE_VIEW_BASE_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
                                        s.deleted_at, s.deleted_by_user_id, s.purge_after";
-const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
+const USER_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
      'write'::text AS permission, root.id AS root_node_id, owner.tier AS owner_tier";
-const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.pinned_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
+const AGENT_SPACE_VIEW_COLUMNS: &str = "s.id, s.name, s.sort_order, s.navigation_pinned_at, s.user_mcp_enabled_at, s.default_search_enabled, s.default_text_encryption_enabled, s.owner_user_id, s.created_at, s.updated_at, \
      s.deleted_at, s.deleted_by_user_id, s.purge_after, \
      c.permission AS permission, root.id AS root_node_id, owner.tier AS owner_tier";
 
@@ -172,7 +176,8 @@ impl SpaceRepo {
         .map_err(map_sqlx_error)?;
 
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
-            "INSERT INTO spaces (name, owner_user_id, sort_order) VALUES ($1, $2, $3) RETURNING {SPACE_COLUMNS}"
+            "INSERT INTO spaces (name, owner_user_id, sort_order, navigation_pinned_at) \
+             VALUES ($1, $2, $3, now()) RETURNING {SPACE_COLUMNS}"
         ))
         .bind(&command.name)
         .bind(owner_user_id)
@@ -203,10 +208,10 @@ impl SpaceRepo {
         &self,
         account_id: Uuid,
         space_id: Uuid,
-        user_pinned_only: bool,
+        user_mcp_only: bool,
     ) -> Result<Option<SpaceView>> {
-        let user_pin_predicate = if user_pinned_only {
-            "AND s.pinned_at IS NOT NULL"
+        let user_mcp_predicate = if user_mcp_only {
+            "AND s.user_mcp_enabled_at IS NOT NULL"
         } else {
             ""
         };
@@ -221,7 +226,7 @@ impl SpaceRepo {
              LEFT JOIN space_agent_connections c \
                ON c.space_id = s.id AND c.agent_id = acc.id AND c.disconnected_at IS NULL \
              WHERE acc.id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
-               AND ((acc.kind = 'user' AND s.owner_user_id = acc.id {user_pin_predicate}) \
+               AND ((acc.kind = 'user' AND s.owner_user_id = acc.id {user_mcp_predicate}) \
                     OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL))"
         ))
         .bind(account_id)
@@ -254,15 +259,15 @@ impl SpaceRepo {
         name: &str,
         limit: i64,
         case_insensitive: bool,
-        user_pinned_only: bool,
+        user_mcp_only: bool,
     ) -> Result<Vec<SpaceView>> {
         let name_predicate = if case_insensitive {
             "lower(s.name) = lower($2)"
         } else {
             "s.name = $2"
         };
-        let user_pin_predicate = if user_pinned_only {
-            "AND s.pinned_at IS NOT NULL"
+        let user_mcp_predicate = if user_mcp_only {
+            "AND s.user_mcp_enabled_at IS NOT NULL"
         } else {
             ""
         };
@@ -274,7 +279,7 @@ impl SpaceRepo {
                  JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   {user_pin_predicate} \
+                   {user_mcp_predicate} \
                    AND {name_predicate} \
                  UNION ALL \
                  SELECT {AGENT_SPACE_VIEW_COLUMNS} \
@@ -342,15 +347,15 @@ impl SpaceRepo {
         account_id: Uuid,
         limit: i64,
         cursor: Option<&SpaceCursor>,
-        user_pinned_only: bool,
+        user_mcp_only: bool,
     ) -> Result<Vec<SpaceView>> {
         let cursor_clause = if cursor.is_some() {
             "WHERE (sort_order, name, id) > ($2, $3, $4)"
         } else {
             ""
         };
-        let user_pin_predicate = if user_pinned_only {
-            "AND s.pinned_at IS NOT NULL"
+        let user_mcp_predicate = if user_mcp_only {
+            "AND s.user_mcp_enabled_at IS NOT NULL"
         } else {
             ""
         };
@@ -362,7 +367,7 @@ impl SpaceRepo {
                  JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   {user_pin_predicate} \
+                   {user_mcp_predicate} \
                  UNION ALL \
                  SELECT {AGENT_SPACE_VIEW_COLUMNS} \
                  FROM accounts acc \
@@ -424,7 +429,7 @@ impl SpaceRepo {
         owner_user_id: Uuid,
         name: Option<&str>,
         sort_order: Option<i32>,
-        pinned: Option<bool>,
+        user_mcp_enabled: Option<bool>,
     ) -> Result<Space> {
         self.update_space_with_features(
             owner_user_id,
@@ -432,7 +437,8 @@ impl SpaceRepo {
                 space_id,
                 name: name.map(str::to_owned),
                 sort_order,
-                pinned,
+                navigation_pinned: None,
+                user_mcp_enabled,
                 default_search_enabled: None,
                 default_text_encryption_enabled: None,
             },
@@ -480,9 +486,12 @@ impl SpaceRepo {
         let sort_order_changed = command
             .sort_order
             .is_some_and(|value| value != current.sort_order);
-        let pinned_changed = command
-            .pinned
-            .is_some_and(|value| value != current.pinned_at.is_some());
+        let navigation_pinned_changed = command
+            .navigation_pinned
+            .is_some_and(|value| value != current.navigation_pinned_at.is_some());
+        let user_mcp_changed = command
+            .user_mcp_enabled
+            .is_some_and(|value| value != current.user_mcp_enabled_at.is_some());
         let default_search_changed = command
             .default_search_enabled
             .is_some_and(|value| value != current.default_search_enabled);
@@ -491,7 +500,8 @@ impl SpaceRepo {
             .is_some_and(|value| value != current.default_text_encryption_enabled);
         if !name_changed
             && !sort_order_changed
-            && !pinned_changed
+            && !navigation_pinned_changed
+            && !user_mcp_changed
             && !default_search_changed
             && !default_encryption_changed
         {
@@ -502,13 +512,18 @@ impl SpaceRepo {
         let row = sqlx::query_as::<_, SpaceRow>(&format!(
             "UPDATE spaces \
              SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), \
-                 pinned_at = CASE \
-                     WHEN $5::boolean IS NULL THEN pinned_at \
-                     WHEN $5 THEN COALESCE(pinned_at, now()) \
+                 navigation_pinned_at = CASE \
+                     WHEN $5::boolean IS NULL THEN navigation_pinned_at \
+                     WHEN $5 THEN COALESCE(navigation_pinned_at, now()) \
                      ELSE NULL \
                  END, \
-                 default_search_enabled = COALESCE($6, default_search_enabled), \
-                 default_text_encryption_enabled = COALESCE($7, default_text_encryption_enabled), \
+                 user_mcp_enabled_at = CASE \
+                     WHEN $6::boolean IS NULL THEN user_mcp_enabled_at \
+                     WHEN $6 THEN COALESCE(user_mcp_enabled_at, now()) \
+                     ELSE NULL \
+                 END, \
+                 default_search_enabled = COALESCE($7, default_search_enabled), \
+                 default_text_encryption_enabled = COALESCE($8, default_text_encryption_enabled), \
                  updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
         ))
@@ -516,7 +531,8 @@ impl SpaceRepo {
         .bind(owner_user_id)
         .bind(command.name.as_deref())
         .bind(command.sort_order)
-        .bind(command.pinned)
+        .bind(command.navigation_pinned)
+        .bind(command.user_mcp_enabled)
         .bind(command.default_search_enabled)
         .bind(command.default_text_encryption_enabled)
         .fetch_optional(&mut *tx)
@@ -531,8 +547,11 @@ impl SpaceRepo {
         if sort_order_changed {
             changed_fields.push("sort_order");
         }
-        if pinned_changed {
-            changed_fields.push("pinned");
+        if navigation_pinned_changed {
+            changed_fields.push("navigation_pinned");
+        }
+        if user_mcp_changed {
+            changed_fields.push("user_mcp_enabled");
         }
         if default_search_changed {
             changed_fields.push("default_search_enabled");

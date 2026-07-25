@@ -40,7 +40,11 @@ const space: Space = {
   id: "space-1",
   name: "Daily",
   sort_order: 0,
-  pinned: true,
+  navigation_pinned: true,
+  user_mcp_enabled: true,
+  default_search_enabled: true,
+  default_text_encryption_enabled: false,
+  features: { text_encryption: true },
   permission: "write",
   root_node_id: "root-1",
   created_at: "2026-07-01T00:00:00Z",
@@ -67,7 +71,8 @@ const privateSpace: Space = {
   ...space,
   id: "space-2",
   name: "Private",
-  pinned: false,
+  navigation_pinned: false,
+  user_mcp_enabled: false,
   root_node_id: "root-2"
 };
 
@@ -90,7 +95,7 @@ describe("AppShell history", () => {
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
   });
 
-  it("keeps inactive unpinned spaces out of the user rail while showing all spaces in the library", async () => {
+  it("keeps inactive navigation-unpinned spaces out of the user rail while showing all spaces in the library", async () => {
     const user = userEvent.setup();
     mocks.useWorkbenchController.mockReturnValue({ ...workbench(), spaces: [space, privateSpace] });
     mocks.useUploadManager.mockReturnValue(uploadManager());
@@ -105,7 +110,7 @@ describe("AppShell history", () => {
     expect(screen.getByTestId("space-library")).toHaveTextContent("Daily,Private");
   });
 
-  it("keeps the active unpinned space visible in the user rail", () => {
+  it("keeps the active navigation-unpinned space out of the user rail", () => {
     mocks.useWorkbenchController.mockReturnValue({
       ...workbench(),
       spaces: [space, privateSpace],
@@ -116,11 +121,7 @@ describe("AppShell history", () => {
     render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Daily" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Private" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "Private" })).toHaveAttribute(
-      "aria-description",
-      "Unpinned; hidden from user MCP"
-    );
+    expect(screen.queryByRole("button", { name: "Private" })).not.toBeInTheDocument();
   });
 
   it("keeps connected spaces in the agent rail and does not expose the pin library", () => {

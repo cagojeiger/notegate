@@ -12,6 +12,7 @@ type TitleBarProps = {
   theme: ThemeMode;
   primarySidebarOpen: boolean;
   auxiliaryOpen: boolean;
+  auxiliaryLabel?: string;
   editorGroupCount: number;
   onAddGroup: () => void;
   onToggleTheme: () => void;
@@ -26,6 +27,7 @@ export function TitleBar({
   theme,
   primarySidebarOpen,
   auxiliaryOpen,
+  auxiliaryLabel = "Toggle right sidebar",
   editorGroupCount,
   onAddGroup,
   onToggleTheme,
@@ -45,18 +47,18 @@ export function TitleBar({
         {locationLabel || activeSpace ? <span className="truncate text-sm text-muted">/ {locationLabel ?? activeSpace?.name}</span> : null}
       </div>
       <div className="flex items-center gap-2 text-muted">
-        {showWorkbenchControls ? (
-          <>
-            <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1">
+          {showWorkbenchControls ? (
+            <>
               <IconButton label="Toggle left sidebar" onClick={onTogglePrimarySidebar} pressed={primarySidebarOpen}><PanelLeft size={16} /></IconButton>
               <div className="hidden md:block">
                 <IconButton label={splitLabel} onClick={onAddGroup} disabled={atMaxGroups} pressed={editorGroupCount > 1}><SplitIcon size={16} /></IconButton>
               </div>
-              <IconButton label="Toggle right sidebar" onClick={onToggleAuxiliary} pressed={auxiliaryOpen}><PanelRight size={16} /></IconButton>
-            </div>
-            <div className="h-5 w-px bg-seam" aria-hidden="true" />
-          </>
-        ) : null}
+            </>
+          ) : null}
+          <IconButton label={auxiliaryLabel} onClick={onToggleAuxiliary} pressed={auxiliaryOpen}><PanelRight size={16} /></IconButton>
+        </div>
+        <div className="h-5 w-px bg-seam" aria-hidden="true" />
         <IconButton label="Toggle theme" onClick={onToggleTheme}>{theme === "light" ? <Moon size={16} /> : <Sun size={16} />}</IconButton>
       </div>
     </header>

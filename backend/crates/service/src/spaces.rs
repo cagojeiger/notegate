@@ -211,7 +211,8 @@ impl SpaceService {
         require_user_caller(caller_kind)?;
         if command.name.is_none()
             && command.sort_order.is_none()
-            && command.pinned.is_none()
+            && command.navigation_pinned.is_none()
+            && command.user_mcp_enabled.is_none()
             && command.default_search_enabled.is_none()
             && command.default_text_encryption_enabled.is_none()
         {

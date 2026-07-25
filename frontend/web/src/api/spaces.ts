@@ -1,6 +1,15 @@
 import type { ApiClient } from "./client";
 import type { Space, SpacesListResponse } from "./types";
 
+export type UpdateSpaceInput = {
+  name?: string;
+  sort_order?: number;
+  navigation_pinned?: boolean;
+  user_mcp_enabled?: boolean;
+  default_search_enabled?: boolean;
+  default_text_encryption_enabled?: boolean;
+};
+
 export function listSpaces(client: ApiClient): Promise<SpacesListResponse> {
   return client.get<SpacesListResponse>("/api/v1/spaces?limit=100");
 }
@@ -9,7 +18,7 @@ export function createSpace(client: ApiClient, name: string): Promise<Space> {
   return client.post<Space>("/api/v1/spaces", { name });
 }
 
-export function updateSpace(client: ApiClient, spaceId: string, input: { name?: string; sort_order?: number; pinned?: boolean }): Promise<Space> {
+export function updateSpace(client: ApiClient, spaceId: string, input: UpdateSpaceInput): Promise<Space> {
   return client.patch<Space>(`/api/v1/spaces/${spaceId}`, input);
 }
 

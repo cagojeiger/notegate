@@ -29,7 +29,13 @@ export type Space = {
   id: string;
   name: string;
   sort_order: number;
-  pinned: boolean;
+  navigation_pinned: boolean;
+  user_mcp_enabled: boolean;
+  default_search_enabled: boolean;
+  default_text_encryption_enabled: boolean;
+  features: {
+    text_encryption: boolean;
+  };
   permission: SpacePermission;
   root_node_id: string;
   created_at: string;

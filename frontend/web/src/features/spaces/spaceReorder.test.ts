@@ -8,7 +8,11 @@ function space(id: string, sort_order = 0): Space {
     id,
     name: id,
     sort_order,
-    pinned: true,
+    navigation_pinned: true,
+    user_mcp_enabled: true,
+    default_search_enabled: true,
+    default_text_encryption_enabled: false,
+    features: { text_encryption: true },
     permission: "write",
     root_node_id: `root-${id}`,
     created_at: "2026-06-14T00:00:00Z",
@@ -40,7 +44,7 @@ describe("spaceReorder", () => {
 
   it("reorders visible spaces without moving hidden spaces out of their slots", () => {
     const first = space("a", 1000);
-    const hidden = { ...space("hidden", 2000), pinned: false };
+    const hidden = { ...space("hidden", 2000), navigation_pinned: false };
     const last = space("c", 3000);
 
     const merged = mergeVisibleSpaceOrder([first, hidden, last], [last, first]);

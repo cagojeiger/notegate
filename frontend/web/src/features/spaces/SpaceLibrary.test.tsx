@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,7 +28,11 @@ const spaces: Space[] = [
     id: "daily",
     name: "Daily",
     sort_order: 1000,
-    pinned: true,
+    navigation_pinned: true,
+    user_mcp_enabled: true,
+    default_search_enabled: true,
+    default_text_encryption_enabled: false,
+    features: { text_encryption: true },
     permission: "write",
     root_node_id: "daily-root",
     created_at: "2026-07-01T00:00:00Z",
@@ -37,7 +42,11 @@ const spaces: Space[] = [
     id: "private",
     name: "Private",
     sort_order: 2000,
-    pinned: false,
+    navigation_pinned: false,
+    user_mcp_enabled: false,
+    default_search_enabled: false,
+    default_text_encryption_enabled: false,
+    features: { text_encryption: false },
     permission: "write",
     root_node_id: "private-root",
     created_at: "2026-07-02T00:00:00Z",
@@ -45,12 +54,50 @@ const spaces: Space[] = [
   }
 ];
 
+function renderLibrary(options: {
+  isMobile?: boolean;
+  inspectorOpen?: boolean;
+  onOpenSpace?: (space: Space) => void;
+} = {}) {
+  const isMobile = options.isMobile ?? false;
+
+  function LibraryHarness() {
+    const [inspectorOpen, setInspectorOpen] = useState(
+      options.inspectorOpen ?? !isMobile
+    );
+
+    return (
+      <SpaceLibrary
+        spaces={spaces}
+        activeSpace={spaces[0]}
+        isMobile={isMobile}
+        inspectorOpen={inspectorOpen}
+        onOpenInspector={() => setInspectorOpen(true)}
+        onCloseInspector={() => setInspectorOpen(false)}
+        onOpenSpace={options.onOpenSpace ?? vi.fn()}
+        onCreateSpace={vi.fn()}
+      />
+    );
+  }
+
+  return render(
+    <LibraryHarness />
+  );
+}
+
 describe("SpaceLibrary", () => {
   beforeEach(() => {
     mocks.mutate.mockReset();
     mocks.reorder.mockReset();
-    mocks.useUpdateSpaceMutation.mockReturnValue({ mutate: mocks.mutate, isPending: false });
-    mocks.useReorderSpacesMutation.mockReturnValue({ mutate: mocks.reorder, isPending: false });
+    mocks.useUpdateSpaceMutation.mockReturnValue({
+      mutate: mocks.mutate,
+      isPending: false,
+      isError: false
+    });
+    mocks.useReorderSpacesMutation.mockReturnValue({
+      mutate: mocks.reorder,
+      isPending: false
+    });
     mocks.useUsageQuery.mockReturnValue({
       isLoading: false,
       isError: false,
@@ -70,42 +117,68 @@ describe("SpaceLibrary", () => {
     });
   });
 
-  it("shows one ordered grid while keeping pin as an independent access state", async () => {
+  it("shows compact policy states and toggles navigation pin from the card", async () => {
     const user = userEvent.setup();
-    render(<SpaceLibrary spaces={spaces} activeSpace={spaces[0]} onOpenSpace={vi.fn()} onCreateSpace={vi.fn()} />);
+    renderLibrary();
 
     expect(screen.getByRole("heading", { name: "Spaces 2" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "All spaces" })).toBeInTheDocument();
-    expect(screen.getAllByText("12 items · 6 KB").length).toBeGreaterThan(0);
+    expect(screen.getByTitle("Search default on")).toBeInTheDocument();
+    expect(screen.getByTitle("Search default off")).toBeInTheDocument();
+    expect(screen.getByTitle("User MCP access on")).toBeInTheDocument();
+    expect(screen.getByTitle("User MCP access off")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Inspect Private" }));
-    expect(screen.getAllByText("Unpinned").length).toBeGreaterThan(1);
+    await user.click(screen.getByRole("button", { name: "Pin Private to navigation" }));
 
-    await user.click(screen.getByRole("button", { name: "Make Private available in user MCP" }));
-    expect(mocks.mutate).toHaveBeenCalledWith({ spaceId: "private", pinned: true });
+    expect(mocks.mutate).toHaveBeenCalledWith({
+      spaceId: "private",
+      navigation_pinned: true
+    });
   });
 
-  it("keeps optional guidance behind an accessible help button", async () => {
+  it("keeps access and new-item defaults in the inspector", async () => {
     const user = userEvent.setup();
-    render(<SpaceLibrary spaces={spaces} activeSpace={spaces[0]} onOpenSpace={vi.fn()} onCreateSpace={vi.fn()} />);
+    renderLibrary();
 
-    expect(screen.queryByRole("region", { name: "About spaces" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Inspect Private" }));
+    expect(screen.getByRole("switch", { name: "User MCP access" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Include in search" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Text encryption" })).toBeDisabled();
 
-    const help = screen.getByRole("button", { name: "About spaces" });
-    await user.click(help);
+    await user.click(screen.getByRole("switch", { name: "User MCP access" }));
+    await user.click(screen.getByRole("switch", { name: "Include in search" }));
 
-    expect(help).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("region", { name: "About spaces" })).toHaveTextContent("Pinned spaces are available in your user MCP.");
+    expect(mocks.mutate).toHaveBeenNthCalledWith(1, {
+      spaceId: "private",
+      user_mcp_enabled: true
+    });
+    expect(mocks.mutate).toHaveBeenNthCalledWith(2, {
+      spaceId: "private",
+      default_search_enabled: true
+    });
+  });
 
-    await user.keyboard("{Escape}");
+  it("opens the inspector as a mobile sheet only on mobile", async () => {
+    const user = userEvent.setup();
+    renderLibrary({ isMobile: true });
 
-    expect(help).toHaveAttribute("aria-expanded", "false");
-    expect(help).toHaveFocus();
+    expect(screen.queryByText("Space Inspector")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Inspect Private" }));
+
+    expect(screen.getByRole("dialog", { name: "Space Inspector" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Space Inspector" })).not.toBeInTheDocument();
+  });
+
+  it("removes the docked inspector from layout when it is closed", () => {
+    renderLibrary({ inspectorOpen: false });
+
+    expect(screen.queryByText("Space Inspector")).not.toBeInTheDocument();
   });
 
   it("offers single-click ordering controls as an alternative to dragging", async () => {
     const user = userEvent.setup();
-    render(<SpaceLibrary spaces={spaces} activeSpace={spaces[0]} onOpenSpace={vi.fn()} onCreateSpace={vi.fn()} />);
+    renderLibrary();
 
     expect(screen.getByRole("button", { name: "Move Daily earlier" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Move Private later" })).toBeDisabled();
@@ -113,12 +186,13 @@ describe("SpaceLibrary", () => {
     await user.click(screen.getByRole("button", { name: "Move Daily later" }));
 
     expect(mocks.reorder).toHaveBeenCalledWith({ spaces: [spaces[1], spaces[0]] });
+    expect(screen.getByText("Daily moved to position 2 of 2")).toHaveAttribute("role", "status");
   });
 
-  it("opens a space without changing its pin state", async () => {
+  it("opens a space without changing its policies", async () => {
     const user = userEvent.setup();
     const onOpenSpace = vi.fn();
-    render(<SpaceLibrary spaces={spaces} activeSpace={spaces[0]} onOpenSpace={onOpenSpace} onCreateSpace={vi.fn()} />);
+    renderLibrary({ onOpenSpace });
 
     await user.click(screen.getAllByRole("button", { name: "Open" })[1]);
 
