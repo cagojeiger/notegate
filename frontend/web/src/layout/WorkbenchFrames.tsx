@@ -1,8 +1,9 @@
 import type { PointerEventHandler, ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT, type WorkbenchPanelMode } from "../shared/model/workbenchLayout";
+import { ResizeSeparator } from "../shared/ui";
 
-export function PrimarySidebarFrame({ mode, width, children }: { mode: WorkbenchPanelMode; width: number; children: ReactNode }) {
+export function PrimarySidebarFrame({ mode, width, children, id }: { mode: WorkbenchPanelMode; width: number; children: ReactNode; id?: string }) {
   if (mode === "hidden") return null;
 
   const style = mode === "docked" ? { width } : { width: WORKBENCH_LAYOUT.mobilePrimaryWidthPercent, maxWidth: WORKBENCH_LAYOUT.mobilePrimaryMaxWidth };
@@ -12,15 +13,40 @@ export function PrimarySidebarFrame({ mode, width, children }: { mode: Workbench
       : "fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] left-0 top-[calc(3rem+env(safe-area-inset-top))] z-40 flex min-h-0 shadow-2xl";
 
   return (
-    <div style={style} className={className}>
+    <div id={id} style={style} className={className}>
       {children}
     </div>
   );
 }
 
-export function PrimarySidebarResizeHandle({ visible, onPointerDown }: { visible: boolean; onPointerDown: PointerEventHandler<HTMLDivElement> }) {
+export function PrimarySidebarResizeHandle({
+  visible,
+  value,
+  onPointerDown,
+  onValueChange
+}: {
+  visible: boolean;
+  value: number;
+  onPointerDown: PointerEventHandler<HTMLDivElement>;
+  onValueChange: (value: number) => void;
+}) {
   if (!visible) return null;
-  return <div onPointerDown={onPointerDown} className="hidden w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--ng-selection)] md:block" aria-hidden="true" />;
+  return (
+    <div className="relative hidden w-1 shrink-0 bg-transparent md:block">
+      <ResizeSeparator
+        orientation="vertical"
+        label="Resize Files sidebar"
+        value={value}
+        min={WORKBENCH_LAYOUT.minPrimaryWidth}
+        max={WORKBENCH_LAYOUT.maxPrimaryWidth}
+        step={10}
+        valueText={`${value} pixels`}
+        controls="primary-sidebar-panel"
+        onPointerDown={onPointerDown}
+        onValueChange={onValueChange}
+      />
+    </div>
+  );
 }
 
 export function AuxiliarySidebarFrame({ mode, children }: { mode: WorkbenchPanelMode; children: ReactNode }) {

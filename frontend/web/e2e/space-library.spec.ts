@@ -67,6 +67,19 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   await inspectorToggle.click();
   await expect(page.getByText("Space Inspector", { exact: true })).toBeVisible();
 
+  const navigationHelp = page.getByRole("button", { name: "About Navigation" });
+  await navigationHelp.focus();
+  const helpTooltip = page.getByRole("tooltip");
+  await expect(helpTooltip).toContainText("Pinned spaces stay visible");
+  await helpTooltip.hover();
+  await expect(helpTooltip).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(helpTooltip).toBeHidden();
+  await navigationHelp.click();
+  await expect(helpTooltip).toBeVisible();
+  await navigationHelp.click();
+  await expect(helpTooltip).toBeHidden();
+
   const orderBeforePin = await cardNames(grid);
   await page.getByRole("button", { name: "Pin Private Journal to navigation" }).click();
   await expect(page.getByRole("button", { name: "Unpin Private Journal from navigation" })).toBeVisible();

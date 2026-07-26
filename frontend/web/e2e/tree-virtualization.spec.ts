@@ -52,6 +52,19 @@ for (const viewport of [
     await expect.poll(() => childRequestCount).toBe(1);
     await expect.poll(() => page.locator("[data-node-row]").count()).toBeLessThan(60);
 
+    const filesSeparator = page.getByRole("separator", { name: "Resize Files section" });
+    const sidebarSeparator = page.getByRole("separator", { name: "Resize Files sidebar" });
+    await expect(filesSeparator).toHaveAttribute("aria-valuenow", "67");
+    await filesSeparator.focus();
+    await filesSeparator.press("ArrowDown");
+    await expect(filesSeparator).toHaveAttribute("aria-valuenow", "72");
+    const filesSeparatorBox = await filesSeparator.boundingBox();
+    expect(filesSeparatorBox?.height).toBeGreaterThanOrEqual(24);
+    if (!viewport.opensOverlay) {
+      const sidebarBox = await sidebarSeparator.boundingBox();
+      expect(sidebarBox?.width).toBeGreaterThanOrEqual(24);
+    }
+
     await page.getByRole("button", { name: "file-0000.bin" }).focus();
     for (let index = 1; index <= 20; index += 1) {
       await page.keyboard.press("ArrowDown");

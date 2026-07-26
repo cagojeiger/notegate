@@ -173,7 +173,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
             </Suspense>
           ) : (
             <>
-              <PrimarySidebarFrame mode={layout.primaryMode} width={workbench.primaryWidth}>
+              <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode} width={workbench.primaryWidth}>
                 <PrimarySidebar
                   activeSpace={workbench.activeSpace}
                   activeNodeId={workbench.activeNode?.id ?? null}
@@ -199,7 +199,12 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
                 />
               </PrimarySidebarFrame>
-              <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} onPointerDown={actions.startPrimaryResize} />
+              <PrimarySidebarResizeHandle
+                visible={layout.primaryMode === "docked"}
+                value={workbench.primaryWidth}
+                onPointerDown={actions.startPrimaryResize}
+                onValueChange={actions.setPrimaryWidth}
+              />
               <EditorArea
                 groups={workbench.editorGroups}
                 activeGroupIndex={workbench.activeGroupIndex}

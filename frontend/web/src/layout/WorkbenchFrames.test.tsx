@@ -37,7 +37,12 @@ describe("WorkbenchFrames", () => {
         <PrimarySidebarFrame mode="hidden" width={300}>
           <div>Files</div>
         </PrimarySidebarFrame>
-        <PrimarySidebarResizeHandle visible={false} onPointerDown={vi.fn()} />
+        <PrimarySidebarResizeHandle
+          visible={false}
+          value={300}
+          onPointerDown={vi.fn()}
+          onValueChange={vi.fn()}
+        />
       </>
     );
 
@@ -46,12 +51,21 @@ describe("WorkbenchFrames", () => {
 
   it("keeps the resize target wide without adding a second default seam", () => {
     const { container } = render(
-      <PrimarySidebarResizeHandle visible onPointerDown={vi.fn()} />
+      <PrimarySidebarResizeHandle
+        visible
+        value={300}
+        onPointerDown={vi.fn()}
+        onValueChange={vi.fn()}
+      />
     );
 
     const handle = container.firstElementChild;
     expect(handle).toHaveClass("w-1", "bg-transparent");
     expect(handle).not.toHaveClass("bg-seam");
+    expect(screen.getByRole("separator", { name: "Resize Files sidebar" })).toHaveAttribute(
+      "aria-valuenow",
+      "300"
+    );
   });
 
   it("uses safe-area offsets for mobile overlays", () => {

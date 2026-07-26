@@ -1,4 +1,6 @@
 import type { NodeSummary, Space } from "../../api/types";
+import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
+import { ResizeSeparator } from "../../shared/ui";
 import { RecentSection } from "./RecentSection";
 import { TreeSection } from "./TreeSection";
 import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
@@ -45,11 +47,24 @@ export function PrimarySidebarSections({
         canWriteActiveSpace={canWriteActiveSpace}
       />
       <div
-        onPointerDown={sections.startTreeResize}
-        className={`group relative ${sections.bothSectionsOpen ? "cursor-row-resize" : ""}`}
-        aria-hidden="true"
+        className="relative"
       >
-        <span className={`absolute inset-x-0 top-1/2 h-px bg-seam transition-colors ${sections.bothSectionsOpen ? "group-hover:bg-[var(--ng-active-border)]" : ""}`} />
+        {sections.bothSectionsOpen ? (
+          <ResizeSeparator
+            orientation="horizontal"
+            label="Resize Files section"
+            value={Math.round(sections.treeRatio * 100)}
+            min={WORKBENCH_LAYOUT.minTreeRatio * 100}
+            max={WORKBENCH_LAYOUT.maxTreeRatio * 100}
+            step={5}
+            valueText={`${Math.round(sections.treeRatio * 100)}% Files`}
+            controls="files-section"
+            onPointerDown={sections.startTreeResize}
+            onValueChange={(value) => sections.setTreeRatio(value / 100)}
+          />
+        ) : (
+          <span className="absolute inset-x-0 top-1/2 h-px bg-seam" aria-hidden="true" />
+        )}
       </div>
       <RecentSection
         activeSpace={activeSpace}
