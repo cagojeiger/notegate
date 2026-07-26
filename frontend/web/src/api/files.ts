@@ -36,10 +36,6 @@ export function filePreviewStaleTime(expiresAt: string, cachedAt: number): numbe
   return Math.max(0, expiresAtMs - cachedAt - FILE_PREVIEW_EXPIRY_SAFETY_MS);
 }
 
-export function statFile(client: ApiClient, spaceId: string, nodeId: string): Promise<FileResponse> {
-  return client.get<FileResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}`);
-}
-
 export function beginFileUpload(client: ApiClient, spaceId: string, input: FileUploadInput): Promise<BeginFileUploadResponse> {
   return client.post<BeginFileUploadResponse>(`/api/v1/spaces/${spaceId}/file-uploads`, {
     parent_node_id: input.parentNodeId,

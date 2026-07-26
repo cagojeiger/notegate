@@ -163,25 +163,6 @@ impl FilesService {
         Ok(())
     }
 
-    pub async fn record_object_upload(
-        &self,
-        upload_id: Uuid,
-        object_key: &str,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        command: &BeginObjectUpload,
-    ) -> ServiceResult<PendingObjectUpload> {
-        let registration = notegate_model::files::ObjectUploadRegistration {
-            id: upload_id,
-            object_key: object_key.to_owned(),
-            upload_mode: notegate_model::files::ObjectUploadMode::Single,
-            multipart_upload_id: None,
-            multipart_part_size: None,
-        };
-        self.record_registered_object_upload(&registration, caller_account_id, space_id, command)
-            .await
-    }
-
     pub async fn record_registered_object_upload(
         &self,
         registration: &notegate_model::files::ObjectUploadRegistration,

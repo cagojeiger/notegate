@@ -22,7 +22,6 @@ chrono.workspace = true
 [dev-dependencies]
 notegate-db = { path = ".", features = ["test-util"] }
 tokio.workspace = true
-sha2.workspace = true
 secrecy.workspace = true
 
 [lints]

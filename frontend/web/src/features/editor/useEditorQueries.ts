@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
-import { downloadFile } from "../../api/files";
 import { updateNodeCaches } from "../../api/nodeCache";
 import { getNode, listChildren } from "../../api/nodes";
 import { invalidateRecentNodes, invalidateText } from "../../api/queryInvalidation";
@@ -14,11 +13,6 @@ import { useUiStore } from "../../stores/uiStore";
 export function useFolderChildrenStat(node: RestNode) {
   const client = useApiClient();
   return useQuery({ queryKey: [...queryKeys.children(node.space_id, node.id), "stat"], queryFn: () => listChildren(client, node.space_id, node.id) });
-}
-
-export function useFileDownload(node: RestNode) {
-  const client = useApiClient();
-  return async () => downloadFile(client, node.space_id, node.id, node.original_filename ?? node.name);
 }
 
 export function useTextDocument(node: RestNode) {

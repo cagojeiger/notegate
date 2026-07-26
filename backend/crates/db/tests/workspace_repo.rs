@@ -401,21 +401,24 @@ async fn space_name_suggestion_lookup_is_case_insensitive_only()
     let other = create_user(&db, "other-space-suggest@example.com").await?;
     let repo = SpaceRepo::new(db.pool.clone());
 
-    repo.create_space(
-        owner,
-        &CreateSpace {
-            name: "Beringlab".to_owned(),
-        },
-    )
-    .await?;
+    let space = repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: "Beringlab".to_owned(),
+            },
+        )
+        .await?;
+    repo.update_space(space.id, owner, None, None, Some(true))
+        .await?;
 
     let exact = repo
-        .list_space_views_by_name_for(owner, "beringlab", 10)
+        .list_mcp_space_views_by_name_for(owner, "beringlab", 10)
         .await?;
     assert!(exact.is_empty(), "exact lookup must remain case-sensitive");
 
     let suggestions = repo
-        .list_space_views_by_name_case_insensitive_for(owner, "beringlab", 10)
+        .list_mcp_space_views_by_name_case_insensitive_for(owner, "beringlab", 10)
         .await?;
     let names: Vec<_> = suggestions
         .iter()
@@ -424,7 +427,7 @@ async fn space_name_suggestion_lookup_is_case_insensitive_only()
     assert_eq!(names, vec!["Beringlab"]);
 
     let inaccessible = repo
-        .list_space_views_by_name_case_insensitive_for(other, "beringlab", 10)
+        .list_mcp_space_views_by_name_case_insensitive_for(other, "beringlab", 10)
         .await?;
     assert!(
         inaccessible.is_empty(),

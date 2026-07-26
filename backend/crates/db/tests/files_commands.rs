@@ -12,7 +12,7 @@ use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind};
 use notegate_model::files::{
-    CreateFolder, MoveNode, NodeListCursor, NodeListSort, StoredContent, WriteTextBody,
+    CreateFolder, MoveNode, NodeListCursor, NodeListSort, StoredContent, UpdateNode, WriteTextBody,
 };
 
 fn assert_not_found<T: std::fmt::Debug>(result: Result<T, Error>) {
@@ -101,8 +101,16 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
         .await,
     );
     assert_not_found(
-        repo.update_node_metadata(ws, folder.id, Some("renamed"), None, account)
-            .await,
+        repo.update_node(
+            ws,
+            &UpdateNode {
+                node_id: folder.id,
+                name: Some("renamed".to_owned()),
+                sort_order: None,
+            },
+            account,
+        )
+        .await,
     );
     assert_not_found(repo.soft_delete_node(ws, folder.id, account, false).await);
 

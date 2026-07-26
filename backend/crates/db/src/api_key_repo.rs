@@ -139,6 +139,7 @@ impl ApiKeyRepo {
     ///
     /// Production code must use [`insert_key_with_cap`] or [`rotate_key`]. This
     /// helper exists for repository tests that need to seed exact key states.
+    #[cfg(any(test, feature = "test-util"))]
     #[doc(hidden)]
     pub async fn insert_key_unchecked_for_test(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
         validate_command(args.command)?;

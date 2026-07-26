@@ -599,26 +599,6 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn update_node_metadata(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-        new_name: Option<&str>,
-        new_sort_order: Option<i32>,
-        updated_by: Uuid,
-    ) -> Result<Node> {
-        self.update_node(
-            space_id,
-            &notegate_model::files::UpdateNode {
-                node_id,
-                name: new_name.map(str::to_owned),
-                sort_order: new_sort_order,
-            },
-            updated_by,
-        )
-        .await
-    }
-
     pub async fn update_node(
         &self,
         space_id: Uuid,

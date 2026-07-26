@@ -54,8 +54,6 @@ pub const API_KEY_NAME_MAX_CHARS: usize = 63;
 
 /// Maximum space name length, in characters.
 pub const SPACE_NAME_MAX_LEN: usize = 63;
-/// Maximum folder name length, in characters.
-pub const FOLDER_NAME_MAX_LEN: usize = 128;
 /// Maximum text node name length, in characters.
 pub const TEXT_NAME_MAX_LEN: usize = 128;
 /// Maximum derived path length, in bytes.
