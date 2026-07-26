@@ -334,12 +334,29 @@ impl FilesRepo {
     ) -> Result<Vec<SearchTextCandidate>> {
         queries::search::text_candidates(
             &self.pool,
-            &self.crypto,
             space_id,
             scope_node_id,
             scope_path,
             after_sort_path,
             limit,
+        )
+        .await
+    }
+
+    pub async fn search_text_bodies_within_budget(
+        &self,
+        space_id: Uuid,
+        candidates: &[(Uuid, String, i64)],
+        max_bytes: usize,
+    ) -> Result<HashMap<Uuid, TextObject>> {
+        let max_bytes = i64::try_from(max_bytes)
+            .map_err(|_| notegate_core::Error::internal("text search byte budget exceeds i64"))?;
+        queries::search::text_bodies_within_budget(
+            &self.pool,
+            &self.crypto,
+            space_id,
+            candidates,
+            max_bytes,
         )
         .await
     }

@@ -67,33 +67,64 @@ impl SearchService {
             )
             .await?;
 
+        let mut planned_candidates = 0usize;
+        let mut scanned_text_bytes = 0usize;
+        let mut body_candidates = Vec::new();
+        for candidate in candidates.iter().take(limits::SEARCH_NODE_SCAN_MAX) {
+            if !path_filters.allows(&candidate.path) {
+                planned_candidates += 1;
+                continue;
+            }
+
+            let byte_len = candidate.byte_len.max(0) as usize;
+            if scanned_text_bytes + byte_len > limits::GREP_SCAN_MAX_BYTES {
+                break;
+            }
+            scanned_text_bytes += byte_len;
+            planned_candidates += 1;
+            body_candidates.push((
+                candidate.node.id,
+                candidate.content_sha256.clone(),
+                candidate.byte_len,
+            ));
+        }
+        let mut bodies = self
+            .store
+            .search_text_bodies_within_budget(
+                space_id,
+                &body_candidates,
+                limits::GREP_SCAN_MAX_BYTES,
+            )
+            .await?;
+
         let mut items = Vec::with_capacity(limit as usize);
         let mut consumed = 0usize;
-        let mut scanned_text_bytes = 0usize;
         let mut after = None;
-        for candidate in candidates.iter().take(limits::SEARCH_NODE_SCAN_MAX) {
+        for candidate in candidates.iter().take(planned_candidates) {
             if !path_filters.allows(&candidate.path) {
                 consumed += 1;
                 after = Some(candidate.sort_path.clone());
                 continue;
             }
 
-            let byte_len = candidate.text.byte_len.max(0) as usize;
-            if scanned_text_bytes + byte_len > limits::GREP_SCAN_MAX_BYTES {
-                break;
-            }
-            scanned_text_bytes += byte_len;
+            let Some(text) = bodies.remove(&candidate.node.id) else {
+                // The text changed or became ineligible after the candidate
+                // scan. Consume the stale candidate so pagination can progress.
+                consumed += 1;
+                after = Some(candidate.sort_path.clone());
+                continue;
+            };
             consumed += 1;
             after = Some(candidate.sort_path.clone());
 
-            if let Some(content) = candidate.text.content.as_deref() {
+            if let Some(content) = text.content.as_deref() {
                 let match_lines = matcher.match_lines(content, request.line_mode);
                 if !match_lines.is_empty() {
                     items.push(notegate_model::search::GrepHit {
                         node: self.text_node_view(
                             candidate.node.clone(),
                             candidate.path.clone(),
-                            &candidate.text,
+                            &text,
                         ),
                         match_lines: match request.line_mode {
                             notegate_model::search::GrepLineMode::None => Vec::new(),

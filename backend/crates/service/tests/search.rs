@@ -18,8 +18,9 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
+use notegate_core::limits;
 use notegate_db::{FilesRepo, SpaceRepo};
-use notegate_model::AccountKind;
+use notegate_model::{AccountKind, UpdateSpace};
 use notegate_service::files::{
     CreateFolder, CreateText, FilesService, UpdateNodeSearchPolicy, WriteTarget, WriteText,
     WriteTextBody,
@@ -56,6 +57,33 @@ fn services(db: &TestDb) -> (SpaceRepo, FilesService, SearchService) {
     let files = FilesService::new(FilesRepo::new(db.pool.clone()));
     let search = SearchService::new(FilesRepo::new(db.pool.clone()));
     (ws_repo, files, search)
+}
+
+async fn enable_default_text_encryption(
+    db: &TestDb,
+    ws_repo: &SpaceRepo,
+    owner: Uuid,
+    ws: Uuid,
+) -> Result<(), Box<dyn std::error::Error>> {
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    ws_repo
+        .update_space_with_features(
+            owner,
+            &UpdateSpace {
+                space_id: ws,
+                name: None,
+                sort_order: None,
+                navigation_pinned: None,
+                user_mcp_enabled: None,
+                default_search_enabled: None,
+                default_text_encryption_enabled: Some(true),
+            },
+        )
+        .await?;
+    Ok(())
 }
 
 async fn mkdir(files: &FilesService, owner: Uuid, ws: Uuid, parent: Uuid, name: &str) -> Uuid {
@@ -592,6 +620,188 @@ l7
         )
         .await?;
     assert_eq!(all_lines.items[0].match_lines, vec![4, 6]);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_does_not_decrypt_server_encrypted_rows_rejected_by_path_filters()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(
+        &db.pool,
+        "grep-filter-encrypted",
+        "grep-filter-encrypted@example.test",
+    )
+    .await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "grep-filter-encrypted").await;
+    enable_default_text_encryption(&db, &ws_repo, owner, ws).await?;
+
+    let allowed = write_doc(
+        &files,
+        owner,
+        ws,
+        root,
+        "allowed.md",
+        "needle in allowed text",
+    )
+    .await;
+    let excluded = write_doc(
+        &files,
+        owner,
+        ws,
+        root,
+        "excluded.md",
+        "needle in excluded text",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = decode('00', 'hex') \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(excluded)
+    .execute(&db.pool)
+    .await?;
+
+    let page = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: vec!["/allowed.md".to_owned()],
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].node.node.id, allowed);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_does_not_decrypt_server_encrypted_rows_beyond_byte_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(
+        &db.pool,
+        "grep-budget-encrypted",
+        "grep-budget-encrypted@example.test",
+    )
+    .await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "grep-budget-encrypted").await;
+    enable_default_text_encryption(&db, &ws_repo, owner, ws).await?;
+
+    let mut content = "needle".to_owned();
+    content.push_str(&"x".repeat(limits::TEXT_MAX_BYTES - content.len()));
+    let documents_within_budget = limits::GREP_SCAN_MAX_BYTES / limits::TEXT_MAX_BYTES;
+    let mut node_ids = Vec::new();
+    for index in 0..=documents_within_budget {
+        node_ids.push(
+            write_doc(
+                &files,
+                owner,
+                ws,
+                root,
+                &format!("budget-{index:02}.md"),
+                &content,
+            )
+            .await,
+        );
+    }
+
+    let beyond_budget = node_ids[documents_within_budget];
+    let original_ciphertext: Vec<u8> = sqlx::query_scalar(
+        "SELECT content_ciphertext FROM text_objects WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(beyond_budget)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = decode('00', 'hex') \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(beyond_budget)
+    .execute(&db.pool)
+    .await?;
+
+    let first = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+
+    assert_eq!(first.items.len(), documents_within_budget);
+    assert!(
+        first
+            .items
+            .iter()
+            .map(|item| item.node.node.id)
+            .eq(node_ids[..documents_within_budget].iter().copied())
+    );
+    assert!(first.has_more);
+    assert!(first.next_cursor.is_some());
+
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = $3 \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(beyond_budget)
+    .bind(original_ciphertext)
+    .execute(&db.pool)
+    .await?;
+
+    let second = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: None,
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: first.next_cursor,
+            },
+        )
+        .await?;
+
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(second.items[0].node.node.id, beyond_budget);
+    assert!(!second.has_more);
+    assert!(second.next_cursor.is_none());
 
     db.cleanup().await;
     Ok(())

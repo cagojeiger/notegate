@@ -918,14 +918,16 @@ pub mod search {
     use chrono::{DateTime, Utc};
     use notegate_core::Result;
     use notegate_core::security::PiiCrypto;
+    use notegate_model::TextObject;
     use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
     use serde_json::Value;
     use sqlx::FromRow;
     use sqlx::PgPool;
+    use std::collections::HashMap;
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
-    use super::super::rows::{NodeRow, TextRow};
+    use super::super::rows::{NodeRow, TEXT_COLUMNS, TextRow};
 
     #[derive(Debug, FromRow)]
     struct ResolvedNodePathRow {
@@ -1018,27 +1020,12 @@ pub mod search {
         deleted_at: Option<DateTime<Utc>>,
         path: String,
         sort_path: String,
-        text_content: Option<String>,
-        text_encrypted_payload: Option<Value>,
         text_content_sha256: String,
         text_byte_len: i64,
-        text_line_count: i32,
-        text_media_type: String,
-        text_encoding: String,
-        text_storage_format: String,
-        text_at_rest_encryption: String,
-        text_content_ciphertext: Option<Vec<u8>>,
-        text_content_nonce: Option<Vec<u8>>,
-        text_content_enc_key_id: Option<String>,
-        text_content_enc_version: Option<i32>,
-        text_created_by_account_id: Uuid,
-        text_updated_by_account_id: Uuid,
-        text_created_at: DateTime<Utc>,
-        text_updated_at: DateTime<Utc>,
     }
 
     impl TextCandidateRow {
-        fn into_candidate(self, crypto: &PiiCrypto) -> Result<SearchTextCandidate> {
+        fn into_candidate(self) -> Result<SearchTextCandidate> {
             let node = NodeRow {
                 id: self.id,
                 space_id: self.space_id,
@@ -1057,33 +1044,12 @@ pub mod search {
                 deleted_at: self.deleted_at,
             }
             .into_node()?;
-            let text = TextRow {
-                node_id: self.id,
-                space_id: self.space_id,
-                content: self.text_content,
-                encrypted_payload: self.text_encrypted_payload,
-                content_sha256: self.text_content_sha256,
-                byte_len: self.text_byte_len,
-                line_count: self.text_line_count,
-                media_type: self.text_media_type,
-                encoding: self.text_encoding,
-                storage_format: self.text_storage_format,
-                at_rest_encryption: self.text_at_rest_encryption,
-                content_ciphertext: self.text_content_ciphertext,
-                content_nonce: self.text_content_nonce,
-                content_enc_key_id: self.text_content_enc_key_id,
-                content_enc_version: self.text_content_enc_version,
-                created_by_account_id: self.text_created_by_account_id,
-                updated_by_account_id: self.text_updated_by_account_id,
-                created_at: self.text_created_at,
-                updated_at: self.text_updated_at,
-            }
-            .into_text(crypto)?;
             Ok(SearchTextCandidate {
                 node,
                 path: self.path,
                 sort_path: self.sort_path,
-                text,
+                content_sha256: self.text_content_sha256,
+                byte_len: self.text_byte_len,
             })
         }
     }
@@ -1252,7 +1218,6 @@ pub mod search {
 
     pub async fn text_candidates(
         pool: &PgPool,
-        crypto: &PiiCrypto,
         space_id: Uuid,
         scope_node_id: Uuid,
         scope_path: &str,
@@ -1264,23 +1229,8 @@ pub mod search {
                 "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, s.search_enabled, \
                         s.created_by_account_id, s.updated_by_account_id, s.deleted_by_account_id, \
                         s.purge_after, s.created_at, s.updated_at, s.deleted_at, s.path, s.sort_path, \
-                        t.content_text AS text_content, \
-                        t.encrypted_payload AS text_encrypted_payload, \
                         t.content_sha256 AS text_content_sha256, \
-                        t.byte_len AS text_byte_len, \
-                        t.line_count AS text_line_count, \
-                        t.media_type AS text_media_type, \
-                        t.encoding AS text_encoding, \
-                        t.storage_format AS text_storage_format, \
-                        t.at_rest_encryption AS text_at_rest_encryption, \
-                        t.content_ciphertext AS text_content_ciphertext, \
-                        t.content_nonce AS text_content_nonce, \
-                        t.content_enc_key_id AS text_content_enc_key_id, \
-                        t.content_enc_version AS text_content_enc_version, \
-                        t.created_by_account_id AS text_created_by_account_id, \
-                        t.updated_by_account_id AS text_updated_by_account_id, \
-                        t.created_at AS text_created_at, \
-                        t.updated_at AS text_updated_at \
+                        t.byte_len AS text_byte_len \
                  FROM subtree s \
                  JOIN text_objects t ON t.space_id = s.space_id AND t.node_id = s.id \
                  WHERE s.id <> $2 \
@@ -1302,8 +1252,82 @@ pub mod search {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter()
-            .map(|row| row.into_candidate(crypto))
+            .map(TextCandidateRow::into_candidate)
             .collect()
+    }
+
+    /// Load an ordered prefix of unchanged live plain-text bodies whose expected
+    /// total byte length fits within `max_bytes`.
+    pub async fn text_bodies_within_budget(
+        pool: &PgPool,
+        crypto: &PiiCrypto,
+        space_id: Uuid,
+        candidates: &[(Uuid, String, i64)],
+        max_bytes: i64,
+    ) -> Result<HashMap<Uuid, TextObject>> {
+        if candidates.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let node_ids = candidates
+            .iter()
+            .map(|candidate| candidate.0)
+            .collect::<Vec<_>>();
+        let content_sha256s = candidates
+            .iter()
+            .map(|candidate| candidate.1.clone())
+            .collect::<Vec<_>>();
+        let byte_lengths = candidates
+            .iter()
+            .map(|candidate| candidate.2)
+            .collect::<Vec<_>>();
+        let columns = TEXT_COLUMNS
+            .split(',')
+            .map(|column| format!("t.{}", column.trim()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(&format!(
+            "WITH requested AS MATERIALIZED ( \
+                SELECT node_id, content_sha256, byte_len, ordinality \
+                FROM unnest($2::uuid[], $3::text[], $4::bigint[]) WITH ORDINALITY \
+                     AS r(node_id, content_sha256, byte_len, ordinality) \
+            ), budgeted AS MATERIALIZED ( \
+                SELECT node_id, content_sha256, byte_len, ordinality, \
+                       SUM(byte_len) OVER (ORDER BY ordinality) AS cumulative_bytes \
+                FROM requested \
+                WHERE byte_len >= 0 \
+            ), selected AS MATERIALIZED ( \
+                SELECT node_id, content_sha256, byte_len, ordinality \
+                FROM budgeted \
+                WHERE cumulative_bytes <= $5 \
+            ) \
+            SELECT {columns} \
+            FROM selected s \
+            JOIN nodes n ON n.id = s.node_id AND n.space_id = $1 \
+            JOIN text_objects t ON t.node_id = s.node_id AND t.space_id = $1 \
+            WHERE n.deleted_at IS NULL \
+              AND n.kind = 'text' \
+              AND n.search_enabled = true \
+              AND t.storage_format = 'plain' \
+              AND t.content_sha256 = s.content_sha256 \
+              AND t.byte_len = s.byte_len \
+            ORDER BY s.ordinality"
+        ))
+        .bind(space_id)
+        .bind(node_ids)
+        .bind(content_sha256s)
+        .bind(byte_lengths)
+        .bind(max_bytes)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut texts = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let text = row.into_text(crypto)?;
+            texts.insert(text.node_id, text);
+        }
+        Ok(texts)
     }
 
     fn candidate_cte(select_sql: &str) -> String {
