@@ -6,6 +6,7 @@ import type {
   RestNode,
   Space
 } from "../src/api/types";
+import { usageResponse } from "./support/usage";
 
 const space: Space = {
   id: "space-1",
@@ -143,6 +144,7 @@ async function routeApi(
 
 function baseResponse(url: URL, rootChildren: RestNode[]) {
   if (url.pathname === "/api/v1/me") return me;
+  if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
   if (url.pathname === "/api/v1/spaces") {
     return { spaces: [space], page: pageInfo(1, false, null, 100) };
   }

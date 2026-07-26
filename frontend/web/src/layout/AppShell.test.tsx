@@ -143,6 +143,15 @@ describe("AppShell history", () => {
     expect(screen.queryByRole("button", { name: "Open space library" })).not.toBeInTheDocument();
   });
 
+  it("does not load status usage when the mobile status bar is hidden", () => {
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), isMobile: true });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(mocks.useUsageQuery).toHaveBeenLastCalledWith(false);
+  });
+
   it("leaves horizontal shell boundaries to the title and status bars", () => {
     mocks.useWorkbenchController.mockReturnValue(workbench());
     mocks.useUploadManager.mockReturnValue(uploadManager());

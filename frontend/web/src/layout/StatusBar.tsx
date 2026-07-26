@@ -36,16 +36,16 @@ export function StatusBar({
       <div className="flex min-w-0 items-center gap-4">
         {usage ? (
           <span className="flex shrink-0 items-center gap-3 text-faint">
-            <span className="flex items-center gap-1" title={itemUsageLabel} aria-label={itemUsageLabel}>
+            <span className="flex items-center gap-1" title={itemUsageLabel}>
               <ListTree size={13} aria-hidden="true" />
               {usage.items.used.toLocaleString()} items
             </span>
-            <span className="flex items-center gap-1" title={storageUsageLabel} aria-label={storageUsageLabel}>
+            <span className="flex items-center gap-1" title={storageUsageLabel}>
               <HardDrive size={13} aria-hidden="true" />
               {formatBytes(usedBytes)} used
             </span>
             {usage.reconciliation_pending ? (
-              <span title="Usage is updating" aria-label="Usage is updating">
+              <span role="status" title="Usage is updating" aria-label="Usage is updating">
                 <RefreshCw size={12} aria-hidden="true" />
               </span>
             ) : null}
@@ -55,12 +55,14 @@ export function StatusBar({
           {activeSpace ? (
             <>
               <span
+                role="img"
                 title={`New items ${activeSpace.default_search_enabled ? "are" : "are not"} included in search`}
                 aria-label={`New items ${activeSpace.default_search_enabled ? "are" : "are not"} included in search`}
               >
                 {activeSpace.default_search_enabled ? <Search size={13} aria-hidden="true" /> : <SearchX size={13} aria-hidden="true" />}
               </span>
               <span
+                role="img"
                 title={`New text encryption is ${activeSpace.default_text_encryption_enabled ? "on" : "off"}`}
                 aria-label={`New text encryption is ${activeSpace.default_text_encryption_enabled ? "on" : "off"}`}
               >

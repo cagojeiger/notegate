@@ -36,8 +36,8 @@ export function AuxiliarySidebar({
     <aside className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
       <div className="flex h-12 shrink-0 items-center border-b border-seam px-3 text-sm font-medium">Inspector</div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="space-y-6 px-1 py-1">
-          <section>
+        <div className="divide-y divide-seam px-1">
+          <section className="pb-4 pt-1">
             <SectionHeader title="Node" />
             <dl className="space-y-2">
               <MetaRow label="Kind" value={activeNode?.kind ?? EMPTY} />
@@ -50,12 +50,12 @@ export function AuxiliarySidebar({
               <MetaRow label="Lines" value={activeNode?.line_count ?? EMPTY} />
             </dl>
           </section>
-          <section>
+          <section className="py-4">
             <SectionHeader title="Metadata" />
             <pre className="whitespace-pre-wrap font-mono text-xs text-muted">{JSON.stringify(metadata, null, 2)}</pre>
             <Button size="sm" secondary className="mt-3" onClick={onReplaceMetadata} disabled={!activeNode || !canWriteActiveSpace}>Edit metadata</Button>
           </section>
-          <section>
+          <section className="pb-1 pt-4">
             <SectionHeader title="Node settings" />
             {activeNode ? (
               <div className="space-y-3">

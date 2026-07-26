@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 
-import type { Me } from "../api/types";
+import type { Me, Space } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
@@ -35,17 +35,28 @@ type AppSurface = "workbench" | "library";
 
 const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((module) => ({ default: module.SpaceLibrary })));
 
+function WorkspaceStatusBar({
+  activeSpace,
+  usageEnabled
+}: {
+  activeSpace: Space | null;
+  usageEnabled: boolean;
+}) {
+  const usageQuery = useUsageQuery(usageEnabled);
+  const usage = activeSpace
+    ? usageQuery.data?.spaces.find((candidate) => candidate.id === activeSpace.id)
+    : undefined;
+
+  return <StatusBar activeSpace={activeSpace} usage={usage} />;
+}
+
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
-  const usageQuery = useUsageQuery(me.account.kind === "user");
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
   const [surface, setSurface] = useState<AppSurface>("workbench");
   const { actions } = workbench;
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
-  const activeSpaceUsage = me.account.kind === "user" && workbench.activeSpace
-    ? usageQuery.data?.spaces.find((usage) => usage.id === workbench.activeSpace?.id)
-    : undefined;
   const railSpaces = me.account.kind === "user"
     ? workbench.spaces.filter((space) => space.navigation_pinned)
     : workbench.spaces;
@@ -243,7 +254,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onOpenHistory={openHistory}
           onOpenSettings={openSettings}
         />
-        <StatusBar activeSpace={workbench.activeSpace} usage={activeSpaceUsage} />
+        <WorkspaceStatusBar
+          activeSpace={workbench.activeSpace}
+          usageEnabled={me.account.kind === "user" && !workbench.isMobile}
+        />
       </div>
       <Toast />
       {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}

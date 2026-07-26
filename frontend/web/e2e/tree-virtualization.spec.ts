@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
+import { usageResponse } from "./support/usage";
 
 const space: Space = {
   id: "space-1",
@@ -91,6 +92,7 @@ for (const viewport of [
 
 function responseFor(url: URL, children: RestNode[]) {
   if (url.pathname === "/api/v1/me") return me;
+  if (url.pathname === "/api/v1/me/usage") return usageResponse(space, children.length);
   if (url.pathname === "/api/v1/spaces") {
     return { spaces: [space], page: { limit: 100, returned: 1, has_more: false, next_cursor: null } };
   }
