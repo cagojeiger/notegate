@@ -165,9 +165,15 @@ describe("SpaceLibrary", () => {
     });
   });
 
-  it("explains that space defaults do not change existing nodes", () => {
+  it("explains independent navigation, MCP, and new-item settings", () => {
     renderLibrary();
 
+    expect(screen.getByRole("button", { name: "About Navigation" })).toHaveAccessibleDescription(
+      "Pinned spaces stay visible in desktop and mobile navigation. Unpinned spaces remain available in the Space Library."
+    );
+    expect(screen.getByRole("button", { name: "About Access" })).toHaveAccessibleDescription(
+      "Controls whether User MCP can list and access this space. Agent MCP access is configured separately. Pinning does not affect MCP access."
+    );
     expect(screen.getByRole("button", { name: "About New item defaults" })).toHaveAccessibleDescription(
       "These settings apply only to new nodes created in this space. Search applies to every new node, while encryption applies only to new text nodes. Existing nodes are unchanged."
     );

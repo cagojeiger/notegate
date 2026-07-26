@@ -181,7 +181,10 @@ function SpaceInspector({
             </dl>
           </section>
           <section className="p-4">
-            <SectionHeader title="Navigation" />
+            <SectionHeader
+              title="Navigation"
+              help="Pinned spaces stay visible in desktop and mobile navigation. Unpinned spaces remain available in the Space Library."
+            />
             <SettingToggle
               icon={<Pin size={16} />}
               label="Pin to navigation"
@@ -191,7 +194,10 @@ function SpaceInspector({
             />
           </section>
           <section className="p-4">
-            <SectionHeader title="Access" />
+            <SectionHeader
+              title="Access"
+              help="Controls whether User MCP can list and access this space. Agent MCP access is configured separately. Pinning does not affect MCP access."
+            />
             <SettingToggle
               icon={<Bot size={16} />}
               label="User MCP access"
