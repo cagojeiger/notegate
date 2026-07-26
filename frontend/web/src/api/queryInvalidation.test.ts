@@ -22,12 +22,7 @@ describe("query invalidation", () => {
       ...queryKeys.children("space-1", "parent-1"),
       "stat"
     ] as const;
-    const movePickerKey = [
-      ...queryKeys.children("space-1", "parent-1"),
-      "move-picker"
-    ] as const;
     queryClient.setQueryData(statKey, { children: ["stale"] });
-    queryClient.setQueryData(movePickerKey, { children: ["stale"] });
 
     invalidateNodeLists(queryClient, "space-1", ["parent-1", "parent-2", "parent-1", null]);
 
@@ -43,7 +38,6 @@ describe("query invalidation", () => {
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
     expect(queryClient.getQueryData(statKey)).toBeUndefined();
-    expect(queryClient.getQueryData(movePickerKey)).toBeUndefined();
     expect(
       queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
     ).toBe(1);

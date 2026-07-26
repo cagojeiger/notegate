@@ -23,6 +23,7 @@ export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: (name: string) => createSpace(client, name),
     onSuccess: (space) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
@@ -36,6 +37,7 @@ export function useUpdateSpaceMutation() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: ({ spaceId, ...input }: UpdateSpaceInput & { spaceId: string }) =>
       updateSpace(client, spaceId, input),
     onSuccess: (updatedSpace) => {
@@ -77,6 +79,7 @@ export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: (spaceId: string) => deleteSpace(client, spaceId),
     onSuccess: async (_data, spaceId) => {
       await removeDeletedSpaceQueries(queryClient, spaceId);

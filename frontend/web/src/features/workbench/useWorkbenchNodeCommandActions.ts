@@ -51,6 +51,7 @@ export function useWorkbenchNodeCommandActions({
   const updateNodeSearchPolicyMutation = useUpdateNodeSearchPolicyMutation(updateGroupsNode);
   const updateTextEncryptionMutation = useUpdateTextEncryptionMutation(updateGroupsNode);
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
+  const moveNodeDialogMutation = useMoveNodeMutation(updateGroupsNode, { silentError: true });
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
   const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
 
@@ -95,7 +96,7 @@ export function useWorkbenchNodeCommandActions({
   function promptMoveNode(node: NodeSummary) {
     if (!canWriteActiveSpace || node.parent_id === null || !activeSpace) return;
     setDialog(moveNodeDialog(node, activeSpace, async (movedNode, parentId) => {
-      await moveNodeMutation.mutateAsync(
+      await moveNodeDialogMutation.mutateAsync(
         { node: movedNode, parentId },
         { onSuccess: () => addExpanded([parentId]) }
       );
