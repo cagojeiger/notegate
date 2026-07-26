@@ -90,10 +90,6 @@ export function AuxiliarySidebar({
               <p className="text-xs text-muted">Select a node to manage its settings.</p>
             )}
           </section>
-          <section className="p-4">
-            <SectionHeader title="Policy" />
-            <p className="text-xs leading-5 text-muted">Metadata is not encrypted content. Keep sensitive values inside encrypted text or local client state.</p>
-          </section>
         </div>
       </div>
     </aside>
