@@ -23,10 +23,15 @@ import {
 import { queryKeys } from "../../api/queryKeys";
 import type { NodeSummary, RestNode, Space } from "../../api/types";
 
+type MoveNodeMutationOptions = {
+  silentError?: boolean;
+};
+
 export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (node: RestNode) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: ({ parentId, kind, name, content }: { parentId: string; kind: "folder" | "text"; name: string; content?: string }) => {
       if (!activeSpace) throw new Error("No active space");
       return createNode(client, activeSpace.id, { parent_id: parentId, kind, name, content });
@@ -43,6 +48,7 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: ({ node, name }: { node: NodeSummary; name: string }) => updateNode(client, node.space_id, node.id, { name }),
     onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
@@ -86,10 +92,14 @@ export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => v
   });
 }
 
-export function useMoveNodeMutation(onMoved: (node: RestNode) => void) {
+export function useMoveNodeMutation(
+  onMoved: (node: RestNode) => void,
+  options: MoveNodeMutationOptions = {}
+) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: options.silentError ? { silentError: true } : undefined,
     mutationFn: ({ node, parentId }: { node: NodeSummary; parentId: string }) => moveNode(client, node.space_id, node.id, { new_parent_id: parentId, expected_parent_id: node.parent_id }),
     onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
@@ -108,6 +118,7 @@ export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: ({ node, recursive }: { node: NodeSummary; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive).then(() => node),
     onSuccess: async (node, { recursive }) => {
       await removeDeletedNodeQueries(queryClient, node, recursive);
@@ -125,6 +136,7 @@ export function useReplaceMetadataMutation(onReplaced: (node: RestNode) => void)
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
+    meta: { silentError: true },
     mutationFn: ({ node, metadata }: { node: RestNode; metadata: Record<string, unknown> }) => replaceMetadata(client, node.space_id, node.id, metadata),
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);

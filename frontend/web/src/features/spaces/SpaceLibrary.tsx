@@ -34,6 +34,7 @@ export function SpaceLibrary({
   const [selectedSpaceId, setSelectedSpaceId] = useState(activeSpace?.id ?? spaces[0]?.id ?? null);
   const usageQuery = useUsageQuery();
   const updateSpace = useUpdateSpaceMutation();
+  const updateInspectorSpace = useUpdateSpaceMutation({ silentError: true });
   const reorderSpaces = useReorderSpacesMutation();
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0] ?? null;
   const usageBySpaceId = useMemo(
@@ -41,6 +42,7 @@ export function SpaceLibrary({
     [usageQuery.data?.spaces]
   );
   const currentUsageState = usageState(usageQuery);
+  const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
 
   useEffect(() => {
     if (selectedSpaceId && spaces.some((space) => space.id === selectedSpaceId)) return;
@@ -49,7 +51,7 @@ export function SpaceLibrary({
 
   const updateSelectedSpace = (input: UpdateSpaceInput) => {
     if (!selectedSpace) return;
-    updateSpace.mutate({ spaceId: selectedSpace.id, ...input });
+    updateInspectorSpace.mutate({ spaceId: selectedSpace.id, ...input });
   };
   const toggleNavigationPin = (space: Space) => {
     updateSpace.mutate({
@@ -63,7 +65,7 @@ export function SpaceLibrary({
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
           <div className="flex h-full w-full items-center justify-between gap-3">
@@ -90,8 +92,8 @@ export function SpaceLibrary({
                   spaces={spaces}
                   selectedSpaceId={selectedSpace?.id ?? null}
                   usageBySpaceId={usageBySpaceId}
-                  updatePending={updateSpace.isPending || reorderSpaces.isPending}
-                  reorderPending={reorderSpaces.isPending || updateSpace.isPending}
+                  updatePending={updatePending || reorderSpaces.isPending}
+                  reorderPending={reorderSpaces.isPending || updatePending}
                   onSelect={inspectSpace}
                   onOpen={onOpenSpace}
                   onToggleNavigationPin={toggleNavigationPin}
@@ -104,13 +106,16 @@ export function SpaceLibrary({
       </section>
 
       {!isMobile && inspectorOpen ? (
-        <aside aria-label="Space inspector" className="w-80 shrink-0">
+        <aside
+          aria-label="Space inspector"
+          className="flex h-full min-h-0 w-80 shrink-0 overflow-hidden"
+        >
           <SpaceInspector
             space={selectedSpace}
             usage={selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined}
             usageState={currentUsageState}
-            pending={updateSpace.isPending}
-            error={updateSpace.isError}
+            pending={updatePending}
+            error={updateInspectorSpace.isError}
             onUpdate={updateSelectedSpace}
           />
         </aside>
@@ -127,8 +132,8 @@ export function SpaceLibrary({
             space={selectedSpace}
             usage={usageBySpaceId.get(selectedSpace.id)}
             usageState={currentUsageState}
-            pending={updateSpace.isPending}
-            error={updateSpace.isError}
+            pending={updatePending}
+            error={updateInspectorSpace.isError}
             onUpdate={updateSelectedSpace}
             showHeader={false}
           />
@@ -162,7 +167,10 @@ function SpaceInspector({
           Space Inspector
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto p-3"
+        data-testid="space-inspector-scroll-region"
+      >
         <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
           <section className="p-4">
             <SectionHeader title="Space" />
