@@ -42,7 +42,6 @@ pub use target::{Target, parse_target};
 pub use validation::FilesValidationError;
 pub(crate) use view::hydrate_node_views;
 
-use notegate_core::limits::Limits;
 use notegate_db::FilesRepo;
 use notegate_model::{Node, NodeKind, Permission, TextObject};
 use uuid::Uuid;
@@ -56,10 +55,10 @@ use crate::error::{ServiceError, ServiceResult};
 /// 1. Resolves the caller's live [`Permission`] through the repository permission lookup FIRST. No
 ///    live permission ⇒ not-found (`404`, hides the space); insufficient permission ⇒
 ///    forbidden (`403`, via [`policy::require`]).
-/// 2. Validates input format (name, `.md`, depth, path length, text size)
-///    with the pure [`validation`] functions.
-/// 3. Pre-checks cheap structural limits such as fanout and subtree size. The DB
-///    layer atomically enforces Space node/content quota from the usage counter.
+/// 2. Validates request-local input such as names, content, and metadata with
+///    the pure [`validation`] functions.
+/// 3. Delegates state-dependent tree invariants and quotas to the DB mutation
+///    transaction.
 /// 4. Calls the store mutation, attributing it to the caller.
 ///
 /// Paths are never stored on a node — the display path is derived from parents;
@@ -113,10 +112,6 @@ impl FilesService {
         Ok(())
     }
 
-    pub(super) async fn effective_limits(&self, space_id: Uuid) -> ServiceResult<Limits> {
-        Ok(self.store.effective_limits_for_space(space_id).await?)
-    }
-
     /// Load a live node or 404.
     pub(super) async fn load_node(&self, space_id: Uuid, node_id: Uuid) -> ServiceResult<Node> {
         self.store
@@ -153,50 +148,6 @@ impl FilesService {
             .await?
             .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))
     }
-
-    /// Shared create pre-checks for mkdir/touch/write-create: parent is a live
-    /// folder, no sibling-name conflict, resulting depth + path length within
-    /// limits and parent fanout within limits. Returns the parent's derived path.
-    pub(super) async fn prepare_create(
-        &self,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        name: &str,
-    ) -> ServiceResult<String> {
-        let parent = self.load_node(space_id, parent_node_id).await?;
-        if parent.kind != NodeKind::Folder {
-            return Err(ServiceError::InvalidInput(
-                "parent must be a folder".to_owned(),
-            ));
-        }
-
-        // Name conflict against live siblings.
-        if self
-            .store
-            .find_live_child_by_name(space_id, parent_node_id, name)
-            .await?
-            .is_some()
-        {
-            return Err(ServiceError::Conflict(format!(
-                "a node named '{name}' already exists in this folder"
-            )));
-        }
-
-        let parent_path = self.path_of(space_id, parent_node_id).await?;
-        let parent_depth = path_depth(&parent_path);
-        let new_path = join_path(&parent_path, name);
-        validation::validate_depth(parent_depth + 1)?;
-        validation::validate_path_len(&new_path)?;
-
-        let caps = self.effective_limits(space_id).await?;
-        let children = self
-            .store
-            .count_live_children(space_id, parent_node_id)
-            .await?;
-        validation::validate_fanout(children, caps)?;
-
-        Ok(parent_path)
-    }
 }
 
 /// Join a parent path and a child name into a canonical path (root-aware).
@@ -206,11 +157,4 @@ pub(super) fn join_path(parent_path: &str, name: &str) -> String {
     } else {
         format!("{parent_path}/{name}")
     }
-}
-
-/// Depth (segment count below root) of a derived path. Root (`/`) is 0.
-pub(super) fn path_depth(path: &str) -> usize {
-    path.split('/')
-        .filter(|segment| !segment.is_empty())
-        .count()
 }

@@ -1,13 +1,13 @@
 //! Create commands: `mkdir` (folder) and `touch`/`write-create` (text).
 //!
 //! Both run in one transaction that re-checks every create invariant — parent is
-//! a live folder, resulting depth/fanout/node caps, sibling-name unique, and
+//! a live folder, resulting path/fanout/node caps, sibling-name unique, and
 //! shared content byte budget — then inserts the node (and content row) with
 //! attribution = the caller.
 
-use notegate_core::limits::{self, Limits};
+use notegate_core::Result;
+use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
-use notegate_core::{Error, Result};
 use notegate_model::files::StoredContent;
 use notegate_model::{Node, TextObject};
 use sqlx::PgPool;
@@ -159,8 +159,8 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
     Ok((node_row.into_node()?, doc_row.into_text(crypto)?))
 }
 
-/// Shared in-tx create pre-checks: parent live folder, depth, sibling-unique,
-/// and fanout.
+/// Shared in-tx create pre-checks: parent live folder, path bounds,
+/// sibling-unique, and fanout.
 pub(crate) async fn prepare_create(
     tx: &mut sqlx::PgConnection,
     space_id: Uuid,
@@ -168,15 +168,9 @@ pub(crate) async fn prepare_create(
     name: &str,
     caps: Limits,
 ) -> Result<()> {
-    checks::require_live_folder(tx, space_id, parent_id).await?;
-
-    let parent_depth = checks::node_depth(tx, space_id, parent_id).await?;
-    if parent_depth + 1 > limits::MAX_PATH_DEPTH {
-        return Err(Error::validation(format!(
-            "path depth would exceed the maximum of {}",
-            limits::MAX_PATH_DEPTH
-        )));
-    }
+    let parent_bounds = checks::require_live_folder_path_bounds(tx, space_id, parent_id).await?;
+    let bounds = checks::destination_bounds(parent_bounds, name, checks::PathBounds::default())?;
+    checks::require_path_limits(bounds)?;
 
     checks::require_sibling_unique(tx, space_id, parent_id, name, None).await?;
     checks::require_fanout(tx, space_id, parent_id, caps).await?;

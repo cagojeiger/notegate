@@ -584,44 +584,6 @@ pub mod node {
         Ok(rows.into_iter().map(|(node_id,)| (node_id, true)).collect())
     }
 
-    /// Count of live direct children of a folder.
-    pub async fn count_live_children(
-        pool: &PgPool,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-    ) -> Result<usize> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM nodes \
-         WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL",
-        )
-        .bind(space_id)
-        .bind(parent_node_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(count, "child")
-    }
-
-    /// A live direct child of `parent_node_id` with the given name, if any.
-    pub async fn find_live_child_by_name(
-        pool: &PgPool,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        name: &str,
-    ) -> Result<Option<Node>> {
-        let row = sqlx::query_as::<_, NodeRow>(&format!(
-            "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND parent_id = $2 AND name = $3 AND deleted_at IS NULL"
-        ))
-        .bind(space_id)
-        .bind(parent_node_id)
-        .bind(name)
-        .fetch_optional(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        row.map(NodeRow::into_node).transpose()
-    }
-
     /// A page of live direct children, keyset-ordered by `(sort_order, name, id)`.
     /// Fetches `limit + 1` rows to detect whether more follow.
     pub async fn paged_child_summaries(
@@ -926,35 +888,6 @@ pub mod node {
         NameAsc { name: &'a str, id: Uuid },
     }
 
-    /// The maximum depth of any live descendant relative to `node_id` (0 when there
-    /// are no live children). Computed by a recursive CTE bounded by the live subtree
-    /// (≤ `space_max_nodes`).
-    pub async fn subtree_relative_depth(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-    ) -> Result<usize> {
-        let max_depth: i32 = sqlx::query_scalar(
-            "WITH RECURSIVE subtree AS ( \
-            SELECT id, 0 AS depth \
-            FROM nodes \
-            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-            UNION ALL \
-            SELECT n.id, s.depth + 1 \
-            FROM nodes n \
-            JOIN subtree s ON n.parent_id = s.id \
-            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-         ) \
-         SELECT COALESCE(max(depth), 0) FROM subtree",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        to_usize(i64::from(max_depth), "depth")
-    }
-
     /// Count of live nodes in the subtree rooted at `node_id` (including itself).
     pub async fn subtree_live_count(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<usize> {
         let count: i64 = sqlx::query_scalar(
@@ -976,38 +909,6 @@ pub mod node {
         .await
         .map_err(map_sqlx_error)?;
         to_usize(count, "subtree node")
-    }
-
-    /// Whether `candidate_id` is `node_id` itself or any live descendant of it.
-    pub async fn is_self_or_descendant(
-        pool: &PgPool,
-        space_id: Uuid,
-        node_id: Uuid,
-        candidate_id: Uuid,
-    ) -> Result<bool> {
-        if node_id == candidate_id {
-            return Ok(true);
-        }
-        let found: bool = sqlx::query_scalar(
-            "WITH RECURSIVE subtree AS ( \
-            SELECT id \
-            FROM nodes \
-            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-            UNION ALL \
-            SELECT n.id \
-            FROM nodes n \
-            JOIN subtree s ON n.parent_id = s.id \
-            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-         ) \
-         SELECT EXISTS (SELECT 1 FROM subtree WHERE id = $3)",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .bind(candidate_id)
-        .fetch_one(pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(found)
     }
 }
 

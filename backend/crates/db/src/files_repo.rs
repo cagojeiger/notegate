@@ -14,7 +14,6 @@ use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
-use notegate_core::tier::effective_file_tree_limits;
 use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
 use notegate_model::{FileObject, Node, NodeKind, NodeSummary, Permission, TextObject};
 use serde_json::Value;
@@ -24,7 +23,6 @@ use uuid::Uuid;
 
 use crate::file_change_event_repo;
 use crate::files::{commands, queries};
-use crate::tier_lookup;
 use notegate_model::files::{
     BeginObjectUpload, ChildrenCursor, CopyCounts, CopyNode, CreateFolder, FileStats, MoveNode,
     NodeListCursor, NodeListSort, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
@@ -93,11 +91,6 @@ impl FilesRepo {
 }
 
 impl FilesRepo {
-    pub async fn effective_limits_for_space(&self, space_id: Uuid) -> Result<Limits> {
-        let tier = tier_lookup::active_space_owner_tier(&self.pool, space_id).await?;
-        Ok(effective_file_tree_limits(tier, self.limits))
-    }
-
     pub async fn find_node(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
         queries::node::find_node(&self.pool, space_id, node_id).await
     }
@@ -148,19 +141,6 @@ impl FilesRepo {
         node_ids: &[Uuid],
     ) -> Result<HashMap<Uuid, bool>> {
         queries::node::has_children_many(&self.pool, space_id, node_ids).await
-    }
-
-    pub async fn count_live_children(&self, space_id: Uuid, parent_node_id: Uuid) -> Result<usize> {
-        queries::node::count_live_children(&self.pool, space_id, parent_node_id).await
-    }
-
-    pub async fn find_live_child_by_name(
-        &self,
-        space_id: Uuid,
-        parent_node_id: Uuid,
-        name: &str,
-    ) -> Result<Option<Node>> {
-        queries::node::find_live_child_by_name(&self.pool, space_id, parent_node_id, name).await
     }
 
     pub async fn text_stats(&self, space_id: Uuid, node_id: Uuid) -> Result<Option<TextStats>> {
@@ -364,21 +344,8 @@ impl FilesRepo {
         .await
     }
 
-    pub async fn subtree_relative_depth(&self, space_id: Uuid, node_id: Uuid) -> Result<usize> {
-        queries::node::subtree_relative_depth(&self.pool, space_id, node_id).await
-    }
-
     pub async fn subtree_live_count(&self, space_id: Uuid, node_id: Uuid) -> Result<usize> {
         queries::node::subtree_live_count(&self.pool, space_id, node_id).await
-    }
-
-    pub async fn is_self_or_descendant(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-        candidate_id: Uuid,
-    ) -> Result<bool> {
-        queries::node::is_self_or_descendant(&self.pool, space_id, node_id, candidate_id).await
     }
 
     pub async fn insert_folder(

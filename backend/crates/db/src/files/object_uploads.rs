@@ -83,10 +83,18 @@ pub async fn insert(
 ) -> Result<PendingObjectUpload> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
-    // Serialize against other Space mutations and reject staging that would
-    // already exceed the effective tier quota before object bytes are sent.
+    // Serialize against other Space mutations and reject invalid destinations
+    // or staging that already exceeds the effective tier quota.
     let (_gate, effective_limits) =
         checks::lock_space_with_limits(&mut tx, space_id, limits).await?;
+    create::prepare_create(
+        &mut tx,
+        space_id,
+        input.parent_node_id,
+        &input.name,
+        effective_limits,
+    )
+    .await?;
     let (live_file_bytes, pending_file_bytes): (i64, i64) = sqlx::query_as(
         "SELECT su.live_file_bytes, COALESCE(( \
              SELECT sum(o.declared_byte_len) FROM object_storage_objects o \
