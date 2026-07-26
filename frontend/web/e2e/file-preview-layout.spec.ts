@@ -100,6 +100,30 @@ for (const viewport of [
   });
 }
 
+test("mobile Node Inspector remains scrollable on a short viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 640 });
+  await mockFilePreviewApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Toggle left sidebar" }).click();
+  await page.getByRole("button", { name: imageNode.name }).first().click();
+  await page.getByRole("button", { name: "Toggle right sidebar" }).click();
+
+  const scrollRegion = page.getByTestId("node-inspector-scroll-region");
+  await expect(scrollRegion).toBeVisible();
+  await expect.poll(
+    async () => scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)
+  ).toBe(true);
+
+  await scrollRegion.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(async () => scrollRegion.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await expect(scrollRegion.getByText("Node settings", { exact: true })).toBeInViewport();
+});
+
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {
   const previewSvg = Buffer.from(
     '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="4000"><rect width="1200" height="4000" fill="#ffffff"/><path d="M80 120h1040v3760H80z" fill="none" stroke="#185fc4" stroke-width="16"/></svg>'

@@ -159,6 +159,29 @@ test("Space Library keeps the desktop inspector scrollable at short viewport hei
     .toBeGreaterThan(0);
 });
 
+test("Space Library keeps the mobile inspector scrollable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 640 });
+  await mockSpaceLibraryApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+  await page.getByRole("button", { name: "Inspect Daily" }).click();
+
+  const inspector = page.getByRole("dialog", { name: "Space Inspector" });
+  const scrollRegion = inspector.getByTestId("space-inspector-scroll-region");
+  await expect(inspector).toBeVisible();
+  await expect.poll(
+    async () => scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)
+  ).toBe(true);
+
+  await scrollRegion.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(async () => scrollRegion.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await expect(inspector.getByText("Files", { exact: true })).toBeInViewport();
+});
+
 test("opening an unpinned Space does not add it to navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockSpaceLibraryApi(page);

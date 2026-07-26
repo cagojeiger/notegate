@@ -92,4 +92,17 @@ describe("Modal", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("keeps bottom-sheet content above the device safe area", () => {
+    render(
+      <Modal title="Bottom sheet" placement="bottom" onClose={() => undefined}>
+        <p>Sheet content</p>
+      </Modal>
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Bottom sheet" });
+    const content = screen.getByText("Sheet content").parentElement;
+    expect(dialog).toHaveClass("h-[82dvh]");
+    expect(content).toHaveClass("pb-[env(safe-area-inset-bottom)]");
+  });
 });
