@@ -124,17 +124,6 @@ impl SpaceService {
         })
     }
 
-    pub async fn find_visible_by_id(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-    ) -> ServiceResult<Option<SpaceView>> {
-        Ok(self
-            .store
-            .find_space_view_for(caller_account_id, space_id)
-            .await?)
-    }
-
     pub async fn find_mcp_visible_by_id(
         &self,
         caller_account_id: Uuid,
@@ -143,34 +132,6 @@ impl SpaceService {
         Ok(self
             .store
             .find_mcp_space_view_for(caller_account_id, space_id)
-            .await?)
-    }
-
-    pub async fn find_visible_by_name(
-        &self,
-        caller_account_id: Uuid,
-        name: &str,
-        limit: i64,
-    ) -> ServiceResult<Vec<SpaceView>> {
-        validate_space_name(name)?;
-        let limit = clamp_limit(Some(limit), 1, limits::SPACES_MAX_LIMIT);
-        Ok(self
-            .store
-            .list_space_views_by_name_for(caller_account_id, name, limit)
-            .await?)
-    }
-
-    pub async fn find_visible_by_name_case_insensitive(
-        &self,
-        caller_account_id: Uuid,
-        name: &str,
-        limit: i64,
-    ) -> ServiceResult<Vec<SpaceView>> {
-        validate_space_name(name)?;
-        let limit = clamp_limit(Some(limit), 1, limits::SPACES_MAX_LIMIT);
-        Ok(self
-            .store
-            .list_space_views_by_name_case_insensitive_for(caller_account_id, name, limit)
             .await?)
     }
 

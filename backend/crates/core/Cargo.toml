@@ -11,7 +11,6 @@ license.workspace = true
 test-util = []
 
 [dependencies]
-rand.workspace = true
 sha2.workspace = true
 hmac.workspace = true
 hkdf.workspace = true

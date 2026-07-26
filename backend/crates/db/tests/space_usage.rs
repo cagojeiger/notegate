@@ -12,7 +12,9 @@ mod common;
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
-use notegate_model::files::{CopyNode, CreateFolder, MoveNode, StoredContent, WriteTextBody};
+use notegate_model::files::{
+    CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -125,8 +127,16 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
         account,
     )
     .await?;
-    repo.update_node_metadata(space_id, copied.id, None, Some(2_000), account)
-        .await?;
+    repo.update_node(
+        space_id,
+        &UpdateNode {
+            node_id: copied.id,
+            name: None,
+            sort_order: Some(2_000),
+        },
+        account,
+    )
+    .await?;
     assert_usage(&db.pool, space_id, (6, 22, 3)).await?;
 
     repo.soft_delete_node(space_id, folder.id, account, true)

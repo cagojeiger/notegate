@@ -50,16 +50,13 @@ pub async fn update_node(
 
     let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
     let node_kind = current.kind.clone();
-    let parent_id = current.parent_id;
+    let rename = match (command.name.as_deref(), current.parent_id) {
+        (Some(_), None) => return Err(Error::conflict("cannot rename the root node")),
+        (Some(name), Some(parent_id)) => Some((name, parent_id)),
+        (None, _) => None,
+    };
 
-    if command.name.is_some() && parent_id.is_none() {
-        return Err(Error::conflict("cannot rename the root node"));
-    }
-
-    let name_changed = command
-        .name
-        .as_deref()
-        .is_some_and(|name| name != current.name);
+    let name_changed = rename.is_some_and(|(name, _)| name != current.name);
     let sort_order_changed = command
         .sort_order
         .is_some_and(|sort_order| sort_order != current.sort_order);
@@ -68,12 +65,9 @@ pub async fn update_node(
         return current.into_node();
     }
 
-    if let Some(name) = command.name.as_deref()
+    if let Some((name, parent_id)) = rename
         && name_changed
     {
-        let Some(parent_id) = parent_id else {
-            return Err(Error::conflict("cannot rename the root node"));
-        };
         checks::require_sibling_unique(&mut tx, space_id, parent_id, name, Some(command.node_id))
             .await?;
     }

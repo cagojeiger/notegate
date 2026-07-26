@@ -259,17 +259,11 @@ impl SpaceRepo {
         name: &str,
         limit: i64,
         case_insensitive: bool,
-        user_mcp_only: bool,
     ) -> Result<Vec<SpaceView>> {
         let name_predicate = if case_insensitive {
             "lower(s.name) = lower($2)"
         } else {
             "s.name = $2"
-        };
-        let user_mcp_predicate = if user_mcp_only {
-            "AND s.user_mcp_enabled_at IS NOT NULL"
-        } else {
-            ""
         };
         let rows = sqlx::query_as::<_, SpaceViewRow>(&format!(
             "SELECT * FROM ( \
@@ -279,7 +273,7 @@ impl SpaceRepo {
                  JOIN users owner ON owner.id = s.owner_user_id \
                  JOIN nodes root ON root.space_id = s.id AND root.parent_id IS NULL AND root.deleted_at IS NULL \
                  WHERE acc.id = $1 AND acc.kind = 'user' AND acc.is_active = true AND acc.deleted_at IS NULL \
-                   {user_mcp_predicate} \
+                   AND s.user_mcp_enabled_at IS NOT NULL \
                    AND {name_predicate} \
                  UNION ALL \
                  SELECT {AGENT_SPACE_VIEW_COLUMNS} \
@@ -302,33 +296,13 @@ impl SpaceRepo {
         rows.into_iter().map(SpaceViewRow::into_view).collect()
     }
 
-    pub async fn list_space_views_by_name_for(
-        &self,
-        account_id: Uuid,
-        name: &str,
-        limit: i64,
-    ) -> Result<Vec<SpaceView>> {
-        self.list_space_views_by_name(account_id, name, limit, false, false)
-            .await
-    }
-
-    pub async fn list_space_views_by_name_case_insensitive_for(
-        &self,
-        account_id: Uuid,
-        name: &str,
-        limit: i64,
-    ) -> Result<Vec<SpaceView>> {
-        self.list_space_views_by_name(account_id, name, limit, true, false)
-            .await
-    }
-
     pub async fn list_mcp_space_views_by_name_for(
         &self,
         account_id: Uuid,
         name: &str,
         limit: i64,
     ) -> Result<Vec<SpaceView>> {
-        self.list_space_views_by_name(account_id, name, limit, false, true)
+        self.list_space_views_by_name(account_id, name, limit, false)
             .await
     }
 
@@ -338,7 +312,7 @@ impl SpaceRepo {
         name: &str,
         limit: i64,
     ) -> Result<Vec<SpaceView>> {
-        self.list_space_views_by_name(account_id, name, limit, true, true)
+        self.list_space_views_by_name(account_id, name, limit, true)
             .await
     }
 

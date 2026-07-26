@@ -12,7 +12,9 @@ mod common;
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
-use notegate_model::files::{CopyNode, CreateFolder, MoveNode, StoredContent, WriteTextBody};
+use notegate_model::files::{
+    CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
+};
 use serde_json::json;
 
 fn text(content: &str) -> StoredContent {
@@ -33,7 +35,15 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     let repo = FilesRepo::new(db.pool.clone());
 
     let root_rename = repo
-        .update_node_metadata(space_id, root_id, Some("/"), None, account)
+        .update_node(
+            space_id,
+            &UpdateNode {
+                node_id: root_id,
+                name: Some("/".to_owned()),
+                sort_order: None,
+            },
+            account,
+        )
         .await
         .expect_err("root rename should be rejected even when the name is unchanged");
     assert!(matches!(
@@ -97,10 +107,26 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
         .await?;
     assert_eq!(no_op_metadata_node.updated_at, metadata_node.updated_at);
     let updated_node = repo
-        .update_node_metadata(space_id, node.id, Some("renamed.md"), Some(10), account)
+        .update_node(
+            space_id,
+            &UpdateNode {
+                node_id: node.id,
+                name: Some("renamed.md".to_owned()),
+                sort_order: Some(10),
+            },
+            account,
+        )
         .await?;
     let no_op_updated_node = repo
-        .update_node_metadata(space_id, node.id, Some("renamed.md"), Some(10), account)
+        .update_node(
+            space_id,
+            &UpdateNode {
+                node_id: node.id,
+                name: Some("renamed.md".to_owned()),
+                sort_order: Some(10),
+            },
+            account,
+        )
         .await?;
     assert_eq!(no_op_updated_node.updated_at, updated_node.updated_at);
     let moved_node = repo
