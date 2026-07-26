@@ -115,6 +115,27 @@ test("Space Library expands the card grid when the desktop inspector closes", as
   ).toBeGreaterThan(widthWithInspector + 250);
 });
 
+test("Space Library keeps the desktop inspector scrollable at short viewport heights", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await mockSpaceLibraryApi(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open space library" }).click();
+
+  const inspector = page.getByRole("complementary", { name: "Space inspector" });
+  const scrollRegion = inspector.getByTestId("space-inspector-scroll-region");
+  await expect(inspector).toBeVisible();
+  await expect.poll(
+    async () => scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)
+  ).toBe(true);
+
+  await scrollRegion.evaluate((element) => {
+    element.scrollTop = 100;
+  });
+  await expect
+    .poll(async () => scrollRegion.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+});
+
 test("opening an unpinned Space does not add it to navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockSpaceLibraryApi(page);

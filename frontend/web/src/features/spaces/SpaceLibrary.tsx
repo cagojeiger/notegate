@@ -63,7 +63,7 @@ export function SpaceLibrary({
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="h-12 shrink-0 border-b border-seam px-5 sm:px-7 lg:px-10">
           <div className="flex h-full w-full items-center justify-between gap-3">
@@ -104,7 +104,10 @@ export function SpaceLibrary({
       </section>
 
       {!isMobile && inspectorOpen ? (
-        <aside aria-label="Space inspector" className="w-80 shrink-0">
+        <aside
+          aria-label="Space inspector"
+          className="flex h-full min-h-0 w-80 shrink-0 overflow-hidden"
+        >
           <SpaceInspector
             space={selectedSpace}
             usage={selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined}
@@ -162,7 +165,10 @@ function SpaceInspector({
           Space Inspector
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto p-3"
+        data-testid="space-inspector-scroll-region"
+      >
         <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
           <section className="p-4">
             <SectionHeader title="Space" />
