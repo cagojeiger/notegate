@@ -99,7 +99,7 @@ export function Modal({
         tabIndex={-1}
         className={`relative w-full ${width} border border-border bg-panel shadow-[var(--ng-focus-shadow)] ${
           bottomSheet
-            ? "flex max-h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
+            ? "flex h-[82dvh] flex-col overflow-hidden rounded-t-2xl border-b-0"
             : "max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl p-6"
         }`}
       >
