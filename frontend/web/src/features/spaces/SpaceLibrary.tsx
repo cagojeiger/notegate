@@ -201,7 +201,10 @@ function SpaceInspector({
             />
           </section>
           <section className="py-4">
-            <SectionHeader title="New item defaults" />
+            <SectionHeader
+              title="New item defaults"
+              help="These settings apply only to new nodes created in this space. Search applies to every new node, while encryption applies only to new text nodes. Existing nodes are unchanged."
+            />
             <div className="space-y-3">
               <SettingToggle
                 icon={<Search size={16} />}

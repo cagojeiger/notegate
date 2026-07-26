@@ -165,6 +165,14 @@ describe("SpaceLibrary", () => {
     });
   });
 
+  it("explains that space defaults do not change existing nodes", () => {
+    renderLibrary();
+
+    expect(screen.getByRole("button", { name: "About New item defaults" })).toHaveAccessibleDescription(
+      "These settings apply only to new nodes created in this space. Search applies to every new node, while encryption applies only to new text nodes. Existing nodes are unchanged."
+    );
+  });
+
   it("opens the inspector as a mobile sheet only on mobile", async () => {
     const user = userEvent.setup();
     renderLibrary({ isMobile: true });
