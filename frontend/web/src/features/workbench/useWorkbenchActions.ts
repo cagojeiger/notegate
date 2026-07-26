@@ -101,6 +101,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
       handleSignOut,
       confirmResetSavedWorkspace,
       toggleFolder,
+      setPrimaryWidth,
       startPrimaryResize
     }
   };

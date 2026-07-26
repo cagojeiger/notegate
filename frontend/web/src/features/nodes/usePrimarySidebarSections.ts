@@ -36,6 +36,8 @@ export function usePrimarySidebarSections() {
     gridRef,
     gridRows,
     bothSectionsOpen,
+    treeRatio,
+    setTreeRatio,
     treeSectionOpen,
     recentSectionOpen,
     recentDensity,

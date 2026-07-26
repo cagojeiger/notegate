@@ -6,14 +6,15 @@ import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import { getCurrentUserUsage, requestSpaceUsageCheck, type CurrentUserUsage } from "../../api/usage";
 
-export function useUsageQuery() {
+export function useUsageQuery(enabled = true) {
   const client = useApiClient();
   return useQuery({
     queryKey: queryKeys.usage,
     queryFn: () => getCurrentUserUsage(client),
+    enabled,
     refetchInterval: (query) => query.state.data?.spaces.some((space) => space.reconciliation_pending)
       ? POLLING.usagePendingMs
-      : false
+      : POLLING.usageSummaryMs
   });
 }
 

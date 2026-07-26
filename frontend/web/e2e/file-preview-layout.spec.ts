@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
+import { usageResponse } from "./support/usage";
 
 const space: Space = {
   id: "space-1",
@@ -121,6 +122,7 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
 
 function responseFor(url: URL, previewSvg: string) {
   if (url.pathname === "/api/v1/me") return me;
+  if (url.pathname === "/api/v1/me/usage") return usageResponse(space, 2);
   if (url.pathname === "/api/v1/spaces") {
     return { spaces: [space], page: pageInfo(1) };
   }

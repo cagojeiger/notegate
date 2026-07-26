@@ -1,4 +1,4 @@
-import { Database, FileBadge2, FileText, Folder, Image as ImageIcon } from "lucide-react";
+import { File, FileBadge2, FileText, Folder, Image as ImageIcon } from "lucide-react";
 import { describe, expect, it } from "vitest";
 
 import type { RestNode } from "../../api/types";
@@ -11,8 +11,8 @@ describe("nodeIcon", () => {
     expect(nodeIcon(node({ kind: "file", file_preview_kind: "image" }))).toBe(ImageIcon);
     expect(nodeIcon(node({ kind: "file", file_preview_kind: "pdf" }))).toBe(FileBadge2);
     expect(nodeIcon(node({ kind: "file", preview_available: true }))).toBe(ImageIcon);
-    expect(nodeIcon(node({ kind: "file", preview_available: false }))).toBe(Database);
-    expect(nodeIcon(node({ kind: "file", preview_available: undefined }))).toBe(Database);
+    expect(nodeIcon(node({ kind: "file", preview_available: false }))).toBe(File);
+    expect(nodeIcon(node({ kind: "file", preview_available: undefined }))).toBe(File);
   });
 });
 

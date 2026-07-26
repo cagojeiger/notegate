@@ -82,4 +82,12 @@ describe("TitleBar", () => {
     expect(document.querySelector("header")).toHaveClass("max-md:h-[calc(3rem+env(safe-area-inset-top))]");
     expect(document.querySelector("header")).toHaveClass("max-md:pt-[env(safe-area-inset-top)]");
   });
+
+  it("aligns the desktop brand with the activity rail grid", () => {
+    renderTitleBar();
+
+    expect(document.querySelector("header")).toHaveClass(
+      "grid-cols-[52px_minmax(0,1fr)_auto]"
+    );
+  });
 });

@@ -55,6 +55,26 @@ describe("AuxiliarySidebar", () => {
     expect(onTextEncryptionEnabledChange).toHaveBeenCalledWith(true);
   });
 
+  it("explains that node settings apply immediately", () => {
+    render(
+      <AuxiliarySidebar
+        activeNode={textNode}
+        canWriteActiveSpace
+        canManageActiveSpace
+        textEncryptionAvailable
+        searchPolicyPending={false}
+        textEncryptionPending={false}
+        onReplaceMetadata={vi.fn()}
+        onSearchEnabledChange={vi.fn()}
+        onTextEncryptionEnabledChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "About Node settings" })).toHaveAccessibleDescription(
+      "Changes apply immediately to this node. Search controls whether it appears in find and grep results. Stored text encryption applies only to text content. The settings are independent."
+    );
+  });
+
   it("shows actual encrypted storage and allows disabling it after a tier downgrade", async () => {
     const user = userEvent.setup();
     const onTextEncryptionEnabledChange = vi.fn();

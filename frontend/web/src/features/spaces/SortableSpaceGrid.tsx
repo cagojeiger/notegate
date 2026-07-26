@@ -85,7 +85,7 @@ export function SortableSpaceGrid({
       <SortableContext items={spaces.map((space) => space.id)} strategy={rectSortingStrategy}>
         <ul
           aria-label="All spaces"
-          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3"
+          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] items-stretch gap-3"
         >
           {spaces.map((space, index) => (
             <SortableSpaceCard
@@ -154,7 +154,10 @@ function SortableSpaceCard({
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={isDragging ? "relative z-10 opacity-70" : ""}
+      className={[
+        "w-full max-w-96",
+        isDragging ? "relative z-10 opacity-70" : ""
+      ].join(" ")}
     >
       <Card
         padding="none"
@@ -244,7 +247,7 @@ function SortableSpaceCard({
           </StatusItem>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-seam px-3 py-2">
+        <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
           <Button size="sm" variant="ghost" onClick={onOpen}>
             Open
           </Button>
@@ -285,10 +288,10 @@ function StatusItem({
     <span
       title={description}
       className={[
-        "grid size-7 place-items-center rounded-md border",
+        "grid size-7 place-items-center rounded-md",
         active
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-seam bg-panel text-muted"
+          ? "bg-primary/10 text-primary"
+          : "bg-panel text-muted"
       ].join(" ")}
     >
       <span aria-hidden="true">{children}</span>

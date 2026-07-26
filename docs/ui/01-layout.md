@@ -120,15 +120,17 @@ EditorArea
 
 - 앱 준비/저장 상태.
 - 현재 space 이름.
+- 현재 space의 전체 item 수와 Text/File 합산 사용량.
+- 새 item의 검색 포함 기본값과 새 Text의 암호화 기본값.
 
 포함하지 않음:
 
 - node path.
-- byte count.
+- 현재 node의 byte count.
 - line count.
 - updated timestamp.
 
-node 상세 정보는 Inspector가 담당한다.
+Text/File 한도는 서로 독립이므로 StatusBar에서 합산 비율을 만들지 않는다. 상세 사용량과 node 정보는 Inspector가 담당한다.
 
 ## UploadProgressDock
 

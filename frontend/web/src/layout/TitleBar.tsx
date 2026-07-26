@@ -40,13 +40,16 @@ export function TitleBar({
   const splitLabel = atMaxGroups ? `Maximum ${MAX_EDITOR_GROUPS} editor groups` : `Split editor (${editorGroupCount}/${MAX_EDITOR_GROUPS})`;
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-seam bg-surface px-3 max-md:h-[calc(3rem+env(safe-area-inset-top))] max-md:pt-[env(safe-area-inset-top)]">
-      <div className="flex min-w-0 items-center gap-2">
+    <header className="grid h-12 shrink-0 grid-cols-[52px_minmax(0,1fr)_auto] items-center border-b border-seam bg-surface max-md:h-[calc(3rem+env(safe-area-inset-top))] max-md:grid-cols-[minmax(0,1fr)_auto] max-md:px-3 max-md:pt-[env(safe-area-inset-top)]">
+      <div className="grid h-full place-items-center max-md:hidden">
         <BrandAppIcon size={28} decorative />
+      </div>
+      <div className="flex min-w-0 items-center gap-2 px-3 max-md:px-0">
+        <BrandAppIcon size={28} className="md:hidden" decorative />
         <span className="font-semibold tracking-tight">NoteGate</span>
         {locationLabel || activeSpace ? <span className="truncate text-sm text-muted">/ {locationLabel ?? activeSpace?.name}</span> : null}
       </div>
-      <div className="flex items-center gap-2 text-muted">
+      <div className="flex items-center gap-2 pr-3 text-muted max-md:pr-0">
         <div className="flex items-center gap-1">
           {showWorkbenchControls ? (
             <>
@@ -58,7 +61,6 @@ export function TitleBar({
           ) : null}
           <IconButton label={auxiliaryLabel} onClick={onToggleAuxiliary} pressed={auxiliaryOpen}><PanelRight size={16} /></IconButton>
         </div>
-        <div className="h-5 w-px bg-seam" aria-hidden="true" />
         <IconButton label="Toggle theme" onClick={onToggleTheme}>{theme === "light" ? <Moon size={16} /> : <Sun size={16} />}</IconButton>
       </div>
     </header>

@@ -40,6 +40,11 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[0].y).toBe(cardBoxes[1].y);
   expect(cardBoxes[1].y).toBe(cardBoxes[2].y);
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
+  expect(cardBoxes.every((box) => box.width >= 288 && box.width <= 384)).toBe(true);
+  expect(
+    Math.max(...cardBoxes.map((box) => box.width))
+      - Math.min(...cardBoxes.map((box) => box.width))
+  ).toBeLessThanOrEqual(1);
 
   const archiveCard = grid.getByRole("listitem").filter({ hasText: "Archive" });
   await archiveCard.getByTitle("Search default on").click();
@@ -54,8 +59,26 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
     const boxes = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().y));
     return new Set(boxes).size;
   }).toBe(1);
+  const expandedWidths = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().width));
+  expect(expandedWidths.every((width) => width <= 384)).toBe(true);
+  expect(
+    Math.max(...expandedWidths) - Math.min(...expandedWidths)
+  ).toBeLessThanOrEqual(1);
   await inspectorToggle.click();
   await expect(page.getByText("Space Inspector", { exact: true })).toBeVisible();
+
+  const navigationHelp = page.getByRole("button", { name: "About Navigation" });
+  await navigationHelp.focus();
+  const helpTooltip = page.getByRole("tooltip");
+  await expect(helpTooltip).toContainText("Pinned spaces stay visible");
+  await helpTooltip.hover();
+  await expect(helpTooltip).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(helpTooltip).toBeHidden();
+  await navigationHelp.click();
+  await expect(helpTooltip).toBeVisible();
+  await navigationHelp.click();
+  await expect(helpTooltip).toBeHidden();
 
   const orderBeforePin = await cardNames(grid);
   await page.getByRole("button", { name: "Pin Private Journal to navigation" }).click();
@@ -153,6 +176,7 @@ test("opening an unpinned Space does not add it to navigation", async ({ page })
 });
 
 for (const viewport of [
+  { name: "compact desktop", width: 1180, height: 900, columns: 2, mobile: false },
   { name: "tablet", width: 900, height: 1024, columns: 1, mobile: false },
   { name: "mobile", width: 390, height: 844, columns: 1, mobile: true },
   { name: "narrow mobile", width: 320, height: 800, columns: 1, mobile: true }

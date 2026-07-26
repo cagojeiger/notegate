@@ -1,4 +1,4 @@
-import { Copy, Download, FilePlus, FolderPlus, Move, PanelRightOpen, Pencil, Trash2, Upload, X } from "lucide-react";
+import { ArrowRight, Copy, Download, FilePlus, FolderPlus, Move, PanelRightOpen, Pencil, Trash2, Upload, X } from "lucide-react";
 import { useEffect } from "react";
 
 import type { NodeSummary } from "../../api/types";
@@ -81,7 +81,7 @@ export function NodeContextMenu({
             <div className="my-1 border-t border-border" />
           </>
         ) : null}
-        <MenuButton onClick={() => run(() => onOpenNode(node))}>Open</MenuButton>
+        <MenuButton onClick={() => run(() => onOpenNode(node))}><ArrowRight size={14} /> Open</MenuButton>
         {onOpenInNewGroup ? <MenuButton onClick={() => run(() => onOpenInNewGroup(node))} disabled={!canOpenInNewGroup || isRoot}><PanelRightOpen size={14} /> Open in new group</MenuButton> : null}
         {onDownloadFile && node.kind === "file" ? <MenuButton onClick={() => run(() => onDownloadFile(node))}><Download size={14} /> Download</MenuButton> : null}
         <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={!canMutateNode}><Pencil size={14} /> Rename</MenuButton>

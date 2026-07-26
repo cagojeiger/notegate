@@ -1,10 +1,11 @@
 import { lazy, Suspense, useState } from "react";
 
-import type { Me } from "../api/types";
+import type { Me, Space } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
 import { SettingsModal } from "../features/settings/SettingsModal";
+import { useUsageQuery } from "../features/settings/useUsageQueries";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
 import { ActivityRail } from "../features/spaces/ActivityRail";
@@ -33,6 +34,21 @@ type HistoryScope = {
 type AppSurface = "workbench" | "library";
 
 const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((module) => ({ default: module.SpaceLibrary })));
+
+function WorkspaceStatusBar({
+  activeSpace,
+  usageEnabled
+}: {
+  activeSpace: Space | null;
+  usageEnabled: boolean;
+}) {
+  const usageQuery = useUsageQuery(usageEnabled);
+  const usage = activeSpace
+    ? usageQuery.data?.spaces.find((candidate) => candidate.id === activeSpace.id)
+    : undefined;
+
+  return <StatusBar activeSpace={activeSpace} usage={usage} />;
+}
 
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
@@ -157,7 +173,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
             </Suspense>
           ) : (
             <>
-              <PrimarySidebarFrame mode={layout.primaryMode} width={workbench.primaryWidth}>
+              <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode} width={workbench.primaryWidth}>
                 <PrimarySidebar
                   activeSpace={workbench.activeSpace}
                   activeNodeId={workbench.activeNode?.id ?? null}
@@ -183,7 +199,12 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
                 />
               </PrimarySidebarFrame>
-              <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} onPointerDown={actions.startPrimaryResize} />
+              <PrimarySidebarResizeHandle
+                visible={layout.primaryMode === "docked"}
+                value={workbench.primaryWidth}
+                onPointerDown={actions.startPrimaryResize}
+                onValueChange={actions.setPrimaryWidth}
+              />
               <EditorArea
                 groups={workbench.editorGroups}
                 activeGroupIndex={workbench.activeGroupIndex}
@@ -238,7 +259,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onOpenHistory={openHistory}
           onOpenSettings={openSettings}
         />
-        <StatusBar activeSpace={workbench.activeSpace} />
+        <WorkspaceStatusBar
+          activeSpace={workbench.activeSpace}
+          usageEnabled={me.account.kind === "user" && !workbench.isMobile}
+        />
       </div>
       <Toast />
       {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}

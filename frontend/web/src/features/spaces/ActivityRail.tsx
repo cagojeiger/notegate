@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, History, LayoutGrid, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { Check, Copy, History, LayoutGrid, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 
 import type { Space } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -160,7 +160,7 @@ function SpaceContextMenu({ menu, canManageSpaces, onClose, onSelectSpace, onRen
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
       <Card className="fixed z-50 w-48 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
         <div className="truncate px-3 py-1 text-xs text-muted">{menu.space.name}</div>
-        <MenuButton onClick={() => run(() => onSelectSpace(menu.space))}>Select</MenuButton>
+        <MenuButton onClick={() => run(() => onSelectSpace(menu.space))}><Check size={14} /> Select</MenuButton>
         <MenuButton onClick={() => run(() => onRenameSpace(menu.space))} disabled={!canManageSpace}><Pencil size={14} /> Rename</MenuButton>
         <MenuButton onClick={() => run(() => { void copySpaceId(); })}><Copy size={14} /> Copy space id</MenuButton>
         <MenuButton danger onClick={() => run(() => onDeleteSpace(menu.space))} disabled={!canManageSpace}><Trash2 size={14} /> Delete</MenuButton>

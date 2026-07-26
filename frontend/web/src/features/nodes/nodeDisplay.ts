@@ -1,4 +1,4 @@
-import { Database, FileBadge2, FileText, Folder, Image as ImageIcon, type LucideIcon } from "lucide-react";
+import { File, FileBadge2, FileText, Folder, Image as ImageIcon, type LucideIcon } from "lucide-react";
 
 import type { NodeSummary, RestNode, Space } from "../../api/types";
 
@@ -7,7 +7,7 @@ export function nodeIcon(node: NodeSummary): LucideIcon {
   if (node.kind === "text") return FileText;
   if (node.file_preview_kind === "pdf") return FileBadge2;
   if (node.file_preview_kind === "image" || node.preview_available === true) return ImageIcon;
-  return Database;
+  return File;
 }
 
 export function fmtBytes(bytes = 0): string {

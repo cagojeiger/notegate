@@ -56,7 +56,10 @@ export function AuxiliarySidebar({
             <Button size="sm" secondary className="mt-3" onClick={onReplaceMetadata} disabled={!activeNode || !canWriteActiveSpace}>Edit metadata</Button>
           </section>
           <section className="p-4">
-            <SectionHeader title="Node settings" />
+            <SectionHeader
+              title="Node settings"
+              help="Changes apply immediately to this node. Search controls whether it appears in find and grep results. Stored text encryption applies only to text content. The settings are independent."
+            />
             {activeNode ? (
               <div className="space-y-3">
                 <SettingToggle

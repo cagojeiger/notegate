@@ -1,11 +1,10 @@
-import { useId } from "react";
-import { CircleHelp, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 import { ApiError } from "../../api/errors";
 import type { QuotaUsage, SpaceUsage } from "../../api/usage";
 import { cn } from "../../shared/lib/cn";
 import { formatBytes } from "../../shared/lib/formatBytes";
-import { Badge, Button, Card, EmptyState, SectionHeader } from "../../shared/ui";
+import { Badge, Button, Card, EmptyState, HelpTooltip, SectionHeader } from "../../shared/ui";
 import { useCheckSpaceUsageMutation, useUsageQuery } from "./useUsageQueries";
 
 const numberFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
@@ -143,7 +142,6 @@ function UsageMeter({
   format?: "count" | "bytes";
   helpAlign?: "start" | "end";
 }) {
-  const descriptionId = useId();
   const percentage = usage.limit > 0 ? Math.min(100, (usage.used / usage.limit) * 100) : 0;
   const fillClass = percentage >= 100 ? "bg-danger" : percentage >= 80 ? "bg-warning" : "bg-primary";
   const value = format === "bytes"
@@ -155,24 +153,9 @@ function UsageMeter({
       <div className="flex items-baseline justify-between gap-3 text-xs sm:block">
         <span className="inline-flex items-center gap-1 font-medium text-text">
           {label}
-          <button
-            type="button"
-            className="peer inline-grid size-6 shrink-0 place-items-center rounded text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
-            aria-label={`About ${label}`}
-            aria-describedby={descriptionId}
-          >
-            <CircleHelp size={13} />
-          </button>
-          <span
-            id={descriptionId}
-            role="tooltip"
-            className={cn(
-              "pointer-events-none invisible absolute left-3 right-3 top-10 z-20 rounded-md border border-border bg-panel px-2.5 py-2 text-xs font-normal leading-5 text-text opacity-0 shadow-lg transition-opacity peer-hover:visible peer-hover:opacity-100 peer-focus:visible peer-focus:opacity-100 sm:w-56",
-              helpAlign === "end" ? "sm:left-auto sm:right-4" : "sm:left-4 sm:right-auto"
-            )}
-          >
+          <HelpTooltip label={`About ${label}`} align={helpAlign}>
             {description}
-          </span>
+          </HelpTooltip>
         </span>
         <span className="whitespace-nowrap font-mono tabular-nums text-muted sm:mt-1 sm:block" title={value}>{value}</span>
       </div>

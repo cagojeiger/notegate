@@ -46,7 +46,7 @@ export function TreeSection({
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   return (
-    <section className="flex min-h-0 min-w-0 flex-col px-3 py-2">
+    <section id="files-section" className="flex min-h-0 min-w-0 flex-col px-3 py-2">
       <SidebarSectionHeader
         icon={<Folder size={13} />}
         label="Files"

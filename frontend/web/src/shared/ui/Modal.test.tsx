@@ -4,9 +4,16 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { Button } from "./Button";
+import { HelpTooltip } from "./HelpTooltip";
 import { Modal } from "./Modal";
 
-function ModalHarness({ autoFocusInput = false }: { autoFocusInput?: boolean }) {
+function ModalHarness({
+  autoFocusInput = false,
+  withTooltip = false
+}: {
+  autoFocusInput?: boolean;
+  withTooltip?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -17,7 +24,11 @@ function ModalHarness({ autoFocusInput = false }: { autoFocusInput?: boolean }) 
           onClose={() => setOpen(false)}
           footer={<Button onClick={() => setOpen(false)}>Save</Button>}
         >
-          {autoFocusInput ? <input aria-label="Name" autoFocus /> : <p>Modal content</p>}
+          {autoFocusInput ? <input aria-label="Name" autoFocus /> : null}
+          {withTooltip ? (
+            <HelpTooltip label="About modal help">Modal help</HelpTooltip>
+          ) : null}
+          {!autoFocusInput && !withTooltip ? <p>Modal content</p> : null}
         </Modal>
       ) : null}
     </>
@@ -64,5 +75,21 @@ describe("Modal", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("dismisses nested help before closing the dialog", async () => {
+    const user = userEvent.setup();
+    render(<ModalHarness withTooltip />);
+
+    await user.click(screen.getByRole("button", { name: "Open modal" }));
+    await user.click(screen.getByRole("button", { name: "About modal help" }));
+    expect(screen.getByRole("tooltip")).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Accessible modal" })).toBeInTheDocument();
+    expect(screen.getByRole("tooltip", { hidden: true })).not.toBeVisible();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
