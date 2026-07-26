@@ -176,6 +176,7 @@ test("opening an unpinned Space does not add it to navigation", async ({ page })
 });
 
 for (const viewport of [
+  { name: "compact desktop", width: 1180, height: 900, columns: 2, mobile: false },
   { name: "tablet", width: 900, height: 1024, columns: 1, mobile: false },
   { name: "mobile", width: 390, height: 844, columns: 1, mobile: true },
   { name: "narrow mobile", width: 320, height: 800, columns: 1, mobile: true }

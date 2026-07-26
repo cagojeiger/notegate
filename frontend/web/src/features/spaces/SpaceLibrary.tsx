@@ -5,6 +5,7 @@ import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
+import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { Button, Card, MetaRow, Modal, SectionHeader, SettingToggle } from "../../shared/ui";
 import { useUsageQuery } from "../settings/useUsageQueries";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
@@ -108,7 +109,8 @@ export function SpaceLibrary({
       {!isMobile && inspectorOpen ? (
         <aside
           aria-label="Space inspector"
-          className="flex h-full min-h-0 w-80 shrink-0 overflow-hidden"
+          className="flex h-full min-h-0 shrink-0 overflow-hidden"
+          style={{ width: WORKBENCH_LAYOUT.auxiliaryWidth }}
         >
           <SpaceInspector
             space={selectedSpace}

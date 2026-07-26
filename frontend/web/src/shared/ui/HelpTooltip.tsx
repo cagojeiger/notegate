@@ -29,6 +29,7 @@ export function HelpTooltip({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      event.stopPropagation();
       dismiss();
     }
 
@@ -36,10 +37,10 @@ export function HelpTooltip({
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) dismiss();
     }
 
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("pointerdown", onPointerDown);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("pointerdown", onPointerDown);
     };
   }, [open]);
