@@ -65,6 +65,13 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
       <Card padding="none" className="mt-3 max-h-64 min-h-[8rem] overflow-y-auto p-1">
         {childrenQuery.isLoading ? (
           <div className="px-3 py-2 text-sm text-muted">Loading…</div>
+        ) : childrenQuery.isLoadingError ? (
+          <div role="alert" className="flex min-h-[7rem] flex-col items-center justify-center gap-2 px-3 py-2 text-sm">
+            <span className="text-danger">Could not load folders.</span>
+            <Button size="sm" secondary onClick={() => void childrenQuery.refetch()}>
+              Retry
+            </Button>
+          </div>
         ) : folders.length === 0 && !childrenQuery.hasNextPage ? (
           <EmptyState><span className="inline-flex items-center gap-2"><FolderOpen size={14} /> No subfolders here</span></EmptyState>
         ) : (
@@ -80,6 +87,9 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
                 <ChevronRight size={14} className="shrink-0 text-faint" />
               </button>
             ))}
+            {childrenQuery.isFetchNextPageError ? (
+              <p role="alert" className="px-3 py-2 text-center text-xs text-danger">Could not load more folders.</p>
+            ) : null}
             {childrenQuery.hasNextPage ? (
               <Button
                 className="w-full"
@@ -88,7 +98,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
                 disabled={childrenQuery.isFetchingNextPage}
                 onClick={() => void childrenQuery.fetchNextPage()}
               >
-                {childrenQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+                {childrenQuery.isFetchingNextPage ? "Loading…" : childrenQuery.isFetchNextPageError ? "Retry" : "Load more"}
               </Button>
             ) : null}
           </>

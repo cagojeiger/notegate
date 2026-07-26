@@ -1,16 +1,17 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RestNode } from "../../../api/types";
+import type { ChildrenResponse, RestNode, Space } from "../../../api/types";
 import { DialogHost } from "./DialogHost";
 
 const mocks = vi.hoisted(() => ({
-  useNodeChildrenQuery: vi.fn()
+  apiGet: vi.fn()
 }));
 
-vi.mock("../../nodes/useNodeQueries", () => ({
-  useNodeChildrenQuery: mocks.useNodeChildrenQuery
+vi.mock("../../../api/ApiProvider", () => ({
+  useApiClient: () => ({ get: mocks.apiGet })
 }));
 
 const textNode: RestNode = {
@@ -30,7 +31,26 @@ const textNode: RestNode = {
   updated_at: "2026-06-13T00:00:00Z"
 };
 
+const space: Space = {
+  id: "space-1",
+  name: "Space",
+  sort_order: 0,
+  navigation_pinned: true,
+  user_mcp_enabled: true,
+  default_search_enabled: true,
+  default_text_encryption_enabled: false,
+  features: { text_encryption: true },
+  permission: "write",
+  root_node_id: "root",
+  created_at: "2026-06-13T00:00:00Z",
+  updated_at: "2026-06-13T00:00:00Z"
+};
+
 describe("DialogHost", () => {
+  beforeEach(() => {
+    mocks.apiGet.mockReset();
+  });
+
   it("submits non-empty prompt input", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
@@ -86,52 +106,46 @@ describe("DialogHost", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("shows loaded move destinations from every page and loads the next page", async () => {
+  it("loads move destinations with the next cursor and retries a failed page", async () => {
     const user = userEvent.setup();
-    const fetchNextPage = vi.fn();
-    mocks.useNodeChildrenQuery.mockReturnValue({
-      data: {
-        pages: [
-          { children: [folder("folder-1", "First folder")] },
-          { children: [folder("folder-2", "Second folder")] }
-        ]
-      },
-      isLoading: false,
-      hasNextPage: true,
-      isFetchingNextPage: false,
-      fetchNextPage
-    });
+    mocks.apiGet
+      .mockResolvedValueOnce(childrenPage([folder("folder-1", "First folder")], "next-page"))
+      .mockRejectedValueOnce(new Error("page failed"));
 
-    render(
-      <DialogHost
-        dialog={{
-          kind: "move",
-          node: textNode,
-          space: {
-            id: "space-1",
-            name: "Space",
-            sort_order: 0,
-            navigation_pinned: true,
-            user_mcp_enabled: true,
-            default_search_enabled: true,
-            default_text_encryption_enabled: false,
-            features: { text_encryption: true },
-            permission: "write",
-            root_node_id: "root",
-            created_at: "2026-06-13T00:00:00Z",
-            updated_at: "2026-06-13T00:00:00Z"
-          },
-          onMove: vi.fn()
-        }}
-        onClose={vi.fn()}
-      />
+    renderMoveDialog();
+
+    expect(await screen.findByRole("button", { name: "First folder" })).toBeVisible();
+    expect(mocks.apiGet).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/spaces/space-1/nodes/root/children?limit=100&view=summary"
+    );
+    expect(screen.queryByRole("button", { name: "Second folder" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load more folders.");
+    expect(mocks.apiGet).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/spaces/space-1/nodes/root/children?limit=100&view=summary&cursor=next-page"
     );
 
-    expect(screen.getByRole("button", { name: "First folder" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Second folder" })).toBeVisible();
-    expect(mocks.useNodeChildrenQuery).toHaveBeenCalledWith("space-1", "root", true);
-    await user.click(screen.getByRole("button", { name: "Load more" }));
-    expect(fetchNextPage).toHaveBeenCalledOnce();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([folder("folder-2", "Second folder")], null));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("button", { name: "Second folder" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("retries the initial move destination request after an error", async () => {
+    const user = userEvent.setup();
+    mocks.apiGet.mockRejectedValueOnce(new Error("initial request failed"));
+
+    renderMoveDialog();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load folders.");
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([folder("folder-1", "First folder")], null));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("button", { name: "First folder" })).toBeVisible();
   });
 
   it("validates metadata JSON before saving", async () => {
@@ -169,4 +183,36 @@ function folder(id: string, name: string): RestNode {
     path: `/${name}`,
     has_children: true
   };
+}
+
+function childrenPage(children: RestNode[], nextCursor: string | null): ChildrenResponse {
+  return {
+    parent: { id: "root", path: "/" },
+    children,
+    page: {
+      limit: 100,
+      returned: children.length,
+      has_more: nextCursor !== null,
+      next_cursor: nextCursor
+    }
+  };
+}
+
+function renderMoveDialog() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <DialogHost
+        dialog={{
+          kind: "move",
+          node: textNode,
+          space,
+          onMove: vi.fn()
+        }}
+        onClose={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
 }
