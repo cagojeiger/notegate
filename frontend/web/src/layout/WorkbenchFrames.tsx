@@ -56,7 +56,7 @@ export function AuxiliarySidebarFrame({ mode, children }: { mode: WorkbenchPanel
   const className =
     mode === "docked"
       ? "min-h-0 flex shrink-0"
-      : "fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-40 flex h-[70vh] min-h-0 max-w-none rounded-t-2xl shadow-2xl";
+      : "fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-40 flex h-[70dvh] min-h-0 max-w-none rounded-t-2xl shadow-2xl";
 
   return (
     <div style={style} className={className}>

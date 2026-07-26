@@ -35,7 +35,10 @@ export function AuxiliarySidebar({
   return (
     <aside className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
       <div className="flex h-12 shrink-0 items-center border-b border-seam px-3 text-sm font-medium">Inspector</div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto p-3"
+        data-testid="node-inspector-scroll-region"
+      >
         <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
           <section className="p-4">
             <SectionHeader title="Node" />

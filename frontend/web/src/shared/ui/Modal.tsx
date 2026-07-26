@@ -107,7 +107,11 @@ export function Modal({
           <h2 id={titleId} className={bottomSheet ? "text-sm font-medium" : "text-lg font-semibold"}>{title}</h2>
           <IconButton label="Close" onClick={onClose}><X size={16} /></IconButton>
         </div>
-        {bottomSheet ? <div className="min-h-0 flex-1 overflow-hidden">{children}</div> : children}
+        {bottomSheet ? (
+          <div className="min-h-0 flex-1 overflow-hidden pb-[env(safe-area-inset-bottom)]">
+            {children}
+          </div>
+        ) : children}
         {footer ? <div className="mt-5 flex justify-end gap-2">{footer}</div> : null}
       </div>
     </div>

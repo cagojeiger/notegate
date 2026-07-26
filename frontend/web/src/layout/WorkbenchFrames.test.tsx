@@ -27,7 +27,7 @@ describe("WorkbenchFrames", () => {
     );
 
     const frame = container.firstElementChild as HTMLElement;
-    expect(frame).toHaveClass("fixed", "inset-x-0", "h-[70vh]");
+    expect(frame).toHaveClass("fixed", "inset-x-0", "h-[70dvh]");
     expect(screen.getByText("Inspector")).toBeInTheDocument();
   });
 
