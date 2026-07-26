@@ -15,8 +15,8 @@ use crate::files::{
     UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
 };
 
+use super::FilesService;
 use super::view::{file_view_at_path, text_view_at_path};
-use super::{FilesService, join_path, path_depth};
 
 impl FilesService {
     /// Create a folder (`mkdir`). Requires write permission.
@@ -28,17 +28,13 @@ impl FilesService {
     ) -> ServiceResult<NodeView> {
         self.authorize(space_id, caller_account_id, FileCommand::Mkdir)
             .await?;
-        validation::validate_basename(&command.name, NodeKind::Folder)?;
-
-        let parent_path = self
-            .prepare_create(space_id, command.parent_node_id, &command.name)
-            .await?;
+        validation::validate_basename(&command.name)?;
 
         let node = self
             .store
             .insert_folder(space_id, &command, caller_account_id)
             .await?;
-        let path = join_path(&parent_path, &node.name);
+        let path = self.path_of(space_id, node.id).await?;
         Ok(NodeView {
             node,
             path,
@@ -114,11 +110,7 @@ impl FilesService {
     ) -> ServiceResult<TextView> {
         self.authorize(space_id, caller_account_id, FileCommand::Touch)
             .await?;
-        validation::validate_basename(&command.name, NodeKind::Text)?;
-
-        let parent_path = self
-            .prepare_create(space_id, command.parent_node_id, &command.name)
-            .await?;
+        validation::validate_basename(&command.name)?;
 
         let empty = content::compute("").into_stored_plain(String::new());
         let (node, text) = self
@@ -131,7 +123,7 @@ impl FilesService {
                 caller_account_id,
             )
             .await?;
-        let path = join_path(&parent_path, &node.name);
+        let path = self.path_of(space_id, node.id).await?;
         Ok(text_view_at_path(node, path, text))
     }
 
@@ -143,7 +135,7 @@ impl FilesService {
     ) -> ServiceResult<()> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
-        validation::validate_basename(&command.name, NodeKind::File)?;
+        validation::validate_basename(&command.name)?;
         validation::validate_object_file_bytes(command.byte_len)?;
         validate_file_encryption(
             command.encryption_mode,
@@ -158,8 +150,6 @@ impl FilesService {
         {
             return Err(ServiceError::InvalidInput("invalid media_type".to_owned()));
         }
-        self.prepare_create(space_id, command.parent_node_id, &command.name)
-            .await?;
         Ok(())
     }
 
@@ -316,7 +306,7 @@ impl FilesService {
     ///
     /// [`WriteTarget::Existing`] replaces an existing text (the `create=false`
     /// case, and the resolved `create=true` case). [`WriteTarget::Create`] makes a
-    /// new text, re-checking node/text/fanout/depth/name limits. Both
+    /// new text, re-checking node, text, fanout, path, and name limits. Both
     /// enforce the per-text and space-total content caps; the existing
     /// case also honors the `expected_sha256` optimistic guard.
     pub async fn write_text(
@@ -360,10 +350,8 @@ impl FilesService {
                         "expected_sha256 was supplied but the text does not exist".to_owned(),
                     ));
                 }
-                validation::validate_basename(&name, NodeKind::Text)?;
+                validation::validate_basename(&name)?;
                 validate_stored_text_format(&name, &stored)?;
-                self.prepare_create(space_id, parent_node_id, &name).await?;
-
                 let (node, text) = self
                     .store
                     .insert_text(space_id, parent_node_id, &name, &stored, caller_account_id)
@@ -554,13 +542,7 @@ impl FilesService {
         self.authorize(space_id, caller_account_id, FileCommand::Copy)
             .await?;
 
-        let source = self.load_node(space_id, command.node_id).await?;
-        if source.kind == NodeKind::Folder && !command.recursive {
-            return Err(ServiceError::Conflict(
-                "folder copy requires recursive=true".to_owned(),
-            ));
-        }
-        validation::validate_basename(&command.new_name, source.kind)?;
+        validation::validate_basename(&command.new_name)?;
 
         let (node, counts) = self
             .store
@@ -665,64 +647,14 @@ impl FilesService {
             ));
         }
 
-        let dest_parent = self.load_node(space_id, command.new_parent_node_id).await?;
-        if dest_parent.kind != NodeKind::Folder {
-            return Err(ServiceError::Conflict(
-                "destination parent must be a folder".to_owned(),
-            ));
-        }
-
         let final_name = command
             .new_name
             .clone()
             .unwrap_or_else(|| node.name.clone());
-        validation::validate_basename(&final_name, node.kind)?;
+        validation::validate_basename(&final_name)?;
 
         if node.parent_id == Some(command.new_parent_node_id) && final_name == node.name {
             return self.node_view(space_id, node).await;
-        }
-
-        // Cannot move a node into itself or its own descendant.
-        if self
-            .store
-            .is_self_or_descendant(space_id, command.node_id, command.new_parent_node_id)
-            .await?
-        {
-            return Err(ServiceError::Conflict(
-                "cannot move a node into itself or its descendant".to_owned(),
-            ));
-        }
-
-        // Destination sibling-name conflict (ignore the node itself for in-place
-        // rename within the same parent).
-        if let Some(conflict) = self
-            .store
-            .find_live_child_by_name(space_id, command.new_parent_node_id, &final_name)
-            .await?
-            && conflict.id != node.id
-        {
-            return Err(ServiceError::Conflict(format!(
-                "destination already has a node named '{final_name}'"
-            )));
-        }
-
-        let dest_parent_path = self.path_of(space_id, command.new_parent_node_id).await?;
-        let dest_parent_depth = path_depth(&dest_parent_path);
-        let new_path = join_path(&dest_parent_path, &final_name);
-        validation::validate_path_len(&new_path)?;
-        let subtree_depth = self
-            .store
-            .subtree_relative_depth(space_id, command.node_id)
-            .await?;
-        validation::validate_depth(dest_parent_depth + 1 + subtree_depth)?;
-
-        if node.parent_id != Some(command.new_parent_node_id) {
-            let children = self
-                .store
-                .count_live_children(space_id, command.new_parent_node_id)
-                .await?;
-            let caps = self.effective_limits(space_id).await?;
-            validation::validate_fanout(children, caps)?;
         }
 
         let moved = self
@@ -755,22 +687,7 @@ impl FilesService {
                     "cannot rename the root node".to_owned(),
                 ));
             }
-            validation::validate_basename(name, node.kind)?;
-
-            // Renaming to the same name is allowed (no-op for the name); only a
-            // *different* live sibling with that name is a conflict.
-            if *name != node.name
-                && let Some(parent_id) = node.parent_id
-                && let Some(conflict) = self
-                    .store
-                    .find_live_child_by_name(space_id, parent_id, name)
-                    .await?
-                && conflict.id != node.id
-            {
-                return Err(ServiceError::Conflict(format!(
-                    "a node named '{name}' already exists in this folder"
-                )));
-            }
+            validation::validate_basename(name)?;
         }
 
         let updated = self

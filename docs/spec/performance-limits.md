@@ -144,6 +144,8 @@ Space-level
     409 conflict "folder already has the maximum of {max} live children; split into subfolders"
   depth exceeded:
     400 invalid_input "path is too deep"
+  path bytes exceeded:
+    400 invalid_input "path is too long"
 
 Node/content-level
   text bytes exceeded:

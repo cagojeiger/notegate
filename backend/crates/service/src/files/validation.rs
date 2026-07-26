@@ -1,7 +1,7 @@
 //! Pure validation for file-tree commands.
 //!
-//! These functions are the single in-process gate for the name, path, depth,
-//! fanout, and size limits in `docs/spec/{files-commands,performance-limits,db}.md`.
+//! These functions are the in-process gate for request-local name, path,
+//! metadata, and content limits in `docs/spec/{files-commands,performance-limits,db}.md`.
 //! They build on [`notegate_core::validation`] (name/path format, shared with the
 //! DB `CHECK` constraints) and [`notegate_core::limits`] (the numeric caps), and
 //! return a typed [`FilesValidationError`] so the service can map each failure to
@@ -10,14 +10,12 @@
 //! Status mapping (see [`FilesValidationError::into_service_error`]):
 //! - Format-of-input failures (bad name, non-absolute/too-long/too-deep path,
 //!   per-content byte/line cap) are `400` (`InvalidInput`).
-//! - The folder fanout capacity failure is `409` (`Conflict`) with a hint.
 //!
 //! Everything here is pure: no IO and no store access. Space-level node/content
-//! quota is enforced transactionally by the database usage counter.
+//! quota and file-tree structural bounds are enforced transactionally by the database.
 
-use notegate_core::limits::{self, Limits};
-use notegate_core::validation::{self, ValidationError, validate_folder_name, validate_text_name};
-use notegate_model::NodeKind;
+use notegate_core::limits;
+use notegate_core::validation::{self, ValidationError, validate_node_name};
 
 use crate::error::ServiceError;
 
@@ -26,11 +24,6 @@ use crate::error::ServiceError;
 pub enum FilesValidationError {
     /// A name or path failed format validation (charset, length, depth).
     Name(ValidationError),
-    /// The parent folder already holds the maximum live direct children.
-    FanoutExceeded {
-        /// The configured maximum.
-        max: usize,
-    },
     /// The object upload exceeds the product file-size cap.
     ObjectFileBytesExceeded { max: usize },
     /// The text content exceeds the per-text byte cap.
@@ -49,14 +42,10 @@ pub enum FilesValidationError {
 
 impl FilesValidationError {
     /// Map this validation failure to the service-layer error the api will turn
-    /// into an HTTP status. Input and object-size failures become `400`; folder
-    /// capacity failures become `409` with a hint.
+    /// into an HTTP status.
     pub fn into_service_error(self) -> ServiceError {
         match self {
             Self::Name(error) => ServiceError::InvalidInput(error.to_string()),
-            Self::FanoutExceeded { max } => ServiceError::Conflict(format!(
-                "folder already has the maximum of {max} live children; split into subfolders"
-            )),
             Self::ObjectFileBytesExceeded { max } => {
                 ServiceError::InvalidInput(format!("file exceeds the maximum size of {max} bytes"))
             }
@@ -83,14 +72,9 @@ impl From<FilesValidationError> for ServiceError {
     }
 }
 
-/// Validate a basename for the given kind using the shared node-name rule for
-/// folders, text nodes, and file nodes.
-pub fn validate_basename(name: &str, kind: NodeKind) -> Result<(), FilesValidationError> {
-    match kind {
-        NodeKind::Folder => validate_folder_name(name)?,
-        NodeKind::Text => validate_text_name(name)?,
-        NodeKind::File => notegate_core::validation::validate_file_name(name)?,
-    }
+/// Validate a folder, text, or file basename with the shared node-name rule.
+pub fn validate_basename(name: &str) -> Result<(), FilesValidationError> {
+    validate_node_name(name)?;
     Ok(())
 }
 
@@ -162,36 +146,6 @@ fn validate_metadata_value(
     Ok(())
 }
 
-/// Reject when the resulting depth of a node would exceed [`limits::MAX_PATH_DEPTH`].
-///
-/// `depth` is the segment count below the space root (root = 0, a direct
-/// child of root = 1). The created/moved node's own depth is what is checked.
-pub fn validate_depth(depth: usize) -> Result<(), FilesValidationError> {
-    if depth > limits::MAX_PATH_DEPTH {
-        return Err(FilesValidationError::Name(ValidationError::PathTooDeep));
-    }
-    Ok(())
-}
-
-/// Reject when the derived path length would exceed [`limits::MAX_PATH_LEN`] bytes.
-pub fn validate_path_len(path: &str) -> Result<(), FilesValidationError> {
-    if path.len() > limits::MAX_PATH_LEN {
-        return Err(FilesValidationError::Name(ValidationError::PathTooLong));
-    }
-    Ok(())
-}
-
-/// Reject creating/moving a child into a parent that already holds the maximum
-/// live direct children.
-pub fn validate_fanout(live_children: usize, limits: Limits) -> Result<(), FilesValidationError> {
-    if live_children >= limits.folder_max_children {
-        return Err(FilesValidationError::FanoutExceeded {
-            max: limits.folder_max_children,
-        });
-    }
-    Ok(())
-}
-
 pub fn validate_object_file_bytes(byte_len: i64) -> Result<(), FilesValidationError> {
     if byte_len < 0 || byte_len > limits::FILE_MAX_BYTES as i64 {
         return Err(FilesValidationError::ObjectFileBytesExceeded {
@@ -230,66 +184,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basename_allows_common_file_tree_names_per_kind() {
-        assert!(validate_basename("notes", NodeKind::Folder).is_ok());
-        assert!(validate_basename("today.md", NodeKind::Text).is_ok());
-        assert!(validate_basename("today", NodeKind::Text).is_ok());
-        assert!(validate_basename("data.json", NodeKind::File).is_ok());
+    fn basename_allows_common_file_tree_names() {
+        assert!(validate_basename("notes").is_ok());
+        assert!(validate_basename("today.md").is_ok());
+        assert!(validate_basename("today").is_ok());
+        assert!(validate_basename("data.json").is_ok());
     }
 
     #[test]
     fn basename_rejects_bad_format() {
         assert_eq!(
-            validate_basename("..", NodeKind::Folder),
+            validate_basename(".."),
             Err(FilesValidationError::Name(ValidationError::Reserved))
         );
         assert_eq!(
-            validate_basename("a/b", NodeKind::Folder),
+            validate_basename("a/b"),
             Err(FilesValidationError::Name(ValidationError::ContainsSlash))
         );
         assert_eq!(
-            validate_basename("", NodeKind::Text),
+            validate_basename(""),
             Err(FilesValidationError::Name(ValidationError::Empty))
         );
         // 128-char folder name is the max; Unicode and internal spaces are allowed.
-        assert!(validate_basename(&"가".repeat(128), NodeKind::Folder).is_ok());
-        assert!(validate_basename("회의 메모.md", NodeKind::Text).is_ok());
+        assert!(validate_basename(&"가".repeat(128)).is_ok());
+        assert!(validate_basename("회의 메모.md").is_ok());
         assert_eq!(
-            validate_basename(&"가".repeat(129), NodeKind::Folder),
+            validate_basename(&"가".repeat(129)),
             Err(FilesValidationError::Name(ValidationError::TooLong {
                 max: limits::TEXT_NAME_MAX_LEN
             }))
-        );
-    }
-
-    #[test]
-    fn depth_boundary() {
-        assert!(validate_depth(0).is_ok());
-        assert!(validate_depth(limits::MAX_PATH_DEPTH).is_ok());
-        assert_eq!(
-            validate_depth(limits::MAX_PATH_DEPTH + 1),
-            Err(FilesValidationError::Name(ValidationError::PathTooDeep))
-        );
-    }
-
-    #[test]
-    fn path_len_boundary() {
-        assert!(validate_path_len(&"a".repeat(limits::MAX_PATH_LEN)).is_ok());
-        assert_eq!(
-            validate_path_len(&"a".repeat(limits::MAX_PATH_LEN + 1)),
-            Err(FilesValidationError::Name(ValidationError::PathTooLong))
-        );
-    }
-
-    #[test]
-    fn fanout_boundary() {
-        let caps = Limits::default();
-        assert!(validate_fanout(limits::FOLDER_MAX_CHILDREN - 1, caps).is_ok());
-        assert_eq!(
-            validate_fanout(limits::FOLDER_MAX_CHILDREN, caps),
-            Err(FilesValidationError::FanoutExceeded {
-                max: limits::FOLDER_MAX_CHILDREN
-            })
         );
     }
 
@@ -318,14 +241,6 @@ mod tests {
     fn name_error_maps_to_invalid_input() {
         let err = FilesValidationError::Name(ValidationError::ContainsSlash).into_service_error();
         assert!(matches!(err, ServiceError::InvalidInput(_)));
-    }
-
-    #[test]
-    fn capacity_errors_map_to_conflict() {
-        assert!(matches!(
-            FilesValidationError::FanoutExceeded { max: 200 }.into_service_error(),
-            ServiceError::Conflict(_)
-        ));
     }
 
     #[test]

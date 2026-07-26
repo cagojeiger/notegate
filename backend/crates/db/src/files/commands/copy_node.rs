@@ -48,8 +48,9 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
 
-    let source = checks::live_node(&mut tx, space_id, source_node_id)
-        .await?
+    let snapshot = load_subtree(&mut tx, space_id, source_node_id).await?;
+    let source = snapshot
+        .first()
         .ok_or_else(|| Error::not_found("source node not found"))?;
     if source.parent_id.is_none() {
         return Err(Error::conflict("cannot copy the root node"));
@@ -59,11 +60,11 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     }
     let source_kind = source.kind.clone();
 
-    checks::require_live_folder(&mut tx, space_id, new_parent_id).await?;
+    let destination =
+        checks::require_live_folder_path_bounds(&mut tx, space_id, new_parent_id).await?;
     checks::require_sibling_unique(&mut tx, space_id, new_parent_id, new_name, None).await?;
     checks::require_fanout(&mut tx, space_id, new_parent_id, locked.limits).await?;
 
-    let snapshot = load_subtree(&mut tx, space_id, source_node_id).await?;
     if snapshot.iter().any(|node| node.kind == "file") {
         return Err(Error::conflict("copy does not support file nodes"));
     }
@@ -75,14 +76,20 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
         )));
     }
 
-    let source_depth = snapshot.iter().map(|node| node.depth).max().unwrap_or(0) as usize;
-    let dest_depth = checks::node_depth(&mut tx, space_id, new_parent_id).await?;
-    if dest_depth + 1 + source_depth > limits::MAX_PATH_DEPTH {
-        return Err(Error::conflict(format!(
-            "copy would exceed the maximum path depth of {}",
-            limits::MAX_PATH_DEPTH
-        )));
-    }
+    let source_depth = snapshot.iter().map(|node| node.depth).max().unwrap_or(0);
+    let source_path_bytes = snapshot
+        .iter()
+        .map(|node| node.relative_path_bytes)
+        .max()
+        .unwrap_or(0);
+    let source_bounds = checks::PathBounds {
+        depth: usize::try_from(source_depth)
+            .map_err(|_error| Error::internal("copy depth exceeds usize"))?,
+        bytes: usize::try_from(source_path_bytes)
+            .map_err(|_error| Error::internal("copy path length exceeds usize"))?,
+    };
+    let bounds = checks::destination_bounds(destination, new_name, source_bounds)?;
+    checks::require_path_limits(bounds)?;
 
     let counts = CopyCounts {
         nodes: snapshot.len(),
@@ -164,6 +171,7 @@ struct CopyNodeRow {
     metadata: Value,
     search_enabled: bool,
     depth: i32,
+    relative_path_bytes: i64,
 }
 
 async fn load_subtree(
@@ -173,14 +181,17 @@ async fn load_subtree(
 ) -> Result<Vec<CopyNodeRow>> {
     sqlx::query_as(
         "WITH RECURSIVE subtree AS ( \
-                SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, 0 AS depth \
+                SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, \
+                       0 AS depth, 0::bigint AS relative_path_bytes \
                 FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, s.depth + 1 \
+                SELECT n.id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, \
+                       s.depth + 1, s.relative_path_bytes + 1 + octet_length(n.name) \
                 FROM nodes n JOIN subtree s ON n.parent_id = s.id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
              ) \
-             SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, depth \
+             SELECT id, parent_id, name, kind, sort_order, metadata, search_enabled, depth, \
+                    relative_path_bytes \
              FROM subtree ORDER BY depth, sort_order, name, id",
     )
     .bind(space_id)

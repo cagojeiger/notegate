@@ -328,6 +328,7 @@ nodes
 - `search_enabled`는 해당 node만 검색 결과에 포함할지를 나타낸다. Folder 자식에게 상속되지 않는다.
 - `deleted_at`, `deleted_by_account_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 - Full path는 저장하지 않는다.
+- Create, rename, move, copy, file attach는 DB mutation transaction 안에서 최종 derived path의 depth와 byte 상한을 다시 검사한다. Folder subtree를 옮기거나 복사할 때는 모든 live descendant를 포함한다.
 
 ```text
 text_objects

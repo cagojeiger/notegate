@@ -5,9 +5,9 @@
 //! so they follow the moved node automatically. The transaction re-checks the
 //! move invariants: destination is a live folder, the move is not into the node
 //! itself or its own subtree, sibling-name is unique at the destination, and
-//! the resulting subtree depth and destination fanout stay within limits.
+//! the resulting subtree path bounds and destination fanout stay within limits.
 
-use notegate_core::limits::{self, Limits};
+use notegate_core::limits::Limits;
 use notegate_core::{Error, Result};
 use notegate_model::Node;
 use sqlx::PgPool;
@@ -77,45 +77,45 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         return moved_row.into_node();
     }
 
-    // Destination must be a live folder.
-    checks::require_live_folder(&mut tx, space_id, new_parent_id).await?;
+    let destination =
+        checks::require_live_folder_path_bounds(&mut tx, space_id, new_parent_id).await?;
 
     // Cannot move into self or own descendant (recursive subtree membership).
-    let into_subtree: bool = sqlx::query_scalar(
-        "WITH RECURSIVE subtree AS ( \
-            SELECT id FROM nodes \
-            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-            UNION ALL \
-            SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
-            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
-         ) \
-         SELECT EXISTS (SELECT 1 FROM subtree WHERE id = $3)",
-    )
-    .bind(space_id)
-    .bind(node_id)
-    .bind(new_parent_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?;
-    if into_subtree {
-        return Err(Error::conflict(
-            "cannot move a node into itself or its descendant",
-        ));
+    if moved_kind == "folder" {
+        let into_subtree: bool = sqlx::query_scalar(
+            "WITH RECURSIVE subtree AS ( \
+                SELECT id FROM nodes \
+                WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+                UNION ALL \
+                SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
+                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+             ) \
+             SELECT EXISTS (SELECT 1 FROM subtree WHERE id = $3)",
+        )
+        .bind(space_id)
+        .bind(node_id)
+        .bind(new_parent_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if into_subtree {
+            return Err(Error::conflict(
+                "cannot move a node into itself or its descendant",
+            ));
+        }
     }
 
     // Sibling-name unique at destination (ignoring the node itself).
     checks::require_sibling_unique(&mut tx, space_id, new_parent_id, final_name, Some(node_id))
         .await?;
 
-    // Resulting subtree depth: dest depth + 1 (the moved node) + its subtree depth.
-    let dest_depth = checks::node_depth(&mut tx, space_id, new_parent_id).await?;
-    let subtree_depth = checks::subtree_relative_depth(&mut tx, space_id, node_id).await?;
-    if dest_depth + 1 + subtree_depth > limits::MAX_PATH_DEPTH {
-        return Err(Error::conflict(format!(
-            "move would exceed the maximum path depth of {}",
-            limits::MAX_PATH_DEPTH
-        )));
-    }
+    let subtree = if moved_kind == "folder" {
+        checks::subtree_relative_bounds(&mut tx, space_id, node_id).await?
+    } else {
+        checks::PathBounds::default()
+    };
+    let bounds = checks::destination_bounds(destination, final_name, subtree)?;
+    checks::require_path_limits(bounds)?;
 
     // Destination fanout, only when actually changing parent.
     if current_parent_id != Some(new_parent_id) {

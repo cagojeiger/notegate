@@ -10,15 +10,31 @@ mod common;
 use chrono::{Duration, Utc};
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
+use notegate_core::limits;
 use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind};
+use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
-    CreateFolder, MoveNode, NodeListCursor, NodeListSort, StoredContent, UpdateNode, WriteTextBody,
+    BeginObjectUpload, CopyNode, CreateFolder, MoveNode, NodeListCursor, NodeListSort,
+    StoredContent, UpdateNode, WriteTextBody,
 };
+use uuid::Uuid;
 
 fn assert_not_found<T: std::fmt::Debug>(result: Result<T, Error>) {
     match result {
         Err(Error::NotFound(_)) => {}
         other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+fn assert_path_too_long<T: std::fmt::Debug>(result: Result<T, Error>) {
+    match result {
+        Err(Error::Validation(message)) => {
+            assert!(
+                message.contains("path is too long"),
+                "expected path length error, got {message:?}"
+            );
+        }
+        other => panic!("expected path length error, got {other:?}"),
     }
 }
 
@@ -29,6 +45,244 @@ fn content() -> StoredContent {
         byte_len: 5,
         line_count: 1,
     }
+}
+
+async fn insert_folder(
+    repo: &FilesRepo,
+    space_id: Uuid,
+    parent_node_id: Uuid,
+    name: impl Into<String>,
+    account_id: Uuid,
+) -> Result<notegate_model::Node, Error> {
+    repo.insert_folder(
+        space_id,
+        &CreateFolder {
+            parent_node_id,
+            name: name.into(),
+        },
+        account_id,
+    )
+    .await
+}
+
+async fn long_valid_parent(
+    repo: &FilesRepo,
+    space_id: Uuid,
+    root_id: Uuid,
+    account_id: Uuid,
+) -> Result<Uuid, Error> {
+    let first = insert_folder(
+        repo,
+        space_id,
+        root_id,
+        "가".repeat(limits::TEXT_NAME_MAX_LEN),
+        account_id,
+    )
+    .await?;
+    let second = insert_folder(
+        repo,
+        space_id,
+        first.id,
+        "나".repeat(limits::TEXT_NAME_MAX_LEN),
+        account_id,
+    )
+    .await?;
+    Ok(second.id)
+}
+
+#[tokio::test]
+async fn create_enforces_derived_path_byte_limit_in_transaction()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "createpathlimit").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+
+    let mut parent_id = root_id;
+    let segment = "a".repeat(limits::TEXT_NAME_MAX_LEN);
+    for _ in 0..limits::MAX_PATH_DEPTH {
+        parent_id = insert_folder(&repo, space_id, parent_id, segment.as_str(), account)
+            .await?
+            .id;
+    }
+    let boundary_path = repo
+        .node_path(space_id, parent_id)
+        .await?
+        .expect("boundary node path");
+    assert_eq!(boundary_path.len(), limits::MAX_PATH_LEN);
+    match insert_folder(&repo, space_id, parent_id, "deeper", account).await {
+        Err(Error::Validation(message)) => assert_eq!(message, "path is too deep"),
+        other => panic!("expected path depth error, got {other:?}"),
+    }
+
+    let long_parent_id = long_valid_parent(&repo, space_id, root_id, account).await?;
+    assert_path_too_long(
+        insert_folder(&repo, space_id, long_parent_id, "다".repeat(45), account).await,
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_enforces_fanout_in_transaction() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "createfanout").await?;
+    let repo = FilesRepo::with_limits(
+        db.pool.clone(),
+        limits::Limits {
+            folder_max_children: 1,
+            ..limits::Limits::default()
+        },
+    );
+
+    insert_folder(&repo, space_id, root_id, "first", account).await?;
+    match insert_folder(&repo, space_id, root_id, "second", account).await {
+        Err(Error::Conflict(message)) => {
+            assert!(message.contains("maximum of 1 live children"));
+        }
+        other => panic!("expected fanout error, got {other:?}"),
+    }
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rename_move_and_copy_enforce_descendant_path_byte_limit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "mutatepathlimit").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let long_parent_id = long_valid_parent(&repo, space_id, root_id, account).await?;
+
+    let renamed = insert_folder(&repo, space_id, long_parent_id, "short", account).await?;
+    insert_folder(&repo, space_id, renamed.id, "다".repeat(30), account).await?;
+    assert_path_too_long(
+        repo.update_node(
+            space_id,
+            &UpdateNode {
+                node_id: renamed.id,
+                name: Some("라".repeat(40)),
+                sort_order: None,
+            },
+            account,
+        )
+        .await,
+    );
+
+    let source = insert_folder(&repo, space_id, root_id, "source", account).await?;
+    insert_folder(
+        &repo,
+        space_id,
+        source.id,
+        "마".repeat(limits::TEXT_NAME_MAX_LEN),
+        account,
+    )
+    .await?;
+
+    assert_path_too_long(
+        repo.move_node(
+            space_id,
+            &MoveNode {
+                node_id: source.id,
+                new_parent_node_id: long_parent_id,
+                new_name: None,
+                expected_parent_id: Some(root_id),
+            },
+            account,
+        )
+        .await,
+    );
+    assert_path_too_long(
+        repo.copy_node(
+            space_id,
+            &CopyNode {
+                node_id: source.id,
+                new_parent_node_id: long_parent_id,
+                new_name: "copy".to_owned(),
+                recursive: true,
+            },
+            account,
+        )
+        .await,
+    );
+
+    let unchanged = repo
+        .find_node(space_id, source.id)
+        .await?
+        .expect("source remains live");
+    assert_eq!(unchanged.parent_id, Some(root_id));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn upload_attach_rechecks_path_after_parent_moves() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "uploadpathlimit").await?;
+    let repo = FilesRepo::new(db.pool.clone());
+    let long_parent_id = long_valid_parent(&repo, space_id, root_id, account).await?;
+    let staging = insert_folder(&repo, space_id, root_id, "staging", account).await?;
+    let upload_id = Uuid::new_v4();
+    let upload_name = "마".repeat(45);
+
+    repo.insert_object_upload(
+        upload_id,
+        &format!("objects/{upload_id}"),
+        space_id,
+        account,
+        &BeginObjectUpload {
+            parent_node_id: staging.id,
+            name: upload_name,
+            byte_len: 1,
+            media_type: "application/octet-stream".to_owned(),
+            original_filename: None,
+            encryption_mode: FileEncryptionMode::None,
+            encryption_metadata: None,
+        },
+    )
+    .await?;
+    repo.move_node(
+        space_id,
+        &MoveNode {
+            node_id: staging.id,
+            new_parent_node_id: long_parent_id,
+            new_name: None,
+            expected_parent_id: Some(root_id),
+        },
+        account,
+    )
+    .await?;
+
+    assert_path_too_long(
+        repo.attach_object_upload(upload_id, space_id, account, None)
+            .await,
+    );
+    let attached: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM file_objects WHERE object_key = $1")
+            .bind(format!("objects/{upload_id}"))
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(attached, 0);
+    let upload_state: String =
+        sqlx::query_scalar("SELECT state FROM object_storage_objects WHERE id = $1")
+            .bind(upload_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(upload_state, "uploading");
+
+    db.cleanup().await;
+    Ok(())
 }
 
 #[tokio::test]

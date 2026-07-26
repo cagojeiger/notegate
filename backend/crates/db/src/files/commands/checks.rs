@@ -4,7 +4,7 @@
 //! cannot slip past a structural bound between validation and the write. Space
 //! node/content quota is enforced by the locked counter in `space_usage`.
 
-use notegate_core::limits::Limits;
+use notegate_core::limits::{self, Limits};
 use notegate_core::tier::{UserTier, effective_file_tree_limits};
 use notegate_core::{Error, Result};
 use sqlx::PgConnection;
@@ -20,6 +20,12 @@ pub(crate) struct LockedSpace {
     pub owner_tier: UserTier,
     pub default_search_enabled: bool,
     pub default_text_encryption_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PathBounds {
+    pub depth: usize,
+    pub bytes: usize,
 }
 
 /// Exclude reconciliation, then serialize file-tree mutations in a Space.
@@ -110,64 +116,109 @@ pub async fn live_node(
     }))
 }
 
-/// Assert the parent is a live folder. Returns its kind error otherwise.
-pub async fn require_live_folder(
+/// Assert the parent is a live folder and return its derived path bounds.
+pub(crate) async fn require_live_folder_path_bounds(
     tx: &mut PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
-) -> Result<()> {
-    match live_node(tx, space_id, parent_id).await? {
-        None => Err(Error::not_found("parent node not found")),
-        Some(node) if node.kind != "folder" => Err(Error::validation("parent must be a folder")),
-        Some(_) => Ok(()),
-    }
-}
-
-/// Depth of a node below the root (root = 0), computed in-transaction by walking
-/// the parent chain upward.
-pub async fn node_depth(tx: &mut PgConnection, space_id: Uuid, node_id: Uuid) -> Result<usize> {
-    let depth: i64 = sqlx::query_scalar(
+) -> Result<PathBounds> {
+    let row: Option<(String, i64, i64)> = sqlx::query_as(
         "WITH RECURSIVE chain AS ( \
-            SELECT id, parent_id, 0 AS depth \
-            FROM nodes WHERE space_id = $1 AND id = $2 \
+            SELECT id, parent_id, name, kind AS target_kind, 0::bigint AS depth \
+            FROM nodes \
+            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
             UNION ALL \
-            SELECT n.id, n.parent_id, c.depth + 1 \
+            SELECT n.id, n.parent_id, n.name, c.target_kind, c.depth + 1 \
             FROM nodes n JOIN chain c ON n.id = c.parent_id \
-            WHERE n.space_id = $1 \
+            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
-         SELECT COALESCE(max(depth), 0)::bigint FROM chain",
+         SELECT target_kind, max(depth)::bigint, \
+                CASE WHEN max(depth) = 0 THEN 1::bigint \
+                     ELSE 1 \
+                          + COALESCE(sum(octet_length(name)) \
+                              FILTER (WHERE parent_id IS NOT NULL), 0) \
+                          + GREATEST(count(*) FILTER (WHERE parent_id IS NOT NULL) - 1, 0) \
+                END::bigint AS path_bytes \
+         FROM chain \
+         GROUP BY target_kind",
     )
     .bind(space_id)
-    .bind(node_id)
-    .fetch_one(&mut *tx)
+    .bind(parent_id)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    to_usize(depth, "depth")
+
+    let Some((kind, depth, bytes)) = row else {
+        return Err(Error::not_found("parent node not found"));
+    };
+    if kind != "folder" {
+        return Err(Error::validation("parent must be a folder"));
+    }
+    Ok(PathBounds {
+        depth: to_usize(depth, "depth")?,
+        bytes: to_usize(bytes, "path byte length")?,
+    })
 }
 
-/// Maximum depth of any live descendant relative to `node_id` (0 if none).
-pub async fn subtree_relative_depth(
+/// Maximum depth and path bytes of a live descendant relative to `node_id`.
+pub(crate) async fn subtree_relative_bounds(
     tx: &mut PgConnection,
     space_id: Uuid,
     node_id: Uuid,
-) -> Result<usize> {
-    let depth: i64 = sqlx::query_scalar(
+) -> Result<PathBounds> {
+    let (depth, bytes): (Option<i64>, Option<i64>) = sqlx::query_as(
         "WITH RECURSIVE subtree AS ( \
-            SELECT id, 0 AS depth \
+            SELECT id, 0::bigint AS depth, 0::bigint AS path_bytes \
             FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
             UNION ALL \
-            SELECT n.id, s.depth + 1 \
+            SELECT n.id, s.depth + 1, s.path_bytes + 1 + octet_length(n.name) \
             FROM nodes n JOIN subtree s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
-         SELECT COALESCE(max(depth), 0)::bigint FROM subtree",
+         SELECT max(depth)::bigint, max(path_bytes)::bigint FROM subtree",
     )
     .bind(space_id)
     .bind(node_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    to_usize(depth, "depth")
+    let (Some(depth), Some(bytes)) = (depth, bytes) else {
+        return Err(Error::not_found("node not found"));
+    };
+    Ok(PathBounds {
+        depth: to_usize(depth, "depth")?,
+        bytes: to_usize(bytes, "path byte length")?,
+    })
+}
+
+pub(crate) fn destination_bounds(
+    parent: PathBounds,
+    name: &str,
+    subtree: PathBounds,
+) -> Result<PathBounds> {
+    let separator_bytes = usize::from(parent.depth > 0);
+    let bytes = parent
+        .bytes
+        .checked_add(separator_bytes)
+        .and_then(|value| value.checked_add(name.len()))
+        .and_then(|value| value.checked_add(subtree.bytes))
+        .ok_or_else(|| Error::internal("path byte length overflow"))?;
+    let depth = parent
+        .depth
+        .checked_add(1)
+        .and_then(|value| value.checked_add(subtree.depth))
+        .ok_or_else(|| Error::internal("path depth overflow"))?;
+    Ok(PathBounds { depth, bytes })
+}
+
+pub(crate) fn require_path_limits(bounds: PathBounds) -> Result<()> {
+    if bounds.depth > limits::MAX_PATH_DEPTH {
+        return Err(Error::validation("path is too deep"));
+    }
+    if bounds.bytes > limits::MAX_PATH_LEN {
+        return Err(Error::validation("path is too long"));
+    }
+    Ok(())
 }
 
 /// Enforce the parent fanout cap (`< FOLDER_MAX_CHILDREN` live children).
@@ -188,7 +239,7 @@ pub async fn require_fanout(
     .map_err(map_sqlx_error)?;
     if to_usize(children, "child")? >= caps.folder_max_children {
         return Err(Error::conflict(format!(
-            "folder already has the maximum of {} children",
+            "folder already has the maximum of {} live children; split into subfolders",
             caps.folder_max_children
         )));
     }

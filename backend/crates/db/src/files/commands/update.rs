@@ -70,6 +70,14 @@ pub async fn update_node(
     {
         checks::require_sibling_unique(&mut tx, space_id, parent_id, name, Some(command.node_id))
             .await?;
+        let parent = checks::require_live_folder_path_bounds(&mut tx, space_id, parent_id).await?;
+        let subtree = if current.kind == "folder" {
+            checks::subtree_relative_bounds(&mut tx, space_id, command.node_id).await?
+        } else {
+            checks::PathBounds::default()
+        };
+        let bounds = checks::destination_bounds(parent, name, subtree)?;
+        checks::require_path_limits(bounds)?;
     }
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
