@@ -34,6 +34,7 @@ export function SpaceLibrary({
   const [selectedSpaceId, setSelectedSpaceId] = useState(activeSpace?.id ?? spaces[0]?.id ?? null);
   const usageQuery = useUsageQuery();
   const updateSpace = useUpdateSpaceMutation();
+  const updateInspectorSpace = useUpdateSpaceMutation({ silentError: true });
   const reorderSpaces = useReorderSpacesMutation();
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? spaces[0] ?? null;
   const usageBySpaceId = useMemo(
@@ -41,6 +42,7 @@ export function SpaceLibrary({
     [usageQuery.data?.spaces]
   );
   const currentUsageState = usageState(usageQuery);
+  const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
 
   useEffect(() => {
     if (selectedSpaceId && spaces.some((space) => space.id === selectedSpaceId)) return;
@@ -49,7 +51,7 @@ export function SpaceLibrary({
 
   const updateSelectedSpace = (input: UpdateSpaceInput) => {
     if (!selectedSpace) return;
-    updateSpace.mutate({ spaceId: selectedSpace.id, ...input });
+    updateInspectorSpace.mutate({ spaceId: selectedSpace.id, ...input });
   };
   const toggleNavigationPin = (space: Space) => {
     updateSpace.mutate({
@@ -90,8 +92,8 @@ export function SpaceLibrary({
                   spaces={spaces}
                   selectedSpaceId={selectedSpace?.id ?? null}
                   usageBySpaceId={usageBySpaceId}
-                  updatePending={updateSpace.isPending || reorderSpaces.isPending}
-                  reorderPending={reorderSpaces.isPending || updateSpace.isPending}
+                  updatePending={updatePending || reorderSpaces.isPending}
+                  reorderPending={reorderSpaces.isPending || updatePending}
                   onSelect={inspectSpace}
                   onOpen={onOpenSpace}
                   onToggleNavigationPin={toggleNavigationPin}
@@ -112,8 +114,8 @@ export function SpaceLibrary({
             space={selectedSpace}
             usage={selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined}
             usageState={currentUsageState}
-            pending={updateSpace.isPending}
-            error={updateSpace.isError}
+            pending={updatePending}
+            error={updateInspectorSpace.isError}
             onUpdate={updateSelectedSpace}
           />
         </aside>
@@ -130,8 +132,8 @@ export function SpaceLibrary({
             space={selectedSpace}
             usage={usageBySpaceId.get(selectedSpace.id)}
             usageState={currentUsageState}
-            pending={updateSpace.isPending}
-            error={updateSpace.isError}
+            pending={updatePending}
+            error={updateInspectorSpace.isError}
             onUpdate={updateSelectedSpace}
             showHeader={false}
           />

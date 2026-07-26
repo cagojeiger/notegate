@@ -7,7 +7,8 @@ import type { Space } from "../../api/types";
 import { SpaceLibrary } from "./SpaceLibrary";
 
 const mocks = vi.hoisted(() => ({
-  mutate: vi.fn(),
+  cardMutate: vi.fn(),
+  inspectorMutate: vi.fn(),
   reorder: vi.fn(),
   useUsageQuery: vi.fn(),
   useReorderSpacesMutation: vi.fn(),
@@ -87,13 +88,14 @@ function renderLibrary(options: {
 
 describe("SpaceLibrary", () => {
   beforeEach(() => {
-    mocks.mutate.mockReset();
+    mocks.cardMutate.mockReset();
+    mocks.inspectorMutate.mockReset();
     mocks.reorder.mockReset();
-    mocks.useUpdateSpaceMutation.mockReturnValue({
-      mutate: mocks.mutate,
+    mocks.useUpdateSpaceMutation.mockImplementation((options?: { silentError?: boolean }) => ({
+      mutate: options?.silentError ? mocks.inspectorMutate : mocks.cardMutate,
       isPending: false,
       isError: false
-    });
+    }));
     mocks.useReorderSpacesMutation.mockReturnValue({
       mutate: mocks.reorder,
       isPending: false
@@ -130,7 +132,7 @@ describe("SpaceLibrary", () => {
 
     await user.click(screen.getByRole("button", { name: "Pin Private to navigation" }));
 
-    expect(mocks.mutate).toHaveBeenCalledWith({
+    expect(mocks.cardMutate).toHaveBeenCalledWith({
       spaceId: "private",
       navigation_pinned: true
     });
@@ -153,11 +155,11 @@ describe("SpaceLibrary", () => {
     await user.click(screen.getByRole("switch", { name: "User MCP access" }));
     await user.click(screen.getByRole("switch", { name: "Include in search" }));
 
-    expect(mocks.mutate).toHaveBeenNthCalledWith(1, {
+    expect(mocks.inspectorMutate).toHaveBeenNthCalledWith(1, {
       spaceId: "private",
       user_mcp_enabled: true
     });
-    expect(mocks.mutate).toHaveBeenNthCalledWith(2, {
+    expect(mocks.inspectorMutate).toHaveBeenNthCalledWith(2, {
       spaceId: "private",
       default_search_enabled: true
     });
@@ -202,7 +204,8 @@ describe("SpaceLibrary", () => {
     await user.click(screen.getAllByRole("button", { name: "Open" })[1]);
 
     expect(onOpenSpace).toHaveBeenCalledWith(spaces[1]);
-    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(mocks.cardMutate).not.toHaveBeenCalled();
+    expect(mocks.inspectorMutate).not.toHaveBeenCalled();
     expect(mocks.reorder).not.toHaveBeenCalled();
   });
 });

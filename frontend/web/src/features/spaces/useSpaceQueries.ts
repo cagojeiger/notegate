@@ -14,6 +14,10 @@ import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space, SpacesListResponse } from "../../api/types";
 import { buildSpaceSortOrderUpdates } from "./spaceReorder";
 
+type SpaceMutationOptions = {
+  silentError?: boolean;
+};
+
 export function useSpacesQuery() {
   const client = useApiClient();
   return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client) });
@@ -33,11 +37,11 @@ export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
   });
 }
 
-export function useUpdateSpaceMutation() {
+export function useUpdateSpaceMutation(options: SpaceMutationOptions = {}) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    meta: { silentError: true },
+    meta: options.silentError ? { silentError: true } : undefined,
     mutationFn: ({ spaceId, ...input }: UpdateSpaceInput & { spaceId: string }) =>
       updateSpace(client, spaceId, input),
     onSuccess: (updatedSpace) => {

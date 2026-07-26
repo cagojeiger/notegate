@@ -21,7 +21,7 @@ export function useWorkbenchSpaceActions({ activeSpace, canCreateSpace, setDialo
   const createSpaceMutation = useCreateSpaceMutation((space) => {
     setActiveSpaceId(space.id);
   });
-  const updateSpaceMutation = useUpdateSpaceMutation();
+  const updateSpaceMutation = useUpdateSpaceMutation({ silentError: true });
   const reorderSpacesMutation = useReorderSpacesMutation();
   const deleteSpaceMutation = useDeleteSpaceMutation((spaceId) => {
     if (useUiStore.getState().activeSpaceId === spaceId) setActiveSpaceId(null);
