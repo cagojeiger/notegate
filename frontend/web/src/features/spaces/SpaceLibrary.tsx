@@ -171,8 +171,8 @@ function SpaceInspector({
         className="min-h-0 flex-1 overflow-y-auto p-3"
         data-testid="space-inspector-scroll-region"
       >
-        <div className="divide-y divide-seam px-1">
-          <section className="pb-4 pt-1">
+        <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
+          <section className="p-4">
             <SectionHeader title="Space" />
             <dl className="space-y-2">
               <MetaRow label="Name" value={space?.name ?? "—"} />
@@ -180,7 +180,7 @@ function SpaceInspector({
               <MetaRow label="Updated" value={space?.updated_at.slice(0, 10) ?? "—"} />
             </dl>
           </section>
-          <section className="py-4">
+          <section className="p-4">
             <SectionHeader title="Navigation" />
             <SettingToggle
               icon={<Pin size={16} />}
@@ -190,7 +190,7 @@ function SpaceInspector({
               onChange={(checked) => onUpdate({ navigation_pinned: checked })}
             />
           </section>
-          <section className="py-4">
+          <section className="p-4">
             <SectionHeader title="Access" />
             <SettingToggle
               icon={<Bot size={16} />}
@@ -200,7 +200,7 @@ function SpaceInspector({
               onChange={(checked) => onUpdate({ user_mcp_enabled: checked })}
             />
           </section>
-          <section className="py-4">
+          <section className="p-4">
             <SectionHeader
               title="New item defaults"
               help="These settings apply only to new nodes created in this space. Search applies to every new node, while encryption applies only to new text nodes. Existing nodes are unchanged."
@@ -227,7 +227,7 @@ function SpaceInspector({
               />
             </div>
           </section>
-          <section className="pb-1 pt-4">
+          <section className="p-4">
             <SectionHeader title="Usage" />
             {!space ? <p className="text-sm text-muted">Select a space to inspect it.</p> : null}
             {space && usageState === "loading" ? <p className="text-sm text-muted">Loading usage…</p> : null}
@@ -236,7 +236,7 @@ function SpaceInspector({
             {usage ? <UsageRows usage={usage} /> : null}
           </section>
           {error ? (
-            <section role="alert" className="pb-1 pt-4 text-xs text-danger">Could not update this Space.</section>
+            <section role="alert" className="p-4 text-xs text-danger">Could not update this Space.</section>
           ) : null}
         </div>
       </div>

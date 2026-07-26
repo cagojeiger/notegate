@@ -36,8 +36,8 @@ export function AuxiliarySidebar({
     <aside className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
       <div className="flex h-12 shrink-0 items-center border-b border-seam px-3 text-sm font-medium">Inspector</div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="divide-y divide-seam px-1">
-          <section className="pb-4 pt-1">
+        <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
+          <section className="p-4">
             <SectionHeader title="Node" />
             <dl className="space-y-2">
               <MetaRow label="Kind" value={activeNode?.kind ?? EMPTY} />
@@ -50,12 +50,12 @@ export function AuxiliarySidebar({
               <MetaRow label="Lines" value={activeNode?.line_count ?? EMPTY} />
             </dl>
           </section>
-          <section className="py-4">
+          <section className="p-4">
             <SectionHeader title="Metadata" />
             <pre className="whitespace-pre-wrap font-mono text-xs text-muted">{JSON.stringify(metadata, null, 2)}</pre>
             <Button size="sm" secondary className="mt-3" onClick={onReplaceMetadata} disabled={!activeNode || !canWriteActiveSpace}>Edit metadata</Button>
           </section>
-          <section className="pb-1 pt-4">
+          <section className="p-4">
             <SectionHeader
               title="Node settings"
               help="Changes apply immediately to this node. Search controls whether it appears in find and grep results. Stored text encryption applies only to text content. The settings are independent."
