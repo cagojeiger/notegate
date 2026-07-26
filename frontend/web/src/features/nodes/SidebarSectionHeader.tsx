@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export function SidebarSectionHeader({ icon, label, open, onToggle, action }: { icon: ReactNode; label: string; open: boolean; onToggle: () => void; action: { label: string; icon: ReactNode; onClick: () => void } }) {
   return (
-    <div className="border-b border-seam pb-1">
+    <div className="pb-1">
       <div className="flex items-center justify-between gap-1">
         <button onClick={onToggle} className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-text">
           <ChevronRight size={12} className={`shrink-0 ${open ? "rotate-90 transition" : "transition"}`} />

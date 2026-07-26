@@ -1,4 +1,4 @@
-import { FileText, Folder, MoreHorizontal, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { FilePlus, FolderPlus, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Space } from "../../api/types";
 import { Card, IconButton, MenuButton } from "../../shared/ui";
@@ -51,8 +51,8 @@ function CreateMenu({ onCreateFolder, onCreateText, onFileSelected, onClose }: {
     <>
       <MenuBackdrop onClose={onClose} />
       <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
-        <MenuButton onClick={() => run(onCreateFolder)}><Folder size={14} /> New folder</MenuButton>
-        <MenuButton onClick={() => run(onCreateText)}><FileText size={14} /> New text</MenuButton>
+        <MenuButton onClick={() => run(onCreateFolder)}><FolderPlus size={14} /> New folder</MenuButton>
+        <MenuButton onClick={() => run(onCreateText)}><FilePlus size={14} /> New text</MenuButton>
         <label className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-muted hover:bg-panel hover:text-text">
           <Upload size={14} /> Upload file
           <input
@@ -80,7 +80,7 @@ function SpaceMenu({ onRenameSpace, onDeleteSpace, onClose }: { onRenameSpace: (
     <>
       <MenuBackdrop onClose={onClose} />
       <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
-        <MenuButton onClick={() => run(onRenameSpace)}>Rename space</MenuButton>
+        <MenuButton onClick={() => run(onRenameSpace)}><Pencil size={14} /> Rename space</MenuButton>
         <MenuButton danger onClick={() => run(onDeleteSpace)}><Trash2 size={14} /> Delete space</MenuButton>
       </Card>
     </>

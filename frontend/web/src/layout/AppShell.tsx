@@ -5,6 +5,7 @@ import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
 import { SettingsModal } from "../features/settings/SettingsModal";
+import { useUsageQuery } from "../features/settings/useUsageQueries";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
 import { ActivityRail } from "../features/spaces/ActivityRail";
@@ -36,11 +37,15 @@ const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((
 
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
+  const usageQuery = useUsageQuery(me.account.kind === "user");
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
   const [surface, setSurface] = useState<AppSurface>("workbench");
   const { actions } = workbench;
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
+  const activeSpaceUsage = me.account.kind === "user" && workbench.activeSpace
+    ? usageQuery.data?.spaces.find((usage) => usage.id === workbench.activeSpace?.id)
+    : undefined;
   const railSpaces = me.account.kind === "user"
     ? workbench.spaces.filter((space) => space.navigation_pinned)
     : workbench.spaces;
@@ -238,7 +243,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
           onOpenHistory={openHistory}
           onOpenSettings={openSettings}
         />
-        <StatusBar activeSpace={workbench.activeSpace} />
+        <StatusBar activeSpace={workbench.activeSpace} usage={activeSpaceUsage} />
       </div>
       <Toast />
       {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}

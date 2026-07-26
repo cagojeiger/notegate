@@ -7,7 +7,8 @@ import { AppShell } from "./AppShell";
 
 const mocks = vi.hoisted(() => ({
   useWorkbenchController: vi.fn(),
-  useUploadManager: vi.fn()
+  useUploadManager: vi.fn(),
+  useUsageQuery: vi.fn(() => ({ data: undefined }))
 }));
 
 vi.mock("../features/workbench/useWorkbenchController", () => ({
@@ -16,6 +17,10 @@ vi.mock("../features/workbench/useWorkbenchController", () => ({
 
 vi.mock("../features/uploads/UploadProvider", () => ({
   useUploadManager: mocks.useUploadManager
+}));
+
+vi.mock("../features/settings/useUsageQueries", () => ({
+  useUsageQuery: mocks.useUsageQuery
 }));
 
 vi.mock("../features/editor/EditorArea", () => ({ EditorArea: () => null }));
@@ -132,6 +137,7 @@ describe("AppShell history", () => {
 
     render(<AppShell me={me("agent")} onSignOut={vi.fn()} />);
 
+    expect(mocks.useUsageQuery).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole("button", { name: "Daily" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Private" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open space library" })).not.toBeInTheDocument();

@@ -244,7 +244,7 @@ function SortableSpaceCard({
           </StatusItem>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-seam px-3 py-2">
+        <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
           <Button size="sm" variant="ghost" onClick={onOpen}>
             Open
           </Button>
@@ -285,10 +285,10 @@ function StatusItem({
     <span
       title={description}
       className={[
-        "grid size-7 place-items-center rounded-md border",
+        "grid size-7 place-items-center rounded-md",
         active
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-seam bg-panel text-muted"
+          ? "bg-primary/10 text-primary"
+          : "bg-panel text-muted"
       ].join(" ")}
     >
       <span aria-hidden="true">{children}</span>

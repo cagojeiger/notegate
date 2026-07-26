@@ -44,7 +44,13 @@ export function PrimarySidebarSections({
         onMoveNodeToFolder={onMoveNodeToFolder}
         canWriteActiveSpace={canWriteActiveSpace}
       />
-      <div onPointerDown={sections.startTreeResize} className={`border-y border-seam bg-surface ${sections.bothSectionsOpen ? "cursor-row-resize transition-colors hover:bg-[var(--ng-selection)]" : ""}`} aria-hidden="true" />
+      <div
+        onPointerDown={sections.startTreeResize}
+        className={`group relative ${sections.bothSectionsOpen ? "cursor-row-resize" : ""}`}
+        aria-hidden="true"
+      >
+        <span className={`absolute inset-x-0 top-1/2 h-px bg-seam transition-colors ${sections.bothSectionsOpen ? "group-hover:bg-[var(--ng-active-border)]" : ""}`} />
+      </div>
       <RecentSection
         activeSpace={activeSpace}
         activeNodeId={activeNodeId}

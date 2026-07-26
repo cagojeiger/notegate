@@ -23,7 +23,7 @@ describe("useUsageQuery", () => {
     useQuery.mockReturnValue({});
   });
 
-  it("polls only while a reconciliation is pending", () => {
+  it("polls faster while a reconciliation is pending", () => {
     renderHook(() => useUsageQuery());
     const options = useQuery.mock.calls[0][0];
     const interval = options.refetchInterval as (query: { state: { data?: CurrentUserUsage } }) => number | false;
@@ -39,8 +39,14 @@ describe("useUsageQuery", () => {
       }]
     });
 
-    expect(interval({ state: {} })).toBe(false);
-    expect(interval({ state: { data: usage(false) } })).toBe(false);
+    expect(interval({ state: {} })).toBe(POLLING.usageSummaryMs);
+    expect(interval({ state: { data: usage(false) } })).toBe(POLLING.usageSummaryMs);
     expect(interval({ state: { data: usage(true) } })).toBe(POLLING.usagePendingMs);
+  });
+
+  it("can disable usage loading for non-user callers", () => {
+    renderHook(() => useUsageQuery(false));
+
+    expect(useQuery.mock.calls[0][0]).toMatchObject({ enabled: false });
   });
 });
