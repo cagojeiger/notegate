@@ -41,6 +41,10 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   expect(cardBoxes[1].y).toBe(cardBoxes[2].y);
   expect(cardBoxes[3].y).toBeGreaterThan(cardBoxes[0].y);
   expect(cardBoxes.every((box) => box.width >= 288 && box.width <= 384)).toBe(true);
+  expect(
+    Math.max(...cardBoxes.map((box) => box.width))
+      - Math.min(...cardBoxes.map((box) => box.width))
+  ).toBeLessThanOrEqual(1);
 
   const archiveCard = grid.getByRole("listitem").filter({ hasText: "Archive" });
   await archiveCard.getByTitle("Search default on").click();
@@ -57,6 +61,9 @@ test("Space Library keeps one accessible ordered grid", async ({ page }) => {
   }).toBe(1);
   const expandedWidths = await grid.getByRole("listitem").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().width));
   expect(expandedWidths.every((width) => width <= 384)).toBe(true);
+  expect(
+    Math.max(...expandedWidths) - Math.min(...expandedWidths)
+  ).toBeLessThanOrEqual(1);
   await inspectorToggle.click();
   await expect(page.getByText("Space Inspector", { exact: true })).toBeVisible();
 
