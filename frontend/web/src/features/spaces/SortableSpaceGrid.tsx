@@ -85,7 +85,7 @@ export function SortableSpaceGrid({
       <SortableContext items={spaces.map((space) => space.id)} strategy={rectSortingStrategy}>
         <ul
           aria-label="All spaces"
-          className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))] gap-3"
+          className="flex flex-wrap items-stretch gap-3"
         >
           {spaces.map((space, index) => (
             <SortableSpaceCard
@@ -154,7 +154,10 @@ function SortableSpaceCard({
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={isDragging ? "relative z-10 opacity-70" : ""}
+      className={[
+        "min-w-[min(100%,18rem)] max-w-96 flex-[1_1_18rem]",
+        isDragging ? "relative z-10 opacity-70" : ""
+      ].join(" ")}
     >
       <Card
         padding="none"
