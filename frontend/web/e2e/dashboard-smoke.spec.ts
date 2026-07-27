@@ -36,7 +36,9 @@ test("dev API key dashboard supports space, text, metadata, and file basics", as
 
   await page.getByRole("button", { name: "Edit metadata" }).click();
   await page.getByLabel("Metadata JSON").fill(JSON.stringify({ source: "web-e2e", suffix }));
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("dialog", { name: "Edit metadata" })
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
   await expect(page.getByText('"source": "web-e2e"')).toBeVisible();
 
   const dir = join(tmpdir(), "notegate-web-e2e");
