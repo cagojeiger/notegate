@@ -123,6 +123,25 @@ impl FilesRepo {
         queries::search::resolve_scope_node(&self.pool, space_id, path).await
     }
 
+    /// Resolve one search scope through the shared bounded path resolver.
+    ///
+    /// Hydrating one node is deliberate: search needs its id and kind, and
+    /// reusing the bulk resolver keeps path-walk semantics in one SQL query
+    /// implementation and one database round trip.
+    pub async fn resolve_search_scope(
+        &self,
+        space_id: Uuid,
+        path: &str,
+    ) -> Result<Option<(Uuid, NodeKind, String)>> {
+        let path = notegate_core::validation::normalize_path(path.trim())
+            .map_err(notegate_core::Error::validation)?;
+        let paths = [path];
+        let mut resolved = self.resolve_nodes_by_paths(space_id, &paths).await?;
+        Ok(resolved
+            .pop()
+            .map(|(_, path, node)| (node.id, node.kind, path)))
+    }
+
     pub async fn resolve_nodes_by_paths(
         &self,
         space_id: Uuid,
@@ -656,16 +675,5 @@ impl FilesRepo {
         account_id: Uuid,
     ) -> Result<Option<Permission>> {
         queries::node::permission_for(&self.pool, space_id, account_id).await
-    }
-}
-
-impl FilesRepo {
-    /// Resolve an optional scope path to a live node id within the space.
-    /// `None` scope means "whole space" (no subtree restriction).
-    pub async fn resolve_scope(&self, space_id: Uuid, scope: Option<&str>) -> Result<Option<Uuid>> {
-        match scope {
-            None => Ok(None),
-            Some(path) => queries::search::resolve_scope_node(&self.pool, space_id, path).await,
-        }
     }
 }
