@@ -186,6 +186,9 @@ grep_scan_budget_bytes = 8388608       # 8 MiB content bytes per request
 search_glob_patterns_max = 32          # include/exclude list length per request
 search_glob_pattern_max_chars = 256    # one include/exclude glob pattern
 search_response_target_bytes = 262144  # 256 KiB response target
+search_body_cache_max_bytes = 134217728 # 128 MiB per process; 0 disables
+search_body_cache_ttl_secs = 1800       # 30 minutes from insertion
+search_body_cache_tti_secs = 300        # 5 minutes from last hit
 api_keys_default_limit = 50
 api_keys_max_limit = 100
 ```
@@ -218,6 +221,8 @@ response target     <= 256 KiB
 ```
 
 DB candidate scan은 DFS order를 `sort_order, name, id`와 내부 `sort_path`로 안정화한다. Cursor는 마지막으로 소비한 candidate의 위치를 기억하고, 다음 page는 그 이후 candidate부터 검사한다. Regex matching은 DB regex가 아니라 application Rust regex로 수행한다.
+
+`grep`은 process-local decrypted body cache를 사용한다. Cache key는 `(space_id, node_id, content_sha256)`이고 capacity는 plaintext byte weight 기준 best-effort 128 MiB다. 한 요청의 8 MiB scan budget과 별도로 적용되며, replica가 여러 개면 각 process가 독립 capacity를 사용한다. 환경 변수 `NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES`, `NOTEGATE_SEARCH_BODY_CACHE__TTL_SECS`, `NOTEGATE_SEARCH_BODY_CACHE__TTI_SECS`로 조정하고 capacity를 `0`으로 설정하면 비활성화한다.
 
 `grep`은 기본적으로 query를 포함하는 Text node 후보를 반환한다. 요청 옵션으로 matching line number를 반환할 수 있지만 본문과 snippet은 별도 read command로 조회한다.
 

@@ -23,6 +23,10 @@ const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
 const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
+const DEFAULT_SEARCH_BODY_CACHE_MAX_CAPACITY_BYTES: u64 = 128 * 1024 * 1024;
+const DEFAULT_SEARCH_BODY_CACHE_TTL_SECS: u64 = 30 * 60;
+const DEFAULT_SEARCH_BODY_CACHE_TTI_SECS: u64 = 5 * 60;
+const MAX_SEARCH_BODY_CACHE_EXPIRY_SECS: u64 = 999 * 365 * 86_400;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,6 +39,39 @@ pub struct S3Config {
     pub secret_key: SecretString,
     #[serde(default = "default_true")]
     pub force_path_style: bool,
+}
+
+/// Process-local cache policy for decrypted text bodies used by `grep`.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SearchBodyCacheConfig {
+    /// Approximate maximum plaintext bytes retained. Zero disables the cache.
+    #[serde(default = "default_search_body_cache_max_capacity_bytes")]
+    pub max_capacity_bytes: u64,
+    /// Absolute lifetime of a cached body.
+    #[serde(
+        default = "default_search_body_cache_ttl",
+        rename = "ttl_secs",
+        deserialize_with = "duration_from_secs"
+    )]
+    pub ttl: Duration,
+    /// Maximum idle lifetime, refreshed by cache hits.
+    #[serde(
+        default = "default_search_body_cache_tti",
+        rename = "tti_secs",
+        deserialize_with = "duration_from_secs"
+    )]
+    pub tti: Duration,
+}
+
+impl Default for SearchBodyCacheConfig {
+    fn default() -> Self {
+        Self {
+            max_capacity_bytes: default_search_body_cache_max_capacity_bytes(),
+            ttl: default_search_body_cache_ttl(),
+            tti: default_search_body_cache_tti(),
+        }
+    }
 }
 
 /// Server + database configuration.
@@ -107,6 +144,9 @@ pub struct Config {
     /// Runtime-overridable capacity limits. Defaults match `docs/spec/performance-limits.md`.
     #[serde(default)]
     pub limits: Limits,
+    /// Decrypted text body cache used by content search.
+    #[serde(default)]
+    pub search_body_cache: SearchBodyCacheConfig,
     /// Whether login flow cookies must carry the Secure flag.
     #[serde(skip)]
     pub secure_cookies: bool,
@@ -208,6 +248,7 @@ impl Validate for Config {
             errors.add("s3.secret_key", ValidationError::new("length"));
         }
         validate_limits(&self.limits, &mut errors);
+        validate_search_body_cache(&self.search_body_cache, &mut errors);
 
         if errors.is_empty() {
             Ok(())
@@ -310,6 +351,18 @@ fn default_user_tier() -> UserTier {
     UserTier::DEFAULT
 }
 
+fn default_search_body_cache_max_capacity_bytes() -> u64 {
+    DEFAULT_SEARCH_BODY_CACHE_MAX_CAPACITY_BYTES
+}
+
+fn default_search_body_cache_ttl() -> Duration {
+    Duration::from_secs(DEFAULT_SEARCH_BODY_CACHE_TTL_SECS)
+}
+
+fn default_search_body_cache_tti() -> Duration {
+    Duration::from_secs(DEFAULT_SEARCH_BODY_CACHE_TTI_SECS)
+}
+
 fn user_tier_from_str<'de, D>(deserializer: D) -> std::result::Result<UserTier, D::Error>
 where
     D: Deserializer<'de>,
@@ -381,6 +434,20 @@ fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
     }
     if limits.folder_max_children > crate::limits::FOLDER_MAX_CHILDREN {
         errors.add("limits.folder_max_children", ValidationError::new("range"));
+    }
+}
+
+fn validate_search_body_cache(cache: &SearchBodyCacheConfig, errors: &mut ValidationErrors) {
+    if cache.max_capacity_bytes == 0 {
+        return;
+    }
+    for (field, duration) in [
+        ("search_body_cache.ttl", cache.ttl),
+        ("search_body_cache.tti", cache.tti),
+    ] {
+        if duration.is_zero() || duration.as_secs() > MAX_SEARCH_BODY_CACHE_EXPIRY_SECS {
+            errors.add(field, ValidationError::new("range"));
+        }
     }
 }
 
@@ -457,7 +524,7 @@ mod tests {
     use crate::limits::Limits;
     use crate::tier::UserTier;
 
-    use super::{Config, load_from_sources};
+    use super::{Config, SearchBodyCacheConfig, load_from_sources};
 
     fn valid_config() -> Config {
         Config {
@@ -496,6 +563,7 @@ mod tests {
             },
             default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
+            search_body_cache: SearchBodyCacheConfig::default(),
             secure_cookies: false,
         }
     }
@@ -623,11 +691,12 @@ mod tests {
             super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS
         );
         assert_eq!(config.limits, Limits::default());
+        assert_eq!(config.search_body_cache, SearchBodyCacheConfig::default());
         Ok(())
     }
 
     #[test]
-    fn environment_layer_accepts_nested_limit_overrides() -> crate::Result<()> {
+    fn environment_layer_accepts_nested_overrides() -> crate::Result<()> {
         let config = load_from_sources(
             false,
             test_env(&[
@@ -650,6 +719,12 @@ mod tests {
                 ("NOTEGATE_LIMITS__SPACE_MAX_NODES", "5"),
                 ("NOTEGATE_LIMITS__SPACE_MAX_TEXT_BYTES", "1024"),
                 ("NOTEGATE_LIMITS__SPACE_MAX_FILE_BYTES", "2048"),
+                (
+                    "NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES",
+                    "268435456",
+                ),
+                ("NOTEGATE_SEARCH_BODY_CACHE__TTL_SECS", "3600"),
+                ("NOTEGATE_SEARCH_BODY_CACHE__TTI_SECS", "600"),
             ]),
         )?;
 
@@ -657,6 +732,14 @@ mod tests {
         assert_eq!(config.limits.space_max_nodes, 5);
         assert_eq!(config.limits.space_max_text_bytes, 1024);
         assert_eq!(config.limits.space_max_file_bytes, 2048);
+        assert_eq!(
+            config.search_body_cache,
+            SearchBodyCacheConfig {
+                max_capacity_bytes: 256 * 1024 * 1024,
+                ttl: Duration::from_secs(3600),
+                tti: Duration::from_secs(600),
+            }
+        );
         Ok(())
     }
 
@@ -747,6 +830,16 @@ mod tests {
         let mut config = valid_config();
         config.limits.folder_max_children = crate::limits::FOLDER_MAX_CHILDREN + 1;
         assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.search_body_cache.ttl = Duration::ZERO;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.search_body_cache.max_capacity_bytes = 0;
+        config.search_body_cache.ttl = Duration::ZERO;
+        config.search_body_cache.tti = Duration::ZERO;
+        assert!(config.validate().is_ok());
     }
 
     #[test]

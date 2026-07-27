@@ -98,6 +98,7 @@ fn test_config() -> Arc<Config> {
         s3: crate::state::test_s3_config(),
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
         limits: notegate_core::limits::Limits::default(),
+        search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
         secure_cookies: false,
     })
 }

@@ -918,8 +918,8 @@ pub mod search {
     use chrono::{DateTime, Utc};
     use notegate_core::Result;
     use notegate_core::security::PiiCrypto;
-    use notegate_model::TextObject;
     use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
+    use notegate_model::{TextAtRestEncryption, TextObject};
     use serde_json::Value;
     use sqlx::FromRow;
     use sqlx::PgPool;
@@ -1022,10 +1022,19 @@ pub mod search {
         sort_path: String,
         text_content_sha256: String,
         text_byte_len: i64,
+        text_line_count: i32,
+        text_at_rest_encryption: String,
     }
 
     impl TextCandidateRow {
         fn into_candidate(self) -> Result<SearchTextCandidate> {
+            let at_rest_encryption = TextAtRestEncryption::parse(&self.text_at_rest_encryption)
+                .ok_or_else(|| {
+                    notegate_core::Error::internal(format!(
+                        "unknown text at-rest encryption: {}",
+                        self.text_at_rest_encryption
+                    ))
+                })?;
             let node = NodeRow {
                 id: self.id,
                 space_id: self.space_id,
@@ -1050,6 +1059,8 @@ pub mod search {
                 sort_path: self.sort_path,
                 content_sha256: self.text_content_sha256,
                 byte_len: self.text_byte_len,
+                line_count: self.text_line_count,
+                at_rest_encryption,
             })
         }
     }
@@ -1230,7 +1241,9 @@ pub mod search {
                         s.created_by_account_id, s.updated_by_account_id, s.deleted_by_account_id, \
                         s.purge_after, s.created_at, s.updated_at, s.deleted_at, s.path, s.sort_path, \
                         t.content_sha256 AS text_content_sha256, \
-                        t.byte_len AS text_byte_len \
+                        t.byte_len AS text_byte_len, \
+                        t.line_count AS text_line_count, \
+                        t.at_rest_encryption AS text_at_rest_encryption \
                  FROM subtree s \
                  JOIN text_objects t ON t.space_id = s.space_id AND t.node_id = s.id \
                  WHERE s.id <> $2 \

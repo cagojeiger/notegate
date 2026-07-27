@@ -18,9 +18,10 @@
 mod common;
 
 use common::{TestDb, insert_user_account};
-use notegate_core::limits;
+use notegate_core::{SearchBodyCacheConfig, limits};
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::{AccountKind, UpdateSpace};
+use notegate_service::ServiceError;
 use notegate_service::files::{
     CreateFolder, CreateText, FilesService, UpdateNodeSearchPolicy, WriteTarget, WriteText,
     WriteTextBody,
@@ -687,6 +688,148 @@ async fn grep_does_not_decrypt_server_encrypted_rows_rejected_by_path_filters()
 
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].node.node.id, allowed);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_reuses_cached_encrypted_body_until_content_sha_changes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner =
+        insert_user_account(&db.pool, "grep-body-cache", "grep-body-cache@example.test").await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "grep-body-cache").await;
+    enable_default_text_encryption(&db, &ws_repo, owner, ws).await?;
+    let node_id = write_doc(&files, owner, ws, root, "cached.md", "original marker").await;
+
+    let request = |q: &str| GrepRequest {
+        q: q.to_owned(),
+        path: None,
+        match_mode: GrepMatchMode::Literal,
+        line_mode: GrepLineMode::None,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: None,
+        cursor: None,
+    };
+
+    let first = search.grep(owner, ws, request("original marker")).await?;
+    assert_eq!(first.items[0].node.node.id, node_id);
+
+    let original_ciphertext: Vec<u8> = sqlx::query_scalar(
+        "SELECT content_ciphertext FROM text_objects WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = decode('00', 'hex') \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
+
+    let cloned_search = search.clone();
+    let cached = cloned_search
+        .grep(owner, ws, request("original marker"))
+        .await?;
+    assert_eq!(cached.items[0].node.node.id, node_id);
+
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = $3 \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .bind(original_ciphertext)
+    .execute(&db.pool)
+    .await?;
+    files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Existing { node_id },
+                body: WriteTextBody::Plain("replacement marker".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = decode('00', 'hex') \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
+
+    let error = cloned_search
+        .grep(owner, ws, request("replacement marker"))
+        .await
+        .expect_err("changed content SHA must miss the old cached body");
+    assert!(matches!(error, ServiceError::Internal(_)));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_body_cache_can_be_disabled() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, _search) = services(&db);
+    let search = SearchService::with_body_cache_config(
+        FilesRepo::new(db.pool.clone()),
+        SearchBodyCacheConfig {
+            max_capacity_bytes: 0,
+            ..SearchBodyCacheConfig::default()
+        },
+    );
+    let owner = insert_user_account(
+        &db.pool,
+        "grep-body-cache-disabled",
+        "grep-body-cache-disabled@example.test",
+    )
+    .await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "grep-body-cache-disabled").await;
+    enable_default_text_encryption(&db, &ws_repo, owner, ws).await?;
+    let node_id = write_doc(&files, owner, ws, root, "uncached.md", "uncached marker").await;
+    let request = || GrepRequest {
+        q: "uncached marker".to_owned(),
+        path: None,
+        match_mode: GrepMatchMode::Literal,
+        line_mode: GrepLineMode::None,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit: None,
+        cursor: None,
+    };
+
+    let first = search.grep(owner, ws, request()).await?;
+    assert_eq!(first.items[0].node.node.id, node_id);
+    sqlx::query(
+        "UPDATE text_objects SET content_ciphertext = decode('00', 'hex') \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(ws)
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
+
+    let error = search
+        .grep(owner, ws, request())
+        .await
+        .expect_err("disabled body cache must reload and decrypt the body");
+    assert!(matches!(error, ServiceError::Internal(_)));
 
     db.cleanup().await;
     Ok(())

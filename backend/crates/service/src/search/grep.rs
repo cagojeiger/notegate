@@ -1,5 +1,8 @@
 //! `grep`: deterministic DFS over plain text content.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use notegate_core::limits;
 
 use crate::error::ServiceResult;
@@ -88,14 +91,61 @@ impl SearchService {
                 candidate.byte_len,
             ));
         }
-        let mut bodies = self
-            .store
-            .search_text_bodies_within_budget(
-                space_id,
-                &body_candidates,
-                limits::GREP_SCAN_MAX_BYTES,
-            )
-            .await?;
+        let mut bodies = HashMap::with_capacity(body_candidates.len());
+        let mut missing_body_candidates = Vec::new();
+        for (node_id, content_sha256, byte_len) in &body_candidates {
+            // A hit is consistent with the candidate metadata scan. A write
+            // racing after that scan is observed through its new SHA by the
+            // next request.
+            if let Some(body) = self
+                .body_cache
+                .get(space_id, *node_id, content_sha256)
+                .await
+            {
+                bodies.insert(*node_id, body);
+            } else {
+                missing_body_candidates.push((*node_id, content_sha256.clone(), *byte_len));
+            }
+        }
+
+        if !missing_body_candidates.is_empty() {
+            let _load_guard = self
+                .body_cache
+                .lock_misses(space_id, &missing_body_candidates)
+                .await;
+            let mut candidates_to_load = Vec::new();
+            for (node_id, content_sha256, byte_len) in missing_body_candidates {
+                if let Some(body) = self
+                    .body_cache
+                    .get(space_id, node_id, &content_sha256)
+                    .await
+                {
+                    bodies.insert(node_id, body);
+                } else {
+                    candidates_to_load.push((node_id, content_sha256, byte_len));
+                }
+            }
+
+            let loaded_bodies = self
+                .store
+                .search_text_bodies_within_budget(
+                    space_id,
+                    &candidates_to_load,
+                    limits::GREP_SCAN_MAX_BYTES,
+                )
+                .await?;
+            for (node_id, text) in loaded_bodies {
+                let content_sha256 = text.content_sha256;
+                let Some(content) = text.content else {
+                    continue;
+                };
+                let body = Arc::<str>::from(content);
+                self.body_cache
+                    .insert(space_id, node_id, &content_sha256, Arc::clone(&body))
+                    .await;
+                bodies.insert(node_id, body);
+            }
+        }
 
         let mut items = Vec::with_capacity(limit as usize);
         let mut consumed = 0usize;
@@ -107,7 +157,7 @@ impl SearchService {
                 continue;
             }
 
-            let Some(text) = bodies.remove(&candidate.node.id) else {
+            let Some(content) = bodies.remove(&candidate.node.id) else {
                 // The text changed or became ineligible after the candidate
                 // scan. Consume the stale candidate so pagination can progress.
                 consumed += 1;
@@ -117,24 +167,18 @@ impl SearchService {
             consumed += 1;
             after = Some(candidate.sort_path.clone());
 
-            if let Some(content) = text.content.as_deref() {
-                let match_lines = matcher.match_lines(content, request.line_mode);
-                if !match_lines.is_empty() {
-                    items.push(notegate_model::search::GrepHit {
-                        node: self.text_node_view(
-                            candidate.node.clone(),
-                            candidate.path.clone(),
-                            &text,
-                        ),
-                        match_lines: match request.line_mode {
-                            notegate_model::search::GrepLineMode::None => Vec::new(),
-                            notegate_model::search::GrepLineMode::First => {
-                                match_lines.first().copied().into_iter().collect()
-                            }
-                            notegate_model::search::GrepLineMode::All => match_lines,
-                        },
-                    });
-                }
+            let match_lines = matcher.match_lines(&content, request.line_mode);
+            if !match_lines.is_empty() {
+                items.push(notegate_model::search::GrepHit {
+                    node: self.text_node_view(candidate),
+                    match_lines: match request.line_mode {
+                        notegate_model::search::GrepLineMode::None => Vec::new(),
+                        notegate_model::search::GrepLineMode::First => {
+                            match_lines.first().copied().into_iter().collect()
+                        }
+                        notegate_model::search::GrepLineMode::All => match_lines,
+                    },
+                });
             }
 
             if items.len() >= limit as usize {

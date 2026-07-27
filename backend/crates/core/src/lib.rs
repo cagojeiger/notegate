@@ -10,5 +10,5 @@ pub mod security;
 pub mod tier;
 pub mod validation;
 
-pub use config::{Config, S3Config};
+pub use config::{Config, S3Config, SearchBodyCacheConfig};
 pub use error::{Error, Result};

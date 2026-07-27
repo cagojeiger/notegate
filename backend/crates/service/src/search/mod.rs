@@ -4,14 +4,15 @@
 //! result shaping. The two query implementations live in the [`find`] and [`grep`]
 //! submodules; shared types, the permission gate, and query validation live here.
 
-use notegate_core::limits;
+use notegate_core::{SearchBodyCacheConfig, limits};
 use notegate_db::FilesRepo;
 use notegate_model::files::{ChildrenCursor, NodeView, TextStats};
+use notegate_model::search::SearchTextCandidate;
 pub use notegate_model::search::{
     FindMatchMode, FindPage, FindRequest, GrepLineMode, GrepMatchMode, GrepPage, GrepRequest,
     SearchCursor, TreeCursor, TreeFrame, TreePage, TreeRequest,
 };
-use notegate_model::{Node, NodeKind, Permission, TextObject};
+use notegate_model::{Node, NodeKind, Permission, TextStorageFormat};
 use regex::{Regex, RegexBuilder};
 use uuid::Uuid;
 
@@ -19,20 +20,34 @@ use crate::cursor;
 use crate::error::{ServiceError, ServiceResult};
 use crate::files::policy::{self, FileCommand};
 
+mod body_cache;
 mod find;
 mod grep;
 mod tree;
+
+use body_cache::SearchBodyCache;
 
 /// Search service. The `find`/`grep` query methods are implemented in the
 /// [`find`] and [`grep`] submodules.
 #[derive(Debug, Clone)]
 pub struct SearchService {
     store: FilesRepo,
+    body_cache: SearchBodyCache,
 }
 
 impl SearchService {
     pub fn new(store: FilesRepo) -> Self {
-        Self { store }
+        Self::with_body_cache_config(store, SearchBodyCacheConfig::default())
+    }
+
+    pub fn with_body_cache_config(
+        store: FilesRepo,
+        body_cache_config: SearchBodyCacheConfig,
+    ) -> Self {
+        Self {
+            store,
+            body_cache: SearchBodyCache::new(body_cache_config),
+        }
     }
 
     async fn resolve_scope_folder(
@@ -70,17 +85,17 @@ impl SearchService {
         crate::files::hydrate_node_views(&self.store, space_id, rows).await
     }
 
-    fn text_node_view(&self, node: Node, path: String, text: &TextObject) -> NodeView {
+    fn text_node_view(&self, candidate: &SearchTextCandidate) -> NodeView {
         NodeView {
-            node,
-            path,
+            node: candidate.node.clone(),
+            path: candidate.path.clone(),
             has_children: false,
             text: Some(TextStats {
-                content_sha256: text.content_sha256.clone(),
-                byte_len: text.byte_len,
-                line_count: text.line_count,
-                storage_format: text.storage_format,
-                at_rest_encryption: text.at_rest_encryption,
+                content_sha256: candidate.content_sha256.clone(),
+                byte_len: candidate.byte_len,
+                line_count: candidate.line_count,
+                storage_format: TextStorageFormat::Plain,
+                at_rest_encryption: candidate.at_rest_encryption,
             }),
             file: None,
         }

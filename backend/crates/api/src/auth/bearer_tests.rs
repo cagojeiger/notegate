@@ -215,6 +215,7 @@ fn state_with_pool(
         s3: crate::state::test_s3_config(),
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
         limits: notegate_core::limits::Limits::default(),
+        search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
         secure_cookies: false,
     });
     let jwt = Arc::new(JwtAuthority::from_jwks(&config, aliri_jwks()?));
