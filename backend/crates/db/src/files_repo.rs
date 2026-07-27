@@ -123,6 +123,11 @@ impl FilesRepo {
         queries::search::resolve_scope_node(&self.pool, space_id, path).await
     }
 
+    /// Resolve one search scope through the shared bounded path resolver.
+    ///
+    /// Hydrating one node is deliberate: search needs its id and kind, and
+    /// reusing the bulk resolver keeps path-walk semantics in one SQL query
+    /// implementation and one database round trip.
     pub async fn resolve_search_scope(
         &self,
         space_id: Uuid,

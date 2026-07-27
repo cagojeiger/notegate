@@ -1117,6 +1117,9 @@ pub mod search {
 
     /// Resolve a bounded ordered path set with one recursive SQL query.
     ///
+    /// Input paths must already be canonical. Returned paths are the matching
+    /// input paths rather than paths re-derived from the resolved nodes.
+    ///
     /// Missing paths are omitted. `input_index` lets the caller restore request
     /// order without issuing one query per path or path segment.
     pub async fn resolve_nodes_by_paths(
