@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../api/types";
 import { MAX_EDITOR_GROUPS, WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
 import { makeRestNode } from "../test/fixtures";
-import { useUiStore } from "./uiStore";
-import { MAX_EDITOR_NAVIGATION_ENTRIES } from "./uiStoreReducers";
+import { bootstrapUiStore, createHydratedUiStore, createUiStore, useUiStore } from "./uiStore";
+import type { UiStorePersistence } from "./uiStorePersistence";
+import { MAX_EDITOR_NAVIGATION_ENTRIES, resetEditorGroupsState, type EditorGroupState } from "./uiStoreReducers";
 import { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
 
 function resetStore() {
@@ -23,8 +24,26 @@ function node(id: string, name = `${id}.md`, spaceId = "space-1"): RestNode {
   });
 }
 
+function fakePersistence(overrides: Partial<UiStorePersistence> = {}): UiStorePersistence {
+  return {
+    loadTheme: vi.fn((): "light" | "dark" => "light"),
+    applyTheme: vi.fn(),
+    saveTheme: vi.fn(),
+    loadLastActiveSpaceId: vi.fn(() => null),
+    saveLastActiveSpaceId: vi.fn(),
+    loadSpaceWorkbench: vi.fn((_spaceId, nextGroupId) => resetEditorGroupsState({ nextGroupId })),
+    saveSpaceWorkbench: vi.fn(),
+    loadPanelState: vi.fn(() => ({ primarySidebarOpen: true, auxiliaryOpen: true })),
+    savePanelState: vi.fn(),
+    ...overrides
+  };
+}
+
 describe("useUiStore", () => {
   beforeEach(resetStore);
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+  });
 
   it("toggles theme and sidebar state", () => {
     expect(useUiStore.getState().theme).toBe("light");
@@ -326,42 +345,81 @@ describe("useUiStore", () => {
     expect(group.forward.map((entry) => entry.nodeId)).toEqual(["node-4"]);
   });
 
-  it("restores the last active space workbench during store initialization", async () => {
+  it("hydrates theme, last active space, workbench, and panels through an isolated store", () => {
     const first = node("node-1");
     const second = node("node-2");
-    window.localStorage.setItem("notegate.theme", "light");
-    window.localStorage.setItem("notegate.lastActiveSpaceId", "space-1");
-    persistSpaceWorkbench("space-1", [
-      { id: 11, node: first, mode: "edit", back: [], forward: [] },
-      { id: 12, node: second, mode: "preview", back: [], forward: [] }
-    ], 0);
+    const persistence = fakePersistence({
+      loadTheme: vi.fn((): "light" | "dark" => "dark"),
+      loadLastActiveSpaceId: vi.fn(() => "space-1"),
+      loadSpaceWorkbench: vi.fn((): EditorGroupState => ({
+        editorGroups: [
+          { id: 0, node: first, mode: "edit", back: [], forward: [] },
+          { id: 1, node: second, mode: "preview", back: [], forward: [] }
+        ],
+        activeGroupIndex: 0,
+        nextGroupId: 2
+      })),
+      loadPanelState: vi.fn(() => ({
+        primarySidebarOpen: true,
+        auxiliaryOpen: false
+      }))
+    });
+    const unhydratedStore = createUiStore(persistence);
 
-    vi.resetModules();
-    const { useUiStore: reloadedStore } = await import("./uiStore");
+    expect(persistence.loadTheme).not.toHaveBeenCalled();
+    expect(unhydratedStore.getState().activeSpaceId).toBeNull();
+    const store = createHydratedUiStore(persistence);
 
-    const state = reloadedStore.getState();
+    const state = store.getState();
+    expect(state.theme).toBe("dark");
     expect(state.activeSpaceId).toBe("space-1");
     expect(state.activeGroupIndex).toBe(0);
     expect(state.editorGroups).toHaveLength(2);
     expect(state.editorGroups[0]).toMatchObject({ id: 0, node: first, mode: "edit" });
     expect(state.editorGroups[1]).toMatchObject({ id: 1, node: second, mode: "preview" });
     expect(state.nextGroupId).toBe(2);
-  });
-
-  it("restores saved panel visibility during store initialization", async () => {
-    window.localStorage.setItem("notegate.theme", "light");
-    window.localStorage.setItem(WORKBENCH_PANEL_STATE_KEY, JSON.stringify({
-      version: 1,
-      primarySidebarOpen: true,
-      auxiliaryOpen: false
-    }));
-
-    vi.resetModules();
-    const { useUiStore: reloadedStore } = await import("./uiStore");
-
-    const state = reloadedStore.getState();
     expect(state.primarySidebarOpen).toBe(true);
     expect(state.auxiliaryOpen).toBe(false);
+    expect(persistence.loadSpaceWorkbench).toHaveBeenCalledWith("space-1", 0);
+    expect(persistence.applyTheme).toHaveBeenCalledWith("dark");
+  });
+
+  it("bootstraps the production store before consumers read it", () => {
+    window.localStorage.setItem("notegate.theme", "dark");
+    window.localStorage.setItem("notegate.lastActiveSpaceId", "space-2");
+    window.localStorage.setItem(WORKBENCH_PANEL_STATE_KEY, JSON.stringify({
+      version: 1,
+      primarySidebarOpen: false,
+      auxiliaryOpen: true
+    }));
+
+    bootstrapUiStore();
+
+    expect(useUiStore.getState()).toMatchObject({
+      theme: "dark",
+      activeSpaceId: "space-2",
+      primarySidebarOpen: false,
+      auxiliaryOpen: true
+    });
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  it("keeps independently created stores isolated", () => {
+    const firstStore = createUiStore(fakePersistence());
+    const secondStore = createUiStore(fakePersistence());
+
+    firstStore.getState().toggleTheme();
+    firstStore.getState().addGroup();
+
+    expect(firstStore.getState()).toMatchObject({
+      theme: "dark",
+      activeGroupIndex: 1
+    });
+    expect(secondStore.getState()).toMatchObject({
+      theme: "light",
+      activeGroupIndex: 0
+    });
+    expect(secondStore.getState().editorGroups).toHaveLength(1);
   });
 
   it("can clear a deleted active space snapshot after leaving the space", () => {

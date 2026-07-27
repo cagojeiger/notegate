@@ -1,34 +1,14 @@
 import { create } from "zustand";
+import type { StoreApi, UseBoundStore } from "zustand";
 
 import type { RestNode } from "../api/types";
 import type { ThemeMode } from "../design/tokens";
 import { WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
 import { addEditorGroupState, clearEditorGroupNodeState, closeEditorGroupState, discardEditorNavigationTargetState, navigateEditorGroupState, navigationTarget, openNodeInActiveGroupState, openNodeInGroupState, openNodeInNewGroupState, resetEditorGroupsState, setEditorGroupModeState, updateEditorGroupNodeState, type EditorGroup, type EditorNavigationDirection } from "./uiStoreReducers";
-import { persistSpaceWorkbench, persistWorkbenchPanelState, restoreSpaceWorkbench, restoreWorkbenchPanelState } from "./workbenchStorage";
+import { browserUiStorePersistence, type UiStorePersistence } from "./uiStorePersistence";
 
 export type { EditorGroup };
 
-const THEME_KEY = "notegate.theme";
-const LAST_SPACE_KEY = "notegate.lastActiveSpaceId";
-
-function initialTheme(): ThemeMode {
-  if (typeof window === "undefined") return "dark";
-  const stored = window.localStorage.getItem(THEME_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function initialActiveSpaceId(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(LAST_SPACE_KEY);
-}
-
-const initialThemeMode = initialTheme();
-if (typeof document !== "undefined") document.documentElement.dataset.theme = initialThemeMode;
-
-const initialSpaceId = initialActiveSpaceId();
-const initialEditorState = initialSpaceId ? restoreSpaceWorkbench(initialSpaceId, 0) : resetEditorGroupsState({ nextGroupId: 0 });
-const initialPanelState = restoreWorkbenchPanelState();
 type UiState = {
   theme: ThemeMode;
   activeSpaceId: string | null;
@@ -80,21 +60,25 @@ type UiState = {
   setSaveState: (saveState: "idle" | "saving" | "saved" | "error" | "conflict") => void;
 };
 
-export const useUiStore = create<UiState>((set, get) => ({
-  theme: initialThemeMode,
-  activeSpaceId: initialSpaceId,
+type UiStore = UseBoundStore<StoreApi<UiState>>;
+
+export function createUiStore(persistence: UiStorePersistence): UiStore {
+  const initialEditorState = resetEditorGroupsState({ nextGroupId: 0 });
+  return create<UiState>((set, get) => ({
+  theme: "light",
+  activeSpaceId: null,
   editorGroups: initialEditorState.editorGroups,
   activeGroupIndex: initialEditorState.activeGroupIndex,
   nextGroupId: initialEditorState.nextGroupId,
   expandedFolderIds: new Set(),
   expandedFolderIdsBySpace: {},
-  primarySidebarOpen: initialPanelState.primarySidebarOpen,
+  primarySidebarOpen: true,
   primaryWidth: WORKBENCH_LAYOUT.defaultPrimaryWidth,
   treeRatio: WORKBENCH_LAYOUT.defaultTreeRatio,
   treeSectionOpen: true,
   recentSectionOpen: true,
   recentDensity: "list",
-  auxiliaryOpen: initialPanelState.auxiliaryOpen,
+  auxiliaryOpen: true,
   mobileTreeOpen: false,
   mobileAuxOpen: false,
   toast: null,
@@ -103,7 +87,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   setActiveSpaceId: (activeSpaceId) => {
     const state = get();
     if (state.activeSpaceId === activeSpaceId) return;
-    if (state.activeSpaceId) persistSpaceWorkbench(state.activeSpaceId, state.editorGroups, state.activeGroupIndex);
+    if (state.activeSpaceId) persistence.saveSpaceWorkbench(state.activeSpaceId, state.editorGroups, state.activeGroupIndex);
     const expandedFolderIdsBySpace = rememberExpandedFolders(state);
     if (!activeSpaceId) {
       set({
@@ -118,7 +102,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       activeSpaceId,
       expandedFolderIds: new Set(expandedFolderIdsBySpace[activeSpaceId] ?? []),
       expandedFolderIdsBySpace,
-      ...restoreSpaceWorkbench(activeSpaceId, state.nextGroupId)
+      ...persistence.loadSpaceWorkbench(activeSpaceId, state.nextGroupId)
     });
   },
   openInActiveGroup: (node) => set((state) => openNodeInActiveGroupState(state, node)),
@@ -162,7 +146,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   togglePrimarySidebar: () =>
     set((state) => {
       const primarySidebarOpen = !state.primarySidebarOpen;
-      persistWorkbenchPanelState({ primarySidebarOpen, auxiliaryOpen: state.auxiliaryOpen });
+      persistence.savePanelState({ primarySidebarOpen, auxiliaryOpen: state.auxiliaryOpen });
       return { primarySidebarOpen };
     }),
   setPrimaryWidth: (width) => set({ primaryWidth: Math.max(WORKBENCH_LAYOUT.minPrimaryWidth, Math.min(WORKBENCH_LAYOUT.maxPrimaryWidth, Math.round(width))) }),
@@ -173,7 +157,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   toggleAuxiliary: () =>
     set((state) => {
       const auxiliaryOpen = !state.auxiliaryOpen;
-      persistWorkbenchPanelState({ primarySidebarOpen: state.primarySidebarOpen, auxiliaryOpen });
+      persistence.savePanelState({ primarySidebarOpen: state.primarySidebarOpen, auxiliaryOpen });
       return { auxiliaryOpen };
     }),
   toggleMobileTree: () => set((state) => ({ mobileTreeOpen: !state.mobileTreeOpen })),
@@ -182,7 +166,38 @@ export const useUiStore = create<UiState>((set, get) => ({
   showToast: (toast) => set({ toast }),
   clearToast: () => set({ toast: null }),
   setSaveState: (saveState) => set({ saveState })
-}));
+  }));
+}
+
+export function createHydratedUiStore(persistence: UiStorePersistence): UiStore {
+  const store = createUiStore(persistence);
+  hydrateUiStore(store, persistence);
+  return store;
+}
+
+function hydrateUiStore(store: UiStore, persistence: UiStorePersistence): void {
+  const theme = persistence.loadTheme();
+  const activeSpaceId = persistence.loadLastActiveSpaceId();
+  const editorState = activeSpaceId
+    ? persistence.loadSpaceWorkbench(activeSpaceId, 0)
+    : resetEditorGroupsState({ nextGroupId: 0 });
+  const panelState = persistence.loadPanelState();
+
+  persistence.applyTheme(theme);
+  store.setState({
+    theme,
+    activeSpaceId,
+    ...editorState,
+    primarySidebarOpen: panelState.primarySidebarOpen,
+    auxiliaryOpen: panelState.auxiliaryOpen
+  });
+}
+
+export const useUiStore = createUiStore(browserUiStorePersistence);
+
+export function bootstrapUiStore(): void {
+  hydrateUiStore(useUiStore, browserUiStorePersistence);
+}
 
 function rememberExpandedFolders(
   state: Pick<UiState, "activeSpaceId" | "expandedFolderIds" | "expandedFolderIdsBySpace">
@@ -195,10 +210,9 @@ function rememberExpandedFolders(
 }
 
 export function persistTheme(theme: ThemeMode): void {
-  document.documentElement.dataset.theme = theme;
-  window.localStorage.setItem(THEME_KEY, theme);
+  browserUiStorePersistence.saveTheme(theme);
 }
 
 export function persistLastSpace(spaceId: string): void {
-  window.localStorage.setItem(LAST_SPACE_KEY, spaceId);
+  browserUiStorePersistence.saveLastActiveSpaceId(spaceId);
 }
