@@ -97,53 +97,6 @@ impl SearchService {
         }
     }
 
-    fn decode_search_cursor(
-        &self,
-        raw: Option<&str>,
-        command: &str,
-        fingerprint: &str,
-        scope_node_id: Uuid,
-    ) -> ServiceResult<Option<String>> {
-        match raw {
-            None => Ok(None),
-            Some(raw) => {
-                let cursor: SearchCursor = cursor::decode(raw)?;
-                if cursor.version != 1
-                    || cursor.command != command
-                    || cursor.fingerprint != fingerprint
-                    || cursor.scope_node_id != scope_node_id
-                {
-                    return Err(ServiceError::InvalidInput(
-                        "search cursor does not match this query".to_owned(),
-                    ));
-                }
-                Ok(cursor.after_sort_path)
-            }
-        }
-    }
-
-    fn encode_search_cursor(
-        &self,
-        command: &str,
-        fingerprint: String,
-        scope_node_id: Uuid,
-        after_sort_path: Option<String>,
-    ) -> ServiceResult<Option<String>> {
-        if after_sort_path.is_none() {
-            return Ok(None);
-        }
-        let cursor = SearchCursor {
-            version: 1,
-            command: command.to_owned(),
-            fingerprint,
-            scope_node_id,
-            after_sort_path,
-        };
-        cursor::encode(&cursor)
-            .map(Some)
-            .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
-    }
-
     /// Resolve the caller's permission (none ⇒ `404`) and gate by command
     /// (insufficient permission ⇒ `403`). Mirrors the file service's authorization.
     async fn authorize(
@@ -203,6 +156,51 @@ fn join_path(parent: &str, name: &str) -> String {
 
 fn search_fingerprint(parts: &[String]) -> String {
     parts.join("\u{1f}")
+}
+
+fn decode_search_cursor(
+    raw: Option<&str>,
+    command: &str,
+    fingerprint: &str,
+    scope_node_id: Uuid,
+) -> ServiceResult<Option<String>> {
+    match raw {
+        None => Ok(None),
+        Some(raw) => {
+            let cursor: SearchCursor = cursor::decode(raw)?;
+            if cursor.version != 1
+                || cursor.command != command
+                || cursor.fingerprint != fingerprint
+                || cursor.scope_node_id != scope_node_id
+            {
+                return Err(ServiceError::InvalidInput(
+                    "search cursor does not match this query".to_owned(),
+                ));
+            }
+            Ok(cursor.after_sort_path)
+        }
+    }
+}
+
+fn encode_search_cursor(
+    command: &str,
+    fingerprint: String,
+    scope_node_id: Uuid,
+    after_sort_path: Option<String>,
+) -> ServiceResult<Option<String>> {
+    if after_sort_path.is_none() {
+        return Ok(None);
+    }
+    let cursor = SearchCursor {
+        version: 1,
+        command: command.to_owned(),
+        fingerprint,
+        scope_node_id,
+        after_sort_path,
+    };
+    cursor::encode(&cursor)
+        .map(Some)
+        .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
 }
 
 enum NameMatcher {
@@ -349,25 +347,78 @@ mod tests {
     use super::*;
     use crate::cursor;
 
-    /// The search traversal cursor round-trips through the shared opaque codec.
     #[test]
-    fn search_cursor_round_trips() {
-        let value = SearchCursor {
-            version: 1,
-            command: "find".to_owned(),
-            fingerprint: "fingerprint".to_owned(),
-            scope_node_id: Uuid::new_v4(),
-            after_sort_path: Some("0000000000/note.md".to_owned()),
-        };
-        let encoded = cursor::encode(&value).unwrap();
-        let decoded: SearchCursor = cursor::decode(&encoded).unwrap();
-        assert_eq!(decoded, value);
+    fn search_cursor_helpers_round_trip_position_and_omit_empty_cursor() {
+        let scope_node_id = Uuid::new_v4();
+        assert_eq!(
+            encode_search_cursor("find", "query".to_owned(), scope_node_id, None).unwrap(),
+            None
+        );
+        assert_eq!(
+            decode_search_cursor(None, "find", "query", scope_node_id).unwrap(),
+            None
+        );
+
+        let after_sort_path = "0000000000/note.md".to_owned();
+        let encoded = encode_search_cursor(
+            "find",
+            "query".to_owned(),
+            scope_node_id,
+            Some(after_sort_path.clone()),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            decode_search_cursor(Some(&encoded), "find", "query", scope_node_id).unwrap(),
+            Some(after_sort_path)
+        );
     }
 
-    /// A garbage cursor fails to decode.
     #[test]
-    fn garbage_cursor_fails_to_decode() {
-        assert!(cursor::decode::<SearchCursor>("!!!not-base64!!!").is_err());
+    fn search_cursor_rejects_invalid_or_mismatched_queries() {
+        let scope_node_id = Uuid::new_v4();
+        assert!(matches!(
+            decode_search_cursor(Some("!!!not-base64!!!"), "find", "query", scope_node_id),
+            Err(ServiceError::InvalidInput(_))
+        ));
+
+        for cursor in [
+            SearchCursor {
+                version: 2,
+                command: "find".to_owned(),
+                fingerprint: "query".to_owned(),
+                scope_node_id,
+                after_sort_path: Some("version".to_owned()),
+            },
+            SearchCursor {
+                version: 1,
+                command: "grep".to_owned(),
+                fingerprint: "query".to_owned(),
+                scope_node_id,
+                after_sort_path: Some("command".to_owned()),
+            },
+            SearchCursor {
+                version: 1,
+                command: "find".to_owned(),
+                fingerprint: "other-query".to_owned(),
+                scope_node_id,
+                after_sort_path: Some("fingerprint".to_owned()),
+            },
+            SearchCursor {
+                version: 1,
+                command: "find".to_owned(),
+                fingerprint: "query".to_owned(),
+                scope_node_id: Uuid::new_v4(),
+                after_sort_path: Some("scope".to_owned()),
+            },
+        ] {
+            let encoded = cursor::encode(&cursor).unwrap();
+            assert!(matches!(
+                decode_search_cursor(Some(&encoded), "find", "query", scope_node_id),
+                Err(ServiceError::InvalidInput(message))
+                    if message == "search cursor does not match this query"
+            ));
+        }
     }
 
     #[test]
@@ -401,5 +452,95 @@ mod tests {
             PathFilters::new(&[], &too_long),
             Err(ServiceError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn name_matchers_are_case_insensitive() {
+        let contains = NameMatcher::new("NOTE", FindMatchMode::Contains).unwrap();
+        assert!(contains.is_match("release-note.md"));
+        assert!(!contains.is_match("release.md"));
+
+        let regex = NameMatcher::new(r"^note-\d+\.md$", FindMatchMode::Regex).unwrap();
+        assert!(regex.is_match("NOTE-42.MD"));
+        assert!(!regex.is_match("draft-note-42.md"));
+
+        let glob = NameMatcher::new("note-??.md", FindMatchMode::Glob).unwrap();
+        assert!(glob.is_match("NOTE-42.MD"));
+        assert!(!glob.is_match("draft-note-42.md"));
+        assert!(!glob.is_match("note-7.md"));
+    }
+
+    #[test]
+    fn glob_treats_non_wildcard_regex_characters_as_literals() {
+        let matcher = NameMatcher::new("report[1].md", FindMatchMode::Glob).unwrap();
+        assert!(matcher.is_match("REPORT[1].MD"));
+        assert!(!matcher.is_match("report1.md"));
+    }
+
+    #[test]
+    fn invalid_regex_patterns_are_rejected() {
+        assert!(matches!(
+            NameMatcher::new("(", FindMatchMode::Regex),
+            Err(ServiceError::InvalidInput(message))
+                if message.starts_with("invalid regex pattern:")
+        ));
+        assert!(matches!(
+            ContentMatcher::new("[", GrepMatchMode::Regex),
+            Err(ServiceError::InvalidInput(message))
+                if message.starts_with("invalid regex pattern:")
+        ));
+    }
+
+    #[test]
+    fn content_matcher_reports_requested_logical_lines() {
+        let matcher = ContentMatcher::new("ALPHA", GrepMatchMode::Literal).unwrap();
+        let content = "alpha\nbeta ALPHA\nomega\n";
+
+        assert_eq!(matcher.match_lines(content, GrepLineMode::None), vec![1]);
+        assert_eq!(matcher.match_lines(content, GrepLineMode::First), vec![1]);
+        assert_eq!(matcher.match_lines(content, GrepLineMode::All), vec![1, 2]);
+    }
+
+    #[test]
+    fn content_regex_is_case_insensitive_and_matches_per_line() {
+        let matcher = ContentMatcher::new(r"^error(?:-\d+)?$", GrepMatchMode::Regex).unwrap();
+
+        assert_eq!(
+            matcher.match_lines("ok\nERROR-42\nerror details\n", GrepLineMode::All),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn logical_lines_omit_only_the_terminal_newline() {
+        assert_eq!(logical_lines("").collect::<Vec<_>>(), vec![""]);
+        assert_eq!(
+            logical_lines("first\nsecond\n").collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
+        assert_eq!(
+            logical_lines("first\n\nthird").collect::<Vec<_>>(),
+            vec!["first", "", "third"]
+        );
+
+        let matcher = ContentMatcher::new("^$", GrepMatchMode::Regex).unwrap();
+        assert!(matcher.match_lines("", GrepLineMode::All).is_empty());
+    }
+
+    #[test]
+    fn path_filters_apply_include_then_exclude() {
+        let unrestricted = PathFilters::new(&[], &[]).unwrap();
+        assert!(unrestricted.allows("/notes/release.txt"));
+
+        let filters = PathFilters::new(
+            &["/notes/*.md".to_owned(), "/docs/*.txt".to_owned()],
+            &["*/private/*".to_owned(), "*draft*".to_owned()],
+        )
+        .unwrap();
+        assert!(filters.allows("/NOTES/release.MD"));
+        assert!(filters.allows("/docs/readme.txt"));
+        assert!(!filters.allows("/notes/private/release.md"));
+        assert!(!filters.allows("/notes/draft.md"));
+        assert!(!filters.allows("/images/release.png"));
     }
 }

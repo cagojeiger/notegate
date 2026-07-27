@@ -854,4 +854,97 @@ mod tests {
         );
         assert!(validate_batch_parent_ids(vec![Uuid::new_v4()]).is_ok());
     }
+
+    #[test]
+    fn children_cursor_is_bound_to_space_and_parent() {
+        let space_id = Uuid::new_v4();
+        let parent_node_id = Uuid::new_v4();
+        let position = ChildrenCursor {
+            sort_order: 7,
+            name: "child".to_owned(),
+            id: Uuid::new_v4(),
+        };
+        let raw = cursor::encode(&ScopedChildrenCursor {
+            space_id,
+            parent_node_id,
+            position: position.clone(),
+        })
+        .expect("cursor should encode");
+
+        assert_eq!(
+            decode_children_cursor(Some(&raw), space_id, parent_node_id)
+                .expect("matching query should decode"),
+            Some(position)
+        );
+
+        for result in [
+            decode_children_cursor(Some(&raw), Uuid::new_v4(), parent_node_id),
+            decode_children_cursor(Some(&raw), space_id, Uuid::new_v4()),
+        ] {
+            assert!(
+                matches!(
+                    result,
+                    Err(ServiceError::InvalidInput(message))
+                        if message == "cursor does not match children query"
+                ),
+                "cursor should be rejected outside its original children query"
+            );
+        }
+    }
+
+    #[test]
+    fn node_list_cursor_is_bound_to_space_sort_and_kind() {
+        let space_id = Uuid::new_v4();
+        let position = NodeListCursor::NameAsc {
+            kind: Some(NodeKind::Text),
+            name: "note.md".to_owned(),
+            id: Uuid::new_v4(),
+        };
+        let raw = cursor::encode(&ScopedNodeListCursor {
+            space_id,
+            position: position.clone(),
+        })
+        .expect("cursor should encode");
+
+        assert_eq!(
+            decode_node_list_cursor(
+                Some(&raw),
+                space_id,
+                NodeListSort::NameAsc,
+                Some(NodeKind::Text),
+            )
+            .expect("matching query should decode"),
+            Some(position)
+        );
+
+        for result in [
+            decode_node_list_cursor(
+                Some(&raw),
+                Uuid::new_v4(),
+                NodeListSort::NameAsc,
+                Some(NodeKind::Text),
+            ),
+            decode_node_list_cursor(
+                Some(&raw),
+                space_id,
+                NodeListSort::UpdatedAtDesc,
+                Some(NodeKind::Text),
+            ),
+            decode_node_list_cursor(
+                Some(&raw),
+                space_id,
+                NodeListSort::NameAsc,
+                Some(NodeKind::Folder),
+            ),
+        ] {
+            assert!(
+                matches!(
+                    result,
+                    Err(ServiceError::InvalidInput(message))
+                        if message == "cursor does not match node list query"
+                ),
+                "cursor should be rejected outside its original node list query"
+            );
+        }
+    }
 }
