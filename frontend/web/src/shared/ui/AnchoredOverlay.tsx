@@ -60,6 +60,12 @@ export function AnchoredOverlay({
   onCloseRef.current = onClose;
 
   useLayoutEffect(() => {
+    if (open && !anchorRef.current) {
+      onCloseRef.current();
+    }
+  });
+
+  useLayoutEffect(() => {
     if (!open) {
       setPosition((current) => current === null ? current : null);
       return;
@@ -67,7 +73,6 @@ export function AnchoredOverlay({
     const rect = anchorRef.current?.getBoundingClientRect();
     if (!rect) {
       setPosition((current) => current === null ? current : null);
-      onCloseRef.current();
       return;
     }
 
@@ -88,7 +93,7 @@ export function AnchoredOverlay({
         ? current
         : { left, top, width: renderedWidth }
     ));
-  });
+  }, [anchorRef, estimatedHeight, open, width]);
 
   const positioned = position !== null;
   useEffect(() => {
