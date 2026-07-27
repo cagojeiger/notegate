@@ -165,7 +165,8 @@ pub struct NodeSummaryOut {
     pub kind: String,
     pub path: String,
     pub has_children: bool,
-    pub effective_write_locked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_write_locked: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub byte_len: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -187,7 +188,7 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
             kind: node.kind.as_str().to_owned(),
             path: view.path.clone(),
             has_children: view.has_children,
-            effective_write_locked: view.effective_write_locked,
+            effective_write_locked: view.effective_write_locked.then_some(true),
             byte_len: view
                 .text
                 .as_ref()

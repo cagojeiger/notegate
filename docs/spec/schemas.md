@@ -102,7 +102,7 @@ type RestNode = {
 
 `byte_len`은 Text에서는 저장된 text payload 기준이고 File에서는 저장 bytes 기준이다. Folder에는 `byte_len`이 없다. `content_sha256`은 Text에만 존재한다.
 
-`write_locked`는 현재 node에 직접 설정된 값이다. `effective_write_locked`는 현재 node 또는 live 조상에 직접 잠금이 하나라도 있는지 나타낸다. 상세 REST resource의 `write_lock_sources`는 그 직접 잠금 source를 root부터 나열한다. Tree/Recent용 `NodeSummary`는 원인 목록 없이 `effective_write_locked`만 포함한다.
+`write_locked`는 현재 node에 직접 설정된 값이다. `effective_write_locked`는 현재 node 또는 live 조상에 직접 잠금이 하나라도 있는지 나타낸다. 상세 REST resource의 `write_lock_sources`는 그 직접 잠금 source를 root부터 나열한다. Tree/Recent용 `NodeSummary`는 원인 목록 없이 잠긴 경우에만 `effective_write_locked: true`를 포함하며, 생략된 값은 `false`다.
 
 ## REST node list/reveal envelopes
 

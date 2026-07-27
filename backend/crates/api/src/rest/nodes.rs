@@ -539,7 +539,7 @@ mod collection_response_tests {
                     kind: "file".to_owned(),
                     path: format!("/{}", "p".repeat(902)),
                     has_children: false,
-                    effective_write_locked: false,
+                    effective_write_locked: None,
                     byte_len: Some(crate::file_preview::PREVIEW_MAX_BYTES),
                     line_count: None,
                     preview_available: Some(true),
@@ -576,6 +576,11 @@ mod collection_response_tests {
             !bytes
                 .windows(b"space_id".len())
                 .any(|window| window == b"space_id")
+        );
+        assert!(
+            !bytes
+                .windows(b"effective_write_locked".len())
+                .any(|window| window == b"effective_write_locked")
         );
         Ok(())
     }

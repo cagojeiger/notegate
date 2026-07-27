@@ -50,7 +50,8 @@ DELETE /nodes/{node_id}         -> 204 No Content
 `view=summary`는 tree/Recent용 compact shape을 반환한다. `NodeSummary`는
 `id`, `parent_id`, `name`, `kind`, `path`, `has_children`, `effective_write_locked`, `byte_len`,
 `line_count`, `preview_available`, `file_preview_kind`, `updated_at`만 포함한다. `space_id`는 route
-scope와 중복되므로 wire response에 반복하지 않는다.
+scope와 중복되므로 wire response에 반복하지 않는다. `effective_write_locked`는 `true`일 때만
+wire response에 포함하며, 생략된 값은 `false`다.
 
 ## Batch list children
 

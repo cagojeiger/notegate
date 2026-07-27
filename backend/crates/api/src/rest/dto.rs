@@ -308,7 +308,7 @@ mod tests {
 
         let out = NodeSummaryOut::from(&view);
 
-        assert!(out.effective_write_locked);
+        assert_eq!(out.effective_write_locked, Some(true));
         assert_eq!(out.path, "/locked/note.md");
     }
 
