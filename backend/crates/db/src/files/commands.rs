@@ -6,13 +6,18 @@ pub mod delete;
 pub mod move_node;
 pub mod save;
 pub mod update;
+pub mod write_lock;
 
 use notegate_core::security::PiiCrypto;
 use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result};
 use notegate_model::files::WriteTextBody;
 use serde_json::Value;
+use sqlx::PgConnection;
 use uuid::Uuid;
+
+use super::error::map_sqlx_error;
+use super::rows::{NODE_COLUMNS, NodeRow};
 
 struct StoredTextParts<'a> {
     storage_format: &'static str,
@@ -80,4 +85,18 @@ fn stored_text_parts<'a>(
             content_enc_version: None,
         }),
     }
+}
+
+async fn lock_live_node(tx: &mut PgConnection, space_id: Uuid, node_id: Uuid) -> Result<NodeRow> {
+    sqlx::query_as::<_, NodeRow>(&format!(
+        "SELECT {NODE_COLUMNS} FROM nodes \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+         FOR UPDATE"
+    ))
+    .bind(space_id)
+    .bind(node_id)
+    .fetch_optional(tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::not_found("node not found"))
 }

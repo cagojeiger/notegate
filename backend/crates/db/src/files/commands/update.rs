@@ -8,36 +8,17 @@ use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::Node;
 use notegate_model::files::{
-    StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock, UpdateTextEncryption,
-    WriteTextBody,
+    StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTextBody,
 };
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-use super::{checks, stored_text_parts};
+use super::{checks, lock_live_node, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::MetadataMutationKind;
-
-async fn lock_live_node(
-    tx: &mut Transaction<'_, Postgres>,
-    space_id: Uuid,
-    node_id: Uuid,
-) -> Result<NodeRow> {
-    sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))
-}
 
 pub async fn update_node(
     pool: &PgPool,
@@ -173,59 +154,6 @@ pub async fn update_node_search_policy(
             search_enabled: row.search_enabled,
             text_encryption_enabled: None,
         },
-    )
-    .await?;
-
-    tx.commit().await.map_err(map_sqlx_error)?;
-    row.into_node()
-}
-
-pub async fn update_node_write_lock(
-    pool: &PgPool,
-    space_id: Uuid,
-    command: &UpdateNodeWriteLock,
-    updated_by: Uuid,
-    caps: notegate_core::limits::Limits,
-) -> Result<Node> {
-    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-
-    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
-    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
-    if current.parent_id.is_none() {
-        return Err(Error::conflict("cannot change the root node write lock"));
-    }
-    if command.enabled == current.write_locked {
-        tx.commit().await.map_err(map_sqlx_error)?;
-        return current.into_node();
-    }
-    if command.enabled && !locked.owner_tier.features().write_lock {
-        return Err(Error::conflict(
-            "write lock is not available for the space owner's tier",
-        ));
-    }
-
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
-        "UPDATE nodes \
-         SET write_locked = $3, updated_by_account_id = $4, updated_at = now() \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    ))
-    .bind(space_id)
-    .bind(command.node_id)
-    .bind(command.enabled)
-    .bind(updated_by)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
-
-    file_change_events::node_write_lock_updated(
-        &mut tx,
-        file_change_events::context(updated_by, space_id),
-        command.node_id,
-        &row.kind,
-        &row.name,
-        row.parent_id,
-        row.write_locked,
     )
     .await?;
 

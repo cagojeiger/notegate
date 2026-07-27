@@ -615,7 +615,7 @@ impl FilesRepo {
         command: &notegate_model::files::UpdateNodeWriteLock,
         updated_by: Uuid,
     ) -> Result<Node> {
-        commands::update::update_node_write_lock(
+        commands::write_lock::update_node_write_lock(
             &self.pool,
             space_id,
             command,
