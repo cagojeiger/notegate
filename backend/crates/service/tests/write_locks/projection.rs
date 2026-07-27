@@ -34,8 +34,20 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
         .await?;
     assert!(!detail.node.write_locked);
     assert_eq!(detail.write_lock_sources.len(), 1);
-    assert_eq!(detail.write_lock_sources[0].node_id, folder_id);
-    assert_eq!(detail.write_lock_sources[0].path, "/Policies");
+    assert_eq!(
+        detail
+            .write_lock_sources
+            .first()
+            .map(|source| source.node_id),
+        Some(folder_id)
+    );
+    assert_eq!(
+        detail
+            .write_lock_sources
+            .first()
+            .map(|source| source.path.as_str()),
+        Some("/Policies")
+    );
 
     let children = fixture
         .files
@@ -75,7 +87,13 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
         )
         .await?;
     assert_eq!(grep.items.len(), 1);
-    assert_eq!(grep.items[0].node.write_lock_sources[0].node_id, folder_id);
+    assert_eq!(
+        grep.items
+            .first()
+            .and_then(|item| item.node.write_lock_sources.first())
+            .map(|source| source.node_id),
+        Some(folder_id)
+    );
 
     let read = fixture
         .files
@@ -130,7 +148,13 @@ async fn lock_sources_follow_ancestors_and_are_not_copied() -> TestResult {
         .stat(fixture.owner, fixture.space_id, text_id)
         .await?;
     assert!(!inherited.node.write_locked);
-    assert_eq!(inherited.write_lock_sources[0].node_id, outer_id);
+    assert_eq!(
+        inherited
+            .write_lock_sources
+            .first()
+            .map(|source| source.node_id),
+        Some(outer_id)
+    );
 
     fixture.set_lock(destination_id, true).await?;
     assert_write_locked(

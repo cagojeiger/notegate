@@ -121,7 +121,7 @@ describe("TextEditorView", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
-  it("keeps read actions available while disabling every write action under a lock", () => {
+  it("keeps read actions available while disabling every write action under a lock", async () => {
     vi.mocked(useTextDocument).mockReturnValue({
       data: { ...partialText, text: { ...partialText.text, truncated: false, next_start_line: null } },
       isLoading: false,
@@ -137,7 +137,7 @@ describe("TextEditorView", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
 
-    fireEvent.contextMenu(screen.getByText("Large note"));
+    fireEvent.contextMenu(await screen.findByText("Large note"));
     const menu = within(screen.getByRole("menu"));
     expect(menu.getByRole("button", { name: "Copy content" })).toBeEnabled();
     expect(menu.getByRole("button", { name: "Copy path" })).toBeEnabled();

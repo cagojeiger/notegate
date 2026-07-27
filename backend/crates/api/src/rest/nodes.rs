@@ -1031,9 +1031,10 @@ mod update_request_tests {
 
     #[test]
     fn write_lock_update_accepts_only_an_explicit_boolean() {
-        let enabled = serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": true }))
-            .expect("valid write-lock body");
-        assert!(enabled.enabled);
+        assert!(
+            serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": true }))
+                .is_ok_and(|body| body.enabled)
+        );
         assert!(
             serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": "true" }))
                 .is_err()

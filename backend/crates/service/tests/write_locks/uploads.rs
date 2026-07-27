@@ -98,7 +98,13 @@ async fn upload_reservation_and_file_deletion_follow_lock_policy() -> TestResult
         .complete_object_upload(fixture.owner, fixture.space_id, upload_id, None)
         .await?;
     let file_id = file.node.node.id;
-    assert_eq!(file.node.write_lock_sources[0].node_id, folder_id);
+    assert_eq!(
+        file.node
+            .write_lock_sources
+            .first()
+            .map(|source| source.node_id),
+        Some(folder_id)
+    );
     let upload_state: String =
         sqlx::query_scalar("SELECT state FROM object_storage_objects WHERE id = $1")
             .bind(upload_id)
@@ -111,7 +117,14 @@ async fn upload_reservation_and_file_deletion_follow_lock_policy() -> TestResult
         .complete_object_upload(fixture.owner, fixture.space_id, upload_id, None)
         .await?;
     assert_eq!(repeated.node.node.id, file_id);
-    assert_eq!(repeated.node.write_lock_sources[0].node_id, folder_id);
+    assert_eq!(
+        repeated
+            .node
+            .write_lock_sources
+            .first()
+            .map(|source| source.node_id),
+        Some(folder_id)
+    );
     assert_eq!(
         fixture
             .files

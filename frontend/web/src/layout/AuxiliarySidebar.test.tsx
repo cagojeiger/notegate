@@ -238,7 +238,7 @@ describe("AuxiliarySidebar", () => {
     });
 
     expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
     expect(screen.queryByText("Max")).not.toBeInTheDocument();
   });
 
