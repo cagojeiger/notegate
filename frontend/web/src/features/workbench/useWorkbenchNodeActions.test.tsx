@@ -520,6 +520,39 @@ describe("useWorkbenchNodeActions", () => {
     });
   });
 
+  it("applies inspector commands to the inspected node instead of the open editor node", () => {
+    const activeSpace = space("space-1");
+    const openText = node("open", activeSpace.id, "/open.md");
+    const inspectedFolder = node("folder-1", activeSpace.id, "/Policies", "folder");
+    const setDialog = vi.fn();
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: openText,
+      inspectedNode: inspectedFolder,
+      canWriteActiveSpace: true,
+      setDialog
+    });
+
+    act(() => {
+      result.current.promptReplaceMetadata();
+      result.current.setNodeSearchEnabled(false);
+      result.current.setNodeWriteLocked(true);
+    });
+
+    expect(setDialog).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "metadata",
+      node: inspectedFolder
+    }));
+    expect(mocks.updateNodeSearchPolicy).toHaveBeenCalledWith({
+      node: inspectedFolder,
+      enabled: false
+    });
+    expect(mocks.updateNodeWriteLock).toHaveBeenCalledWith({
+      node: inspectedFolder,
+      enabled: true
+    });
+  });
+
   it("allows sibling creation when only the active text is directly locked", async () => {
     const activeSpace = space("space-1");
     const directlyLockedText = {
@@ -592,8 +625,8 @@ describe("useWorkbenchNodeActions", () => {
 });
 
 function renderNodeActions(
-  props: Omit<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace">
-    & Partial<Pick<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace">>
+  props: Omit<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace" | "inspectedNode">
+    & Partial<Pick<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace" | "inspectedNode">>
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
@@ -601,8 +634,9 @@ function renderNodeActions(
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
+  const inspectedNode = props.inspectedNode === undefined ? props.activeNode : props.inspectedNode;
   return renderHook(
-    () => useWorkbenchNodeActions({ canManageActiveSpace: true, ...props }),
+    () => useWorkbenchNodeActions({ canManageActiveSpace: true, ...props, inspectedNode }),
     { wrapper }
   );
 }

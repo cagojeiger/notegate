@@ -9,12 +9,14 @@ import type { NodeContextHandler } from "./types";
 export function NodeRow({
   node,
   depth,
-  selected,
+  inspected,
+  opened,
   expanded,
   meta,
   suffix,
   dropTarget,
   onToggleFolder,
+  onInspectNode,
   onOpenNode,
   onNodeContextMenu,
   onDragStartNode,
@@ -24,12 +26,14 @@ export function NodeRow({
 }: {
   node: NodeSummary;
   depth: number;
-  selected: boolean;
+  inspected: boolean;
+  opened: boolean;
   expanded?: boolean;
   meta?: string;
   suffix?: string;
   dropTarget?: boolean;
   onToggleFolder?: (nodeId: string) => void;
+  onInspectNode: (node: NodeSummary) => void;
   onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
   onDragStartNode?: (node: NodeSummary) => void;
@@ -46,9 +50,14 @@ export function NodeRow({
     window.clearTimeout(longPressRef.current);
     longPressRef.current = null;
   }
+  function handleToggleFolder() {
+    onInspectNode(node);
+    onToggleFolder?.(node.id);
+  }
   function handleOpen() {
-    if (node.kind === "folder") {
-      onToggleFolder?.(node.id);
+    onInspectNode(node);
+    if (node.kind === "folder" && onToggleFolder) {
+      onToggleFolder(node.id);
       return;
     }
     onOpenNode(node);
@@ -56,6 +65,7 @@ export function NodeRow({
   return (
     <div
       data-node-row
+      data-inspected={inspected ? "true" : undefined}
       draggable={draggable}
       onDragStart={(event) => {
         if (!draggable) return;
@@ -78,15 +88,15 @@ export function NodeRow({
       onTouchMove={clearLongPress}
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
-      className={`group relative flex w-full items-center gap-1 rounded-[9px] py-1.5 pr-2 text-sm transition active:bg-[var(--ng-selection)] active:text-text ${selected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`group relative flex w-full items-center gap-1 rounded-[9px] py-1.5 pr-2 text-sm transition active:bg-[var(--ng-selection)] active:text-text ${inspected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
       style={{ paddingLeft: `${8 + depth * 14}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >
-      {selected ? <span data-active-indicator className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
-      {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={() => onToggleFolder?.(node.id)}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
+      {opened ? <span data-active-indicator className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
+      {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={handleToggleFolder}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
       <button
         data-node-open
-        aria-current={selected ? "page" : undefined}
+        aria-current={opened ? "page" : undefined}
         aria-describedby={node.effective_write_locked ? lockDescriptionId : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50"
         onClick={handleOpen}

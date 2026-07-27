@@ -8,9 +8,11 @@ import { usePrimarySidebarSections } from "./usePrimarySidebarSections";
 
 export function PrimarySidebarSections({
   activeSpace,
-  activeNodeId,
+  openedNodeId,
+  inspectedNodeId,
   expandedFolderIds,
   onToggleFolder,
+  onInspectNode,
   onOpenNode,
   onNodeContextMenu,
   onMoveNodeToFolder,
@@ -19,10 +21,12 @@ export function PrimarySidebarSections({
   canWriteActiveSpace
 }: {
   activeSpace: Space;
-  activeNodeId: string | null;
+  openedNodeId: string | null;
+  inspectedNodeId: string | null;
   expandedFolderIds: Set<string>;
   canWriteActiveSpace: boolean;
   onToggleFolder: (nodeId: string) => void;
+  onInspectNode: (node: NodeSummary) => void;
   onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
   onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
@@ -34,13 +38,15 @@ export function PrimarySidebarSections({
     <div ref={sections.gridRef} className="grid min-h-0 min-w-0 flex-1 content-start" style={{ gridTemplateRows: sections.gridRows }}>
       <TreeSection
         activeSpace={activeSpace}
-        activeNodeId={activeNodeId}
+        openedNodeId={openedNodeId}
+        inspectedNodeId={inspectedNodeId}
         expandedFolderIds={expandedFolderIds}
         open={sections.treeSectionOpen}
         onToggle={sections.toggleTreeSection}
         onCollapseTree={onCollapseTree}
         onTreeNavigationChange={onTreeNavigationChange}
         onToggleFolder={onToggleFolder}
+        onInspectNode={onInspectNode}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
         onMoveNodeToFolder={onMoveNodeToFolder}
@@ -68,12 +74,14 @@ export function PrimarySidebarSections({
       </div>
       <RecentSection
         activeSpace={activeSpace}
-        activeNodeId={activeNodeId}
+        openedNodeId={openedNodeId}
+        inspectedNodeId={inspectedNodeId}
         density={sections.recentDensity}
         open={sections.recentSectionOpen}
         onToggle={sections.toggleRecentSection}
         onToggleDensity={sections.toggleRecentDensity}
         onOpenNode={onOpenNode}
+        onInspectNode={onInspectNode}
         onNodeContextMenu={onNodeContextMenu}
       />
     </div>

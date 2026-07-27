@@ -84,7 +84,7 @@ describe("TreeSection", () => {
     expect(new Set(queriedNodeIds())).toEqual(new Set([space.root_node_id, folder.id]));
   });
 
-  it("expands a folder without opening it as a canonical editor node", async () => {
+  it("inspects and toggles a folder without replacing the open editor node", async () => {
     const folder = node("folder-1", "folder");
     const rootQuery = query([folder]);
     const emptyQuery = query([]);
@@ -92,16 +92,19 @@ describe("TreeSection", () => {
       nodeId === space.root_node_id ? rootQuery : emptyQuery
     );
     const onToggleFolder = vi.fn();
+    const onInspectNode = vi.fn();
     const onOpenNode = vi.fn();
     const view = render(
       <TreeSection
         activeSpace={space}
-        activeNodeId={null}
+        openedNodeId="open-text"
+        inspectedNodeId={null}
         expandedFolderIds={new Set()}
         open
         onToggle={vi.fn()}
         onCollapseTree={vi.fn()}
         onToggleFolder={onToggleFolder}
+        onInspectNode={onInspectNode}
         onOpenNode={onOpenNode}
         onNodeContextMenu={vi.fn()}
         onMoveNodeToFolder={vi.fn()}
@@ -113,7 +116,14 @@ describe("TreeSection", () => {
     await waitFor(() => expect(view.getByRole("button", { name: folder.name })).toBeTruthy());
     fireEvent.click(view.getByRole("button", { name: folder.name }));
 
+    expect(onInspectNode).toHaveBeenCalledWith(folder);
     expect(onToggleFolder).toHaveBeenCalledWith(folder.id);
+    expect(onOpenNode).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: `Expand ${folder.name}` }));
+
+    expect(onInspectNode).toHaveBeenCalledTimes(2);
+    expect(onToggleFolder).toHaveBeenCalledTimes(2);
     expect(onOpenNode).not.toHaveBeenCalled();
   });
 
@@ -209,12 +219,14 @@ function treeElement(
   return (
     <TreeSection
       activeSpace={space}
-      activeNodeId={null}
+      openedNodeId={null}
+      inspectedNodeId={null}
       expandedFolderIds={expandedFolderIds}
       open
       onToggle={vi.fn()}
       onCollapseTree={vi.fn()}
       onToggleFolder={vi.fn()}
+      onInspectNode={vi.fn()}
       onOpenNode={vi.fn()}
       onNodeContextMenu={vi.fn()}
       onMoveNodeToFolder={onMoveNodeToFolder}

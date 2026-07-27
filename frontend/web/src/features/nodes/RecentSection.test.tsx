@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NodeSummary } from "../../api/types";
@@ -74,18 +74,35 @@ describe("RecentSection", () => {
     expect(view.queryByRole("button", { name: /load more/i })).toBeNull();
     expect(mocks.fetchNextPage).not.toHaveBeenCalled();
   });
+
+  it("opens folders from the recent list", () => {
+    const folder = node("folder-1", "folder");
+    const onOpenNode = vi.fn();
+    const onInspectNode = vi.fn();
+    mocks.useRecentNodesQuery.mockReturnValue(query([
+      page([folder], false, null)
+    ]));
+
+    const view = renderRecent(onOpenNode, onInspectNode);
+
+    fireEvent.click(view.getByRole("button", { name: folder.name }));
+    expect(onInspectNode).toHaveBeenCalledWith(folder);
+    expect(onOpenNode).toHaveBeenCalledWith(folder);
+  });
 });
 
-function renderRecent() {
+function renderRecent(onOpenNode = vi.fn(), onInspectNode = vi.fn()) {
   return render(
     <RecentSection
       activeSpace={space}
-      activeNodeId={null}
+      openedNodeId={null}
+      inspectedNodeId={null}
       density="compact"
       open
       onToggle={vi.fn()}
       onToggleDensity={vi.fn()}
-      onOpenNode={vi.fn()}
+      onOpenNode={onOpenNode}
+      onInspectNode={onInspectNode}
       onNodeContextMenu={vi.fn()}
     />
   );
@@ -114,12 +131,13 @@ function page(nodes: NodeSummary[], hasMore: boolean, nextCursor: string | null)
   };
 }
 
-function node(id: string): NodeSummary {
+function node(id: string, kind: NodeSummary["kind"] = "text"): NodeSummary {
   return makeNodeSummary({
     id,
     space_id: space.id,
     parent_id: space.root_node_id,
     name: id,
-    path: `/${id}`
+    path: `/${id}`,
+    kind
   });
 }

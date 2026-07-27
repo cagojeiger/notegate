@@ -1,6 +1,7 @@
 import { ChevronRight, LockKeyhole, Search } from "lucide-react";
 
 import type { RestNode } from "../api/types";
+import { useFolderChildrenStat } from "../features/editor/useEditorQueries";
 import { formatBytes } from "../shared/lib/formatBytes";
 import { Button, MetaRow, SectionHeader, SettingToggle } from "../shared/ui";
 import { WriteLockStatus } from "./WriteLockStatus";
@@ -9,6 +10,7 @@ const EMPTY = "—";
 
 type AuxiliarySidebarProps = {
   activeNode: RestNode | null;
+  loadingNode?: boolean;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   textEncryptionAvailable: boolean;
@@ -24,6 +26,7 @@ type AuxiliarySidebarProps = {
 
 export function AuxiliarySidebar({
   activeNode,
+  loadingNode = false,
   canWriteActiveSpace,
   canManageActiveSpace,
   textEncryptionAvailable,
@@ -57,7 +60,14 @@ export function AuxiliarySidebar({
                 <dl className="space-y-2">
                   <MetaRow label="Name" value={activeNode.name === "/" ? "Space root" : activeNode.name} />
                   <MetaRow label="Path" value={activeNode.path} />
-                  <MetaRow label="Kind" value={nodeSummary(activeNode)} />
+                  <MetaRow label="Kind" value={nodeKindLabel(activeNode)} />
+                  {activeNode.kind === "folder" ? <FolderChildCount node={activeNode} /> : null}
+                  {activeNode.kind !== "folder" && activeNode.byte_len !== undefined ? (
+                    <MetaRow label="Size" value={formatBytes(activeNode.byte_len)} />
+                  ) : null}
+                  {activeNode.kind === "text" && activeNode.line_count !== undefined ? (
+                    <MetaRow label="Lines" value={String(activeNode.line_count)} />
+                  ) : null}
                 </dl>
                 <WriteLockStatus
                   key={activeNode.id}
@@ -67,7 +77,7 @@ export function AuxiliarySidebar({
                 />
               </>
             ) : (
-              <p className="text-xs text-muted">Select a node to inspect.</p>
+              <p className="text-xs text-muted">{loadingNode ? "Loading node…" : "Select a node to inspect."}</p>
             )}
           </section>
           <section className="p-4">
@@ -170,14 +180,16 @@ export function AuxiliarySidebar({
   );
 }
 
-function nodeSummary(node: RestNode): string {
-  const kindLabel = node.kind === "folder" ? "Folder" : node.kind === "text" ? "Text" : "File";
-  const parts = [kindLabel];
-  if (node.kind !== "folder" && node.byte_len !== undefined) {
-    parts.push(formatBytes(node.byte_len));
-  }
-  if (node.kind === "text" && node.line_count !== undefined) {
-    parts.push(`${node.line_count} ${node.line_count === 1 ? "line" : "lines"}`);
-  }
-  return parts.join(" · ");
+function FolderChildCount({ node }: { node: RestNode }) {
+  const childrenQuery = useFolderChildrenStat(node);
+  const value = childrenQuery.data
+    ? `${childrenQuery.data.children.length}${childrenQuery.data.page.has_more ? "+" : ""}`
+    : childrenQuery.isError
+      ? EMPTY
+      : "…";
+  return <MetaRow label="Children" value={value} />;
+}
+
+function nodeKindLabel(node: RestNode): string {
+  return node.kind === "folder" ? "Folder" : node.kind === "text" ? "Text" : "File";
 }

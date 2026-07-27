@@ -1,10 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeRestNode } from "../test/fixtures";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
+
+const mocks = vi.hoisted(() => ({
+  useFolderChildrenStat: vi.fn()
+}));
+
+vi.mock("../features/editor/useEditorQueries", () => ({
+  useFolderChildrenStat: mocks.useFolderChildrenStat
+}));
 
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
 
@@ -34,6 +42,13 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
 }
 
 describe("AuxiliarySidebar", () => {
+  beforeEach(() => {
+    mocks.useFolderChildrenStat.mockReturnValue({
+      data: undefined,
+      isError: false
+    });
+  });
+
   it("uses the shared workbench body-header height and seam", () => {
     renderSidebar({
       activeNode: null,
@@ -84,8 +99,36 @@ describe("AuxiliarySidebar", () => {
   it("prioritizes node identity and keeps secondary details collapsed", () => {
     renderSidebar();
 
-    expect(screen.getByText("Text · 1.8 KB · 42 lines")).toBeInTheDocument();
+    expect(screen.getByText("Text")).toBeInTheDocument();
+    expect(screen.getByText("1.8 KB")).toBeInTheDocument();
+    expect(screen.getByText("42")).toBeInTheDocument();
     expect(screen.getByText("Details").closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("shows direct child count for folders without text-only fields", () => {
+    mocks.useFolderChildrenStat.mockReturnValue({
+      data: {
+        children: [makeRestNode({ id: "child-1" }), makeRestNode({ id: "child-2" })],
+        page: { has_more: true }
+      },
+      isError: false
+    });
+
+    renderSidebar({
+      activeNode: makeRestNode({
+        id: "folder-1",
+        kind: "folder",
+        name: "Policies",
+        path: "/Policies",
+        byte_len: undefined,
+        line_count: undefined
+      })
+    });
+
+    expect(screen.getByText("Folder")).toBeInTheDocument();
+    expect(screen.getByText("2+")).toBeInTheDocument();
+    expect(screen.queryByText("Size")).not.toBeInTheDocument();
+    expect(screen.queryByText("Lines")).not.toBeInTheDocument();
   });
 
   it("shows actual encrypted storage and allows disabling it after a tier downgrade", async () => {

@@ -121,6 +121,10 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       closeMobilePanels();
     }
   };
+  const focusEditorGroup = (index: number) => {
+    actions.focusGroup(index);
+    workbench.inspectNode(workbench.editorGroups[index]?.node ?? null);
+  };
 
   if (workbench.loading) return <FullScreenStatus label="Loading spaces" />;
   if (workbench.error) return <FullScreenStatus label="Could not load spaces" detail={workbench.error} />;
@@ -176,9 +180,11 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode} width={workbench.primaryWidth}>
                 <PrimarySidebar
                   activeSpace={workbench.activeSpace}
-                  activeNodeId={workbench.activeNode?.id ?? null}
+                  openedNodeId={workbench.activeNode?.id ?? null}
+                  inspectedNodeId={workbench.inspectedNodeId}
                   expandedFolderIds={workbench.expandedFolderIds}
                   onToggleFolder={actions.toggleFolder}
+                  onInspectNode={workbench.inspectNode}
                   onOpenNode={(node) => { void openNode(node); }}
                   onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
                   onCreateFolder={() => actions.promptCreateNode("folder")}
@@ -211,7 +217,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 presentation={layout.editorPresentation}
                 visibleGroupCount={layout.visibleEditorGroupCount}
                 activeSpace={workbench.activeSpace}
-                onFocusGroup={actions.focusGroup}
+                onFocusGroup={focusEditorGroup}
                 onNavigateEditorGroup={(groupId, direction) => { void actions.navigateEditorGroup(groupId, direction); }}
                 navigatingGroupIds={actions.navigatingGroupIds}
                 onOpenNode={(node) => { void openNode(node); }}
@@ -230,7 +236,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               />
               <AuxiliarySidebarFrame mode={layout.auxiliaryMode}>
                 <AuxiliarySidebar
-                  activeNode={workbench.activeNode}
+                  activeNode={workbench.inspectedNode}
+                  loadingNode={workbench.inspectorNodeLoading}
                   canWriteActiveSpace={workbench.canWriteActiveSpace}
                   canManageActiveSpace={workbench.canManageActiveSpace}
                   textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}

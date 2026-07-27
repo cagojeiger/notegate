@@ -311,12 +311,14 @@ function renderTree(queryClient: QueryClient, expandedFolderIds: Set<string>) {
   return render(
     <TreeSection
       activeSpace={space}
-      activeNodeId={null}
+      openedNodeId={null}
+      inspectedNodeId={null}
       expandedFolderIds={expandedFolderIds}
       open
       onToggle={vi.fn()}
       onCollapseTree={vi.fn()}
       onToggleFolder={vi.fn()}
+      onInspectNode={vi.fn()}
       onOpenNode={vi.fn()}
       onNodeContextMenu={vi.fn()}
       onMoveNodeToFolder={vi.fn()}

@@ -29,6 +29,7 @@ import {
 type CommandActionsProps = {
   activeSpace: Space | null;
   activeNode: RestNode | null;
+  inspectedNode: RestNode | null;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;
@@ -41,6 +42,7 @@ const LOCKED_DESTINATION_MESSAGE =
 export function useWorkbenchNodeCommandActions({
   activeSpace,
   activeNode,
+  inspectedNode,
   canWriteActiveSpace,
   canManageActiveSpace,
   setDialog,
@@ -164,8 +166,8 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function promptReplaceMetadata() {
-    if (!activeNode || !canWriteNode(activeNode, canWriteActiveSpace)) return;
-    const node = activeNode;
+    if (!inspectedNode || !canWriteNode(inspectedNode, canWriteActiveSpace)) return;
+    const node = inspectedNode;
     setDialog(metadataDialog(node, async (metadataNode, metadata) => {
       await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
     }));
@@ -174,13 +176,13 @@ export function useWorkbenchNodeCommandActions({
   function setNodeSearchEnabled(searchEnabled: boolean) {
     if (
       !canManageActiveSpace
-      || !activeNode
-      || activeNode.parent_id === null
-      || activeNode.effective_write_locked
+      || !inspectedNode
+      || inspectedNode.parent_id === null
+      || inspectedNode.effective_write_locked
       || updateNodeSearchPolicyMutation.isPending
     ) return;
     updateNodeSearchPolicyMutation.mutate({
-      node: activeNode,
+      node: inspectedNode,
       enabled: searchEnabled
     });
   }
@@ -188,13 +190,13 @@ export function useWorkbenchNodeCommandActions({
   function setTextEncryptionEnabled(textEncryptionEnabled: boolean) {
     if (
       !canManageActiveSpace
-      || !activeNode
-      || activeNode.kind !== "text"
-      || activeNode.effective_write_locked
+      || !inspectedNode
+      || inspectedNode.kind !== "text"
+      || inspectedNode.effective_write_locked
       || updateTextEncryptionMutation.isPending
     ) return;
     updateTextEncryptionMutation.mutate({
-      node: activeNode,
+      node: inspectedNode,
       enabled: textEncryptionEnabled
     });
   }
@@ -202,12 +204,12 @@ export function useWorkbenchNodeCommandActions({
   function setNodeWriteLocked(writeLocked: boolean) {
     if (
       !canManageActiveSpace
-      || !activeNode
-      || activeNode.parent_id === null
+      || !inspectedNode
+      || inspectedNode.parent_id === null
       || updateNodeWriteLockMutation.isPending
     ) return;
     updateNodeWriteLockMutation.mutate({
-      node: activeNode,
+      node: inspectedNode,
       enabled: writeLocked
     });
   }
