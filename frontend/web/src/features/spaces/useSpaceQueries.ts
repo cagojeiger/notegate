@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type UseMutationOptions
+} from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
@@ -23,18 +29,45 @@ export function useSpacesQuery() {
   return useQuery({ queryKey: queryKeys.spaces, queryFn: () => listSpaces(client) });
 }
 
-export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  return useMutation({
+export function createSpaceMutationOptions(
+  createRequest: (name: string) => Promise<Space>,
+  queryClient: QueryClient,
+  onCreated: (space: Space) => void
+): UseMutationOptions<Space, Error, string> {
+  return {
     meta: { silentError: true },
-    mutationFn: (name: string) => createSpace(client, name),
+    mutationFn: createRequest,
     onSuccess: (space) => {
+      queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, (current) => {
+        if (!current) {
+          return {
+            spaces: [space],
+            page: { limit: 100, returned: 1, has_more: false, next_cursor: null }
+          };
+        }
+        const spaces = [
+          ...current.spaces.filter((candidate) => candidate.id !== space.id),
+          space
+        ].sort((left, right) => left.sort_order - right.sort_order);
+        return { ...current, spaces, page: { ...current.page, returned: spaces.length } };
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
       invalidateAuditEvents(queryClient);
       onCreated(space);
     }
-  });
+  };
+}
+
+export function useCreateSpaceMutation(onCreated: (space: Space) => void) {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation(
+    createSpaceMutationOptions(
+      (name) => createSpace(client, name),
+      queryClient,
+      onCreated
+    )
+  );
 }
 
 export function useUpdateSpaceMutation(options: SpaceMutationOptions = {}) {
