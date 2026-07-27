@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
+import { canWriteNode } from "../nodes/nodeWriteAccess";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
 type TextContent = ReadTextResponse["text"];
@@ -39,7 +40,7 @@ export function useTextEditorSession({
   const sha = text?.content_sha256;
   const encrypted = isEncryptedTextContent(text);
   const partialText = plainText?.truncated ? plainText : null;
-  const canEdit = canWrite && !node.effective_write_locked && !!plainText && !partialText;
+  const canEdit = canWriteNode(node, canWrite) && !!plainText && !partialText;
   const canCopy = !!plainText && !partialText;
   const dirty = mode === "edit" && draftNodeId.current === node.id && draft !== content;
 

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import type { NodeSummary, Space } from "../../api/types";
 import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
+import { canMoveNodeToFolder, canMutateNode } from "./nodeWriteAccess";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { findAdjacentNodeRowIndex, projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
@@ -202,12 +203,8 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
 
   function handleDragOver(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
     if (
-      !canWriteActiveSpace
-      || !draggedNode
-      || draggedNode.effective_write_locked
-      || node.effective_write_locked
-      || node.kind !== "folder"
-      || node.id === draggedNode.id
+      !draggedNode
+      || !canMoveNodeToFolder(draggedNode, node, canWriteActiveSpace)
     ) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
@@ -216,12 +213,8 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
 
   function handleDrop(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
     if (
-      !canWriteActiveSpace
-      || !draggedNode
-      || draggedNode.effective_write_locked
-      || node.effective_write_locked
-      || node.kind !== "folder"
-      || node.id === draggedNode.id
+      !draggedNode
+      || !canMoveNodeToFolder(draggedNode, node, canWriteActiveSpace)
     ) return;
     event.preventDefault();
     onMoveNodeToFolder(draggedNode, node);
@@ -417,7 +410,7 @@ function VirtualTreeRow({
         onToggleFolder={onToggleFolder}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
-        onDragStartNode={canWriteActiveSpace && !node.effective_write_locked ? onDragStartNode : undefined}
+        onDragStartNode={canMutateNode(node, canWriteActiveSpace) ? onDragStartNode : undefined}
         onDragOverNode={onDragOverNode}
         onDropOnNode={onDropOnNode}
         onDragEndNode={onDragEndNode}

@@ -1,19 +1,20 @@
 import { Download } from "lucide-react";
 import { useState, type MouseEvent, type ReactNode } from "react";
-import { nodeIcon } from "../nodes/nodeDisplay";
 
 import type { NodeSummary, RestNode, Space } from "../../api/types";
 import { MAX_EDITOR_GROUPS, type EditorPresentation } from "../../shared/model/workbenchLayout";
 import { IconButton } from "../../shared/ui";
 import type { EditorGroup } from "../../stores/uiStore";
 import type { EditorNavigationDirection } from "../../stores/uiStoreReducers";
+import { nodeIcon } from "../nodes/nodeDisplay";
+import { canMutateNode } from "../nodes/nodeWriteAccess";
+import { NodeContextMenu } from "../nodes/NodeContextMenu";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { EditorNavigationControls } from "./EditorNavigationControls";
 import { EmptyEditor } from "./EmptyEditor";
 import { FileDetailView } from "./FileDetailView";
 import { FolderDetailView } from "./FolderDetailView";
 import { NodeActionMenu } from "./NodeActionMenu";
-import { NodeContextMenu } from "../nodes/NodeContextMenu";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { TextEditorView } from "./TextEditorView";
 import type { EditorNavigationActions, NodeActions } from "./types";
@@ -172,7 +173,7 @@ function NodeGroupContent({ active, groupId, navigationActions, node, mode, canW
                 <Download size={15} />
               </IconButton>
             ) : null}
-            <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace || node.effective_write_locked} />
+            <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={!canMutateNode(node, canWriteActiveSpace)} />
           </>
         )}
       />

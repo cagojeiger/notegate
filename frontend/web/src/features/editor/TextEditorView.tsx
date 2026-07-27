@@ -5,6 +5,7 @@ import type { RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { Button, Card, IconButton, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
+import { canMutateNode } from "../nodes/nodeWriteAccess";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { TextPreview } from "./TextPreview";
@@ -118,7 +119,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Pencil size={15} />
         </IconButton>
       )}
-      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace || node.effective_write_locked} />
+      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={!canMutateNode(node, canWriteActiveSpace)} />
     </>
   );
   return (
@@ -186,7 +187,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           canCopyContent={canCopyContent}
           canEditText={canEditText}
           canSave={canSave}
-          canMutateNode={node.parent_id !== null && canWriteActiveSpace && !node.effective_write_locked}
+          canMutateNode={canMutateNode(node, canWriteActiveSpace)}
           canOpenInNewGroup={canOpenInNewGroup}
           canCloseGroup={canClose}
           onClose={() => setEditorMenu(null)}
