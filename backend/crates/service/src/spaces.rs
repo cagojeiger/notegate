@@ -170,20 +170,7 @@ impl SpaceService {
         command: UpdateSpace,
     ) -> ServiceResult<SpaceView> {
         require_user_caller(caller_kind)?;
-        if command.name.is_none()
-            && command.sort_order.is_none()
-            && command.navigation_pinned.is_none()
-            && command.user_mcp_enabled.is_none()
-            && command.default_search_enabled.is_none()
-            && command.default_text_encryption_enabled.is_none()
-        {
-            return Err(ServiceError::InvalidInput(
-                "provide at least one space field to update".to_owned(),
-            ));
-        }
-        if let Some(name) = command.name.as_deref() {
-            validate_space_name(name)?;
-        }
+        validate_space_update(&command)?;
         let current = self.get(caller_account_id, command.space_id).await?;
         if command.default_text_encryption_enabled == Some(true)
             && !current.features.text_encryption
@@ -218,23 +205,7 @@ impl SpaceService {
         updates: Vec<SpaceOrderUpdate>,
     ) -> ServiceResult<()> {
         require_user_caller(caller_kind)?;
-        if updates.is_empty() {
-            return Err(ServiceError::InvalidInput(
-                "provide at least one space order update".to_owned(),
-            ));
-        }
-        if updates.len() > limits::OWNED_SPACES_MAX {
-            return Err(ServiceError::InvalidInput(format!(
-                "at most {} spaces may be reordered at once",
-                limits::OWNED_SPACES_MAX
-            )));
-        }
-        let unique_ids: HashSet<_> = updates.iter().map(|update| update.space_id).collect();
-        if unique_ids.len() != updates.len() {
-            return Err(ServiceError::InvalidInput(
-                "space order updates must contain unique space ids".to_owned(),
-            ));
-        }
+        validate_space_order_updates(&updates)?;
 
         self.store
             .reorder_spaces(caller_account_id, &updates)
@@ -278,6 +249,45 @@ impl SpaceService {
     }
 }
 
+fn validate_space_update(command: &UpdateSpace) -> ServiceResult<()> {
+    if command.name.is_none()
+        && command.sort_order.is_none()
+        && command.navigation_pinned.is_none()
+        && command.user_mcp_enabled.is_none()
+        && command.default_search_enabled.is_none()
+        && command.default_text_encryption_enabled.is_none()
+    {
+        return Err(ServiceError::InvalidInput(
+            "provide at least one space field to update".to_owned(),
+        ));
+    }
+    if let Some(name) = command.name.as_deref() {
+        validate_space_name(name)?;
+    }
+    Ok(())
+}
+
+fn validate_space_order_updates(updates: &[SpaceOrderUpdate]) -> ServiceResult<()> {
+    if updates.is_empty() {
+        return Err(ServiceError::InvalidInput(
+            "provide at least one space order update".to_owned(),
+        ));
+    }
+    if updates.len() > limits::OWNED_SPACES_MAX {
+        return Err(ServiceError::InvalidInput(format!(
+            "at most {} spaces may be reordered at once",
+            limits::OWNED_SPACES_MAX
+        )));
+    }
+    let unique_ids: HashSet<_> = updates.iter().map(|update| update.space_id).collect();
+    if unique_ids.len() != updates.len() {
+        return Err(ServiceError::InvalidInput(
+            "space order updates must contain unique space ids".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn require_user_caller(kind: AccountKind) -> ServiceResult<()> {
     match kind {
         AccountKind::User => Ok(()),
@@ -289,4 +299,133 @@ fn require_user_caller(kind: AccountKind) -> ServiceResult<()> {
 
 fn not_found() -> ServiceError {
     ServiceError::NotFound("space not found".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_update() -> UpdateSpace {
+        UpdateSpace {
+            space_id: Uuid::new_v4(),
+            name: None,
+            sort_order: None,
+            navigation_pinned: None,
+            user_mcp_enabled: None,
+            default_search_enabled: None,
+            default_text_encryption_enabled: None,
+        }
+    }
+
+    #[test]
+    fn space_management_requires_a_user_caller() {
+        assert_eq!(require_user_caller(AccountKind::User), Ok(()));
+        assert_eq!(
+            require_user_caller(AccountKind::Agent),
+            Err(ServiceError::Forbidden(
+                "only user accounts may manage spaces".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn update_validation_requires_at_least_one_supported_field() {
+        assert_eq!(
+            validate_space_update(&empty_update()),
+            Err(ServiceError::InvalidInput(
+                "provide at least one space field to update".to_owned()
+            ))
+        );
+
+        let commands = [
+            UpdateSpace {
+                name: Some("renamed".to_owned()),
+                ..empty_update()
+            },
+            UpdateSpace {
+                sort_order: Some(1),
+                ..empty_update()
+            },
+            UpdateSpace {
+                navigation_pinned: Some(false),
+                ..empty_update()
+            },
+            UpdateSpace {
+                user_mcp_enabled: Some(false),
+                ..empty_update()
+            },
+            UpdateSpace {
+                default_search_enabled: Some(false),
+                ..empty_update()
+            },
+            UpdateSpace {
+                default_text_encryption_enabled: Some(false),
+                ..empty_update()
+            },
+        ];
+        for command in commands {
+            assert_eq!(validate_space_update(&command), Ok(()));
+        }
+    }
+
+    #[test]
+    fn update_validation_checks_space_names() {
+        let command = UpdateSpace {
+            name: Some("bad/name".to_owned()),
+            ..empty_update()
+        };
+
+        assert!(matches!(
+            validate_space_update(&command),
+            Err(ServiceError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn reorder_validation_requires_a_bounded_unique_set() {
+        assert_eq!(
+            validate_space_order_updates(&[]),
+            Err(ServiceError::InvalidInput(
+                "provide at least one space order update".to_owned()
+            ))
+        );
+
+        let duplicate_id = Uuid::new_v4();
+        let duplicate = [
+            SpaceOrderUpdate {
+                space_id: duplicate_id,
+                sort_order: 1,
+            },
+            SpaceOrderUpdate {
+                space_id: duplicate_id,
+                sort_order: 2,
+            },
+        ];
+        assert_eq!(
+            validate_space_order_updates(&duplicate),
+            Err(ServiceError::InvalidInput(
+                "space order updates must contain unique space ids".to_owned()
+            ))
+        );
+
+        let mut boundary = std::iter::repeat_with(|| SpaceOrderUpdate {
+            space_id: Uuid::new_v4(),
+            sort_order: 0,
+        })
+        .take(limits::OWNED_SPACES_MAX)
+        .collect::<Vec<_>>();
+        assert_eq!(validate_space_order_updates(&boundary), Ok(()));
+
+        boundary.push(SpaceOrderUpdate {
+            space_id: Uuid::new_v4(),
+            sort_order: 0,
+        });
+        assert_eq!(
+            validate_space_order_updates(&boundary),
+            Err(ServiceError::InvalidInput(format!(
+                "at most {} spaces may be reordered at once",
+                limits::OWNED_SPACES_MAX
+            )))
+        );
+    }
 }
