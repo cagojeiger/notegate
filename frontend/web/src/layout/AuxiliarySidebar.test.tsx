@@ -1,28 +1,41 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../api/types";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 
+type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
+
+function renderSidebar(overrides: Partial<SidebarProps> = {}) {
+  const props: SidebarProps = {
+    activeNode: textNode,
+    canWriteActiveSpace: true,
+    canManageActiveSpace: true,
+    textEncryptionAvailable: true,
+    writeLockAvailable: true,
+    searchPolicyPending: false,
+    writeLockPending: false,
+    textEncryptionPending: false,
+    onReplaceMetadata: vi.fn(),
+    onSearchEnabledChange: vi.fn(),
+    onWriteLockedChange: vi.fn(),
+    onTextEncryptionEnabledChange: vi.fn(),
+    ...overrides
+  };
+  return render(<AuxiliarySidebar {...props} />);
+}
+
 describe("AuxiliarySidebar", () => {
   it("uses the shared workbench body-header height and seam", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={null}
-        canWriteActiveSpace={false}
-        canManageActiveSpace={false}
-        textEncryptionAvailable={false}
-        writeLockAvailable={false}
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      activeNode: null,
+      canWriteActiveSpace: false,
+      canManageActiveSpace: false,
+      textEncryptionAvailable: false,
+      writeLockAvailable: false
+    });
 
     expect(screen.getByText("Inspector")).toHaveClass("h-12", "border-b", "border-seam");
   });
@@ -33,22 +46,11 @@ describe("AuxiliarySidebar", () => {
     const onWriteLockedChange = vi.fn();
     const onTextEncryptionEnabledChange = vi.fn();
 
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={onSearchEnabledChange}
-        onWriteLockedChange={onWriteLockedChange}
-        onTextEncryptionEnabledChange={onTextEncryptionEnabledChange}
-      />
-    );
+    renderSidebar({
+      onSearchEnabledChange,
+      onWriteLockedChange,
+      onTextEncryptionEnabledChange
+    });
 
     const search = screen.getByRole("switch", { name: "Include in search" });
     const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
@@ -66,22 +68,7 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("explains that node settings apply immediately", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar();
 
     expect(screen.getByRole("button", { name: "About Node settings" })).toHaveAccessibleDescription(
       "Changes apply immediately to this node. A direct lock protects this node and its descendants; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
@@ -89,22 +76,7 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("prioritizes node identity and keeps secondary details collapsed", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar();
 
     expect(screen.getByText("Text · 1.8 KB · 42 lines")).toBeInTheDocument();
     expect(screen.getByText("Details").closest("details")).not.toHaveAttribute("open");
@@ -114,25 +86,15 @@ describe("AuxiliarySidebar", () => {
     const user = userEvent.setup();
     const onTextEncryptionEnabledChange = vi.fn();
 
-    render(
-      <AuxiliarySidebar
-        activeNode={{
-          ...textNode,
-          text_at_rest_encryption: "server"
-        }}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable={false}
-        writeLockAvailable={false}
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={onTextEncryptionEnabledChange}
-      />
-    );
+    renderSidebar({
+      activeNode: {
+        ...textNode,
+        text_at_rest_encryption: "server"
+      },
+      textEncryptionAvailable: false,
+      writeLockAvailable: false,
+      onTextEncryptionEnabledChange
+    });
 
     const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
     expect(encryption).toBeChecked();
@@ -142,22 +104,7 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("keeps metadata editing available while policy controls require manage access", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace={false}
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({ canManageActiveSpace: false });
 
     expect(screen.getByRole("button", { name: "Edit metadata" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
@@ -166,44 +113,14 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("tracks search and encryption requests independently", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({ searchPolicyPending: true });
 
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
   });
 
   it("tracks write-lock requests independently", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({ writeLockPending: true });
 
     expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeEnabled();
@@ -211,25 +128,12 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("shows client-encrypted text as encrypted without offering a server rewrite", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={{
-          ...textNode,
-          text_storage_format: "encrypted"
-        }}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      activeNode: {
+        ...textNode,
+        text_storage_format: "encrypted"
+      }
+    });
 
     const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
     expect(encryption).toBeChecked();
@@ -239,30 +143,17 @@ describe("AuxiliarySidebar", () => {
 
   it("shows direct protection and reveals inherited sources in an overlay", async () => {
     const user = userEvent.setup();
-    render(
-      <AuxiliarySidebar
-        activeNode={{
-          ...textNode,
-          write_locked: true,
-          effective_write_locked: true,
-          write_lock_sources: [
-            { node_id: "folder-1", name: "Policies", path: "/Policies" },
-            { node_id: textNode.id, name: textNode.name, path: textNode.path }
-          ]
-        }}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      activeNode: {
+        ...textNode,
+        write_locked: true,
+        effective_write_locked: true,
+        write_lock_sources: [
+          { node_id: "folder-1", name: "Policies", path: "/Policies" },
+          { node_id: textNode.id, name: textNode.name, path: textNode.path }
+        ]
+      }
+    });
 
     expect(screen.getByRole("switch", { name: "Lock this node" })).toBeChecked();
     expect(screen.getByText("Locked here")).toBeInTheDocument();
@@ -283,28 +174,15 @@ describe("AuxiliarySidebar", () => {
 
   it("shows inherited protection without marking the node as directly locked", async () => {
     const user = userEvent.setup();
-    render(
-      <AuxiliarySidebar
-        activeNode={{
-          ...textNode,
-          effective_write_locked: true,
-          write_lock_sources: [
-            { node_id: "folder-1", name: "Policies", path: "/Policies" }
-          ]
-        }}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      activeNode: {
+        ...textNode,
+        effective_write_locked: true,
+        write_lock_sources: [
+          { node_id: "folder-1", name: "Policies", path: "/Policies" }
+        ]
+      }
+    });
 
     expect(screen.getByText("Inherited")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Lock this node" })).not.toBeChecked();
@@ -317,22 +195,10 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("shows an unavailable plan without naming a specific tier", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable={false}
-        writeLockAvailable={false}
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      textEncryptionAvailable: false,
+      writeLockAvailable: false
+    });
 
     expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
@@ -340,27 +206,14 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("keeps the space root lock control disabled", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={{
-          ...textNode,
-          parent_id: null,
-          name: "/",
-          path: "/"
-        }}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      activeNode: {
+        ...textNode,
+        parent_id: null,
+        name: "/",
+        path: "/"
+      }
+    });
 
     expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
     expect(screen.getByText("Root")).toBeInTheDocument();
@@ -369,29 +222,18 @@ describe("AuxiliarySidebar", () => {
   it("allows an existing direct lock to be removed after the feature becomes unavailable", async () => {
     const user = userEvent.setup();
     const onWriteLockedChange = vi.fn();
-    render(
-      <AuxiliarySidebar
-        activeNode={{
-          ...textNode,
-          write_locked: true,
-          effective_write_locked: true,
-          write_lock_sources: [
-            { node_id: textNode.id, name: textNode.name, path: textNode.path }
-          ]
-        }}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable={false}
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={onWriteLockedChange}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar({
+      activeNode: {
+        ...textNode,
+        write_locked: true,
+        effective_write_locked: true,
+        write_lock_sources: [
+          { node_id: textNode.id, name: textNode.name, path: textNode.path }
+        ]
+      },
+      writeLockAvailable: false,
+      onWriteLockedChange
+    });
 
     const writeLock = screen.getByRole("switch", { name: "Lock this node" });
     expect(writeLock).toBeChecked();
@@ -403,22 +245,7 @@ describe("AuxiliarySidebar", () => {
   });
 
   it("uses an explicit empty metadata state", () => {
-    render(
-      <AuxiliarySidebar
-        activeNode={textNode}
-        canWriteActiveSpace
-        canManageActiveSpace
-        textEncryptionAvailable
-        writeLockAvailable
-        searchPolicyPending={false}
-        writeLockPending={false}
-        textEncryptionPending={false}
-        onReplaceMetadata={vi.fn()}
-        onSearchEnabledChange={vi.fn()}
-        onWriteLockedChange={vi.fn()}
-        onTextEncryptionEnabledChange={vi.fn()}
-      />
-    );
+    renderSidebar();
 
     expect(screen.getByText("No metadata.")).toBeInTheDocument();
     expect(screen.queryByText("{}")).not.toBeInTheDocument();

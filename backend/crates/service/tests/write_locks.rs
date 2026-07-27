@@ -7,11 +7,10 @@
     clippy::unwrap_in_result
 )]
 mod common;
+#[path = "common/write_lock.rs"]
+mod write_lock_support;
 
-use std::error::Error;
-use std::fmt::Debug;
-
-use common::{TestDb, insert_user_account};
+use common::insert_user_account;
 use notegate_db::{AccountRepo, AgentRepo, ConnectionRepo, FilesRepo, SpaceRepo};
 use notegate_model::files::{ObjectUploadMode, ObjectUploadRegistration};
 use notegate_model::{
@@ -21,141 +20,15 @@ use notegate_model::{
 use notegate_service::ServiceError;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::{
-    BeginObjectUpload, ChildrenRequest, CopyNode, CreateFolder, CreateText, DeleteNode,
-    FilesService, MoveNode, ReadText, UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock,
-    UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
+    BeginObjectUpload, ChildrenRequest, CopyNode, DeleteNode, MoveNode, ReadText, UpdateNode,
+    UpdateNodeSearchPolicy, UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget, WriteText,
+    WriteTextBody,
 };
 use notegate_service::search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
-use notegate_service::spaces::{CreateSpace, SpaceService};
+use notegate_service::spaces::SpaceService;
 use serde_json::json;
 use uuid::Uuid;
-
-type TestResult<T = ()> = Result<T, Box<dyn Error>>;
-
-struct Fixture {
-    db: TestDb,
-    owner: Uuid,
-    space_id: Uuid,
-    root_id: Uuid,
-    files: FilesService,
-    browser: Caller,
-}
-
-impl Fixture {
-    async fn setup(label: &str) -> TestResult<Option<Self>> {
-        let Some(db) = TestDb::setup().await? else {
-            return Ok(None);
-        };
-        let username = format!("write-lock-{label}");
-        let email = format!("{label}@example.test");
-        let owner = insert_user_account(&db.pool, &username, &email).await?;
-        set_system_max(&db, owner).await?;
-
-        let spaces = SpaceRepo::new(db.pool.clone());
-        let space = spaces
-            .create_space(
-                owner,
-                &CreateSpace {
-                    name: username.clone(),
-                },
-            )
-            .await?;
-        let root_id = spaces.root_node_id(space.id).await?.expect("root node");
-        let browser = load_caller(&db, owner, Channel::Browser).await;
-
-        Ok(Some(Self {
-            files: FilesService::new(FilesRepo::new(db.pool.clone())),
-            db,
-            owner,
-            space_id: space.id,
-            root_id,
-            browser,
-        }))
-    }
-
-    async fn folder(&self, parent_node_id: Uuid, name: &str) -> TestResult<Uuid> {
-        Ok(self
-            .files
-            .create_folder(
-                self.owner,
-                self.space_id,
-                CreateFolder {
-                    parent_node_id,
-                    name: name.to_owned(),
-                },
-            )
-            .await?
-            .node
-            .id)
-    }
-
-    async fn text(&self, parent_node_id: Uuid, name: &str) -> TestResult<Uuid> {
-        Ok(self
-            .files
-            .create_text(
-                self.owner,
-                self.space_id,
-                CreateText {
-                    parent_node_id,
-                    name: name.to_owned(),
-                },
-            )
-            .await?
-            .node
-            .node
-            .id)
-    }
-
-    async fn set_lock(&self, node_id: Uuid, enabled: bool) -> TestResult {
-        self.files
-            .update_node_write_lock(
-                &self.browser,
-                self.space_id,
-                UpdateNodeWriteLock { node_id, enabled },
-            )
-            .await?;
-        Ok(())
-    }
-
-    async fn cleanup(self) {
-        self.db.cleanup().await;
-    }
-}
-
-async fn load_caller(db: &TestDb, account_id: Uuid, channel: Channel) -> Caller {
-    let (account, user) = AccountRepo::new(db.pool.clone())
-        .find_caller_by_account_id(account_id)
-        .await
-        .expect("load caller")
-        .expect("caller exists");
-    Caller {
-        account,
-        identity: CallerIdentity::User(user),
-        channel,
-    }
-}
-
-async fn set_system_max(db: &TestDb, owner: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
-        .bind(owner)
-        .execute(&db.pool)
-        .await?;
-    Ok(())
-}
-
-fn assert_write_locked<T: Debug>(result: Result<T, ServiceError>) {
-    assert!(
-        matches!(&result, Err(ServiceError::WriteLocked { .. })),
-        "expected write-lock conflict, got {result:?}"
-    );
-}
-
-fn assert_forbidden<T: Debug>(result: Result<T, ServiceError>) {
-    assert!(
-        matches!(&result, Err(ServiceError::Forbidden(_))),
-        "expected forbidden result, got {result:?}"
-    );
-}
+use write_lock_support::{Fixture, TestResult, assert_forbidden, assert_write_locked, load_caller};
 
 #[tokio::test]
 async fn ancestor_lock_blocks_descendant_changes_and_reports_its_source() -> TestResult {
