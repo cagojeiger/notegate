@@ -307,6 +307,34 @@ async fn find_matches_name_kind_and_scope() -> Result<(), Box<dyn std::error::Er
         "find item carries derived path"
     );
 
+    let explicit_root = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                q: "note".to_owned(),
+                path: Some("/".to_owned()),
+                kind: None,
+                match_mode: FindMatchMode::Contains,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    let result_paths = |page: &notegate_service::search::FindPage| {
+        page.items
+            .iter()
+            .map(|view| (view.node.id, view.path.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        result_paths(&explicit_root),
+        result_paths(&by_name),
+        "path='/' is identical to the default root search"
+    );
+
     let projects_only = search
         .find(
             owner,
@@ -500,12 +528,9 @@ needle
         )
         .await
         .unwrap_err();
-    assert!(
-        matches!(
-            text_scope,
-            notegate_service::error::ServiceError::InvalidInput(_)
-        ),
-        "text scope is invalid, got {text_scope:?}"
+    assert_eq!(
+        text_scope,
+        ServiceError::InvalidInput("search scope must be a folder".to_owned())
     );
 
     let missing = search
@@ -525,9 +550,9 @@ needle
         )
         .await
         .unwrap_err();
-    assert!(
-        matches!(missing, notegate_service::error::ServiceError::NotFound(_)),
-        "missing scope is not_found, got {missing:?}"
+    assert_eq!(
+        missing,
+        ServiceError::NotFound("scope path not found".to_owned())
     );
 
     db.cleanup().await;
@@ -950,8 +975,8 @@ async fn grep_does_not_decrypt_server_encrypted_rows_beyond_byte_budget()
     Ok(())
 }
 
-/// find follows DFS pre-order: it descends into a folder before scanning later
-/// siblings, and the cursor resumes from that traversal state.
+/// A nested scope keeps exact paths and subtree boundaries; find pagination
+/// resumes in the same DFS order after descending into a folder.
 #[tokio::test]
 async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -962,47 +987,106 @@ async fn find_cursor_descends_before_later_siblings() -> Result<(), Box<dyn std:
     let (ws, root) = setup_space(&ws_repo, owner, "personal").await;
 
     let a = mkdir(&files, owner, ws, root, "a").await;
-    let nested = write_doc(&files, owner, ws, a, "b-match.md", "nested\n").await;
-    let sibling = write_doc(&files, owner, ws, root, "z-match.md", "sibling\n").await;
+    let b = mkdir(&files, owner, ws, a, "b").await;
+    let c = mkdir(&files, owner, ws, b, "c").await;
+    let _outside = write_doc(&files, owner, ws, b, "outside-match.md", "needle outside\n").await;
+    let _first = write_doc(&files, owner, ws, c, "a-match.md", "needle first\n").await;
+    let nested = mkdir(&files, owner, ws, c, "m-match").await;
+    let _nested = write_doc(&files, owner, ws, nested, "b-match.md", "needle nested\n").await;
+    let _last = write_doc(&files, owner, ws, c, "z-match.md", "needle last\n").await;
+
+    let find_request = |path, limit, cursor| FindRequest {
+        q: "match".to_owned(),
+        path,
+        kind: None,
+        match_mode: FindMatchMode::Contains,
+        include: Vec::new(),
+        exclude: Vec::new(),
+        limit,
+        cursor,
+    };
+    let expected_find_paths = vec![
+        "/a/b/c/a-match.md",
+        "/a/b/c/m-match",
+        "/a/b/c/m-match/b-match.md",
+        "/a/b/c/z-match.md",
+    ];
+
+    let scoped = search
+        .find(
+            owner,
+            ws,
+            find_request(Some("/a/b/c/   ".to_owned()), None, None),
+        )
+        .await?;
+    assert_eq!(
+        scoped
+            .items
+            .iter()
+            .map(|view| view.path.as_str())
+            .collect::<Vec<_>>(),
+        expected_find_paths,
+        "deep scope returns exact canonical paths and excludes sibling subtrees"
+    );
+
+    let scoped_grep = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                q: "needle".to_owned(),
+                path: Some("/a/b/c".to_owned()),
+                match_mode: GrepMatchMode::Literal,
+                line_mode: GrepLineMode::None,
+                include: Vec::new(),
+                exclude: Vec::new(),
+                limit: None,
+                cursor: None,
+            },
+        )
+        .await?;
+    assert_eq!(
+        scoped_grep
+            .items
+            .iter()
+            .map(|hit| hit.node.path.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "/a/b/c/a-match.md",
+            "/a/b/c/m-match/b-match.md",
+            "/a/b/c/z-match.md",
+        ],
+        "grep returns only text nodes inside the deep scope"
+    );
 
     let first = search
         .find(
             owner,
             ws,
-            FindRequest {
-                q: "match".to_owned(),
-                path: None,
-                kind: None,
-                match_mode: FindMatchMode::Contains,
-                include: Vec::new(),
-                exclude: Vec::new(),
-                limit: Some(1),
-                cursor: None,
-            },
+            find_request(Some("/a/b/c".to_owned()), Some(2), None),
         )
         .await?;
-    assert_eq!(first.items.len(), 1);
-    assert_eq!(first.items[0].node.id, nested);
     assert!(first.has_more);
 
     let second = search
         .find(
             owner,
             ws,
-            FindRequest {
-                q: "match".to_owned(),
-                path: None,
-                kind: None,
-                match_mode: FindMatchMode::Contains,
-                include: Vec::new(),
-                exclude: Vec::new(),
-                limit: Some(1),
-                cursor: first.next_cursor,
-            },
+            find_request(Some("/a/b/c".to_owned()), Some(2), first.next_cursor),
         )
         .await?;
-    assert_eq!(second.items.len(), 1);
-    assert_eq!(second.items[0].node.id, sibling);
+    assert!(!second.has_more);
+    assert!(second.next_cursor.is_none());
+    let paged_paths = first
+        .items
+        .iter()
+        .chain(&second.items)
+        .map(|view| view.path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paged_paths, expected_find_paths,
+        "two scoped pages preserve DFS order without duplicates or omissions"
+    );
 
     db.cleanup().await;
     Ok(())

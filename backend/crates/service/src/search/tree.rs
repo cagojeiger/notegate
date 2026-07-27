@@ -22,7 +22,7 @@ impl SearchService {
     ) -> ServiceResult<TreePage> {
         self.authorize(space_id, caller_account_id, FileCommand::Ls)
             .await?;
-        let scope_node_id = self
+        let (scope_node_id, _) = self
             .resolve_scope_folder(space_id, request.path.as_deref())
             .await?;
         let depth = clamp_tree_depth(request.depth);

@@ -27,14 +27,9 @@ impl SearchService {
             limits::FIND_DEFAULT_LIMIT,
             limits::FIND_MAX_LIMIT,
         );
-        let scope_node_id = self
+        let (scope_node_id, scope_path) = self
             .resolve_scope_folder(space_id, request.path.as_deref())
             .await?;
-        let scope_path = self
-            .store
-            .node_path(space_id, scope_node_id)
-            .await?
-            .unwrap_or_else(|| "/".to_owned());
         let fingerprint = search_fingerprint(&[
             space_id.to_string(),
             "find".to_owned(),

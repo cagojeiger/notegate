@@ -123,6 +123,14 @@ impl FilesRepo {
         queries::search::resolve_scope_node(&self.pool, space_id, path).await
     }
 
+    pub async fn resolve_search_scope(
+        &self,
+        space_id: Uuid,
+        path: &str,
+    ) -> Result<Option<(Uuid, NodeKind, String)>> {
+        queries::search::resolve_search_scope(&self.pool, space_id, path).await
+    }
+
     pub async fn resolve_nodes_by_paths(
         &self,
         space_id: Uuid,
@@ -656,16 +664,5 @@ impl FilesRepo {
         account_id: Uuid,
     ) -> Result<Option<Permission>> {
         queries::node::permission_for(&self.pool, space_id, account_id).await
-    }
-}
-
-impl FilesRepo {
-    /// Resolve an optional scope path to a live node id within the space.
-    /// `None` scope means "whole space" (no subtree restriction).
-    pub async fn resolve_scope(&self, space_id: Uuid, scope: Option<&str>) -> Result<Option<Uuid>> {
-        match scope {
-            None => Ok(None),
-            Some(path) => queries::search::resolve_scope_node(&self.pool, space_id, path).await,
-        }
     }
 }

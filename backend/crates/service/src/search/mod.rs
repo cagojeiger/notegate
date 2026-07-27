@@ -54,27 +54,22 @@ impl SearchService {
         &self,
         space_id: Uuid,
         path: Option<&str>,
-    ) -> ServiceResult<Uuid> {
+    ) -> ServiceResult<(Uuid, String)> {
         let normalized = match path {
             Some(path) => crate::files::validation::normalize_path(path)?,
             None => "/".to_owned(),
         };
-        let node_id = self
+        let (node_id, kind, path) = self
             .store
-            .resolve_scope(space_id, Some(&normalized))
+            .resolve_search_scope(space_id, &normalized)
             .await?
             .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
-        let node = self
-            .store
-            .find_node(space_id, node_id)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("scope path not found".to_owned()))?;
-        if node.kind != NodeKind::Folder {
+        if kind != NodeKind::Folder {
             return Err(ServiceError::InvalidInput(
                 "search scope must be a folder".to_owned(),
             ));
         }
-        Ok(node_id)
+        Ok((node_id, path))
     }
 
     async fn node_views(

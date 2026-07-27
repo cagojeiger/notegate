@@ -916,10 +916,10 @@ pub mod search {
     //! Path scope resolution and subtree candidate scans for file-tree commands.
 
     use chrono::{DateTime, Utc};
-    use notegate_core::Result;
     use notegate_core::security::PiiCrypto;
+    use notegate_core::{Error, Result};
     use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
-    use notegate_model::{TextAtRestEncryption, TextObject};
+    use notegate_model::{NodeKind, TextAtRestEncryption, TextObject};
     use serde_json::Value;
     use sqlx::FromRow;
     use sqlx::PgPool;
@@ -1063,6 +1063,62 @@ pub mod search {
                 at_rest_encryption,
             })
         }
+    }
+
+    /// Resolve one search scope with a single recursive query.
+    ///
+    /// The terminal kind is returned so the service can distinguish a missing
+    /// path from a path that resolves to a non-folder node.
+    pub async fn resolve_search_scope(
+        pool: &PgPool,
+        space_id: Uuid,
+        scope_path: &str,
+    ) -> Result<Option<(Uuid, NodeKind, String)>> {
+        let segments = scope_path
+            .trim()
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let resolved_path = if segments.is_empty() {
+            "/".to_owned()
+        } else {
+            format!("/{}", segments.join("/"))
+        };
+        let row: Option<(Uuid, String)> = sqlx::query_as(
+            "WITH RECURSIVE requested AS ( \
+                SELECT $2::text[] AS segments \
+            ), walk AS ( \
+                SELECT root.id, root.kind, requested.segments, 0 AS depth \
+                FROM requested \
+                JOIN nodes root ON root.space_id = $1 \
+                    AND root.parent_id IS NULL \
+                    AND root.deleted_at IS NULL \
+                UNION ALL \
+                SELECT child.id, child.kind, walk.segments, walk.depth + 1 \
+                FROM walk \
+                JOIN nodes child ON child.space_id = $1 \
+                    AND child.parent_id = walk.id \
+                    AND child.name = walk.segments[walk.depth + 1] \
+                    AND child.deleted_at IS NULL \
+                WHERE walk.depth < cardinality(walk.segments) \
+            ) \
+            SELECT id, kind \
+            FROM walk \
+            WHERE depth = cardinality(segments)",
+        )
+        .bind(space_id)
+        .bind(segments)
+        .fetch_optional(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let Some((node_id, kind)) = row else {
+            return Ok(None);
+        };
+        let kind = NodeKind::parse(&kind)
+            .ok_or_else(|| Error::internal(format!("unknown node kind: {kind}")))?;
+        Ok(Some((node_id, kind, resolved_path)))
     }
 
     /// Resolve a scope path (e.g. `/projects/notes`) to a live node id within
