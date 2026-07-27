@@ -55,6 +55,23 @@ fn default_encryption_mode() -> String {
     "none".to_owned()
 }
 
+fn begin_upload_command(body: BeginUploadBody) -> Result<BeginObjectUpload, &'static str> {
+    if body.byte_len > notegate_core::limits::BROWSER_FILE_MAX_BYTES as i64 {
+        return Err("browser uploads support files up to 10737418240 bytes");
+    }
+    let encryption_mode = FileEncryptionMode::parse(&body.encryption_mode)
+        .ok_or("encryption_mode must be 'none' or 'client'")?;
+    Ok(BeginObjectUpload {
+        parent_node_id: body.parent_node_id,
+        name: body.name,
+        byte_len: body.byte_len,
+        media_type: body.media_type,
+        original_filename: body.original_filename,
+        encryption_mode,
+        encryption_metadata: body.encryption_metadata,
+    })
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct BeginUploadResponse {
     upload_id: Uuid,
@@ -118,22 +135,7 @@ pub(crate) async fn begin(
     Path(space_id): Path<Uuid>,
     Json(body): Json<BeginUploadBody>,
 ) -> Result<(StatusCode, Json<BeginUploadResponse>), ApiError> {
-    if body.byte_len > notegate_core::limits::BROWSER_FILE_MAX_BYTES as i64 {
-        return Err(ApiError::invalid_field(
-            "browser uploads support files up to 10737418240 bytes",
-        ));
-    }
-    let encryption_mode = FileEncryptionMode::parse(&body.encryption_mode)
-        .ok_or_else(|| ApiError::invalid_field("encryption_mode must be 'none' or 'client'"))?;
-    let command = BeginObjectUpload {
-        parent_node_id: body.parent_node_id,
-        name: body.name,
-        byte_len: body.byte_len,
-        media_type: body.media_type,
-        original_filename: body.original_filename,
-        encryption_mode,
-        encryption_metadata: body.encryption_metadata,
-    };
+    let command = begin_upload_command(body).map_err(ApiError::invalid_field)?;
     let begun = begin_upload(
         &state,
         caller.account_id(),
@@ -281,5 +283,87 @@ fn api_error(error: UploadFlowError) -> ApiError {
             tracing::error!(event = "error.internal", detail = message);
             ApiError::internal("internal server error")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn begin_body(byte_len: i64, encryption_mode: &str) -> BeginUploadBody {
+        BeginUploadBody {
+            parent_node_id: Uuid::new_v4(),
+            name: "archive.bin".to_owned(),
+            byte_len,
+            media_type: "application/octet-stream".to_owned(),
+            original_filename: Some("Archive.bin".to_owned()),
+            encryption_mode: encryption_mode.to_owned(),
+            encryption_metadata: Some(json!({ "algorithm": "example" })),
+        }
+    }
+
+    #[test]
+    fn begin_command_accepts_browser_limit_and_preserves_fields() {
+        let body = begin_body(
+            notegate_core::limits::BROWSER_FILE_MAX_BYTES as i64,
+            "client",
+        );
+        let expected = BeginObjectUpload {
+            parent_node_id: body.parent_node_id,
+            name: body.name.clone(),
+            byte_len: body.byte_len,
+            media_type: body.media_type.clone(),
+            original_filename: body.original_filename.clone(),
+            encryption_mode: FileEncryptionMode::Client,
+            encryption_metadata: body.encryption_metadata.clone(),
+        };
+
+        assert_eq!(begin_upload_command(body), Ok(expected));
+    }
+
+    #[test]
+    fn begin_command_accepts_supported_encryption_modes() {
+        for (value, expected) in [
+            ("none", FileEncryptionMode::None),
+            ("client", FileEncryptionMode::Client),
+        ] {
+            assert_eq!(
+                begin_upload_command(begin_body(1, value)).map(|command| command.encryption_mode),
+                Ok(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn begin_body_defaults_encryption_mode_to_none() -> Result<(), serde_json::Error> {
+        let body: BeginUploadBody = serde_json::from_value(json!({
+            "parent_node_id": Uuid::new_v4(),
+            "name": "archive.bin",
+            "byte_len": 1,
+            "media_type": "application/octet-stream"
+        }))?;
+
+        assert_eq!(
+            begin_upload_command(body).map(|command| command.encryption_mode),
+            Ok(FileEncryptionMode::None)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn begin_command_preserves_validation_precedence_and_messages() {
+        assert_eq!(
+            begin_upload_command(begin_body(
+                notegate_core::limits::BROWSER_FILE_MAX_BYTES as i64 + 1,
+                "unsupported",
+            )),
+            Err("browser uploads support files up to 10737418240 bytes")
+        );
+        assert_eq!(
+            begin_upload_command(begin_body(1, "unsupported")),
+            Err("encryption_mode must be 'none' or 'client'")
+        );
     }
 }
