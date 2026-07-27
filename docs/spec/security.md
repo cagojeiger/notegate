@@ -74,6 +74,8 @@ Client-side encrypted Text에서 서버는 원문, 비밀번호, 복호화 키�
 
 서버 관리 암호화는 `storage_format='plain'`에만 적용한다. Ciphertext는 Space id, Node id, key id, version을 AEAD AAD로 묶는다. API read, write, patch와 `grep`은 서버에서 복호화한 plain content를 사용한다. Node metadata, `content_sha256`, `byte_len`, `line_count`는 암호화하지 않는다.
 
+`grep`은 복호화된 plain body를 process-local memory에 제한적으로 캐시할 수 있다. Cache key는 Space/Node/content SHA를 묶고, 기본 capacity는 plaintext byte weight 128 MiB, TTL은 30분, TTI는 5분이다. Cache entry는 외부 저장소나 다른 replica로 전송하지 않으며 process 종료, capacity eviction, TTL/TTI 만료 시 참조에서 제거된다. Rust allocator가 해제된 memory page를 즉시 zeroize하거나 OS에 반환한다는 보장은 없다.
+
 `text_objects.at_rest_encryption`은 서버 관리 암호화의 실제 저장 상태다. 설정을 변경하면 기존 plain Text 본문을 같은 transaction에서 즉시 암호화하거나 복호화한다. Space 기본값은 새 Text 생성 시 초기 저장 상태를 정하며 기존 Text를 바꾸지 않는다.
 
 서버 관리 암호화 설정 변경은 Space owner User만 할 수 있다. Agent는 write 권한이 있어도 활성화하거나 비활성화할 수 없다. 암호화 활성화와 암호화 저장은 Space owner의 tier capability `text_encryption`이 필요하다. 현재 `system_max`만 허용한다. Tier가 낮아져도 기존 ciphertext는 읽기와 검색이 가능하지만 새 암호화 저장은 거부한다. 서버는 tier 변경을 이유로 ciphertext를 자동 복호화 저장하지 않는다.

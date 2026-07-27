@@ -795,6 +795,7 @@ mod tests {
             s3: crate::state::test_s3_config(),
             default_user_tier: notegate_core::tier::UserTier::DEFAULT,
             limits: notegate_core::limits::Limits::default(),
+            search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
             secure_cookies: false,
         });
         let crypto = PiiCrypto::from_root_secrets(

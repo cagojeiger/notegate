@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::files::{ChildrenCursor, NodeView};
-use crate::{Node, NodeKind};
+use crate::{Node, NodeKind, TextAtRestEncryption};
 
 #[derive(Debug, Clone)]
 pub struct FindRequest {
@@ -125,6 +125,8 @@ pub struct SearchTextCandidate {
     pub sort_path: String,
     pub content_sha256: String,
     pub byte_len: i64,
+    pub line_count: i32,
+    pub at_rest_encryption: TextAtRestEncryption,
 }
 
 #[derive(Debug, Clone)]

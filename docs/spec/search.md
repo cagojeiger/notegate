@@ -219,6 +219,40 @@ for each plain text candidate in DFS order:
 
 Text 내부 line offset cursor는 사용하지 않는다.
 
+## Decrypted body cache
+
+`grep`은 후보 조회에서 얻은 `(space_id, node_id, content_sha256)`를 key로 복호화된 plain body를 process-local memory에 캐시한다.
+
+```text
+candidate metadata query:
+  항상 실행
+  current content_sha256, byte_len, line_count, at_rest_encryption 조회
+
+body cache hit:
+  PostgreSQL body query와 서버 복호화 생략
+
+body cache miss:
+  기존 8 MiB request budget 안의 miss만 한 번의 bulk query로 조회
+  live/plain/search_enabled/SHA/byte_len 재검증 후 복호화
+  Arc<str>로 cache 저장
+```
+
+본문 변경 transaction이 `content_sha256`을 갱신하면 다음 candidate scan은 새 key를 사용하므로 이전 body를 재사용하지 않는다. 이전 key의 entry는 별도 전체 무효화 없이 capacity, TTL, TTI 정책으로 제거한다. Candidate scan 직후 write가 경합한 현재 요청은 scan 시점의 이전 body를 사용할 수 있으며, 다음 요청부터 새 SHA를 관측한다. Search pagination과 동일하게 단일 요청을 가로지르는 tree/content 변경 일관성은 best-effort다.
+
+기본 정책:
+
+```text
+capacity = plaintext byte weight 128 MiB per process
+eviction/admission = TinyLFU
+TTL = insertion 후 30 minutes
+TTI = 마지막 hit 후 5 minutes
+capacity 0 = disabled
+```
+
+Cache에는 복호화된 본문만 저장하며 DB candidate, folder page, search result는 저장하지 않는다. 여러 replica 사이에 cache coherence나 공유 cache를 두지 않는다.
+
+동시에 들어온 요청의 miss key가 겹치면 process 안에서 key별 load flight를 공유한다. 대기한 요청은 cache를 다시 확인하고, 여전히 없는 miss만 기존 bulk query로 읽는다. 서로 겹치지 않는 key 집합은 독립적으로 진행한다.
+
 ## Worst-case scan and memory model
 
 현재 `system_max` hard limit에서 scope가 root이고 모든 live node가 scope 안에 있으면 최악의 논리 scan 범위는 다음과 같다. `tier0`는 이보다 낮은 quota를 적용한다.
@@ -243,6 +277,7 @@ response result limit   <= 100 node summaries
 include glob patterns   <= 32 patterns × 256 chars
 exclude glob patterns   <= 32 patterns × 256 chars
 response body target    <= 256 KiB
+decrypted body cache    <= 128 MiB plaintext weight per process by default
 ```
 
 따라서 큰 scope 검색은 여러 page로 나뉜다.

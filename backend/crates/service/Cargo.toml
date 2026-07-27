@@ -29,11 +29,12 @@ hmac.workspace = true
 rand.workspace = true
 similar.workspace = true
 regex.workspace = true
+moka.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 notegate-db = { workspace = true, features = ["test-util"] }
 notegate-service = { path = ".", features = ["test-util"] }
-tokio.workspace = true
 sqlx.workspace = true
 
 [lints]
