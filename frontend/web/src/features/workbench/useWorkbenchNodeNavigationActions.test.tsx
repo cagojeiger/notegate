@@ -1,0 +1,320 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ApiError } from "../../api/errors";
+import { getNode, resolveNodePath } from "../../api/nodes";
+import type { RestNode, Space } from "../../api/types";
+import { useUiStore } from "../../stores/uiStore";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
+import type { CanonicalNodeLoader } from "./useCanonicalNodeLoader";
+import { useWorkbenchNodeNavigationActions } from "./useWorkbenchNodeNavigationActions";
+
+const mocks = vi.hoisted(() => ({
+  revealNode: vi.fn()
+}));
+
+vi.mock("../../api/ApiProvider", () => ({
+  useApiClient: () => ({})
+}));
+
+vi.mock("../../api/nodes", () => ({
+  getNode: vi.fn(),
+  resolveNodePath: vi.fn()
+}));
+
+vi.mock("./useWorkbenchQueries", () => ({
+  useRevealNode: () => mocks.revealNode
+}));
+
+describe("useWorkbenchNodeNavigationActions", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useUiStore.setState(useUiStore.getInitialState(), true);
+    vi.mocked(getNode).mockReset();
+    vi.mocked(resolveNodePath).mockReset();
+    mocks.revealNode.mockReset();
+  });
+
+  it("opens a resolved markdown link through the active editor group and reveals its ancestors", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const folder = node("folder", activeSpace.id, "/Policies", "folder");
+    const targetNode = node("target", activeSpace.id, "/Policies/Access Control Policy.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
+    mocks.revealNode.mockResolvedValue({ ancestors: [folder], target: targetNode });
+
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
+    });
+
+    expect(resolveNodePath).toHaveBeenCalledWith(expect.anything(), activeSpace.id, targetNode.path);
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
+    expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
+  });
+
+  it("keeps the current editor state when markdown link resolution fails", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    vi.mocked(resolveNodePath).mockRejectedValue(new ApiError("not found", 404));
+
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openMarkdownLink(groupId, sourceNode, "/missing.md");
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
+    expect(useUiStore.getState().toast).toBe("Linked node not found");
+  });
+
+  it("opens markdown links even when tree reveal fails", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const targetNode = node("target", activeSpace.id, "/Policies/Access Control Policy.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
+    mocks.revealNode.mockRejectedValue(new Error("reveal failed"));
+
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
+    expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
+  });
+
+  it("opens a resolved markdown link in the original source group when focus changes before resolution", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const otherNode = node("other", activeSpace.id, "/other.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    useUiStore.getState().openInNewGroup(otherNode);
+    useUiStore.getState().focusGroup(0);
+    const pending = deferred<RestNode>();
+    vi.mocked(resolveNodePath).mockReturnValue(pending.promise);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
+
+    const { result } = renderNavigationActions(activeSpace);
+
+    const openPromise = result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
+    act(() => {
+      useUiStore.getState().focusGroup(1);
+      pending.resolve(targetNode);
+    });
+    await act(async () => {
+      await openPromise;
+    });
+
+    const state = useUiStore.getState();
+    expect(state.editorGroups[0].node?.id).toBe(targetNode.id);
+    expect(state.editorGroups[1].node?.id).toBe(otherNode.id);
+    expect(state.activeGroupIndex).toBe(1);
+  });
+
+  it("does not open a stale markdown link when the source group changed before resolution", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const replacementNode = node("replacement", activeSpace.id, "/replacement.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    const pending = deferred<RestNode>();
+    vi.mocked(resolveNodePath).mockReturnValue(pending.promise);
+
+    const { result } = renderNavigationActions(activeSpace);
+
+    const openPromise = result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
+    act(() => {
+      useUiStore.getState().openInGroup(groupId, replacementNode);
+      pending.resolve(targetNode);
+    });
+    await act(async () => {
+      await openPromise;
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacementNode.id);
+    expect(mocks.revealNode).not.toHaveBeenCalled();
+  });
+
+  it("does not open resolved markdown links from a different space", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const targetNode = node("target", "space-2", "/target.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
+
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
+    expect(useUiStore.getState().toast).toBe("Could not open linked node");
+  });
+
+  it("opens regular nodes even when tree reveal fails", async () => {
+    const activeSpace = space("space-1");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    const loadCanonicalNode = vi.fn<CanonicalNodeLoader>().mockResolvedValue(targetNode);
+    mocks.revealNode.mockRejectedValue(new Error("reveal failed"));
+
+    const { result } = renderNavigationActions(activeSpace, loadCanonicalNode);
+
+    await act(async () => {
+      await result.current.openNode(targetNode);
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
+    expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
+  });
+
+  it("navigates backward using a fresh canonical node", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const second = node("second", activeSpace.id, "/second.md");
+    const third = node("third", activeSpace.id, "/third.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, second);
+    useUiStore.getState().openInGroup(groupId, third);
+    vi.mocked(getNode).mockResolvedValue(second);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: second });
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(getNode).toHaveBeenCalledWith(expect.anything(), activeSpace.id, second.id);
+    expect(group.node?.id).toBe(second.id);
+    expect(group.back.map((entry) => entry.nodeId)).toEqual([first.id]);
+    expect(group.forward.map((entry) => entry.nodeId)).toEqual([third.id]);
+  });
+
+  it("skips deleted navigation entries and continues in the same direction", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const deleted = node("deleted", activeSpace.id, "/deleted.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, deleted);
+    useUiStore.getState().openInGroup(groupId, current);
+    vi.mocked(getNode)
+      .mockRejectedValueOnce(new ApiError("not found", 404))
+      .mockResolvedValueOnce(first);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: first });
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(first.id);
+    expect(group.back).toEqual([]);
+    expect(group.forward.map((entry) => entry.nodeId)).toEqual([current.id]);
+    expect(getNode).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps navigation history when the target cannot be verified", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, current);
+    vi.mocked(getNode).mockRejectedValue(new ApiError("unavailable", 503));
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(current.id);
+    expect(group.back.map((entry) => entry.nodeId)).toEqual([first.id]);
+    expect(useUiStore.getState().toast).toBe("Could not navigate to node");
+  });
+
+  it("does not apply a navigation result after the group changes", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const replacement = node("replacement", activeSpace.id, "/replacement.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, current);
+    const pending = deferred<RestNode>();
+    vi.mocked(getNode).mockReturnValue(pending.promise);
+    const { result } = renderNavigationActions(activeSpace);
+
+    const navigation = result.current.navigateEditorGroup(groupId, "back");
+    act(() => {
+      useUiStore.getState().openInGroup(groupId, replacement);
+      pending.resolve(first);
+    });
+    await act(async () => {
+      await navigation;
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacement.id);
+    expect(mocks.revealNode).not.toHaveBeenCalled();
+  });
+});
+
+function renderNavigationActions(
+  activeSpace: Space | null,
+  loadCanonicalNode: CanonicalNodeLoader = vi.fn()
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return renderHook(
+    () => useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode }),
+    { wrapper }
+  );
+}
+
+function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
+  useUiStore.getState().setActiveSpaceId(activeSpace.id);
+  useUiStore.getState().openInActiveGroup(sourceNode);
+  return useUiStore.getState().editorGroups[0].id;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function space(id: string): Space {
+  return makeSpace({
+    id,
+    name: id,
+    root_node_id: `${id}-root`
+  });
+}
+
+function node(id: string, spaceId: string, path: string, kind: RestNode["kind"] = "text"): RestNode {
+  return makeRestNode({
+    id,
+    space_id: spaceId,
+    parent_id: `${spaceId}-root`,
+    name: path.split("/").pop() ?? id,
+    kind,
+    path,
+    has_children: kind === "folder"
+  });
+}
