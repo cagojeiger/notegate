@@ -80,23 +80,6 @@ impl SearchService {
         crate::files::hydrate_node_views(&self.store, space_id, rows).await
     }
 
-    fn text_node_view(&self, candidate: &SearchTextCandidate) -> NodeView {
-        NodeView {
-            node: candidate.node.clone(),
-            path: candidate.path.clone(),
-            has_children: false,
-            text: Some(TextStats {
-                content_sha256: candidate.content_sha256.clone(),
-                byte_len: candidate.byte_len,
-                line_count: candidate.line_count,
-                storage_format: TextStorageFormat::Plain,
-                at_rest_encryption: candidate.at_rest_encryption,
-            }),
-            file: None,
-            write_lock_sources: Vec::new(),
-        }
-    }
-
     /// Resolve the caller's permission (none ⇒ `404`) and gate by command
     /// (insufficient permission ⇒ `403`). Mirrors the file service's authorization.
     async fn authorize(
@@ -112,6 +95,23 @@ impl SearchService {
             .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
         policy::require(permission, command)?;
         Ok(permission)
+    }
+}
+
+fn text_node_view(candidate: &SearchTextCandidate) -> NodeView {
+    NodeView {
+        node: candidate.node.clone(),
+        path: candidate.path.clone(),
+        has_children: false,
+        text: Some(TextStats {
+            content_sha256: candidate.content_sha256.clone(),
+            byte_len: candidate.byte_len,
+            line_count: candidate.line_count,
+            storage_format: TextStorageFormat::Plain,
+            at_rest_encryption: candidate.at_rest_encryption,
+        }),
+        file: None,
+        write_lock_sources: Vec::new(),
     }
 }
 

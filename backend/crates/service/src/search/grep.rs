@@ -4,15 +4,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use notegate_core::limits;
-use notegate_model::search::SearchTextCandidate;
+use notegate_model::search::{GrepHit, SearchTextCandidate};
 
 use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
 use super::{
-    ContentMatcher, GrepPage, GrepRequest, PathFilters, SearchService, decode_search_cursor,
-    encode_search_cursor, search_fingerprint, validate_query,
+    ContentMatcher, GrepLineMode, GrepPage, GrepRequest, PathFilters, SearchService,
+    decode_search_cursor, encode_search_cursor, search_fingerprint, text_node_view, validate_query,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -51,6 +51,61 @@ fn plan_grep_candidates(
     GrepCandidatePlan {
         planned_candidates,
         body_candidates,
+    }
+}
+
+#[derive(Debug)]
+struct GrepCandidateReduction {
+    items: Vec<GrepHit>,
+    after_sort_path: Option<String>,
+    has_more: bool,
+}
+
+fn reduce_grep_candidates(
+    candidates: &[SearchTextCandidate],
+    planned_candidates: usize,
+    mut bodies: HashMap<uuid::Uuid, Arc<str>>,
+    path_filters: &PathFilters,
+    matcher: &ContentMatcher,
+    line_mode: GrepLineMode,
+    result_limit: usize,
+) -> GrepCandidateReduction {
+    let mut items = Vec::with_capacity(result_limit);
+    let mut consumed = 0usize;
+    let mut after_sort_path = None;
+    for candidate in candidates.iter().take(planned_candidates) {
+        consumed += 1;
+        after_sort_path = Some(candidate.sort_path.clone());
+        if !path_filters.allows(&candidate.path) {
+            continue;
+        }
+
+        let Some(content) = bodies.remove(&candidate.node.id) else {
+            // The text changed or became ineligible after the candidate scan.
+            // Consume the stale candidate so pagination can progress.
+            continue;
+        };
+        let match_lines = matcher.match_lines(&content, line_mode);
+        if !match_lines.is_empty() {
+            items.push(GrepHit {
+                node: text_node_view(candidate),
+                match_lines: match line_mode {
+                    GrepLineMode::None => Vec::new(),
+                    GrepLineMode::First => match_lines.first().copied().into_iter().collect(),
+                    GrepLineMode::All => match_lines,
+                },
+            });
+        }
+
+        if items.len() >= result_limit {
+            break;
+        }
+    }
+
+    GrepCandidateReduction {
+        items,
+        after_sort_path,
+        has_more: candidates.len() > consumed,
     }
 }
 
@@ -170,48 +225,21 @@ impl SearchService {
             }
         }
 
-        let mut items = Vec::with_capacity(limit as usize);
-        let mut consumed = 0usize;
-        let mut after = None;
-        for candidate in candidates.iter().take(planned_candidates) {
-            if !path_filters.allows(&candidate.path) {
-                consumed += 1;
-                after = Some(candidate.sort_path.clone());
-                continue;
-            }
-
-            let Some(content) = bodies.remove(&candidate.node.id) else {
-                // The text changed or became ineligible after the candidate
-                // scan. Consume the stale candidate so pagination can progress.
-                consumed += 1;
-                after = Some(candidate.sort_path.clone());
-                continue;
-            };
-            consumed += 1;
-            after = Some(candidate.sort_path.clone());
-
-            let match_lines = matcher.match_lines(&content, request.line_mode);
-            if !match_lines.is_empty() {
-                items.push(notegate_model::search::GrepHit {
-                    node: self.text_node_view(candidate),
-                    match_lines: match request.line_mode {
-                        notegate_model::search::GrepLineMode::None => Vec::new(),
-                        notegate_model::search::GrepLineMode::First => {
-                            match_lines.first().copied().into_iter().collect()
-                        }
-                        notegate_model::search::GrepLineMode::All => match_lines,
-                    },
-                });
-            }
-
-            if items.len() >= limit as usize {
-                break;
-            }
-        }
-
-        let has_more = candidates.len() > consumed;
+        let GrepCandidateReduction {
+            mut items,
+            after_sort_path,
+            has_more,
+        } = reduce_grep_candidates(
+            &candidates,
+            planned_candidates,
+            bodies,
+            &path_filters,
+            &matcher,
+            request.line_mode,
+            limit as usize,
+        );
         let next_cursor = if has_more {
-            encode_search_cursor("grep", fingerprint, scope_node_id, after)?
+            encode_search_cursor("grep", fingerprint, scope_node_id, after_sort_path)?
         } else {
             None
         };
@@ -242,6 +270,7 @@ mod tests {
     use chrono::Utc;
     use notegate_model::{Node, NodeKind, TextAtRestEncryption};
 
+    use super::super::GrepMatchMode;
     use super::*;
 
     fn candidate(path: &str, byte_len: i64) -> SearchTextCandidate {
@@ -325,5 +354,117 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn candidate_reduction_consumes_filtered_and_stale_rows_before_filling_page() {
+        let candidates = vec![
+            candidate("/private/hidden.md", 6),
+            candidate("/notes/stale.md", 6),
+            candidate("/notes/first.md", 6),
+            candidate("/notes/second.md", 6),
+            candidate("/notes/later.md", 6),
+        ];
+        let bodies = HashMap::from([
+            (candidates[0].node.id, Arc::<str>::from("hidden needle")),
+            (candidates[2].node.id, Arc::<str>::from("first needle")),
+            (candidates[3].node.id, Arc::<str>::from("second needle")),
+            (candidates[4].node.id, Arc::<str>::from("later needle")),
+        ]);
+        let filters = PathFilters::new(&[], &["/private/*".to_owned()]).unwrap();
+        let matcher = ContentMatcher::new("needle", GrepMatchMode::Literal).unwrap();
+
+        let reduction = reduce_grep_candidates(
+            &candidates,
+            candidates.len(),
+            bodies,
+            &filters,
+            &matcher,
+            GrepLineMode::First,
+            2,
+        );
+
+        assert_eq!(
+            reduction
+                .items
+                .iter()
+                .map(|item| item.node.node.id)
+                .collect::<Vec<_>>(),
+            vec![candidates[2].node.id, candidates[3].node.id]
+        );
+        assert_eq!(
+            reduction.after_sort_path,
+            Some(candidates[3].sort_path.clone())
+        );
+        assert!(reduction.has_more);
+    }
+
+    #[test]
+    fn candidate_reduction_advances_through_filtered_stale_and_nonmatching_rows() {
+        let candidates = vec![
+            candidate("/private/hidden.md", 6),
+            candidate("/notes/stale.md", 6),
+            candidate("/notes/no-match.md", 6),
+            candidate("/notes/not-planned.md", 6),
+        ];
+        let bodies = HashMap::from([
+            (candidates[0].node.id, Arc::<str>::from("hidden needle")),
+            (candidates[2].node.id, Arc::<str>::from("haystack")),
+        ]);
+        let filters = PathFilters::new(&[], &["/private/*".to_owned()]).unwrap();
+        let matcher = ContentMatcher::new("needle", GrepMatchMode::Literal).unwrap();
+
+        let reduction = reduce_grep_candidates(
+            &candidates,
+            3,
+            bodies,
+            &filters,
+            &matcher,
+            GrepLineMode::First,
+            10,
+        );
+
+        assert!(reduction.items.is_empty());
+        assert_eq!(
+            reduction.after_sort_path,
+            Some(candidates[2].sort_path.clone())
+        );
+        assert!(reduction.has_more);
+    }
+
+    #[test]
+    fn candidate_reduction_shapes_match_lines_without_changing_hit_detection() {
+        let candidates = vec![candidate("/notes/matches.md", 20)];
+        let filters = PathFilters::new(&[], &[]).unwrap();
+        let matcher = ContentMatcher::new("needle", GrepMatchMode::Literal).unwrap();
+
+        for (line_mode, expected_lines) in [
+            (GrepLineMode::None, vec![]),
+            (GrepLineMode::First, vec![1]),
+            (GrepLineMode::All, vec![1, 3]),
+        ] {
+            let bodies = HashMap::from([(
+                candidates[0].node.id,
+                Arc::<str>::from("needle\nother\nneedle"),
+            )]);
+
+            let reduction = reduce_grep_candidates(
+                &candidates,
+                candidates.len(),
+                bodies,
+                &filters,
+                &matcher,
+                line_mode,
+                10,
+            );
+
+            assert_eq!(reduction.items.len(), 1);
+            assert_eq!(reduction.items[0].match_lines, expected_lines);
+            assert_eq!(
+                reduction.after_sort_path,
+                Some(candidates[0].sort_path.clone())
+            );
+            assert!(!reduction.has_more);
+        }
     }
 }
