@@ -1,15 +1,16 @@
-import { Bot, FolderOpen, LockKeyhole, Pin, Search } from "lucide-react";
+import { Bot, FolderOpen, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { ApiError } from "../../api/errors";
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { Button, Card, MetaRow, Modal, SectionHeader, SettingToggle } from "../../shared/ui";
-import { useUsageQuery } from "../settings/useUsageQueries";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { useReorderSpacesMutation, useUpdateSpaceMutation } from "./useSpaceQueries";
+import { useCheckSpaceUsageMutation, useUsageQuery } from "./useUsageQueries";
 
 type SpaceLibraryProps = {
   spaces: Space[];
@@ -20,6 +21,29 @@ type SpaceLibraryProps = {
   onCloseInspector: () => void;
   onOpenSpace: (space: Space) => void;
   onCreateSpace: () => void;
+};
+
+type UsageLoadState = "loading" | "error" | "ready";
+
+type UsageCheckProps = {
+  disabled: boolean;
+  error: Error | null;
+  hasRequested: boolean;
+  isRequesting: boolean;
+  onCheck: () => void;
+};
+
+type SpaceInspectorProps = {
+  space: Space | null;
+  usage: SpaceUsage | undefined;
+  usageState: UsageLoadState;
+  usageFetching: boolean;
+  pending: boolean;
+  error: boolean;
+  onRetryUsage: () => void;
+  onUpdate: (input: UpdateSpaceInput) => void;
+  usageCheck: UsageCheckProps;
+  showHeader?: boolean;
 };
 
 export function SpaceLibrary({
@@ -34,6 +58,7 @@ export function SpaceLibrary({
 }: SpaceLibraryProps) {
   const [selectedSpaceId, setSelectedSpaceId] = useState(activeSpace?.id ?? spaces[0]?.id ?? null);
   const usageQuery = useUsageQuery();
+  const checkUsage = useCheckSpaceUsageMutation();
   const updateSpace = useUpdateSpaceMutation();
   const updateInspectorSpace = useUpdateSpaceMutation({ silentError: true });
   const reorderSpaces = useReorderSpacesMutation();
@@ -42,8 +67,14 @@ export function SpaceLibrary({
     () => new Map((usageQuery.data?.spaces ?? []).map((usage) => [usage.id, usage])),
     [usageQuery.data?.spaces]
   );
+  const selectedUsage = selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined;
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
+  const selectedCheckError = checkUsage.isError
+    && checkUsage.variables === selectedSpace?.id
+    && !(checkUsage.error instanceof ApiError && checkUsage.error.kind === "usage_reconciliation_pending")
+    ? checkUsage.error
+    : null;
 
   useEffect(() => {
     if (selectedSpaceId && spaces.some((space) => space.id === selectedSpaceId)) return;
@@ -63,6 +94,27 @@ export function SpaceLibrary({
   const inspectSpace = (spaceId: string) => {
     setSelectedSpaceId(spaceId);
     onOpenInspector();
+  };
+  const inspectorProps: SpaceInspectorProps = {
+    space: selectedSpace,
+    usage: selectedUsage,
+    usageState: currentUsageState,
+    usageFetching: usageQuery.isFetching,
+    pending: updatePending,
+    error: updateInspectorSpace.isError,
+    onRetryUsage: () => { void usageQuery.refetch(); },
+    onUpdate: updateSelectedSpace,
+    usageCheck: {
+      disabled: checkUsage.isPending,
+      error: selectedCheckError,
+      hasRequested: checkUsage.variables === selectedSpace?.id && (checkUsage.isSuccess || checkUsage.isError),
+      isRequesting: checkUsage.isPending && checkUsage.variables === selectedSpace?.id,
+      onCheck: () => {
+        if (!selectedSpace) return;
+        checkUsage.reset();
+        checkUsage.mutate(selectedSpace.id);
+      }
+    }
   };
 
   return (
@@ -112,14 +164,7 @@ export function SpaceLibrary({
           className="flex h-full min-h-0 shrink-0 overflow-hidden"
           style={{ width: WORKBENCH_LAYOUT.auxiliaryWidth }}
         >
-          <SpaceInspector
-            space={selectedSpace}
-            usage={selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined}
-            usageState={currentUsageState}
-            pending={updatePending}
-            error={updateInspectorSpace.isError}
-            onUpdate={updateSelectedSpace}
-          />
+          <SpaceInspector {...inspectorProps} />
         </aside>
       ) : null}
 
@@ -130,15 +175,7 @@ export function SpaceLibrary({
           width="max-w-none"
           onClose={onCloseInspector}
         >
-          <SpaceInspector
-            space={selectedSpace}
-            usage={usageBySpaceId.get(selectedSpace.id)}
-            usageState={currentUsageState}
-            pending={updatePending}
-            error={updateInspectorSpace.isError}
-            onUpdate={updateSelectedSpace}
-            showHeader={false}
-          />
+          <SpaceInspector {...inspectorProps} showHeader={false} />
         </Modal>
       ) : null}
     </div>
@@ -149,19 +186,49 @@ function SpaceInspector({
   space,
   usage,
   usageState,
+  usageFetching,
   pending,
   error,
+  onRetryUsage,
   onUpdate,
+  usageCheck,
   showHeader = true
-}: {
-  space: Space | null;
-  usage: SpaceUsage | undefined;
-  usageState: "loading" | "error" | "ready";
-  pending: boolean;
-  error: boolean;
-  onUpdate: (input: UpdateSpaceInput) => void;
-  showHeader?: boolean;
-}) {
+}: SpaceInspectorProps) {
+  const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
+  const isCooldown = usageCheck.error instanceof ApiError && usageCheck.error.kind === "usage_reconciliation_cooldown";
+  const checkStatus = usageState === "ready" && usage
+    ? isChecking
+      ? { message: "Checking usage…", className: "text-warning" }
+      : isCooldown
+        ? { message: "Usage is already up to date.", className: "text-muted" }
+        : usageCheck.error
+          ? { message: "Usage could not be checked. Try again shortly.", className: "text-danger" }
+          : usageCheck.hasRequested
+            ? { message: "Usage is up to date.", className: "text-muted" }
+            : null
+    : null;
+  const usageAction = space && usageState === "error"
+    ? (
+      <Button secondary size="sm" onClick={onRetryUsage} disabled={usageFetching} aria-label={`Retry ${space.name} usage`}>
+        <RefreshCw size={14} className={usageFetching ? "animate-spin" : undefined} />
+        Try again
+      </Button>
+    )
+    : space && usage
+      ? (
+        <Button
+          secondary
+          size="sm"
+          onClick={usageCheck.onCheck}
+          disabled={isChecking || usageCheck.disabled}
+          aria-label={`Check ${space.name} usage`}
+        >
+          <RefreshCw size={14} className={isChecking ? "animate-spin" : undefined} />
+          {isChecking ? "Checking…" : "Check usage"}
+        </Button>
+      )
+      : undefined;
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-panel md:border-l md:border-seam">
       {showHeader ? (
@@ -236,12 +303,13 @@ function SpaceInspector({
             </div>
           </section>
           <section className="p-4">
-            <SectionHeader title="Usage" />
+            <SectionHeader title="Usage" actions={usageAction} />
             {!space ? <p className="text-sm text-muted">Select a space to inspect it.</p> : null}
             {space && usageState === "loading" ? <p className="text-sm text-muted">Loading usage…</p> : null}
             {space && usageState === "error" ? <p className="text-sm text-danger">Could not load usage.</p> : null}
             {space && usageState === "ready" && !usage ? <p className="text-sm text-muted">Usage is not available.</p> : null}
             {usage ? <UsageRows usage={usage} /> : null}
+            {checkStatus ? <p className={`mt-3 text-xs ${checkStatus.className}`} aria-live="polite">{checkStatus.message}</p> : null}
           </section>
           {error ? (
             <section role="alert" className="p-4 text-xs text-danger">Could not update this Space.</section>
@@ -254,29 +322,37 @@ function SpaceInspector({
 
 function UsageRows({ usage }: { usage: SpaceUsage }) {
   return (
-    <dl className="space-y-3">
+    <div className="space-y-3">
       <UsageRow label="Items" used={usage.items.used} limit={usage.items.limit} format={(value) => value.toLocaleString()} />
       <UsageRow label="Text" used={usage.text_bytes.used} limit={usage.text_bytes.limit} format={formatBytes} />
       <UsageRow label="Files" used={usage.file_bytes.used} limit={usage.file_bytes.limit} format={formatBytes} />
-      {usage.reconciliation_pending ? <p className="text-xs text-warning">Usage refresh in progress.</p> : null}
-    </dl>
+    </div>
   );
 }
 
 function UsageRow({ label, used, limit, format }: { label: string; used: number; limit: number; format: (value: number) => string }) {
   const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  const value = `${format(used)} / ${format(limit)}`;
   return (
     <div className="grid grid-cols-[auto_1fr] gap-x-3 text-xs">
-      <dt className="font-medium text-text">{label}</dt>
-      <dd className="text-right text-muted">{format(used)} / {format(limit)}</dd>
-      <div className="col-span-2 mt-1.5 h-1.5 overflow-hidden rounded-full bg-panel-strong" aria-hidden="true">
+      <span className="font-medium text-text">{label}</span>
+      <span className="text-right text-muted">{value}</span>
+      <div
+        className="col-span-2 mt-1.5 h-1.5 overflow-hidden rounded-full bg-panel-strong"
+        role="progressbar"
+        aria-label={`${label} usage`}
+        aria-valuemin={0}
+        aria-valuemax={limit}
+        aria-valuenow={Math.min(used, limit)}
+        aria-valuetext={value}
+      >
         <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
 }
 
-function usageState(query: { isLoading: boolean; isError: boolean; data?: CurrentUserUsage }): "loading" | "error" | "ready" {
+function usageState(query: { isLoading: boolean; isError: boolean; data?: CurrentUserUsage }): UsageLoadState {
   if (query.isLoading) return "loading";
   if (query.isError) return "error";
   return "ready";

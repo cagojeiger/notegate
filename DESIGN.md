@@ -3,7 +3,7 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-07-25
+- Last refreshed: 2026-07-28
 - Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown and structured previews.
 - Evidence reviewed: `docs/ui/*`, `frontend/web/src/design/*`, `frontend/web/src/styles/globals.css`, shared UI primitives, auth and layout components, and the 2026-07-23 NoteGate brand asset set.
 
@@ -31,7 +31,7 @@
 
 - Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings. An active Unpinned Space remains in the rail until the user changes destination, without changing its user MCP visibility.
 - Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces.
-- Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; node content in the editor; identity, change protection, settings, metadata, and secondary details in that order in the Node Inspector; app state in the status bar or transient status surfaces. Pin is an MCP access state, not a Library grouping.
+- Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; Space capacity and manual usage checks in the selected Space Inspector; node content in the editor; identity, change protection, settings, metadata, and secondary details in that order in the Node Inspector; app state in the status bar or transient status surfaces. Navigation pinning is separate from User MCP access.
 
 ## Design principles
 
@@ -54,8 +54,8 @@
 ## Components
 
 - Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`.
-- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls, and the Node Inspector change-protection state.
-- Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected, dragging, Pinned, and Unpinned Space cards; directly locked, inherited lock, and unlocked nodes.
+- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, and the Node Inspector change-protection state.
+- Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected and dragging Space cards; navigation-pinned/unpinned Spaces; User MCP enabled/disabled Spaces; directly locked, inherited lock, and unlocked nodes.
 - Token/component ownership: `theme.css` owns semantic colors. Shared UI owns focus, controls, and repeated visual treatment. Feature components own data and state.
 
 ## Accessibility
@@ -76,7 +76,7 @@
 ## Interaction states
 
 - Active/current: The current surface, Space, and opened node use a primary edge indicator plus a selection background and semantic current/selected state. Only one surface or Space is current within its navigation scope.
-- Loading: Branded but quiet, with visible text and an activity indicator.
+- Loading: Branded but quiet, with visible text and an activity indicator. A pending usage check keeps the current values visible, disables duplicate checks, and reports progress in the Space Inspector.
 - Empty: Explain the next available action without decorative illustration.
 - Error: Pair semantic color with a clear message and recovery action.
 - Success: Pair icon or text with status color.

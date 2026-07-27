@@ -10,13 +10,18 @@ import { SpaceLibrary } from "./SpaceLibrary";
 const mocks = vi.hoisted(() => ({
   cardMutate: vi.fn(),
   inspectorMutate: vi.fn(),
+  checkUsage: vi.fn(),
+  resetUsageCheck: vi.fn(),
+  retryUsage: vi.fn(),
   reorder: vi.fn(),
+  useCheckSpaceUsageMutation: vi.fn(),
   useUsageQuery: vi.fn(),
   useReorderSpacesMutation: vi.fn(),
   useUpdateSpaceMutation: vi.fn()
 }));
 
-vi.mock("../settings/useUsageQueries", () => ({
+vi.mock("./useUsageQueries", () => ({
+  useCheckSpaceUsageMutation: mocks.useCheckSpaceUsageMutation,
   useUsageQuery: mocks.useUsageQuery
 }));
 
@@ -82,6 +87,9 @@ describe("SpaceLibrary", () => {
     mocks.cardMutate.mockReset();
     mocks.inspectorMutate.mockReset();
     mocks.reorder.mockReset();
+    mocks.checkUsage.mockReset();
+    mocks.resetUsageCheck.mockReset();
+    mocks.retryUsage.mockReset();
     mocks.useUpdateSpaceMutation.mockImplementation((options?: { silentError?: boolean }) => ({
       mutate: options?.silentError ? mocks.inspectorMutate : mocks.cardMutate,
       isPending: false,
@@ -91,9 +99,20 @@ describe("SpaceLibrary", () => {
       mutate: mocks.reorder,
       isPending: false
     });
+    mocks.useCheckSpaceUsageMutation.mockReturnValue({
+      error: null,
+      isError: false,
+      isPending: false,
+      isSuccess: false,
+      mutate: mocks.checkUsage,
+      reset: mocks.resetUsageCheck,
+      variables: undefined
+    });
     mocks.useUsageQuery.mockReturnValue({
+      isFetching: false,
       isLoading: false,
       isError: false,
+      refetch: mocks.retryUsage,
       data: {
         tier: "free",
         spaces: [
@@ -212,5 +231,32 @@ describe("SpaceLibrary", () => {
     expect(mocks.cardMutate).not.toHaveBeenCalled();
     expect(mocks.inspectorMutate).not.toHaveBeenCalled();
     expect(mocks.reorder).not.toHaveBeenCalled();
+  });
+
+  it("checks the selected space usage from the inspector", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+
+    expect(screen.getByRole("progressbar", { name: "Items usage" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Check Daily usage" }));
+
+    expect(mocks.resetUsageCheck).toHaveBeenCalledTimes(1);
+    expect(mocks.checkUsage).toHaveBeenCalledWith("daily");
+  });
+
+  it("retries usage loading from the inspector", async () => {
+    mocks.useUsageQuery.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isFetching: false,
+      isLoading: false,
+      refetch: mocks.retryUsage
+    });
+    const user = userEvent.setup();
+    renderLibrary();
+
+    await user.click(screen.getByRole("button", { name: "Retry Daily usage" }));
+
+    expect(mocks.retryUsage).toHaveBeenCalledTimes(1);
   });
 });
