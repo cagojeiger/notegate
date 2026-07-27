@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChildrenResponse } from "../../../api/types";
+import type { ChildrenResponse, RestNode } from "../../../api/types";
 import { makeRestNode, makeSpace } from "../../../test/fixtures";
 import { DialogHost } from "./DialogHost";
 import type { AppDialog } from "./dialogTypes";
