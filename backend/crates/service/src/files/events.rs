@@ -1,6 +1,7 @@
 //! File change event history queries for file-tree changes.
 
 use notegate_core::limits;
+use notegate_db::FileChangeSyncRows;
 use notegate_model::{
     FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage, ListFileChangeEvents,
     SyncFileChanges,
@@ -11,6 +12,37 @@ use crate::ServiceResult;
 use crate::pagination::{clamp_limit, paginate_keyset};
 
 use super::{FileCommand, FilesService};
+
+fn shape_file_change_sync_page(
+    batch: FileChangeSyncRows,
+    after_id: Option<i64>,
+    limit: i64,
+) -> FileChangeSyncPage {
+    if !batch.token_valid {
+        return FileChangeSyncPage {
+            items: Vec::new(),
+            next_after_id: batch.latest_id,
+            has_more: false,
+            resync_required: true,
+        };
+    }
+
+    let mut items = batch.events;
+    let has_more = items.len() as i64 > limit;
+    items.truncate(limit as usize);
+    let next_after_id = items
+        .last()
+        .map(|event| event.id)
+        .or(after_id)
+        .unwrap_or(batch.latest_id);
+
+    FileChangeSyncPage {
+        items,
+        next_after_id,
+        has_more,
+        resync_required: false,
+    }
+}
 
 impl FilesService {
     /// List space-scoped file change event history. Requires read/stat access to the space.
@@ -69,29 +101,84 @@ impl FilesService {
             .sync_file_change_events(space_id, request.after_id, limit + 1)
             .await?;
 
-        if !batch.token_valid {
-            return Ok(FileChangeSyncPage {
-                items: Vec::new(),
-                next_after_id: batch.latest_id,
-                has_more: false,
-                resync_required: true,
-            });
+        Ok(shape_file_change_sync_page(batch, request.after_id, limit))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use notegate_model::FileChangeEvent;
+    use serde_json::Value;
+
+    use super::*;
+
+    fn event(id: i64) -> FileChangeEvent {
+        FileChangeEvent {
+            id,
+            created_at: Utc::now(),
+            space_id: Uuid::nil(),
+            node_id: None,
+            actor_account_id: None,
+            op_type: "test".to_owned(),
+            metadata: Value::Null,
         }
+    }
 
-        let mut items = batch.events;
-        let has_more = items.len() as i64 > limit;
-        items.truncate(limit as usize);
-        let next_after_id = items
-            .last()
-            .map(|event| event.id)
-            .or(request.after_id)
-            .unwrap_or(batch.latest_id);
+    fn batch(ids: &[i64], latest_id: i64, token_valid: bool) -> FileChangeSyncRows {
+        FileChangeSyncRows {
+            events: ids.iter().copied().map(event).collect(),
+            latest_id,
+            token_valid,
+        }
+    }
 
-        Ok(FileChangeSyncPage {
-            items,
-            next_after_id,
-            has_more,
-            resync_required: false,
-        })
+    #[test]
+    fn invalid_sync_token_requires_resync_from_latest_id() {
+        let page = shape_file_change_sync_page(batch(&[1000], 42, false), Some(999), 10);
+
+        assert!(page.items.is_empty());
+        assert_eq!(page.next_after_id, 42);
+        assert!(!page.has_more);
+        assert!(page.resync_required);
+    }
+
+    #[test]
+    fn empty_sync_page_uses_the_available_anchor() {
+        let initial = shape_file_change_sync_page(batch(&[], 42, true), None, 10);
+        assert_eq!(initial.next_after_id, 42);
+        assert!(!initial.has_more);
+        assert!(!initial.resync_required);
+
+        let continuation = shape_file_change_sync_page(batch(&[], 100, true), Some(42), 10);
+        assert_eq!(continuation.next_after_id, 42);
+        assert!(!continuation.has_more);
+        assert!(!continuation.resync_required);
+    }
+
+    #[test]
+    fn exact_sync_page_ends_at_its_last_event() {
+        let page = shape_file_change_sync_page(batch(&[11, 12], 12, true), Some(10), 2);
+
+        assert_eq!(
+            page.items.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![11, 12]
+        );
+        assert_eq!(page.next_after_id, 12);
+        assert!(!page.has_more);
+        assert!(!page.resync_required);
+    }
+
+    #[test]
+    fn sync_page_truncates_lookahead_and_reports_more() {
+        let page = shape_file_change_sync_page(batch(&[11, 12, 13], 13, true), Some(10), 2);
+
+        assert_eq!(
+            page.items.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![11, 12]
+        );
+        assert_eq!(page.next_after_id, 12);
+        assert!(page.has_more);
+        assert!(!page.resync_required);
     }
 }
