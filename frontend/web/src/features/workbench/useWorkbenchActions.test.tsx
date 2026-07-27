@@ -31,6 +31,7 @@ function renderActions(onSignOut = vi.fn()) {
     ...renderHook(() => useWorkbenchActions({
       activeSpace: null,
       activeNode: null,
+      inspectedNode: null,
       canCreateSpace: false,
       canWriteActiveSpace: false,
       canManageActiveSpace: false,

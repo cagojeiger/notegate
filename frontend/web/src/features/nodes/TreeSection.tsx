@@ -18,9 +18,11 @@ const TREE_OVERSCAN = 8;
 
 type TreeProps = {
   activeSpace: Space;
-  activeNodeId: string | null;
+  openedNodeId: string | null;
+  inspectedNodeId: string | null;
   expandedFolderIds: Set<string>;
   onToggleFolder: (nodeId: string) => void;
+  onInspectNode: (node: NodeSummary) => void;
   onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
   onMoveNodeToFolder: (node: NodeSummary, folder: NodeSummary) => void;
@@ -29,12 +31,14 @@ type TreeProps = {
 
 export function TreeSection({
   activeSpace,
-  activeNodeId,
+  openedNodeId,
+  inspectedNodeId,
   expandedFolderIds,
   open,
   onToggle,
   onCollapseTree,
   onToggleFolder,
+  onInspectNode,
   onOpenNode,
   onNodeContextMenu,
   onMoveNodeToFolder,
@@ -59,9 +63,11 @@ export function TreeSection({
         <VirtualizedTree
           key={activeSpace.id}
           activeSpace={activeSpace}
-          activeNodeId={activeNodeId}
+          openedNodeId={openedNodeId}
+          inspectedNodeId={inspectedNodeId}
           expandedFolderIds={expandedFolderIds}
           onToggleFolder={onToggleFolder}
+          onInspectNode={onInspectNode}
           onOpenNode={onOpenNode}
           onNodeContextMenu={onNodeContextMenu}
           onMoveNodeToFolder={onMoveNodeToFolder}
@@ -76,9 +82,11 @@ export function TreeSection({
 function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboardNavigationRegistrar }) {
   const {
     activeSpace,
-    activeNodeId,
+    openedNodeId,
+    inspectedNodeId,
     expandedFolderIds,
     onToggleFolder,
+    onInspectNode,
     onOpenNode,
     onNodeContextMenu,
     onMoveNodeToFolder,
@@ -274,12 +282,14 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
               >
                 <VirtualTreeRow
                   row={row}
-                  activeNodeId={activeNodeId}
+                  openedNodeId={openedNodeId}
+                  inspectedNodeId={inspectedNodeId}
                   dropFolderId={dropFolderId}
                   expandedFolderIds={expandedFolderIds}
                   fetchNextPage={row.type === "load-more" ? fetchNextPageByParent.current.get(row.parentId) : undefined}
                   scrollRef={scrollRef}
                   onToggleFolder={onToggleFolder}
+                  onInspectNode={onInspectNode}
                   onOpenNode={onOpenNode}
                   onNodeContextMenu={onNodeContextMenu}
                   onDragStartNode={setDraggedNode}
@@ -345,12 +355,14 @@ function FolderQueryBridge({
 
 function VirtualTreeRow({
   row,
-  activeNodeId,
+  openedNodeId,
+  inspectedNodeId,
   dropFolderId,
   expandedFolderIds,
   fetchNextPage,
   scrollRef,
   onToggleFolder,
+  onInspectNode,
   onOpenNode,
   onNodeContextMenu,
   onDragStartNode,
@@ -360,12 +372,14 @@ function VirtualTreeRow({
   canWriteActiveSpace
 }: {
   row: TreeRow;
-  activeNodeId: string | null;
+  openedNodeId: string | null;
+  inspectedNodeId: string | null;
   dropFolderId: string | null;
   expandedFolderIds: ReadonlySet<string>;
   fetchNextPage?: () => void;
   scrollRef: RefObject<HTMLDivElement | null>;
   onToggleFolder: (nodeId: string) => void;
+  onInspectNode: (node: NodeSummary) => void;
   onOpenNode: (node: NodeSummary) => void;
   onNodeContextMenu: NodeContextHandler;
   onDragStartNode: (node: NodeSummary) => void;
@@ -398,16 +412,18 @@ function VirtualTreeRow({
       role="treeitem"
       aria-level={row.depth + 1}
       aria-expanded={node.kind === "folder" ? expandedFolderIds.has(node.id) : undefined}
-      aria-selected={activeNodeId === node.id}
+      aria-selected={inspectedNodeId === node.id}
     >
       <NodeRow
         node={node}
         depth={row.depth}
-        selected={activeNodeId === node.id}
+        inspected={inspectedNodeId === node.id}
+        opened={openedNodeId === node.id}
         expanded={node.kind === "folder" && expandedFolderIds.has(node.id)}
         suffix={nodeMetaSuffix(node)}
         dropTarget={dropFolderId === node.id}
         onToggleFolder={onToggleFolder}
+        onInspectNode={onInspectNode}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
         onDragStartNode={canMutateNode(node, canWriteActiveSpace) ? onDragStartNode : undefined}

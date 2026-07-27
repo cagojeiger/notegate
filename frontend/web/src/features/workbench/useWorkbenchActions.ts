@@ -13,6 +13,7 @@ import { useWorkbenchSpaceActions } from "./useWorkbenchSpaceActions";
 type WorkbenchActionsProps = {
   activeSpace: Space | null;
   activeNode: RestNode | null;
+  inspectedNode: RestNode | null;
   canCreateSpace: boolean;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
@@ -20,7 +21,7 @@ type WorkbenchActionsProps = {
   onSignOut: () => void;
 };
 
-export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, canWriteActiveSpace, canManageActiveSpace, primaryWidth, onSignOut }: WorkbenchActionsProps) {
+export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, canCreateSpace, canWriteActiveSpace, canManageActiveSpace, primaryWidth, onSignOut }: WorkbenchActionsProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dialog, setDialog] = useState<AppDialog | null>(null);
 
@@ -43,6 +44,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, canCreateSpace, c
   const nodeActions = useWorkbenchNodeActions({
     activeSpace,
     activeNode,
+    inspectedNode,
     canWriteActiveSpace,
     canManageActiveSpace,
     setDialog

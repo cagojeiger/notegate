@@ -9,9 +9,11 @@ import { useSidebarKeyboardNavigation } from "./useSidebarKeyboardNavigation";
 
 export function PrimarySidebar({
   activeSpace,
-  activeNodeId,
+  openedNodeId,
+  inspectedNodeId,
   expandedFolderIds,
   onToggleFolder,
+  onInspectNode,
   onOpenNode,
   onOpenNodeInNewGroup,
   onCreateFolder,
@@ -32,12 +34,14 @@ export function PrimarySidebar({
   canOpenInNewGroup
 }: {
   activeSpace: Space | null;
-  activeNodeId: string | null;
+  openedNodeId: string | null;
+  inspectedNodeId: string | null;
   expandedFolderIds: Set<string>;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   canOpenInNewGroup: boolean;
   onToggleFolder: (nodeId: string) => void;
+  onInspectNode: (node: NodeSummary) => void;
   onOpenNode: (node: NodeSummary) => void;
   onOpenNodeInNewGroup: (node: NodeSummary) => void;
   onCreateFolder: () => void;
@@ -59,6 +63,7 @@ export function PrimarySidebar({
 
   const onNodeContextMenu: NodeContextHandler = (node, event) => {
     event.preventDefault();
+    onInspectNode(node);
     setMenu({ x: event.clientX, y: event.clientY, node });
   };
 
@@ -68,9 +73,11 @@ export function PrimarySidebar({
       {activeSpace ? (
         <PrimarySidebarSections
           activeSpace={activeSpace}
-          activeNodeId={activeNodeId}
+          openedNodeId={openedNodeId}
+          inspectedNodeId={inspectedNodeId}
           expandedFolderIds={expandedFolderIds}
           onToggleFolder={onToggleFolder}
+          onInspectNode={onInspectNode}
           onOpenNode={onOpenNode}
           onNodeContextMenu={onNodeContextMenu}
           onMoveNodeToFolder={onMoveNodeToFolder}

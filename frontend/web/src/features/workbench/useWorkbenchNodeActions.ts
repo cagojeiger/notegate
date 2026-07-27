@@ -9,6 +9,7 @@ import { useWorkbenchNodeNavigationActions } from "./useWorkbenchNodeNavigationA
 type NodeActionsProps = {
   activeSpace: Space | null;
   activeNode: RestNode | null;
+  inspectedNode: RestNode | null;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;

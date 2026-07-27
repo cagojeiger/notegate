@@ -17,8 +17,10 @@ describe("NodeRow", () => {
       <NodeRow
         node={pdf}
         depth={0}
-        selected
+        inspected
+        opened
         onOpenNode={vi.fn()}
+        onInspectNode={vi.fn()}
         onNodeContextMenu={vi.fn()}
       />
     );
@@ -32,12 +34,32 @@ describe("NodeRow", () => {
       <NodeRow
         node={pdf}
         depth={0}
-        selected={false}
+        inspected={false}
+        opened={false}
         onOpenNode={vi.fn()}
+        onInspectNode={vi.fn()}
         onNodeContextMenu={vi.fn()}
       />
     );
 
+    expect(screen.getByRole("button", { name: "report.pdf" })).not.toHaveAttribute("aria-current");
+    expect(view.container.querySelector("[data-active-indicator]")).not.toBeInTheDocument();
+  });
+
+  it("highlights the inspected node without marking it as open", () => {
+    const view = render(
+      <NodeRow
+        node={pdf}
+        depth={0}
+        inspected
+        opened={false}
+        onOpenNode={vi.fn()}
+        onInspectNode={vi.fn()}
+        onNodeContextMenu={vi.fn()}
+      />
+    );
+
+    expect(view.container.querySelector("[data-node-row]")).toHaveAttribute("data-inspected", "true");
     expect(screen.getByRole("button", { name: "report.pdf" })).not.toHaveAttribute("aria-current");
     expect(view.container.querySelector("[data-active-indicator]")).not.toBeInTheDocument();
   });
@@ -47,8 +69,10 @@ describe("NodeRow", () => {
       <NodeRow
         node={{ ...pdf, effective_write_locked: true }}
         depth={0}
-        selected={false}
+        inspected={false}
+        opened={false}
         onOpenNode={vi.fn()}
+        onInspectNode={vi.fn()}
         onNodeContextMenu={vi.fn()}
       />
     );
@@ -65,8 +89,10 @@ describe("NodeRow", () => {
       <NodeRow
         node={pdf}
         depth={0}
-        selected={false}
+        inspected={false}
+        opened={false}
         onOpenNode={vi.fn()}
+        onInspectNode={vi.fn()}
         onNodeContextMenu={vi.fn()}
       />
     );

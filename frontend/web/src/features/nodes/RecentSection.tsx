@@ -8,21 +8,21 @@ import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import type { NodeContextHandler } from "./types";
 
-export function RecentSection({ activeSpace, activeNodeId, density, open, onToggle, onToggleDensity, onOpenNode, onNodeContextMenu }: { activeSpace: Space; activeNodeId: string | null; density: "list" | "compact"; open: boolean; onToggle: () => void; onToggleDensity: () => void; onOpenNode: (node: NodeSummary) => void; onNodeContextMenu: NodeContextHandler }) {
+export function RecentSection({ activeSpace, openedNodeId, inspectedNodeId, density, open, onToggle, onToggleDensity, onOpenNode, onInspectNode, onNodeContextMenu }: { activeSpace: Space; openedNodeId: string | null; inspectedNodeId: string | null; density: "list" | "compact"; open: boolean; onToggle: () => void; onToggleDensity: () => void; onOpenNode: (node: NodeSummary) => void; onInspectNode: (node: NodeSummary) => void; onNodeContextMenu: NodeContextHandler }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   return (
     <section className="flex min-h-0 min-w-0 flex-col px-3 py-2">
       <SidebarSectionHeader icon={<FileText size={13} />} label="Recent" open={open} onToggle={onToggle} action={{ label: "Toggle recent density", icon: <List size={13} />, onClick: onToggleDensity }} />
       {open ? (
         <div ref={scrollRef} data-recent-list className="mt-2 min-h-0 flex-1 overflow-y-auto">
-          <RecentList activeSpace={activeSpace} activeNodeId={activeNodeId} density={density} scrollRef={scrollRef} onOpenNode={onOpenNode} onNodeContextMenu={onNodeContextMenu} />
+          <RecentList activeSpace={activeSpace} openedNodeId={openedNodeId} inspectedNodeId={inspectedNodeId} density={density} scrollRef={scrollRef} onOpenNode={onOpenNode} onInspectNode={onInspectNode} onNodeContextMenu={onNodeContextMenu} />
         </div>
       ) : null}
     </section>
   );
 }
 
-function RecentList({ activeSpace, activeNodeId, density, scrollRef, onOpenNode, onNodeContextMenu }: { activeSpace: Space; activeNodeId: string | null; density: "list" | "compact"; scrollRef: RefObject<HTMLDivElement | null>; onOpenNode: (node: NodeSummary) => void; onNodeContextMenu: NodeContextHandler }) {
+function RecentList({ activeSpace, openedNodeId, inspectedNodeId, density, scrollRef, onOpenNode, onInspectNode, onNodeContextMenu }: { activeSpace: Space; openedNodeId: string | null; inspectedNodeId: string | null; density: "list" | "compact"; scrollRef: RefObject<HTMLDivElement | null>; onOpenNode: (node: NodeSummary) => void; onInspectNode: (node: NodeSummary) => void; onNodeContextMenu: NodeContextHandler }) {
   const recentQuery = useRecentNodesQuery(activeSpace.id);
   const nodes = useMemo(() => {
     const seen = new Set<string>();
@@ -44,9 +44,11 @@ function RecentList({ activeSpace, activeNodeId, density, scrollRef, onOpenNode,
           key={node.id}
           node={node}
           depth={0}
-          selected={activeNodeId === node.id}
+          inspected={inspectedNodeId === node.id}
+          opened={openedNodeId === node.id}
           meta={density === "list" ? `${node.path} · ${node.updated_at.slice(0, 10)}` : undefined}
           onOpenNode={onOpenNode}
+          onInspectNode={onInspectNode}
           onNodeContextMenu={onNodeContextMenu}
         />
       ))}
