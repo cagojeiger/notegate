@@ -20,7 +20,7 @@ vi.mock("../features/uploads/UploadProvider", () => ({
   useUploadManager: mocks.useUploadManager
 }));
 
-vi.mock("../features/settings/useUsageQueries", () => ({
+vi.mock("../features/spaces/useUsageQueries", () => ({
   useUsageQuery: mocks.useUsageQuery
 }));
 
