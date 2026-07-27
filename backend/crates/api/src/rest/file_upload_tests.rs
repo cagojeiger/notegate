@@ -34,7 +34,7 @@ use crate::mcp::tools::transfers;
 use crate::mcp::tools::unified::{CompletedPartInput, FileTransferInput};
 
 use crate::rest::test_support::{
-    caller_and_space, empty_request, json_request, rest_app, state_with_s3,
+    caller_and_space, empty_request, json_request, rest_app, state, state_with_s3,
 };
 
 fn test_s3_config() -> Option<S3Config> {
@@ -879,15 +879,12 @@ async fn rest_begin_uses_multipart_above_the_single_put_limit()
 }
 
 #[tokio::test]
-async fn rest_begin_rejects_files_above_the_browser_limit() -> Result<(), Box<dyn std::error::Error>>
-{
-    let Some(s3) = test_s3_config() else {
-        return Ok(());
-    };
+async fn rest_begin_rejects_files_above_the_browser_limit_without_storage()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let state = state_with_s3(&db, s3);
+    let state = state(&db);
     let (caller, space_id, root_id) = caller_and_space(&state).await?;
 
     let (status, body) = json_request(
