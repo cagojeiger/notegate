@@ -128,7 +128,13 @@ impl FilesRepo {
         space_id: Uuid,
         path: &str,
     ) -> Result<Option<(Uuid, NodeKind, String)>> {
-        queries::search::resolve_search_scope(&self.pool, space_id, path).await
+        let path = notegate_core::validation::normalize_path(path.trim())
+            .map_err(notegate_core::Error::validation)?;
+        let paths = [path];
+        let mut resolved = self.resolve_nodes_by_paths(space_id, &paths).await?;
+        Ok(resolved
+            .pop()
+            .map(|(_, path, node)| (node.id, node.kind, path)))
     }
 
     pub async fn resolve_nodes_by_paths(
