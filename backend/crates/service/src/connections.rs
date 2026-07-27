@@ -90,3 +90,19 @@ fn require_user_caller(kind: AccountKind) -> ServiceResult<()> {
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_management_requires_a_user_caller() {
+        assert_eq!(require_user_caller(AccountKind::User), Ok(()));
+        assert_eq!(
+            require_user_caller(AccountKind::Agent),
+            Err(ServiceError::Forbidden(
+                "only user accounts may manage agent connections".to_owned()
+            ))
+        );
+    }
+}
