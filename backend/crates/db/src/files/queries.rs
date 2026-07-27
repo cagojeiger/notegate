@@ -486,7 +486,7 @@ pub mod node {
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
-                       n.search_enabled, \
+                       n.search_enabled, n.write_locked, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
                 FROM nodes n \
@@ -502,6 +502,49 @@ pub mod node {
         .map_err(map_sqlx_error)?;
 
         rows.into_iter().map(NodeRow::into_node).collect()
+    }
+
+    /// Directly locked ancestors for a bounded set of live nodes, ordered from
+    /// the root toward each requested node.
+    pub async fn direct_write_lock_ancestors_many(
+        pool: &PgPool,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, Vec<(Uuid, String)>>> {
+        if node_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
+            "WITH RECURSIVE chain AS ( \
+                SELECT id AS target_id, id, parent_id, name, write_locked, 0 AS depth \
+                FROM nodes \
+                WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL \
+                UNION ALL \
+                SELECT c.target_id, n.id, n.parent_id, n.name, n.write_locked, c.depth + 1 \
+                FROM nodes n \
+                JOIN chain c ON n.id = c.parent_id \
+                WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+             ) \
+             SELECT target_id, id, name \
+             FROM chain \
+             WHERE write_locked \
+             ORDER BY target_id, depth DESC",
+        )
+        .bind(space_id)
+        .bind(node_ids.to_vec())
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let mut sources = HashMap::new();
+        for (target_id, source_id, name) in rows {
+            sources
+                .entry(target_id)
+                .or_insert_with(Vec::new)
+                .push((source_id, name));
+        }
+        Ok(sources)
     }
 
     /// Shared path-derivation CTE used by `node_path` and search result assembly.
@@ -941,6 +984,7 @@ pub mod search {
         sort_order: i32,
         metadata: Value,
         search_enabled: bool,
+        write_locked: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -960,6 +1004,7 @@ pub mod search {
         sort_order: i32,
         metadata: Value,
         search_enabled: bool,
+        write_locked: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -982,6 +1027,7 @@ pub mod search {
                 sort_order: self.sort_order,
                 metadata: self.metadata.clone(),
                 search_enabled: self.search_enabled,
+                write_locked: self.write_locked,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
                 deleted_by_account_id: self.deleted_by_account_id,
@@ -1011,6 +1057,7 @@ pub mod search {
         sort_order: i32,
         metadata: Value,
         search_enabled: bool,
+        write_locked: bool,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1044,6 +1091,7 @@ pub mod search {
                 sort_order: self.sort_order,
                 metadata: self.metadata,
                 search_enabled: self.search_enabled,
+                write_locked: self.write_locked,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
                 deleted_by_account_id: self.deleted_by_account_id,
@@ -1181,6 +1229,7 @@ pub mod search {
                     sort_order: row.sort_order,
                     metadata: row.metadata,
                     search_enabled: row.search_enabled,
+                    write_locked: row.write_locked,
                     created_by_account_id: row.created_by_account_id,
                     updated_by_account_id: row.updated_by_account_id,
                     deleted_by_account_id: row.deleted_by_account_id,
@@ -1204,7 +1253,7 @@ pub mod search {
         limit: i64,
     ) -> Result<Vec<SearchNodeCandidate>> {
         let rows: Vec<NodeCandidateRow> = sqlx::query_as(&candidate_cte(
-            "SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, \
+            "SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, \
                         created_by_account_id, updated_by_account_id, deleted_by_account_id, \
                         purge_after, created_at, updated_at, deleted_at, path, sort_path \
                  FROM subtree \
@@ -1237,7 +1286,7 @@ pub mod search {
     ) -> Result<Vec<SearchTextCandidate>> {
         let rows: Vec<TextCandidateRow> = sqlx::query_as(
             &candidate_cte(
-                "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, s.search_enabled, \
+                "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, s.search_enabled, s.write_locked, \
                         s.created_by_account_id, s.updated_by_account_id, s.deleted_by_account_id, \
                         s.purge_after, s.created_at, s.updated_at, s.deleted_at, s.path, s.sort_path, \
                         t.content_sha256 AS text_content_sha256, \
@@ -1346,7 +1395,7 @@ pub mod search {
     fn candidate_cte(select_sql: &str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
-                SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, \
+                SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, \
                        created_by_account_id, updated_by_account_id, deleted_by_account_id, \
                        purge_after, created_at, updated_at, deleted_at, \
                        $3::text AS path, \
@@ -1354,7 +1403,7 @@ pub mod search {
                 FROM nodes \
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, \
+                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, \
                        CASE WHEN s.path = '/' THEN '/' || n.name ELSE s.path || '/' || n.name END, \

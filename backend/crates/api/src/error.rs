@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::http::{HeaderValue, StatusCode, header::RETRY_AFTER};
 use axum::response::{IntoResponse, Response};
-use notegate_core::Error as CoreError;
+use notegate_core::{Error as CoreError, WriteLockScope};
 use notegate_service::ServiceError;
 use serde::Serialize;
 use serde_json::json;
@@ -55,6 +55,14 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, "conflict", message)
     }
 
+    pub fn write_locked(scope: WriteLockScope) -> Self {
+        Self::new(
+            StatusCode::LOCKED,
+            write_lock_code(scope),
+            scope.to_string(),
+        )
+    }
+
     pub fn usage_recalculation_in_progress(retry_after_seconds: u64) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -93,6 +101,13 @@ impl ApiError {
     }
 }
 
+pub(crate) const fn write_lock_code(scope: WriteLockScope) -> &'static str {
+    match scope {
+        WriteLockScope::TargetOrAncestor => "node_write_locked",
+        WriteLockScope::Descendant => "subtree_write_locked",
+    }
+}
+
 /// Map a service-layer error to an HTTP response per `docs/spec/rest/errors.md`.
 /// Internal failures are logged but their detail is never returned to the client.
 impl From<ServiceError> for ApiError {
@@ -102,6 +117,7 @@ impl From<ServiceError> for ApiError {
             ServiceError::InvalidInput(message) => Self::invalid_field(message),
             ServiceError::Forbidden(message) => Self::forbidden(message),
             ServiceError::Conflict(message) => Self::conflict(message),
+            ServiceError::WriteLocked { scope } => Self::write_locked(scope),
             ServiceError::UsageRecalculationInProgress {
                 retry_after_seconds,
             } => Self::usage_recalculation_in_progress(retry_after_seconds),
@@ -121,6 +137,7 @@ impl From<CoreError> for ApiError {
             CoreError::NotFound(msg) => Self::not_found(msg),
             CoreError::Validation(msg) => Self::invalid_field(msg),
             CoreError::Conflict(msg) => Self::conflict(msg),
+            CoreError::WriteLocked { scope } => Self::write_locked(scope),
             CoreError::UsageRecalculationInProgress {
                 retry_after_seconds,
             } => Self::usage_recalculation_in_progress(retry_after_seconds),
@@ -189,6 +206,22 @@ mod tests {
                 StatusCode::CONFLICT,
                 "conflict",
                 "stale",
+            ),
+            (
+                ServiceError::WriteLocked {
+                    scope: WriteLockScope::TargetOrAncestor,
+                },
+                StatusCode::LOCKED,
+                "node_write_locked",
+                "changes are blocked because the node or an ancestor is write-locked",
+            ),
+            (
+                ServiceError::WriteLocked {
+                    scope: WriteLockScope::Descendant,
+                },
+                StatusCode::LOCKED,
+                "subtree_write_locked",
+                "changes are blocked because the subtree contains a directly write-locked node",
             ),
             (
                 ServiceError::Internal("db detail".to_owned()),

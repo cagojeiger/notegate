@@ -8,6 +8,12 @@ export function invalidateAuditEvents(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.auditEvents });
 }
 
+export function invalidateFileChangeEvents(queryClient: QueryClient, spaceId: string) {
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.fileChangeEventsFamily(spaceId)
+  });
+}
+
 export function invalidateNodeLists(
   queryClient: QueryClient,
   spaceId: string,
@@ -24,8 +30,18 @@ export function invalidateRecentNodes(queryClient: QueryClient, spaceId: string)
 export function invalidateFolderSubtree(queryClient: QueryClient, spaceId: string) {
   invalidateRecentNodes(queryClient, spaceId);
   invalidateAllChildren(queryClient, spaceId);
-  void queryClient.invalidateQueries({ queryKey: queryKeys.nodes(spaceId) });
+  invalidateNodeDetails(queryClient, spaceId);
   removeMarkdownImageQueries(queryClient, spaceId);
+}
+
+export function invalidateWriteLockState(queryClient: QueryClient, spaceId: string) {
+  invalidateRecentNodes(queryClient, spaceId);
+  invalidateAllChildren(queryClient, spaceId);
+  invalidateNodeDetails(queryClient, spaceId);
+}
+
+export function invalidateNodeDetails(queryClient: QueryClient, spaceId: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.nodes(spaceId) });
 }
 
 export async function applyExternalFileChanges(
@@ -43,15 +59,15 @@ export async function applyExternalFileChanges(
   let subtreeChanged = false;
   let subtreeDeleted = false;
   let pathChanged = false;
+  let descendantWriteLockChanged = false;
 
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.fileChangeEventsFamily(spaceId)
-  });
+  invalidateFileChangeEvents(queryClient, spaceId);
 
   for (const change of changes) {
     subtreeChanged ||= change.subtree_changed;
     subtreeDeleted ||= change.subtree_changed && change.op_type === "item.delete";
     pathChanged ||= change.path_changed || change.op_type === "item.delete";
+    descendantWriteLockChanged ||= change.write_lock_changed === true && change.item_kind === "folder";
     if (!change.parent_scope_known) {
       missingParent = true;
     } else {
@@ -96,11 +112,15 @@ export async function applyExternalFileChanges(
     return;
   }
 
-  invalidateRecentNodes(queryClient, spaceId);
-  if (missingParent) {
-    invalidateAllChildren(queryClient, spaceId);
+  if (descendantWriteLockChanged) {
+    invalidateWriteLockState(queryClient, spaceId);
   } else {
-    invalidateParentChildren(queryClient, spaceId, parentIds);
+    invalidateRecentNodes(queryClient, spaceId);
+    if (missingParent) {
+      invalidateAllChildren(queryClient, spaceId);
+    } else {
+      invalidateParentChildren(queryClient, spaceId, parentIds);
+    }
   }
   if (pathChanged) {
     removeMarkdownImageQueries(queryClient, spaceId);
@@ -109,9 +129,7 @@ export async function applyExternalFileChanges(
 
 export async function invalidateFileSyncFallback(queryClient: QueryClient, spaceId: string) {
   invalidateFolderSubtree(queryClient, spaceId);
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.fileChangeEventsFamily(spaceId)
-  });
+  invalidateFileChangeEvents(queryClient, spaceId);
   void queryClient.invalidateQueries({ queryKey: queryKeys.texts(spaceId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.metadataFamily(spaceId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.files(spaceId) });

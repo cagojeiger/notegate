@@ -172,7 +172,7 @@ function NodeGroupContent({ active, groupId, navigationActions, node, mode, canW
                 <Download size={15} />
               </IconButton>
             ) : null}
-            <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />
+            <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace || node.effective_write_locked} />
           </>
         )}
       />

@@ -41,8 +41,9 @@ export function NodeContextMenu({
   const { node } = menu;
   const isRoot = node.parent_id === null;
   const isFolder = node.kind === "folder";
-  const canMutateNode = !isRoot && canWriteActiveSpace;
-  const canCreateInNode = showCreateActions && isFolder && canWriteActiveSpace;
+  const canMutateNode = !isRoot && canWriteActiveSpace && !node.effective_write_locked;
+  const showCreateInNode = showCreateActions && isFolder;
+  const canCreateInNode = showCreateInNode && canWriteActiveSpace && !node.effective_write_locked;
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -61,7 +62,7 @@ export function NodeContextMenu({
     showToast((await copyText(node.path)) ? "Path copied" : "Could not copy path");
   }
 
-  const maxHeight = canCreateInNode ? 304 : 236;
+  const maxHeight = showCreateInNode ? 304 : 236;
   const left = Math.min(menu.x, window.innerWidth - 216);
   const top = Math.min(menu.y, window.innerHeight - maxHeight);
 
@@ -70,13 +71,13 @@ export function NodeContextMenu({
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
       <Card className="fixed z-50 w-52 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
         <div className="truncate px-3 py-1 text-xs text-muted">{node.path}</div>
-        {canCreateInNode ? (
+        {showCreateInNode ? (
           <>
-            <MenuButton onClick={() => run(() => onCreateInFolder(node, "folder"))}><FolderPlus size={14} /> New folder</MenuButton>
-            <MenuButton onClick={() => run(() => onCreateInFolder(node, "text"))}><FilePlus size={14} /> New text</MenuButton>
-            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-muted hover:bg-panel hover:text-text">
+            <MenuButton onClick={() => run(() => onCreateInFolder(node, "folder"))} disabled={!canCreateInNode}><FolderPlus size={14} /> New folder</MenuButton>
+            <MenuButton onClick={() => run(() => onCreateInFolder(node, "text"))} disabled={!canCreateInNode}><FilePlus size={14} /> New text</MenuButton>
+            <label className={`flex items-center gap-2 rounded-lg px-3 py-2 ${canCreateInNode ? "cursor-pointer text-muted hover:bg-panel hover:text-text" : "cursor-not-allowed text-faint"}`}>
               <Upload size={14} /> Upload file
-              <input className="hidden" type="file" onChange={(event) => { const file = event.target.files?.[0] ?? null; onClose(); onUploadInFolder(node, file); }} />
+              <input className="hidden" type="file" disabled={!canCreateInNode} onChange={(event) => { const file = event.target.files?.[0] ?? null; onClose(); onUploadInFolder(node, file); }} />
             </label>
             <div className="my-1 border-t border-border" />
           </>

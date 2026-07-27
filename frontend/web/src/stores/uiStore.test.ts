@@ -21,7 +21,10 @@ function node(id: string, name = `${id}.md`, spaceId = "space-1"): RestNode {
     sort_order: 0,
     metadata: {},
     search_enabled: true,
+    write_locked: false,
+    write_lock_sources: [],
     has_children: false,
+    effective_write_locked: false,
     created_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_by: { id: "user-1", kind: "user", display_name: "User" },
     created_at: "2026-06-13T00:00:00Z",
@@ -254,6 +257,9 @@ describe("useUiStore", () => {
     const first = node("node-1");
     const legacyFirst: Partial<RestNode> = { ...first };
     delete legacyFirst.search_enabled;
+    delete legacyFirst.write_locked;
+    delete legacyFirst.effective_write_locked;
+    delete legacyFirst.write_lock_sources;
     const wrongSpaceNode = node("node-2", "wrong.md", "other-space");
     const malformedNode = { ...node("node-3"), created_by: undefined };
     window.localStorage.setItem(workbenchSpaceKey("space-1"), JSON.stringify({
@@ -273,9 +279,35 @@ describe("useUiStore", () => {
     const state = useUiStore.getState();
     expect(state.activeGroupIndex).toBe(2);
     expect(state.editorGroups).toHaveLength(3);
-    expect(state.editorGroups[0]).toMatchObject({ node: first, mode: "edit" });
+    expect(state.editorGroups[0]).toMatchObject({
+      node: { ...first, search_enabled: true, write_locked: false, write_lock_sources: [] },
+      mode: "edit"
+    });
     expect(state.editorGroups[1]).toMatchObject({ node: null, mode: "preview" });
     expect(state.editorGroups[2]).toMatchObject({ node: null, mode: "preview" });
+  });
+
+  it("derives effective write-lock state when restoring an older snapshot", () => {
+    const first = node("node-1");
+    const legacyLocked: Partial<RestNode> = {
+      ...first,
+      write_locked: false,
+      write_lock_sources: [{ node_id: "folder-1", name: "Policies", path: "/Policies" }]
+    };
+    delete legacyLocked.effective_write_locked;
+    window.localStorage.setItem(workbenchSpaceKey("space-1"), JSON.stringify({
+      version: 1,
+      spaceId: "space-1",
+      updatedAt: 1,
+      groups: [{ node: legacyLocked, mode: "preview" }],
+      activeGroupIndex: 0
+    }));
+
+    useUiStore.getState().setActiveSpaceId("space-1");
+
+    expect(
+      useUiStore.getState().editorGroups[0]?.node?.effective_write_locked
+    ).toBe(true);
   });
 
   it("restores valid navigation history and drops entries from other spaces", () => {

@@ -168,7 +168,8 @@ pub(crate) async fn prepare_create(
     name: &str,
     caps: Limits,
 ) -> Result<()> {
-    let parent_bounds = checks::require_live_folder_path_bounds(tx, space_id, parent_id).await?;
+    let parent_bounds =
+        checks::require_writable_folder_path_bounds(tx, space_id, parent_id).await?;
     let bounds = checks::destination_bounds(parent_bounds, name, checks::PathBounds::default())?;
     checks::require_path_limits(bounds)?;
 

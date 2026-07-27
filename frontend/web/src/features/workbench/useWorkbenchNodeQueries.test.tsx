@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { deleteNode, moveNode, updateNodeSearchPolicy } from "../../api/nodes";
+import { deleteNode, moveNode, updateNodeSearchPolicy, updateNodeWriteLock } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
 import type { RestNode } from "../../api/types";
@@ -11,6 +11,7 @@ import {
   useDeleteNodeMutation,
   useMoveNodeMutation,
   useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchNodeQueries";
 
@@ -24,7 +25,8 @@ vi.mock("../../api/nodes", () => ({
   moveNode: vi.fn(),
   revealNode: vi.fn(),
   updateNode: vi.fn(),
-  updateNodeSearchPolicy: vi.fn()
+  updateNodeSearchPolicy: vi.fn(),
+  updateNodeWriteLock: vi.fn()
 }));
 
 vi.mock("../../api/text", () => ({
@@ -101,6 +103,77 @@ describe("workbench node mutations", () => {
       exact: true
     });
     expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  it("updates the direct write lock through its dedicated endpoint", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    const updated = {
+      ...current,
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [{ node_id: current.id, name: current.name, path: current.path }]
+    };
+    vi.mocked(updateNodeWriteLock).mockResolvedValue(updated);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(onUpdated), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ node: current, enabled: true });
+    });
+
+    expect(updateNodeWriteLock).toHaveBeenCalledWith(
+      expect.anything(),
+      current.space_id,
+      current.id,
+      true
+    );
+    expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.fileChangeEventsFamily(current.space_id)
+    });
+    expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  it("invalidates descendant node details when a folder lock changes", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("folder-1", "space-1", "folder");
+    const updated = {
+      ...current,
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [{ node_id: current.id, name: current.name, path: current.path }]
+    };
+    vi.mocked(updateNodeWriteLock).mockResolvedValue(updated);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(vi.fn()), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ node: current, enabled: true });
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.nodes("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
   });
 
   it("removes every preview URL cached for a recursively deleted folder", async () => {
@@ -217,6 +290,9 @@ function node(id: string, spaceId: string, kind: RestNode["kind"]): RestNode {
     sort_order: 0,
     metadata: {},
     search_enabled: true,
+    write_locked: false,
+    effective_write_locked: false,
+    write_lock_sources: [],
     has_children: kind === "folder",
     created_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_by: { id: "user-1", kind: "user", display_name: "User" },

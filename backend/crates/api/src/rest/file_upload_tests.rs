@@ -23,6 +23,7 @@ use notegate_model::files::{BeginObjectUpload, ObjectUploadMode, ObjectUploadReg
 use notegate_model::{
     Caller, CallerIdentity, Channel, ConnectAgent, CreateAgent, FileEncryptionMode, Permission,
 };
+use notegate_service::files::{CreateFolder, UpdateNodeWriteLock};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -555,6 +556,71 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
 
     assert_eq!(object_state(&db, upload.id).await?, "deleted");
     assert_eq!(reqwest::get(get_url).await?.status(), StatusCode::NOT_FOUND);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_lock_rejection_queues_the_uploaded_object_for_cleanup()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(caller.account_id())
+        .execute(&db.pool)
+        .await?;
+    let folder_id = state
+        .files
+        .create_folder(
+            caller.account_id(),
+            space_id,
+            CreateFolder {
+                parent_node_id: root_id,
+                name: "locked-uploads".to_owned(),
+            },
+        )
+        .await?
+        .node
+        .id;
+    let upload = begin_upload(&state, &caller, space_id, folder_id, "orphan.bin", 6).await?;
+    put_upload(&upload, b"orphan").await?.error_for_status()?;
+    state
+        .files
+        .update_node_write_lock(
+            &caller,
+            space_id,
+            UpdateNodeWriteLock {
+                node_id: folder_id,
+                enabled: true,
+            },
+        )
+        .await?;
+
+    let (status, body) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    assert_eq!(status, StatusCode::LOCKED, "{body}");
+    assert_eq!(body["kind"], "node_write_locked");
+    assert_eq!(object_state(&db, upload.id).await?, "expire_pending");
+    let attached_node_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT node_id FROM object_storage_objects WHERE id = $1")
+            .bind(upload.id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert!(attached_node_id.is_none());
+    assert_eq!(object_get_status(&state, upload.id).await, StatusCode::OK);
+
+    run_cleanup(&db, &state).await;
+    assert_eq!(object_state(&db, upload.id).await?, "expired");
+    assert_eq!(
+        object_get_status(&state, upload.id).await,
+        StatusCode::NOT_FOUND
+    );
 
     db.cleanup().await;
     Ok(())

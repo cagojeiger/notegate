@@ -20,7 +20,10 @@ const node: RestNode = {
   sort_order: 0,
   metadata: {},
   search_enabled: true,
+  write_locked: false,
+  write_lock_sources: [],
   has_children: false,
+  effective_write_locked: false,
   content_sha256: "sha-1",
   created_by: { id: "user-1", kind: "user", display_name: "User" },
   updated_by: { id: "user-1", kind: "user", display_name: "User" },
@@ -198,5 +201,56 @@ describe("useTextEditorSession", () => {
 
     rerender({ latestNode: { ...node, content_sha256: "sha-3" } });
     await waitFor(() => expect(result.current.externalUpdate?.content_sha256).toBe("sha-3"));
+  });
+
+  it("leaves edit mode when the node becomes effectively write-locked", async () => {
+    const onSetMode = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: textResponse,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    const { result } = renderHook(() => useTextEditorSession({
+      node: { ...node, effective_write_locked: true },
+      mode: "edit",
+      canWrite: true,
+      onSetMode
+    }));
+
+    expect(result.current.canEdit).toBe(false);
+    await waitFor(() => expect(onSetMode).toHaveBeenCalledWith("preview"));
+  });
+
+  it("preserves an unsaved draft when a lock arrives during editing", async () => {
+    const onSetMode = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: textResponse,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    const { result, rerender } = renderHook(
+      ({ currentNode }: { currentNode: RestNode }) => useTextEditorSession({
+        node: currentNode,
+        mode: "edit",
+        canWrite: true,
+        onSetMode
+      }),
+      { initialProps: { currentNode: node } }
+    );
+    await waitFor(() => expect(result.current.draft).toBe("original"));
+    act(() => result.current.setDraft("unsaved"));
+
+    rerender({ currentNode: { ...node, effective_write_locked: true } });
+
+    expect(result.current.draft).toBe("unsaved");
+    expect(result.current.dirty).toBe(true);
+    expect(result.current.canSave).toBe(false);
+    expect(onSetMode).not.toHaveBeenCalled();
+
+    rerender({ currentNode: node });
+    expect(result.current.draft).toBe("unsaved");
+    expect(result.current.canSave).toBe(true);
   });
 });

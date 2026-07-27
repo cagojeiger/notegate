@@ -22,6 +22,7 @@ struct SubtreeUsage {
     nodes: i64,
     text_bytes: i64,
     file_bytes: i64,
+    has_direct_write_lock: bool,
 }
 
 /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
@@ -42,14 +43,15 @@ pub async fn soft_delete_node(
     if node.parent_id.is_none() {
         return Err(Error::conflict("cannot delete the root node"));
     }
+    checks::require_write_unlocked(&mut tx, space_id, node_id).await?;
 
     // Bound the synchronous delete by the live subtree size.
     let subtree_usage = sqlx::query_as::<_, SubtreeUsage>(
         "WITH RECURSIVE subtree AS ( \
-            SELECT id FROM nodes \
+            SELECT id, write_locked FROM nodes \
             WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
             UNION ALL \
-            SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
+            SELECT n.id, n.write_locked FROM nodes n JOIN subtree s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
          SELECT \
@@ -61,13 +63,16 @@ pub async fn soft_delete_node(
              COALESCE(( \
                  SELECT sum(f.byte_len) FROM file_objects f \
                  JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1 \
-             ), 0)::bigint AS file_bytes",
+             ), 0)::bigint AS file_bytes, \
+             COALESCE((SELECT bool_or(write_locked) FROM subtree), false) \
+                 AS has_direct_write_lock",
     )
     .bind(space_id)
     .bind(node_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
+    checks::require_subtree_write_unlocked(subtree_usage.has_direct_write_lock)?;
     let subtree = crate::to_usize(subtree_usage.nodes, "subtree")?;
     if subtree > limits::SUBTREE_DELETE_MAX_NODES {
         return Err(Error::conflict(format!(

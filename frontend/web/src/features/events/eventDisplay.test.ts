@@ -45,6 +45,11 @@ describe("eventDisplay", () => {
     expect(formatFileChangeTarget(event)).toBe("Text · notes.md");
     expect(formatFileChangeAction({ ...event, op_type: "text.edit" })).toBe("Edited");
     expect(formatFileChangeAction({ ...event, op_type: "item.update", metadata: { name_changed: true } })).toBe("Renamed");
+    expect(formatFileChangeAction({
+      ...event,
+      op_type: "item.update",
+      metadata: { write_lock_changed: true, write_locked: true }
+    })).toBe("Locked");
     expect(
       formatActor({ id: "user-1", kind: "user", display_name: "Ada" }, "user-1")
     ).toBe("Ada (User)");
@@ -170,6 +175,14 @@ describe("eventDisplay", () => {
       metadata: { name_changed: true, sort_order_changed: true }
     })).toEqual([
       { label: "Changed", value: "Name, Order" },
+      { label: "Node", value: "node-1" }
+    ]);
+    expect(formatFileChangeDetails({
+      ...event,
+      op_type: "item.update",
+      metadata: { write_lock_changed: true, write_locked: false }
+    })).toEqual([
+      { label: "Changed", value: "Write lock" },
       { label: "Node", value: "node-1" }
     ]);
   });

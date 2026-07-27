@@ -8,7 +8,8 @@ use notegate_core::security::PiiCrypto;
 use notegate_core::{Error, Result};
 use notegate_model::Node;
 use notegate_model::files::{
-    StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTextBody,
+    StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock, UpdateTextEncryption,
+    WriteTextBody,
 };
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -64,15 +65,17 @@ pub async fn update_node(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_write_unlocked(&mut tx, space_id, command.node_id).await?;
 
     if let Some((name, parent_id)) = rename
         && name_changed
     {
         checks::require_sibling_unique(&mut tx, space_id, parent_id, name, Some(command.node_id))
             .await?;
-        let parent = checks::require_live_folder_path_bounds(&mut tx, space_id, parent_id).await?;
+        let parent =
+            checks::require_writable_folder_path_bounds(&mut tx, space_id, parent_id).await?;
         let subtree = if current.kind == "folder" {
-            checks::subtree_relative_bounds(&mut tx, space_id, command.node_id).await?
+            checks::require_writable_subtree_bounds(&mut tx, space_id, command.node_id).await?
         } else {
             checks::PathBounds::default()
         };
@@ -139,6 +142,7 @@ pub async fn update_node_search_policy(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_write_unlocked(&mut tx, space_id, command.node_id).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
         "UPDATE nodes \
@@ -169,6 +173,59 @@ pub async fn update_node_search_policy(
             search_enabled: row.search_enabled,
             text_encryption_enabled: None,
         },
+    )
+    .await?;
+
+    tx.commit().await.map_err(map_sqlx_error)?;
+    row.into_node()
+}
+
+pub async fn update_node_write_lock(
+    pool: &PgPool,
+    space_id: Uuid,
+    command: &UpdateNodeWriteLock,
+    updated_by: Uuid,
+    caps: notegate_core::limits::Limits,
+) -> Result<Node> {
+    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
+
+    let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
+    let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+    if current.parent_id.is_none() {
+        return Err(Error::conflict("cannot change the root node write lock"));
+    }
+    if command.enabled == current.write_locked {
+        tx.commit().await.map_err(map_sqlx_error)?;
+        return current.into_node();
+    }
+    if command.enabled && !locked.owner_tier.features().write_lock {
+        return Err(Error::conflict(
+            "write lock is not available for the space owner's tier",
+        ));
+    }
+
+    let row = sqlx::query_as::<_, NodeRow>(&format!(
+        "UPDATE nodes \
+         SET write_locked = $3, updated_by_account_id = $4, updated_at = now() \
+         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
+    ))
+    .bind(space_id)
+    .bind(command.node_id)
+    .bind(command.enabled)
+    .bind(updated_by)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?
+    .ok_or_else(|| Error::not_found("node not found"))?;
+
+    file_change_events::node_write_lock_updated(
+        &mut tx,
+        file_change_events::context(updated_by, space_id),
+        command.node_id,
+        &row.kind,
+        &row.name,
+        row.parent_id,
+        row.write_locked,
     )
     .await?;
 
@@ -209,6 +266,7 @@ pub async fn update_text_encryption(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_write_unlocked(&mut tx, space_id, command.node_id).await?;
     if command.enabled {
         if !locked.owner_tier.features().text_encryption {
             return Err(Error::conflict(
@@ -331,6 +389,7 @@ pub async fn replace_node_metadata(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_write_unlocked(&mut tx, space_id, node_id).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
         "UPDATE nodes \

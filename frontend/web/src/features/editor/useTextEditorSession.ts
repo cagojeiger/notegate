@@ -39,9 +39,9 @@ export function useTextEditorSession({
   const sha = text?.content_sha256;
   const encrypted = isEncryptedTextContent(text);
   const partialText = plainText?.truncated ? plainText : null;
-  const canEdit = canWrite && !!plainText && !partialText;
+  const canEdit = canWrite && !node.effective_write_locked && !!plainText && !partialText;
   const canCopy = !!plainText && !partialText;
-  const dirty = mode === "edit" && canEdit && draft !== content;
+  const dirty = mode === "edit" && draftNodeId.current === node.id && draft !== content;
 
   useEffect(() => {
     setConflict(false);
@@ -59,8 +59,11 @@ export function useTextEditorSession({
   }, [mode, content, canEdit, node.id]);
 
   useEffect(() => {
-    if (mode === "edit" && textQuery.isSuccess && !canEdit) onSetMode("preview");
-  }, [canEdit, mode, onSetMode, textQuery.isSuccess]);
+    const preserveLockedDraft = node.effective_write_locked && dirty;
+    if (mode === "edit" && textQuery.isSuccess && !canEdit && !preserveLockedDraft) {
+      onSetMode("preview");
+    }
+  }, [canEdit, dirty, mode, node.effective_write_locked, onSetMode, textQuery.isSuccess]);
 
   const reloadLatestText = useCallback(async (showFailure: boolean) => {
     const requestedNodeId = node.id;
@@ -136,7 +139,7 @@ export function useTextEditorSession({
     dirty,
     conflict,
     externalUpdate,
-    canSave: dirty && !saveMutation.isPending,
+    canSave: canEdit && dirty && !saveMutation.isPending,
     saveDraft: () => saveMutation.mutate(false),
     overwriteDraft: () => saveMutation.mutate(true),
     cancelEdit,

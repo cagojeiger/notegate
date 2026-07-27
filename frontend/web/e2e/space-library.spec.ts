@@ -325,7 +325,7 @@ function space(id: string, name: string, sortOrder: number, navigationPinned: bo
     user_mcp_enabled: navigationPinned,
     default_search_enabled: true,
     default_text_encryption_enabled: false,
-    features: { text_encryption: true },
+    features: { text_encryption: true, write_lock: true },
     permission: "write",
     root_node_id: `${id}-root`,
     created_at: "2026-07-01T00:00:00Z",

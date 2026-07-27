@@ -1,6 +1,6 @@
 use notegate_core::limits;
 use notegate_db::{MetadataMutationKind, TextMutationKind};
-use notegate_model::{AccountKind, NodeKind};
+use notegate_model::{AccountKind, Caller, NodeKind};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -12,11 +12,11 @@ use crate::files::{
     AppendText, BeginObjectUpload, CopyNode, CopyResult, CreateFolder, CreateText, DeleteNode,
     DeleteResult, EditText, FileCommand, MoveNode, NodeView, PatchResult, PatchText,
     PendingObjectUpload, StoredContent, TextView, UpdateNode, UpdateNodeSearchPolicy,
-    UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
+    UpdateNodeWriteLock, UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody, content,
 };
 
 use super::FilesService;
-use super::view::{file_view_at_path, text_view_at_path};
+use super::view::text_view_at_path;
 
 impl FilesService {
     /// Create a folder (`mkdir`). Requires write permission.
@@ -41,6 +41,7 @@ impl FilesService {
             has_children: false,
             text: None,
             file: None,
+            write_lock_sources: Vec::new(),
         })
     }
 
@@ -266,8 +267,8 @@ impl FilesService {
             .store
             .attach_object_upload(upload_id, space_id, caller_account_id, detected_media_type)
             .await?;
-        let path = self.path_of(space_id, node.id).await?;
-        Ok(file_view_at_path(node, path, file))
+        let node = self.file_node_view(space_id, node, &file).await?;
+        Ok(crate::files::FileView { node, file })
     }
 
     pub async fn record_detected_file_media_type(
@@ -709,6 +710,21 @@ impl FilesService {
         let updated = self
             .store
             .update_node_search_policy(space_id, &command, caller_account_id)
+            .await?;
+        self.node_view(space_id, updated).await
+    }
+
+    pub async fn update_node_write_lock(
+        &self,
+        caller: &Caller,
+        space_id: Uuid,
+        command: UpdateNodeWriteLock,
+    ) -> ServiceResult<NodeView> {
+        self.authorize_space_owner_dashboard_user(caller, space_id)
+            .await?;
+        let updated = self
+            .store
+            .update_node_write_lock(space_id, &command, caller.account_id())
             .await?;
         self.node_view(space_id, updated).await
     }

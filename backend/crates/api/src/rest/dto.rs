@@ -125,6 +125,7 @@ pub struct SpaceOut {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SpaceFeaturesOut {
     pub text_encryption: bool,
+    pub write_lock: bool,
 }
 
 impl From<&SpaceView> for SpaceOut {
@@ -141,6 +142,7 @@ impl From<&SpaceView> for SpaceOut {
             default_text_encryption_enabled: view.space.default_text_encryption_enabled,
             features: SpaceFeaturesOut {
                 text_encryption: view.features.text_encryption,
+                write_lock: view.features.write_lock,
             },
             created_at: view.space.created_at,
             updated_at: view.space.updated_at,
@@ -158,10 +160,12 @@ mod tests {
         clippy::unwrap_in_result
     )]
     use notegate_model::{
-        AccountKind, AuditEvent, FileEncryptionMode, Node, NodeKind, TextAtRestEncryption,
-        TextStorageFormat,
+        AccountKind, AuditEvent, FileEncryptionMode, Node, NodeKind, NodeSummary,
+        TextAtRestEncryption, TextStorageFormat,
     };
-    use notegate_service::files::{FileChangeEvent, FileStats, NodeView, TextStats};
+    use notegate_service::files::{
+        FileChangeEvent, FileStats, NodeSummaryView, NodeView, TextStats, WriteLockSource,
+    };
     use serde_json::json;
 
     use crate::file_preview::FilePreviewKind;
@@ -179,6 +183,7 @@ mod tests {
             sort_order: 0,
             metadata: json!({"pinned": true}),
             search_enabled: true,
+            write_locked: false,
             created_by_account_id: Uuid::new_v4(),
             updated_by_account_id: Uuid::new_v4(),
             deleted_by_account_id: None,
@@ -196,6 +201,7 @@ mod tests {
             has_children: false,
             text: None,
             file: None,
+            write_lock_sources: Vec::new(),
         }
     }
 
@@ -259,6 +265,51 @@ mod tests {
         assert!(out.encryption_metadata.is_none());
         assert!(out.preview_available.is_none());
         assert!(out.file_preview_kind.is_none());
+    }
+
+    #[test]
+    fn node_out_distinguishes_direct_and_inherited_write_locks() {
+        let mut view = base_view(NodeKind::Text);
+        let source_id = Uuid::new_v4();
+        view.write_lock_sources.push(WriteLockSource {
+            node_id: source_id,
+            name: "locked".to_owned(),
+            path: "/locked".to_owned(),
+        });
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert!(!out.write_locked);
+        assert!(out.effective_write_locked);
+        assert_eq!(out.write_lock_sources.len(), 1);
+        assert_eq!(out.write_lock_sources[0].node_id, source_id);
+        assert_eq!(out.write_lock_sources[0].path, "/locked");
+    }
+
+    #[test]
+    fn node_summary_out_preserves_effective_write_lock() {
+        let node = base_node(NodeKind::Text);
+        let view = NodeSummaryView {
+            node: NodeSummary {
+                id: node.id,
+                space_id: node.space_id,
+                parent_id: node.parent_id,
+                name: node.name,
+                kind: node.kind,
+                sort_order: node.sort_order,
+                updated_at: node.updated_at,
+            },
+            path: "/locked/note.md".to_owned(),
+            has_children: false,
+            effective_write_locked: true,
+            text: None,
+            file: None,
+        };
+
+        let out = NodeSummaryOut::from(&view);
+
+        assert!(out.effective_write_locked);
+        assert_eq!(out.path, "/locked/note.md");
     }
 
     #[test]

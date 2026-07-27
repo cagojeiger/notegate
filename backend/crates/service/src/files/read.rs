@@ -75,35 +75,14 @@ impl FilesService {
 
         let next_cursor = encode_children_cursor(space_id, parent_node_id, rows.last(), has_more)?;
 
-        let child_ids: Vec<Uuid> = rows.iter().map(|node| node.id).collect();
-        let text_ids: Vec<Uuid> = rows
-            .iter()
-            .filter(|node| node.kind == NodeKind::Text)
-            .map(|node| node.id)
+        let rows = rows
+            .into_iter()
+            .map(|node| {
+                let path = join_path(&parent.path, &node.name);
+                (node, path)
+            })
             .collect();
-        let file_ids: Vec<Uuid> = rows
-            .iter()
-            .filter(|node| node.kind == NodeKind::File)
-            .map(|node| node.id)
-            .collect();
-        let child_has_children = self.store.has_children_many(space_id, &child_ids).await?;
-        let text_stats = self.store.text_stats_many(space_id, &text_ids).await?;
-        let file_stats = self.store.file_stats_many(space_id, &file_ids).await?;
-
-        let mut items = Vec::with_capacity(rows.len());
-        for node in rows {
-            let path = join_path(&parent.path, &node.name);
-            let has_children = child_has_children.get(&node.id).copied().unwrap_or(false);
-            let text = text_stats.get(&node.id).cloned();
-            let file = file_stats.get(&node.id).cloned();
-            items.push(NodeSummaryView {
-                node,
-                path,
-                has_children,
-                text,
-                file,
-            });
-        }
+        let items = super::view::hydrate_node_summary_views(&self.store, space_id, rows).await?;
 
         Ok(ChildrenPage {
             parent: NodeView {
@@ -112,6 +91,7 @@ impl FilesService {
                 has_children: parent.has_children,
                 text: None,
                 file: None,
+                write_lock_sources: Vec::new(),
             },
             items,
             limit,
@@ -157,6 +137,7 @@ impl FilesService {
                 has_children: parent.has_children,
                 text: None,
                 file: None,
+                write_lock_sources: Vec::new(),
             },
             items,
             limit,
@@ -245,6 +226,7 @@ impl FilesService {
                         has_children: has_more || !items.is_empty(),
                         text: None,
                         file: None,
+                        write_lock_sources: Vec::new(),
                     },
                     items,
                     limit,
@@ -415,6 +397,7 @@ impl FilesService {
             has_children: self.store.has_children(space_id, parent_node_id).await?,
             text: None,
             file: None,
+            write_lock_sources: Vec::new(),
         })
     }
 

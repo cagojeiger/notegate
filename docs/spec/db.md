@@ -311,6 +311,7 @@ nodes
   sort_order int not null default 0
   metadata jsonb not null default '{}'
   search_enabled bool not null default true
+  write_locked bool not null default false
   created_by_account_id uuid not null references accounts(id)
   updated_by_account_id uuid not null references accounts(id)
   deleted_by_account_id uuid null references accounts(id)
@@ -326,6 +327,7 @@ nodes
 - 같은 parent 안 live node name은 unique다.
 - `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다.
 - `search_enabled`는 해당 node만 검색 결과에 포함할지를 나타낸다. Folder 자식에게 상속되지 않는다.
+- `write_locked`는 직접 설정된 쓰기 잠금이다. descendant 상속 상태는 저장하지 않으며 parent chain에서 계산한다.
 - `deleted_at`, `deleted_by_account_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.
 - Full path는 저장하지 않는다.
 - Create, rename, move, copy, file attach는 DB mutation transaction 안에서 최종 derived path의 depth와 byte 상한을 다시 검사한다. Folder subtree를 옮기거나 복사할 때는 모든 live descendant를 포함한다.

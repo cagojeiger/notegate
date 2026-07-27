@@ -15,6 +15,7 @@ import {
   useReplaceMetadataMutation,
   useUpdateNodeMutation,
   useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchQueries";
 
@@ -49,36 +50,48 @@ export function useWorkbenchNodeCommandActions({
   });
   const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
   const updateNodeSearchPolicyMutation = useUpdateNodeSearchPolicyMutation(updateGroupsNode);
+  const updateNodeWriteLockMutation = useUpdateNodeWriteLockMutation(updateGroupsNode);
   const updateTextEncryptionMutation = useUpdateTextEncryptionMutation(updateGroupsNode);
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
   const moveNodeDialogMutation = useMoveNodeMutation(updateGroupsNode, { silentError: true });
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
   const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
 
-  function parentForCreate(): string | null {
+  function parentForCreate(): { id: string; path: string; writeLocked: boolean } | null {
     if (!activeSpace) return null;
-    if (!activeNode) return activeSpace.root_node_id;
-    return activeNode.kind === "folder" ? activeNode.id : activeNode.parent_id ?? activeSpace.root_node_id;
+    if (!activeNode) return { id: activeSpace.root_node_id, path: "/", writeLocked: false };
+    if (activeNode.kind === "folder") {
+      return {
+        id: activeNode.id,
+        path: activeNode.path,
+        writeLocked: activeNode.effective_write_locked
+      };
+    }
+    return {
+      id: activeNode.parent_id ?? activeSpace.root_node_id,
+      path: parentPath(activeNode.path),
+      writeLocked: activeNode.write_lock_sources.some((source) => source.node_id !== activeNode.id)
+    };
   }
 
   function promptCreateNode(kind: "folder" | "text") {
     if (!canWriteActiveSpace) return;
-    const parentId = parentForCreate();
-    if (!parentId) return;
-    setDialog(createNodeDialog(parentId, kind, async (input) => {
+    const parent = parentForCreate();
+    if (!parent || parent.writeLocked) return;
+    setDialog(createNodeDialog(parent.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
   }
 
   function promptCreateInFolder(folder: NodeSummary, kind: "folder" | "text") {
-    if (!canWriteActiveSpace) return;
+    if (!canWriteActiveSpace || folder.effective_write_locked) return;
     setDialog(createNodeDialog(folder.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
   }
 
   function uploadInFolder(folder: NodeSummary, file: File | null) {
-    if (!canWriteActiveSpace || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
+    if (!canWriteActiveSpace || folder.effective_write_locked || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
     promptUpload(activeSpace, folder.id, folder.path, file);
   }
 
@@ -87,14 +100,14 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function promptRenameNode(node: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null) return;
+    if (!canWriteActiveSpace || node.effective_write_locked || node.parent_id === null) return;
     setDialog(renameNodeDialog(node, async (renamedNode, name) => {
       await updateNodeMutation.mutateAsync({ node: renamedNode, name });
     }));
   }
 
   function promptMoveNode(node: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null || !activeSpace) return;
+    if (!canWriteActiveSpace || node.effective_write_locked || node.parent_id === null || !activeSpace) return;
     setDialog(moveNodeDialog(node, activeSpace, async (movedNode, parentId) => {
       await moveNodeDialogMutation.mutateAsync(
         { node: movedNode, parentId },
@@ -104,7 +117,14 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function moveNodeToFolder(node: NodeSummary, folder: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null || folder.kind !== "folder" || node.id === folder.id) return;
+    if (
+      !canWriteActiveSpace
+      || node.effective_write_locked
+      || folder.effective_write_locked
+      || node.parent_id === null
+      || folder.kind !== "folder"
+      || node.id === folder.id
+    ) return;
     moveNodeMutation.mutate(
       { node, parentId: folder.id },
       { onSuccess: () => addExpanded([folder.id]) }
@@ -112,19 +132,16 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function confirmDeleteNode(node: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null) return;
+    if (!canWriteActiveSpace || node.effective_write_locked || node.parent_id === null) return;
     setDialog(deleteNodeDialog(node, async (deletedNode, recursive) => {
       await deleteNodeMutation.mutateAsync({ node: deletedNode, recursive });
     }));
   }
 
   function handleFileSelected(file: File | null) {
-    const parentId = parentForCreate();
-    if (!canWriteActiveSpace || !file || !parentId || !activeSpace) return;
-    const destinationPath = !activeNode
-      ? "/"
-      : activeNode.kind === "folder" ? activeNode.path : parentPath(activeNode.path);
-    promptUpload(activeSpace, parentId, destinationPath, file);
+    const parent = parentForCreate();
+    if (!canWriteActiveSpace || !file || !parent || parent.writeLocked || !activeSpace) return;
+    promptUpload(activeSpace, parent.id, parent.path, file);
   }
 
   function promptUpload(space: Space, parentId: string, destinationPath: string, file: File) {
@@ -153,7 +170,7 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function promptReplaceMetadata() {
-    if (!canWriteActiveSpace || !activeNode) return;
+    if (!canWriteActiveSpace || !activeNode || activeNode.effective_write_locked) return;
     const node = activeNode;
     setDialog(metadataDialog(node, async (metadataNode, metadata) => {
       await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
@@ -165,6 +182,7 @@ export function useWorkbenchNodeCommandActions({
       !canManageActiveSpace
       || !activeNode
       || activeNode.parent_id === null
+      || activeNode.effective_write_locked
       || updateNodeSearchPolicyMutation.isPending
     ) return;
     updateNodeSearchPolicyMutation.mutate({
@@ -178,11 +196,25 @@ export function useWorkbenchNodeCommandActions({
       !canManageActiveSpace
       || !activeNode
       || activeNode.kind !== "text"
+      || activeNode.effective_write_locked
       || updateTextEncryptionMutation.isPending
     ) return;
     updateTextEncryptionMutation.mutate({
       node: activeNode,
       enabled: textEncryptionEnabled
+    });
+  }
+
+  function setNodeWriteLocked(writeLocked: boolean) {
+    if (
+      !canManageActiveSpace
+      || !activeNode
+      || activeNode.parent_id === null
+      || updateNodeWriteLockMutation.isPending
+    ) return;
+    updateNodeWriteLockMutation.mutate({
+      node: activeNode,
+      enabled: writeLocked
     });
   }
 
@@ -198,8 +230,10 @@ export function useWorkbenchNodeCommandActions({
     confirmDeleteNode,
     promptReplaceMetadata,
     setNodeSearchEnabled,
+    setNodeWriteLocked,
     setTextEncryptionEnabled,
     nodeSearchPolicyPending: updateNodeSearchPolicyMutation.isPending,
+    nodeWriteLockPending: updateNodeWriteLockMutation.isPending,
     textEncryptionPending: updateTextEncryptionMutation.isPending,
     downloadFileNode
   };

@@ -92,6 +92,24 @@ describe("EditorArea", () => {
     expect(onDownloadFile).toHaveBeenCalledWith(node);
   });
 
+  it("keeps locked files downloadable while disabling node mutations", () => {
+    const node = { ...fileNode(), effective_write_locked: true };
+    const onDownloadFile = vi.fn();
+    renderEditorArea({
+      groups: [{ id: 0, node, mode: "preview", back: [], forward: [] }],
+      activeGroupIndex: 0,
+      canWriteActiveSpace: true,
+      onDownloadFile
+    });
+
+    const download = screen.getByRole("button", { name: "Download" });
+    expect(download).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
+
+    fireEvent.click(download);
+    expect(onDownloadFile).toHaveBeenCalledWith(node);
+  });
+
   it("shows per-group navigation controls before the title", () => {
     const current = fileNode();
     const onNavigateEditorGroup = vi.fn();
@@ -130,7 +148,10 @@ function fileNode(): RestNode {
     sort_order: 0,
     metadata: {},
     search_enabled: true,
+    write_locked: false,
+    write_lock_sources: [],
     has_children: false,
+    effective_write_locked: false,
     byte_len: 29,
     media_type: "application/pdf",
     detected_media_type: "application/pdf",

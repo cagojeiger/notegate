@@ -10,9 +10,17 @@ import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
 const mocks = vi.hoisted(() => ({
+  createNode: vi.fn(),
+  deleteNode: vi.fn(),
   downloadFile: vi.fn(),
+  moveNode: vi.fn(),
+  replaceMetadata: vi.fn(),
   revealNode: vi.fn(),
-  startUpload: vi.fn()
+  startUpload: vi.fn(),
+  updateNode: vi.fn(),
+  updateNodeSearchPolicy: vi.fn(),
+  updateNodeWriteLock: vi.fn(),
+  updateTextEncryption: vi.fn()
 }));
 
 vi.mock("../../api/ApiProvider", () => ({
@@ -33,15 +41,24 @@ vi.mock("../uploads/UploadProvider", () => ({
 }));
 
 vi.mock("./useWorkbenchQueries", () => {
-  const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn() });
   return {
-    useCreateNodeMutation: mutation,
-    useDeleteNodeMutation: mutation,
-    useMoveNodeMutation: mutation,
-    useReplaceMetadataMutation: mutation,
-    useUpdateNodeMutation: mutation,
-    useUpdateNodeSearchPolicyMutation: mutation,
-    useUpdateTextEncryptionMutation: mutation,
+    useCreateNodeMutation: () => ({ mutateAsync: mocks.createNode }),
+    useDeleteNodeMutation: () => ({ mutateAsync: mocks.deleteNode }),
+    useMoveNodeMutation: () => ({ mutate: mocks.moveNode, mutateAsync: mocks.moveNode }),
+    useReplaceMetadataMutation: () => ({ mutateAsync: mocks.replaceMetadata }),
+    useUpdateNodeMutation: () => ({ mutateAsync: mocks.updateNode }),
+    useUpdateNodeSearchPolicyMutation: () => ({
+      mutate: mocks.updateNodeSearchPolicy,
+      isPending: false
+    }),
+    useUpdateNodeWriteLockMutation: () => ({
+      mutate: mocks.updateNodeWriteLock,
+      isPending: false
+    }),
+    useUpdateTextEncryptionMutation: () => ({
+      mutate: mocks.updateTextEncryption,
+      isPending: false
+    }),
     useRevealNode: () => mocks.revealNode
   };
 });
@@ -53,8 +70,16 @@ describe("useWorkbenchNodeActions", () => {
     vi.mocked(resolveNodePath).mockReset();
     vi.mocked(getNode).mockReset();
     mocks.downloadFile.mockReset().mockResolvedValue(undefined);
+    mocks.createNode.mockReset();
+    mocks.deleteNode.mockReset();
+    mocks.moveNode.mockReset();
+    mocks.replaceMetadata.mockReset();
     mocks.revealNode.mockReset();
     mocks.startUpload.mockReset();
+    mocks.updateNode.mockReset();
+    mocks.updateNodeSearchPolicy.mockReset();
+    mocks.updateNodeWriteLock.mockReset();
+    mocks.updateTextEncryption.mockReset();
   });
 
   it("opens a resolved markdown link through the active editor group and reveals its ancestors", async () => {
@@ -392,6 +417,114 @@ describe("useWorkbenchNodeActions", () => {
     });
   });
 
+  it("does not dispatch node mutations from any command path under an inherited lock", () => {
+    const activeSpace = space("space-1");
+    const lockedText = {
+      ...node("locked", activeSpace.id, "/Policies/locked.md"),
+      effective_write_locked: true,
+      write_lock_sources: [
+        { node_id: "folder-1", name: "Policies", path: "/Policies" }
+      ]
+    };
+    const lockedFolder = {
+      ...node("folder-1", activeSpace.id, "/Policies", "folder"),
+      has_children: true,
+      effective_write_locked: true
+    };
+    const unlockedFolder = {
+      ...node("folder-2", activeSpace.id, "/Elsewhere", "folder"),
+      has_children: true
+    };
+    const setDialog = vi.fn();
+    const file = new File(["data"], "source.bin");
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: lockedText,
+      canWriteActiveSpace: true,
+      setDialog
+    });
+
+    act(() => {
+      result.current.promptCreateNode("text");
+      result.current.promptCreateInFolder(lockedFolder, "text");
+      result.current.handleFileSelected(file);
+      result.current.uploadInFolder(lockedFolder, file);
+      result.current.promptRenameNode(lockedText);
+      result.current.promptMoveNode(lockedText);
+      result.current.moveNodeToFolder(lockedText, unlockedFolder);
+      result.current.moveNodeToFolder(unlockedFolder, lockedFolder);
+      result.current.confirmDeleteNode(lockedText);
+      result.current.promptReplaceMetadata();
+      result.current.setNodeSearchEnabled(false);
+      result.current.setTextEncryptionEnabled(true);
+    });
+
+    expect(setDialog).not.toHaveBeenCalled();
+    expect(mocks.startUpload).not.toHaveBeenCalled();
+    expect(mocks.moveNode).not.toHaveBeenCalled();
+    expect(mocks.updateNodeSearchPolicy).not.toHaveBeenCalled();
+    expect(mocks.updateTextEncryption).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dedicated direct-lock control available under an inherited lock", () => {
+    const activeSpace = space("space-1");
+    const lockedText = {
+      ...node("locked", activeSpace.id, "/Policies/locked.md"),
+      effective_write_locked: true,
+      write_lock_sources: [
+        { node_id: "folder-1", name: "Policies", path: "/Policies" }
+      ]
+    };
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: lockedText,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    act(() => result.current.setNodeWriteLocked(true));
+
+    expect(mocks.updateNodeWriteLock).toHaveBeenCalledWith({
+      node: lockedText,
+      enabled: true
+    });
+  });
+
+  it("allows sibling creation when only the active text is directly locked", async () => {
+    const activeSpace = space("space-1");
+    const directlyLockedText = {
+      ...node("locked", activeSpace.id, "/Policies/locked.md"),
+      parent_id: "folder-1",
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [
+        { node_id: "locked", name: "locked.md", path: "/Policies/locked.md" }
+      ]
+    };
+    const setDialog = vi.fn();
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: directlyLockedText,
+      canWriteActiveSpace: true,
+      setDialog
+    });
+
+    act(() => result.current.promptCreateNode("text"));
+
+    expect(setDialog).toHaveBeenCalledOnce();
+    const dialog = setDialog.mock.calls[0]?.[0];
+    expect(dialog).toMatchObject({ kind: "prompt" });
+    if (!dialog || dialog.kind !== "prompt") throw new Error("create prompt was not opened");
+
+    await act(async () => { await dialog.onSubmit("sibling.md"); });
+    expect(mocks.createNode).toHaveBeenCalledWith({
+      parentId: "folder-1",
+      kind: "text",
+      name: "sibling.md",
+      content: ""
+    });
+  });
+
   it("downloads a file through the browser download path", async () => {
     const activeSpace = space("space-1");
     const fileSummary = node(
@@ -467,7 +600,7 @@ function space(id: string): Space {
     user_mcp_enabled: true,
     default_search_enabled: true,
     default_text_encryption_enabled: false,
-    features: { text_encryption: true },
+    features: { text_encryption: true, write_lock: true },
     permission: "write",
     root_node_id: `${id}-root`,
     created_at: "2026-06-13T00:00:00Z",
@@ -486,7 +619,10 @@ function node(id: string, spaceId: string, path: string, kind: RestNode["kind"] 
     sort_order: 0,
     metadata: {},
     search_enabled: true,
+    write_locked: false,
+    write_lock_sources: [],
     has_children: false,
+    effective_write_locked: false,
     created_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_by: { id: "user-1", kind: "user", display_name: "User" },
     created_at: "2026-06-13T00:00:00Z",

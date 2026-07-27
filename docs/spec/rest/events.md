@@ -87,7 +87,8 @@ UI 동기화 전용 forward stream이다. `after_id`를 생략한 첫 요청은 
       "affected_parent_ids": ["parent-node-id"],
       "parent_scope_known": true,
       "path_changed": false,
-      "subtree_changed": false
+      "subtree_changed": false,
+      "write_lock_changed": false
     }
   ],
   "next_after_id": 2049,
@@ -106,4 +107,5 @@ Rules:
 - `parent_scope_known=false`는 과거 event에 parent 정보가 없어 children-family fallback이 필요함을 뜻한다.
 - `path_changed`는 create/copy/rename/move/delete로 path resolution 결과가 바뀌었음을 뜻한다.
 - `subtree_changed`는 folder rename/move 또는 recursive delete로 descendant cache도 바뀌었음을 뜻한다.
+- `write_lock_changed`는 node의 직접 write lock 설정이 바뀌었음을 뜻한다. 대상이 folder이면 하위 node의 상속 lock source가 바뀌므로 client는 node detail cache를 무효화한다.
 - token event가 더 이상 해당 Space에 없으면 event를 반환하지 않고 `resync_required=true`와 새 baseline을 반환한다.

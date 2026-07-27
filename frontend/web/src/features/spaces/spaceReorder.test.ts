@@ -12,7 +12,7 @@ function space(id: string, sort_order = 0): Space {
     user_mcp_enabled: true,
     default_search_enabled: true,
     default_text_encryption_enabled: false,
-    features: { text_encryption: true },
+    features: { text_encryption: true, write_lock: true },
     permission: "write",
     root_node_id: `root-${id}`,
     created_at: "2026-06-14T00:00:00Z",

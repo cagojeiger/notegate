@@ -1,0 +1,62 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import type { NodeSummary } from "../../api/types";
+import { NodeContextMenu } from "./NodeContextMenu";
+
+const lockedFolder: NodeSummary = {
+  id: "folder-1",
+  space_id: "space-1",
+  parent_id: "root-1",
+  name: "Policies",
+  kind: "folder",
+  path: "/Policies",
+  has_children: true,
+  effective_write_locked: true,
+  updated_at: "2026-07-26T00:00:00Z"
+};
+
+describe("NodeContextMenu", () => {
+  it("keeps read navigation available and disables every folder write action under a lock", async () => {
+    const user = userEvent.setup();
+    const onOpenNode = vi.fn();
+    const onClose = vi.fn();
+    const onCreateInFolder = vi.fn();
+    const onUploadInFolder = vi.fn();
+    const onRenameNode = vi.fn();
+    const onMoveNode = vi.fn();
+    const onDeleteNode = vi.fn();
+
+    render(
+      <NodeContextMenu
+        menu={{ x: 10, y: 10, node: lockedFolder }}
+        canWriteActiveSpace
+        onClose={onClose}
+        onOpenNode={onOpenNode}
+        onRenameNode={onRenameNode}
+        onMoveNode={onMoveNode}
+        onDeleteNode={onDeleteNode}
+        onCreateInFolder={onCreateInFolder}
+        onUploadInFolder={onUploadInFolder}
+      />
+    );
+
+    const menu = within(screen.getByRole("menu"));
+    expect(menu.getByRole("button", { name: "New folder" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "New text" })).toBeDisabled();
+    expect(menu.getByText("Upload file").closest("label")?.querySelector("input")).toBeDisabled();
+    expect(menu.getByRole("button", { name: "Rename" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "Move…" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "Delete" })).toBeDisabled();
+
+    await user.click(menu.getByRole("button", { name: "Open" }));
+    expect(onOpenNode).toHaveBeenCalledWith(lockedFolder);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onCreateInFolder).not.toHaveBeenCalled();
+    expect(onUploadInFolder).not.toHaveBeenCalled();
+    expect(onRenameNode).not.toHaveBeenCalled();
+    expect(onMoveNode).not.toHaveBeenCalled();
+    expect(onDeleteNode).not.toHaveBeenCalled();
+  });
+});

@@ -201,14 +201,28 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
   }
 
   function handleDragOver(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
-    if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    if (
+      !canWriteActiveSpace
+      || !draggedNode
+      || draggedNode.effective_write_locked
+      || node.effective_write_locked
+      || node.kind !== "folder"
+      || node.id === draggedNode.id
+    ) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     setDropFolderId(node.id);
   }
 
   function handleDrop(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
-    if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    if (
+      !canWriteActiveSpace
+      || !draggedNode
+      || draggedNode.effective_write_locked
+      || node.effective_write_locked
+      || node.kind !== "folder"
+      || node.id === draggedNode.id
+    ) return;
     event.preventDefault();
     onMoveNodeToFolder(draggedNode, node);
     clearDrag();
@@ -403,7 +417,7 @@ function VirtualTreeRow({
         onToggleFolder={onToggleFolder}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
-        onDragStartNode={canWriteActiveSpace ? onDragStartNode : undefined}
+        onDragStartNode={canWriteActiveSpace && !node.effective_write_locked ? onDragStartNode : undefined}
         onDragOverNode={onDragOverNode}
         onDropOnNode={onDropOnNode}
         onDragEndNode={onDragEndNode}

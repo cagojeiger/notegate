@@ -1,4 +1,4 @@
-import { ChevronRight, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, LockKeyhole } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button, Card, EmptyState, Modal } from "../../../shared/ui";
@@ -24,8 +24,9 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
     [childrenQuery.data, node.id]
   );
   const alreadyHere = node.parent_id === current.id;
+  const sourceLocked = node.effective_write_locked;
   async function moveHere() {
-    if (alreadyHere || submitting) return;
+    if (alreadyHere || sourceLocked || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -44,7 +45,7 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
       footer={
         <>
           <Button secondary onClick={onClose}>Cancel</Button>
-          <Button onClick={() => void moveHere()} disabled={alreadyHere || submitting}>Move here</Button>
+          <Button onClick={() => void moveHere()} disabled={alreadyHere || sourceLocked || submitting}>Move here</Button>
         </>
       }
     >
@@ -81,10 +82,14 @@ export function MoveDialog({ dialog, onClose }: { dialog: Extract<AppDialog, { k
                 key={folder.id}
                 type="button"
                 onClick={() => setStack((prev) => [...prev, { id: folder.id, name: folder.name }])}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-panel hover:text-text"
+                disabled={folder.effective_write_locked}
+                title={folder.effective_write_locked ? "Write locked" : undefined}
+                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-panel hover:text-text disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted"
               >
                 <span className="flex min-w-0 items-center gap-2"><Folder size={14} className="shrink-0" /><span className="truncate">{folder.name}</span></span>
-                <ChevronRight size={14} className="shrink-0 text-faint" />
+                {folder.effective_write_locked
+                  ? <LockKeyhole size={14} className="shrink-0 text-faint" aria-hidden="true" />
+                  : <ChevronRight size={14} className="shrink-0 text-faint" />}
               </button>
             ))}
             {childrenQuery.isFetchNextPageError ? (

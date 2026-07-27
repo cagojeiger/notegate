@@ -18,7 +18,7 @@
 ## Product goals
 
 - Goals: Make notes and files feel calm to read, make the gate/file-tree model recognizable, and make authentication and system state unambiguous.
-- Non-goals: Space Collections, README summaries, encryption/indexing controls in the Space Inspector, or additional authentication providers.
+- Non-goals: Space Collections, README summaries, or additional authentication providers.
 - Success signals: WCAG 2.2 AA contrast, consistent identity across favicon/login/title bar, readable light and dark themes, and no regression in existing UI tests.
 
 ## Personas and jobs
@@ -31,7 +31,7 @@
 
 - Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings. An active Unpinned Space remains in the rail until the user changes destination, without changing its user MCP visibility.
 - Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces.
-- Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; node content in the editor; details in the relevant Inspector; app state in the status bar or transient status surfaces. Pin is an MCP access state, not a Library grouping.
+- Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; node content in the editor; identity, change protection, settings, metadata, and secondary details in that order in the Node Inspector; app state in the status bar or transient status surfaces. Pin is an MCP access state, not a Library grouping.
 
 ## Design principles
 
@@ -54,8 +54,8 @@
 ## Components
 
 - Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`.
-- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, and usage-only Space Inspector.
-- Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected, dragging, Pinned, and Unpinned Space cards.
+- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls, and the Node Inspector change-protection state.
+- Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected, dragging, Pinned, and Unpinned Space cards; directly locked, inherited lock, and unlocked nodes.
 - Token/component ownership: `theme.css` owns semantic colors. Shared UI owns focus, controls, and repeated visual treatment. Feature components own data and state.
 
 ## Accessibility

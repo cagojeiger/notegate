@@ -126,6 +126,18 @@ export function updateNodeSearchPolicy(
   );
 }
 
+export function updateNodeWriteLock(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  enabled: boolean
+): Promise<RestNode> {
+  return client.put<RestNode>(
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/write-lock`,
+    { enabled }
+  );
+}
+
 export function moveNode(
   client: ApiClient,
   spaceId: string,

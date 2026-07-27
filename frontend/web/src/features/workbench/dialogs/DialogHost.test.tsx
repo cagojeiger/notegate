@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChildrenResponse, RestNode, Space } from "../../../api/types";
 import { DialogHost } from "./DialogHost";
+import type { AppDialog } from "./dialogTypes";
 
 const mocks = vi.hoisted(() => ({
   apiGet: vi.fn()
@@ -24,7 +25,10 @@ const textNode: RestNode = {
   sort_order: 0,
   metadata: { title: "note" },
   search_enabled: true,
+  write_locked: false,
+  write_lock_sources: [],
   has_children: false,
+  effective_write_locked: false,
   created_by: { id: "user-1", kind: "user", display_name: "User" },
   updated_by: { id: "user-1", kind: "user", display_name: "User" },
   created_at: "2026-06-13T00:00:00Z",
@@ -39,7 +43,7 @@ const space: Space = {
   user_mcp_enabled: true,
   default_search_enabled: true,
   default_text_encryption_enabled: false,
-  features: { text_encryption: true },
+  features: { text_encryption: true, write_lock: true },
   permission: "write",
   root_node_id: "root",
   created_at: "2026-06-13T00:00:00Z",
@@ -148,6 +152,61 @@ describe("DialogHost", () => {
     expect(await screen.findByRole("button", { name: "First folder" })).toBeVisible();
   });
 
+  it("does not enter an effectively write-locked move destination", async () => {
+    const user = userEvent.setup();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([
+      { ...folder("folder-1", "Locked folder"), effective_write_locked: true }
+    ], null));
+
+    renderMoveDialog();
+
+    const lockedFolder = await screen.findByRole("button", { name: "Locked folder" });
+    expect(lockedFolder).toBeDisabled();
+    expect(lockedFolder).toHaveAttribute("title", "Write locked");
+    await user.click(lockedFolder);
+
+    expect(mocks.apiGet).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Root")).toHaveClass("font-semibold");
+  });
+
+  it("does not submit a move when the source node is write-locked", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([], null));
+
+    renderMoveDialog({
+      node: { ...textNode, parent_id: "current-folder", effective_write_locked: true },
+      onMove
+    });
+
+    const moveHere = await screen.findByRole("button", { name: "Move here" });
+    expect(moveHere).toBeDisabled();
+    await user.click(moveHere);
+
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("keeps the move dialog open when the backend rejects a protected subtree", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn().mockRejectedValue(
+      new Error("subtree contains a directly write-locked node")
+    );
+    const onClose = vi.fn();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([], null));
+
+    renderMoveDialog({
+      node: { ...textNode, parent_id: "current-folder" },
+      onMove,
+      onClose
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Move here" }));
+
+    expect(await screen.findByText("subtree contains a directly write-locked node")).toBeVisible();
+    expect(onMove).toHaveBeenCalledWith("root");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("validates metadata JSON before saving", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
@@ -181,7 +240,8 @@ function folder(id: string, name: string): RestNode {
     name,
     kind: "folder",
     path: `/${name}`,
-    has_children: true
+    has_children: true,
+    effective_write_locked: false
   };
 }
 
@@ -198,7 +258,15 @@ function childrenPage(children: RestNode[], nextCursor: string | null): Children
   };
 }
 
-function renderMoveDialog() {
+function renderMoveDialog({
+  node = textNode,
+  onMove = vi.fn(),
+  onClose = vi.fn()
+}: {
+  node?: RestNode;
+  onMove?: Extract<AppDialog, { kind: "move" }>["onMove"];
+  onClose?: () => void;
+} = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   });
@@ -207,11 +275,11 @@ function renderMoveDialog() {
       <DialogHost
         dialog={{
           kind: "move",
-          node: textNode,
+          node,
           space,
-          onMove: vi.fn()
+          onMove
         }}
-        onClose={vi.fn()}
+        onClose={onClose}
       />
     </QueryClientProvider>
   );

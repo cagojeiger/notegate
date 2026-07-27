@@ -27,8 +27,8 @@ pub use notegate_model::files::{
     EditText, FileStats, FileView, LineEdit, ListNodesRequest, MoveNode, NodeListCursor,
     NodeListPage, NodeListSort, NodeReveal, NodeSummaryView, NodeView, PatchMode, PatchResult,
     PatchText, PendingObjectUpload, ReadContent, ReadResult, ReadText, ReadTextBody, StoredContent,
-    TextStats, TextView, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTarget,
-    WriteText, WriteTextBody,
+    TextStats, TextView, UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock,
+    UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::{
     AccountKind, FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
@@ -40,10 +40,10 @@ pub use preview::{BatchPreviewCandidate, MAX_BATCH_PREVIEW_PATH_BYTES, MAX_BATCH
 pub use read::MAX_BATCH_CHILDREN_PARENTS;
 pub use target::{Target, parse_target};
 pub use validation::FilesValidationError;
-pub(crate) use view::hydrate_node_views;
+pub(crate) use view::{hydrate_node_views, write_lock_sources_many};
 
 use notegate_db::FilesRepo;
-use notegate_model::{Node, NodeKind, Permission, TextObject};
+use notegate_model::{Caller, Channel, Node, NodeKind, Permission, TextObject};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
@@ -109,6 +109,29 @@ impl FilesService {
             .permission_for(space_id, account_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("space not found".to_owned()))?;
+        Ok(())
+    }
+
+    pub(super) async fn authorize_space_owner_dashboard_user(
+        &self,
+        caller: &Caller,
+        space_id: Uuid,
+    ) -> ServiceResult<()> {
+        if caller.account.kind != AccountKind::User || caller.channel != Channel::Browser {
+            return Err(ServiceError::Forbidden(
+                "only the space owner in the dashboard can change node write locks".to_owned(),
+            ));
+        }
+        if self
+            .store
+            .permission_for(space_id, caller.account_id())
+            .await?
+            .is_none()
+        {
+            return Err(ServiceError::Forbidden(
+                "only the space owner in the dashboard can change node write locks".to_owned(),
+            ));
+        }
         Ok(())
     }
 

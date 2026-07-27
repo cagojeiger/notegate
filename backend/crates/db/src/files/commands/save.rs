@@ -113,6 +113,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         tx.commit().await.map_err(map_sqlx_error)?;
         return Ok((node_row.into_node()?, current_text.into_text(crypto)?));
     }
+    checks::require_write_unlocked(&mut tx, space_id, node_id).await?;
 
     space_usage::apply_quota_delta(
         &mut tx,

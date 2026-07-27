@@ -9,14 +9,17 @@ import {
   moveNode,
   revealNode,
   updateNode,
-  updateNodeSearchPolicy
+  updateNodeSearchPolicy,
+  updateNodeWriteLock
 } from "../../api/nodes";
 import { updateTextEncryption } from "../../api/text";
 import {
   invalidateFolderSubtree,
+  invalidateFileChangeEvents,
   invalidateNodeLists,
   invalidateRecentNodes,
   invalidateText,
+  invalidateWriteLockState,
   removeDeletedNodeQueries,
   removeMarkdownImagePreviewQuery
 } from "../../api/queryInvalidation";
@@ -72,6 +75,25 @@ export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) =>
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
+      onUpdated(node);
+    }
+  });
+}
+
+export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => void) {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
+      updateNodeWriteLock(client, node.space_id, node.id, enabled),
+    onSuccess: (node) => {
+      updateNodeCaches(queryClient, node, () => node);
+      invalidateFileChangeEvents(queryClient, node.space_id);
+      if (node.kind === "folder") {
+        invalidateWriteLockState(queryClient, node.space_id);
+      } else {
+        invalidateRecentNodes(queryClient, node.space_id);
+      }
       onUpdated(node);
     }
   });

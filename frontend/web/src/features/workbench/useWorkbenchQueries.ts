@@ -6,6 +6,7 @@ export {
   useRevealNode,
   useUpdateNodeMutation,
   useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchNodeQueries";
 export { useLogout } from "./useWorkbenchSessionQueries";

@@ -6,7 +6,7 @@
 
 use notegate_core::limits::{self, Limits};
 use notegate_core::tier::{UserTier, effective_file_tree_limits};
-use notegate_core::{Error, Result};
+use notegate_core::{Error, Result, WriteLockScope};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -116,19 +116,48 @@ pub async fn live_node(
     }))
 }
 
-/// Assert the parent is a live folder and return its derived path bounds.
-pub(crate) async fn require_live_folder_path_bounds(
+/// Reject a mutation when the target or a live ancestor has a direct write lock.
+/// The space mutation gate serializes this check with lock changes.
+pub(crate) async fn require_write_unlocked(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+) -> Result<()> {
+    let locked: Option<Uuid> = sqlx::query_scalar(
+        "WITH RECURSIVE chain AS ( \
+            SELECT id, parent_id, write_locked \
+            FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+            UNION ALL \
+            SELECT n.id, n.parent_id, n.write_locked \
+            FROM nodes n JOIN chain c ON n.id = c.parent_id \
+            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+         ) \
+         SELECT id FROM chain WHERE write_locked LIMIT 1",
+    )
+    .bind(space_id)
+    .bind(node_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    if locked.is_some() {
+        return Err(Error::write_locked(WriteLockScope::TargetOrAncestor));
+    }
+    Ok(())
+}
+
+/// Assert the parent is a live, writable folder and return its derived path bounds.
+pub(crate) async fn require_writable_folder_path_bounds(
     tx: &mut PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
 ) -> Result<PathBounds> {
-    let row: Option<(String, i64, i64)> = sqlx::query_as(
+    let row: Option<(String, i64, i64, bool)> = sqlx::query_as(
         "WITH RECURSIVE chain AS ( \
-            SELECT id, parent_id, name, kind AS target_kind, 0::bigint AS depth \
+            SELECT id, parent_id, name, kind AS target_kind, write_locked, 0::bigint AS depth \
             FROM nodes \
             WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
             UNION ALL \
-            SELECT n.id, n.parent_id, n.name, c.target_kind, c.depth + 1 \
+            SELECT n.id, n.parent_id, n.name, c.target_kind, n.write_locked, c.depth + 1 \
             FROM nodes n JOIN chain c ON n.id = c.parent_id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
@@ -138,7 +167,8 @@ pub(crate) async fn require_live_folder_path_bounds(
                           + COALESCE(sum(octet_length(name)) \
                               FILTER (WHERE parent_id IS NOT NULL), 0) \
                           + GREATEST(count(*) FILTER (WHERE parent_id IS NOT NULL) - 1, 0) \
-                END::bigint AS path_bytes \
+                END::bigint AS path_bytes, \
+                COALESCE(bool_or(write_locked), false) AS has_direct_write_lock \
          FROM chain \
          GROUP BY target_kind",
     )
@@ -148,11 +178,14 @@ pub(crate) async fn require_live_folder_path_bounds(
     .await
     .map_err(map_sqlx_error)?;
 
-    let Some((kind, depth, bytes)) = row else {
+    let Some((kind, depth, bytes, has_direct_write_lock)) = row else {
         return Err(Error::not_found("parent node not found"));
     };
     if kind != "folder" {
         return Err(Error::validation("parent must be a folder"));
+    }
+    if has_direct_write_lock {
+        return Err(Error::write_locked(WriteLockScope::TargetOrAncestor));
     }
     Ok(PathBounds {
         depth: to_usize(depth, "depth")?,
@@ -160,22 +193,24 @@ pub(crate) async fn require_live_folder_path_bounds(
     })
 }
 
-/// Maximum depth and path bytes of a live descendant relative to `node_id`.
-pub(crate) async fn subtree_relative_bounds(
+/// Require an unlocked live subtree and return its bounds relative to `node_id`.
+pub(crate) async fn require_writable_subtree_bounds(
     tx: &mut PgConnection,
     space_id: Uuid,
     node_id: Uuid,
 ) -> Result<PathBounds> {
-    let (depth, bytes): (Option<i64>, Option<i64>) = sqlx::query_as(
+    let (depth, bytes, has_direct_write_lock): (Option<i64>, Option<i64>, bool) = sqlx::query_as(
         "WITH RECURSIVE subtree AS ( \
-            SELECT id, 0::bigint AS depth, 0::bigint AS path_bytes \
+            SELECT id, write_locked, 0::bigint AS depth, 0::bigint AS path_bytes \
             FROM nodes WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
             UNION ALL \
-            SELECT n.id, s.depth + 1, s.path_bytes + 1 + octet_length(n.name) \
+            SELECT n.id, n.write_locked, s.depth + 1, s.path_bytes + 1 + octet_length(n.name) \
             FROM nodes n JOIN subtree s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
-         SELECT max(depth)::bigint, max(path_bytes)::bigint FROM subtree",
+         SELECT max(depth)::bigint, max(path_bytes)::bigint, \
+                COALESCE(bool_or(write_locked), false) \
+         FROM subtree",
     )
     .bind(space_id)
     .bind(node_id)
@@ -185,10 +220,18 @@ pub(crate) async fn subtree_relative_bounds(
     let (Some(depth), Some(bytes)) = (depth, bytes) else {
         return Err(Error::not_found("node not found"));
     };
+    require_subtree_write_unlocked(has_direct_write_lock)?;
     Ok(PathBounds {
         depth: to_usize(depth, "depth")?,
         bytes: to_usize(bytes, "path byte length")?,
     })
+}
+
+pub(crate) fn require_subtree_write_unlocked(has_direct_write_lock: bool) -> Result<()> {
+    if has_direct_write_lock {
+        return Err(Error::write_locked(WriteLockScope::Descendant));
+    }
+    Ok(())
 }
 
 pub(crate) fn destination_bounds(

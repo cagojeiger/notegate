@@ -12,6 +12,7 @@ const pdf: NodeSummary = {
   kind: "file",
   path: "/report.pdf",
   has_children: false,
+  effective_write_locked: false,
   updated_at: "2026-07-25T00:00:00Z"
 };
 

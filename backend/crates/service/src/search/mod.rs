@@ -98,6 +98,7 @@ impl SearchService {
                 at_rest_encryption: candidate.at_rest_encryption,
             }),
             file: None,
+            write_lock_sources: Vec::new(),
         }
     }
 

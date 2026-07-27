@@ -7,6 +7,7 @@ import {
   invalidateNodeLists,
   invalidateRecentNodes,
   invalidateSpaceResources,
+  invalidateWriteLockState,
   removeMarkdownImageQueries,
   removeMarkdownImagePreviewQuery,
   removeDeletedNodeQueries,
@@ -195,6 +196,54 @@ describe("query invalidation", () => {
           JSON.stringify(queryKeys.children("space-1", "parent-1"))
       )
     ).toHaveLength(1);
+    expect(
+      queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
+    ).toBe(1);
+  });
+
+  it("invalidates descendant node details after an external folder write-lock change", async () => {
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+
+    await applyExternalFileChanges(queryClient, "space-1", [{
+      ...delta(11, "folder-1", ["root-1"]),
+      item_kind: "folder",
+      write_lock_changed: true
+    }]);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.nodes("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
+    expect(
+      queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
+    ).toBe(1);
+  });
+
+  it("refreshes every summary and detail affected by an inherited write lock", () => {
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+
+    invalidateWriteLockState(queryClient, "space-1");
+
+    expect(resetQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(resetQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.nodes("space-1")
+    });
     expect(
       queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
     ).toBe(1);

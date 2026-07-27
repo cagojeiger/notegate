@@ -76,9 +76,10 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         tx.commit().await.map_err(map_sqlx_error)?;
         return moved_row.into_node();
     }
+    checks::require_write_unlocked(&mut tx, space_id, node_id).await?;
 
     let destination =
-        checks::require_live_folder_path_bounds(&mut tx, space_id, new_parent_id).await?;
+        checks::require_writable_folder_path_bounds(&mut tx, space_id, new_parent_id).await?;
 
     // Cannot move into self or own descendant (recursive subtree membership).
     if moved_kind == "folder" {
@@ -110,7 +111,7 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         .await?;
 
     let subtree = if moved_kind == "folder" {
-        checks::subtree_relative_bounds(&mut tx, space_id, node_id).await?
+        checks::require_writable_subtree_bounds(&mut tx, space_id, node_id).await?
     } else {
         checks::PathBounds::default()
     };

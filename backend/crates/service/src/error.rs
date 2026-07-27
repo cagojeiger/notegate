@@ -2,7 +2,7 @@
 //!
 //! Feature services return this; the api layer maps it to HTTP status codes.
 
-use notegate_core::Error as CoreError;
+use notegate_core::{Error as CoreError, WriteLockScope};
 
 /// A service-layer failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -19,6 +19,9 @@ pub enum ServiceError {
     /// The operation conflicts with current state or a limit.
     #[error("{0}")]
     Conflict(String),
+    /// A direct or inherited node write lock blocks the mutation.
+    #[error("{scope}")]
+    WriteLocked { scope: WriteLockScope },
     /// A Space mutation must be retried after usage reconciliation finishes.
     #[error("space usage recalculation is in progress")]
     UsageRecalculationInProgress { retry_after_seconds: u64 },
@@ -36,6 +39,7 @@ impl From<CoreError> for ServiceError {
             CoreError::NotFound(message) => Self::NotFound(message),
             CoreError::Validation(message) => Self::InvalidInput(message),
             CoreError::Conflict(message) => Self::Conflict(message),
+            CoreError::WriteLocked { scope } => Self::WriteLocked { scope },
             CoreError::UsageRecalculationInProgress {
                 retry_after_seconds,
             } => Self::UsageRecalculationInProgress {

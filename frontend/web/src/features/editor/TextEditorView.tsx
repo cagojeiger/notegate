@@ -41,7 +41,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
     reloadExternalUpdate,
     dismissExternalUpdate
   } = useTextEditorSession({ node, latestNode, mode, canWrite: canWriteActiveSpace, onSetMode });
-  const copySource = mode === "edit" && canEditText ? draft : content;
+  const copySource = mode === "edit" ? draft : content;
   const format = inferTextFormat(node.name);
   const structured = isStructuredFormat(format);
   const showToast = useUiStore((state) => state.showToast);
@@ -118,7 +118,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Pencil size={15} />
         </IconButton>
       )}
-      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace} />
+      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={node.parent_id === null || !canWriteActiveSpace || node.effective_write_locked} />
     </>
   );
   return (
@@ -135,6 +135,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           {partialText ? (
             <div className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
               Loaded {partialText.returned_lines} of {partialText.line_count} lines. Editing is disabled until the full document is available.
+            </div>
+          ) : null}
+          {mode === "edit" && node.effective_write_locked ? (
+            <div className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+              This node is now locked. Unsaved edits are preserved here but cannot be saved.
             </div>
           ) : null}
           {conflict ? (
@@ -156,7 +161,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
             </div>
           ) : null}
           {mode === "edit" ? (
-            <LineNumberedTextArea value={draft} onChange={setDraft} />
+            <LineNumberedTextArea
+              value={draft}
+              readOnly={node.effective_write_locked}
+              onChange={setDraft}
+            />
           ) : (
             <TextPreview
               name={node.name}
@@ -177,7 +186,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           canCopyContent={canCopyContent}
           canEditText={canEditText}
           canSave={canSave}
-          canMutateNode={node.parent_id !== null && canWriteActiveSpace}
+          canMutateNode={node.parent_id !== null && canWriteActiveSpace && !node.effective_write_locked}
           canOpenInNewGroup={canOpenInNewGroup}
           canCloseGroup={canClose}
           onClose={() => setEditorMenu(null)}
@@ -284,7 +293,15 @@ function EditorContextMenu({
   );
 }
 
-function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function LineNumberedTextArea({
+  value,
+  readOnly = false,
+  onChange
+}: {
+  value: string;
+  readOnly?: boolean;
+  onChange: (value: string) => void;
+}) {
   const gutterRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lineCount = Math.max(1, value.split("\n").length);
@@ -301,6 +318,7 @@ function LineNumberedTextArea({ value, onChange }: { value: string; onChange: (v
       <textarea
         ref={textareaRef}
         aria-label="Edit text content"
+        readOnly={readOnly}
         wrap="off"
         onContextMenu={(event) => event.stopPropagation()}
         className="min-h-0 flex-1 resize-none overflow-auto bg-transparent px-5 py-8 font-mono text-sm leading-6 text-text outline-none"

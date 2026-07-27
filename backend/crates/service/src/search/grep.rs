@@ -192,6 +192,16 @@ impl SearchService {
         } else {
             None
         };
+        if !items.is_empty() {
+            let node_ids: Vec<_> = items.iter().map(|item| item.node.node.id).collect();
+            let mut write_lock_sources =
+                crate::files::write_lock_sources_many(&self.store, space_id, &node_ids).await?;
+            for item in &mut items {
+                item.node.write_lock_sources = write_lock_sources
+                    .remove(&item.node.node.id)
+                    .unwrap_or_default();
+            }
+        }
 
         Ok(GrepPage {
             items,

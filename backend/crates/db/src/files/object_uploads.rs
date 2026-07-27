@@ -7,7 +7,7 @@ use notegate_model::files::{
 };
 use notegate_model::{FileEncryptionMode, FileObject, Node};
 use serde_json::Value;
-use sqlx::{FromRow, PgPool};
+use sqlx::{Executor, FromRow, PgPool, Postgres};
 use uuid::Uuid;
 
 use super::commands::{checks, create};
@@ -231,6 +231,18 @@ pub async fn request_expiry(
     space_id: Uuid,
     requested_by: Uuid,
 ) -> Result<bool> {
+    transition_to_expire_pending(pool, id, space_id, requested_by).await
+}
+
+async fn transition_to_expire_pending<'e, E>(
+    executor: E,
+    id: Uuid,
+    space_id: Uuid,
+    requested_by: Uuid,
+) -> Result<bool>
+where
+    E: Executor<'e, Database = Postgres>,
+{
     let result = sqlx::query(
         "UPDATE object_storage_objects \
          SET state = 'expire_pending', retry_after = NULL, last_error_code = NULL \
@@ -240,7 +252,7 @@ pub async fn request_expiry(
     .bind(id)
     .bind(space_id)
     .bind(requested_by)
-    .execute(pool)
+    .execute(executor)
     .await
     .map_err(map_sqlx_error)?;
     Ok(result.rows_affected() == 1)
@@ -298,7 +310,19 @@ pub async fn attach(
         .parent_node_id
         .ok_or_else(|| Error::not_found("upload parent no longer exists"))?;
     let locked = checks::lock_space_context(&mut tx, space_id, limits).await?;
-    create::prepare_create(&mut tx, space_id, parent_id, &upload.name, locked.limits).await?;
+    if let Err(error) =
+        create::prepare_create(&mut tx, space_id, parent_id, &upload.name, locked.limits).await
+    {
+        if matches!(&error, Error::WriteLocked { .. }) {
+            if !transition_to_expire_pending(&mut *tx, id, space_id, requested_by).await? {
+                return Err(Error::internal(
+                    "write-locked file upload could not be queued for cleanup",
+                ));
+            }
+            tx.commit().await.map_err(map_sqlx_error)?;
+        }
+        return Err(error);
+    }
     space_usage::apply_quota_delta(
         &mut tx,
         &locked.gate,

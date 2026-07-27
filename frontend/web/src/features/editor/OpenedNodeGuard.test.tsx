@@ -22,7 +22,10 @@ const node: RestNode = {
   sort_order: 0,
   metadata: {},
   search_enabled: true,
+  write_locked: false,
+  write_lock_sources: [],
   has_children: false,
+  effective_write_locked: false,
   created_by: { id: "user-1", kind: "user", display_name: "User" },
   updated_by: { id: "user-1", kind: "user", display_name: "User" },
   created_at: "2026-06-13T00:00:00Z",
@@ -51,6 +54,26 @@ describe("OpenedNodeGuard", () => {
 
     expect(screen.getByText("renamed.md")).toBeInTheDocument();
     await waitFor(() => expect(useUiStore.getState().editorGroups[0].node?.name).toBe("renamed.md"));
+  });
+
+  it("propagates an inherited write lock into an already opened editor group", async () => {
+    const locked = {
+      ...node,
+      effective_write_locked: true,
+      write_lock_sources: [
+        { node_id: "folder-1", name: "Policies", path: "/Policies" }
+      ]
+    };
+    vi.mocked(useNodeFreshness).mockReturnValue({ data: locked, error: null } as never);
+
+    renderGuard();
+
+    await waitFor(() => {
+      expect(useUiStore.getState().editorGroups[0].node).toMatchObject({
+        effective_write_locked: true,
+        write_lock_sources: locked.write_lock_sources
+      });
+    });
   });
 
   it("clears an opened editor group when the node was deleted elsewhere", async () => {
