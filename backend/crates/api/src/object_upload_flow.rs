@@ -147,13 +147,10 @@ pub async fn begin_upload(
     })
 }
 
-pub async fn prepare_parts(
-    state: &AppState,
-    account_id: Uuid,
-    upload: PendingObjectUpload,
-    part_numbers: Vec<i32>,
-    transfer_ttl: Duration,
-) -> Result<Vec<UploadPartTransfer>, UploadFlowError> {
+fn plan_upload_parts(
+    upload: &PendingObjectUpload,
+    part_numbers: &[i32],
+) -> Result<Vec<(i32, i64)>, UploadFlowError> {
     if part_numbers.is_empty() {
         return Err(invalid("part_numbers must not be empty"));
     }
@@ -175,14 +172,25 @@ pub async fn prepare_parts(
     let part_size = upload.multipart_part_size.ok_or(UploadFlowError::Internal(
         "multipart upload state is incomplete",
     ))?;
-    let prepared_parts = part_numbers
-        .into_iter()
+    part_numbers
+        .iter()
+        .copied()
         .map(|part_number| {
             multipart_part_len(upload.byte_len, part_size, part_number)
                 .map(|content_length| (part_number, content_length))
                 .ok_or_else(|| invalid("part number is outside the upload range"))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect()
+}
+
+pub async fn prepare_parts(
+    state: &AppState,
+    account_id: Uuid,
+    upload: PendingObjectUpload,
+    part_numbers: Vec<i32>,
+    transfer_ttl: Duration,
+) -> Result<Vec<UploadPartTransfer>, UploadFlowError> {
+    let prepared_parts = plan_upload_parts(&upload, &part_numbers)?;
 
     let upload = state
         .files
@@ -388,16 +396,15 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn completed_parts_require_every_part_exactly_once() -> Result<(), UploadFlowError> {
-        let upload = PendingObjectUpload {
+    fn multipart_upload(byte_len: i64) -> PendingObjectUpload {
+        PendingObjectUpload {
             id: Uuid::new_v4(),
             object_key: "objects/test".to_owned(),
             space_id: Uuid::new_v4(),
             parent_node_id: Uuid::new_v4(),
             requested_by_account_id: Uuid::new_v4(),
             name: "large.bin".to_owned(),
-            byte_len: MULTIPART_PART_SIZE + 1,
+            byte_len,
             media_type: "application/octet-stream".to_owned(),
             original_filename: None,
             encryption_mode: FileEncryptionMode::None,
@@ -406,7 +413,105 @@ mod tests {
             multipart_upload_id: Some("provider-id".to_owned()),
             multipart_part_size: Some(MULTIPART_PART_SIZE),
             node_id: None,
-        };
+        }
+    }
+
+    #[test]
+    fn part_plan_rejects_invalid_batches_before_upload_state() {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 1);
+        assert!(matches!(
+            plan_upload_parts(&upload, &[]),
+            Err(UploadFlowError::InvalidInput(message))
+                if message == "part_numbers must not be empty"
+        ));
+
+        let too_many_duplicates = vec![1; PART_URL_BATCH_MAX + 1];
+        assert!(matches!(
+            plan_upload_parts(&upload, &too_many_duplicates),
+            Err(UploadFlowError::InvalidInput(message))
+                if message == "part_numbers accepts at most 16 values"
+        ));
+
+        let mut single_upload = upload;
+        single_upload.upload_mode = ObjectUploadMode::Single;
+        assert!(matches!(
+            plan_upload_parts(&single_upload, &[1, 1]),
+            Err(UploadFlowError::InvalidInput(message))
+                if message == "part_numbers must not contain duplicates"
+        ));
+    }
+
+    #[test]
+    fn part_plan_rejects_invalid_upload_state_in_order() {
+        let mut upload = multipart_upload(MULTIPART_PART_SIZE + 1);
+        upload.upload_mode = ObjectUploadMode::Single;
+        assert!(matches!(
+            plan_upload_parts(&upload, &[1]),
+            Err(UploadFlowError::InvalidInput(message))
+                if message == "upload is not multipart"
+        ));
+
+        upload.upload_mode = ObjectUploadMode::Multipart;
+        upload.node_id = Some(Uuid::new_v4());
+        upload.multipart_part_size = None;
+        assert!(matches!(
+            plan_upload_parts(&upload, &[1]),
+            Err(UploadFlowError::InvalidInput(message))
+                if message == "upload is already complete"
+        ));
+
+        upload.node_id = None;
+        assert!(matches!(
+            plan_upload_parts(&upload, &[1]),
+            Err(UploadFlowError::Internal(
+                "multipart upload state is incomplete"
+            ))
+        ));
+    }
+
+    #[test]
+    fn part_plan_rejects_numbers_outside_the_upload_range() {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 1);
+
+        for part_number in [0, 3] {
+            assert!(matches!(
+                plan_upload_parts(&upload, &[part_number]),
+                Err(UploadFlowError::InvalidInput(message))
+                    if message == "part number is outside the upload range"
+            ));
+        }
+    }
+
+    #[test]
+    fn part_plan_preserves_order_and_content_lengths() -> Result<(), UploadFlowError> {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 7);
+
+        assert_eq!(
+            plan_upload_parts(&upload, &[2, 1])?,
+            vec![(2, 7), (1, MULTIPART_PART_SIZE)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn part_plan_accepts_the_maximum_batch_size() -> Result<(), UploadFlowError> {
+        let upload = multipart_upload(MULTIPART_PART_SIZE * PART_URL_BATCH_MAX as i64);
+        let part_numbers = (1..=PART_URL_BATCH_MAX as i32).rev().collect::<Vec<_>>();
+
+        let planned = plan_upload_parts(&upload, &part_numbers)?;
+
+        assert_eq!(planned.len(), PART_URL_BATCH_MAX);
+        assert_eq!(
+            planned.first(),
+            Some(&(PART_URL_BATCH_MAX as i32, MULTIPART_PART_SIZE))
+        );
+        assert_eq!(planned.last(), Some(&(1, MULTIPART_PART_SIZE)));
+        Ok(())
+    }
+
+    #[test]
+    fn completed_parts_require_every_part_exactly_once() -> Result<(), UploadFlowError> {
+        let upload = multipart_upload(MULTIPART_PART_SIZE + 1);
         let valid = vec![
             CompletedUploadPart {
                 part_number: 2,
