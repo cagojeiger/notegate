@@ -28,7 +28,7 @@ type WorkbenchIndex = {
   spaces: { spaceId: string; updatedAt: number }[];
 };
 
-type WorkbenchPanelState = {
+export type WorkbenchPanelState = {
   primarySidebarOpen: boolean;
   auxiliaryOpen: boolean;
 };
