@@ -128,6 +128,41 @@ describe("DialogHost", () => {
     expect(await screen.findByRole("button", { name: "First folder" })).toBeVisible();
   });
 
+  it("shows only valid move destinations and disables the current parent", async () => {
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([
+      folder(textNode.id, "Source folder"),
+      { ...textNode, id: "note-2", name: "other.md", path: "/other.md" },
+      folder("archive", "Archive")
+    ], null));
+
+    renderMoveDialog();
+
+    expect(await screen.findByRole("button", { name: "Archive" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Source folder" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "other.md" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move here" })).toBeDisabled();
+    expect(screen.getByText(/already here/i)).toBeVisible();
+  });
+
+  it("moves to a selected folder and closes the dialog", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    mocks.apiGet
+      .mockResolvedValueOnce(childrenPage([folder("archive", "Archive")], null))
+      .mockResolvedValueOnce(childrenPage([], null));
+
+    renderMoveDialog({ onMove, onClose });
+
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
+    await screen.findByText("No subfolders here");
+    await user.click(screen.getByRole("button", { name: "Move here" }));
+
+    expect(onMove).toHaveBeenCalledOnce();
+    expect(onMove).toHaveBeenCalledWith("archive");
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
   it("does not enter an effectively write-locked move destination", async () => {
     const user = userEvent.setup();
     mocks.apiGet.mockResolvedValueOnce(childrenPage([
