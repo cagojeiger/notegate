@@ -1,44 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { RestNode, Space } from "../../../api/types";
+import type { RestNode } from "../../../api/types";
+import { makeRestNode, makeSpace } from "../../../test/fixtures";
 import { createNodeDialog, deleteNodeDialog, renameNodeDialog, renameSpaceDialog, uploadFileDialog } from "./appDialogs";
 
-const space: Space = {
-  id: "space-1",
+const space = makeSpace({
   name: "Personal",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 function node(overrides: Partial<RestNode> = {}): RestNode {
-  return {
-    id: "node-1",
+  return makeRestNode({
     space_id: space.id,
     parent_id: space.root_node_id,
-    name: "note.md",
-    kind: "text",
-    path: "/note.md",
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: false,
-    effective_write_locked: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z",
     ...overrides
-  };
+  });
 }
 
 describe("app dialog builders", () => {

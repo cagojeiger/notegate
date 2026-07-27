@@ -1,7 +1,8 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { NodeSummary, Space } from "../../api/types";
+import type { NodeSummary } from "../../api/types";
+import { makeNodeSummary, makeSpace } from "../../test/fixtures";
 import { RecentSection } from "./RecentSection";
 
 const mocks = vi.hoisted(() => ({
@@ -13,20 +14,7 @@ vi.mock("./useNodeQueries", () => ({
   useRecentNodesQuery: mocks.useRecentNodesQuery
 }));
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
-  updated_at: "2026-07-01T00:00:00Z"
-};
+const space = makeSpace();
 
 describe("RecentSection", () => {
   beforeEach(() => {
@@ -127,15 +115,11 @@ function page(nodes: NodeSummary[], hasMore: boolean, nextCursor: string | null)
 }
 
 function node(id: string): NodeSummary {
-  return {
+  return makeNodeSummary({
     id,
     space_id: space.id,
     parent_id: space.root_node_id,
     name: id,
-    kind: "text",
-    path: `/${id}`,
-    has_children: false,
-    effective_write_locked: false,
-    updated_at: "2026-07-25T00:00:00Z"
-  };
+    path: `/${id}`
+  });
 }

@@ -2,9 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ReadTextResponse, RestNode } from "../../api/types";
+import type { ReadTextResponse } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
+import { makeRestNode } from "../../test/fixtures";
 import { TextEditorView } from "./TextEditorView";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 import { useMarkdownImageLoader } from "./useFilePreviewQueries";
@@ -22,25 +23,10 @@ vi.mock("./useFilePreviewQueries", () => ({
   useMarkdownImageLoader: vi.fn()
 }));
 
-const node: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
-  parent_id: "root-1",
+const node = makeRestNode({
   name: "large.md",
-  kind: "text",
   path: "/large.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  write_locked: false,
-  write_lock_sources: [],
-  has_children: false,
-  effective_write_locked: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 const partialText: ReadTextResponse = {
   node: { id: node.id, path: node.path },

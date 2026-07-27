@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { NodeSummary, RestNode } from "../../api/types";
+import { makeNodeSummary, makeRestNode } from "../../test/fixtures";
 import {
   canCreateInFolder,
   canMoveNodeToFolder,
@@ -9,27 +10,20 @@ import {
   resolveNodeCreateTarget
 } from "./nodeWriteAccess";
 
-const node: NodeSummary = {
+const node = makeNodeSummary({
   id: "text-1",
-  space_id: "space-1",
   parent_id: "folder-1",
-  name: "note.md",
-  kind: "text",
   path: "/Policies/note.md",
-  has_children: false,
-  effective_write_locked: false,
-  updated_at: "2026-07-27T00:00:00Z"
-};
+});
 
-const folder: NodeSummary = {
-  ...node,
+const folder = makeNodeSummary({
   id: "folder-1",
   parent_id: "root-1",
   name: "Policies",
   kind: "folder",
   path: "/Policies",
   has_children: true
-};
+});
 
 describe("node write access", () => {
   it("requires both space write access and an unlocked node", () => {
@@ -100,16 +94,8 @@ function restNode(
   summary: NodeSummary,
   overrides: Partial<RestNode> = {}
 ): RestNode {
-  return {
+  return makeRestNode({
     ...summary,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-07-27T00:00:00Z",
     ...overrides
-  };
+  });
 }

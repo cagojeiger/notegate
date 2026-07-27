@@ -4,7 +4,7 @@ import type { PropsWithChildren } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
-import type { RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import { useNodeFreshness } from "../editor/useEditorQueries";
 import { useNodeChildrenQuery, useRecentNodesQuery } from "../nodes/useNodeQueries";
 
@@ -52,25 +52,7 @@ describe("workspace resource freshness", () => {
   });
 });
 
-const node: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
-  parent_id: "root-1",
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  write_locked: false,
-  write_lock_sources: [],
-  has_children: false,
-  effective_write_locked: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-07-24T00:00:00Z",
-  updated_at: "2026-07-24T00:00:00Z"
-};
+const node = makeRestNode();
 
 function page() {
   return {

@@ -2,24 +2,13 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Space } from "../api/types";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
+import { makeSpace } from "../test/fixtures";
 import { TitleBar } from "./TitleBar";
 
-const space: Space = {
-  id: "space-1",
+const space = makeSpace({
   name: "Personal",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 function renderTitleBar(overrides: Partial<Parameters<typeof TitleBar>[0]> = {}) {
   const props = {

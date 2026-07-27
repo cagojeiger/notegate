@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { Space } from "../api/types";
 import type { SpaceUsage } from "../api/usage";
+import { makeSpace } from "../test/fixtures";
 import { StatusBar } from "./StatusBar";
 
 describe("StatusBar", () => {
@@ -24,20 +24,9 @@ describe("StatusBar", () => {
   });
 });
 
-const space: Space = {
-  id: "space-1",
+const space = makeSpace({
   name: "Personal",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
-  updated_at: "2026-07-01T00:00:00Z"
-};
+});
 
 const usage: SpaceUsage = {
   id: space.id,

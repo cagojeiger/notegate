@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Space } from "../../api/types";
+import { makeSpace } from "../../test/fixtures";
 import { SpaceLibrary } from "./SpaceLibrary";
 
 const mocks = vi.hoisted(() => ({
@@ -25,34 +26,24 @@ vi.mock("./useSpaceQueries", () => ({
 }));
 
 const spaces: Space[] = [
-  {
+  makeSpace({
     id: "daily",
-    name: "Daily",
     sort_order: 1000,
-    navigation_pinned: true,
-    user_mcp_enabled: true,
-    default_search_enabled: true,
-    default_text_encryption_enabled: false,
-    features: { text_encryption: true, write_lock: true },
-    permission: "write",
     root_node_id: "daily-root",
-    created_at: "2026-07-01T00:00:00Z",
     updated_at: "2026-07-25T00:00:00Z"
-  },
-  {
+  }),
+  makeSpace({
     id: "private",
     name: "Private",
     sort_order: 2000,
     navigation_pinned: false,
     user_mcp_enabled: false,
     default_search_enabled: false,
-    default_text_encryption_enabled: false,
     features: { text_encryption: false, write_lock: false },
-    permission: "write",
     root_node_id: "private-root",
     created_at: "2026-07-02T00:00:00Z",
     updated_at: "2026-07-24T00:00:00Z"
-  }
+  })
 ];
 
 function renderLibrary(options: {

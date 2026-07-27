@@ -3,7 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChildrenResponse, RestNode, Space } from "../../../api/types";
+import type { ChildrenResponse } from "../../../api/types";
+import { makeRestNode, makeSpace } from "../../../test/fixtures";
 import { DialogHost } from "./DialogHost";
 import type { AppDialog } from "./dialogTypes";
 
@@ -15,40 +16,15 @@ vi.mock("../../../api/ApiProvider", () => ({
   useApiClient: () => ({ get: mocks.apiGet })
 }));
 
-const textNode: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
+const textNode = makeRestNode({
   parent_id: "root",
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
   metadata: { title: "note" },
-  search_enabled: true,
-  write_locked: false,
-  write_lock_sources: [],
-  has_children: false,
-  effective_write_locked: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
-const space: Space = {
-  id: "space-1",
+const space = makeSpace({
   name: "Space",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
   root_node_id: "root",
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 describe("DialogHost", () => {
   beforeEach(() => {

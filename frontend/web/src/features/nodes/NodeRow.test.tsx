@@ -1,20 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { NodeSummary } from "../../api/types";
+import { makeNodeSummary } from "../../test/fixtures";
 import { NodeRow } from "./NodeRow";
 
-const pdf: NodeSummary = {
+const pdf = makeNodeSummary({
   id: "pdf-1",
-  space_id: "space-1",
-  parent_id: "root-1",
   name: "report.pdf",
   kind: "file",
-  path: "/report.pdf",
-  has_children: false,
-  effective_write_locked: false,
-  updated_at: "2026-07-25T00:00:00Z"
-};
+  path: "/report.pdf"
+});
 
 describe("NodeRow", () => {
   it("marks an opened file with the shared current indicator", () => {

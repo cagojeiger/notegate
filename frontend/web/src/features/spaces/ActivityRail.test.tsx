@@ -1,23 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Space } from "../../api/types";
+import { makeSpace } from "../../test/fixtures";
 import { ActivityRail } from "./ActivityRail";
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-25T00:00:00Z",
-  updated_at: "2026-07-25T00:00:00Z"
-};
+const space = makeSpace();
 
 describe("ActivityRail", () => {
   it("marks the selected Space as current in the workbench", () => {

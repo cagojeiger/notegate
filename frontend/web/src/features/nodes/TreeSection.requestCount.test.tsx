@@ -7,7 +7,8 @@ import type { ApiClient } from "../../api/client";
 import { updateNodeCaches } from "../../api/nodeCache";
 import { applyExternalFileChanges } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
-import type { ChildrenResponse, RestNode, Space } from "../../api/types";
+import type { ChildrenResponse, RestNode } from "../../api/types";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { TreeSection } from "./TreeSection";
 import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
 
@@ -35,20 +36,7 @@ vi.mock("@tanstack/react-virtual", () => ({
   })
 }));
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
-  updated_at: "2026-07-01T00:00:00Z"
-};
+const space = makeSpace();
 
 describe("TreeSection request count", () => {
   beforeEach(() => {
@@ -412,23 +400,13 @@ function node(
   path = `/${id}${kind === "text" ? ".md" : ""}`
 ): RestNode {
   const name = kind === "text" ? `${id}.md` : id;
-  return {
+  return makeRestNode({
     id,
     space_id: space.id,
     parent_id: parentId,
     name,
     kind,
     path,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: kind === "folder",
-    effective_write_locked: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-01T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }

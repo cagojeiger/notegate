@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RestNode } from "../api/types";
+import { makeRestNode } from "../test/fixtures";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
@@ -289,26 +289,11 @@ describe("AuxiliarySidebar", () => {
   });
 });
 
-const textNode: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
-  parent_id: "root-1",
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  write_locked: false,
-  write_lock_sources: [],
-  has_children: false,
-  effective_write_locked: false,
+const textNode = makeRestNode({
   byte_len: 1842,
   line_count: 42,
   text_storage_format: "plain",
   text_at_rest_encryption: "none",
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
   created_at: "2026-07-26T00:00:00Z",
   updated_at: "2026-07-26T00:00:00Z"
-};
+});

@@ -8,6 +8,7 @@ import { ApiError } from "../../api/errors";
 import { getNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import {
   filePreviewKindForNode,
   useFilePreviewUrl,
@@ -30,25 +31,11 @@ vi.mock("../../api/nodes", () => ({
   getNode: vi.fn()
 }));
 
-const sourceNode: RestNode = {
+const sourceNode = makeRestNode({
   id: "source-1",
-  space_id: "space-1",
-  parent_id: "root-1",
   name: "source.md",
-  kind: "text",
   path: "/docs/source.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  write_locked: false,
-  write_lock_sources: [],
-  has_children: false,
-  effective_write_locked: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 describe("useMarkdownImageLoader", () => {
   beforeEach(() => {
@@ -367,7 +354,7 @@ function batchPreview(path: string, nodeId = "image-1") {
 }
 
 function fileNode(overrides: Partial<RestNode>): RestNode {
-  return {
+  return makeRestNode({
     ...sourceNode,
     id: "file-1",
     kind: "file",
@@ -376,5 +363,5 @@ function fileNode(overrides: Partial<RestNode>): RestNode {
     media_type: "image/png",
     encryption_mode: "none",
     ...overrides
-  };
+  });
 }

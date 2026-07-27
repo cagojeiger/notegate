@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../api/types";
 import { MAX_EDITOR_GROUPS, WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
+import { makeRestNode } from "../test/fixtures";
 import { useUiStore } from "./uiStore";
 import { MAX_EDITOR_NAVIGATION_ENTRIES } from "./uiStoreReducers";
 import { MAX_WORKBENCH_SNAPSHOTS, WORKBENCH_INDEX_KEY, WORKBENCH_PANEL_STATE_KEY, clearPersistedSpaceWorkbench, clearPersistedWorkbenches, persistSpaceWorkbench, workbenchSpaceKey } from "./workbenchStorage";
@@ -11,27 +12,15 @@ function resetStore() {
 }
 
 function node(id: string, name = `${id}.md`, spaceId = "space-1"): RestNode {
-  return {
+  return makeRestNode({
     id,
     space_id: spaceId,
     parent_id: `${spaceId}-root`,
     name,
-    kind: "text",
     path: `/${name}`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: false,
-    effective_write_locked: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z",
     byte_len: 12,
     line_count: 1
-  };
+  });
 }
 
 describe("useUiStore", () => {

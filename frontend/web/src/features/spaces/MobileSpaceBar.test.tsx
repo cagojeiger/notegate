@@ -3,37 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Space } from "../../api/types";
+import { makeSpace } from "../../test/fixtures";
 import { MobileSpaceBar } from "./MobileSpaceBar";
 
 const spaces: Space[] = [
-  {
-    id: "space-1",
-    name: "Daily",
-    sort_order: 0,
-    navigation_pinned: true,
-    user_mcp_enabled: true,
-    default_search_enabled: true,
-    default_text_encryption_enabled: false,
-    features: { text_encryption: true, write_lock: true },
-    permission: "write",
-    root_node_id: "root-1",
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  },
-  {
+  makeSpace(),
+  makeSpace({
     id: "space-2",
     name: "Work",
     sort_order: 1,
-    navigation_pinned: true,
-    user_mcp_enabled: true,
-    default_search_enabled: true,
-    default_text_encryption_enabled: false,
-    features: { text_encryption: true, write_lock: true },
-    permission: "write",
-    root_node_id: "root-2",
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  }
+    root_node_id: "root-2"
+  })
 ];
 
 describe("MobileSpaceBar", () => {

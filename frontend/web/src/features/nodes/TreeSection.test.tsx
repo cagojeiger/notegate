@@ -1,7 +1,8 @@
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../api/types";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { TreeSection } from "./TreeSection";
 import type { TreeKeyboardNavigation } from "./types";
 
@@ -46,20 +47,7 @@ vi.mock("@tanstack/react-virtual", () => {
   };
 });
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true, write_lock: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
-  updated_at: "2026-07-01T00:00:00Z"
-};
+const space = makeSpace();
 
 describe("TreeSection", () => {
   beforeEach(() => {
@@ -270,23 +258,13 @@ function query(children: RestNode[]) {
 
 function node(id: string, kind: RestNode["kind"], parentId = space.root_node_id): RestNode {
   const name = kind === "folder" ? id : `${id}.${kind === "text" ? "md" : "bin"}`;
-  return {
+  return makeRestNode({
     id,
     space_id: space.id,
     parent_id: parentId,
     name,
     kind,
     path: `/${name}`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: kind === "folder",
-    effective_write_locked: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-01T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }

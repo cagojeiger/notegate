@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EditorArea } from "./EditorArea";
 import type { RestNode } from "../../api/types";
 import type { EditorGroup } from "../../stores/uiStore";
+import { makeRestNode } from "../../test/fixtures";
 
 vi.mock("./OpenedNodeGuard", () => ({
   OpenedNodeGuard: ({ node, children }: { node: RestNode; children: (node: RestNode) => ReactNode }) => children(node)
@@ -138,29 +139,16 @@ describe("EditorArea", () => {
 });
 
 function fileNode(): RestNode {
-  return {
+  return makeRestNode({
     id: "file-1",
-    space_id: "space-1",
-    parent_id: "root-1",
     name: "document.pdf",
     kind: "file",
     path: "/document.pdf",
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: false,
-    effective_write_locked: false,
     byte_len: 29,
     media_type: "application/pdf",
     detected_media_type: "application/pdf",
     preview_available: false,
     file_preview_kind: "pdf",
-    encryption_mode: "none",
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    encryption_mode: "none"
+  });
 }

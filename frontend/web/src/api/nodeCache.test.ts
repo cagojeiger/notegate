@@ -1,6 +1,7 @@
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
+import { makeRestNode } from "../test/fixtures";
 import { updateNodeCaches } from "./nodeCache";
 import { queryKeys } from "./queryKeys";
 import type { ChildrenResponse, RestNode, RestNodeListResponse } from "./types";
@@ -104,25 +105,12 @@ describe("updateNodeCaches", () => {
 });
 
 function node(id: string): RestNode {
-  return {
+  return makeRestNode({
     id,
-    space_id: "space-1",
-    parent_id: "root-1",
     name: `${id}.png`,
     kind: "file",
-    path: `/${id}.png`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: false,
-    effective_write_locked: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    path: `/${id}.png`
+  });
 }
 
 function page() {

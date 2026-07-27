@@ -2,20 +2,17 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { NodeSummary } from "../../api/types";
+import { makeNodeSummary } from "../../test/fixtures";
 import { NodeContextMenu } from "./NodeContextMenu";
 
-const lockedFolder: NodeSummary = {
+const lockedFolder = makeNodeSummary({
   id: "folder-1",
-  space_id: "space-1",
-  parent_id: "root-1",
   name: "Policies",
   kind: "folder",
   path: "/Policies",
   has_children: true,
-  effective_write_locked: true,
-  updated_at: "2026-07-26T00:00:00Z"
-};
+  effective_write_locked: true
+});
 
 describe("NodeContextMenu", () => {
   it("keeps read navigation available and disables every folder write action under a lock", async () => {

@@ -7,6 +7,7 @@ import { deleteNode, moveNode, updateNodeSearchPolicy, updateNodeWriteLock } fro
 import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
 import type { RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import {
   useDeleteNodeMutation,
   useMoveNodeMutation,
@@ -280,23 +281,13 @@ describe("workbench node mutations", () => {
 });
 
 function node(id: string, spaceId: string, kind: RestNode["kind"]): RestNode {
-  return {
+  return makeRestNode({
     id,
     space_id: spaceId,
     parent_id: `${spaceId}-root`,
     name: id,
     kind,
     path: `/${id}`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    effective_write_locked: false,
-    write_lock_sources: [],
-    has_children: kind === "folder",
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }

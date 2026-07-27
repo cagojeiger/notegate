@@ -7,6 +7,7 @@ import { ApiError } from "../../api/errors";
 import { getNode, resolveNodePath } from "../../api/nodes";
 import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
 
 const mocks = vi.hoisted(() => ({
@@ -621,40 +622,21 @@ function deferred<T>() {
 }
 
 function space(id: string): Space {
-  return {
+  return makeSpace({
     id,
     name: id,
-    sort_order: 0,
-    navigation_pinned: true,
-    user_mcp_enabled: true,
-    default_search_enabled: true,
-    default_text_encryption_enabled: false,
-    features: { text_encryption: true, write_lock: true },
-    permission: "write",
-    root_node_id: `${id}-root`,
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    root_node_id: `${id}-root`
+  });
 }
 
 function node(id: string, spaceId: string, path: string, kind: RestNode["kind"] = "text"): RestNode {
-  return {
+  return makeRestNode({
     id,
     space_id: spaceId,
     parent_id: `${spaceId}-root`,
     name: path.split("/").pop() ?? id,
     kind,
     path,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    write_locked: false,
-    write_lock_sources: [],
-    has_children: false,
-    effective_write_locked: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }
