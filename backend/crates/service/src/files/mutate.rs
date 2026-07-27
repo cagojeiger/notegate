@@ -381,17 +381,12 @@ impl FilesService {
                 let existing = text.content.as_deref().ok_or_else(|| {
                     ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
                 })?;
-                let mut content = existing.to_owned();
-                if command.ensure_newline && !content.is_empty() && !content.ends_with('\n') {
-                    content.push('\n');
-                }
-                content.push_str(&command.content);
-
-                validate_structured_text(&node.name, &content)?;
-                let metrics = content::compute(&content);
-                validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
-
-                let stored = metrics.into_stored_plain(content);
+                let stored = prepare_appended_plain_text(
+                    &node.name,
+                    existing,
+                    &command.content,
+                    command.ensure_newline,
+                )?;
                 let (node, text) = self
                     .store
                     .save_text_content(
@@ -795,6 +790,24 @@ impl FilesService {
     }
 }
 
+fn prepare_appended_plain_text(
+    name: &str,
+    existing: &str,
+    appended: &str,
+    ensure_newline: bool,
+) -> ServiceResult<StoredContent> {
+    let mut content = existing.to_owned();
+    if ensure_newline && !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(appended);
+
+    validate_structured_text(name, &content)?;
+    let metrics = content::compute(&content);
+    validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
+    Ok(metrics.into_stored_plain(content))
+}
+
 fn stored_text_body(body: WriteTextBody) -> ServiceResult<StoredContent> {
     match body {
         WriteTextBody::Plain(content) => {
@@ -871,6 +884,49 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn appended_plain_text_applies_newline_policy_and_metrics() {
+        for (existing, appended, ensure_newline, expected, expected_lines) in [
+            ("", "first", true, "first", 1),
+            ("first", "second", true, "first\nsecond", 2),
+            ("first\n", "second", true, "first\nsecond", 2),
+            ("first", "second", false, "firstsecond", 1),
+            ("first", "", false, "first", 1),
+        ] {
+            let stored = prepare_appended_plain_text("note.md", existing, appended, ensure_newline)
+                .expect("plain append should be prepared");
+
+            assert_eq!(stored.body, WriteTextBody::Plain(expected.to_owned()));
+            assert_eq!(stored.byte_len, expected.len() as i64);
+            assert_eq!(stored.line_count, expected_lines);
+        }
+    }
+
+    #[test]
+    fn appended_plain_text_validates_the_combined_structure() {
+        let error = prepare_appended_plain_text("config.json", r#"{"ok":true}"#, "invalid", false)
+            .expect_err("invalid combined JSON should fail");
+
+        assert!(matches!(
+            error,
+            ServiceError::InvalidInput(message)
+                if message.contains("invalid json syntax in config.json")
+        ));
+    }
+
+    #[test]
+    fn appended_plain_text_enforces_the_combined_content_limit() {
+        let appended = "x\n".repeat(notegate_core::limits::TEXT_MAX_LINES + 1);
+        let error = prepare_appended_plain_text("note.md", "", &appended, false)
+            .expect_err("too many combined lines should fail");
+
+        assert!(matches!(
+            error,
+            ServiceError::InvalidInput(message)
+                if message.contains("text exceeds the maximum")
+        ));
+    }
 
     #[test]
     fn stored_text_body_computes_plain_content_metrics() {
