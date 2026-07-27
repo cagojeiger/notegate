@@ -13,8 +13,8 @@ use super::resolve::{
 use super::unified::FileTransferInput;
 use crate::object_storage::{CompletedUploadPart, MCP_TRANSFER_URL_TTL, ObjectStorageError};
 use crate::object_upload_flow::{
-    BegunTransfer, PART_UPLOAD_CONCURRENCY_MAX, PART_URL_BATCH_MAX, UploadFlowError,
-    abort_upload as abort_object_upload, begin_upload as begin_object_upload,
+    BegunTransfer, BegunUpload, PART_UPLOAD_CONCURRENCY_MAX, PART_URL_BATCH_MAX, UploadFlowError,
+    UploadPartTransfer, abort_upload as abort_object_upload, begin_upload as begin_object_upload,
     complete_upload as complete_object_upload, prepare_parts as prepare_upload_parts,
 };
 use crate::state::AppState;
@@ -79,15 +79,22 @@ async fn begin_upload(
     )
     .await
     .map_err(flow_error)?;
-    let upload_id = begun.upload_id;
-    let transfer = match begun.transfer {
+    Ok(build_begin_upload_response(target, byte_len, begun))
+}
+
+fn build_begin_upload_response(target: String, byte_len: i64, begun: BegunUpload) -> Json<Value> {
+    let BegunUpload {
+        upload_id,
+        transfer,
+    } = begun;
+    match transfer {
         BegunTransfer::Multipart {
             part_size,
             part_count,
         } => {
             let first_part_numbers =
                 (1..=part_count.min(PART_URL_BATCH_MAX as i32)).collect::<Vec<_>>();
-            return Ok(Json(json!({
+            Json(json!({
                 "upload_id": upload_id,
                 "target": target,
                 "transfer": {
@@ -105,34 +112,33 @@ async fn begin_upload(
                     },
                     "instruction": "Request upload URLs for the first part batch.",
                 },
-            })));
+            }))
         }
-        BegunTransfer::Single(transfer) => transfer,
-    };
-    Ok(Json(json!({
-        "upload_id": upload_id,
-        "target": target,
-        "transfer": {
-            "mode": "single",
-            "method": "PUT",
-            "url": transfer.url,
-            "headers": transfer.headers,
-            "content_length": byte_len,
-            "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
-        },
-        "next_action": {
-            "kind": "http_upload",
-            "transfer_field": "transfer",
-            "instruction": "PUT the local file using transfer.method, transfer.url, every transfer.headers entry, and the exact transfer.content_length.",
-            "then": {
-                "tool": "file_transfer",
-                "input": {
-                    "op": "complete_upload",
-                    "upload_id": upload_id,
+        BegunTransfer::Single(transfer) => Json(json!({
+            "upload_id": upload_id,
+            "target": target,
+            "transfer": {
+                "mode": "single",
+                "method": "PUT",
+                "url": transfer.url,
+                "headers": transfer.headers,
+                "content_length": byte_len,
+                "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
+            },
+            "next_action": {
+                "kind": "http_upload",
+                "transfer_field": "transfer",
+                "instruction": "PUT the local file using transfer.method, transfer.url, every transfer.headers entry, and the exact transfer.content_length.",
+                "then": {
+                    "tool": "file_transfer",
+                    "input": {
+                        "op": "complete_upload",
+                        "upload_id": upload_id,
+                    },
                 },
             },
-        },
-    })))
+        })),
+    }
 }
 
 async fn prepare_parts(
@@ -160,22 +166,30 @@ async fn prepare_parts(
         MCP_TRANSFER_URL_TTL,
     )
     .await
-    .map_err(flow_error)?
-    .into_iter()
-    .map(|part| {
-        json!({
-            "part_number": part.part_number,
-            "method": "PUT",
-            "url": part.transfer.url,
-            "headers": part.transfer.headers,
-            "content_length": part.content_length,
-            "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
+    .map_err(flow_error)?;
+    Ok(build_prepare_parts_response(upload_id, transfers))
+}
+
+fn build_prepare_parts_response(
+    upload_id: Uuid,
+    transfers: Vec<UploadPartTransfer>,
+) -> Json<Value> {
+    let parts = transfers
+        .into_iter()
+        .map(|part| {
+            json!({
+                "part_number": part.part_number,
+                "method": "PUT",
+                "url": part.transfer.url,
+                "headers": part.transfer.headers,
+                "content_length": part.content_length,
+                "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
+            })
         })
-    })
-    .collect::<Vec<_>>();
-    Ok(Json(json!({
+        .collect::<Vec<_>>();
+    Json(json!({
         "upload_id": upload_id,
-        "parts": transfers,
+        "parts": parts,
         "next_action": {
             "kind": "http_upload_parts",
             "transfers_field": "parts",
@@ -200,7 +214,7 @@ async fn prepare_parts(
                 "requires": "completed_parts for every part exactly once",
             },
         },
-    })))
+    }))
 }
 
 async fn complete_upload(
@@ -368,5 +382,256 @@ fn storage_error(error: ObjectStorageError) -> ErrorData {
                 "retryable": true,
             })),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::object_storage::PresignedPut;
+
+    use super::*;
+
+    fn presigned_put(url: &str, content_type: &str) -> PresignedPut {
+        let mut headers = BTreeMap::new();
+        headers.insert("content-type".to_owned(), content_type.to_owned());
+        PresignedPut {
+            url: url.to_owned(),
+            headers,
+        }
+    }
+
+    #[test]
+    fn begin_response_guides_single_upload_and_completion() {
+        let upload_id = Uuid::from_u128(1);
+        let response = build_begin_upload_response(
+            "daily:/report.pdf".to_owned(),
+            42,
+            BegunUpload {
+                upload_id,
+                transfer: BegunTransfer::Single(presigned_put(
+                    "https://storage.example/upload",
+                    "application/pdf",
+                )),
+            },
+        )
+        .0;
+
+        assert_eq!(
+            response.pointer("/upload_id").and_then(Value::as_str),
+            Some(upload_id.to_string().as_str())
+        );
+        assert_eq!(
+            response.pointer("/target").and_then(Value::as_str),
+            Some("daily:/report.pdf")
+        );
+        assert_eq!(
+            response.pointer("/transfer/mode").and_then(Value::as_str),
+            Some("single")
+        );
+        assert_eq!(
+            response.pointer("/transfer/method").and_then(Value::as_str),
+            Some("PUT")
+        );
+        assert_eq!(
+            response.pointer("/transfer/url").and_then(Value::as_str),
+            Some("https://storage.example/upload")
+        );
+        assert_eq!(
+            response
+                .pointer("/transfer/headers/content-type")
+                .and_then(Value::as_str),
+            Some("application/pdf")
+        );
+        assert_eq!(
+            response
+                .pointer("/transfer/content_length")
+                .and_then(Value::as_i64),
+            Some(42)
+        );
+        assert_eq!(
+            response
+                .pointer("/transfer/expires_in_seconds")
+                .and_then(Value::as_u64),
+            Some(300)
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/kind")
+                .and_then(Value::as_str),
+            Some("http_upload")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/transfer_field")
+                .and_then(Value::as_str),
+            Some("transfer")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/then/input/op")
+                .and_then(Value::as_str),
+            Some("complete_upload")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/then/input/upload_id")
+                .and_then(Value::as_str),
+            Some(upload_id.to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn begin_response_caps_multipart_first_batch() {
+        let upload_id = Uuid::from_u128(2);
+        let response = build_begin_upload_response(
+            "daily:/archive.bin".to_owned(),
+            1_000,
+            BegunUpload {
+                upload_id,
+                transfer: BegunTransfer::Multipart {
+                    part_size: 200,
+                    part_count: 20,
+                },
+            },
+        )
+        .0;
+        let expected_part_numbers = json!([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+
+        assert_eq!(
+            response.pointer("/transfer/mode").and_then(Value::as_str),
+            Some("multipart")
+        );
+        assert_eq!(
+            response
+                .pointer("/transfer/part_size")
+                .and_then(Value::as_i64),
+            Some(200)
+        );
+        assert_eq!(
+            response
+                .pointer("/transfer/part_count")
+                .and_then(Value::as_i64),
+            Some(20)
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/kind")
+                .and_then(Value::as_str),
+            Some("call_tool")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/tool")
+                .and_then(Value::as_str),
+            Some("file_transfer")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/input/op")
+                .and_then(Value::as_str),
+            Some("prepare_parts")
+        );
+        assert_eq!(
+            response.pointer("/next_action/input/part_numbers"),
+            Some(&expected_part_numbers)
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/input/upload_id")
+                .and_then(Value::as_str),
+            Some(upload_id.to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn prepare_response_preserves_part_order_and_continuations() {
+        let upload_id = Uuid::from_u128(3);
+        let response = build_prepare_parts_response(
+            upload_id,
+            vec![
+                UploadPartTransfer {
+                    part_number: 2,
+                    content_length: 20,
+                    transfer: presigned_put("https://storage.example/part-2", "application/bin"),
+                },
+                UploadPartTransfer {
+                    part_number: 1,
+                    content_length: 10,
+                    transfer: presigned_put("https://storage.example/part-1", "application/bin"),
+                },
+            ],
+        )
+        .0;
+
+        assert_eq!(
+            response
+                .pointer("/parts/0/part_number")
+                .and_then(Value::as_i64),
+            Some(2)
+        );
+        assert_eq!(
+            response.pointer("/parts/0/url").and_then(Value::as_str),
+            Some("https://storage.example/part-2")
+        );
+        assert_eq!(
+            response.pointer("/parts/0/method").and_then(Value::as_str),
+            Some("PUT")
+        );
+        assert_eq!(
+            response
+                .pointer("/parts/0/headers/content-type")
+                .and_then(Value::as_str),
+            Some("application/bin")
+        );
+        assert_eq!(
+            response
+                .pointer("/parts/0/content_length")
+                .and_then(Value::as_i64),
+            Some(20)
+        );
+        assert_eq!(
+            response
+                .pointer("/parts/0/expires_in_seconds")
+                .and_then(Value::as_u64),
+            Some(300)
+        );
+        assert_eq!(
+            response
+                .pointer("/parts/1/part_number")
+                .and_then(Value::as_i64),
+            Some(1)
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/transfers_field")
+                .and_then(Value::as_str),
+            Some("parts")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/collect_response_header")
+                .and_then(Value::as_str),
+            Some("etag")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/max_concurrency")
+                .and_then(Value::as_u64),
+            Some(4)
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/repeat/input/upload_id")
+                .and_then(Value::as_str),
+            Some(upload_id.to_string().as_str())
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/then/input/upload_id")
+                .and_then(Value::as_str),
+            Some(upload_id.to_string().as_str())
+        );
     }
 }
