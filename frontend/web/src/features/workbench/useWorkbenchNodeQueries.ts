@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient, type UseMutationOptions } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import { replaceMetadata } from "../../api/metadata";
@@ -28,6 +28,11 @@ import type { NodeSummary, RestNode, Space } from "../../api/types";
 
 type MoveNodeMutationOptions = {
   silentError?: boolean;
+};
+
+type UpdateNodeWriteLockVariables = {
+  node: RestNode;
+  enabled: boolean;
 };
 
 export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (node: RestNode) => void) {
@@ -80,12 +85,13 @@ export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) =>
   });
 }
 
-export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => void) {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
-      updateNodeWriteLock(client, node.space_id, node.id, enabled),
+export function createUpdateNodeWriteLockMutationOptions(
+  updateRequest: (variables: UpdateNodeWriteLockVariables) => Promise<RestNode>,
+  queryClient: QueryClient,
+  onUpdated: (node: RestNode) => void
+): UseMutationOptions<RestNode, Error, UpdateNodeWriteLockVariables, { previousNode: RestNode }> {
+  return {
+    mutationFn: updateRequest,
     onMutate: ({ node, enabled }) => {
       const optimisticNode = applyDirectWriteLock(node, enabled);
       updateNodeCaches(queryClient, optimisticNode, () => optimisticNode);
@@ -107,7 +113,19 @@ export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => vo
       }
       onUpdated(node);
     }
-  });
+  };
+}
+
+export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => void) {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation(
+    createUpdateNodeWriteLockMutationOptions(
+      ({ node, enabled }) => updateNodeWriteLock(client, node.space_id, node.id, enabled),
+      queryClient,
+      onUpdated
+    )
+  );
 }
 
 function applyDirectWriteLock(node: RestNode, enabled: boolean): RestNode {
