@@ -7,8 +7,8 @@ use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
 use super::{
-    FindPage, FindRequest, NameMatcher, PathFilters, SearchService, search_fingerprint,
-    validate_query,
+    FindPage, FindRequest, NameMatcher, PathFilters, SearchService, decode_search_cursor,
+    encode_search_cursor, search_fingerprint, validate_query,
 };
 
 impl SearchService {
@@ -45,7 +45,7 @@ impl SearchService {
             "case-insensitive".to_owned(),
             "dfs-sort_order-name-id".to_owned(),
         ]);
-        let after_sort_path = self.decode_search_cursor(
+        let after_sort_path = decode_search_cursor(
             request.cursor.as_deref(),
             "find",
             &fingerprint,
@@ -84,7 +84,7 @@ impl SearchService {
 
         let has_more = candidates.len() > consumed;
         let next_cursor = if has_more {
-            self.encode_search_cursor("find", fingerprint, scope_node_id, after)?
+            encode_search_cursor("find", fingerprint, scope_node_id, after)?
         } else {
             None
         };

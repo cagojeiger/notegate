@@ -169,3 +169,98 @@ fn parse_grep_line_mode(value: Option<&str>) -> Result<GrepLineMode, ErrorData> 
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::indexing_slicing)]
+
+    use rmcp::{ErrorData, model::ErrorCode};
+
+    use super::{
+        FindMatchMode, GrepLineMode, GrepMatchMode, NodeKind, parse_find_match_mode,
+        parse_grep_line_mode, parse_grep_match_mode, parse_kind,
+    };
+
+    fn assert_invalid_input(error: ErrorData, expected_message: &str) {
+        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        assert_eq!(error.message, expected_message);
+
+        let data = error.data.expect("invalid input error carries metadata");
+        assert_eq!(data["kind"], "invalid_input");
+        assert_eq!(data["code"], "invalid_input");
+    }
+
+    #[test]
+    fn parse_kind_contract() {
+        for (value, expected) in [
+            ("folder", NodeKind::Folder),
+            ("text", NodeKind::Text),
+            ("file", NodeKind::File),
+        ] {
+            assert_eq!(parse_kind(value).expect("supported kind"), expected);
+        }
+        let error = parse_kind("document").expect_err("unknown kind must fail");
+        assert_invalid_input(error, "kind must be 'folder', 'text', or 'file'");
+    }
+
+    #[test]
+    fn parse_find_match_mode_contract() {
+        assert_eq!(
+            parse_find_match_mode(None).expect("default match mode"),
+            FindMatchMode::Contains
+        );
+        for (value, expected) in [
+            ("contains", FindMatchMode::Contains),
+            ("regex", FindMatchMode::Regex),
+            ("glob", FindMatchMode::Glob),
+        ] {
+            assert_eq!(
+                parse_find_match_mode(Some(value)).expect("supported find match mode"),
+                expected
+            );
+        }
+        let error =
+            parse_find_match_mode(Some("literal")).expect_err("unknown match mode must fail");
+        assert_invalid_input(error, "match must be 'contains', 'regex', or 'glob'");
+    }
+
+    #[test]
+    fn parse_grep_match_mode_contract() {
+        assert_eq!(
+            parse_grep_match_mode(None).expect("default match mode"),
+            GrepMatchMode::Literal
+        );
+        for (value, expected) in [
+            ("literal", GrepMatchMode::Literal),
+            ("regex", GrepMatchMode::Regex),
+        ] {
+            assert_eq!(
+                parse_grep_match_mode(Some(value)).expect("supported grep match mode"),
+                expected
+            );
+        }
+        let error = parse_grep_match_mode(Some("glob")).expect_err("unknown match mode must fail");
+        assert_invalid_input(error, "match must be 'literal' or 'regex'");
+    }
+
+    #[test]
+    fn parse_grep_line_mode_contract() {
+        assert_eq!(
+            parse_grep_line_mode(None).expect("default line mode"),
+            GrepLineMode::None
+        );
+        for (value, expected) in [
+            ("none", GrepLineMode::None),
+            ("first", GrepLineMode::First),
+            ("all", GrepLineMode::All),
+        ] {
+            assert_eq!(
+                parse_grep_line_mode(Some(value)).expect("supported line mode"),
+                expected
+            );
+        }
+        let error =
+            parse_grep_line_mode(Some("matching")).expect_err("unknown line mode must fail");
+        assert_invalid_input(error, "lines must be 'none', 'first', or 'all'");
+    }
+}

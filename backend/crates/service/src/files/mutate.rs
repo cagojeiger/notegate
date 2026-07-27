@@ -862,3 +862,132 @@ fn check_expected_sha(expected: Option<&str>, current: &str) -> ServiceResult<()
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use notegate_model::FileEncryptionMode;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn stored_text_body_computes_plain_content_metrics() {
+        let body = WriteTextBody::Plain("a\nb\n".to_owned());
+
+        let stored = stored_text_body(body.clone()).expect("plain content should be stored");
+
+        assert_eq!(stored.body, body);
+        assert_eq!(stored.byte_len, 4);
+        assert_eq!(stored.line_count, 2);
+        assert_eq!(stored.content_sha256.len(), 64);
+    }
+
+    #[test]
+    fn stored_text_body_requires_object_encrypted_payload() {
+        let payload = json!({"ciphertext": "opaque"});
+        let stored = stored_text_body(WriteTextBody::Encrypted(payload.clone()))
+            .expect("object payload should be stored");
+
+        assert_eq!(stored.body, WriteTextBody::Encrypted(payload));
+        assert_eq!(stored.line_count, 0);
+        assert_eq!(stored.content_sha256.len(), 64);
+
+        let error = stored_text_body(WriteTextBody::Encrypted(json!("opaque")))
+            .expect_err("non-object encrypted payload should fail");
+        assert!(matches!(
+            error,
+            ServiceError::InvalidInput(message)
+                if message == "encrypted_payload must be a JSON object"
+        ));
+    }
+
+    #[test]
+    fn file_encryption_metadata_matches_encryption_mode() {
+        assert!(validate_file_encryption(FileEncryptionMode::None, None).is_ok());
+        assert!(
+            validate_file_encryption(FileEncryptionMode::Client, Some(&json!({"key": "value"})))
+                .is_ok()
+        );
+
+        let unexpected =
+            validate_file_encryption(FileEncryptionMode::None, Some(&json!({"key": "value"})))
+                .expect_err("unencrypted files must omit encryption metadata");
+        assert!(matches!(
+            unexpected,
+            ServiceError::InvalidInput(message)
+                if message
+                    == "encryption_metadata must be omitted when encryption_mode=none"
+        ));
+
+        for metadata in [None, Some(&json!("not-an-object"))] {
+            let missing_or_invalid = validate_file_encryption(FileEncryptionMode::Client, metadata)
+                .expect_err("client encryption requires object metadata");
+            assert!(matches!(
+                missing_or_invalid,
+                ServiceError::InvalidInput(message)
+                    if message
+                        == "encryption_metadata must be a JSON object when encryption_mode=client"
+            ));
+        }
+    }
+
+    #[test]
+    fn json_merge_patch_merges_replaces_and_removes_fields() {
+        let mut target = json!({
+            "title": "old",
+            "nested": {
+                "keep": 1,
+                "remove": 2
+            },
+            "scalar": "old"
+        });
+
+        apply_json_merge_patch(
+            &mut target,
+            json!({
+                "nested": {
+                    "remove": null,
+                    "add": 3
+                },
+                "scalar": {
+                    "new": true
+                },
+                "missing": null
+            }),
+        );
+
+        assert_eq!(
+            target,
+            json!({
+                "title": "old",
+                "nested": {
+                    "keep": 1,
+                    "add": 3
+                },
+                "scalar": {
+                    "new": true
+                }
+            })
+        );
+
+        apply_json_merge_patch(&mut target, json!("replacement"));
+        assert_eq!(target, json!("replacement"));
+    }
+
+    #[test]
+    fn expected_sha_is_optional_but_must_match_when_present() {
+        assert!(check_expected_sha(None, "current").is_ok());
+        assert!(check_expected_sha(Some("current"), "current").is_ok());
+
+        let error = check_expected_sha(Some("stale"), "current")
+            .expect_err("stale expected hash should fail");
+        assert!(matches!(
+            error,
+            ServiceError::Conflict(message)
+                if message
+                    == "expected_sha256 does not match the current text; read it again"
+        ));
+    }
+}

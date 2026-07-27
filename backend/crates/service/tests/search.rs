@@ -1339,6 +1339,27 @@ hit-{index}
         .await;
         expected_ids.push(node);
     }
+    let encrypted = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root,
+                    name: "encrypted.md".to_owned(),
+                },
+                body: WriteTextBody::Encrypted(serde_json::json!({
+                    "version": 1,
+                    "alg": "AES-256-GCM",
+                    "ciphertext_b64": "hit-client-encrypted"
+                })),
+                expected_sha256: None,
+            },
+        )
+        .await?
+        .node
+        .node
+        .id;
 
     let limit = 2i64;
     let mut seen: Vec<Uuid> = Vec::new();
@@ -1387,6 +1408,10 @@ hit-{index}
     assert_eq!(
         seen, expected_ids,
         "all matching texts returned exactly once"
+    );
+    assert!(
+        !seen.contains(&encrypted),
+        "client-encrypted text is excluded even when its opaque payload matches"
     );
 
     db.cleanup().await;
