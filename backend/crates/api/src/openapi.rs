@@ -46,6 +46,7 @@ use crate::state::AppState;
         rest::nodes::reveal,
         rest::nodes::update,
         rest::nodes::update_search_policy,
+        rest::nodes::update_write_lock,
         rest::nodes::delete,
         rest::nodes::children,
         rest::nodes::batch_children,
@@ -522,6 +523,7 @@ mod tests {
             "/api/v1/spaces/{space_id}/nodes/{node_id}/children",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/reveal",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
+            "/api/v1/spaces/{space_id}/nodes/{node_id}/write-lock",
             "/api/v1/spaces/{space_id}/nodes/{node_id}/move",
             "/api/v1/spaces/{space_id}/text/{node_id}",
             "/api/v1/spaces/{space_id}/text/{node_id}/encryption",
@@ -611,6 +613,7 @@ mod tests {
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
             "PUT /api/v1/spaces/{space_id}/text/{node_id}",
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
+            "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/write-lock",
             "PUT /api/v1/spaces/{space_id}/text/{node_id}/encryption",
         ];
         expected.sort();

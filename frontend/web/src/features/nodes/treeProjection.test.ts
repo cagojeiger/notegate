@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import { findAdjacentNodeRowIndex, projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
 
 describe("projectVisibleTree", () => {
@@ -101,20 +102,13 @@ function snapshot(
 }
 
 function node(id: string, kind: RestNode["kind"], parentId: string): RestNode {
-  return {
+  return makeRestNode({
     id,
     space_id: "space",
     parent_id: parentId,
     name: id,
     kind,
     path: `/${id}`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: kind === "folder",
-    created_by: { id: "user", kind: "user", display_name: "User" },
-    updated_by: { id: "user", kind: "user", display_name: "User" },
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-01T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }

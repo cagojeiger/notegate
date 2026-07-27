@@ -161,14 +161,37 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
 
 /// Shared in-tx create pre-checks: parent live folder, path bounds,
 /// sibling-unique, and fanout.
-pub(crate) async fn prepare_create(
+pub(in crate::files) async fn prepare_create(
     tx: &mut sqlx::PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
     name: &str,
     caps: Limits,
 ) -> Result<()> {
-    let parent_bounds = checks::require_live_folder_path_bounds(tx, space_id, parent_id).await?;
+    let parent_bounds = checks::require_child_write(tx, space_id, parent_id).await?;
+    prepare_create_with_parent_bounds(tx, space_id, parent_id, name, caps, parent_bounds).await
+}
+
+pub(in crate::files) async fn prepare_reserved_file_create(
+    tx: &mut sqlx::PgConnection,
+    space_id: Uuid,
+    parent_id: Uuid,
+    name: &str,
+    caps: Limits,
+) -> Result<()> {
+    // The upload row already reserved write-lock access when it was registered.
+    let parent_bounds = checks::folder_path_bounds(tx, space_id, parent_id).await?;
+    prepare_create_with_parent_bounds(tx, space_id, parent_id, name, caps, parent_bounds).await
+}
+
+async fn prepare_create_with_parent_bounds(
+    tx: &mut sqlx::PgConnection,
+    space_id: Uuid,
+    parent_id: Uuid,
+    name: &str,
+    caps: Limits,
+    parent_bounds: checks::PathBounds,
+) -> Result<()> {
     let bounds = checks::destination_bounds(parent_bounds, name, checks::PathBounds::default())?;
     checks::require_path_limits(bounds)?;
 

@@ -1,7 +1,8 @@
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { RestNode, Space } from "../../api/types";
+import type { RestNode } from "../../api/types";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { TreeSection } from "./TreeSection";
 import type { TreeKeyboardNavigation } from "./types";
 
@@ -46,20 +47,7 @@ vi.mock("@tanstack/react-virtual", () => {
   };
 });
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
-  updated_at: "2026-07-01T00:00:00Z"
-};
+const space = makeSpace();
 
 describe("TreeSection", () => {
   beforeEach(() => {
@@ -157,6 +145,53 @@ describe("TreeSection", () => {
     await waitFor(() => expect(view.getByRole("button", { name: "file-29.bin" })).toHaveFocus());
     expect(view.getByRole("button", { name: "file-28.bin" })).not.toHaveFocus();
   });
+
+  it("does not make effectively locked rows draggable", async () => {
+    const locked = { ...node("text-1", "text"), effective_write_locked: true };
+    mocks.useNodeChildrenQuery.mockReturnValue(query([locked]));
+
+    const view = renderTree(new Set());
+
+    const row = await findNodeRow(view, locked.name);
+    expect(row).toHaveAttribute("draggable", "false");
+  });
+
+  it("blocks drops onto effectively locked folders", async () => {
+    const source = node("text-1", "text");
+    const destination = {
+      ...node("folder-1", "folder"),
+      effective_write_locked: true
+    };
+    const onMoveNodeToFolder = vi.fn();
+    mocks.useNodeChildrenQuery.mockReturnValue(query([source, destination]));
+    const view = render(treeElement(new Set(), vi.fn(), onMoveNodeToFolder));
+
+    const sourceRow = await findNodeRow(view, source.name);
+    const destinationRow = await findNodeRow(view, destination.name);
+    const dataTransfer = dragDataTransfer();
+    fireEvent.dragStart(sourceRow, { dataTransfer });
+    fireEvent.dragOver(destinationRow, { dataTransfer });
+    fireEvent.drop(destinationRow, { dataTransfer });
+
+    expect(onMoveNodeToFolder).not.toHaveBeenCalled();
+  });
+
+  it("moves an unlocked row into an unlocked folder", async () => {
+    const source = node("text-1", "text");
+    const destination = node("folder-1", "folder");
+    const onMoveNodeToFolder = vi.fn();
+    mocks.useNodeChildrenQuery.mockReturnValue(query([source, destination]));
+    const view = render(treeElement(new Set(), vi.fn(), onMoveNodeToFolder));
+
+    const sourceRow = await findNodeRow(view, source.name);
+    const destinationRow = await findNodeRow(view, destination.name);
+    const dataTransfer = dragDataTransfer();
+    fireEvent.dragStart(sourceRow, { dataTransfer });
+    fireEvent.dragOver(destinationRow, { dataTransfer });
+    fireEvent.drop(destinationRow, { dataTransfer });
+
+    expect(onMoveNodeToFolder).toHaveBeenCalledWith(source, destination);
+  });
 });
 
 function renderTree(
@@ -168,7 +203,8 @@ function renderTree(
 
 function treeElement(
   expandedFolderIds: Set<string>,
-  onTreeNavigationChange: (navigation: TreeKeyboardNavigation | null) => void
+  onTreeNavigationChange: (navigation: TreeKeyboardNavigation | null) => void,
+  onMoveNodeToFolder = vi.fn()
 ) {
   return (
     <TreeSection
@@ -181,11 +217,29 @@ function treeElement(
       onToggleFolder={vi.fn()}
       onOpenNode={vi.fn()}
       onNodeContextMenu={vi.fn()}
-      onMoveNodeToFolder={vi.fn()}
+      onMoveNodeToFolder={onMoveNodeToFolder}
       onTreeNavigationChange={onTreeNavigationChange}
       canWriteActiveSpace
     />
   );
+}
+
+async function findNodeRow(
+  view: ReturnType<typeof render>,
+  name: string
+): Promise<HTMLElement> {
+  const button = await waitFor(() => within(view.container).getByRole("button", { name }));
+  const row = button.closest<HTMLElement>("[data-node-row]");
+  if (!row) throw new Error(`missing row for ${name}`);
+  return row;
+}
+
+function dragDataTransfer() {
+  return {
+    dropEffect: "none",
+    effectAllowed: "none",
+    setData: vi.fn()
+  };
 }
 
 function queriedNodeIds(): string[] {
@@ -204,20 +258,13 @@ function query(children: RestNode[]) {
 
 function node(id: string, kind: RestNode["kind"], parentId = space.root_node_id): RestNode {
   const name = kind === "folder" ? id : `${id}.${kind === "text" ? "md" : "bin"}`;
-  return {
+  return makeRestNode({
     id,
     space_id: space.id,
     parent_id: parentId,
     name,
     kind,
     path: `/${name}`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: kind === "folder",
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-01T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }

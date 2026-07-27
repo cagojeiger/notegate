@@ -88,6 +88,9 @@ export function formatFileChangeAction(event: FileChangeEvent): string {
   if (event.op_type === "item.update") {
     const renamed = event.metadata.name_changed === true;
     const reordered = event.metadata.sort_order_changed === true;
+    if (event.metadata.write_lock_changed === true) {
+      return event.metadata.write_locked === true ? "Locked" : "Unlocked";
+    }
     if (renamed && !reordered) return "Renamed";
     if (reordered && !renamed) return "Reordered";
     return "Updated";
@@ -146,7 +149,8 @@ export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetai
   } else if (event.op_type === "item.update") {
     const changes = [
       metadata.name_changed === true ? "Name" : null,
-      metadata.sort_order_changed === true ? "Order" : null
+      metadata.sort_order_changed === true ? "Order" : null,
+      metadata.write_lock_changed === true ? "Write lock" : null
     ].filter((value): value is string => value !== null);
     if (changes.length > 0) details.push({ label: "Changed", value: changes.join(", ") });
   }

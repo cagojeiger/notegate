@@ -2,7 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Me, RestNode, Space } from "../api/types";
+import type { Me, Space } from "../api/types";
+import { makeRestNode, makeSpace } from "../test/fixtures";
 import { AppShell } from "./AppShell";
 
 const mocks = vi.hoisted(() => ({
@@ -41,46 +42,25 @@ vi.mock("../features/events/EventHistoryModal", () => ({
   )
 }));
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
+const space = makeSpace({
   updated_at: "2026-07-10T00:00:00Z"
-};
+});
 
-const activeNode: RestNode = {
-  id: "node-1",
+const activeNode = makeRestNode({
   space_id: space.id,
   parent_id: space.root_node_id,
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  has_children: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
   created_at: "2026-07-10T02:00:00Z",
   updated_at: "2026-07-10T02:12:00Z"
-};
+});
 
-const privateSpace: Space = {
+const privateSpace = makeSpace({
   ...space,
   id: "space-2",
   name: "Private",
   navigation_pinned: false,
   user_mcp_enabled: false,
   root_node_id: "root-2"
-};
+});
 
 describe("AppShell history", () => {
   it.each([

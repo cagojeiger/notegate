@@ -3,25 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
-import type { Me, Space } from "../../api/types";
+import type { Me } from "../../api/types";
+import { makeSpace } from "../../test/fixtures";
 import { SettingsModal } from "./SettingsModal";
 
 const page = { limit: 100, returned: 0, has_more: false, next_cursor: null };
 
-const space: Space = {
-  id: "space-1",
+const space = makeSpace({
   name: "Personal",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 function jsonResponse(body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));

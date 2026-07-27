@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use notegate_model::{AccountRef as ModelAccountRef, FileEncryptionMode, NodeKind};
-use notegate_service::files::{NodeSummaryView, NodeView};
+use notegate_service::files::{NodeSummaryView, NodeView, WriteLockSource};
 use serde::Serialize;
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -25,6 +25,9 @@ pub struct NodeOut {
     pub sort_order: i32,
     pub metadata: Value,
     pub search_enabled: bool,
+    pub write_locked: bool,
+    pub effective_write_locked: bool,
+    pub write_lock_sources: Vec<WriteLockSourceOut>,
     pub has_children: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_sha256: Option<String>,
@@ -71,6 +74,13 @@ impl NodeOut {
             sort_order: node.sort_order,
             metadata: node.metadata.clone(),
             search_enabled: node.search_enabled,
+            write_locked: node.write_locked,
+            effective_write_locked: !view.write_lock_sources.is_empty(),
+            write_lock_sources: view
+                .write_lock_sources
+                .iter()
+                .map(WriteLockSourceOut::from)
+                .collect(),
             has_children: view.has_children,
             content_sha256: view.text.as_ref().map(|text| text.content_sha256.clone()),
             byte_len: view
@@ -129,6 +139,23 @@ impl NodeOut {
     }
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct WriteLockSourceOut {
+    pub node_id: Uuid,
+    pub name: String,
+    pub path: String,
+}
+
+impl From<&WriteLockSource> for WriteLockSourceOut {
+    fn from(source: &WriteLockSource) -> Self {
+        Self {
+            node_id: source.node_id,
+            name: source.name.clone(),
+            path: source.path.clone(),
+        }
+    }
+}
+
 /// Compact node output for paginated tree and list collections.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct NodeSummaryOut {
@@ -138,6 +165,8 @@ pub struct NodeSummaryOut {
     pub kind: String,
     pub path: String,
     pub has_children: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_write_locked: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub byte_len: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,6 +188,7 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
             kind: node.kind.as_str().to_owned(),
             path: view.path.clone(),
             has_children: view.has_children,
+            effective_write_locked: view.effective_write_locked.then_some(true),
             byte_len: view
                 .text
                 .as_ref()

@@ -16,27 +16,9 @@ use uuid::Uuid;
 
 use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
-use super::{checks, stored_text_parts};
+use super::{checks, lock_live_node, stored_text_parts};
 use crate::file_change_events;
 use crate::files_repo::MetadataMutationKind;
-
-async fn lock_live_node(
-    tx: &mut Transaction<'_, Postgres>,
-    space_id: Uuid,
-    node_id: Uuid,
-) -> Result<NodeRow> {
-    sqlx::query_as::<_, NodeRow>(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
-         FOR UPDATE"
-    ))
-    .bind(space_id)
-    .bind(node_id)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .ok_or_else(|| Error::not_found("node not found"))
-}
 
 pub async fn update_node(
     pool: &PgPool,
@@ -64,20 +46,23 @@ pub async fn update_node(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
-
     if let Some((name, parent_id)) = rename
         && name_changed
     {
+        let access = checks::require_move_write(
+            &mut tx,
+            space_id,
+            command.node_id,
+            parent_id,
+            &current.kind,
+        )
+        .await?;
         checks::require_sibling_unique(&mut tx, space_id, parent_id, name, Some(command.node_id))
             .await?;
-        let parent = checks::require_live_folder_path_bounds(&mut tx, space_id, parent_id).await?;
-        let subtree = if current.kind == "folder" {
-            checks::subtree_relative_bounds(&mut tx, space_id, command.node_id).await?
-        } else {
-            checks::PathBounds::default()
-        };
-        let bounds = checks::destination_bounds(parent, name, subtree)?;
+        let bounds = checks::destination_bounds(access.destination, name, access.subtree)?;
         checks::require_path_limits(bounds)?;
+    } else {
+        checks::require_node_write(&mut tx, space_id, command.node_id).await?;
     }
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
@@ -139,6 +124,7 @@ pub async fn update_node_search_policy(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_node_write(&mut tx, space_id, command.node_id).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
         "UPDATE nodes \
@@ -209,6 +195,7 @@ pub async fn update_text_encryption(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_node_write(&mut tx, space_id, command.node_id).await?;
     if command.enabled {
         if !locked.owner_tier.features().text_encryption {
             return Err(Error::conflict(
@@ -331,6 +318,7 @@ pub async fn replace_node_metadata(
         tx.commit().await.map_err(map_sqlx_error)?;
         return current.into_node();
     }
+    checks::require_node_write(&mut tx, space_id, node_id).await?;
 
     let row = sqlx::query_as::<_, NodeRow>(&format!(
         "UPDATE nodes \

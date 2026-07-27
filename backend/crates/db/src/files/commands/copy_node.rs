@@ -60,8 +60,7 @@ pub async fn copy_node(args: CopyNodeArgs<'_>) -> Result<(Node, CopyCounts)> {
     }
     let source_kind = source.kind.clone();
 
-    let destination =
-        checks::require_live_folder_path_bounds(&mut tx, space_id, new_parent_id).await?;
+    let destination = checks::require_child_write(&mut tx, space_id, new_parent_id).await?;
     checks::require_sibling_unique(&mut tx, space_id, new_parent_id, new_name, None).await?;
     checks::require_fanout(&mut tx, space_id, new_parent_id, locked.limits).await?;
 

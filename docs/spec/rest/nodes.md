@@ -14,6 +14,7 @@ GET    /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 POST   /api/v1/spaces/{space_id}/nodes
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy
+PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/write-lock
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
@@ -37,6 +38,7 @@ GET /nodes/{node_id}/reveal     -> { ancestors: RestNode[], target: RestNode }
 POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
 PUT /nodes/{node_id}/search-policy -> RestNode
+PUT /nodes/{node_id}/write-lock    -> RestNode
 PUT/PATCH /nodes/{id}/metadata  -> RestNode
 POST /nodes/{node_id}/move      -> RestNode
 DELETE /nodes/{node_id}         -> 204 No Content
@@ -46,9 +48,10 @@ DELETE /nodes/{node_id}         -> 204 No Content
 
 기존 collection API는 query에 `view`를 주지 않으면 `RestNode`를 반환한다.
 `view=summary`는 tree/Recent용 compact shape을 반환한다. `NodeSummary`는
-`id`, `parent_id`, `name`, `kind`, `path`, `has_children`, `byte_len`,
+`id`, `parent_id`, `name`, `kind`, `path`, `has_children`, `effective_write_locked`, `byte_len`,
 `line_count`, `preview_available`, `file_preview_kind`, `updated_at`만 포함한다. `space_id`는 route
-scope와 중복되므로 wire response에 반복하지 않는다.
+scope와 중복되므로 wire response에 반복하지 않는다. `effective_write_locked`는 `true`일 때만
+wire response에 포함하며, 생략된 값은 `false`다.
 
 ## Batch list children
 
@@ -145,6 +148,10 @@ type UpdateNodeSearchPolicyBody = {
   enabled: boolean
 }
 
+type UpdateNodeWriteLockBody = {
+  enabled: boolean
+}
+
 type MoveNodeBody = {
   new_parent_id: string
   new_name?: string
@@ -156,6 +163,9 @@ type MoveNodeBody = {
 - `PUT /nodes/{node_id}/search-policy`는 검색 포함 여부를 변경하며 Space owner User만 사용할 수 있다.
 - `search_enabled`는 non-root folder/text/file에 적용한다. Folder의 값은 자식에게 상속되지 않는다.
 - Agent는 write 권한이 있어도 검색 정책을 변경할 수 없다.
+- `PUT /nodes/{node_id}/write-lock`은 node의 직접 쓰기 잠금을 변경한다. Browser channel의 Space owner User만 호출할 수 있으며 MCP/API key와 Agent에는 노출하지 않는다.
+- 직접 잠금은 해당 node와 모든 live descendant의 쓰기를 막는다. `RestNode.effective_write_locked`는 이 계산 결과이고, `RestNode.write_lock_sources`는 현재 node와 조상 중 직접 잠긴 node만 root부터 반환한다.
+- Root는 직접 잠글 수 없다. Tier capability `write_lock`이 활성화된 경우에만 새 잠금을 설정할 수 있지만, tier가 내려간 뒤의 잠금 해제는 허용한다.
 - Text 암호화는 Text API의 `PUT /text/{node_id}/encryption`으로 변경한다.
 - Root node는 rename/move/delete할 수 없다.
 - `POST /nodes/{node_id}/move`는 같은 Space 안에서만 parent/name을 변경한다.

@@ -247,6 +247,42 @@ pub(crate) async fn node_updated(
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
+fn node_write_lock_updated_payload(
+    item_kind: &str,
+    item_name: &str,
+    parent_node_id: Option<Uuid>,
+    write_locked: bool,
+) -> (&'static str, Value) {
+    (
+        "item.update",
+        json!({
+            "item_kind": item_kind,
+            "item_name": item_name,
+            "parent_node_id": parent_node_id,
+            "name_changed": false,
+            "sort_order_changed": false,
+            "search_enabled_changed": false,
+            "text_encryption_changed": false,
+            "write_lock_changed": true,
+            "write_locked": write_locked,
+        }),
+    )
+}
+
+pub(crate) async fn node_write_lock_updated(
+    tx: &mut PgConnection,
+    ctx: FileChangeContext,
+    node_id: Uuid,
+    item_kind: &str,
+    item_name: &str,
+    parent_node_id: Option<Uuid>,
+    write_locked: bool,
+) -> Result<()> {
+    let (op_type, metadata) =
+        node_write_lock_updated_payload(item_kind, item_name, parent_node_id, write_locked);
+    event(tx, ctx, Some(node_id), op_type, metadata).await
+}
+
 fn node_moved_payload(
     item_kind: &str,
     item_name: &str,
@@ -465,6 +501,28 @@ mod tests {
                 "item_kind": "text",
                 "item_name": "draft.md",
                 "parent_node_id": parent,
+            })
+        );
+    }
+
+    #[test]
+    fn write_lock_change_is_an_item_update() {
+        let parent = Uuid::new_v4();
+        let (op_type, metadata) =
+            node_write_lock_updated_payload("folder", "Policies", Some(parent), true);
+        assert_eq!(op_type, "item.update");
+        assert_eq!(
+            metadata,
+            json!({
+                "item_kind": "folder",
+                "item_name": "Policies",
+                "parent_node_id": parent,
+                "name_changed": false,
+                "sort_order_changed": false,
+                "search_enabled_changed": false,
+                "text_encryption_changed": false,
+                "write_lock_changed": true,
+                "write_locked": true,
             })
         );
     }

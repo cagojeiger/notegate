@@ -183,6 +183,12 @@ pub struct UpdateNodeSearchPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateNodeWriteLock {
+    pub node_id: Uuid,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateTextEncryption {
     pub node_id: Uuid,
     pub enabled: bool,
@@ -298,6 +304,14 @@ pub struct FileStats {
     pub encryption_metadata: Option<Value>,
 }
 
+/// A direct lock that currently prevents writes through a node's parent chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteLockSource {
+    pub node_id: Uuid,
+    pub name: String,
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeView {
     pub node: Node,
@@ -305,6 +319,7 @@ pub struct NodeView {
     pub has_children: bool,
     pub text: Option<TextStats>,
     pub file: Option<FileStats>,
+    pub write_lock_sources: Vec<WriteLockSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,6 +327,7 @@ pub struct NodeSummaryView {
     pub node: NodeSummary,
     pub path: String,
     pub has_children: bool,
+    pub effective_write_locked: bool,
     pub text: Option<TextStats>,
     pub file: Option<FileStats>,
 }

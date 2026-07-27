@@ -11,4 +11,4 @@ pub mod tier;
 pub mod validation;
 
 pub use config::{Config, S3Config, SearchBodyCacheConfig};
-pub use error::{Error, Result};
+pub use error::{Error, Result, WriteLockScope};

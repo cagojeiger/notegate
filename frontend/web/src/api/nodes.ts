@@ -20,7 +20,9 @@ export function getNode(client: ApiClient, spaceId: string, nodeId: string): Pro
   return client.get<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}`);
 }
 
-type WireNodeSummary = Omit<NodeSummary, "space_id">;
+type WireNodeSummary = Omit<NodeSummary, "space_id" | "effective_write_locked"> & {
+  effective_write_locked?: true;
+};
 type WireChildrenResponse = Omit<ChildrenResponse, "children"> & {
   children: WireNodeSummary[];
 };
@@ -85,7 +87,11 @@ export async function listNodes(
 }
 
 function withSpaceId(spaceId: string, nodes: WireNodeSummary[]): NodeSummary[] {
-  return nodes.map((node) => ({ ...node, space_id: spaceId }));
+  return nodes.map((node) => ({
+    ...node,
+    space_id: spaceId,
+    effective_write_locked: node.effective_write_locked ?? false
+  }));
 }
 
 export function revealNode(client: ApiClient, spaceId: string, nodeId: string): Promise<NodeRevealResponse> {
@@ -122,6 +128,18 @@ export function updateNodeSearchPolicy(
 ): Promise<RestNode> {
   return client.put<RestNode>(
     `/api/v1/spaces/${spaceId}/nodes/${nodeId}/search-policy`,
+    { enabled }
+  );
+}
+
+export function updateNodeWriteLock(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  enabled: boolean
+): Promise<RestNode> {
+  return client.put<RestNode>(
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/write-lock`,
     { enabled }
   );
 }

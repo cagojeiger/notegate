@@ -3,32 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
-import type { Space } from "../../api/types";
+import { makeSpace } from "../../test/fixtures";
 import { EventHistoryModal } from "./EventHistoryModal";
 
 const page = { limit: 50, returned: 0, has_more: false, next_cursor: null };
 
-const space: Space = {
-  id: "space-1",
-  name: "Daily",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true },
-  permission: "write",
-  root_node_id: "root-1",
-  created_at: "2026-07-01T00:00:00Z",
+const space = makeSpace({
   updated_at: "2026-07-10T00:00:00Z"
-};
+});
 
-const secondSpace: Space = {
+const secondSpace = makeSpace({
   ...space,
   id: "space-2",
   name: "Research",
   root_node_id: "root-2"
-};
+});
 
 function jsonResponse(body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));

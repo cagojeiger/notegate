@@ -36,6 +36,19 @@ write permission -> read + mkdir/write/append/patch/edit/mv/copy/rm 가능
 
 User caller는 자신이 소유한 space에서 read/write/manage 가능하다. Agent caller는 connection permission에 따른다.
 
+## Write lock
+
+`nodes.write_locked=true`는 직접 설정된 node와 모든 live descendant에 쓰기 장벽을 만든다. 상속 상태를 별도 row로 저장하지 않고, mutation transaction 안에서 대상의 parent chain을 확인한다.
+
+- 잠긴 node 또는 잠긴 조상 아래에서는 create, Text write/append/patch/edit, metadata, 검색 정책, 저장 Text 암호화, rename, reorder, move, delete, File upload 등록을 거부한다.
+- 이동은 source와 destination 모두 확인한다. 잠긴 descendant가 있는 folder는 rename, move, delete할 수 없다.
+- Copy는 source를 읽을 수 있지만 잠긴 destination에는 만들 수 없다. 복사본에는 직접 잠금을 복제하지 않는다.
+- Read, metadata 조회, find/grep/tree, File download는 허용한다. Preview MIME 감지값처럼 read path가 기록하는 파생 File metadata도 content/tree 변경이 아니므로 허용한다. 같은 parent/name으로의 move, 현재 값과 같은 update, 이미 attach된 File upload의 완료 재시도처럼 실제 변경이 없는 요청도 허용한다.
+- File upload 등록은 destination의 잠금을 검사하고 해당 upload handle의 write-lock 허가를 예약한다. 등록 뒤 destination이 잠겨도 기존 handle은 attach할 수 있으며, 잠금 이후 새 upload 등록은 거부한다. 완료 시 일반 write permission, parent 존재, 이름 충돌과 quota는 다시 확인한다. 취소되거나 만료된 upload object는 기존 cleanup worker가 backoff로 정리한다.
+- 잠금 설정/해제는 Dashboard Browser의 Space owner User 전용 보안 설정이다. MCP/CLI command는 이를 변경하지 않는다.
+- 직접 잠금의 설정/해제는 상속된 잠금과 독립적으로 처리한다. 따라서 잠긴 조상 아래의 직접 잠금도 owner가 해제할 수 있고, effective lock은 남아 있는 직접 source가 없을 때만 풀린다.
+- Space 삭제는 node mutation이 아닌 owner의 별도 resource lifecycle 작업이므로 node write lock이 막지 않는다.
+
 ## Text commands
 
 ```text

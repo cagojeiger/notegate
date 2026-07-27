@@ -298,7 +298,8 @@ pub async fn attach(
         .parent_node_id
         .ok_or_else(|| Error::not_found("upload parent no longer exists"))?;
     let locked = checks::lock_space_context(&mut tx, space_id, limits).await?;
-    create::prepare_create(&mut tx, space_id, parent_id, &upload.name, locked.limits).await?;
+    create::prepare_reserved_file_create(&mut tx, space_id, parent_id, &upload.name, locked.limits)
+        .await?;
     space_usage::apply_quota_delta(
         &mut tx,
         &locked.gate,

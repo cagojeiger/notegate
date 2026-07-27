@@ -1,8 +1,10 @@
+use notegate_model::files::WriteLockSource;
 use notegate_model::{FileObject, Node, NodeKind, NodeSummary, TextObject};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::ServiceResult;
-use crate::files::{FileStats, FileView, NodeSummaryView, NodeView, TextStats, TextView};
+use crate::files::{FileStats, NodeSummaryView, NodeView, TextStats, TextView};
 use notegate_db::FilesRepo;
 
 use super::FilesService;
@@ -26,6 +28,7 @@ pub(crate) async fn hydrate_node_views(
     let has_children = store.has_children_many(space_id, &node_ids).await?;
     let text_stats = store.text_stats_many(space_id, &text_ids).await?;
     let file_stats = store.file_stats_many(space_id, &file_ids).await?;
+    let mut write_lock_sources = write_lock_sources_many(store, space_id, &node_ids).await?;
 
     Ok(rows
         .into_iter()
@@ -33,6 +36,7 @@ pub(crate) async fn hydrate_node_views(
             has_children: has_children.get(&node.id).copied().unwrap_or(false),
             text: text_stats.get(&node.id).cloned(),
             file: file_stats.get(&node.id).cloned(),
+            write_lock_sources: write_lock_sources.remove(&node.id).unwrap_or_default(),
             node,
             path,
         })
@@ -58,11 +62,15 @@ pub(crate) async fn hydrate_node_summary_views(
     let has_children = store.has_children_many(space_id, &node_ids).await?;
     let text_stats = store.text_stats_many(space_id, &text_ids).await?;
     let file_stats = store.file_stats_many(space_id, &file_ids).await?;
+    let effective_write_locks = store
+        .direct_write_lock_ancestors_many(space_id, &node_ids)
+        .await?;
 
     Ok(rows
         .into_iter()
         .map(|(node, path)| NodeSummaryView {
             has_children: has_children.get(&node.id).copied().unwrap_or(false),
+            effective_write_locked: effective_write_locks.contains_key(&node.id),
             text: text_stats.get(&node.id).cloned(),
             file: file_stats.get(&node.id).cloned(),
             node,
@@ -86,12 +94,14 @@ impl FilesService {
         } else {
             None
         };
+        let write_lock_sources = self.write_lock_sources(space_id, node.id).await?;
         Ok(NodeView {
             node,
             path,
             has_children,
             text,
             file,
+            write_lock_sources,
         })
     }
 
@@ -115,12 +125,14 @@ impl FilesService {
         text: &TextObject,
     ) -> ServiceResult<NodeView> {
         let path = self.path_of(space_id, node.id).await?;
+        let write_lock_sources = self.write_lock_sources(space_id, node.id).await?;
         Ok(NodeView {
             node,
             path,
             has_children: false,
             text: Some(stats_from_text(text)),
             file: None,
+            write_lock_sources,
         })
     }
 
@@ -132,12 +144,14 @@ impl FilesService {
         file: &FileObject,
     ) -> ServiceResult<NodeView> {
         let path = self.path_of(space_id, node.id).await?;
+        let write_lock_sources = self.write_lock_sources(space_id, node.id).await?;
         Ok(NodeView {
             node,
             path,
             has_children: false,
             text: None,
             file: Some(stats_from_file(file)),
+            write_lock_sources,
         })
     }
 }
@@ -151,23 +165,58 @@ pub(super) fn text_view_at_path(node: Node, path: String, text: TextObject) -> T
             has_children: false,
             text: Some(stats),
             file: None,
+            write_lock_sources: Vec::new(),
         },
         text,
     }
 }
 
-pub(super) fn file_view_at_path(node: Node, path: String, file: FileObject) -> FileView {
-    let stats = stats_from_file(&file);
-    FileView {
-        node: NodeView {
-            node,
-            path,
-            has_children: false,
-            text: None,
-            file: Some(stats),
-        },
-        file,
+impl FilesService {
+    async fn write_lock_sources(
+        &self,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<Vec<WriteLockSource>> {
+        let mut sources = write_lock_sources_many(&self.store, space_id, &[node_id]).await?;
+        Ok(sources.remove(&node_id).unwrap_or_default())
     }
+}
+
+pub(crate) async fn write_lock_sources_many(
+    store: &FilesRepo,
+    space_id: Uuid,
+    node_ids: &[Uuid],
+) -> ServiceResult<HashMap<Uuid, Vec<WriteLockSource>>> {
+    let direct_sources = store
+        .direct_write_lock_ancestors_many(space_id, node_ids)
+        .await?;
+    if direct_sources.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let source_ids: Vec<Uuid> = direct_sources
+        .values()
+        .flat_map(|sources| sources.iter().map(|(node_id, _)| *node_id))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let paths = store.node_paths_many(space_id, &source_ids).await?;
+
+    Ok(direct_sources
+        .into_iter()
+        .map(|(node_id, sources)| {
+            let sources = sources
+                .into_iter()
+                .filter_map(|(source_id, name)| {
+                    paths.get(&source_id).map(|path| WriteLockSource {
+                        node_id: source_id,
+                        name,
+                        path: path.clone(),
+                    })
+                })
+                .collect();
+            (node_id, sources)
+        })
+        .collect())
 }
 
 fn stats_from_text(text: &TextObject) -> TextStats {

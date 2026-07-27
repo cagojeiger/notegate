@@ -76,9 +76,8 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         tx.commit().await.map_err(map_sqlx_error)?;
         return moved_row.into_node();
     }
-
-    let destination =
-        checks::require_live_folder_path_bounds(&mut tx, space_id, new_parent_id).await?;
+    let access =
+        checks::require_move_write(&mut tx, space_id, node_id, new_parent_id, &moved_kind).await?;
 
     // Cannot move into self or own descendant (recursive subtree membership).
     if moved_kind == "folder" {
@@ -109,12 +108,7 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     checks::require_sibling_unique(&mut tx, space_id, new_parent_id, final_name, Some(node_id))
         .await?;
 
-    let subtree = if moved_kind == "folder" {
-        checks::subtree_relative_bounds(&mut tx, space_id, node_id).await?
-    } else {
-        checks::PathBounds::default()
-    };
-    let bounds = checks::destination_bounds(destination, final_name, subtree)?;
+    let bounds = checks::destination_bounds(access.destination, final_name, access.subtree)?;
     checks::require_path_limits(bounds)?;
 
     // Destination fanout, only when actually changing parent.

@@ -113,6 +113,7 @@ function toNodeSummary(node: CachedNodeReference): NodeSummary {
     kind: node.kind,
     path: node.path,
     has_children: node.has_children,
+    effective_write_locked: node.effective_write_locked,
     byte_len: node.byte_len,
     line_count: node.line_count,
     preview_available: node.preview_available,

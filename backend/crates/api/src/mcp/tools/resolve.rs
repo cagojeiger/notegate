@@ -14,12 +14,14 @@ use rmcp::ErrorData;
 use serde_json::json;
 use uuid::Uuid;
 
+use notegate_core::WriteLockScope;
 use notegate_core::validation::{normalize_path, validate_space_name};
 use notegate_model::Caller;
 use notegate_service::ServiceError;
 use notegate_service::files::parse_target;
 use notegate_service::spaces::SpaceView;
 
+use crate::error::write_lock_code;
 use crate::state::AppState;
 
 const SPACE_SUGGESTION_LIMIT: i64 = 5;
@@ -193,6 +195,7 @@ pub fn service_error(error: ServiceError) -> ErrorData {
         ServiceError::Conflict(message) => {
             ErrorData::invalid_request(Cow::Owned(message), error_meta("conflict"))
         }
+        ServiceError::WriteLocked { scope } => write_locked_error(scope),
         ServiceError::UsageRecalculationInProgress {
             retry_after_seconds,
         } => ErrorData::new(
@@ -210,6 +213,29 @@ pub fn service_error(error: ServiceError) -> ErrorData {
             ErrorData::internal_error("internal server error", error_meta("internal_error"))
         }
     }
+}
+
+fn write_locked_error(scope: WriteLockScope) -> ErrorData {
+    let (scope_name, hint) = match scope {
+        WriteLockScope::TargetOrAncestor => (
+            "target_or_ancestor",
+            "Use read op=stat on the target to inspect write_lock_sources. Only the space owner can unlock it in the Dashboard. If file_transfer begin_upload was rejected, unlock the target and call begin_upload again; no upload handle was created.",
+        ),
+        WriteLockScope::Descendant => (
+            "descendant",
+            "Inspect the subtree for direct write locks. Only the space owner can unlock them in the Dashboard.",
+        ),
+    };
+    ErrorData::invalid_request(
+        Cow::Owned(scope.to_string()),
+        Some(json!({
+            "kind": "write_locked",
+            "code": write_lock_code(scope),
+            "scope": scope_name,
+            "retryable": false,
+            "hint": hint,
+        })),
+    )
 }
 
 fn error_meta(kind: &'static str) -> Option<serde_json::Value> {
@@ -271,6 +297,8 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         "has_children": view.has_children,
         "sort_order": view.node.sort_order,
         "search_enabled": view.node.search_enabled,
+        "write_locked": view.node.write_locked,
+        "effective_write_locked": !view.write_lock_sources.is_empty(),
         "created_at": view.node.created_at,
         "updated_at": view.node.updated_at,
     });
@@ -479,6 +507,28 @@ mod tests {
         let conflict_data = conflict.data.expect("conflict carries data");
         assert_eq!(conflict_data["kind"], "conflict");
         assert_eq!(conflict_data["code"], "conflict");
+
+        let locked = service_error(ServiceError::WriteLocked {
+            scope: WriteLockScope::TargetOrAncestor,
+        });
+        assert_eq!(locked.code, ErrorCode::INVALID_REQUEST);
+        let locked_data = locked.data.expect("write lock carries data");
+        assert_eq!(locked_data["kind"], "write_locked");
+        assert_eq!(locked_data["code"], "node_write_locked");
+        assert_eq!(locked_data["scope"], "target_or_ancestor");
+        assert_eq!(locked_data["retryable"], false);
+        assert!(
+            locked_data["hint"]
+                .as_str()
+                .is_some_and(|hint| hint.contains("begin_upload"))
+        );
+
+        let locked_subtree = service_error(ServiceError::WriteLocked {
+            scope: WriteLockScope::Descendant,
+        });
+        let locked_subtree_data = locked_subtree.data.expect("subtree lock carries data");
+        assert_eq!(locked_subtree_data["code"], "subtree_write_locked");
+        assert_eq!(locked_subtree_data["scope"], "descendant");
 
         let internal = service_error(ServiceError::Internal("db detail".to_owned()));
         assert_eq!(internal.code, ErrorCode::INTERNAL_ERROR);

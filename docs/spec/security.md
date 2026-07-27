@@ -92,6 +92,16 @@ encrypted line_count     = 0
 
 REST는 client-side encrypted payload 저장/조회가 가능하다. MCP Text content operation과 `search op=grep`은 `storage_format='plain'`만 대상으로 하며, 서버 관리 암호화 여부는 이 동작을 바꾸지 않는다.
 
+## Node write lock
+
+Node write lock은 content 암호화와 독립된 구조 변경 방지 정책이다. 직접 잠금은 `nodes.write_locked`에만 저장하고 descendant의 상속 상태는 materialize하지 않는다. 따라서 잠금 source와 실제 tree 관계가 항상 일치한다.
+
+직접 잠금 변경은 Browser channel의 Space owner User만 할 수 있다. Agent와 MCP/API channel의 User는 write permission이 있어도 변경할 수 없다. `write_lock` tier capability가 새 잠금 설정을 제어하며 현재는 `system_max`만 활성화한다. Tier 하향 뒤에는 기존 잠금을 해제할 수 있다.
+
+Node mutation은 현재 node의 ancestor chain을 확인한다. Folder rename/move/delete는 subtree에 직접 잠긴 descendant가 있는지도 확인한다. Read와 File download, owner의 Space 삭제는 별도 권한 경계이며 허용한다.
+
+File upload handle은 등록 transaction에서 destination의 write lock을 확인한다. 이후 잠금은 이미 등록된 handle의 완료를 취소하지 않으며, 완료 시 일반 write permission과 File 생성 invariant는 다시 확인한다.
+
 
 ## File content encryption
 

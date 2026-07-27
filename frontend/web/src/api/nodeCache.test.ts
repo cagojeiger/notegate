@@ -1,6 +1,7 @@
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
+import { makeRestNode } from "../test/fixtures";
 import { updateNodeCaches } from "./nodeCache";
 import { queryKeys } from "./queryKeys";
 import type { ChildrenResponse, RestNode, RestNodeListResponse } from "./types";
@@ -81,25 +82,35 @@ describe("updateNodeCaches", () => {
 
     expect(queryClient.getQueryData(statKey)).toBe(stat);
   });
+
+  it("preserves effective write-lock state in collection summaries", () => {
+    const queryClient = new QueryClient();
+    const target = node("file-1");
+    queryClient.setQueryData(queryKeys.recent("space-1"), {
+      pages: [{ nodes: [target], page: page() }],
+      pageParams: [null]
+    });
+
+    updateNodeCaches(
+      queryClient,
+      { ...target, write_locked: true, effective_write_locked: true },
+      (current) => ({ ...current, effective_write_locked: true })
+    );
+
+    const recent = queryClient.getQueryData<InfiniteData<RestNodeListResponse>>(
+      queryKeys.recent("space-1")
+    );
+    expect(recent?.pages[0]?.nodes[0]?.effective_write_locked).toBe(true);
+  });
 });
 
 function node(id: string): RestNode {
-  return {
+  return makeRestNode({
     id,
-    space_id: "space-1",
-    parent_id: "root-1",
     name: `${id}.png`,
     kind: "file",
-    path: `/${id}.png`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    path: `/${id}.png`
+  });
 }
 
 function page() {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import { FileDetailView } from "./FileDetailView";
 import { useFilePreviewUrl } from "./useFilePreviewQueries";
 
@@ -141,26 +142,16 @@ describe("FileDetailView", () => {
 });
 
 function fileNode(overrides: Partial<RestNode> = {}): RestNode {
-  return {
+  return makeRestNode({
     id: "file-1",
-    space_id: "space-1",
-    parent_id: "root-1",
     name: "image.png",
     kind: "file",
     path: "/image.png",
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: false,
     byte_len: 29,
     media_type: "image/png",
     detected_media_type: "image/png",
     preview_available: true,
     encryption_mode: "none",
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z",
     ...overrides
-  };
+  });
 }

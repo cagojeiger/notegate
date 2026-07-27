@@ -19,6 +19,8 @@ invalid_input  -> 400 invalid field/name/path, malformed limit, malformed/tamper
 forbidden      -> 403 authenticated but not allowed
 not_found      -> 404 not found or cross-space hidden resource
 conflict       -> 409 state conflict, quota conflict, stale hash, duplicate destination, subtree too large
+node_write_locked    -> 423 target node or an ancestor is write-locked
+subtree_write_locked -> 423 source subtree contains a directly write-locked node
 usage_reconciliation_pending  -> 409 reconciliation job already queued
 usage_reconciliation_cooldown -> 409 reconciliation completed within the cooldown window
 internal_error -> 500 redacted internal error

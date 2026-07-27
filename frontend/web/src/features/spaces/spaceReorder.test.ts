@@ -1,23 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { Space } from "../../api/types";
+import { makeSpace } from "../../test/fixtures";
 import { buildSpaceSortOrderUpdates, mergeVisibleSpaceOrder, reorderSpacesByDrop } from "./spaceReorder";
 
 function space(id: string, sort_order = 0): Space {
-  return {
+  return makeSpace({
     id,
     name: id,
     sort_order,
-    navigation_pinned: true,
-    user_mcp_enabled: true,
-    default_search_enabled: true,
-    default_text_encryption_enabled: false,
-    features: { text_encryption: true },
-    permission: "write",
-    root_node_id: `root-${id}`,
-    created_at: "2026-06-14T00:00:00Z",
-    updated_at: "2026-06-14T00:00:00Z"
-  };
+    root_node_id: `root-${id}`
+  });
 }
 
 describe("spaceReorder", () => {

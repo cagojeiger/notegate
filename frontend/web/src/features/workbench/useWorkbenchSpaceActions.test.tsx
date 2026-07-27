@@ -2,9 +2,10 @@ import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode, Space } from "../../api/types";
-import type { AppDialog } from "./dialogs/dialogTypes";
 import { useUiStore } from "../../stores/uiStore";
 import { persistSpaceWorkbench, workbenchSpaceKey } from "../../stores/workbenchStorage";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
+import type { AppDialog } from "./dialogs/dialogTypes";
 import { useWorkbenchSpaceActions } from "./useWorkbenchSpaceActions";
 
 vi.mock("./useWorkbenchQueries", () => ({
@@ -19,39 +20,22 @@ vi.mock("./useWorkbenchQueries", () => ({
 }));
 
 function space(id: string, permission: Space["permission"] = "write"): Space {
-  return {
+  return makeSpace({
     id,
     name: id,
-    sort_order: 0,
-    navigation_pinned: true,
-    user_mcp_enabled: true,
-    default_search_enabled: true,
-    default_text_encryption_enabled: false,
-    features: { text_encryption: true },
     permission,
-    root_node_id: `${id}-root`,
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    root_node_id: `${id}-root`
+  });
 }
 
 function node(id: string, spaceId: string): RestNode {
-  return {
+  return makeRestNode({
     id,
     space_id: spaceId,
     parent_id: `${spaceId}-root`,
     name: `${id}.md`,
-    kind: "text",
     path: `/${id}.md`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: false,
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+  });
 }
 
 describe("useWorkbenchSpaceActions", () => {

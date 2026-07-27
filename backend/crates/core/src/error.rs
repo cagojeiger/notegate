@@ -7,6 +7,25 @@ use std::fmt;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteLockScope {
+    TargetOrAncestor,
+    Descendant,
+}
+
+impl fmt::Display for WriteLockScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::TargetOrAncestor => {
+                "changes are blocked because the node or an ancestor is write-locked"
+            }
+            Self::Descendant => {
+                "changes are blocked because the subtree contains a directly write-locked node"
+            }
+        })
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The requested resource does not exist.
@@ -20,6 +39,10 @@ pub enum Error {
     /// The operation conflicts with current state.
     #[error("conflict: {0}")]
     Conflict(String),
+
+    /// The target is protected by a direct or inherited node write lock.
+    #[error("{scope}")]
+    WriteLocked { scope: WriteLockScope },
 
     /// A Space mutation must wait for usage reconciliation to finish.
     #[error("space usage recalculation is in progress")]
@@ -41,6 +64,10 @@ impl Error {
 
     pub fn conflict(msg: impl fmt::Display) -> Self {
         Self::Conflict(msg.to_string())
+    }
+
+    pub fn write_locked(scope: WriteLockScope) -> Self {
+        Self::WriteLocked { scope }
     }
 
     pub fn usage_recalculation_in_progress(retry_after_seconds: u64) -> Self {

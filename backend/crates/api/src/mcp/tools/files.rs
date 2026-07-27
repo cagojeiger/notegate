@@ -154,10 +154,28 @@ pub async fn stat(
         .resolve_path(caller.account_id(), resolved.space_id(), &path)
         .await
         .map_err(service_error)?;
+    let mut node = node_summary(&view);
+    if let Some(object) = node.as_object_mut() {
+        object.insert(
+            "write_lock_sources".to_owned(),
+            json!(
+                view.write_lock_sources
+                    .iter()
+                    .map(|source| {
+                        json!({
+                            "node_id": source.node_id,
+                            "name": source.name,
+                            "path": source.path,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
 
     Ok(Json(json!({
         "space": resolved.name(),
-        "node": node_summary(&view),
+        "node": node,
     })))
 }
 

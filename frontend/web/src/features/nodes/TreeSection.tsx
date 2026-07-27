@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import type { NodeSummary, Space } from "../../api/types";
 import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
+import { canMoveNodeToFolder, canMutateNode } from "./nodeWriteAccess";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { findAdjacentNodeRowIndex, projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
@@ -201,14 +202,20 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
   }
 
   function handleDragOver(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
-    if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    if (
+      !draggedNode
+      || !canMoveNodeToFolder(draggedNode, node, canWriteActiveSpace)
+    ) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
     setDropFolderId(node.id);
   }
 
   function handleDrop(node: NodeSummary, event: DragEvent<HTMLDivElement>) {
-    if (!canWriteActiveSpace || !draggedNode || node.kind !== "folder" || node.id === draggedNode.id) return;
+    if (
+      !draggedNode
+      || !canMoveNodeToFolder(draggedNode, node, canWriteActiveSpace)
+    ) return;
     event.preventDefault();
     onMoveNodeToFolder(draggedNode, node);
     clearDrag();
@@ -403,7 +410,7 @@ function VirtualTreeRow({
         onToggleFolder={onToggleFolder}
         onOpenNode={onOpenNode}
         onNodeContextMenu={onNodeContextMenu}
-        onDragStartNode={canWriteActiveSpace ? onDragStartNode : undefined}
+        onDragStartNode={canMutateNode(node, canWriteActiveSpace) ? onDragStartNode : undefined}
         onDragOverNode={onDragOverNode}
         onDropOnNode={onDropOnNode}
         onDragEndNode={onDragEndNode}

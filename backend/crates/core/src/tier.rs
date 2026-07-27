@@ -19,6 +19,7 @@ pub enum UserTier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TierFeatures {
     pub text_encryption: bool,
+    pub write_lock: bool,
 }
 
 impl UserTier {
@@ -71,9 +72,11 @@ impl UserTier {
         match self {
             Self::Tier0 => TierFeatures {
                 text_encryption: false,
+                write_lock: false,
             },
             Self::SystemMax => TierFeatures {
                 text_encryption: true,
+                write_lock: true,
             },
         }
     }
@@ -135,6 +138,12 @@ mod tests {
     fn text_encryption_is_feature_gated() {
         assert!(!UserTier::Tier0.features().text_encryption);
         assert!(UserTier::SystemMax.features().text_encryption);
+    }
+
+    #[test]
+    fn write_lock_is_feature_gated() {
+        assert!(!UserTier::Tier0.features().write_lock);
+        assert!(UserTier::SystemMax.features().write_lock);
     }
 
     #[test]

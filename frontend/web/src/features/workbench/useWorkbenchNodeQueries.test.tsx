@@ -1,16 +1,18 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, type InfiniteData } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { deleteNode, moveNode, updateNodeSearchPolicy } from "../../api/nodes";
+import { deleteNode, moveNode, updateNodeSearchPolicy, updateNodeWriteLock } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
-import type { RestNode } from "../../api/types";
+import type { ChildrenResponse, RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import {
   useDeleteNodeMutation,
   useMoveNodeMutation,
   useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchNodeQueries";
 
@@ -24,7 +26,8 @@ vi.mock("../../api/nodes", () => ({
   moveNode: vi.fn(),
   revealNode: vi.fn(),
   updateNode: vi.fn(),
-  updateNodeSearchPolicy: vi.fn()
+  updateNodeSearchPolicy: vi.fn(),
+  updateNodeWriteLock: vi.fn()
 }));
 
 vi.mock("../../api/text", () => ({
@@ -101,6 +104,151 @@ describe("workbench node mutations", () => {
       exact: true
     });
     expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  it("updates the direct write lock through its dedicated endpoint", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    const updated = {
+      ...current,
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [{ node_id: current.id, name: current.name, path: current.path }]
+    };
+    vi.mocked(updateNodeWriteLock).mockResolvedValue(updated);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(onUpdated), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ node: current, enabled: true });
+    });
+
+    expect(updateNodeWriteLock).toHaveBeenCalledWith(
+      expect.anything(),
+      current.space_id,
+      current.id,
+      true
+    );
+    expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.fileChangeEventsFamily(current.space_id)
+    });
+    expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  it("shows a direct write lock in cached tree rows while the request is pending", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    const updated = {
+      ...current,
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [{ node_id: current.id, name: current.name, path: current.path }]
+    };
+    let resolveUpdate: (node: RestNode) => void = () => undefined;
+    const updateRequest = new Promise<RestNode>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    vi.mocked(updateNodeWriteLock).mockReturnValue(updateRequest);
+    queryClient.setQueryData<InfiniteData<ChildrenResponse>>(
+      queryKeys.children(current.space_id, current.parent_id!),
+      {
+        pages: [{
+          parent: { id: current.parent_id!, path: "/" },
+          children: [current],
+          page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+        }],
+        pageParams: [null]
+      }
+    );
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(onUpdated), { wrapper });
+
+    act(() => {
+      result.current.mutate({ node: current, enabled: true });
+    });
+
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<InfiniteData<ChildrenResponse>>(
+        queryKeys.children(current.space_id, current.parent_id!)
+      );
+      expect(cached?.pages[0]?.children[0]?.effective_write_locked).toBe(true);
+      expect(onUpdated).toHaveBeenCalledWith(updated);
+    });
+
+    await act(async () => {
+      resolveUpdate(updated);
+      await updateRequest;
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it("restores the previous write-lock state when an optimistic request fails", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    vi.mocked(updateNodeWriteLock).mockRejectedValue(new Error("update failed"));
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(onUpdated), { wrapper });
+
+    act(() => {
+      result.current.mutate({ node: current, enabled: true });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(current);
+    expect(onUpdated).toHaveBeenLastCalledWith(current);
+  });
+
+  it("invalidates descendant node details when a folder lock changes", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("folder-1", "space-1", "folder");
+    const updated = {
+      ...current,
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [{ node_id: current.id, name: current.name, path: current.path }]
+    };
+    vi.mocked(updateNodeWriteLock).mockResolvedValue(updated);
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(vi.fn()), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ node: current, enabled: true });
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.nodes("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.recent("space-1"),
+      exact: true
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.childrenFamily("space-1")
+    });
   });
 
   it("removes every preview URL cached for a recursively deleted folder", async () => {
@@ -207,20 +355,13 @@ describe("workbench node mutations", () => {
 });
 
 function node(id: string, spaceId: string, kind: RestNode["kind"]): RestNode {
-  return {
+  return makeRestNode({
     id,
     space_id: spaceId,
     parent_id: `${spaceId}-root`,
     name: id,
     kind,
     path: `/${id}`,
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: kind === "folder",
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    has_children: kind === "folder"
+  });
 }

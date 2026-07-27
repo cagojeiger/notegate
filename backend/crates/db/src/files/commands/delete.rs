@@ -22,6 +22,8 @@ struct SubtreeUsage {
     nodes: i64,
     text_bytes: i64,
     file_bytes: i64,
+    has_target_or_ancestor_lock: bool,
+    has_descendant_lock: bool,
 }
 
 /// Soft-delete `node_id` and its live subtree, attributing it to `deleted_by`.
@@ -42,14 +44,21 @@ pub async fn soft_delete_node(
     if node.parent_id.is_none() {
         return Err(Error::conflict("cannot delete the root node"));
     }
-
-    // Bound the synchronous delete by the live subtree size.
+    // Bound the synchronous delete and enforce inherited locks from one tree
+    // snapshot.
     let subtree_usage = sqlx::query_as::<_, SubtreeUsage>(
-        "WITH RECURSIVE subtree AS ( \
-            SELECT id FROM nodes \
+        "WITH RECURSIVE ancestors AS ( \
+            SELECT id, parent_id, write_locked FROM nodes \
             WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
             UNION ALL \
-            SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id = s.id \
+            SELECT n.id, n.parent_id, n.write_locked \
+            FROM nodes n JOIN ancestors a ON n.id = a.parent_id \
+            WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+         ), subtree AS ( \
+            SELECT id, write_locked FROM nodes \
+            WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
+            UNION ALL \
+            SELECT n.id, n.write_locked FROM nodes n JOIN subtree s ON n.parent_id = s.id \
             WHERE n.space_id = $1 AND n.deleted_at IS NULL \
          ) \
          SELECT \
@@ -58,16 +67,24 @@ pub async fn soft_delete_node(
                  SELECT sum(t.byte_len) FROM text_objects t \
                  JOIN subtree s ON s.id = t.node_id WHERE t.space_id = $1 \
              ), 0)::bigint AS text_bytes, \
-             COALESCE(( \
-                 SELECT sum(f.byte_len) FROM file_objects f \
-                 JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1 \
-             ), 0)::bigint AS file_bytes",
+              COALESCE(( \
+                  SELECT sum(f.byte_len) FROM file_objects f \
+                  JOIN subtree s ON s.id = f.node_id WHERE f.space_id = $1 \
+             ), 0)::bigint AS file_bytes, \
+             COALESCE((SELECT bool_or(write_locked) FROM ancestors), false) \
+                 AS has_target_or_ancestor_lock, \
+             COALESCE((SELECT bool_or(write_locked) FROM subtree WHERE id <> $2), false) \
+                 AS has_descendant_lock",
     )
     .bind(space_id)
     .bind(node_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
+    checks::require_subtree_write(
+        subtree_usage.has_target_or_ancestor_lock,
+        subtree_usage.has_descendant_lock,
+    )?;
     let subtree = crate::to_usize(subtree_usage.nodes, "subtree")?;
     if subtree > limits::SUBTREE_DELETE_MAX_NODES {
         return Err(Error::conflict(format!(

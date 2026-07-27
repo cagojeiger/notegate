@@ -119,6 +119,14 @@ impl FilesRepo {
         queries::node::ancestor_chain(&self.pool, space_id, node_id).await
     }
 
+    pub async fn direct_write_lock_ancestors_many(
+        &self,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, Vec<(Uuid, String)>>> {
+        queries::node::direct_write_lock_ancestors_many(&self.pool, space_id, node_ids).await
+    }
+
     pub async fn resolve_path(&self, space_id: Uuid, path: &str) -> Result<Option<Uuid>> {
         queries::search::resolve_scope_node(&self.pool, space_id, path).await
     }
@@ -618,6 +626,22 @@ impl FilesRepo {
         updated_by: Uuid,
     ) -> Result<Node> {
         commands::update::update_node_search_policy(&self.pool, space_id, command, updated_by).await
+    }
+
+    pub async fn update_node_write_lock(
+        &self,
+        space_id: Uuid,
+        command: &notegate_model::files::UpdateNodeWriteLock,
+        updated_by: Uuid,
+    ) -> Result<Node> {
+        commands::write_lock::update_node_write_lock(
+            &self.pool,
+            space_id,
+            command,
+            updated_by,
+            self.limits,
+        )
+        .await
     }
 
     pub async fn update_text_encryption(

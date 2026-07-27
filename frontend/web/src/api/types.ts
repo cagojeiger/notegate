@@ -35,6 +35,7 @@ export type Space = {
   default_text_encryption_enabled: boolean;
   features: {
     text_encryption: boolean;
+    write_lock: boolean;
   };
   permission: SpacePermission;
   root_node_id: string;
@@ -59,6 +60,7 @@ export type NodeSummary = {
   kind: NodeKind;
   path: string;
   has_children: boolean;
+  effective_write_locked: boolean;
   byte_len?: number;
   line_count?: number;
   preview_available?: boolean;
@@ -70,6 +72,8 @@ export type RestNode = NodeSummary & {
   sort_order: number;
   metadata: Record<string, unknown>;
   search_enabled: boolean;
+  write_locked: boolean;
+  write_lock_sources: WriteLockSource[];
   content_sha256?: string;
   text_storage_format?: "plain" | "encrypted";
   text_at_rest_encryption?: "none" | "server";
@@ -81,6 +85,12 @@ export type RestNode = NodeSummary & {
   created_by: AccountRef;
   updated_by: AccountRef;
   created_at: string;
+};
+
+export type WriteLockSource = {
+  node_id: string;
+  name: string;
+  path: string;
 };
 
 export type SpacesListResponse = {
@@ -275,6 +285,7 @@ export type FileChangeDelta = {
   parent_scope_known: boolean;
   path_changed: boolean;
   subtree_changed: boolean;
+  write_lock_changed?: boolean;
 };
 
 export type FileChangeSyncResponse = {

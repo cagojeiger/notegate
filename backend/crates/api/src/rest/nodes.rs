@@ -3,7 +3,7 @@
 //! `GET /paths/resolve?path=`, `GET /nodes`, `GET /nodes/{id}`,
 //! `GET /nodes/{id}/children` (paginated), `GET /nodes/{id}/reveal`,
 //! `POST /nodes` (create folder/text), `PATCH /nodes/{id}`
-//! (rename / reorder), `PUT /nodes/{id}/search-policy`,
+//! (rename / reorder), `PUT /nodes/{id}/search-policy`, `PUT /nodes/{id}/write-lock`,
 //! `GET`/`PUT`/`PATCH /nodes/{id}/metadata`,
 //! `POST /nodes/{id}/move`, and `DELETE /nodes/{id}`.
 //! All handlers delegate to the files service,
@@ -31,7 +31,7 @@ use crate::state::AppState;
 use notegate_service::files::{
     BatchChildrenRequest, BatchChildrenResult, ChildrenRequest, CreateFolder, CreateText,
     DeleteNode, ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, SyncFileChanges,
-    UpdateNode, UpdateNodeSearchPolicy, WriteTarget, WriteText, WriteTextBody,
+    UpdateNode, UpdateNodeSearchPolicy, UpdateNodeWriteLock, WriteTarget, WriteText, WriteTextBody,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -53,6 +53,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
             axum::routing::put(update_search_policy),
+        )
+        .route(
+            "/v1/spaces/{space_id}/nodes/{node_id}/write-lock",
+            axum::routing::put(update_write_lock),
         )
         .route("/v1/spaces/{space_id}/nodes/{node_id}/reveal", get(reveal))
         .route(
@@ -535,6 +539,7 @@ mod collection_response_tests {
                     kind: "file".to_owned(),
                     path: format!("/{}", "p".repeat(902)),
                     has_children: false,
+                    effective_write_locked: None,
                     byte_len: Some(crate::file_preview::PREVIEW_MAX_BYTES),
                     line_count: None,
                     preview_available: Some(true),
@@ -571,6 +576,11 @@ mod collection_response_tests {
             !bytes
                 .windows(b"space_id".len())
                 .any(|window| window == b"space_id")
+        );
+        assert!(
+            !bytes
+                .windows(b"effective_write_locked".len())
+                .any(|window| window == b"effective_write_locked")
         );
         Ok(())
     }
@@ -732,6 +742,12 @@ pub(crate) struct UpdateNodeSearchPolicyBody {
     enabled: bool,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UpdateNodeWriteLockBody {
+    enabled: bool,
+}
+
 #[utoipa::path(
     patch,
     path = "/api/v1/spaces/{space_id}/nodes/{node_id}",
@@ -788,6 +804,39 @@ pub(crate) async fn update_search_policy(
             caller.account_id(),
             space_id,
             UpdateNodeSearchPolicy {
+                node_id,
+                enabled: body.enabled,
+            },
+        )
+        .await?;
+    let refs = state
+        .accounts
+        .find_account_refs(&attribution_ids([&view]))
+        .await?;
+    Ok(Json(NodeOut::from_view(&view, &refs)))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/spaces/{space_id}/nodes/{node_id}/write-lock",
+    tag = "nodes",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    request_body = UpdateNodeWriteLockBody,
+    responses((status = 200, description = "Update direct node write lock", body = NodeOut)),
+    security(("bearer_auth" = []))
+)]
+pub(crate) async fn update_write_lock(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateNodeWriteLockBody>,
+) -> Result<Json<NodeOut>, ApiError> {
+    let view = state
+        .files
+        .update_node_write_lock(
+            &caller,
+            space_id,
+            UpdateNodeWriteLock {
                 node_id,
                 enabled: body.enabled,
             },
@@ -972,7 +1021,7 @@ pub(crate) async fn delete(
 mod update_request_tests {
     use serde_json::json;
 
-    use super::UpdateNodeBody;
+    use super::{UpdateNodeBody, UpdateNodeWriteLockBody};
 
     #[test]
     fn generic_update_rejects_policy_fields() {
@@ -982,6 +1031,24 @@ mod update_request_tests {
         assert!(
             serde_json::from_value::<UpdateNodeBody>(json!({ "text_encryption_enabled": true }))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn write_lock_update_accepts_only_an_explicit_boolean() {
+        assert!(
+            serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": true }))
+                .is_ok_and(|body| body.enabled)
+        );
+        assert!(
+            serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": "true" }))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UpdateNodeWriteLockBody>(
+                json!({ "enabled": true, "scope": "subtree" })
+            )
+            .is_err()
         );
     }
 }

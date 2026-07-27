@@ -3,8 +3,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChildrenResponse, RestNode, Space } from "../../../api/types";
+import type { ChildrenResponse, RestNode } from "../../../api/types";
+import { makeRestNode, makeSpace } from "../../../test/fixtures";
 import { DialogHost } from "./DialogHost";
+import type { AppDialog } from "./dialogTypes";
 
 const mocks = vi.hoisted(() => ({
   apiGet: vi.fn()
@@ -14,37 +16,15 @@ vi.mock("../../../api/ApiProvider", () => ({
   useApiClient: () => ({ get: mocks.apiGet })
 }));
 
-const textNode: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
+const textNode = makeRestNode({
   parent_id: "root",
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
   metadata: { title: "note" },
-  search_enabled: true,
-  has_children: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
-const space: Space = {
-  id: "space-1",
+const space = makeSpace({
   name: "Space",
-  sort_order: 0,
-  navigation_pinned: true,
-  user_mcp_enabled: true,
-  default_search_enabled: true,
-  default_text_encryption_enabled: false,
-  features: { text_encryption: true },
-  permission: "write",
   root_node_id: "root",
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 describe("DialogHost", () => {
   beforeEach(() => {
@@ -148,6 +128,61 @@ describe("DialogHost", () => {
     expect(await screen.findByRole("button", { name: "First folder" })).toBeVisible();
   });
 
+  it("does not enter an effectively write-locked move destination", async () => {
+    const user = userEvent.setup();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([
+      { ...folder("folder-1", "Locked folder"), effective_write_locked: true }
+    ], null));
+
+    renderMoveDialog();
+
+    const lockedFolder = await screen.findByRole("button", { name: "Locked folder" });
+    expect(lockedFolder).toBeDisabled();
+    expect(lockedFolder).toHaveAttribute("title", "Write locked");
+    await user.click(lockedFolder);
+
+    expect(mocks.apiGet).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Root")).toHaveClass("font-semibold");
+  });
+
+  it("does not submit a move when the source node is write-locked", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([], null));
+
+    renderMoveDialog({
+      node: { ...textNode, parent_id: "current-folder", effective_write_locked: true },
+      onMove
+    });
+
+    const moveHere = await screen.findByRole("button", { name: "Move here" });
+    expect(moveHere).toBeDisabled();
+    await user.click(moveHere);
+
+    expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("keeps the move dialog open when the backend rejects a protected subtree", async () => {
+    const user = userEvent.setup();
+    const onMove = vi.fn().mockRejectedValue(
+      new Error("subtree contains a directly write-locked node")
+    );
+    const onClose = vi.fn();
+    mocks.apiGet.mockResolvedValueOnce(childrenPage([], null));
+
+    renderMoveDialog({
+      node: { ...textNode, parent_id: "current-folder" },
+      onMove,
+      onClose
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Move here" }));
+
+    expect(await screen.findByText("subtree contains a directly write-locked node")).toBeVisible();
+    expect(onMove).toHaveBeenCalledWith("root");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("validates metadata JSON before saving", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
@@ -181,7 +216,8 @@ function folder(id: string, name: string): RestNode {
     name,
     kind: "folder",
     path: `/${name}`,
-    has_children: true
+    has_children: true,
+    effective_write_locked: false
   };
 }
 
@@ -198,7 +234,15 @@ function childrenPage(children: RestNode[], nextCursor: string | null): Children
   };
 }
 
-function renderMoveDialog() {
+function renderMoveDialog({
+  node = textNode,
+  onMove = vi.fn(),
+  onClose = vi.fn()
+}: {
+  node?: RestNode;
+  onMove?: Extract<AppDialog, { kind: "move" }>["onMove"];
+  onClose?: () => void;
+} = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   });
@@ -207,11 +251,11 @@ function renderMoveDialog() {
       <DialogHost
         dialog={{
           kind: "move",
-          node: textNode,
+          node,
           space,
-          onMove: vi.fn()
+          onMove
         }}
-        onClose={vi.fn()}
+        onClose={onClose}
       />
     </QueryClientProvider>
   );

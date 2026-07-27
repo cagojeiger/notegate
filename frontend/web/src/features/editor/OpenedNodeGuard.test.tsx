@@ -3,8 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import type { RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
+import { makeRestNode } from "../../test/fixtures";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import { useNodeFreshness } from "./useEditorQueries";
 
@@ -12,22 +12,7 @@ vi.mock("./useEditorQueries", () => ({
   useNodeFreshness: vi.fn()
 }));
 
-const node: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
-  parent_id: "root-1",
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  has_children: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+const node = makeRestNode();
 
 function renderGuard() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -51,6 +36,26 @@ describe("OpenedNodeGuard", () => {
 
     expect(screen.getByText("renamed.md")).toBeInTheDocument();
     await waitFor(() => expect(useUiStore.getState().editorGroups[0].node?.name).toBe("renamed.md"));
+  });
+
+  it("propagates an inherited write lock into an already opened editor group", async () => {
+    const locked = {
+      ...node,
+      effective_write_locked: true,
+      write_lock_sources: [
+        { node_id: "folder-1", name: "Policies", path: "/Policies" }
+      ]
+    };
+    vi.mocked(useNodeFreshness).mockReturnValue({ data: locked, error: null } as never);
+
+    renderGuard();
+
+    await waitFor(() => {
+      expect(useUiStore.getState().editorGroups[0].node).toMatchObject({
+        effective_write_locked: true,
+        write_lock_sources: locked.write_lock_sources
+      });
+    });
   });
 
   it("clears an opened editor group when the node was deleted elsewhere", async () => {

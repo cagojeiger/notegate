@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadTextResponse, RestNode } from "../../api/types";
+import { makeRestNode } from "../../test/fixtures";
 import { useTextEditorSession } from "./useTextEditorSession";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 
@@ -10,23 +11,7 @@ vi.mock("./useEditorQueries", () => ({
   useSaveTextDocument: vi.fn()
 }));
 
-const node: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
-  parent_id: "root-1",
-  name: "note.md",
-  kind: "text",
-  path: "/note.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  has_children: false,
-  content_sha256: "sha-1",
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+const node = makeRestNode({ content_sha256: "sha-1" });
 
 const textResponse = {
   node: { id: node.id, path: node.path },
@@ -198,5 +183,56 @@ describe("useTextEditorSession", () => {
 
     rerender({ latestNode: { ...node, content_sha256: "sha-3" } });
     await waitFor(() => expect(result.current.externalUpdate?.content_sha256).toBe("sha-3"));
+  });
+
+  it("leaves edit mode when the node becomes effectively write-locked", async () => {
+    const onSetMode = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: textResponse,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    const { result } = renderHook(() => useTextEditorSession({
+      node: { ...node, effective_write_locked: true },
+      mode: "edit",
+      canWrite: true,
+      onSetMode
+    }));
+
+    expect(result.current.canEdit).toBe(false);
+    await waitFor(() => expect(onSetMode).toHaveBeenCalledWith("preview"));
+  });
+
+  it("preserves an unsaved draft when a lock arrives during editing", async () => {
+    const onSetMode = vi.fn();
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: textResponse,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+
+    const { result, rerender } = renderHook(
+      ({ currentNode }: { currentNode: RestNode }) => useTextEditorSession({
+        node: currentNode,
+        mode: "edit",
+        canWrite: true,
+        onSetMode
+      }),
+      { initialProps: { currentNode: node } }
+    );
+    await waitFor(() => expect(result.current.draft).toBe("original"));
+    act(() => result.current.setDraft("unsaved"));
+
+    rerender({ currentNode: { ...node, effective_write_locked: true } });
+
+    expect(result.current.draft).toBe("unsaved");
+    expect(result.current.dirty).toBe(true);
+    expect(result.current.canSave).toBe(false);
+    expect(onSetMode).not.toHaveBeenCalled();
+
+    rerender({ currentNode: node });
+    expect(result.current.draft).toBe("unsaved");
+    expect(result.current.canSave).toBe(true);
   });
 });

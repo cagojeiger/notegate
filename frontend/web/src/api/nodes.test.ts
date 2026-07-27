@@ -30,8 +30,11 @@ describe("nodes api", () => {
     const client = {
       get: vi.fn().mockResolvedValue({
         parent: { id: "root-1", path: "/" },
-        children: [{ id: "node-1", name: "node-1", kind: "text" }],
-        page: { limit: 100, returned: 1, has_more: false, next_cursor: null }
+        children: [
+          { id: "node-1", name: "node-1", kind: "text" },
+          { id: "node-2", name: "node-2", kind: "text", effective_write_locked: true }
+        ],
+        page: { limit: 100, returned: 2, has_more: false, next_cursor: null }
       })
     } as unknown as ApiClient;
 
@@ -41,6 +44,8 @@ describe("nodes api", () => {
       "/api/v1/spaces/space-1/nodes/root-1/children?limit=100&view=summary"
     );
     expect(response.children[0]?.space_id).toBe("space-1");
+    expect(response.children[0]?.effective_write_locked).toBe(false);
+    expect(response.children[1]?.effective_write_locked).toBe(true);
   });
 
   it("continues compact Recent pages with the opaque cursor", async () => {

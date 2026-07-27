@@ -97,6 +97,7 @@ pub(crate) struct FileChangeDeltaOut {
     pub parent_scope_known: bool,
     pub path_changed: bool,
     pub subtree_changed: bool,
+    pub write_lock_changed: bool,
 }
 
 impl FileChangeDeltaOut {
@@ -137,6 +138,8 @@ impl FileChangeDeltaOut {
                 || (event.op_type == "item.update"
                     && metadata_bool(&event.metadata, "name_changed"))
                 || (event.op_type == "item.delete" && metadata_bool(&event.metadata, "recursive")));
+        let write_lock_changed =
+            event.op_type == "item.update" && metadata_bool(&event.metadata, "write_lock_changed");
 
         Self {
             id: event.id,
@@ -147,6 +150,7 @@ impl FileChangeDeltaOut {
             parent_scope_known,
             path_changed,
             subtree_changed,
+            write_lock_changed,
         }
     }
 }
@@ -226,6 +230,25 @@ mod tests {
         ));
 
         assert!(delta.path_changed);
+        assert!(!delta.subtree_changed);
+        assert!(!delta.write_lock_changed);
+    }
+
+    #[test]
+    fn delta_marks_direct_write_lock_changes() {
+        let parent = Uuid::new_v4();
+        let delta = FileChangeDeltaOut::from_event(&event(
+            "item.update",
+            json!({
+                "item_kind": "folder",
+                "parent_node_id": parent,
+                "write_lock_changed": true,
+                "write_locked": true,
+            }),
+        ));
+
+        assert!(delta.write_lock_changed);
+        assert!(!delta.path_changed);
         assert!(!delta.subtree_changed);
     }
 

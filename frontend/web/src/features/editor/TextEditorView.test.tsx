@@ -2,9 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ReadTextResponse, RestNode } from "../../api/types";
+import type { ReadTextResponse } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
+import { makeRestNode } from "../../test/fixtures";
 import { TextEditorView } from "./TextEditorView";
 import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 import { useMarkdownImageLoader } from "./useFilePreviewQueries";
@@ -22,22 +23,10 @@ vi.mock("./useFilePreviewQueries", () => ({
   useMarkdownImageLoader: vi.fn()
 }));
 
-const node: RestNode = {
-  id: "node-1",
-  space_id: "space-1",
-  parent_id: "root-1",
+const node = makeRestNode({
   name: "large.md",
-  kind: "text",
   path: "/large.md",
-  sort_order: 0,
-  metadata: {},
-  search_enabled: true,
-  has_children: false,
-  created_by: { id: "user-1", kind: "user", display_name: "User" },
-  updated_by: { id: "user-1", kind: "user", display_name: "User" },
-  created_at: "2026-06-13T00:00:00Z",
-  updated_at: "2026-06-13T00:00:00Z"
-};
+});
 
 const partialText: ReadTextResponse = {
   node: { id: node.id, path: node.path },
@@ -58,12 +47,12 @@ const partialText: ReadTextResponse = {
   }
 };
 
-function renderTextEditorView(canWriteActiveSpace = true) {
+function renderTextEditorView(canWriteActiveSpace = true, currentNode = node) {
   render(
     <TextEditorView
       active
       groupId={0}
-      node={node}
+      node={currentNode}
       mode="preview"
       canWriteActiveSpace={canWriteActiveSpace}
       canOpenInNewGroup
@@ -116,6 +105,81 @@ describe("TextEditorView", () => {
     renderTextEditorView(false);
 
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+  });
+
+  it("keeps read actions available while disabling every write action under a lock", async () => {
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: { ...partialText, text: { ...partialText.text, truncated: false, next_start_line: null } },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    const lockedNode = { ...node, effective_write_locked: true };
+
+    renderTextEditorView(true, lockedNode);
+
+    expect(screen.getByRole("button", { name: "Copy content" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
+
+    fireEvent.contextMenu(await screen.findByText("Large note"));
+    const menu = within(screen.getByRole("menu"));
+    expect(menu.getByRole("button", { name: "Copy content" })).toBeEnabled();
+    expect(menu.getByRole("button", { name: "Copy path" })).toBeEnabled();
+    expect(menu.getByRole("button", { name: "Edit" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "Rename" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "Move…" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+
+  it("keeps a dirty draft visible and read-only when a lock arrives", async () => {
+    const user = userEvent.setup();
+    const props = {
+      active: true,
+      groupId: 0,
+      mode: "edit" as const,
+      canWriteActiveSpace: true,
+      canOpenInNewGroup: true,
+      canClose: false,
+      onClose: vi.fn(),
+      onSetMode: vi.fn(),
+      onOpenNodeInNewGroup: vi.fn(),
+      onOpenMarkdownLink: vi.fn(),
+      onRenameNode: vi.fn(),
+      onMoveNode: vi.fn(),
+      onDeleteNode: vi.fn()
+    };
+    vi.mocked(useTextDocument).mockReturnValue({
+      data: {
+        ...partialText,
+        text: { ...partialText.text, content: "original", truncated: false, next_start_line: null }
+      },
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: vi.fn()
+    } as never);
+    const view = render(<TextEditorView {...props} node={node} />);
+    const textarea = screen.getByRole("textbox", { name: /edit text content/i });
+    await waitFor(() => expect(textarea).toHaveValue("original"));
+    await user.type(textarea, " unsaved");
+
+    view.rerender(
+      <TextEditorView
+        {...props}
+        node={{ ...node, effective_write_locked: true }}
+      />
+    );
+
+    expect(textarea).toHaveValue("original unsaved");
+    expect(textarea).toHaveAttribute("readonly");
+    expect(screen.getByText(/Unsaved edits are preserved/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    const copy = screen.getByRole("button", { name: "Copy content" });
+    expect(copy).toBeEnabled();
+    await user.click(copy);
+    expect(copyText).toHaveBeenCalledWith("original unsaved");
   });
 
   it("keeps encrypted text read-only", () => {

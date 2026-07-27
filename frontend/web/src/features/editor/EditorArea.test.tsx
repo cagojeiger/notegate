@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EditorArea } from "./EditorArea";
 import type { RestNode } from "../../api/types";
 import type { EditorGroup } from "../../stores/uiStore";
+import { makeRestNode } from "../../test/fixtures";
 
 vi.mock("./OpenedNodeGuard", () => ({
   OpenedNodeGuard: ({ node, children }: { node: RestNode; children: (node: RestNode) => ReactNode }) => children(node)
@@ -92,6 +93,24 @@ describe("EditorArea", () => {
     expect(onDownloadFile).toHaveBeenCalledWith(node);
   });
 
+  it("keeps locked files downloadable while disabling node mutations", () => {
+    const node = { ...fileNode(), effective_write_locked: true };
+    const onDownloadFile = vi.fn();
+    renderEditorArea({
+      groups: [{ id: 0, node, mode: "preview", back: [], forward: [] }],
+      activeGroupIndex: 0,
+      canWriteActiveSpace: true,
+      onDownloadFile
+    });
+
+    const download = screen.getByRole("button", { name: "Download" });
+    expect(download).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
+
+    fireEvent.click(download);
+    expect(onDownloadFile).toHaveBeenCalledWith(node);
+  });
+
   it("shows per-group navigation controls before the title", () => {
     const current = fileNode();
     const onNavigateEditorGroup = vi.fn();
@@ -120,26 +139,16 @@ describe("EditorArea", () => {
 });
 
 function fileNode(): RestNode {
-  return {
+  return makeRestNode({
     id: "file-1",
-    space_id: "space-1",
-    parent_id: "root-1",
     name: "document.pdf",
     kind: "file",
     path: "/document.pdf",
-    sort_order: 0,
-    metadata: {},
-    search_enabled: true,
-    has_children: false,
     byte_len: 29,
     media_type: "application/pdf",
     detected_media_type: "application/pdf",
     preview_available: false,
     file_preview_kind: "pdf",
-    encryption_mode: "none",
-    created_by: { id: "user-1", kind: "user", display_name: "User" },
-    updated_by: { id: "user-1", kind: "user", display_name: "User" },
-    created_at: "2026-06-13T00:00:00Z",
-    updated_at: "2026-06-13T00:00:00Z"
-  };
+    encryption_mode: "none"
+  });
 }

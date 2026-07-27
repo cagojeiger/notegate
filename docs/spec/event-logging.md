@@ -186,8 +186,10 @@ name_changed: bool
 sort_order_changed: bool
 search_enabled_changed: bool
 text_encryption_changed: bool
+write_lock_changed: bool
 search_enabled: bool
 text_encryption_enabled: bool | null
+write_locked: bool
 recursive: bool
 copied_nodes: integer
 copied_texts: integer

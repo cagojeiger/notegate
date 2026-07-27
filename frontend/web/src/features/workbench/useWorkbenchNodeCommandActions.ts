@@ -4,6 +4,13 @@ import { downloadFile } from "../../api/files";
 import { useApiClient } from "../../api/ApiProvider";
 import type { NodeSummary, RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
+import {
+  canCreateInFolder,
+  canMoveNodeToFolder,
+  canMutateNode,
+  canWriteNode,
+  resolveNodeCreateTarget
+} from "../nodes/nodeWriteAccess";
 import { useUploadActions } from "../uploads/UploadProvider";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import type { AppDialog } from "./dialogs/dialogTypes";
@@ -15,6 +22,7 @@ import {
   useReplaceMetadataMutation,
   useUpdateNodeMutation,
   useUpdateNodeSearchPolicyMutation,
+  useUpdateNodeWriteLockMutation,
   useUpdateTextEncryptionMutation
 } from "./useWorkbenchQueries";
 
@@ -26,6 +34,9 @@ type CommandActionsProps = {
   setDialog: Dispatch<SetStateAction<AppDialog | null>>;
   loadCanonicalNode: CanonicalNodeLoader;
 };
+
+const LOCKED_DESTINATION_MESSAGE =
+  "Changes are blocked because the destination folder or an ancestor is write-locked";
 
 export function useWorkbenchNodeCommandActions({
   activeSpace,
@@ -41,6 +52,7 @@ export function useWorkbenchNodeCommandActions({
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
   const addExpanded = useUiStore((state) => state.addExpanded);
   const setExpanded = useUiStore((state) => state.setExpanded);
+  const showToast = useUiStore((state) => state.showToast);
   const { startUpload } = useUploadActions();
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
@@ -49,36 +61,34 @@ export function useWorkbenchNodeCommandActions({
   });
   const updateNodeMutation = useUpdateNodeMutation(updateGroupsNode);
   const updateNodeSearchPolicyMutation = useUpdateNodeSearchPolicyMutation(updateGroupsNode);
+  const updateNodeWriteLockMutation = useUpdateNodeWriteLockMutation(updateGroupsNode);
   const updateTextEncryptionMutation = useUpdateTextEncryptionMutation(updateGroupsNode);
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
   const moveNodeDialogMutation = useMoveNodeMutation(updateGroupsNode, { silentError: true });
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
   const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
 
-  function parentForCreate(): string | null {
-    if (!activeSpace) return null;
-    if (!activeNode) return activeSpace.root_node_id;
-    return activeNode.kind === "folder" ? activeNode.id : activeNode.parent_id ?? activeSpace.root_node_id;
-  }
-
   function promptCreateNode(kind: "folder" | "text") {
-    if (!canWriteActiveSpace) return;
-    const parentId = parentForCreate();
-    if (!parentId) return;
-    setDialog(createNodeDialog(parentId, kind, async (input) => {
+    if (!canWriteActiveSpace || !activeSpace) return;
+    const parent = resolveNodeCreateTarget(activeSpace.root_node_id, activeNode);
+    if (parent.writeLocked) {
+      showToast(LOCKED_DESTINATION_MESSAGE);
+      return;
+    }
+    setDialog(createNodeDialog(parent.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
   }
 
   function promptCreateInFolder(folder: NodeSummary, kind: "folder" | "text") {
-    if (!canWriteActiveSpace) return;
+    if (!canCreateInFolder(folder, canWriteActiveSpace)) return;
     setDialog(createNodeDialog(folder.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
   }
 
   function uploadInFolder(folder: NodeSummary, file: File | null) {
-    if (!canWriteActiveSpace || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
+    if (!canCreateInFolder(folder, canWriteActiveSpace) || !file || !activeSpace || folder.space_id !== activeSpace.id) return;
     promptUpload(activeSpace, folder.id, folder.path, file);
   }
 
@@ -87,14 +97,14 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function promptRenameNode(node: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null) return;
+    if (!canMutateNode(node, canWriteActiveSpace)) return;
     setDialog(renameNodeDialog(node, async (renamedNode, name) => {
       await updateNodeMutation.mutateAsync({ node: renamedNode, name });
     }));
   }
 
   function promptMoveNode(node: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null || !activeSpace) return;
+    if (!canMutateNode(node, canWriteActiveSpace) || !activeSpace) return;
     setDialog(moveNodeDialog(node, activeSpace, async (movedNode, parentId) => {
       await moveNodeDialogMutation.mutateAsync(
         { node: movedNode, parentId },
@@ -104,7 +114,7 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function moveNodeToFolder(node: NodeSummary, folder: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null || folder.kind !== "folder" || node.id === folder.id) return;
+    if (!canMoveNodeToFolder(node, folder, canWriteActiveSpace)) return;
     moveNodeMutation.mutate(
       { node, parentId: folder.id },
       { onSuccess: () => addExpanded([folder.id]) }
@@ -112,19 +122,20 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function confirmDeleteNode(node: NodeSummary) {
-    if (!canWriteActiveSpace || node.parent_id === null) return;
+    if (!canMutateNode(node, canWriteActiveSpace)) return;
     setDialog(deleteNodeDialog(node, async (deletedNode, recursive) => {
       await deleteNodeMutation.mutateAsync({ node: deletedNode, recursive });
     }));
   }
 
   function handleFileSelected(file: File | null) {
-    const parentId = parentForCreate();
-    if (!canWriteActiveSpace || !file || !parentId || !activeSpace) return;
-    const destinationPath = !activeNode
-      ? "/"
-      : activeNode.kind === "folder" ? activeNode.path : parentPath(activeNode.path);
-    promptUpload(activeSpace, parentId, destinationPath, file);
+    if (!canWriteActiveSpace || !file || !activeSpace) return;
+    const parent = resolveNodeCreateTarget(activeSpace.root_node_id, activeNode);
+    if (parent.writeLocked) {
+      showToast(LOCKED_DESTINATION_MESSAGE);
+      return;
+    }
+    promptUpload(activeSpace, parent.id, parent.path, file);
   }
 
   function promptUpload(space: Space, parentId: string, destinationPath: string, file: File) {
@@ -153,7 +164,7 @@ export function useWorkbenchNodeCommandActions({
   }
 
   function promptReplaceMetadata() {
-    if (!canWriteActiveSpace || !activeNode) return;
+    if (!activeNode || !canWriteNode(activeNode, canWriteActiveSpace)) return;
     const node = activeNode;
     setDialog(metadataDialog(node, async (metadataNode, metadata) => {
       await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
@@ -165,6 +176,7 @@ export function useWorkbenchNodeCommandActions({
       !canManageActiveSpace
       || !activeNode
       || activeNode.parent_id === null
+      || activeNode.effective_write_locked
       || updateNodeSearchPolicyMutation.isPending
     ) return;
     updateNodeSearchPolicyMutation.mutate({
@@ -178,11 +190,25 @@ export function useWorkbenchNodeCommandActions({
       !canManageActiveSpace
       || !activeNode
       || activeNode.kind !== "text"
+      || activeNode.effective_write_locked
       || updateTextEncryptionMutation.isPending
     ) return;
     updateTextEncryptionMutation.mutate({
       node: activeNode,
       enabled: textEncryptionEnabled
+    });
+  }
+
+  function setNodeWriteLocked(writeLocked: boolean) {
+    if (
+      !canManageActiveSpace
+      || !activeNode
+      || activeNode.parent_id === null
+      || updateNodeWriteLockMutation.isPending
+    ) return;
+    updateNodeWriteLockMutation.mutate({
+      node: activeNode,
+      enabled: writeLocked
     });
   }
 
@@ -198,14 +224,11 @@ export function useWorkbenchNodeCommandActions({
     confirmDeleteNode,
     promptReplaceMetadata,
     setNodeSearchEnabled,
+    setNodeWriteLocked,
     setTextEncryptionEnabled,
     nodeSearchPolicyPending: updateNodeSearchPolicyMutation.isPending,
+    nodeWriteLockPending: updateNodeWriteLockMutation.isPending,
     textEncryptionPending: updateTextEncryptionMutation.isPending,
     downloadFileNode
   };
-}
-
-function parentPath(path: string): string {
-  const lastSlash = path.lastIndexOf("/");
-  return lastSlash <= 0 ? "/" : path.slice(0, lastSlash);
 }
