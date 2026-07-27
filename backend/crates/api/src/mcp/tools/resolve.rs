@@ -219,7 +219,7 @@ fn write_locked_error(scope: WriteLockScope) -> ErrorData {
     let (scope_name, hint) = match scope {
         WriteLockScope::TargetOrAncestor => (
             "target_or_ancestor",
-            "Use read op=stat on the target to inspect write_lock_sources. Only the space owner can unlock it in the Dashboard. If file_transfer complete_upload failed, start a new upload after unlocking because the current upload is queued for cleanup.",
+            "Use read op=stat on the target to inspect write_lock_sources. Only the space owner can unlock it in the Dashboard. If file_transfer begin_upload was rejected, unlock the target and call begin_upload again; no upload handle was created.",
         ),
         WriteLockScope::Descendant => (
             "descendant",
@@ -520,7 +520,7 @@ mod tests {
         assert!(
             locked_data["hint"]
                 .as_str()
-                .is_some_and(|hint| hint.contains("start a new upload"))
+                .is_some_and(|hint| hint.contains("begin_upload"))
         );
 
         let locked_subtree = service_error(ServiceError::WriteLocked {

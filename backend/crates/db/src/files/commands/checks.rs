@@ -28,6 +28,12 @@ pub(crate) struct PathBounds {
     pub bytes: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MoveWriteAccess {
+    pub destination: PathBounds,
+    pub subtree: PathBounds,
+}
+
 /// Exclude reconciliation, then serialize file-tree mutations in a Space.
 /// This closes quota races and keeps reconciliation from observing a partial
 /// mutation without making ordinary writes wait for maintenance.
@@ -118,7 +124,7 @@ pub async fn live_node(
 
 /// Reject a mutation when the target or a live ancestor has a direct write lock.
 /// The space mutation gate serializes this check with lock changes.
-pub(crate) async fn require_write_unlocked(
+pub(super) async fn require_node_write(
     tx: &mut PgConnection,
     space_id: Uuid,
     node_id: Uuid,
@@ -145,12 +151,36 @@ pub(crate) async fn require_write_unlocked(
     Ok(())
 }
 
-/// Assert the parent is a live, writable folder and return its derived path bounds.
-pub(crate) async fn require_writable_folder_path_bounds(
+pub(super) async fn require_move_write(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    node_id: Uuid,
+    destination_parent_id: Uuid,
+    node_kind: &str,
+) -> Result<MoveWriteAccess> {
+    require_node_write(tx, space_id, node_id).await?;
+    let destination = require_child_write(tx, space_id, destination_parent_id).await?;
+    let subtree = match node_kind {
+        "folder" => require_writable_subtree_bounds(tx, space_id, node_id).await?,
+        "text" | "file" => PathBounds::default(),
+        value => return Err(Error::internal(format!("unknown node kind: {value}"))),
+    };
+    Ok(MoveWriteAccess {
+        destination,
+        subtree,
+    })
+}
+
+struct FolderPathState {
+    bounds: PathBounds,
+    has_direct_write_lock: bool,
+}
+
+async fn folder_path_state(
     tx: &mut PgConnection,
     space_id: Uuid,
     parent_id: Uuid,
-) -> Result<PathBounds> {
+) -> Result<FolderPathState> {
     let row: Option<(String, i64, i64, bool)> = sqlx::query_as(
         "WITH RECURSIVE chain AS ( \
             SELECT id, parent_id, name, kind AS target_kind, write_locked, 0::bigint AS depth \
@@ -184,17 +214,38 @@ pub(crate) async fn require_writable_folder_path_bounds(
     if kind != "folder" {
         return Err(Error::validation("parent must be a folder"));
     }
-    if has_direct_write_lock {
-        return Err(Error::write_locked(WriteLockScope::TargetOrAncestor));
-    }
-    Ok(PathBounds {
-        depth: to_usize(depth, "depth")?,
-        bytes: to_usize(bytes, "path byte length")?,
+    Ok(FolderPathState {
+        bounds: PathBounds {
+            depth: to_usize(depth, "depth")?,
+            bytes: to_usize(bytes, "path byte length")?,
+        },
+        has_direct_write_lock,
     })
 }
 
+/// Assert the parent is a live, writable folder and return its derived path bounds.
+pub(super) async fn require_child_write(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    parent_id: Uuid,
+) -> Result<PathBounds> {
+    let state = folder_path_state(tx, space_id, parent_id).await?;
+    if state.has_direct_write_lock {
+        return Err(Error::write_locked(WriteLockScope::TargetOrAncestor));
+    }
+    Ok(state.bounds)
+}
+
+pub(super) async fn folder_path_bounds(
+    tx: &mut PgConnection,
+    space_id: Uuid,
+    parent_id: Uuid,
+) -> Result<PathBounds> {
+    Ok(folder_path_state(tx, space_id, parent_id).await?.bounds)
+}
+
 /// Require an unlocked live subtree and return its bounds relative to `node_id`.
-pub(crate) async fn require_writable_subtree_bounds(
+async fn require_writable_subtree_bounds(
     tx: &mut PgConnection,
     space_id: Uuid,
     node_id: Uuid,
@@ -220,15 +271,21 @@ pub(crate) async fn require_writable_subtree_bounds(
     let (Some(depth), Some(bytes)) = (depth, bytes) else {
         return Err(Error::not_found("node not found"));
     };
-    require_subtree_write_unlocked(has_direct_write_lock)?;
+    require_subtree_write(false, has_direct_write_lock)?;
     Ok(PathBounds {
         depth: to_usize(depth, "depth")?,
         bytes: to_usize(bytes, "path byte length")?,
     })
 }
 
-pub(crate) fn require_subtree_write_unlocked(has_direct_write_lock: bool) -> Result<()> {
-    if has_direct_write_lock {
+pub(super) fn require_subtree_write(
+    has_target_or_ancestor_lock: bool,
+    has_descendant_lock: bool,
+) -> Result<()> {
+    if has_target_or_ancestor_lock {
+        return Err(Error::write_locked(WriteLockScope::TargetOrAncestor));
+    }
+    if has_descendant_lock {
         return Err(Error::write_locked(WriteLockScope::Descendant));
     }
     Ok(())
@@ -313,5 +370,41 @@ pub async fn require_sibling_unique(
             "a node named '{name}' already exists in this folder"
         ))),
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subtree_write_guard_accepts_an_unlocked_tree() {
+        assert!(require_subtree_write(false, false).is_ok());
+    }
+
+    #[test]
+    fn subtree_write_guard_reports_the_lock_scope() {
+        assert!(matches!(
+            require_subtree_write(true, false),
+            Err(Error::WriteLocked {
+                scope: WriteLockScope::TargetOrAncestor
+            })
+        ));
+        assert!(matches!(
+            require_subtree_write(false, true),
+            Err(Error::WriteLocked {
+                scope: WriteLockScope::Descendant
+            })
+        ));
+    }
+
+    #[test]
+    fn target_or_ancestor_lock_takes_precedence() {
+        assert!(matches!(
+            require_subtree_write(true, true),
+            Err(Error::WriteLocked {
+                scope: WriteLockScope::TargetOrAncestor
+            })
+        ));
     }
 }

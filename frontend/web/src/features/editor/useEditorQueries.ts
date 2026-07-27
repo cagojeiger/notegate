@@ -60,8 +60,19 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
       if (error instanceof ApiError && error.status === 409) {
         onConflict();
         setSaveState("conflict");
-      } else {
-        setSaveState("error");
+        return;
+      }
+      setSaveState("error");
+      if (
+        error instanceof ApiError
+        && error.status === 423
+        && (error.kind === "node_write_locked" || error.kind === "subtree_write_locked")
+      ) {
+        showToast(error.message);
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.node(node.space_id, node.id),
+          exact: true
+        });
       }
     }
   });

@@ -24,7 +24,13 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
     onTextEncryptionEnabledChange: vi.fn(),
     ...overrides
   };
-  return render(<AuxiliarySidebar {...props} />);
+  const view = render(<AuxiliarySidebar {...props} />);
+  return {
+    ...view,
+    rerenderSidebar(nextOverrides: Partial<SidebarProps>) {
+      view.rerender(<AuxiliarySidebar {...props} {...nextOverrides} />);
+    }
+  };
 }
 
 describe("AuxiliarySidebar", () => {
@@ -192,6 +198,37 @@ describe("AuxiliarySidebar", () => {
 
     await user.click(screen.getByRole("button", { name: "1 source" }));
     expect(screen.getByTitle("/Policies")).toHaveTextContent("/Policies");
+  });
+
+  it("closes inherited lock sources when the selected node changes", async () => {
+    const user = userEvent.setup();
+    const { rerenderSidebar } = renderSidebar({
+      activeNode: {
+        ...textNode,
+        effective_write_locked: true,
+        write_lock_sources: [
+          { node_id: "folder-1", name: "Policies", path: "/Policies" }
+        ]
+      }
+    });
+
+    await user.click(screen.getByRole("button", { name: "1 source" }));
+    expect(screen.getByRole("dialog", { name: "Inherited lock sources" })).toBeInTheDocument();
+
+    rerenderSidebar({
+      activeNode: {
+        ...textNode,
+        id: "text-2",
+        name: "other.md",
+        path: "/other.md",
+        effective_write_locked: true,
+        write_lock_sources: [
+          { node_id: "folder-2", name: "Archive", path: "/Archive" }
+        ]
+      }
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Inherited lock sources" })).not.toBeInTheDocument();
   });
 
   it("shows an unavailable plan without naming a specific tier", () => {

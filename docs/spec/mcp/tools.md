@@ -191,7 +191,7 @@ File bytes는 MCP request/response에 포함하지 않는다. Single/multipart P
 
 모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하고, `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 `max_concurrency=4` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
 
-완료되지 않은 upload는 `begin_upload`, `prepare_parts`, `complete_upload` 중 마지막 활동 이후 2시간이 지나면 비동기 정리 대상이 된다. Object 전송 뒤 `complete_upload`의 File attach가 write lock으로 거부되면 2시간을 기다리지 않고 즉시 정리 대상으로 전환한다. 이 upload handle은 다시 사용할 수 없으며, owner가 잠금을 해제한 뒤 `begin_upload`부터 새로 시작한다. Presigned URL의 5분 만료와 upload 원장의 2시간 무활동 만료는 서로 다른 제한이다.
+완료되지 않은 upload는 `begin_upload`, `prepare_parts`, `complete_upload` 중 마지막 활동 이후 2시간이 지나면 비동기 정리 대상이 된다. `begin_upload`는 destination의 write lock을 검사하고 해당 handle의 write-lock 허가를 예약한다. 이후 destination이 잠겨도 기존 upload handle은 완료할 수 있지만 새 `begin_upload`는 거부한다. 완료 시 일반 write permission과 File 생성 invariant는 다시 확인한다. Presigned URL의 5분 만료와 upload 원장의 2시간 무활동 만료는 서로 다른 제한이다.
 
 Write command가 잠금으로 거부되면 MCP error `data`는 `kind=write_locked`, `retryable=false`와 다음 code 중 하나를 포함한다.
 

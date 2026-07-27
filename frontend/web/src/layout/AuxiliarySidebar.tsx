@@ -60,6 +60,7 @@ export function AuxiliarySidebar({
                   <MetaRow label="Kind" value={nodeSummary(activeNode)} />
                 </dl>
                 <WriteLockStatus
+                  key={activeNode.id}
                   nodeId={activeNode.id}
                   directlyLocked={activeNode.write_locked}
                   sources={activeNode.write_lock_sources}

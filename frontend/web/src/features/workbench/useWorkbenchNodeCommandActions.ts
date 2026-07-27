@@ -35,6 +35,9 @@ type CommandActionsProps = {
   loadCanonicalNode: CanonicalNodeLoader;
 };
 
+const LOCKED_DESTINATION_MESSAGE =
+  "Changes are blocked because the destination folder or an ancestor is write-locked";
+
 export function useWorkbenchNodeCommandActions({
   activeSpace,
   activeNode,
@@ -49,6 +52,7 @@ export function useWorkbenchNodeCommandActions({
   const clearGroupsWithNode = useUiStore((state) => state.clearGroupsWithNode);
   const addExpanded = useUiStore((state) => state.addExpanded);
   const setExpanded = useUiStore((state) => state.setExpanded);
+  const showToast = useUiStore((state) => state.showToast);
   const { startUpload } = useUploadActions();
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
@@ -67,7 +71,10 @@ export function useWorkbenchNodeCommandActions({
   function promptCreateNode(kind: "folder" | "text") {
     if (!canWriteActiveSpace || !activeSpace) return;
     const parent = resolveNodeCreateTarget(activeSpace.root_node_id, activeNode);
-    if (parent.writeLocked) return;
+    if (parent.writeLocked) {
+      showToast(LOCKED_DESTINATION_MESSAGE);
+      return;
+    }
     setDialog(createNodeDialog(parent.id, kind, async (input) => {
       await createNodeMutation.mutateAsync(input);
     }));
@@ -124,7 +131,10 @@ export function useWorkbenchNodeCommandActions({
   function handleFileSelected(file: File | null) {
     if (!canWriteActiveSpace || !file || !activeSpace) return;
     const parent = resolveNodeCreateTarget(activeSpace.root_node_id, activeNode);
-    if (parent.writeLocked) return;
+    if (parent.writeLocked) {
+      showToast(LOCKED_DESTINATION_MESSAGE);
+      return;
+    }
     promptUpload(activeSpace, parent.id, parent.path, file);
   }
 

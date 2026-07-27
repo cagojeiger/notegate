@@ -1,4 +1,5 @@
 export { Badge } from "./Badge";
+export { AnchoredOverlay } from "./AnchoredOverlay";
 export { BrandAppIcon, BrandLockup } from "./Brand";
 export { Button } from "./Button";
 export { Card } from "./Card";

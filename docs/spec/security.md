@@ -100,6 +100,8 @@ Node write lock은 content 암호화와 독립된 구조 변경 방지 정책이
 
 Node mutation은 현재 node의 ancestor chain을 확인한다. Folder rename/move/delete는 subtree에 직접 잠긴 descendant가 있는지도 확인한다. Read와 File download, owner의 Space 삭제는 별도 권한 경계이며 허용한다.
 
+File upload handle은 등록 transaction에서 destination의 write lock을 확인한다. 이후 잠금은 이미 등록된 handle의 완료를 취소하지 않으며, 완료 시 일반 write permission과 File 생성 invariant는 다시 확인한다.
+
 
 ## File content encryption
 

@@ -1,31 +1,52 @@
 import { MoreHorizontal, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { Card, IconButton, MenuButton } from "../../shared/ui";
+import { AnchoredOverlay, Card, IconButton, MenuButton } from "../../shared/ui";
 
 export function NodeActionMenu({ onRenameNode, onMoveNode, onDeleteNode, disabled }: { onRenameNode: () => void; onMoveNode: () => void; onDeleteNode: () => void; disabled: boolean }) {
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const overlayId = useId();
+  const closeMenu = useCallback(() => setOpen(false), []);
+  const menuOpen = open && !disabled;
+
+  function run(action: () => void) {
+    action();
+    closeMenu();
+  }
+
   useEffect(() => {
-    if (!open) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+    if (disabled) closeMenu();
+  }, [closeMenu, disabled]);
+
   return (
-    <div className="relative">
-      <IconButton label="Node actions" onClick={() => setOpen((value) => !value)} disabled={disabled}><MoreHorizontal size={16} /></IconButton>
-      {open ? (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} onContextMenu={(event) => { event.preventDefault(); setOpen(false); }} aria-hidden="true" />
-          <Card className="absolute right-0 top-9 z-20 w-40 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
-            <MenuButton onClick={() => { onRenameNode(); setOpen(false); }}>Rename</MenuButton>
-            <MenuButton onClick={() => { onMoveNode(); setOpen(false); }}>Move</MenuButton>
-            <MenuButton danger onClick={() => { onDeleteNode(); setOpen(false); }}><Trash2 size={14} /> Delete</MenuButton>
-          </Card>
-        </>
-      ) : null}
+    <div ref={anchorRef} className="relative">
+      <IconButton
+        label="Node actions"
+        expanded={menuOpen}
+        controls={menuOpen ? overlayId : undefined}
+        hasPopup="dialog"
+        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+      >
+        <MoreHorizontal size={16} />
+      </IconButton>
+      <AnchoredOverlay
+        anchorRef={anchorRef}
+        open={menuOpen}
+        onClose={closeMenu}
+        id={overlayId}
+        label="Node actions"
+        role="dialog"
+        width={160}
+        estimatedHeight={120}
+      >
+        <Card className="w-full p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
+          <MenuButton onClick={() => run(onRenameNode)} disabled={disabled}>Rename</MenuButton>
+          <MenuButton onClick={() => run(onMoveNode)} disabled={disabled}>Move</MenuButton>
+          <MenuButton danger onClick={() => run(onDeleteNode)} disabled={disabled}><Trash2 size={14} /> Delete</MenuButton>
+        </Card>
+      </AnchoredOverlay>
     </div>
   );
 }

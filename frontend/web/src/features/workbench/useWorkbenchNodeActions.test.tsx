@@ -417,6 +417,35 @@ describe("useWorkbenchNodeActions", () => {
     });
   });
 
+  it("explains why header create and upload actions are blocked", () => {
+    const activeSpace = space("space-1");
+    const lockedFolder = {
+      ...node("folder-1", activeSpace.id, "/Policies", "folder"),
+      effective_write_locked: true
+    };
+    const file = new File(["data"], "source.bin");
+    const { result } = renderNodeActions({
+      activeSpace,
+      activeNode: lockedFolder,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    act(() => result.current.promptCreateNode("text"));
+    expect(useUiStore.getState().toast).toBe(
+      "Changes are blocked because the destination folder or an ancestor is write-locked"
+    );
+
+    act(() => {
+      useUiStore.setState({ toast: null });
+      result.current.handleFileSelected(file);
+    });
+    expect(useUiStore.getState().toast).toBe(
+      "Changes are blocked because the destination folder or an ancestor is write-locked"
+    );
+    expect(mocks.startUpload).not.toHaveBeenCalled();
+  });
+
   it("does not dispatch node mutations from any command path under an inherited lock", () => {
     const activeSpace = space("space-1");
     const lockedText = {
