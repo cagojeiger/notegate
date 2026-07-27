@@ -1,6 +1,6 @@
 import type { DragEvent } from "react";
-import { useRef } from "react";
-import { ChevronRight } from "lucide-react";
+import { useId, useRef } from "react";
+import { ChevronRight, LockKeyhole } from "lucide-react";
 
 import type { NodeSummary } from "../../api/types";
 import { nodeIcon } from "./nodeDisplay";
@@ -40,6 +40,7 @@ export function NodeRow({
   const Icon = nodeIcon(node);
   const draggable = node.parent_id !== null && Boolean(onDragStartNode);
   const longPressRef = useRef<number | null>(null);
+  const lockDescriptionId = useId();
   function clearLongPress() {
     if (longPressRef.current === null) return;
     window.clearTimeout(longPressRef.current);
@@ -83,13 +84,34 @@ export function NodeRow({
     >
       {selected ? <span data-active-indicator className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
       {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={() => onToggleFolder?.(node.id)}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
-      <button data-node-open aria-current={selected ? "page" : undefined} className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50" onClick={handleOpen}>
-        <Icon size={15} className="shrink-0" />
+      <button
+        data-node-open
+        aria-current={selected ? "page" : undefined}
+        aria-describedby={node.effective_write_locked ? lockDescriptionId : undefined}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50"
+        onClick={handleOpen}
+      >
+        <span className="relative grid size-4 shrink-0 place-items-center">
+          <Icon size={15} data-node-kind-icon />
+          {node.effective_write_locked ? (
+            <span
+              data-node-lock-indicator
+              title="Write locked"
+              aria-hidden="true"
+              className="absolute -bottom-1 -right-1 grid size-3 place-items-center text-warning"
+            >
+              <LockKeyhole size={10} strokeWidth={2.5} />
+            </span>
+          ) : null}
+        </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate">{node.name}</span>
           {meta ? <span className="block truncate text-xs text-faint">{meta}</span> : null}
         </span>
       </button>
+      {node.effective_write_locked ? (
+        <span id={lockDescriptionId} className="sr-only">Write locked</span>
+      ) : null}
       {suffix ? <span className="shrink-0 text-[10px] tabular-nums text-faint">{suffix}</span> : null}
     </div>
   );

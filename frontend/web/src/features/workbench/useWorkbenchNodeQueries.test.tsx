@@ -1,12 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, type InfiniteData } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { deleteNode, moveNode, updateNodeSearchPolicy, updateNodeWriteLock } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
-import type { RestNode } from "../../api/types";
+import type { ChildrenResponse, RestNode } from "../../api/types";
 import { makeRestNode } from "../../test/fixtures";
 import {
   useDeleteNodeMutation,
@@ -140,6 +140,80 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.fileChangeEventsFamily(current.space_id)
     });
     expect(onUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  it("shows a direct write lock in cached tree rows while the request is pending", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    const updated = {
+      ...current,
+      write_locked: true,
+      effective_write_locked: true,
+      write_lock_sources: [{ node_id: current.id, name: current.name, path: current.path }]
+    };
+    let resolveUpdate: (node: RestNode) => void = () => undefined;
+    const updateRequest = new Promise<RestNode>((resolve) => {
+      resolveUpdate = resolve;
+    });
+    vi.mocked(updateNodeWriteLock).mockReturnValue(updateRequest);
+    queryClient.setQueryData<InfiniteData<ChildrenResponse>>(
+      queryKeys.children(current.space_id, current.parent_id!),
+      {
+        pages: [{
+          parent: { id: current.parent_id!, path: "/" },
+          children: [current],
+          page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+        }],
+        pageParams: [null]
+      }
+    );
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(onUpdated), { wrapper });
+
+    act(() => {
+      result.current.mutate({ node: current, enabled: true });
+    });
+
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<InfiniteData<ChildrenResponse>>(
+        queryKeys.children(current.space_id, current.parent_id!)
+      );
+      expect(cached?.pages[0]?.children[0]?.effective_write_locked).toBe(true);
+      expect(onUpdated).toHaveBeenCalledWith(updated);
+    });
+
+    await act(async () => {
+      resolveUpdate(updated);
+      await updateRequest;
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it("restores the previous write-lock state when an optimistic request fails", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    });
+    const current = node("text-1", "space-1", "text");
+    vi.mocked(updateNodeWriteLock).mockRejectedValue(new Error("update failed"));
+    const onUpdated = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useUpdateNodeWriteLockMutation(onUpdated), { wrapper });
+
+    act(() => {
+      result.current.mutate({ node: current, enabled: true });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(current);
+    expect(onUpdated).toHaveBeenLastCalledWith(current);
   });
 
   it("invalidates descendant node details when a folder lock changes", async () => {

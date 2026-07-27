@@ -41,4 +41,37 @@ describe("NodeRow", () => {
     expect(screen.getByRole("button", { name: "report.pdf" })).not.toHaveAttribute("aria-current");
     expect(view.container.querySelector("[data-active-indicator]")).not.toBeInTheDocument();
   });
+
+  it("adds a lock badge without replacing the node kind icon", () => {
+    const view = render(
+      <NodeRow
+        node={{ ...pdf, effective_write_locked: true }}
+        depth={0}
+        selected={false}
+        onOpenNode={vi.fn()}
+        onNodeContextMenu={vi.fn()}
+      />
+    );
+
+    const openButton = screen.getByRole("button", { name: "report.pdf" });
+    expect(openButton).toHaveAccessibleDescription("Write locked");
+    expect(view.container.querySelector("[data-node-kind-icon]")).toBeInTheDocument();
+    expect(screen.getByTitle("Write locked")).toHaveAttribute("data-node-lock-indicator");
+    expect(screen.getByTitle("Write locked")).toHaveClass("text-warning");
+  });
+
+  it("does not show a lock badge for a writable node", () => {
+    const view = render(
+      <NodeRow
+        node={pdf}
+        depth={0}
+        selected={false}
+        onOpenNode={vi.fn()}
+        onNodeContextMenu={vi.fn()}
+      />
+    );
+
+    expect(view.container.querySelector("[data-node-kind-icon]")).toBeInTheDocument();
+    expect(view.container.querySelector("[data-node-lock-indicator]")).not.toBeInTheDocument();
+  });
 });

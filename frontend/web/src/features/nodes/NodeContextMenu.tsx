@@ -43,7 +43,7 @@ export function NodeContextMenu({
   const isRoot = node.parent_id === null;
   const isFolder = node.kind === "folder";
   const nodeCanBeMutated = canMutateNode(node, canWriteActiveSpace);
-  const showCreateInNode = showCreateActions && isFolder;
+  const showCreateInNode = showCreateActions && isFolder && canWriteActiveSpace;
   const canCreateInNode = showCreateInNode && canCreateInFolder(node, canWriteActiveSpace);
 
   useEffect(() => {

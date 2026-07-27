@@ -86,6 +86,17 @@ export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => vo
   return useMutation({
     mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
       updateNodeWriteLock(client, node.space_id, node.id, enabled),
+    onMutate: ({ node, enabled }) => {
+      const optimisticNode = applyDirectWriteLock(node, enabled);
+      updateNodeCaches(queryClient, optimisticNode, () => optimisticNode);
+      onUpdated(optimisticNode);
+      return { previousNode: node };
+    },
+    onError: (_error, _variables, context) => {
+      if (!context) return;
+      updateNodeCaches(queryClient, context.previousNode, () => context.previousNode);
+      onUpdated(context.previousNode);
+    },
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateFileChangeEvents(queryClient, node.space_id);
@@ -97,6 +108,19 @@ export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => vo
       onUpdated(node);
     }
   });
+}
+
+function applyDirectWriteLock(node: RestNode, enabled: boolean): RestNode {
+  const inheritedSources = node.write_lock_sources.filter((source) => source.node_id !== node.id);
+  const writeLockSources = enabled
+    ? [...inheritedSources, { node_id: node.id, name: node.name, path: node.path }]
+    : inheritedSources;
+  return {
+    ...node,
+    write_locked: enabled,
+    effective_write_locked: writeLockSources.length > 0,
+    write_lock_sources: writeLockSources
+  };
 }
 
 export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => void) {
