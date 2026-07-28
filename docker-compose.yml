@@ -130,6 +130,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_LOG_MODE: console
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/notegate-service-overview.json
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     volumes:

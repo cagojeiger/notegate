@@ -73,7 +73,22 @@ Local observability endpoints:
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
 - Grafana login: `admin` / `notegate-local` by default
-- Provisioned dashboard: **NoteGate / Service Overview**
+- Provisioned dashboards: **NoteGate / Service Overview**,
+  **NoteGate / Search Detail**, and **NoteGate / Internals Detail**
+
+The Grafana root opens Service Overview as its local home dashboard.
+See [`deploy/observability/README.md`](../deploy/observability/README.md) for
+dashboard ownership, validation, and Kubernetes packaging requirements.
+The Service Overview is organized for an overview → RED → USE → process fleet scan.
+Search Detail continues with RED → pipeline → workload → cache diagnostics.
+Internals Detail exposes bounded MCP tool, database pool-acquisition, and
+server-managed text-decryption diagnostics.
+Each panel's information icon explains what the signal means, when a change is
+unusual, and which panel or runtime evidence to inspect next. Rate and throughput
+are treated as workload until they correlate with errors, latency, or saturation;
+fixed alert thresholds should follow a measured baseline or SLO.
+Dashboard links preserve the selected time range and shared instance filter, and
+the default 15-second refresh matches the Prometheus scrape interval.
 
 The application-level metrics default remains disabled. Docker Compose intentionally
 sets `NOTEGATE_METRICS_ENABLED` from `COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults

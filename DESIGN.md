@@ -30,7 +30,7 @@
 ## Information architecture
 
 - Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings. An active Unpinned Space remains in the rail until the user changes destination, without changing its user MCP visibility.
-- Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces; Grafana Service Overview with Health, RED, resource/USE signals, and instance health; a separately linked Search Detail dashboard for `find` and `grep`.
+- Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces; Grafana Service Overview with Health, RED, resource/USE signals, and process fleet health; separately linked Search Detail for `find`/`grep` and Internals Detail for MCP, database-pool, and text-decryption diagnostics.
 - Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; Space capacity and manual usage checks in the selected Space Inspector; node content in the editor; identity, change protection, settings, metadata, and secondary details in that order in the Node Inspector; app state in the status bar or transient status surfaces. Navigation pinning is separate from User MCP access.
 
 ## Design principles
@@ -39,15 +39,16 @@
 - Identity is structural: Use the NoteGate mark at product entry points, not as decoration throughout the workbench.
 - Progressive disclosure: Keep primary surfaces self-explanatory and move uncommon concepts into contextual help or the relevant Inspector.
 - Operational hierarchy: Keep service-wide RED and resource signals on the Overview; move operation and pipeline-stage diagnostics into a linked subsystem dashboard.
+- Operator scan path: Each dashboard starts with a compact status summary, then moves from RED symptoms to resource or pipeline causes, and ends with lower-frequency instance or cache diagnostics.
 - Meaning survives color: Pair status color with text, shape, or icon.
 - One visual grammar: Brand assets identify the product; Lucide icons represent actions and objects.
 - Tradeoffs: Compact desktop density is retained, but interactive targets remain at least 24 CSS px and visible focus is never removed.
 
 ## Visual language
 
-- Color: Brand ink `#17212b` and paper `#f7f9fb` anchor neutral surfaces. Blue is reserved for links, selection, focus, and primary actions. Status colors are semantic and contrast-safe.
+- Color: Brand ink `#17212b` and paper `#f7f9fb` anchor neutral surfaces. Blue is reserved for links, selection, focus, primary actions, and neutral operational volume. Green means confirmed health or efficiency; amber means warning; red means failure. Healthy states use colored values instead of large saturated panel backgrounds.
 - Typography: Apple/system sans for UI and reading; system monospace for code, paths, identifiers, and structured data.
-- Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; 48 px aligned workbench body headers; generous Markdown reading padding.
+- Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; 48 px aligned workbench body headers; generous Markdown reading padding. Grafana overview cards stay compact, while diagnostic charts receive enough width for readable axes and legends.
 - Shape/radius/elevation: 8–10 px controls, 12–16 px panels, no shadow except floating or modal surfaces. Each panel boundary has one 1 px seam; resize handles may use a wider invisible hit target without adding another default line.
 - Motion: Short color/opacity transitions plus transform-only card reordering; preserve scroll position and respect reduced motion.
 - Imagery/iconography: Official NoteGate SVG/PNG assets for identity. Lucide only for functional icons, normally 16 px with 1.75 px stroke. Auth and onboarding may use a low-contrast Gate Field mark at the screen edge; content surfaces remain flat and undecorated.
@@ -88,7 +89,7 @@
 
 - Tone: Short, direct, calm.
 - Terminology: `NoteGate`, `Google`, `space`, `node`, `Files`, `Recent`, and `Inspector`.
-- Microcopy rules: State the user action, not the authentication plumbing. Avoid persistent instructional copy when placement, labels, and contextual help can explain the interaction. The login CTA is `Continue with Google`; AuthGate is not presented as a user-facing provider.
+- Microcopy rules: State the user action, not the authentication plumbing. Avoid persistent instructional copy when placement, labels, and contextual help can explain the interaction. Operational panel help follows `meaning → unusual signal → check next`, distinguishes load from failure, and avoids fixed alert thresholds until a measured baseline or SLO exists. The login CTA is `Continue with Google`; AuthGate is not presented as a user-facing provider.
 
 ## Implementation constraints
 
@@ -96,7 +97,7 @@
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
 - Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available.
 - Compatibility constraints: Preserve the current OAuth popup and developer API-key fallback behavior.
-- Observability constraints: Dashboard variables and Prometheus labels remain bounded; search queries, paths, account/Space/node identifiers, filenames, and content never appear in metrics.
+- Observability constraints: Dashboard variables and Prometheus labels remain bounded; search queries, paths, account/Space/node identifiers, filenames, and content never appear in metrics. Dashboard links preserve the selected time range and shared variables, refresh cadence matches the 15-second scrape interval, and repeated series use stable semantic colors.
 - Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, light/dark login screenshots, dashboard JSON validation, Prometheus config validation, and a rendered Grafana screenshot.
 
 ## Open questions

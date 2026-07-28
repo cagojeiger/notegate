@@ -56,6 +56,13 @@ pub use usage_repo::{
 /// Generic internal mapping for any repository query failure. Shared by every
 /// repo so the mapping never drifts; detail is logged, not surfaced.
 pub(crate) fn map_sqlx_error(error: sqlx::Error) -> Error {
+    if matches!(&error, sqlx::Error::PoolTimedOut) {
+        tracing::warn!(
+            target: "notegate_db::pool",
+            event = "acquire.timeout",
+            "database pool acquisition timed out"
+        );
+    }
     Error::internal(format!("database query failed: {error}"))
 }
 

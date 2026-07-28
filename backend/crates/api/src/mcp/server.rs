@@ -32,6 +32,7 @@ use crate::auth::bearer::{
 };
 use crate::identity::me::MeOutput;
 use crate::mcp::tools;
+use crate::observability::observe_mcp_tool;
 use crate::state::AppState;
 
 const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
@@ -73,7 +74,10 @@ impl McpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<Json<MeOutput>, ErrorData> {
-        tools::identity::call(&parts)
+        observe_mcp_tool(self.state.config.metrics_enabled, "me", async {
+            tools::identity::call(&parts)
+        })
+        .await
     }
 
     #[tool(
@@ -87,7 +91,12 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::ReadInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::unified::read(&self.state, &parts, params).await
+        observe_mcp_tool(
+            self.state.config.metrics_enabled,
+            "read",
+            tools::unified::read(&self.state, &parts, params),
+        )
+        .await
     }
 
     #[tool(
@@ -101,7 +110,12 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::SearchInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::unified::search(&self.state, &parts, params).await
+        observe_mcp_tool(
+            self.state.config.metrics_enabled,
+            "search",
+            tools::unified::search(&self.state, &parts, params),
+        )
+        .await
     }
 
     #[tool(
@@ -115,7 +129,12 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::WriteInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::unified::write(&self.state, &parts, params).await
+        observe_mcp_tool(
+            self.state.config.metrics_enabled,
+            "write",
+            tools::unified::write(&self.state, &parts, params),
+        )
+        .await
     }
 
     #[tool(
@@ -129,7 +148,12 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::ManageInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::unified::manage(&self.state, &parts, params).await
+        observe_mcp_tool(
+            self.state.config.metrics_enabled,
+            "manage",
+            tools::unified::manage(&self.state, &parts, params),
+        )
+        .await
     }
 
     #[tool(
@@ -144,7 +168,12 @@ impl McpServer {
         params: Parameters<tools::unified::FileTransferInput>,
     ) -> Result<Json<Value>, ErrorData> {
         let Parameters(input) = params;
-        tools::transfers::call(&self.state, &parts, input).await
+        observe_mcp_tool(
+            self.state.config.metrics_enabled,
+            "file_transfer",
+            tools::transfers::call(&self.state, &parts, input),
+        )
+        .await
     }
 
     #[tool(
@@ -158,7 +187,12 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::RunSequenceInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        tools::unified::run_sequence(&self.state, &parts, params).await
+        observe_mcp_tool(
+            self.state.config.metrics_enabled,
+            "run_sequence",
+            tools::unified::run_sequence(&self.state, &parts, params),
+        )
+        .await
     }
 }
 
