@@ -7,6 +7,8 @@ use notegate_core::SearchBodyCacheConfig;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use uuid::Uuid;
 
+use super::SearchBodyCacheStats;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct BodyCacheKey {
     space_id: Uuid,
@@ -114,6 +116,18 @@ impl SearchBodyCache {
         }
     }
 
+    pub(super) fn stats(&self) -> SearchBodyCacheStats {
+        let Some(entries) = &self.entries else {
+            return SearchBodyCacheStats::default();
+        };
+
+        SearchBodyCacheStats {
+            entries: entries.entry_count(),
+            size_bytes: entries.weighted_size(),
+            capacity_bytes: entries.policy().max_capacity().unwrap_or_default(),
+        }
+    }
+
     pub(super) async fn get(
         &self,
         space_id: Uuid,
@@ -203,6 +217,14 @@ mod tests {
             .await;
         entries.run_pending_tasks().await;
         assert_eq!(entries.weighted_size(), 5);
+        assert_eq!(
+            cache.stats(),
+            SearchBodyCacheStats {
+                entries: 1,
+                size_bytes: 5,
+                capacity_bytes: 8,
+            }
+        );
     }
 
     #[tokio::test]
@@ -216,6 +238,7 @@ mod tests {
             .insert(Uuid::nil(), Uuid::nil(), "sha", Arc::<str>::from("body"))
             .await;
         assert!(cache.get(Uuid::nil(), Uuid::nil(), "sha").await.is_none());
+        assert_eq!(cache.stats(), SearchBodyCacheStats::default());
     }
 
     #[tokio::test]
