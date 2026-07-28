@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import { createMockApiClient } from "../../test/apiClient";
+import { createTestQueryClient } from "../../test/queryClient";
 import {
   createSpaceChangeSynchronizer,
   useSpaceChangeSync
@@ -40,7 +41,7 @@ describe("useSpaceChangeSync", () => {
         change(11, { node_id: "text-1", affected_parent_ids: ["parent-1"] }),
         change(12, { node_id: "text-2", affected_parent_ids: ["parent-2"] })
       ]));
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const reset = vi.spyOn(queryClient, "resetQueries");
     let renderCount = 0;
@@ -83,7 +84,7 @@ describe("useSpaceChangeSync", () => {
         item_kind: "file",
         affected_parent_ids: ["parent-1"]
       })]));
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const previewKey = queryKeys.filePreviewUrl("space-1", "file-1", "pdf");
     queryClient.setQueryData(previewKey, { url: "https://storage.example/stale" });
 
@@ -103,7 +104,7 @@ describe("useSpaceChangeSync", () => {
         ...response(40),
         resync_required: true
       });
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const reset = vi.spyOn(queryClient, "resetQueries");
 
@@ -134,7 +135,7 @@ describe("useSpaceChangeSync", () => {
     get
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce(response(11, [change(11)]));
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const sync = createSpaceChangeSynchronizer(client, queryClient);
 
     const older = sync("space-1");
@@ -149,12 +150,6 @@ describe("useSpaceChangeSync", () => {
     expect(get.mock.calls[1]?.[0]).toContain("after_id=10");
   });
 });
-
-function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false } }
-  });
-}
 
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: PropsWithChildren) {

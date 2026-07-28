@@ -10,6 +10,7 @@ import { queryKeys } from "../../api/queryKeys";
 import type { ChildrenResponse, RestNode } from "../../api/types";
 import { createMockApiClient } from "../../test/apiClient";
 import { makeRestNode, makeSpace } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import { TreeSection } from "./TreeSection";
 import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
 
@@ -350,10 +351,9 @@ function wrapper(queryClient: QueryClient) {
 }
 
 function createQueryClient() {
-  return new QueryClient({
+  return createTestQueryClient({
     defaultOptions: {
       queries: {
-        retry: false,
         staleTime: 5_000
       }
     }

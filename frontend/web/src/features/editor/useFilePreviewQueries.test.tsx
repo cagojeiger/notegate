@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { getNode } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import { makeRestNode } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import {
   filePreviewKindForNode,
   useFilePreviewUrl,
@@ -133,7 +134,7 @@ describe("useFilePreviewUrl", () => {
   });
 
   it("patches node collections without refetching after legacy preview metadata is discovered", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const imageNode = fileNode({
       id: "legacy-image",
@@ -178,7 +179,7 @@ describe("useFilePreviewUrl", () => {
   });
 
   it("shares a preview URL across stale node snapshots of the same immutable file", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const olderNode = fileNode({ updated_at: "2026-06-13T00:00:00Z" });
     const newerNode = fileNode({ updated_at: "2026-06-14T00:00:00Z" });
     vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
@@ -202,7 +203,7 @@ describe("useFilePreviewUrl", () => {
   });
 
   it("uses the PDF endpoint and cache key for PDF file previews", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const pdfNode = fileNode({
       name: "document.pdf",
       media_type: "application/pdf",
@@ -229,7 +230,7 @@ describe("useFilePreviewUrl", () => {
   });
 
   it("clears stale PDF preview metadata when the backend rejects it", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const pdfNode = fileNode({
       name: "document.pdf",
       media_type: "application/pdf",
@@ -259,7 +260,7 @@ describe("useFilePreviewUrl", () => {
   });
 
   it("refreshes the node after a declared PDF is detected as an image", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const declaredPdf = fileNode({
       name: "document.pdf",
       media_type: "application/pdf",
@@ -318,17 +319,7 @@ describe("filePreviewKindForNode", () => {
   });
 });
 
-function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false
-      }
-    }
-  });
-}
-
-function createQueryWrapper(queryClient = createQueryClient()) {
+function createQueryWrapper(queryClient = createTestQueryClient()) {
   return function QueryWrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   };

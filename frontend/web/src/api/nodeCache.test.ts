@@ -1,14 +1,15 @@
-import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import type { InfiniteData } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { makeRestNode } from "../test/fixtures";
+import { createTestQueryClient } from "../test/queryClient";
 import { updateNodeCaches } from "./nodeCache";
 import { queryKeys } from "./queryKeys";
 import type { ChildrenResponse, RestNode, RestNodeListResponse } from "./types";
 
 describe("updateNodeCaches", () => {
   it("updates every cached appearance without changing unrelated pages", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const target = node("file-1");
     const unrelated = node("file-2");
     const recent: RestNodeListResponse = {
@@ -60,7 +61,7 @@ describe("updateNodeCaches", () => {
   });
 
   it("does not create collection entries that were not already cached", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const target = node("file-1");
 
     updateNodeCaches(queryClient, target, (current) => ({ ...current, preview_available: true }));
@@ -72,7 +73,7 @@ describe("updateNodeCaches", () => {
   });
 
   it("does not treat folder statistics as paginated children data", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const target = node("file-1");
     const statKey = [...queryKeys.children("space-1", "root-1"), "stat"] as const;
     const stat = { parent: { id: "root-1", path: "/" }, children: [target], page: page() };
@@ -84,7 +85,7 @@ describe("updateNodeCaches", () => {
   });
 
   it("preserves effective write-lock state in collection summaries", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const target = node("file-1");
     queryClient.setQueryData(queryKeys.recent("space-1"), {
       pages: [{ nodes: [target], page: page() }],
