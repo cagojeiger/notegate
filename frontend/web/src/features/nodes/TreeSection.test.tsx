@@ -7,11 +7,12 @@ import { createTreeNodeFactory, treeSectionElement } from "../../test/treeSectio
 import { resetTreeVirtualizer } from "../../test/treeVirtualizer";
 
 const mocks = vi.hoisted(() => ({
-  useNodeChildrenQuery: vi.fn()
+  useNodeChildrenQuery: vi.fn(),
+  useTreeRestoreBatch: vi.fn()
 }));
 
 vi.mock("./useNodeQueries", () => ({ useNodeChildrenQuery: mocks.useNodeChildrenQuery }));
-vi.mock("./useTreeRestoreBatch", () => ({ useTreeRestoreBatch: () => false }));
+vi.mock("./useTreeRestoreBatch", () => ({ useTreeRestoreBatch: mocks.useTreeRestoreBatch }));
 vi.mock("@tanstack/react-virtual", () => import("../../test/treeVirtualizer"));
 
 const space = makeSpace();
@@ -20,6 +21,7 @@ const node = createTreeNodeFactory(space);
 describe("TreeSection", () => {
   beforeEach(() => {
     mocks.useNodeChildrenQuery.mockReset();
+    mocks.useTreeRestoreBatch.mockReset().mockReturnValue(false);
     resetTreeVirtualizer(20);
   });
 
@@ -49,6 +51,21 @@ describe("TreeSection", () => {
 
     await waitFor(() => expect(queriedNodeIds()).toContain(folder.id));
     expect(new Set(queriedNodeIds())).toEqual(new Set([space.root_node_id, folder.id]));
+  });
+
+  it("defers child query observers while restoring expanded folders", () => {
+    const folder = node("folder-1", "folder");
+    mocks.useTreeRestoreBatch.mockReturnValue(true);
+    mocks.useNodeChildrenQuery.mockReturnValue(query([folder]));
+
+    renderTree(new Set([folder.id]));
+
+    expect(mocks.useTreeRestoreBatch).toHaveBeenCalledWith(
+      space.id,
+      space.root_node_id,
+      new Set([folder.id])
+    );
+    expect(mocks.useNodeChildrenQuery).not.toHaveBeenCalled();
   });
 
   it("inspects and toggles a folder without replacing the open editor node", async () => {
