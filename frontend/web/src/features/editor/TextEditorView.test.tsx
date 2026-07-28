@@ -7,16 +7,30 @@ import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
 import { TextEditorView } from "./TextEditorView";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import type { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
 import { useMarkdownImageLoader } from "./useFilePreviewQueries";
+
+type TextEditorViewProps = Parameters<typeof TextEditorView>[0];
+type TextDocumentQuery = ReturnType<typeof useTextDocument>;
+type TextDocumentQueryMock = Pick<
+  TextDocumentQuery,
+  "data" | "isError" | "isLoading" | "isSuccess" | "refetch"
+>;
+type SaveTextMutation = ReturnType<typeof useSaveTextDocument>;
+type SaveTextMutationMock = Pick<SaveTextMutation, "mutate" | "isPending">;
+
+const editorQueryMocks = vi.hoisted(() => ({
+  useTextDocument: vi.fn<(...args: Parameters<typeof useTextDocument>) => TextDocumentQueryMock>(),
+  useSaveTextDocument: vi.fn<(...args: Parameters<typeof useSaveTextDocument>) => SaveTextMutationMock>()
+}));
 
 vi.mock("../../shared/lib/clipboard", () => ({
   copyText: vi.fn()
 }));
 
 vi.mock("./useEditorQueries", () => ({
-  useTextDocument: vi.fn(),
-  useSaveTextDocument: vi.fn()
+  useTextDocument: editorQueryMocks.useTextDocument,
+  useSaveTextDocument: editorQueryMocks.useSaveTextDocument
 }));
 
 vi.mock("./useFilePreviewQueries", () => ({
@@ -28,7 +42,7 @@ const node = makeRestNode({
   path: "/large.md",
 });
 
-const partialText: ReadTextResponse = {
+const partialText = {
   node: { id: node.id, path: node.path },
   text: {
     node_id: node.id,
@@ -45,40 +59,63 @@ const partialText: ReadTextResponse = {
     updated_by: { id: "user-1", kind: "user", display_name: "User" },
     updated_at: "2026-06-13T00:00:00Z"
   }
-};
+} satisfies ReadTextResponse;
 
-function renderTextEditorView(canWriteActiveSpace = true, currentNode = node) {
-  render(
-    <TextEditorView
-      active
-      groupId={0}
-      node={currentNode}
-      mode="preview"
-      canWriteActiveSpace={canWriteActiveSpace}
-      canOpenInNewGroup
-      canClose={false}
-      onClose={vi.fn()}
-      onSetMode={vi.fn()}
-      onOpenNodeInNewGroup={vi.fn()}
-      onOpenMarkdownLink={vi.fn()}
-      onRenameNode={vi.fn()}
-      onMoveNode={vi.fn()}
-      onDeleteNode={vi.fn()}
-    />
-  );
+function mockTextDocument(data: ReadTextResponse = partialText) {
+  const query = {
+    data,
+    isError: false,
+    isLoading: false,
+    isSuccess: true,
+    refetch: vi.fn()
+  } satisfies TextDocumentQueryMock;
+  editorQueryMocks.useTextDocument.mockReturnValue(query);
+}
+
+function mockFullText(content = partialText.text.content) {
+  mockTextDocument({
+    ...partialText,
+    text: { ...partialText.text, content, truncated: false, next_start_line: null }
+  });
+}
+
+function mockSaveTextDocument(mutate: SaveTextMutation["mutate"] = vi.fn()) {
+  const mutation = {
+    mutate,
+    isPending: false
+  } satisfies SaveTextMutationMock;
+  editorQueryMocks.useSaveTextDocument.mockReturnValue(mutation);
+}
+
+function makeTextEditorViewProps(overrides: Partial<TextEditorViewProps> = {}): TextEditorViewProps {
+  return {
+    active: true,
+    groupId: 0,
+    node,
+    mode: "preview",
+    canWriteActiveSpace: true,
+    canOpenInNewGroup: true,
+    canClose: false,
+    onClose: vi.fn(),
+    onSetMode: vi.fn(),
+    onOpenNodeInNewGroup: vi.fn(),
+    onOpenMarkdownLink: vi.fn(),
+    onRenameNode: vi.fn(),
+    onMoveNode: vi.fn(),
+    onDeleteNode: vi.fn(),
+    ...overrides
+  };
+}
+
+function renderTextEditorView(overrides: Partial<TextEditorViewProps> = {}) {
+  return render(<TextEditorView {...makeTextEditorViewProps(overrides)} />);
 }
 
 describe("TextEditorView", () => {
   beforeEach(() => {
     useUiStore.setState(useUiStore.getInitialState(), true);
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: partialText,
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
-    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: vi.fn(), isPending: false } as never);
+    mockTextDocument();
+    mockSaveTextDocument();
     vi.mocked(useMarkdownImageLoader).mockReset();
     vi.mocked(useMarkdownImageLoader).mockReturnValue(vi.fn().mockResolvedValue({ status: "error" }));
     vi.mocked(copyText).mockReset();
@@ -94,30 +131,18 @@ describe("TextEditorView", () => {
   });
 
   it("disables editing without write permission", () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText();
 
-    renderTextEditorView(false);
+    renderTextEditorView({ canWriteActiveSpace: false });
 
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
   it("keeps read actions available while disabling every write action under a lock", async () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText();
     const lockedNode = { ...node, effective_write_locked: true };
 
-    renderTextEditorView(true, lockedNode);
+    renderTextEditorView({ node: lockedNode });
 
     expect(screen.getByRole("button", { name: "Copy content" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
@@ -135,42 +160,14 @@ describe("TextEditorView", () => {
 
   it("keeps a dirty draft visible and read-only when a lock arrives", async () => {
     const user = userEvent.setup();
-    const props = {
-      active: true,
-      groupId: 0,
-      mode: "edit" as const,
-      canWriteActiveSpace: true,
-      canOpenInNewGroup: true,
-      canClose: false,
-      onClose: vi.fn(),
-      onSetMode: vi.fn(),
-      onOpenNodeInNewGroup: vi.fn(),
-      onOpenMarkdownLink: vi.fn(),
-      onRenameNode: vi.fn(),
-      onMoveNode: vi.fn(),
-      onDeleteNode: vi.fn()
-    };
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: {
-        ...partialText,
-        text: { ...partialText.text, content: "original", truncated: false, next_start_line: null }
-      },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
-    const view = render(<TextEditorView {...props} node={node} />);
+    const props = makeTextEditorViewProps({ mode: "edit" });
+    mockFullText("original");
+    const view = render(<TextEditorView {...props} />);
     const textarea = screen.getByRole("textbox", { name: /edit text content/i });
     await waitFor(() => expect(textarea).toHaveValue("original"));
     await user.type(textarea, " unsaved");
 
-    view.rerender(
-      <TextEditorView
-        {...props}
-        node={{ ...node, effective_write_locked: true }}
-      />
-    );
+    view.rerender(<TextEditorView {...props} node={{ ...node, effective_write_locked: true }} />);
 
     expect(textarea).toHaveValue("original unsaved");
     expect(textarea).toHaveAttribute("readonly");
@@ -183,25 +180,19 @@ describe("TextEditorView", () => {
   });
 
   it("keeps encrypted text read-only", () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: {
-        node: partialText.node,
-        text: {
-          node_id: node.id,
-          storage_format: "encrypted",
-          encrypted_payload: { ciphertext: "encrypted" },
-          content_sha256: "sha",
-          byte_len: 9,
-          line_count: 1,
-          updated_by: { id: "user-1", kind: "user", display_name: "User" },
-          updated_at: "2026-06-13T00:00:00Z"
-        }
-      },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockTextDocument({
+      node: partialText.node,
+      text: {
+        node_id: node.id,
+        storage_format: "encrypted",
+        encrypted_payload: { ciphertext: "encrypted" },
+        content_sha256: "sha",
+        byte_len: 9,
+        line_count: 1,
+        updated_by: { id: "user-1", kind: "user", display_name: "User" },
+        updated_at: "2026-06-13T00:00:00Z"
+      }
+    });
 
     renderTextEditorView();
 
@@ -213,29 +204,8 @@ describe("TextEditorView", () => {
   it("warns instead of overwriting a dirty editor when the server sha changes", async () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "original", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
-    const props = {
-      active: true,
-      groupId: 0,
-      node,
-      mode: "edit" as const,
-      canWriteActiveSpace: true,
-      canOpenInNewGroup: true,
-      canClose: false,
-      onClose: vi.fn(),
-      onSetMode,
-      onOpenNodeInNewGroup: vi.fn(),
-      onOpenMarkdownLink: vi.fn(),
-      onRenameNode: vi.fn(),
-      onMoveNode: vi.fn(),
-      onDeleteNode: vi.fn()
-    };
+    mockFullText("original");
+    const props = makeTextEditorViewProps({ mode: "edit", onSetMode });
     const view = render(<TextEditorView {...props} />);
 
     const textarea = screen.getByRole("textbox", { name: /edit text content/i });
@@ -267,31 +237,8 @@ describe("TextEditorView", () => {
     });
 
     try {
-      vi.mocked(useTextDocument).mockReturnValue({
-        data: { ...partialText, text: { ...partialText.text, content: "long line without wrapping", truncated: false, next_start_line: null } },
-        isLoading: false,
-        isError: false,
-        isSuccess: true,
-        refetch: vi.fn()
-      } as never);
-      render(
-        <TextEditorView
-          active
-          groupId={0}
-          node={node}
-          mode="edit"
-          canWriteActiveSpace
-          canOpenInNewGroup
-          canClose={false}
-          onClose={vi.fn()}
-          onSetMode={vi.fn()}
-          onOpenNodeInNewGroup={vi.fn()}
-          onOpenMarkdownLink={vi.fn()}
-          onRenameNode={vi.fn()}
-          onMoveNode={vi.fn()}
-          onDeleteNode={vi.fn()}
-        />
-      );
+      mockFullText("long line without wrapping");
+      renderTextEditorView({ mode: "edit" });
 
       const textarea = screen.getByRole("textbox", { name: /edit text content/i });
 
@@ -312,13 +259,7 @@ describe("TextEditorView", () => {
 
   it("copies loaded text from the editor header", async () => {
     const user = userEvent.setup();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "copy me", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("copy me");
 
     renderTextEditorView();
 
@@ -331,29 +272,9 @@ describe("TextEditorView", () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();
     const save = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "original", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
-    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: save, isPending: false } as never);
-    const props = {
-      active: true,
-      groupId: 0,
-      node,
-      canWriteActiveSpace: true,
-      canOpenInNewGroup: true,
-      canClose: false,
-      onClose: vi.fn(),
-      onSetMode,
-      onOpenNodeInNewGroup: vi.fn(),
-      onOpenMarkdownLink: vi.fn(),
-      onRenameNode: vi.fn(),
-      onMoveNode: vi.fn(),
-      onDeleteNode: vi.fn()
-    };
+    mockFullText("original");
+    mockSaveTextDocument(save);
+    const props = makeTextEditorViewProps({ onSetMode });
     const view = render(<TextEditorView {...props} mode="preview" />);
 
     await user.click(screen.getByRole("button", { name: "Edit" }));
@@ -378,33 +299,10 @@ describe("TextEditorView", () => {
   it("loads the draft when restored directly into edit mode", async () => {
     const user = userEvent.setup();
     const save = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "restored content", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
-    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: save, isPending: false } as never);
+    mockFullText("restored content");
+    mockSaveTextDocument(save);
 
-    render(
-      <TextEditorView
-        active
-        groupId={0}
-        node={node}
-        mode="edit"
-        canWriteActiveSpace
-        canOpenInNewGroup
-        canClose={false}
-        onClose={vi.fn()}
-        onSetMode={vi.fn()}
-        onOpenNodeInNewGroup={vi.fn()}
-        onOpenMarkdownLink={vi.fn()}
-        onRenameNode={vi.fn()}
-        onMoveNode={vi.fn()}
-        onDeleteNode={vi.fn()}
-      />
-    );
+    renderTextEditorView({ mode: "edit" });
 
     const textarea = screen.getByRole("textbox", { name: /edit text content/i });
     await waitFor(() => expect(textarea).toHaveValue("restored content"));
@@ -419,32 +317,9 @@ describe("TextEditorView", () => {
   it("passes the source group and node when opening markdown links", async () => {
     const onOpenMarkdownLink = vi.fn();
     const sourceNode = { ...node, path: "/docs/source.md" };
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "[Target](./target.md)", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("[Target](./target.md)");
 
-    render(
-      <TextEditorView
-        active
-        groupId={7}
-        node={sourceNode}
-        mode="preview"
-        canWriteActiveSpace
-        canOpenInNewGroup
-        canClose={false}
-        onClose={vi.fn()}
-        onSetMode={vi.fn()}
-        onOpenNodeInNewGroup={vi.fn()}
-        onOpenMarkdownLink={onOpenMarkdownLink}
-        onRenameNode={vi.fn()}
-        onMoveNode={vi.fn()}
-        onDeleteNode={vi.fn()}
-      />
-    );
+    renderTextEditorView({ groupId: 7, node: sourceNode, onOpenMarkdownLink });
 
     fireEvent.click(await screen.findByRole("link", { name: "Target" }));
 
@@ -452,13 +327,7 @@ describe("TextEditorView", () => {
   });
 
   it("shows a toast for invalid internal-looking markdown links", async () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "[Broken](./bad%path.md)", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("[Broken](./bad%path.md)");
 
     renderTextEditorView();
 
@@ -469,31 +338,10 @@ describe("TextEditorView", () => {
 
   it("passes markdown image links through the editor image loader", async () => {
     const loadMarkdownImage = vi.fn().mockResolvedValue({ status: "loaded", url: "https://storage.example/image.png" });
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "![Diagram](./assets/diagram.png)", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("![Diagram](./assets/diagram.png)");
     vi.mocked(useMarkdownImageLoader).mockReturnValue(loadMarkdownImage);
     const sourceNode = { ...node, path: "/docs/source.md" };
-    const viewProps = {
-      active: true,
-      groupId: 0,
-      node: sourceNode,
-      mode: "preview" as const,
-      canWriteActiveSpace: true,
-      canOpenInNewGroup: true,
-      canClose: false,
-      onClose: vi.fn(),
-      onSetMode: vi.fn(),
-      onOpenNodeInNewGroup: vi.fn(),
-      onOpenMarkdownLink: vi.fn(),
-      onRenameNode: vi.fn(),
-      onMoveNode: vi.fn(),
-      onDeleteNode: vi.fn()
-    };
+    const viewProps = makeTextEditorViewProps({ node: sourceNode });
 
     const view = render(<TextEditorView {...viewProps} />);
 
@@ -507,13 +355,7 @@ describe("TextEditorView", () => {
   });
 
   it("shows a placeholder for unsupported markdown images", async () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "![Not image](./note.md)", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("![Not image](./note.md)");
     vi.mocked(useMarkdownImageLoader).mockReturnValue(vi.fn().mockResolvedValue({ status: "unsupported" }));
 
     renderTextEditorView();
@@ -522,13 +364,7 @@ describe("TextEditorView", () => {
   });
 
   it("shows a placeholder when the browser cannot decode a markdown image", async () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "![Broken](./broken.png)", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("![Broken](./broken.png)");
     const loadMarkdownImage = vi.fn().mockResolvedValue({ status: "loaded", url: "https://storage.example/broken.png" });
     vi.mocked(useMarkdownImageLoader).mockReturnValue(loadMarkdownImage);
     renderTextEditorView();
@@ -545,32 +381,14 @@ describe("TextEditorView", () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();
     const onOpenNodeInNewGroup = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "plain text", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    mockFullText("plain text");
 
-    render(
-      <TextEditorView
-        active
-        groupId={0}
-        node={{ ...node, name: "note.txt" }}
-        mode="preview"
-        canWriteActiveSpace
-        canOpenInNewGroup
-        canClose
-        onClose={vi.fn()}
-        onSetMode={onSetMode}
-        onOpenNodeInNewGroup={onOpenNodeInNewGroup}
-        onOpenMarkdownLink={vi.fn()}
-        onRenameNode={vi.fn()}
-        onMoveNode={vi.fn()}
-        onDeleteNode={vi.fn()}
-      />
-    );
+    renderTextEditorView({
+      node: { ...node, name: "note.txt" },
+      canClose: true,
+      onSetMode,
+      onOpenNodeInNewGroup
+    });
 
     fireEvent.contextMenu(screen.getByText("plain text"));
 
@@ -590,30 +408,9 @@ describe("TextEditorView", () => {
     const user = userEvent.setup();
     const onSetMode = vi.fn();
     const save = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: { ...partialText, text: { ...partialText.text, content: "original", truncated: false, next_start_line: null } },
-      isLoading: false,
-      isError: false,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
-    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: save, isPending: false } as never);
-    const props = {
-      active: true,
-      groupId: 0,
-      node,
-      canWriteActiveSpace: true,
-      canOpenInNewGroup: true,
-      canClose: false,
-      onClose: vi.fn(),
-      onSetMode,
-      onOpenNodeInNewGroup: vi.fn(),
-      onOpenMarkdownLink: vi.fn(),
-      onRenameNode: vi.fn(),
-      onMoveNode: vi.fn(),
-      onDeleteNode: vi.fn()
-    };
-    render(<TextEditorView {...props} mode="edit" />);
+    mockFullText("original");
+    mockSaveTextDocument(save);
+    renderTextEditorView({ mode: "edit", onSetMode });
     await waitFor(() => expect(screen.getByRole("textbox", { name: /edit text content/i })).toHaveValue("original"));
     const textarea = screen.getByRole("textbox", { name: /edit text content/i });
     await user.type(textarea, " changed");
@@ -630,5 +427,4 @@ describe("TextEditorView", () => {
     expect(onSetMode).toHaveBeenLastCalledWith("preview");
     expect(useUiStore.getState().toast).toBe("Edit canceled");
   });
-
 });
