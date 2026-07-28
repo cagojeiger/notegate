@@ -10,6 +10,7 @@ use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
+use super::telemetry::{CacheResult, SearchOperation, SearchStage};
 use super::{
     ContentMatcher, GrepLineMode, GrepPage, GrepRequest, PathFilters, SearchService,
     decode_search_cursor, encode_search_cursor, search_fingerprint, text_node_view, validate_query,
@@ -59,6 +60,7 @@ struct GrepCandidateReduction {
     items: Vec<GrepHit>,
     after_sort_path: Option<String>,
     has_more: bool,
+    scanned_bytes: usize,
 }
 
 fn reduce_grep_candidates(
@@ -73,6 +75,7 @@ fn reduce_grep_candidates(
     let mut items = Vec::with_capacity(result_limit);
     let mut consumed = 0usize;
     let mut after_sort_path = None;
+    let mut scanned_bytes = 0usize;
     for candidate in candidates.iter().take(planned_candidates) {
         consumed += 1;
         after_sort_path = Some(candidate.sort_path.clone());
@@ -85,6 +88,7 @@ fn reduce_grep_candidates(
             // Consume the stale candidate so pagination can progress.
             continue;
         };
+        scanned_bytes = scanned_bytes.saturating_add(content.len());
         let match_lines = matcher.match_lines(&content, line_mode);
         if !match_lines.is_empty() {
             items.push(GrepHit {
@@ -106,6 +110,7 @@ fn reduce_grep_candidates(
         items,
         after_sort_path,
         has_more: candidates.len() > consumed,
+        scanned_bytes,
     }
 }
 
@@ -117,149 +122,236 @@ impl SearchService {
         space_id: uuid::Uuid,
         request: GrepRequest,
     ) -> ServiceResult<GrepPage> {
-        self.authorize(space_id, caller_account_id, FileCommand::Grep)
-            .await?;
-        let q = validate_query(&request.q)?.to_owned();
-        let limit = clamp_limit(
-            request.limit,
-            limits::GREP_DEFAULT_LIMIT,
-            limits::GREP_MAX_LIMIT,
-        );
-        let (scope_node_id, scope_path) = self
-            .resolve_scope_folder(space_id, request.path.as_deref())
-            .await?;
-        let fingerprint = search_fingerprint(&[
-            space_id.to_string(),
-            "grep".to_owned(),
-            q.clone(),
-            request.match_mode.as_str().to_owned(),
-            request.line_mode.as_str().to_owned(),
-            request.include.join(","),
-            request.exclude.join(","),
-            scope_node_id.to_string(),
-            "case-insensitive".to_owned(),
-            "dfs-sort_order-name-id".to_owned(),
-        ]);
-        let after_sort_path = decode_search_cursor(
-            request.cursor.as_deref(),
-            "grep",
-            &fingerprint,
-            scope_node_id,
-        )?;
-
-        let matcher = ContentMatcher::new(&q, request.match_mode)?;
-        let path_filters = PathFilters::new(&request.include, &request.exclude)?;
-        let candidates = self
-            .store
-            .search_text_candidates(
-                space_id,
-                scope_node_id,
-                &scope_path,
-                after_sort_path.as_deref(),
-                limits::SEARCH_CANDIDATE_PAGE_MAX + 1,
-            )
-            .await?;
-
-        let GrepCandidatePlan {
-            planned_candidates,
-            body_candidates,
-        } = plan_grep_candidates(
-            &candidates,
-            &path_filters,
-            limits::SEARCH_NODE_SCAN_MAX,
-            limits::GREP_SCAN_MAX_BYTES,
-        );
-        let mut bodies = HashMap::with_capacity(body_candidates.len());
-        let mut missing_body_candidates = Vec::new();
-        for (node_id, content_sha256, byte_len) in &body_candidates {
-            // A hit is consistent with the candidate metadata scan. A write
-            // racing after that scan is observed through its new SHA by the
-            // next request.
-            if let Some(body) = self
-                .body_cache
-                .get(space_id, *node_id, content_sha256)
-                .await
-            {
-                bodies.insert(*node_id, body);
-            } else {
-                missing_body_candidates.push((*node_id, content_sha256.clone(), *byte_len));
-            }
-        }
-
-        if !missing_body_candidates.is_empty() {
-            let _load_guard = self
-                .body_cache
-                .lock_misses(space_id, &missing_body_candidates)
-                .await;
-            let mut candidates_to_load = Vec::new();
-            for (node_id, content_sha256, byte_len) in missing_body_candidates {
-                if let Some(body) = self
-                    .body_cache
-                    .get(space_id, node_id, &content_sha256)
-                    .await
-                {
-                    bodies.insert(node_id, body);
-                } else {
-                    candidates_to_load.push((node_id, content_sha256, byte_len));
-                }
-            }
-
-            let loaded_bodies = self
-                .store
-                .search_text_bodies_within_budget(
-                    space_id,
-                    &candidates_to_load,
-                    limits::GREP_SCAN_MAX_BYTES,
+        let operation = SearchOperation::Grep;
+        let timer = self
+            .telemetry
+            .operation(operation, request.match_mode.as_str());
+        let result = async {
+            self.telemetry
+                .stage(
+                    operation,
+                    SearchStage::Authorize,
+                    self.authorize(space_id, caller_account_id, FileCommand::Grep),
                 )
                 .await?;
-            for (node_id, text) in loaded_bodies {
-                let content_sha256 = text.content_sha256;
-                let Some(content) = text.content else {
-                    continue;
-                };
-                let body = Arc::<str>::from(content);
-                self.body_cache
-                    .insert(space_id, node_id, &content_sha256, Arc::clone(&body))
-                    .await;
-                bodies.insert(node_id, body);
-            }
-        }
+            let q = validate_query(&request.q)?.to_owned();
+            let limit = clamp_limit(
+                request.limit,
+                limits::GREP_DEFAULT_LIMIT,
+                limits::GREP_MAX_LIMIT,
+            );
+            let (scope_node_id, scope_path) = self
+                .telemetry
+                .stage(
+                    operation,
+                    SearchStage::ResolveScope,
+                    self.resolve_scope_folder(space_id, request.path.as_deref()),
+                )
+                .await?;
+            let (fingerprint, after_sort_path, matcher, path_filters) =
+                self.telemetry
+                    .stage_sync(operation, SearchStage::Prepare, || {
+                        let fingerprint = search_fingerprint(&[
+                            space_id.to_string(),
+                            "grep".to_owned(),
+                            q.clone(),
+                            request.match_mode.as_str().to_owned(),
+                            request.line_mode.as_str().to_owned(),
+                            request.include.join(","),
+                            request.exclude.join(","),
+                            scope_node_id.to_string(),
+                            "case-insensitive".to_owned(),
+                            "dfs-sort_order-name-id".to_owned(),
+                        ]);
+                        let after_sort_path = decode_search_cursor(
+                            request.cursor.as_deref(),
+                            "grep",
+                            &fingerprint,
+                            scope_node_id,
+                        )?;
+                        let matcher = ContentMatcher::new(&q, request.match_mode)?;
+                        let path_filters = PathFilters::new(&request.include, &request.exclude)?;
+                        Ok::<_, crate::error::ServiceError>((
+                            fingerprint,
+                            after_sort_path,
+                            matcher,
+                            path_filters,
+                        ))
+                    })?;
+            let candidates = self
+                .telemetry
+                .stage(
+                    operation,
+                    SearchStage::CandidateQuery,
+                    self.store.search_text_candidates(
+                        space_id,
+                        scope_node_id,
+                        &scope_path,
+                        after_sort_path.as_deref(),
+                        limits::SEARCH_CANDIDATE_PAGE_MAX + 1,
+                    ),
+                )
+                .await?;
 
-        let GrepCandidateReduction {
-            mut items,
-            after_sort_path,
-            has_more,
-        } = reduce_grep_candidates(
-            &candidates,
-            planned_candidates,
-            bodies,
-            &path_filters,
-            &matcher,
-            request.line_mode,
-            limit as usize,
-        );
-        let next_cursor = if has_more {
-            encode_search_cursor("grep", fingerprint, scope_node_id, after_sort_path)?
-        } else {
-            None
-        };
-        if !items.is_empty() {
-            let node_ids: Vec<_> = items.iter().map(|item| item.node.node.id).collect();
-            let mut write_lock_sources =
-                crate::files::write_lock_sources_many(&self.store, space_id, &node_ids).await?;
-            for item in &mut items {
-                item.node.write_lock_sources = write_lock_sources
-                    .remove(&item.node.node.id)
-                    .unwrap_or_default();
-            }
-        }
+            let GrepCandidatePlan {
+                planned_candidates,
+                body_candidates,
+            } = plan_grep_candidates(
+                &candidates,
+                &path_filters,
+                limits::SEARCH_NODE_SCAN_MAX,
+                limits::GREP_SCAN_MAX_BYTES,
+            );
+            let (mut bodies, candidates_to_load, load_guard, hits, misses, coalesced) = self
+                .telemetry
+                .stage(operation, SearchStage::CacheLookup, async {
+                    let mut bodies = HashMap::with_capacity(body_candidates.len());
+                    let mut missing_body_candidates = Vec::new();
+                    let mut hits = 0usize;
+                    for (node_id, content_sha256, byte_len) in &body_candidates {
+                        // A hit is consistent with the candidate metadata scan. A write
+                        // racing after that scan is observed through its new SHA by the
+                        // next request.
+                        if let Some(body) = self
+                            .body_cache
+                            .get(space_id, *node_id, content_sha256)
+                            .await
+                        {
+                            hits += 1;
+                            bodies.insert(*node_id, body);
+                        } else {
+                            missing_body_candidates.push((
+                                *node_id,
+                                content_sha256.clone(),
+                                *byte_len,
+                            ));
+                        }
+                    }
 
-        Ok(GrepPage {
-            items,
-            limit,
-            has_more,
-            next_cursor,
-        })
+                    let load_guard = self
+                        .body_cache
+                        .lock_misses(space_id, &missing_body_candidates)
+                        .await;
+                    let mut candidates_to_load = Vec::new();
+                    let mut coalesced = 0usize;
+                    for (node_id, content_sha256, byte_len) in missing_body_candidates {
+                        if let Some(body) = self
+                            .body_cache
+                            .get(space_id, node_id, &content_sha256)
+                            .await
+                        {
+                            coalesced += 1;
+                            bodies.insert(node_id, body);
+                        } else {
+                            candidates_to_load.push((node_id, content_sha256, byte_len));
+                        }
+                    }
+                    let misses = candidates_to_load.len();
+
+                    (
+                        bodies,
+                        candidates_to_load,
+                        load_guard,
+                        hits,
+                        misses,
+                        coalesced,
+                    )
+                })
+                .await;
+            self.telemetry.record_cache(CacheResult::Hit, hits);
+            self.telemetry.record_cache(CacheResult::Miss, misses);
+            self.telemetry
+                .record_cache(CacheResult::Coalesced, coalesced);
+
+            let body_load_bytes = if candidates_to_load.is_empty() {
+                0
+            } else {
+                self.telemetry
+                    .stage(operation, SearchStage::BodyLoad, async {
+                        let loaded_bodies = self
+                            .store
+                            .search_text_bodies_within_budget(
+                                space_id,
+                                &candidates_to_load,
+                                limits::GREP_SCAN_MAX_BYTES,
+                            )
+                            .await?;
+                        let mut loaded_bytes = 0usize;
+                        for (node_id, text) in loaded_bodies {
+                            let content_sha256 = text.content_sha256;
+                            let Some(content) = text.content else {
+                                continue;
+                            };
+                            loaded_bytes = loaded_bytes.saturating_add(content.len());
+                            let body = Arc::<str>::from(content);
+                            self.body_cache
+                                .insert(space_id, node_id, &content_sha256, Arc::clone(&body))
+                                .await;
+                            bodies.insert(node_id, body);
+                        }
+                        Ok::<_, crate::error::ServiceError>(loaded_bytes)
+                    })
+                    .await?
+            };
+            drop(load_guard);
+
+            let GrepCandidateReduction {
+                mut items,
+                after_sort_path,
+                has_more,
+                scanned_bytes,
+            } = self
+                .telemetry
+                .stage_sync(operation, SearchStage::MatchReduce, || {
+                    reduce_grep_candidates(
+                        &candidates,
+                        planned_candidates,
+                        bodies,
+                        &path_filters,
+                        &matcher,
+                        request.line_mode,
+                        limit as usize,
+                    )
+                });
+            let next_cursor = if has_more {
+                encode_search_cursor("grep", fingerprint, scope_node_id, after_sort_path)?
+            } else {
+                None
+            };
+            self.telemetry
+                .stage(operation, SearchStage::Hydrate, async {
+                    if !items.is_empty() {
+                        let node_ids: Vec<_> = items.iter().map(|item| item.node.node.id).collect();
+                        let mut write_lock_sources =
+                            crate::files::write_lock_sources_many(&self.store, space_id, &node_ids)
+                                .await?;
+                        for item in &mut items {
+                            item.node.write_lock_sources = write_lock_sources
+                                .remove(&item.node.node.id)
+                                .unwrap_or_default();
+                        }
+                    }
+                    Ok::<_, crate::error::ServiceError>(())
+                })
+                .await?;
+            self.telemetry.record_workload(
+                operation,
+                candidates.len(),
+                items.len(),
+                scanned_bytes,
+                body_load_bytes,
+            );
+
+            Ok(GrepPage {
+                items,
+                limit,
+                has_more,
+                next_cursor,
+            })
+        }
+        .await;
+        timer.finish(&result);
+        result
     }
 }
 
@@ -396,6 +488,10 @@ mod tests {
             reduction.after_sort_path,
             Some(candidates[3].sort_path.clone())
         );
+        assert_eq!(
+            reduction.scanned_bytes,
+            "first needle".len() + "second needle".len()
+        );
         assert!(reduction.has_more);
     }
 
@@ -429,6 +525,7 @@ mod tests {
             reduction.after_sort_path,
             Some(candidates[2].sort_path.clone())
         );
+        assert_eq!(reduction.scanned_bytes, "haystack".len());
         assert!(reduction.has_more);
     }
 
@@ -464,6 +561,7 @@ mod tests {
                 reduction.after_sort_path,
                 Some(candidates[0].sort_path.clone())
             );
+            assert_eq!(reduction.scanned_bytes, "needle\nother\nneedle".len());
             assert!(!reduction.has_more);
         }
     }

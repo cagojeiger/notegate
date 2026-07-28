@@ -18,6 +18,9 @@ use crate::state::AppState;
 const HTTP_DURATION_BUCKETS_SECONDS: &[f64] = &[
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
 ];
+const SEARCH_DURATION_BUCKETS_SECONDS: &[f64] = &[
+    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+];
 const UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
@@ -34,6 +37,14 @@ pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
         .set_buckets_for_metric(
             Matcher::Full("notegate_http_request_duration".to_owned()),
             HTTP_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_search_operation_duration".to_owned()),
+            SEARCH_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_search_stage_duration".to_owned()),
+            SEARCH_DURATION_BUCKETS_SECONDS,
         )?
         .install_recorder()?;
 
@@ -77,6 +88,42 @@ fn describe_metrics() {
     metrics::describe_gauge!(
         "notegate_search_body_cache_entries",
         "Approximate number of decrypted search bodies in memory"
+    );
+    metrics::describe_counter!(
+        "notegate_search_operations",
+        "Completed find and grep operations by bounded mode and outcome"
+    );
+    metrics::describe_histogram!(
+        "notegate_search_operation_duration",
+        Unit::Seconds,
+        "End-to-end find and grep operation duration"
+    );
+    metrics::describe_histogram!(
+        "notegate_search_stage_duration",
+        Unit::Seconds,
+        "Search pipeline stage duration by bounded operation and stage"
+    );
+    metrics::describe_counter!(
+        "notegate_search_candidates",
+        "Candidate rows returned to find and grep operations"
+    );
+    metrics::describe_counter!(
+        "notegate_search_results",
+        "Nodes returned by successful find and grep operations"
+    );
+    metrics::describe_counter!(
+        "notegate_search_scanned_bytes",
+        Unit::Bytes,
+        "Plaintext bytes passed to grep content matching"
+    );
+    metrics::describe_counter!(
+        "notegate_search_body_load_bytes",
+        Unit::Bytes,
+        "Plaintext bytes returned by the grep database body-load boundary"
+    );
+    metrics::describe_counter!(
+        "notegate_search_cache_lookups",
+        "Grep decrypted-body cache lookups by bounded result"
     );
 }
 
@@ -258,6 +305,16 @@ mod tests {
                 HTTP_DURATION_BUCKETS_SECONDS,
             )
             .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_search_operation_duration".to_owned()),
+                SEARCH_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_search_stage_duration".to_owned()),
+                SEARCH_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
             .build_recorder();
         (MetricsHandle(recorder.handle()), recorder)
     }
@@ -295,6 +352,32 @@ mod tests {
                     capacity_bytes: 128,
                 },
             });
+            metrics::counter!(
+                "notegate_search_operations",
+                "operation" => "grep",
+                "mode" => "regex",
+                "outcome" => "success",
+            )
+            .increment(1);
+            metrics::histogram!(
+                "notegate_search_operation_duration",
+                "operation" => "grep",
+                "mode" => "regex",
+                "outcome" => "success",
+            )
+            .record(0.01);
+            metrics::histogram!(
+                "notegate_search_stage_duration",
+                "operation" => "grep",
+                "stage" => "candidate_query",
+            )
+            .record(0.005);
+            metrics::counter!("notegate_search_candidates", "operation" => "grep").increment(4);
+            metrics::counter!("notegate_search_results", "operation" => "grep").increment(2);
+            metrics::counter!("notegate_search_scanned_bytes", "operation" => "grep").increment(64);
+            metrics::counter!("notegate_search_body_load_bytes", "operation" => "grep")
+                .increment(32);
+            metrics::counter!("notegate_search_cache_lookups", "result" => "hit").increment(3);
         });
 
         let response = scrape_response(&handle);
@@ -318,5 +401,15 @@ mod tests {
         assert!(body.contains("notegate_search_body_cache_size_bytes 64"));
         assert!(body.contains("notegate_search_body_cache_capacity_bytes 128"));
         assert!(body.contains("notegate_search_body_cache_entries 4"));
+        assert!(body.contains(
+            "notegate_search_operations_total{operation=\"grep\",mode=\"regex\",outcome=\"success\"} 1"
+        ));
+        assert!(body.contains("notegate_search_operation_duration_seconds_bucket"));
+        assert!(body.contains("notegate_search_stage_duration_seconds_bucket"));
+        assert!(body.contains("notegate_search_candidates_total{operation=\"grep\"} 4"));
+        assert!(body.contains("notegate_search_results_total{operation=\"grep\"} 2"));
+        assert!(body.contains("notegate_search_scanned_bytes_total{operation=\"grep\"} 64"));
+        assert!(body.contains("notegate_search_body_load_bytes_total{operation=\"grep\"} 32"));
+        assert!(body.contains("notegate_search_cache_lookups_total{result=\"hit\"} 3"));
     }
 }

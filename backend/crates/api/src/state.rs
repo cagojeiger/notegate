@@ -97,7 +97,8 @@ impl AppState {
         let files_repo =
             FilesRepo::with_limits_and_crypto(db.clone(), config.limits, pii_crypto.clone());
         let files = FilesService::new(files_repo.clone());
-        let search = SearchService::with_body_cache_config(files_repo, config.search_body_cache);
+        let search = SearchService::with_body_cache_config(files_repo, config.search_body_cache)
+            .with_metrics_enabled(config.metrics_enabled);
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
         let browser_sessions = BrowserSessionRepo::with_lookup_key(
             db.clone(),

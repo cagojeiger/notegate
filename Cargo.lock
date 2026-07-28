@@ -2601,6 +2601,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hmac 0.12.1",
+ "metrics",
+ "metrics-exporter-prometheus",
  "moka",
  "notegate-core",
  "notegate-db",

@@ -71,9 +71,51 @@ Metric labels must be bounded and must not contain:
 New metrics must define their label domains in this document before implementation.
 Unbounded diagnostic values belong in structured logs or traces, not Prometheus labels.
 
-## Planned search metrics
+## Search metrics
 
-Search metrics are intentionally separate from the HTTP foundation. A later change may
-add operation and stage-level measurements for `find` and `grep`, using bounded labels
-such as `operation`, `stage`, `outcome`, and `cache_result`. It must not expose query or
-node identity and must reuse the existing search pipeline boundaries.
+Search metrics are recorded only when `NOTEGATE_METRICS_ENABLED=true`. Disabled
+metrics do not start search timers or update counters.
+
+```text
+notegate_search_operations_total
+  labels: operation, mode, outcome
+
+notegate_search_operation_duration_seconds
+  labels: operation, mode, outcome
+
+notegate_search_stage_duration_seconds
+  labels: operation, stage
+
+notegate_search_candidates_total
+  labels: operation
+
+notegate_search_results_total
+  labels: operation
+
+notegate_search_scanned_bytes_total
+  labels: operation
+
+notegate_search_body_load_bytes_total
+  labels: operation
+
+notegate_search_cache_lookups_total
+  labels: result
+```
+
+- `operation` is `find` or `grep`.
+- `mode` is `contains`, `glob`, `literal`, or `regex`; only modes valid for the
+  selected operation are emitted.
+- `outcome` is `success`, `invalid`, `not_found`, `forbidden`, `conflict`, or
+  `internal`.
+- `stage` is `authorize`, `prepare`, `resolve_scope`, `candidate_query`,
+  `cache_lookup`, `body_load`, `match_reduce`, or `hydrate`. Cache and body-load
+  stages are grep-only.
+- `result` is `hit`, `miss`, or `coalesced`. A coalesced lookup initially missed
+  and then observed a body loaded by another request after acquiring the
+  single-flight lock.
+- Candidate counters measure rows returned by the candidate query. Result
+  counters measure returned nodes. Scanned bytes measure plaintext bytes passed
+  to grep matching. Body-load bytes measure plaintext bytes returned by the
+  database body-load/decryption boundary.
+- Operation and stage durations use fixed histogram buckets. No search query,
+  path, cursor, identifier, filename, content, or error text is recorded.

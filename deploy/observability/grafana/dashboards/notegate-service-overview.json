@@ -22,6 +22,16 @@
   "id": null,
   "links": [
     {
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Search Detail",
+      "type": "link",
+      "url": "/d/notegate-search-detail/notegate-search-detail"
+    },
+    {
       "icon": "external link",
       "includeVars": false,
       "keepTime": true,

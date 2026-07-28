@@ -23,9 +23,11 @@ use crate::files::policy::{self, FileCommand};
 mod body_cache;
 mod find;
 mod grep;
+mod telemetry;
 mod tree;
 
 use body_cache::SearchBodyCache;
+use telemetry::SearchTelemetry;
 
 /// Process-local snapshot of the decrypted search body cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub struct SearchBodyCacheStats {
 pub struct SearchService {
     store: FilesRepo,
     body_cache: SearchBodyCache,
+    telemetry: SearchTelemetry,
 }
 
 impl SearchService {
@@ -55,7 +58,13 @@ impl SearchService {
         Self {
             store,
             body_cache: SearchBodyCache::new(body_cache_config),
+            telemetry: SearchTelemetry::default(),
         }
+    }
+
+    pub fn with_metrics_enabled(mut self, enabled: bool) -> Self {
+        self.telemetry = SearchTelemetry::new(enabled);
+        self
     }
 
     pub fn body_cache_stats(&self) -> SearchBodyCacheStats {

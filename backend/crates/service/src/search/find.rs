@@ -8,6 +8,7 @@ use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
+use super::telemetry::{SearchOperation, SearchStage};
 use super::{
     FindPage, FindRequest, NameMatcher, PathFilters, SearchService, decode_search_cursor,
     encode_search_cursor, search_fingerprint, validate_query,
@@ -60,76 +61,123 @@ impl SearchService {
         space_id: uuid::Uuid,
         request: FindRequest,
     ) -> ServiceResult<FindPage> {
-        self.authorize(space_id, caller_account_id, FileCommand::Find)
-            .await?;
-        let q = validate_query(&request.q)?.to_owned();
-        let limit = clamp_limit(
-            request.limit,
-            limits::FIND_DEFAULT_LIMIT,
-            limits::FIND_MAX_LIMIT,
-        );
-        let (scope_node_id, scope_path) = self
-            .resolve_scope_folder(space_id, request.path.as_deref())
-            .await?;
-        let fingerprint = search_fingerprint(&[
-            space_id.to_string(),
-            "find".to_owned(),
-            q.clone(),
-            request
-                .kind
-                .map(|kind| kind.as_str().to_owned())
-                .unwrap_or_default(),
-            request.match_mode.as_str().to_owned(),
-            request.include.join(","),
-            request.exclude.join(","),
-            scope_node_id.to_string(),
-            "case-insensitive".to_owned(),
-            "dfs-sort_order-name-id".to_owned(),
-        ]);
-        let after_sort_path = decode_search_cursor(
-            request.cursor.as_deref(),
-            "find",
-            &fingerprint,
-            scope_node_id,
-        )?;
+        let operation = SearchOperation::Find;
+        let timer = self
+            .telemetry
+            .operation(operation, request.match_mode.as_str());
+        let result = async {
+            self.telemetry
+                .stage(
+                    operation,
+                    SearchStage::Authorize,
+                    self.authorize(space_id, caller_account_id, FileCommand::Find),
+                )
+                .await?;
+            let q = validate_query(&request.q)?.to_owned();
+            let limit = clamp_limit(
+                request.limit,
+                limits::FIND_DEFAULT_LIMIT,
+                limits::FIND_MAX_LIMIT,
+            );
+            let (scope_node_id, scope_path) = self
+                .telemetry
+                .stage(
+                    operation,
+                    SearchStage::ResolveScope,
+                    self.resolve_scope_folder(space_id, request.path.as_deref()),
+                )
+                .await?;
+            let (fingerprint, after_sort_path, matcher, path_filters) =
+                self.telemetry
+                    .stage_sync(operation, SearchStage::Prepare, || {
+                        let fingerprint = search_fingerprint(&[
+                            space_id.to_string(),
+                            "find".to_owned(),
+                            q.clone(),
+                            request
+                                .kind
+                                .map(|kind| kind.as_str().to_owned())
+                                .unwrap_or_default(),
+                            request.match_mode.as_str().to_owned(),
+                            request.include.join(","),
+                            request.exclude.join(","),
+                            scope_node_id.to_string(),
+                            "case-insensitive".to_owned(),
+                            "dfs-sort_order-name-id".to_owned(),
+                        ]);
+                        let after_sort_path = decode_search_cursor(
+                            request.cursor.as_deref(),
+                            "find",
+                            &fingerprint,
+                            scope_node_id,
+                        )?;
+                        let matcher = NameMatcher::new(&q, request.match_mode)?;
+                        let path_filters = PathFilters::new(&request.include, &request.exclude)?;
+                        Ok::<_, crate::error::ServiceError>((
+                            fingerprint,
+                            after_sort_path,
+                            matcher,
+                            path_filters,
+                        ))
+                    })?;
+            let candidates = self
+                .telemetry
+                .stage(
+                    operation,
+                    SearchStage::CandidateQuery,
+                    self.store.search_node_candidates(
+                        space_id,
+                        scope_node_id,
+                        &scope_path,
+                        after_sort_path.as_deref(),
+                        limits::SEARCH_CANDIDATE_PAGE_MAX + 1,
+                    ),
+                )
+                .await?;
 
-        let matcher = NameMatcher::new(&q, request.match_mode)?;
-        let path_filters = PathFilters::new(&request.include, &request.exclude)?;
-        let candidates = self
-            .store
-            .search_node_candidates(
-                space_id,
-                scope_node_id,
-                &scope_path,
-                after_sort_path.as_deref(),
-                limits::SEARCH_CANDIDATE_PAGE_MAX + 1,
-            )
-            .await?;
+            let FindCandidateReduction {
+                items,
+                after_sort_path,
+                has_more,
+            } = self
+                .telemetry
+                .stage_sync(operation, SearchStage::MatchReduce, || {
+                    reduce_find_candidates(
+                        &candidates,
+                        request.kind,
+                        &matcher,
+                        &path_filters,
+                        limit as usize,
+                        limits::SEARCH_NODE_SCAN_MAX,
+                    )
+                });
+            let next_cursor = if has_more {
+                encode_search_cursor("find", fingerprint, scope_node_id, after_sort_path)?
+            } else {
+                None
+            };
+            let result_count = items.len();
+            let items = self
+                .telemetry
+                .stage(
+                    operation,
+                    SearchStage::Hydrate,
+                    self.node_views(space_id, items),
+                )
+                .await?;
+            self.telemetry
+                .record_workload(operation, candidates.len(), result_count, 0, 0);
 
-        let FindCandidateReduction {
-            items,
-            after_sort_path,
-            has_more,
-        } = reduce_find_candidates(
-            &candidates,
-            request.kind,
-            &matcher,
-            &path_filters,
-            limit as usize,
-            limits::SEARCH_NODE_SCAN_MAX,
-        );
-        let next_cursor = if has_more {
-            encode_search_cursor("find", fingerprint, scope_node_id, after_sort_path)?
-        } else {
-            None
-        };
-
-        Ok(FindPage {
-            items: self.node_views(space_id, items).await?,
-            limit,
-            has_more,
-            next_cursor,
-        })
+            Ok(FindPage {
+                items,
+                limit,
+                has_more,
+                next_cursor,
+            })
+        }
+        .await;
+        timer.finish(&result);
+        result
     }
 }
 

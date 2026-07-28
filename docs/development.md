@@ -73,7 +73,8 @@ Local observability endpoints:
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
 - Grafana login: `admin` / `notegate-local` by default
-- Provisioned dashboard: **NoteGate / Service Overview**
+- Provisioned dashboards: **NoteGate / Service Overview** and
+  **NoteGate / Search Detail**
 
 The application-level metrics default remains disabled. Docker Compose intentionally
 sets `NOTEGATE_METRICS_ENABLED` from `COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults
