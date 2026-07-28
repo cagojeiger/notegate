@@ -212,7 +212,3 @@ function rememberExpandedFolders(
 export function persistTheme(theme: ThemeMode): void {
   browserUiStorePersistence.saveTheme(theme);
 }
-
-export function persistLastSpace(spaceId: string): void {
-  browserUiStorePersistence.saveLastActiveSpaceId(spaceId);
-}
