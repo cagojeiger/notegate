@@ -76,6 +76,12 @@ Local observability endpoints:
 - Provisioned dashboards: **NoteGate / Service Overview** and
   **NoteGate / Search Detail**
 
+The Grafana root opens Service Overview as its local home dashboard.
+The Service Overview is organized for an overview → RED → USE → instance scan.
+Search Detail continues with RED → pipeline → workload → cache diagnostics.
+Dashboard links preserve the selected time range and shared instance filter, and
+the default 15-second refresh matches the Prometheus scrape interval.
+
 The application-level metrics default remains disabled. Docker Compose intentionally
 sets `NOTEGATE_METRICS_ENABLED` from `COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults
 to `true` for this local stack. Prometheus discovers both scaled `web` replicas through

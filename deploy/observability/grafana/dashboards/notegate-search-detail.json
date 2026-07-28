@@ -27,7 +27,7 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": false,
-      "title": "Service Overview",
+      "title": "← Service Overview",
       "type": "link",
       "url": "/d/notegate-service-overview/notegate-service-overview"
     },
@@ -37,7 +37,7 @@
       "keepTime": true,
       "tags": [],
       "targetBlank": true,
-      "title": "Prometheus",
+      "title": "Prometheus UI ↗",
       "type": "link",
       "url": "http://localhost:9090"
     }
@@ -54,7 +54,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "Search RED",
+      "title": "Overview",
       "type": "row"
     },
     {
@@ -73,7 +73,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "blue",
                 "value": null
               }
             ]
@@ -83,7 +83,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 4,
         "w": 8,
         "x": 0,
         "y": 1
@@ -153,14 +153,14 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 4,
         "w": 8,
         "x": 8,
         "y": 1
       },
       "id": 3,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
@@ -199,6 +199,19 @@
             "mode": "thresholds"
           },
           "decimals": 3,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "gray",
+                  "index": 0,
+                  "text": "No traffic"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -221,7 +234,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 4,
         "w": 8,
         "x": 16,
         "y": 1
@@ -254,6 +267,19 @@
       ],
       "title": "p95 Latency",
       "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 16,
+      "panels": [],
+      "title": "RED · Search Operations",
+      "type": "row"
     },
     {
       "datasource": {
@@ -345,7 +371,53 @@
           },
           "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -405,7 +477,7 @@
       },
       "id": 7,
       "panels": [],
-      "title": "Pipeline Stages",
+      "title": "Pipeline · Stage Cost",
       "type": "row"
     },
     {
@@ -438,7 +510,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
+        "h": 8,
         "w": 12,
         "x": 0,
         "y": 15
@@ -498,7 +570,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
+        "h": 8,
         "w": 12,
         "x": 12,
         "y": 15
@@ -534,11 +606,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 23
       },
       "id": 9,
       "panels": [],
-      "title": "Search Workload",
+      "title": "Workload · Scan Cost",
       "type": "row"
     },
     {
@@ -568,13 +640,74 @@
           },
           "unit": "ops"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "find candidates/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "find results/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "grep candidates/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "grep results/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 24
       },
       "id": 10,
       "options": {
@@ -638,13 +771,44 @@
           },
           "unit": "Bps"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "matched plaintext"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "DB body load"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 24
       },
       "id": 11,
       "options": {
@@ -687,11 +851,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 31
       },
       "id": 12,
       "panels": [],
-      "title": "Grep Cache",
+      "title": "Cache · Grep Bodies",
       "type": "row"
     },
     {
@@ -706,6 +870,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "color": "gray",
+                  "index": 0,
+                  "text": "No lookups"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "max": 100,
           "min": 0,
           "thresholds": {
@@ -730,14 +907,14 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 32
       },
       "id": 13,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
@@ -755,7 +932,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum(increase(notegate_search_cache_lookups_total{job=\"notegate\", instance=~\"$instance\", result=~\"hit|coalesced\"}[$__range])) / clamp_min(sum(increase(notegate_search_cache_lookups_total{job=\"notegate\", instance=~\"$instance\"}[$__range])), 1e-9) or vector(0)",
+          "expr": "100 * sum(increase(notegate_search_cache_lookups_total{job=\"notegate\", instance=~\"$instance\", result=~\"hit|coalesced\"}[$__range])) / sum(increase(notegate_search_cache_lookups_total{job=\"notegate\", instance=~\"$instance\"}[$__range]))",
           "legendFormat": "avoided DB load",
           "range": true,
           "refId": "A"
@@ -791,13 +968,59 @@
           },
           "unit": "reqps"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "miss"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "coalesced"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 16,
         "x": 8,
-        "y": 34
+        "y": 32
       },
       "id": 14,
       "options": {
@@ -807,7 +1030,7 @@
             "max"
           ],
           "displayMode": "table",
-          "placement": "bottom",
+          "placement": "right",
           "showLegend": true
         },
         "tooltip": {
@@ -828,12 +1051,13 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "10s",
+  "refresh": "15s",
   "schemaVersion": 41,
   "tags": [
     "notegate",
     "search",
-    "prometheus"
+    "prometheus",
+    "detail"
   ],
   "templating": {
     "list": [
@@ -901,7 +1125,19 @@
     "from": "now-30m",
     "to": "now"
   },
-  "timepicker": {},
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "15s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h"
+    ]
+  },
   "timezone": "browser",
   "title": "NoteGate Search Detail",
   "uid": "notegate-search-detail",
