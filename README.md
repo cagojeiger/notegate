@@ -53,7 +53,9 @@ cargo run --bin notegate-api
 pnpm web:dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). For the production-like Docker stack, run `make up` and open [http://localhost:9191](http://localhost:9191).
+Open [http://localhost:5173](http://localhost:5173). For the production-like Docker
+stack, run `make up` and open [NoteGate](http://localhost:9191) or its provisioned
+[Grafana service dashboard](http://localhost:3000/d/notegate-service-overview).
 
 See the [development guide](docs/development.md) for architecture, configuration, service URLs, and checks.
 
