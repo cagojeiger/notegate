@@ -3,16 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { updateNodeCaches } from "../../api/nodeCache";
-import { getNode, listChildren } from "../../api/nodes";
-import { invalidateRecentNodes, invalidateText } from "../../api/queryInvalidation";
+import { getNode } from "../../api/nodes";
+import { invalidateRecentNodes } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
-import type { RestNode } from "../../api/types";
+import type { ReadTextResponse, RestNode } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
+import { useNodeChildrenQuery } from "../nodes/useNodeQueries";
 
 export function useFolderChildrenStat(node: RestNode) {
-  const client = useApiClient();
-  return useQuery({ queryKey: [...queryKeys.children(node.space_id, node.id), "stat"], queryFn: () => listChildren(client, node.space_id, node.id) });
+  const query = useNodeChildrenQuery(node.space_id, node.id, true);
+  return { ...query, data: query.data?.pages[0] };
 }
 
 export function useTextDocument(node: RestNode) {
@@ -37,9 +38,41 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
   const updateGroupsNode = useUiStore((state) => state.updateGroupsNode);
   return useMutation({
     meta: { silentError: true },
-    mutationFn: (force: boolean) => replaceText(client, node.space_id, node.id, draft, force ? undefined : sha),
-    onMutate: () => setSaveState("saving"),
-    onSuccess: (response) => {
+    mutationFn: async (force: boolean) => {
+      const submittedDraft = draft;
+      const response = await replaceText(
+        client,
+        node.space_id,
+        node.id,
+        submittedDraft,
+        force ? undefined : sha
+      );
+      return { response, submittedDraft };
+    },
+    onMutate: async () => {
+      setSaveState("saving");
+      await queryClient.cancelQueries({
+        queryKey: queryKeys.text(node.space_id, node.id),
+        exact: true
+      });
+    },
+    onSuccess: ({ response, submittedDraft }) => {
+      queryClient.setQueryData<ReadTextResponse>(
+        queryKeys.text(node.space_id, node.id),
+        {
+          node: response.node,
+          text: {
+            ...response.text,
+            storage_format: "plain",
+            content: submittedDraft,
+            start_line: 1,
+            end_line: response.text.line_count,
+            returned_lines: response.text.line_count,
+            truncated: false,
+            next_start_line: null
+          }
+        }
+      );
       const updatedNode = {
         ...node,
         content_sha256: response.text.content_sha256,
@@ -53,7 +86,6 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
       setSaveState("saved");
       showToast("Saved");
       onSaved();
-      invalidateText(queryClient, node.space_id, node.id);
       invalidateRecentNodes(queryClient, node.space_id);
     },
     onError: (error) => {

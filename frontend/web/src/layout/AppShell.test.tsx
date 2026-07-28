@@ -28,7 +28,11 @@ vi.mock("../features/editor/EditorArea", () => ({ EditorArea: () => null }));
 vi.mock("../features/nodes/PrimarySidebar", () => ({ PrimarySidebar: () => null }));
 vi.mock("../features/spaces/MobileSpaceBar", () => ({ MobileSpaceBar: () => null }));
 vi.mock("../features/spaces/SpaceLibrary", () => ({
-  SpaceLibrary: ({ spaces }: { spaces: Space[] }) => <div data-testid="space-library">{spaces.map((item) => item.name).join(",")}</div>
+  SpaceLibrary: ({ spaces, usagePollingEnabled }: { spaces: Space[]; usagePollingEnabled: boolean }) => (
+    <div data-testid="space-library" data-usage-polling-enabled={String(usagePollingEnabled)}>
+      {spaces.map((item) => item.name).join(",")}
+    </div>
+  )
 }));
 vi.mock("./AuxiliarySidebar", () => ({ AuxiliarySidebar: () => null }));
 vi.mock("../features/events/EventHistoryModal", () => ({
@@ -94,6 +98,7 @@ describe("AppShell history", () => {
     await user.click(screen.getByRole("button", { name: "Open space library" }));
 
     expect(screen.getByTestId("space-library")).toHaveTextContent("Daily,Private");
+    expect(screen.getByTestId("space-library")).toHaveAttribute("data-usage-polling-enabled", "false");
     expect(screen.getByText("ready")).toBeInTheDocument();
   });
 
@@ -129,6 +134,22 @@ describe("AppShell history", () => {
 
     render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
 
+    expect(mocks.useUsageQuery).toHaveBeenLastCalledWith(false);
+  });
+
+  it("lets the mobile library own usage polling while the status bar stays disabled", async () => {
+    const user = userEvent.setup();
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(),
+      isMobile: true,
+      actions: { closeMobile: vi.fn() }
+    });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Open space library" }));
+
+    expect(screen.getByTestId("space-library")).toHaveAttribute("data-usage-polling-enabled", "true");
     expect(mocks.useUsageQuery).toHaveBeenLastCalledWith(false);
   });
 

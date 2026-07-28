@@ -20,11 +20,6 @@ describe("query invalidation", () => {
   it("invalidates only Recent and the affected parent folders for a node change", () => {
     const queryClient = createTestQueryClient();
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
-    const statKey = [
-      ...queryKeys.children("space-1", "parent-1"),
-      "stat"
-    ] as const;
-    queryClient.setQueryData(statKey, { children: ["stale"] });
 
     invalidateNodeLists(queryClient, "space-1", ["parent-1", "parent-2", "parent-1", null]);
 
@@ -39,7 +34,6 @@ describe("query invalidation", () => {
       queryKey: queryKeys.children("space-1", "parent-2")
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
-    expect(queryClient.getQueryData(statKey)).toBeUndefined();
     expect(
       queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
     ).toBe(1);
