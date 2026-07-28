@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReadTextResponse } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
 import { useUiStore } from "../../stores/uiStore";
+import { installElementResizeMock } from "../../test/browserLayout";
 import { makeRestNode } from "../../test/fixtures";
 import { TextEditorView } from "./TextEditorView";
 import type { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
@@ -219,22 +220,7 @@ describe("TextEditorView", () => {
   });
 
   it("resets horizontal edit scroll when the editor grows wider", () => {
-    const originalResizeObserver = globalThis.ResizeObserver;
-    const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "clientWidth");
-    let triggerResize: (() => void) | null = null;
-    let textareaWidth = 320;
-    globalThis.ResizeObserver = class {
-      constructor(callback: ResizeObserverCallback) {
-        triggerResize = () => callback([], this as unknown as ResizeObserver);
-      }
-      observe() {}
-      disconnect() {}
-      unobserve() {}
-    } as typeof ResizeObserver;
-    Object.defineProperty(HTMLTextAreaElement.prototype, "clientWidth", {
-      configurable: true,
-      get: () => textareaWidth
-    });
+    const resize = installElementResizeMock();
 
     try {
       mockFullText("long line without wrapping");
@@ -243,17 +229,15 @@ describe("TextEditorView", () => {
       const textarea = screen.getByRole("textbox", { name: /edit text content/i });
 
       textarea.scrollLeft = 120;
-      textareaWidth = 240;
-      act(() => triggerResize?.());
+      resize.setWidth(textarea, 240);
+      act(() => resize.trigger(textarea));
       expect(textarea.scrollLeft).toBe(120);
 
-      textareaWidth = 480;
-      act(() => triggerResize?.());
+      resize.setWidth(textarea, 480);
+      act(() => resize.trigger(textarea));
       expect(textarea.scrollLeft).toBe(0);
     } finally {
-      globalThis.ResizeObserver = originalResizeObserver;
-      if (originalClientWidth) Object.defineProperty(HTMLTextAreaElement.prototype, "clientWidth", originalClientWidth);
-      else delete (HTMLTextAreaElement.prototype as unknown as { clientWidth?: number }).clientWidth;
+      resize.restore();
     }
   });
 
