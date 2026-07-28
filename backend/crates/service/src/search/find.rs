@@ -8,10 +8,11 @@ use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
+use super::matcher::{NameMatcher, PathFilters};
 use super::telemetry::{SearchOperation, SearchStage};
 use super::{
-    FindPage, FindRequest, NameMatcher, PathFilters, SearchService, decode_search_cursor,
-    encode_search_cursor, search_fingerprint, validate_query,
+    FindPage, FindRequest, SearchService, decode_search_cursor, encode_search_cursor,
+    search_fingerprint, validate_query,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -141,7 +142,7 @@ impl SearchService {
                 has_more,
             } = self
                 .telemetry
-                .stage_sync(operation, SearchStage::MatchReduce, || {
+                .match_reduce(operation, request.match_mode.as_str(), None, || {
                     reduce_find_candidates(
                         &candidates,
                         request.kind,

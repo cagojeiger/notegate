@@ -72,7 +72,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Meaning: completed MCP tool calls per second. A high rate is load, not a failure by itself. If it rises with error rate or p95 latency, check Rate by Tool and Outcome, p95 Latency by Tool, then the Search or DB sections.",
+      "description": "Meaning: completed MCP tool calls per second in the current rate interval. 0.00 is normal when no MCP tool completed recently; use a wider time range and Rate by Tool and Outcome to confirm historical traffic. A high rate is load, not a failure by itself.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -450,7 +450,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Meaning: requests that could not obtain a DB connection before the pool timeout. Any sustained non-zero value is an availability risk. Check pool utilization, acquire p95, PostgreSQL health, slow queries, and application logs immediately.",
+      "description": "Meaning: requests that could not obtain a DB connection before the pool timeout. 0.00 is the healthy expected value. Any sustained non-zero value is an availability risk. Check pool utilization, acquire p95, PostgreSQL health, slow queries, and application logs immediately.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -663,7 +663,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Meaning: server-managed text decryptions per second at instrumented boundaries, currently search body loading. A high rate is workload, not failure. If it rises with grep body-load bytes or cache misses, the cache is avoiding less DB/decryption work; check Search Detail and decryption p95.",
+      "description": "Meaning: server-managed text decryptions per second at instrumented boundaries, currently search body loading. 0.00 is normal when matching bodies are unencrypted or served from cache; an absent historical series means no instrumented decryption occurred in the selected range. A high rate is workload, not failure.",
       "fieldConfig": {
         "defaults": {
           "color": {

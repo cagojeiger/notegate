@@ -86,6 +86,9 @@ notegate_search_operation_duration_seconds
 notegate_search_stage_duration_seconds
   labels: operation, stage
 
+notegate_search_match_reduce_duration_seconds
+  labels: operation, mode, line_mode
+
 notegate_search_candidates_total
   labels: operation
 
@@ -105,6 +108,8 @@ notegate_search_cache_lookups_total
 - `operation` is `find` or `grep`.
 - `mode` is `contains`, `glob`, `literal`, or `regex`; only modes valid for the
   selected operation are emitted.
+- `line_mode` is `none`, `first`, or `all` for `grep`, and `not_applicable`
+  for `find`.
 - `outcome` is `success`, `invalid`, `not_found`, `forbidden`, `conflict`, or
   `internal`.
 - `stage` is `authorize`, `prepare`, `resolve_scope`, `candidate_query`,
@@ -117,5 +122,9 @@ notegate_search_cache_lookups_total
   counters measure returned nodes. Scanned bytes measure plaintext bytes passed
   to grep matching. Body-load bytes measure plaintext bytes returned by the
   database body-load/decryption boundary.
-- Operation and stage durations use fixed histogram buckets. No search query,
-  path, cursor, identifier, filename, content, or error text is recorded.
+- Match/reduce duration is recorded once per request from the same elapsed time
+  as the `match_reduce` stage, so it does not add a second timer. It includes
+  path filtering and result reduction around matcher execution.
+- Operation, stage, and match/reduce durations use fixed histogram buckets. No
+  search query, path, cursor, identifier, filename, content, or error text is
+  recorded.

@@ -116,6 +116,31 @@ impl SearchTelemetry {
         result
     }
 
+    pub(super) fn match_reduce<T>(
+        self,
+        operation: SearchOperation,
+        mode: &'static str,
+        line_mode: Option<&'static str>,
+        work: impl FnOnce() -> T,
+    ) -> T {
+        if !self.enabled {
+            return work();
+        }
+
+        let started = Instant::now();
+        let result = work();
+        let elapsed = started.elapsed();
+        record_stage(operation, SearchStage::MatchReduce, elapsed);
+        metrics::histogram!(
+            "notegate_search_match_reduce_duration",
+            "operation" => operation.as_str(),
+            "mode" => mode,
+            "line_mode" => line_mode.unwrap_or("not_applicable"),
+        )
+        .record(elapsed.as_secs_f64());
+        result
+    }
+
     pub(super) fn record_workload(
         self,
         operation: SearchOperation,
@@ -250,6 +275,8 @@ mod tests {
         metrics::with_local_recorder(&recorder, || {
             let telemetry = SearchTelemetry::new(true);
             let timer = telemetry.operation(SearchOperation::Grep, "regex");
+            telemetry.match_reduce(SearchOperation::Grep, "regex", Some("all"), || ());
+            telemetry.match_reduce(SearchOperation::Find, "glob", None, || ());
             telemetry.record_workload(SearchOperation::Grep, 4, 2, 64, 32);
             telemetry.record_cache(CacheResult::Coalesced, 1);
             timer.finish(&Ok::<(), ServiceError>(()));
@@ -267,6 +294,18 @@ mod tests {
         assert!(body.contains("notegate_search_scanned_bytes_total{operation=\"grep\"} 64"));
         assert!(body.contains("notegate_search_body_load_bytes_total{operation=\"grep\"} 32"));
         assert!(body.contains("notegate_search_cache_lookups_total{result=\"coalesced\"} 1"));
+        assert!(
+            body.contains(
+                "notegate_search_match_reduce_duration{operation=\"grep\",mode=\"regex\",line_mode=\"all\""
+            ),
+            "{body}"
+        );
+        assert!(
+            body.contains(
+                "notegate_search_match_reduce_duration{operation=\"find\",mode=\"glob\",line_mode=\"not_applicable\""
+            ),
+            "{body}"
+        );
     }
 
     #[test]
@@ -275,6 +314,7 @@ mod tests {
         metrics::with_local_recorder(&recorder, || {
             let telemetry = SearchTelemetry::new(false);
             let timer = telemetry.operation(SearchOperation::Find, "contains");
+            telemetry.match_reduce(SearchOperation::Find, "contains", None, || ());
             telemetry.record_workload(SearchOperation::Find, 4, 2, 0, 0);
             telemetry.record_cache(CacheResult::Hit, 1);
             timer.finish(&Ok::<(), ServiceError>(()));
