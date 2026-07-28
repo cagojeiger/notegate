@@ -18,6 +18,7 @@ use notegate_service::usage::UsageService;
 
 use crate::identity::CallerResolver;
 use crate::object_storage::ObjectStorage;
+use crate::observability::MetricsHandle;
 
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
@@ -57,6 +58,7 @@ pub struct AppState {
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
+    pub(crate) metrics: Option<MetricsHandle>,
 }
 
 impl AppState {
@@ -120,7 +122,13 @@ impl AppState {
             usage,
             accounts: account_repo,
             browser_sessions,
+            metrics: None,
         }
+    }
+
+    pub(crate) fn with_metrics(mut self, metrics: Option<MetricsHandle>) -> Self {
+        self.metrics = metrics;
+        self
     }
 }
 
