@@ -5,10 +5,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
 import { makeRestNode } from "../../test/fixtures";
+import { createMockApiClient } from "../../test/apiClient";
 import { useNodeFreshness } from "../editor/useEditorQueries";
 import { useNodeChildrenQuery, useRecentNodesQuery } from "../nodes/useNodeQueries";
 
-const get = vi.fn((path: string) => {
+const apiClientState = vi.hoisted(
+  (): { client: ApiClient | null } => ({ client: null })
+);
+
+vi.mock("../../api/ApiProvider", () => ({
+  useApiClient: () => apiClientState.client!
+}));
+
+const client = createMockApiClient();
+client.get.mockImplementation((path: string) => {
   if (path.includes("/children")) {
     return Promise.resolve({
       parent: { id: "root-1", path: "/" },
@@ -21,11 +31,8 @@ const get = vi.fn((path: string) => {
   }
   return Promise.resolve(node);
 });
-const client = { get } as unknown as ApiClient;
-
-vi.mock("../../api/ApiProvider", () => ({
-  useApiClient: () => client
-}));
+const get = client.get;
+apiClientState.client = client;
 
 describe("workspace resource freshness", () => {
   it("does not attach independent polling intervals to tree, recent, or opened-node queries", async () => {

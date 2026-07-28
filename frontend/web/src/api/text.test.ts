@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { ApiClient } from "./client";
+import { createMockApiClient } from "../test/apiClient";
 import { readText } from "./text";
 
 describe("text api", () => {
   it("requests the full editable text limit", async () => {
-    const client = { get: vi.fn().mockResolvedValue({}) } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({});
 
     await readText(client, "space-1", "node-1");
 

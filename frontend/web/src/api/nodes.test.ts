@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { ApiClient } from "./client";
+import { createMockApiClient } from "../test/apiClient";
 import { batchListChildren, listChildren, listNodes, resolveNodePath } from "./nodes";
 
 describe("nodes api", () => {
   it("resolves node paths with URLSearchParams encoding", async () => {
-    const client = { get: vi.fn().mockResolvedValue({ id: "node-1" }) } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({ id: "node-1" });
 
     await resolveNodePath(client, "space-1", "/Policies/Access Control #1.md");
 
@@ -13,7 +14,8 @@ describe("nodes api", () => {
   });
 
   it("requests a bounded first children page for multiple parents", async () => {
-    const client = { post: vi.fn().mockResolvedValue({ results: [] }) } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.post.mockResolvedValue({ results: [] });
 
     await batchListChildren(client, "space-1", ["root-1", "folder-1"]);
 
@@ -27,16 +29,15 @@ describe("nodes api", () => {
   });
 
   it("opts into compact children and restores the route Space id", async () => {
-    const client = {
-      get: vi.fn().mockResolvedValue({
-        parent: { id: "root-1", path: "/" },
-        children: [
-          { id: "node-1", name: "node-1", kind: "text" },
-          { id: "node-2", name: "node-2", kind: "text", effective_write_locked: true }
-        ],
-        page: { limit: 100, returned: 2, has_more: false, next_cursor: null }
-      })
-    } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({
+      parent: { id: "root-1", path: "/" },
+      children: [
+        { id: "node-1", name: "node-1", kind: "text" },
+        { id: "node-2", name: "node-2", kind: "text", effective_write_locked: true }
+      ],
+      page: { limit: 100, returned: 2, has_more: false, next_cursor: null }
+    });
 
     const response = await listChildren(client, "space-1", "root-1");
 
@@ -49,12 +50,11 @@ describe("nodes api", () => {
   });
 
   it("continues compact Recent pages with the opaque cursor", async () => {
-    const client = {
-      get: vi.fn().mockResolvedValue({
-        nodes: [{ id: "node-51", name: "node-51", kind: "text" }],
-        page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
-      })
-    } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({
+      nodes: [{ id: "node-51", name: "node-51", kind: "text" }],
+      page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+    });
 
     const response = await listNodes(client, "space-1", {
       sort: "updated_at_desc",

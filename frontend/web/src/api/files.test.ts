@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "./client";
+import { createMockApiClient } from "../test/apiClient";
 import { ApiError } from "./errors";
 import {
   batchResolveFilePreviews,
@@ -84,7 +84,8 @@ describe("files api", () => {
   });
 
   it("creates a presigned upload with the selected file metadata", async () => {
-    const api = { post: vi.fn().mockResolvedValue(singleUpload) } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.post.mockResolvedValue(singleUpload);
     const file = new File(["hello"], "hello.txt", { type: "text/plain" });
 
     await beginFileUpload(api, "space-1", { parentNodeId: "parent-1", name: "note.txt", file });
@@ -101,7 +102,7 @@ describe("files api", () => {
   it("uploads a single PUT and reports progress", async () => {
     const file = new File(["hello"], "hello.txt", { type: "text/plain" });
     const onProgress = vi.fn();
-    const pending = transferFile({} as ApiClient, "space-1", singleUpload, file, { onProgress });
+    const pending = transferFile(createMockApiClient(), "space-1", singleUpload, file, { onProgress });
     const request = FakeXmlHttpRequest.instances[0];
 
     request.progress(2, 5);
@@ -121,7 +122,7 @@ describe("files api", () => {
 
   it("reports a failed single PUT as an object upload failure", async () => {
     const pending = transferFile(
-      {} as ApiClient,
+      createMockApiClient(),
       "space-1",
       singleUpload,
       new File(["hello"], "hello.txt")
@@ -199,7 +200,7 @@ describe("files api", () => {
   it("aborts active object requests when the transfer is canceled", async () => {
     const controller = new AbortController();
     const pending = transferFile(
-      {} as ApiClient,
+      createMockApiClient(),
       "space-1",
       singleUpload,
       new File(["data"], "file.bin"),
@@ -212,11 +213,10 @@ describe("files api", () => {
   });
 
   it("retries only completion after a transient API failure", async () => {
-    const api = {
-      post: vi.fn()
-        .mockRejectedValueOnce(new ApiError("temporary", 503, "object_storage_unavailable"))
-        .mockResolvedValueOnce({ node: { id: "node-1" } })
-    } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.post
+      .mockRejectedValueOnce(new ApiError("temporary", 503, "object_storage_unavailable"))
+      .mockResolvedValueOnce({ node: { id: "node-1" } });
 
     await completeFileUpload(api, "space-1", "upload-1");
 
@@ -226,7 +226,8 @@ describe("files api", () => {
   });
 
   it("sends multipart ETags when completing", async () => {
-    const api = { post: vi.fn().mockResolvedValue({ node: { id: "node-1" } }) } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.post.mockResolvedValue({ node: { id: "node-1" } });
     const parts = [{ part_number: 1, etag: '"etag-1"' }];
 
     await completeFileUpload(api, "space-1", "upload-1", parts);
@@ -238,7 +239,8 @@ describe("files api", () => {
   });
 
   it("does not retry completion after a permanent API failure", async () => {
-    const api = { post: vi.fn().mockRejectedValue(new ApiError("conflict", 409, "conflict")) } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.post.mockRejectedValue(new ApiError("conflict", 409, "conflict"));
 
     await expect(completeFileUpload(api, "space-1", "upload-1"))
       .rejects.toMatchObject({ status: 409, kind: "conflict" });
@@ -252,7 +254,8 @@ describe("files api", () => {
       media_type: "image/png",
       expires_at: "2026-06-13T00:15:00Z"
     };
-    const api = { get: vi.fn().mockResolvedValue(response) } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.get.mockResolvedValue(response);
 
     await expect(getFilePreviewUrl(api, "space-1", "file-1")).resolves.toEqual(response);
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/preview-url");
@@ -264,7 +267,8 @@ describe("files api", () => {
       media_type: "application/pdf",
       expires_at: "2026-06-13T00:15:00Z"
     };
-    const api = { get: vi.fn().mockResolvedValue(response) } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.get.mockResolvedValue(response);
 
     await expect(getFilePreviewUrl(api, "space-1", "file-1", "pdf")).resolves.toEqual(response);
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/pdf-preview-url");
@@ -283,7 +287,8 @@ describe("files api", () => {
         }
       ]
     };
-    const api = { post: vi.fn().mockResolvedValue(response) } as unknown as ApiClient;
+    const api = createMockApiClient();
+    api.post.mockResolvedValue(response);
 
     await expect(
       batchResolveFilePreviews(api, "space-1", ["/assets/logo.png"])
@@ -310,19 +315,19 @@ function multipartUpload(partCount: number, partSize: number): BeginFileUploadRe
   };
 }
 
-function multipartApi(partSize: number, totalSize: number): ApiClient {
+function multipartApi(partSize: number, totalSize: number) {
   let requestId = 0;
-  return {
-    post: vi.fn(async (_path: string, body?: unknown) => {
-      const numbers = (body as { part_numbers: number[] }).part_numbers;
-      return {
-        parts: numbers.map((partNumber) => ({
-          part_number: partNumber,
-          url: `https://objects.test/part-${partNumber}-${requestId++}`,
-          headers: {},
-          content_length: Math.min(partSize, totalSize - (partNumber - 1) * partSize)
-        }))
-      };
-    })
-  } as unknown as ApiClient;
+  const api = createMockApiClient();
+  api.post.mockImplementation(async (_path: string, body?: unknown) => {
+    const numbers = (body as { part_numbers: number[] }).part_numbers;
+    return {
+      parts: numbers.map((partNumber) => ({
+        part_number: partNumber,
+        url: `https://objects.test/part-${partNumber}-${requestId++}`,
+        headers: {},
+        content_length: Math.min(partSize, totalSize - (partNumber - 1) * partSize)
+      }))
+    };
+  });
+  return api;
 }
