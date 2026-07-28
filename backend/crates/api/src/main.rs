@@ -17,6 +17,7 @@ mod mcp;
 mod object_storage;
 mod object_storage_cleanup_worker;
 mod object_upload_flow;
+mod observability;
 mod openapi;
 mod page;
 mod periodic_worker;
@@ -42,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let config = Config::load()?;
+    let metrics = observability::install(config.metrics_enabled)?;
 
     // fail-fast: install the SIGTERM handler during boot so a failure here
     // aborts startup instead of leaving us without graceful shutdown.
@@ -108,12 +110,15 @@ async fn main() -> anyhow::Result<()> {
         std::sync::Arc::new(resolver),
         http,
         pii_crypto,
-    );
+    )
+    .with_metrics(metrics.clone());
 
     let listener = TcpListener::bind(bind_addr).await?;
     info!(event = "server.listening", addr = %bind_addr);
 
     let background_shutdown_token = CancellationToken::new();
+    let metrics_upkeep_worker =
+        observability::spawn_upkeep(metrics, background_shutdown_token.clone());
     let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
     let usage_reconcile_worker =
         usage_reconcile_worker::spawn(pool.clone(), background_shutdown_token.clone());
@@ -154,6 +159,11 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Err(error) = object_storage_cleanup_worker.await {
         tracing::error!(event = "object_storage_cleanup_worker.join_failed", %error);
+    }
+    if let Some(metrics_upkeep_worker) = metrics_upkeep_worker
+        && let Err(error) = metrics_upkeep_worker.await
+    {
+        tracing::error!(event = "metrics_upkeep_worker.join_failed", %error);
     }
 
     // Workers finish their current in-flight work before returning. Close the

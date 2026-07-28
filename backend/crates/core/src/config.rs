@@ -23,6 +23,7 @@ const DEFAULT_JWKS_CACHE_TTL_SECS: u64 = 300;
 const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
+const DEFAULT_METRICS_ENABLED: bool = false;
 const DEFAULT_SEARCH_BODY_CACHE_MAX_CAPACITY_BYTES: u64 = 128 * 1024 * 1024;
 const DEFAULT_SEARCH_BODY_CACHE_TTL_SECS: u64 = 30 * 60;
 const DEFAULT_SEARCH_BODY_CACHE_TTI_SECS: u64 = 5 * 60;
@@ -133,6 +134,8 @@ pub struct Config {
     pub browser_session_max_ttl: Duration,
     /// Whether OpenAPI JSON and Swagger UI routes are exposed.
     pub openapi_enabled: bool,
+    /// Whether Prometheus metrics are recorded and exposed at `/metrics`.
+    pub metrics_enabled: bool,
     /// Optional directory containing the built web dashboard. When set, unknown
     /// non-API routes fall back to this directory's `index.html`.
     pub web_dist_dir: Option<String>,
@@ -307,6 +310,8 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         )
         .map_err(map_config_error)?
         .set_default("openapi_enabled", DEFAULT_OPENAPI_ENABLED)
+        .map_err(map_config_error)?
+        .set_default("metrics_enabled", DEFAULT_METRICS_ENABLED)
         .map_err(map_config_error)?;
 
     if include_files {
@@ -551,6 +556,7 @@ mod tests {
                 super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS,
             ),
             openapi_enabled: false,
+            metrics_enabled: false,
             web_dist_dir: None,
             s3: super::S3Config {
                 endpoint: "http://localhost:9000".to_owned(),
@@ -646,6 +652,7 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_METRICS_ENABLED", "true"),
                 ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
                 ("NOTEGATE_S3__ENDPOINT", "https://s3.internal.env/"),
                 ("NOTEGATE_S3__PUBLIC_ENDPOINT", "https://s3.public.env/"),
@@ -662,6 +669,7 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert!(config.metrics_enabled);
         assert_eq!(config.oauth_client_id, "notegate-web");
         assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
         assert_eq!(
@@ -780,6 +788,7 @@ mod tests {
         assert_eq!(config.jwks_cache_ttl.as_secs(), 300);
         assert_eq!(config.browser_session_ttl.as_secs(), 3600);
         assert!(!config.openapi_enabled);
+        assert!(!config.metrics_enabled);
         assert!(!config.secure_cookies);
         Ok(())
     }
