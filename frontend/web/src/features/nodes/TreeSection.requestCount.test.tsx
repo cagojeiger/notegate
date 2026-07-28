@@ -9,9 +9,10 @@ import { applyExternalFileChanges } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import type { ChildrenResponse, RestNode } from "../../api/types";
 import { createMockApiClient } from "../../test/apiClient";
-import { makeRestNode, makeSpace } from "../../test/fixtures";
+import { makeSpace } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
-import { TreeSection } from "./TreeSection";
+import { createTreeNodeFactory, treeSectionElement } from "../../test/treeSection";
+import { resetTreeVirtualizer } from "../../test/treeVirtualizer";
 import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
 
 const apiClientState = vi.hoisted(
@@ -22,30 +23,19 @@ vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => apiClientState.client!
 }));
 
-vi.mock("@tanstack/react-virtual", () => ({
-  defaultRangeExtractor: ({ startIndex, endIndex }: { startIndex: number; endIndex: number }) =>
-    Array.from({ length: endIndex - startIndex + 1 }, (_, index) => startIndex + index),
-  useVirtualizer: ({ count, getItemKey }: { count: number; getItemKey: (index: number) => string | number }) => ({
-    getTotalSize: () => count * 36,
-    getVirtualItems: () => Array.from({ length: count }, (_, index) => ({
-      index,
-      key: getItemKey(index),
-      size: 36,
-      start: index * 36
-    })),
-    scrollToIndex: vi.fn()
-  })
-}));
+vi.mock("@tanstack/react-virtual", () => import("../../test/treeVirtualizer"));
 
 const mocks = createMockApiClient();
 apiClientState.client = mocks;
 
 const space = makeSpace();
+const node = createTreeNodeFactory(space);
 
 describe("TreeSection request count", () => {
   beforeEach(() => {
     mocks.get.mockReset();
     mocks.post.mockReset();
+    resetTreeVirtualizer();
   });
 
   it("restores ten expanded folders from a fresh in-memory cache without HTTP requests", async () => {
@@ -322,22 +312,7 @@ describe("TreeSection request count", () => {
 
 function renderTree(queryClient: QueryClient, expandedFolderIds: Set<string>) {
   return render(
-    <TreeSection
-      activeSpace={space}
-      openedNodeId={null}
-      inspectedNodeId={null}
-      expandedFolderIds={expandedFolderIds}
-      open
-      onToggle={vi.fn()}
-      onCollapseTree={vi.fn()}
-      onToggleFolder={vi.fn()}
-      onInspectNode={vi.fn()}
-      onOpenNode={vi.fn()}
-      onNodeContextMenu={vi.fn()}
-      onMoveNodeToFolder={vi.fn()}
-      onTreeNavigationChange={vi.fn()}
-      canWriteActiveSpace
-    />,
+    treeSectionElement(space, { expandedFolderIds }),
     { wrapper: wrapper(queryClient) }
   );
 }
@@ -405,22 +380,4 @@ function readyBatchResponse(folders: RestNode[], parentIds: string[]) {
       }
     }))
   };
-}
-
-function node(
-  id: string,
-  kind: RestNode["kind"],
-  parentId: string,
-  path = `/${id}${kind === "text" ? ".md" : ""}`
-): RestNode {
-  const name = kind === "text" ? `${id}.md` : id;
-  return makeRestNode({
-    id,
-    space_id: space.id,
-    parent_id: parentId,
-    name,
-    kind,
-    path,
-    has_children: kind === "folder"
-  });
 }
