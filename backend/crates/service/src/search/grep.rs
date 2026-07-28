@@ -10,10 +10,11 @@ use crate::error::ServiceResult;
 use crate::files::policy::FileCommand;
 use crate::pagination::clamp_limit;
 
+use super::matcher::{ContentMatcher, PathFilters};
 use super::telemetry::{CacheResult, SearchOperation, SearchStage};
 use super::{
-    ContentMatcher, GrepLineMode, GrepPage, GrepRequest, PathFilters, SearchService,
-    decode_search_cursor, encode_search_cursor, search_fingerprint, text_node_view, validate_query,
+    GrepLineMode, GrepPage, GrepRequest, SearchService, decode_search_cursor, encode_search_cursor,
+    search_fingerprint, text_node_view, validate_query,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -300,9 +301,11 @@ impl SearchService {
                 after_sort_path,
                 has_more,
                 scanned_bytes,
-            } = self
-                .telemetry
-                .stage_sync(operation, SearchStage::MatchReduce, || {
+            } = self.telemetry.match_reduce(
+                operation,
+                request.match_mode.as_str(),
+                Some(request.line_mode.as_str()),
+                || {
                     reduce_grep_candidates(
                         &candidates,
                         planned_candidates,
@@ -312,7 +315,8 @@ impl SearchService {
                         request.line_mode,
                         limit as usize,
                     )
-                });
+                },
+            );
             let next_cursor = if has_more {
                 encode_search_cursor("grep", fingerprint, scope_node_id, after_sort_path)?
             } else {

@@ -13,7 +13,6 @@ pub use notegate_model::search::{
     SearchCursor, TreeCursor, TreeFrame, TreePage, TreeRequest,
 };
 use notegate_model::{Node, NodeKind, Permission, TextStorageFormat};
-use regex::{Regex, RegexBuilder};
 use uuid::Uuid;
 
 use crate::cursor;
@@ -23,6 +22,7 @@ use crate::files::policy::{self, FileCommand};
 mod body_cache;
 mod find;
 mod grep;
+mod matcher;
 mod telemetry;
 mod tree;
 
@@ -224,138 +224,6 @@ fn encode_search_cursor(
         .map_err(|_error| ServiceError::Internal("failed to encode cursor".to_owned()))
 }
 
-enum NameMatcher {
-    Contains(String),
-    Regex(Regex),
-    Glob(Regex),
-}
-
-impl NameMatcher {
-    fn new(q: &str, mode: FindMatchMode) -> ServiceResult<Self> {
-        match mode {
-            FindMatchMode::Contains => Ok(Self::Contains(q.to_lowercase())),
-            FindMatchMode::Regex => Ok(Self::Regex(compile_regex(q)?)),
-            FindMatchMode::Glob => Ok(Self::Glob(compile_glob(q)?)),
-        }
-    }
-
-    fn is_match(&self, value: &str) -> bool {
-        match self {
-            Self::Contains(needle) => value.to_lowercase().contains(needle),
-            Self::Regex(regex) | Self::Glob(regex) => regex.is_match(value),
-        }
-    }
-}
-
-enum ContentMatcher {
-    Literal(String),
-    Regex(Regex),
-}
-
-impl ContentMatcher {
-    fn new(q: &str, mode: GrepMatchMode) -> ServiceResult<Self> {
-        match mode {
-            GrepMatchMode::Literal => Ok(Self::Literal(q.to_lowercase())),
-            GrepMatchMode::Regex => Ok(Self::Regex(compile_regex(q)?)),
-        }
-    }
-
-    fn match_lines(&self, content: &str, mode: GrepLineMode) -> Vec<i32> {
-        if content.is_empty() {
-            return Vec::new();
-        }
-
-        let mut lines = Vec::new();
-        for (index, line) in logical_lines(content).enumerate() {
-            let matched = match self {
-                Self::Literal(needle) => line.to_lowercase().contains(needle),
-                Self::Regex(regex) => regex.is_match(line),
-            };
-            if !matched {
-                continue;
-            }
-
-            let line_number = index as i32 + 1;
-            match mode {
-                GrepLineMode::None => return vec![line_number],
-                GrepLineMode::First => return vec![line_number],
-                GrepLineMode::All => lines.push(line_number),
-            }
-        }
-        lines
-    }
-}
-
-fn logical_lines(content: &str) -> impl Iterator<Item = &str> {
-    let content = content.strip_suffix('\n').unwrap_or(content);
-    content.split('\n')
-}
-
-struct PathFilters {
-    include: Vec<Regex>,
-    exclude: Vec<Regex>,
-}
-
-impl PathFilters {
-    fn new(include: &[String], exclude: &[String]) -> ServiceResult<Self> {
-        validate_glob_patterns("include", include)?;
-        validate_glob_patterns("exclude", exclude)?;
-        Ok(Self {
-            include: include
-                .iter()
-                .map(|pattern| compile_glob(pattern))
-                .collect::<ServiceResult<_>>()?,
-            exclude: exclude
-                .iter()
-                .map(|pattern| compile_glob(pattern))
-                .collect::<ServiceResult<_>>()?,
-        })
-    }
-
-    fn allows(&self, path: &str) -> bool {
-        (self.include.is_empty() || self.include.iter().any(|regex| regex.is_match(path)))
-            && !self.exclude.iter().any(|regex| regex.is_match(path))
-    }
-}
-
-fn validate_glob_patterns(label: &str, patterns: &[String]) -> ServiceResult<()> {
-    if patterns.len() > limits::SEARCH_GLOB_PATTERNS_MAX {
-        return Err(ServiceError::InvalidInput(format!(
-            "{label} must contain at most {} glob patterns",
-            limits::SEARCH_GLOB_PATTERNS_MAX
-        )));
-    }
-    for pattern in patterns {
-        if pattern.chars().count() > limits::SEARCH_GLOB_PATTERN_MAX_CHARS {
-            return Err(ServiceError::InvalidInput(format!(
-                "{label} glob patterns must be at most {} characters",
-                limits::SEARCH_GLOB_PATTERN_MAX_CHARS
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn compile_regex(pattern: &str) -> ServiceResult<Regex> {
-    RegexBuilder::new(pattern)
-        .case_insensitive(true)
-        .build()
-        .map_err(|error| ServiceError::InvalidInput(format!("invalid regex pattern: {error}")))
-}
-
-fn compile_glob(pattern: &str) -> ServiceResult<Regex> {
-    let mut out = String::from("^");
-    for ch in pattern.chars() {
-        match ch {
-            '*' => out.push_str(".*"),
-            '?' => out.push('.'),
-            _ => out.push_str(&regex::escape(&ch.to_string())),
-        }
-    }
-    out.push('$');
-    compile_regex(&out)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(
@@ -365,6 +233,7 @@ mod tests {
         clippy::panic,
         clippy::unwrap_in_result
     )]
+    use super::matcher::{ContentMatcher, NameMatcher, PathFilters, logical_lines};
     use super::*;
     use crate::cursor;
 
@@ -533,6 +402,41 @@ mod tests {
     }
 
     #[test]
+    fn content_matcher_preserves_results_across_modes_and_unicode() {
+        for (query, match_mode, content, expected) in [
+            (
+                "needle",
+                GrepMatchMode::Literal,
+                "NEEDLE\nnone\nneedle\n",
+                vec![1, 3],
+            ),
+            (
+                "İSTANBUL",
+                GrepMatchMode::Literal,
+                "istanbul\nİstanbul\n",
+                vec![2],
+            ),
+            (
+                r"^error(?:-\d+)?$",
+                GrepMatchMode::Regex,
+                "ERROR\nerror-42\nerror details\n",
+                vec![1, 2],
+            ),
+        ] {
+            let matcher = ContentMatcher::new(query, match_mode).unwrap();
+            assert_eq!(
+                matcher.match_lines(content, GrepLineMode::None),
+                expected.first().copied().into_iter().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                matcher.match_lines(content, GrepLineMode::First),
+                expected.first().copied().into_iter().collect::<Vec<_>>()
+            );
+            assert_eq!(matcher.match_lines(content, GrepLineMode::All), expected);
+        }
+    }
+
+    #[test]
     fn logical_lines_omit_only_the_terminal_newline() {
         assert_eq!(logical_lines("").collect::<Vec<_>>(), vec![""]);
         assert_eq!(
@@ -563,5 +467,114 @@ mod tests {
         assert!(!filters.allows("/notes/private/release.md"));
         assert!(!filters.allows("/notes/draft.md"));
         assert!(!filters.allows("/images/release.png"));
+    }
+
+    #[derive(Clone, Copy)]
+    enum BenchmarkMatchPosition {
+        Early,
+        Late,
+        Absent,
+    }
+
+    impl BenchmarkMatchPosition {
+        fn as_str(self) -> &'static str {
+            match self {
+                Self::Early => "early",
+                Self::Late => "late",
+                Self::Absent => "absent",
+            }
+        }
+    }
+
+    fn benchmark_content(position: BenchmarkMatchPosition) -> String {
+        const CONTENT_BYTES: usize = 8 * 1024 * 1024;
+        const LINE_BYTES: usize = 64;
+        const NEEDLE: &[u8] = b"NeEdLe";
+
+        let mut bytes = vec![b'x'; CONTENT_BYTES];
+        for newline in ((LINE_BYTES - 1)..CONTENT_BYTES).step_by(LINE_BYTES) {
+            bytes[newline] = b'\n';
+        }
+        let needle_offset = match position {
+            BenchmarkMatchPosition::Early => Some(0),
+            BenchmarkMatchPosition::Late => Some(CONTENT_BYTES - LINE_BYTES),
+            BenchmarkMatchPosition::Absent => None,
+        };
+        if let Some(offset) = needle_offset {
+            bytes[offset..offset + NEEDLE.len()].copy_from_slice(NEEDLE);
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    fn benchmark_expected_lines(position: BenchmarkMatchPosition) -> Vec<i32> {
+        match position {
+            BenchmarkMatchPosition::Early => vec![1],
+            BenchmarkMatchPosition::Late => vec![131_072],
+            BenchmarkMatchPosition::Absent => Vec::new(),
+        }
+    }
+
+    /// Run with:
+    /// `cargo test --release -p notegate-service --lib benchmark_matcher_8_mib -- --ignored --nocapture`
+    #[test]
+    #[ignore = "local 8 MiB matcher benchmark"]
+    fn benchmark_matcher_8_mib() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const SAMPLES: usize = 5;
+        for position in [
+            BenchmarkMatchPosition::Early,
+            BenchmarkMatchPosition::Late,
+            BenchmarkMatchPosition::Absent,
+        ] {
+            let content = benchmark_content(position);
+            let expected = benchmark_expected_lines(position);
+            for (match_mode, query) in [
+                (GrepMatchMode::Literal, "needle"),
+                (GrepMatchMode::Regex, r"n[e]{2}dle"),
+            ] {
+                let matcher = ContentMatcher::new(query, match_mode).unwrap();
+                for line_mode in [GrepLineMode::None, GrepLineMode::First, GrepLineMode::All] {
+                    let expected = match line_mode {
+                        GrepLineMode::None | GrepLineMode::First => {
+                            expected.first().copied().into_iter().collect()
+                        }
+                        GrepLineMode::All => expected.clone(),
+                    };
+                    assert_eq!(
+                        matcher.match_lines(black_box(&content), line_mode),
+                        expected
+                    );
+
+                    let batch_iterations = match (position, line_mode) {
+                        (
+                            BenchmarkMatchPosition::Early,
+                            GrepLineMode::None | GrepLineMode::First,
+                        ) => 10_000,
+                        _ => 1,
+                    };
+                    let mut samples = Vec::with_capacity(SAMPLES);
+                    for _ in 0..SAMPLES {
+                        let started = Instant::now();
+                        for _ in 0..batch_iterations {
+                            let actual = matcher.match_lines(black_box(&content), line_mode);
+                            black_box(actual);
+                        }
+                        samples.push(started.elapsed() / batch_iterations);
+                    }
+                    samples.sort_unstable();
+                    let median = samples[SAMPLES / 2];
+                    println!(
+                        "matcher_bench bytes={} match={} position={} lines={} median_ns={}",
+                        content.len(),
+                        match_mode.as_str(),
+                        position.as_str(),
+                        line_mode.as_str(),
+                        median.as_nanos()
+                    );
+                }
+            }
+        }
     }
 }

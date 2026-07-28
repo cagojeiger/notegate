@@ -51,6 +51,10 @@ pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
             SEARCH_DURATION_BUCKETS_SECONDS,
         )?
         .set_buckets_for_metric(
+            Matcher::Full("notegate_search_match_reduce_duration".to_owned()),
+            SEARCH_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
             Matcher::Full("notegate_mcp_tool_duration".to_owned()),
             HTTP_DURATION_BUCKETS_SECONDS,
         )?
@@ -118,6 +122,11 @@ fn describe_metrics() {
         "notegate_search_stage_duration",
         Unit::Seconds,
         "Search pipeline stage duration by bounded operation and stage"
+    );
+    metrics::describe_histogram!(
+        "notegate_search_match_reduce_duration",
+        Unit::Seconds,
+        "Search match and reduction duration by bounded operation, mode, and line mode"
     );
     metrics::describe_counter!(
         "notegate_search_candidates",
@@ -491,6 +500,11 @@ mod tests {
             )
             .unwrap()
             .set_buckets_for_metric(
+                Matcher::Full("notegate_search_match_reduce_duration".to_owned()),
+                SEARCH_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
                 Matcher::Full("notegate_mcp_tool_duration".to_owned()),
                 HTTP_DURATION_BUCKETS_SECONDS,
             )
@@ -562,6 +576,13 @@ mod tests {
                 "stage" => "candidate_query",
             )
             .record(0.005);
+            metrics::histogram!(
+                "notegate_search_match_reduce_duration",
+                "operation" => "grep",
+                "mode" => "regex",
+                "line_mode" => "all",
+            )
+            .record(0.004);
             metrics::counter!("notegate_search_candidates", "operation" => "grep").increment(4);
             metrics::counter!("notegate_search_results", "operation" => "grep").increment(2);
             metrics::counter!("notegate_search_scanned_bytes", "operation" => "grep").increment(64);
@@ -630,6 +651,9 @@ mod tests {
         ));
         assert!(body.contains("notegate_search_operation_duration_seconds_bucket"));
         assert!(body.contains("notegate_search_stage_duration_seconds_bucket"));
+        assert!(body.contains(
+            "notegate_search_match_reduce_duration_seconds_bucket{operation=\"grep\",mode=\"regex\",line_mode=\"all\""
+        ));
         assert!(body.contains("notegate_search_candidates_total{operation=\"grep\"} 4"));
         assert!(body.contains("notegate_search_results_total{operation=\"grep\"} 2"));
         assert!(body.contains("notegate_search_scanned_bytes_total{operation=\"grep\"} 64"));
