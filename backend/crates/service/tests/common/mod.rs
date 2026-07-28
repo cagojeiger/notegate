@@ -8,9 +8,10 @@
     clippy::unwrap_in_result
 )]
 
-use notegate_db::AccountRepo;
 pub use notegate_db::test_support::TestDb;
+use notegate_db::{AccountRepo, SpaceRepo};
 use notegate_model::ResolveAttrs;
+use notegate_service::spaces::CreateSpace;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -51,4 +52,24 @@ pub async fn deactivate_account(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Create a space owned by `owner` and return `(space_id, root_id)`.
+#[allow(dead_code)]
+pub async fn setup_space(space_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
+    let space = space_repo
+        .create_space(
+            owner,
+            &CreateSpace {
+                name: name.to_owned(),
+            },
+        )
+        .await
+        .expect("create space");
+    let root = space_repo
+        .root_node_id(space.id)
+        .await
+        .expect("root id query")
+        .expect("root id present");
+    (space.id, root)
 }

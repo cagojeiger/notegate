@@ -17,7 +17,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, insert_user_account, setup_space};
 use notegate_core::{SearchBodyCacheConfig, limits};
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::{AccountKind, UpdateSpace};
@@ -30,27 +30,7 @@ use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
     TreeRequest,
 };
-use notegate_service::spaces::CreateSpace;
 use uuid::Uuid;
-
-/// Create a space owned by `owner` and return `(space_id, root_id)`.
-async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
-    let ws = ws_repo
-        .create_space(
-            owner,
-            &CreateSpace {
-                name: name.to_owned(),
-            },
-        )
-        .await
-        .expect("create space");
-    let root = ws_repo
-        .root_node_id(ws.id)
-        .await
-        .expect("root id query")
-        .expect("root id present");
-    (ws.id, root)
-}
 
 /// Build the trio of services/repos used by every test.
 fn services(db: &TestDb) -> (SpaceRepo, FilesService, SearchService) {
@@ -1449,7 +1429,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
     assert!(
         matches!(
             find_err,
-            notegate_service::error::ServiceError::InvalidInput(_)
+            ServiceError::InvalidInput(ref message) if message == "invalid cursor"
         ),
         "find rejects a garbage cursor as invalid input, got {find_err:?}"
     );
@@ -1474,7 +1454,7 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
     assert!(
         matches!(
             grep_err,
-            notegate_service::error::ServiceError::InvalidInput(_)
+            ServiceError::InvalidInput(ref message) if message == "invalid cursor"
         ),
         "grep rejects a garbage cursor as invalid input, got {grep_err:?}"
     );
