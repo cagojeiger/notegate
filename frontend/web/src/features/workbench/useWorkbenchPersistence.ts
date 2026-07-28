@@ -2,28 +2,41 @@ import { useEffect } from "react";
 
 import type { Space } from "../../api/types";
 import type { ThemeMode } from "../../design/tokens";
-import { persistLastSpace, persistTheme, useUiStore } from "../../stores/uiStore";
-import { persistSpaceWorkbench } from "../../stores/workbenchStorage";
+import { useUiStore } from "../../stores/uiStore";
+import {
+  browserUiStorePersistence,
+  type UiStorePersistence
+} from "../../stores/uiStorePersistence";
 
-export function useWorkbenchPersistence(theme: ThemeMode, activeSpace: Space | null, activeSpaceId: string | null) {
+export type WorkbenchPersistence = Pick<
+  UiStorePersistence,
+  "saveTheme" | "saveLastActiveSpaceId" | "saveSpaceWorkbench"
+>;
+
+export function useWorkbenchPersistence(
+  theme: ThemeMode,
+  activeSpace: Space | null,
+  activeSpaceId: string | null,
+  persistence: WorkbenchPersistence = browserUiStorePersistence
+) {
   const setActiveSpaceId = useUiStore((state) => state.setActiveSpaceId);
   const addExpanded = useUiStore((state) => state.addExpanded);
   const editorGroups = useUiStore((state) => state.editorGroups);
   const activeGroupIndex = useUiStore((state) => state.activeGroupIndex);
 
   useEffect(() => {
-    persistTheme(theme);
-  }, [theme]);
+    persistence.saveTheme(theme);
+  }, [persistence, theme]);
 
   useEffect(() => {
     if (!activeSpace) return;
     if (activeSpace.id !== activeSpaceId) setActiveSpaceId(activeSpace.id);
-    persistLastSpace(activeSpace.id);
+    persistence.saveLastActiveSpaceId(activeSpace.id);
     addExpanded([activeSpace.root_node_id]);
-  }, [activeSpace, activeSpaceId, setActiveSpaceId, addExpanded]);
+  }, [activeSpace, activeSpaceId, persistence, setActiveSpaceId, addExpanded]);
 
   useEffect(() => {
     if (!activeSpace || activeSpace.id !== activeSpaceId) return;
-    persistSpaceWorkbench(activeSpace.id, editorGroups, activeGroupIndex);
-  }, [activeSpace, activeSpaceId, editorGroups, activeGroupIndex]);
+    persistence.saveSpaceWorkbench(activeSpace.id, editorGroups, activeGroupIndex);
+  }, [activeSpace, activeSpaceId, editorGroups, activeGroupIndex, persistence]);
 }
