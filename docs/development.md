@@ -13,8 +13,9 @@ notegate/
 ├─ frontend/web/               # React dashboard
 ├─ deploy/
 │  ├─ docker/web.Dockerfile    # Frontend build and backend binary
-│  └─ nginx/notegate.conf      # Reverse proxy for scaled web replicas
-└─ docker-compose.yml          # PostgreSQL, MinIO, web, and proxy
+│  ├─ nginx/notegate.conf      # Reverse proxy for scaled web replicas
+│  └─ observability/           # Prometheus and provisioned Grafana dashboards
+└─ docker-compose.yml          # App, storage, proxy, and observability stack
 ```
 
 ## Local development
@@ -63,7 +64,28 @@ cp .env.example .env
 make up
 ```
 
-The stack exposes NoteGate through the proxy at `http://localhost:9191`. It also starts PostgreSQL, MinIO, and an initialization job that creates the local bucket and its least-privilege application account.
+The stack exposes NoteGate through the proxy at `http://localhost:9191`. It also
+starts PostgreSQL, MinIO, Prometheus, Grafana, and an initialization job that creates
+the local bucket and its least-privilege application account.
+
+Local observability endpoints:
+
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- Grafana login: `admin` / `notegate-local` by default
+- Provisioned dashboard: **NoteGate / Service Overview**
+
+The application-level metrics default remains disabled. Docker Compose intentionally
+sets `NOTEGATE_METRICS_ENABLED` from `COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults
+to `true` for this local stack. Prometheus discovers both scaled `web` replicas through
+Docker DNS and scrapes each process-local `/metrics` endpoint. Change the local ports
+or Grafana credentials in `.env`.
+
+Verify the three endpoints after `make up`:
+
+```sh
+make curl-metrics
+```
 
 The MinIO root account is used only for local initialization. The NoteGate runtime account is limited to `GetObject`, `PutObject`, and `DeleteObject` under the configured bucket's `objects/*` prefix. It cannot create or list buckets.
 

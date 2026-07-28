@@ -1,4 +1,4 @@
-.PHONY: fmt check test clippy build frontend-check release-check dev-db dev-infra web-build up logs curl-meta
+.PHONY: fmt check test clippy build frontend-check release-check dev-db dev-infra web-build up logs curl-meta curl-metrics
 
 fmt:
 	cargo fmt --all --check
@@ -40,7 +40,7 @@ up:
 	docker compose up --build -d --remove-orphans
 
 logs:
-	docker compose logs -f web proxy minio
+	docker compose logs -f web proxy minio prometheus grafana
 
 curl-meta:
 	curl -fsS http://localhost:9191/health
@@ -49,3 +49,8 @@ curl-meta:
 	curl -fsS http://localhost:9191/.well-known/oauth-protected-resource
 	curl -fsS http://localhost:9191/.well-known/oauth-protected-resource/mcp
 	curl -i -sS http://localhost:9191/mcp -X POST -H 'content-type: application/json' -d '{}'
+
+curl-metrics:
+	curl -fsS http://localhost:9191/metrics
+	curl -fsS http://localhost:9090/-/ready
+	curl -fsS http://localhost:3000/api/health
