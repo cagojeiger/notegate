@@ -4,8 +4,8 @@
 
 - Status: Active
 - Last refreshed: 2026-07-28
-- Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown and structured previews.
-- Evidence reviewed: `docs/ui/*`, `frontend/web/src/design/*`, `frontend/web/src/styles/globals.css`, shared UI primitives, auth and layout components, and the 2026-07-23 NoteGate brand asset set.
+- Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown and structured previews, and operator observability dashboards.
+- Evidence reviewed: `docs/ui/*`, `frontend/web/src/design/*`, `frontend/web/src/styles/globals.css`, shared UI primitives, auth and layout components, the 2026-07-23 NoteGate brand asset set, and `deploy/observability/grafana/*`.
 
 ## Brand
 
@@ -17,20 +17,20 @@
 
 ## Product goals
 
-- Goals: Make notes and files feel calm to read, make the gate/file-tree model recognizable, and make authentication and system state unambiguous.
+- Goals: Make notes and files feel calm to read, make the gate/file-tree model recognizable, make authentication and system state unambiguous, and let operators move from service health to a specific performance subsystem without scanning unrelated panels.
 - Non-goals: Space Collections, README summaries, or additional authentication providers.
-- Success signals: WCAG 2.2 AA contrast, consistent identity across favicon/login/title bar, readable light and dark themes, and no regression in existing UI tests.
+- Success signals: WCAG 2.2 AA contrast, consistent identity across favicon/login/title bar, readable light and dark themes, no regression in existing UI tests, and Grafana dashboards with explicit Health, RED, resource/USE, and subsystem-detail hierarchy.
 
 ## Personas and jobs
 
-- Primary personas: An individual managing private notes, files, and agent access.
-- User jobs: Sign in, control which Spaces are available to user MCP, find a Space or node, read and edit content, inspect metadata, and understand sync/upload state.
+- Primary personas: An individual managing private notes, files, and agent access; a developer or operator diagnosing local service and search performance.
+- User jobs: Sign in, control which Spaces are available to user MCP, find a Space or node, read and edit content, inspect metadata, understand sync/upload state, and distinguish service-wide failure from resource pressure or search-pipeline cost.
 - Key contexts of use: Long desktop sessions, compact sidebars, Markdown reading, occasional mobile reading and simple actions.
 
 ## Information architecture
 
 - Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings. An active Unpinned Space remains in the rail until the user changes destination, without changing its user MCP visibility.
-- Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces.
+- Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces; Grafana Service Overview with Health, RED, resource/USE signals, and instance health; a separately linked Search Detail dashboard for `find` and `grep`.
 - Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; Space capacity and manual usage checks in the selected Space Inspector; node content in the editor; identity, change protection, settings, metadata, and secondary details in that order in the Node Inspector; app state in the status bar or transient status surfaces. Navigation pinning is separate from User MCP access.
 
 ## Design principles
@@ -38,6 +38,7 @@
 - Reading first: The editor is the cleanest surface and Markdown typography receives more contrast than surrounding chrome.
 - Identity is structural: Use the NoteGate mark at product entry points, not as decoration throughout the workbench.
 - Progressive disclosure: Keep primary surfaces self-explanatory and move uncommon concepts into contextual help or the relevant Inspector.
+- Operational hierarchy: Keep service-wide RED and resource signals on the Overview; move operation and pipeline-stage diagnostics into a linked subsystem dashboard.
 - Meaning survives color: Pair status color with text, shape, or icon.
 - One visual grammar: Brand assets identify the product; Lucide icons represent actions and objects.
 - Tradeoffs: Compact desktop density is retained, but interactive targets remain at least 24 CSS px and visible focus is never removed.
@@ -54,7 +55,7 @@
 ## Components
 
 - Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`.
-- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, and the Node Inspector change-protection state.
+- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, the Node Inspector change-protection state, and provisioned Grafana row/panel layouts using native Grafana components.
 - Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected and dragging Space cards; navigation-pinned/unpinned Spaces; User MCP enabled/disabled Spaces; directly locked, inherited lock, and unlocked nodes.
 - Token/component ownership: `theme.css` owns semantic colors. Shared UI owns focus, controls, and repeated visual treatment. Feature components own data and state.
 
@@ -95,7 +96,8 @@
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
 - Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available.
 - Compatibility constraints: Preserve the current OAuth popup and developer API-key fallback behavior.
-- Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, and light/dark login screenshots.
+- Observability constraints: Dashboard variables and Prometheus labels remain bounded; search queries, paths, account/Space/node identifiers, filenames, and content never appear in metrics.
+- Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, light/dark login screenshots, dashboard JSON validation, Prometheus config validation, and a rendered Grafana screenshot.
 
 ## Open questions
 

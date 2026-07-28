@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Process-local HTTP RED, PostgreSQL pool, and decrypted search body cache metrics for the Docker Compose NoteGate stack.",
+  "description": "Service health, HTTP RED, resource/USE signals, and per-instance scrape health for the Docker Compose NoteGate stack.",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -34,6 +34,19 @@
   ],
   "liveNow": false,
   "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 16,
+      "panels": [],
+      "title": "Service Health",
+      "type": "row"
+    },
     {
       "datasource": {
         "type": "prometheus",
@@ -67,9 +80,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 8,
+        "w": 6,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -99,7 +112,7 @@
           "refId": "A"
         }
       ],
-      "title": "Target Availability",
+      "title": "Availability",
       "type": "stat"
     },
     {
@@ -130,9 +143,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 8,
-        "x": 8,
-        "y": 0
+        "w": 6,
+        "x": 6,
+        "y": 1
       },
       "id": 2,
       "options": {
@@ -203,9 +216,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 8,
-        "x": 16,
-        "y": 0
+        "w": 6,
+        "x": 12,
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -235,7 +248,7 @@
           "refId": "A"
         }
       ],
-      "title": "Server Error Rate",
+      "title": "5xx Error Rate",
       "type": "stat"
     },
     {
@@ -274,9 +287,9 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 8,
-        "x": 0,
-        "y": 5
+        "w": 6,
+        "x": 18,
+        "y": 1
       },
       "id": 4,
       "options": {
@@ -306,144 +319,21 @@
           "refId": "A"
         }
       ],
-      "title": "HTTP p95 Latency",
+      "title": "p95 Latency",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "HTTP requests currently executing in selected NoteGate processes.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "collapsed": false,
       "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 8,
-        "y": 5
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
       },
-      "id": 5,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(notegate_http_requests_in_flight{job=\"notegate\", instance=~\"$instance\"}) or vector(0)",
-          "instant": false,
-          "legendFormat": "in flight",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Requests In Flight",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Checked-out DB connections divided by configured pool capacity.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 70
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 16,
-        "y": 5
-      },
-      "id": 6,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "13.1.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum(notegate_db_pool_connections{job=\"notegate\", instance=~\"$instance\", state=\"in_use\"}) / clamp_min(sum(notegate_db_pool_max_connections{job=\"notegate\", instance=~\"$instance\"}), 1)",
-          "instant": false,
-          "legendFormat": "pool utilization",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "DB Pool Utilization",
-      "type": "stat"
+      "id": 17,
+      "panels": [],
+      "title": "RED — Requests",
+      "type": "row"
     },
     {
       "datasource": {
@@ -505,7 +395,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 10
+        "y": 7
       },
       "id": 7,
       "options": {
@@ -598,7 +488,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 10
+        "y": 7
       },
       "id": 8,
       "options": {
@@ -707,7 +597,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 10
+        "y": 7
       },
       "id": 9,
       "options": {
@@ -739,6 +629,220 @@
       ],
       "title": "HTTP Error Rate",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 18,
+      "panels": [],
+      "title": "USE Signals — Resources (partial)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "HTTP requests currently executing in selected NoteGate processes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 17
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.1.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(notegate_http_requests_in_flight{job=\"notegate\", instance=~\"$instance\"}) or vector(0)",
+          "instant": false,
+          "legendFormat": "in flight",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Requests In Flight",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Checked-out DB connections divided by configured pool capacity.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 17
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.1.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(notegate_db_pool_connections{job=\"notegate\", instance=~\"$instance\", state=\"in_use\"}) / clamp_min(sum(notegate_db_pool_max_connections{job=\"notegate\", instance=~\"$instance\"}), 1)",
+          "instant": false,
+          "legendFormat": "pool utilization",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "DB Pool Utilization",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Cache occupancy is informational: a full TinyLFU cache is not itself an error.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 17
+      },
+      "id": 13,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto"
+      },
+      "pluginVersion": "13.1.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(notegate_search_body_cache_size_bytes{job=\"notegate\", instance=~\"$instance\"}) / clamp_min(sum(notegate_search_body_cache_capacity_bytes{job=\"notegate\", instance=~\"$instance\"}), 1)",
+          "instant": false,
+          "legendFormat": "occupancy",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Grep Cache Occupancy",
+      "type": "gauge"
     },
     {
       "datasource": {
@@ -800,9 +904,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
-        "y": 19
+        "y": 22
       },
       "id": 10,
       "options": {
@@ -842,78 +946,6 @@
       ],
       "title": "DB Pool Connections",
       "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Checked-out DB connections as a percentage of configured capacity.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 70
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 4,
-        "x": 8,
-        "y": 19
-      },
-      "id": 11,
-      "options": {
-        "minVizHeight": 75,
-        "minVizWidth": 75,
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true,
-        "sizing": "auto"
-      },
-      "pluginVersion": "13.1.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum(notegate_db_pool_connections{job=\"notegate\", instance=~\"$instance\", state=\"in_use\"}) / clamp_min(sum(notegate_db_pool_max_connections{job=\"notegate\", instance=~\"$instance\"}), 1)",
-          "instant": false,
-          "legendFormat": "utilization",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "DB Pool Capacity",
-      "type": "gauge"
     },
     {
       "datasource": {
@@ -975,9 +1007,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 12,
-        "y": 19
+        "y": 22
       },
       "id": 12,
       "options": {
@@ -1015,168 +1047,21 @@
           "refId": "B"
         }
       ],
-      "title": "Search Body Cache Bytes",
+      "title": "Grep Body Cache Bytes",
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Cache occupancy is informational: a full TinyLFU cache is not itself an error.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "blue",
-            "mode": "fixed"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
+      "collapsed": false,
       "gridPos": {
-        "h": 8,
-        "w": 4,
-        "x": 20,
-        "y": 19
-      },
-      "id": 13,
-      "options": {
-        "minVizHeight": 75,
-        "minVizWidth": 75,
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": false,
-        "sizing": "auto"
-      },
-      "pluginVersion": "13.1.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum(notegate_search_body_cache_size_bytes{job=\"notegate\", instance=~\"$instance\"}) / clamp_min(sum(notegate_search_body_cache_capacity_bytes{job=\"notegate\", instance=~\"$instance\"}), 1)",
-          "instant": false,
-          "legendFormat": "occupancy",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Cache Occupancy",
-      "type": "gauge"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "description": "Approximate number of decrypted bodies retained in each process-local cache.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "decimals": 0,
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 1,
+        "w": 24,
         "x": 0,
-        "y": 27
+        "y": 30
       },
-      "id": 14,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "pluginVersion": "13.1.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "notegate_search_body_cache_entries{job=\"notegate\", instance=~\"$instance\"}",
-          "instant": false,
-          "legendFormat": "{{instance}}",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Cache Entries by Instance",
-      "type": "timeseries"
+      "id": 19,
+      "panels": [],
+      "title": "Instance Health",
+      "type": "row"
     },
     {
       "datasource": {
@@ -1257,9 +1142,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 27
+        "w": 24,
+        "x": 0,
+        "y": 31
       },
       "id": 15,
       "options": {
