@@ -8,17 +8,17 @@ import { updateNodeCaches } from "../../api/nodeCache";
 import { applyExternalFileChanges } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import type { ChildrenResponse, RestNode } from "../../api/types";
+import { createMockApiClient } from "../../test/apiClient";
 import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { TreeSection } from "./TreeSection";
 import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
 
-const mocks = vi.hoisted(() => ({
-  get: vi.fn(),
-  post: vi.fn()
-}));
+const apiClientState = vi.hoisted(
+  (): { client: ApiClient | null } => ({ client: null })
+);
 
 vi.mock("../../api/ApiProvider", () => ({
-  useApiClient: () => ({ get: mocks.get, post: mocks.post } as unknown as ApiClient)
+  useApiClient: () => apiClientState.client!
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -35,6 +35,9 @@ vi.mock("@tanstack/react-virtual", () => ({
     scrollToIndex: vi.fn()
   })
 }));
+
+const mocks = createMockApiClient();
+apiClientState.client = mocks;
 
 const space = makeSpace();
 
@@ -66,8 +69,11 @@ describe("TreeSection request count", () => {
       node(`folder-${index}`, "folder", space.root_node_id)
     );
     mocks.post.mockImplementation(
-      (_path: string, body: { parent_ids: string[] }) =>
-        Promise.resolve(readyBatchResponse(folders, body.parent_ids))
+      (_path: string, body?: unknown) =>
+        Promise.resolve(readyBatchResponse(
+          folders,
+          (body as { parent_ids: string[] }).parent_ids
+        ))
     );
 
     const view = renderTree(
@@ -110,8 +116,11 @@ describe("TreeSection request count", () => {
       node(`folder-${index}`, "folder", space.root_node_id)
     );
     mocks.post.mockImplementation(
-      (_path: string, body: { parent_ids: string[] }) =>
-        Promise.resolve(readyBatchResponse(folders, body.parent_ids))
+      (_path: string, body?: unknown) =>
+        Promise.resolve(readyBatchResponse(
+          folders,
+          (body as { parent_ids: string[] }).parent_ids
+        ))
     );
 
     const view = renderTree(
@@ -154,7 +163,7 @@ describe("TreeSection request count", () => {
     );
     expect(mocks.post).toHaveBeenCalledOnce();
     const requestedParentIds = mocks.get.mock.calls.map(([path]) =>
-      (path as string).match(/\/nodes\/([^/]+)\/children/)?.[1]
+      path.match(/\/nodes\/([^/]+)\/children/)?.[1]
     );
     expect(new Set(requestedParentIds)).toEqual(
       new Set([space.root_node_id, ...folders.map((folder) => folder.id)])
@@ -166,8 +175,11 @@ describe("TreeSection request count", () => {
     mocks.post
       .mockRejectedValueOnce(new Error("batch unavailable"))
       .mockImplementation(
-        (_path: string, body: { parent_ids: string[] }) =>
-          Promise.resolve(readyBatchResponse([folder], body.parent_ids))
+        (_path: string, body?: unknown) =>
+          Promise.resolve(readyBatchResponse(
+            [folder],
+            (body as { parent_ids: string[] }).parent_ids
+          ))
       );
     const queryClient = createQueryClient();
 

@@ -5,21 +5,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { createMockApiClient } from "../../test/apiClient";
 import {
   createSpaceChangeSynchronizer,
   useSpaceChangeSync
 } from "./useSpaceChangeSync";
 
-const get = vi.fn();
-const client = { get } as unknown as ApiClient;
+const apiClientState = vi.hoisted(
+  (): { client: ApiClient | null } => ({ client: null })
+);
 
 vi.mock("../../api/ApiProvider", () => ({
-  useApiClient: () => client
+  useApiClient: () => apiClientState.client!
 }));
 
 vi.mock("../../shared/hooks/usePageVisible", () => ({
   usePageVisible: () => true
 }));
+
+const client = createMockApiClient();
+const get = client.get;
+apiClientState.client = client;
 
 describe("useSpaceChangeSync", () => {
   afterEach(() => {

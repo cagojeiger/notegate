@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { ApiClient } from "./client";
+import { createMockApiClient } from "../test/apiClient";
 import { drainFileChanges, listAuditEvents, listFileChangeEvents } from "./events";
 
 describe("events api", () => {
   it("lists audit events with pagination", async () => {
-    const client = { get: vi.fn().mockResolvedValue({ events: [] }) } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({ events: [] });
 
     await listAuditEvents(client, "cursor-1");
 
@@ -13,7 +14,8 @@ describe("events api", () => {
   });
 
   it("lists file change events with node filtering", async () => {
-    const client = { get: vi.fn().mockResolvedValue({ events: [] }) } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({ events: [] });
 
     await listFileChangeEvents(client, "space-1", { nodeId: "node-1", cursor: "cursor-2" });
 
@@ -21,7 +23,8 @@ describe("events api", () => {
   });
 
   it("allows event history to request one item", async () => {
-    const client = { get: vi.fn().mockResolvedValue({ events: [] }) } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({ events: [] });
 
     await listFileChangeEvents(client, "space-1", { limit: 1 });
 
@@ -29,11 +32,10 @@ describe("events api", () => {
   });
 
   it("drains forward sync pages without skipping intermediate changes", async () => {
-    const client = {
-      get: vi.fn()
-        .mockResolvedValueOnce(syncResponse([change(11), change(12)], 12, true))
-        .mockResolvedValueOnce(syncResponse([change(13)], 13, false))
-    } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get
+      .mockResolvedValueOnce(syncResponse([change(11), change(12)], 12, true))
+      .mockResolvedValueOnce(syncResponse([change(13)], 13, false));
 
     const result = await drainFileChanges(client, "space-1", 10);
 
@@ -50,14 +52,13 @@ describe("events api", () => {
   });
 
   it("drops partial pages when the server requires a resync", async () => {
-    const client = {
-      get: vi.fn()
-        .mockResolvedValueOnce(syncResponse([change(11)], 11, true))
-        .mockResolvedValueOnce({
-          ...syncResponse([], 20, false),
-          resync_required: true
-        })
-    } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get
+      .mockResolvedValueOnce(syncResponse([change(11)], 11, true))
+      .mockResolvedValueOnce({
+        ...syncResponse([], 20, false),
+        resync_required: true
+      });
 
     const result = await drainFileChanges(client, "space-1", 10);
 
@@ -69,11 +70,10 @@ describe("events api", () => {
   });
 
   it("rejects a paginated response that does not advance its token", async () => {
-    const client = {
-      get: vi.fn()
-        .mockResolvedValueOnce(syncResponse([change(11)], 11, true))
-        .mockResolvedValueOnce(syncResponse([change(11)], 11, true))
-    } as unknown as ApiClient;
+    const client = createMockApiClient();
+    client.get
+      .mockResolvedValueOnce(syncResponse([change(11)], 11, true))
+      .mockResolvedValueOnce(syncResponse([change(11)], 11, true));
 
     await expect(drainFileChanges(client, "space-1", 10))
       .rejects.toThrow("file change sync token did not advance");

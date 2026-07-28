@@ -1,10 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "../../api/client";
 import { batchResolveFilePreviews } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
+import { createMockApiClient } from "../../test/apiClient";
 import { createMarkdownPreviewBatcher } from "./markdownPreviewBatcher";
 
 vi.mock("../../api/files", () => ({
@@ -21,7 +21,7 @@ describe("createMarkdownPreviewBatcher", () => {
       results: [ready("/image.png", "node-1")]
     });
     const load = createMarkdownPreviewBatcher(
-      {} as ApiClient,
+      createMockApiClient(),
       new QueryClient(),
       "space-1"
     );
@@ -49,7 +49,7 @@ describe("createMarkdownPreviewBatcher", () => {
     });
     const queryClient = new QueryClient();
     const load = createMarkdownPreviewBatcher(
-      {} as ApiClient,
+      createMockApiClient(),
       queryClient,
       "space-1"
     );
@@ -75,7 +75,7 @@ describe("createMarkdownPreviewBatcher", () => {
       })
     );
     const load = createMarkdownPreviewBatcher(
-      {} as ApiClient,
+      createMockApiClient(),
       new QueryClient(),
       "space-1"
     );
@@ -105,7 +105,7 @@ describe("createMarkdownPreviewBatcher", () => {
       { id: "pdf-1", space_id: "space-1", kind: "file" } as RestNode
     );
     const load = createMarkdownPreviewBatcher(
-      {} as ApiClient,
+      createMockApiClient(),
       queryClient,
       "space-1"
     );
