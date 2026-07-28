@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{AgentRepo, ConnectionRepo, FilesRepo, SpaceRepo};
 use notegate_model::{
     AccountKind, ConnectAgent, CreateAgent, Permission, TextAtRestEncryption, UpdateSpace,
@@ -21,26 +21,6 @@ use notegate_service::files::{
     WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::{GrepLineMode, GrepMatchMode, GrepRequest, SearchService};
-use notegate_service::spaces::CreateSpace;
-use uuid::Uuid;
-
-async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
-    let space = ws_repo
-        .create_space(
-            owner,
-            &CreateSpace {
-                name: name.to_owned(),
-            },
-        )
-        .await
-        .expect("create space");
-    let root = ws_repo
-        .root_node_id(space.id)
-        .await
-        .expect("root id query")
-        .expect("root id present");
-    (space.id, root)
-}
 
 #[tokio::test]
 async fn text_encryption_toggle_rewrites_existing_content_immediately()
@@ -85,8 +65,13 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
                 enabled: true,
             },
         )
-        .await;
-    assert!(denied.is_err(), "tier0 cannot enable text encryption");
+        .await
+        .expect_err("tier0 cannot enable text encryption");
+    assert!(matches!(
+        denied,
+        ServiceError::Conflict(message)
+            if message == "text encryption is not available for the space owner's tier"
+    ));
 
     sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
         .bind(owner)
@@ -367,6 +352,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             },
         )
         .await?;
+    assert_eq!(grep.items.len(), 1);
     assert_eq!(grep.items[0].node.node.id, node_id);
 
     files
@@ -454,22 +440,25 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             },
         )
         .await?;
+    assert_eq!(grep_after_downgrade.items.len(), 1);
     assert_eq!(grep_after_downgrade.items[0].node.node.id, node_id);
-    assert!(
-        files
-            .write_text(
-                owner,
-                ws,
-                WriteText {
-                    target: WriteTarget::Existing { node_id },
-                    body: WriteTextBody::Plain("blocked after downgrade".to_owned()),
-                    expected_sha256: None,
-                },
-            )
-            .await
-            .is_err(),
-        "downgraded owner cannot create a new encrypted revision"
-    );
+    let rejected_write = files
+        .write_text(
+            owner,
+            ws,
+            WriteText {
+                target: WriteTarget::Existing { node_id },
+                body: WriteTextBody::Plain("blocked after downgrade".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await
+        .expect_err("downgraded owner cannot create a new encrypted revision");
+    assert!(matches!(
+        rejected_write,
+        ServiceError::Conflict(message)
+            if message == "text encryption is not available for the space owner's tier"
+    ));
 
     db.cleanup().await;
     Ok(())

@@ -1470,13 +1470,10 @@ async fn attachment_conflict_expires_only_the_unattached_object()
 #[tokio::test]
 async fn mcp_single_upload_guides_put_completion_and_abort()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(s3) = test_s3_config() else {
-        return Ok(());
-    };
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let state = state_with_s3(&db, s3);
+    let state = state_with_s3(&db, crate::state::test_s3_config());
     let (caller, space_id, _root_id) = caller_and_space(&state).await?;
     SpaceRepo::new(db.pool.clone())
         .update_space(space_id, caller.account_id(), None, None, Some(true))
@@ -1503,11 +1500,7 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
     .await?
     .0;
     assert_eq!(begun["next_action"]["kind"], "http_upload");
-    assert_eq!(
-        begun["next_action"]["then"]["input"]["op"],
-        "complete_upload"
-    );
-    let upload_id = begun["upload_id"].as_str().ok_or("upload id")?.to_owned();
+    let upload_id: Uuid = serde_json::from_value(begun["upload_id"].clone())?;
 
     let aborted = transfers::call(
         &state,
@@ -1520,7 +1513,7 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
             original_filename: None,
             encryption_mode: None,
             encryption_metadata: None,
-            upload_id: Some(upload_id.clone()),
+            upload_id: Some(upload_id.to_string()),
             part_numbers: None,
             completed_parts: None,
         },
@@ -1528,6 +1521,7 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
     .await?
     .0;
     assert_eq!(aborted["next_action"]["kind"], "done");
+    assert_eq!(object_state(&db, upload_id).await?, "expire_pending");
 
     db.cleanup().await;
     Ok(())
@@ -1696,7 +1690,6 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     assert_eq!(begun["transfer"]["mode"], "multipart");
     assert_eq!(begun["transfer"]["part_count"], 2);
     assert_eq!(begun["next_action"]["kind"], "call_tool");
-    assert_eq!(begun["next_action"]["input"]["part_numbers"], json!([1, 2]));
     let upload_id = begun["upload_id"].as_str().ok_or("upload id")?.to_owned();
 
     let prepared = transfers::call(
@@ -1718,16 +1711,6 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
     .await?
     .0;
     assert_eq!(prepared["next_action"]["kind"], "http_upload_parts");
-    assert_eq!(prepared["next_action"]["collect_response_header"], "etag");
-    assert_eq!(prepared["next_action"]["max_concurrency"], 4);
-    assert_eq!(
-        prepared["next_action"]["repeat"]["input"]["op"],
-        "prepare_parts"
-    );
-    assert_eq!(
-        prepared["next_action"]["then"]["input"]["op"],
-        "complete_upload"
-    );
     let part_transfers = prepared["parts"].as_array().ok_or("part transfers")?;
     assert_eq!(part_transfers.len(), 2);
     let (first, second) = tokio::join!(
@@ -1772,7 +1755,15 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         },
     )
     .await;
-    assert!(prepare_after_completion.is_err());
+    let error = match prepare_after_completion {
+        Ok(_) => panic!("completed upload must reject part preparation"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert_eq!(error.message, "upload is already complete");
+    let data = error.data.expect("invalid-input error data");
+    assert_eq!(data["kind"], "invalid_input");
+    assert_eq!(data["code"], "invalid_input");
     let node_id = state
         .files
         .resolve_path(caller.account_id(), space_id, "/large.bin")

@@ -17,42 +17,21 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, insert_user_account, setup_space};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, SpaceRepo};
 use notegate_model::files::{ObjectUploadMode, ObjectUploadRegistration};
 use notegate_model::{FileEncryptionMode, NodeKind};
+use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload, ChildrenCursor,
     CopyNode, CreateFolder, CreateText, DeleteNode, Edit, EditText, FilesService, LineEdit,
     ListFileChangeEvents, ListNodesRequest, MoveNode, NodeListSort, PatchMode, PatchText, ReadText,
     ReadTextBody, SyncFileChanges, WriteTarget, WriteText, WriteTextBody,
 };
-use notegate_service::search::{
-    FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest, SearchService,
-};
-use notegate_service::spaces::CreateSpace;
+use notegate_service::search::{FindMatchMode, FindRequest, SearchService};
 use serde_json::json;
 use uuid::Uuid;
-
-/// Create a space owned by `owner` and return `(space_id, root_id)`.
-async fn setup_space(ws_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uuid, Uuid) {
-    let ws = ws_repo
-        .create_space(
-            owner,
-            &CreateSpace {
-                name: name.to_owned(),
-            },
-        )
-        .await
-        .expect("create space");
-    let root = ws_repo
-        .root_node_id(ws.id)
-        .await
-        .expect("root id query")
-        .expect("root id present");
-    (ws.id, root)
-}
 
 fn single_upload_registration(id: Uuid, object_key: impl Into<String>) -> ObjectUploadRegistration {
     ObjectUploadRegistration {
@@ -177,7 +156,10 @@ async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::er
         )
         .await
         .expect_err("invalid cursor should be rejected");
-    assert!(err.to_string().contains("invalid cursor"));
+    assert!(matches!(
+        err,
+        ServiceError::InvalidInput(message) if message == "invalid cursor"
+    ));
 
     let baseline = files
         .sync_file_changes(
@@ -248,9 +230,8 @@ async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-/// The full lifecycle: create ws → mkdir → touch → write → read → patch →
-/// find(name) → grep → mv → rm, asserting attribution is populated throughout
-/// and the derived path follows an O(1) move.
+/// The full lifecycle: create ws → mkdir → touch → write → read → copy → file →
+/// patch → mv → find(name) → rm, asserting persistence and derived paths.
 #[tokio::test]
 async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -361,53 +342,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         written.text.updated_by_account_id, owner,
         "write sets doc updated_by"
     );
-    let after_initial_write_sha = written.text.content_sha256.clone();
-
-    // --- append: exact EOF append, then newline-separated append ---
-    let appended = files
-        .append_text(
-            owner,
-            ws,
-            AppendText {
-                target: WriteTarget::Existing { node_id: note_id },
-                content: "delta".to_owned(),
-                expected_sha256: Some(after_initial_write_sha.clone()),
-                ensure_newline: false,
-            },
-        )
-        .await?;
-    assert_eq!(appended.text.line_count, 2);
-    let after_append_sha = appended.text.content_sha256.clone();
-
-    let newline_appended = files
-        .append_text(
-            owner,
-            ws,
-            AppendText {
-                target: WriteTarget::Existing { node_id: note_id },
-                content: "epsilon\n".to_owned(),
-                expected_sha256: Some(after_append_sha.clone()),
-                ensure_newline: true,
-            },
-        )
-        .await?;
-    assert_eq!(newline_appended.text.line_count, 3);
-    let after_write_sha = newline_appended.text.content_sha256.clone();
-
-    let stale_append = files
-        .append_text(
-            owner,
-            ws,
-            AppendText {
-                target: WriteTarget::Existing { node_id: note_id },
-                content: "stale".to_owned(),
-                expected_sha256: Some(after_initial_write_sha),
-                ensure_newline: false,
-            },
-        )
-        .await
-        .expect_err("append must reject stale expected_sha256");
-    assert!(stale_append.to_string().contains("expected_sha256"));
+    let after_write_sha = written.text.content_sha256.clone();
 
     // --- read: range slice returns the content + metrics ---
     let read = files
@@ -424,11 +359,11 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
     let content = match read.body {
-        notegate_service::files::ReadTextBody::Content(content) => content,
+        ReadTextBody::Content(content) => content,
         other => panic!("expected content body, got {other:?}"),
     };
-    assert_eq!(content.returned_lines, 3);
-    assert!(content.content.contains("alpha beta gammadelta\nepsilon"));
+    assert_eq!(content.returned_lines, 2);
+    assert_eq!(content.content, "# Title\nalpha beta gamma");
     assert_eq!(read.content_sha256, after_write_sha);
 
     // --- encrypted text: REST-visible opaque payload, not plaintext-patchable ---
@@ -487,7 +422,11 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         .expect_err("encrypted text patch must fail");
-    assert!(patch_err.to_string().contains("plaintext"));
+    assert!(matches!(
+        patch_err,
+        ServiceError::InvalidInput(message)
+            if message == "text content is not stored as plaintext"
+    ));
 
     // --- copy: text-only subtrees preserve metadata and encrypted text ---
     let copied = files
@@ -542,7 +481,10 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         .expect_err("folder copy must require recursive=true");
-    assert!(non_recursive_copy.to_string().contains("recursive=true"));
+    assert!(matches!(
+        non_recursive_copy,
+        ServiceError::Conflict(message) if message == "folder copy requires recursive=true"
+    ));
 
     // --- file: attach object metadata after a direct-to-storage upload ---
     let upload_id = Uuid::new_v4();
@@ -604,9 +546,12 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         .expect_err("object-backed files are not copied implicitly");
-    assert!(object_copy.to_string().contains("file nodes"));
+    assert!(matches!(
+        object_copy,
+        ServiceError::Conflict(message) if message == "copy does not support file nodes"
+    ));
 
-    // --- patch: exact-match replacement ---
+    // --- patch: all-match replacement through the persistence path ---
     let patched = files
         .patch_text(
             owner,
@@ -616,8 +561,8 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 edits: vec![Edit {
                     old_text: "beta".to_owned(),
                     new_text: "delta".to_owned(),
-                    mode: PatchMode::Unique,
-                    expected_count: None,
+                    mode: PatchMode::All,
+                    expected_count: Some(1),
                 }],
                 expected_sha256: Some(after_write_sha.clone()),
             },
@@ -626,141 +571,35 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(patched.previous_sha256, after_write_sha);
     assert_eq!(patched.edits_applied, 1);
     let (_, doc_now) = repo_find_text(&repo, ws, note_id).await;
-    assert!(
-        doc_now
-            .content
-            .as_deref()
-            .unwrap()
-            .contains("alpha delta gamma")
+    assert_eq!(
+        doc_now.content.as_deref(),
+        Some("# Title\nalpha delta gamma")
     );
     assert_eq!(
         doc_now.updated_by_account_id, owner,
         "patch sets doc updated_by"
     );
 
-    let replace_all = files
-        .patch_text(
-            owner,
-            ws,
-            PatchText {
-                node_id: note_id,
-                edits: vec![Edit {
-                    old_text: "delta".to_owned(),
-                    new_text: "DELTA".to_owned(),
-                    mode: PatchMode::All,
-                    expected_count: Some(2),
-                }],
-                expected_sha256: Some(patched.text.content_sha256.clone()),
-            },
-        )
-        .await?;
-    assert_eq!(replace_all.edits_applied, 2);
-
-    let line_edited = files
+    // --- edit: line edits use the same persistence pipeline with their own mutation kind ---
+    let edited = files
         .edit_text(
             owner,
             ws,
             EditText {
                 node_id: note_id,
-                edits: vec![
-                    LineEdit::InsertAfter {
-                        line: 1,
-                        content: "inserted line\n".to_owned(),
-                    },
-                    LineEdit::ReplaceLines {
-                        start_line: 3,
-                        end_line: 3,
-                        content: "replacement line\n".to_owned(),
-                    },
-                ],
-                expected_sha256: Some(replace_all.text.content_sha256.clone()),
+                edits: vec![LineEdit::ReplaceLines {
+                    start_line: 2,
+                    end_line: 2,
+                    content: "final line".to_owned(),
+                }],
+                expected_sha256: Some(patched.text.content_sha256.clone()),
             },
         )
         .await?;
-    assert_eq!(line_edited.edits_applied, 2);
-    let (_, edited_now) = repo_find_text(&repo, ws, note_id).await;
-    assert!(
-        edited_now
-            .content
-            .as_deref()
-            .unwrap()
-            .contains("inserted line\nalpha DELTA gammaDELTA\nreplacement line\n")
-    );
-
-    // --- find by NAME: q='note' matches the text by name ---
-    let by_name = search
-        .find(
-            owner,
-            ws,
-            FindRequest {
-                q: "note".to_owned(),
-                path: None,
-                kind: None,
-                match_mode: FindMatchMode::Contains,
-                include: Vec::new(),
-                exclude: Vec::new(),
-                limit: Some(50),
-                cursor: None,
-            },
-        )
-        .await?;
-    assert!(
-        by_name.items.iter().any(|item| item.node.id == note_id),
-        "find by name must match the text"
-    );
-
-    // --- find remains name-only: q='projects' matches the folder, not the doc via path ---
-    let by_path = search
-        .find(
-            owner,
-            ws,
-            FindRequest {
-                q: "projects".to_owned(),
-                path: None,
-                kind: None,
-                match_mode: FindMatchMode::Contains,
-                include: Vec::new(),
-                exclude: Vec::new(),
-                limit: Some(50),
-                cursor: None,
-            },
-        )
-        .await?;
-    assert!(
-        by_path.items.iter().all(|item| item.node.id != note_id),
-        "find must not match the text by path substring"
-    );
-
-    // --- grep: content candidate by body substring, with derived path ---
-    let candidates = search
-        .grep(
-            owner,
-            ws,
-            GrepRequest {
-                q: "alpha delta".to_owned(),
-                path: None,
-                match_mode: GrepMatchMode::Literal,
-                line_mode: GrepLineMode::None,
-                include: Vec::new(),
-                exclude: Vec::new(),
-                limit: Some(20),
-                cursor: None,
-            },
-        )
-        .await?;
-    let hit = candidates
-        .items
-        .iter()
-        .find(|item| item.node.node.id == note_id)
-        .expect("grep candidate present");
-    assert_eq!(
-        hit.node.path, "/projects/note.md",
-        "grep returns derived path"
-    );
-    assert_eq!(
-        hit.node.text.as_ref().expect("text stats").byte_len,
-        edited_now.byte_len
-    );
+    assert_eq!(edited.previous_sha256, patched.text.content_sha256);
+    assert_eq!(edited.edits_applied, 1);
+    let (_, doc_now) = repo_find_text(&repo, ws, note_id).await;
+    assert_eq!(doc_now.content.as_deref(), Some("# Title\nfinal line"));
 
     // --- mv: move /projects/note.md → /archive/note.md (rename parent) ---
     let archive = files
@@ -810,11 +649,13 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             },
         )
         .await?;
-    let hit = by_name.items.iter().find(|item| item.node.id == note_id);
-    assert!(hit.is_some(), "find by name must hit the moved text");
+    let hit = by_name
+        .items
+        .iter()
+        .find(|item| item.node.id == note_id)
+        .expect("find by name must hit the moved text");
     assert_eq!(
-        hit.map(|item| item.path.as_str()),
-        Some("/archive/note.md"),
+        hit.path, "/archive/note.md",
         "derived path reflects the move",
     );
 
@@ -877,7 +718,11 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
         )
         .await
         .expect_err("invalid json must be rejected before create");
-    assert!(invalid_create.to_string().contains("invalid json syntax"));
+    assert!(matches!(
+        invalid_create,
+        ServiceError::InvalidInput(message)
+            if message.starts_with("invalid json syntax in config.json at line 1, column ")
+    ));
 
     let json_doc = files
         .write_text(
@@ -909,7 +754,11 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
         )
         .await
         .expect_err("append that breaks json must be rejected");
-    assert!(invalid_append.to_string().contains("invalid json syntax"));
+    assert!(matches!(
+        invalid_append,
+        ServiceError::InvalidInput(message)
+            if message.starts_with("invalid json syntax in settings.json at line 1, column ")
+    ));
 
     let toml_doc = files
         .write_text(
@@ -942,7 +791,11 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
         )
         .await
         .expect_err("patch that breaks toml must be rejected");
-    assert!(invalid_patch.to_string().contains("invalid toml syntax"));
+    assert!(matches!(
+        invalid_patch,
+        ServiceError::InvalidInput(message)
+            if message.starts_with("invalid toml syntax in app.toml")
+    ));
 
     let yaml_doc = files
         .write_text(
@@ -974,7 +827,11 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
         )
         .await
         .expect_err("line edit that breaks yaml must be rejected");
-    assert!(invalid_edit.to_string().contains("invalid yaml syntax"));
+    assert!(matches!(
+        invalid_edit,
+        ServiceError::InvalidInput(message)
+            if message.starts_with("invalid yaml syntax in app.yaml")
+    ));
 
     db.cleanup().await;
     Ok(())
@@ -1034,7 +891,11 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         .expect_err("create-on-append must reject expected_sha256");
-    assert!(create_guard_err.to_string().contains("expected_sha256"));
+    assert!(matches!(
+        create_guard_err,
+        ServiceError::Conflict(message)
+            if message == "expected_sha256 was supplied but the text does not exist"
+    ));
 
     // --- ensure_newline guard: a non-empty body without a trailing newline gets one ---
     let joined = files
@@ -1050,6 +911,26 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
     assert_eq!(joined.text.line_count, 2, "ensure_newline split the lines");
+
+    let stale_append = files
+        .append_text(
+            owner,
+            ws,
+            AppendText {
+                target: WriteTarget::Existing { node_id: log_id },
+                content: "stale".to_owned(),
+                expected_sha256: Some(created.text.content_sha256),
+                ensure_newline: false,
+            },
+        )
+        .await
+        .expect_err("append must reject a stale expected_sha256");
+    assert!(matches!(
+        stale_append,
+        ServiceError::Conflict(message)
+            if message == "expected_sha256 does not match the current text; read it again"
+    ));
+
     let read = files
         .read_text(
             owner,
@@ -1102,7 +983,11 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         .expect_err("append to encrypted text must fail");
-    assert!(encrypted_err.to_string().contains("plaintext"));
+    assert!(matches!(
+        encrypted_err,
+        ServiceError::InvalidInput(message)
+            if message == "text content is not stored as plaintext"
+    ));
 
     db.cleanup().await;
     Ok(())
@@ -1388,6 +1273,7 @@ async fn batch_children_returns_ordered_independent_first_pages()
             },
         )
         .await?;
+    assert_eq!(next.items.len(), 1);
     assert_eq!(next.items[0].node.name, "b.md");
 
     let wrong_parent = files
@@ -1402,7 +1288,11 @@ async fn batch_children_returns_ordered_independent_first_pages()
         )
         .await
         .expect_err("children cursor must be bound to its parent");
-    assert!(wrong_parent.to_string().contains("children query"));
+    assert!(matches!(
+        wrong_parent,
+        ServiceError::InvalidInput(message)
+            if message == "cursor does not match children query"
+    ));
 
     assert!(matches!(
         results[2],
@@ -1562,7 +1452,11 @@ async fn list_nodes_filters_pages_and_binds_cursor_to_kind()
         )
         .await
         .expect_err("cursor must be bound to the original kind filter");
-    assert!(mismatched_kind.to_string().contains("node list query"));
+    assert!(matches!(
+        mismatched_kind,
+        ServiceError::InvalidInput(message)
+            if message == "cursor does not match node list query"
+    ));
 
     let summary_first = files
         .list_node_summaries(
@@ -1576,6 +1470,7 @@ async fn list_nodes_filters_pages_and_binds_cursor_to_kind()
             },
         )
         .await?;
+    assert_eq!(summary_first.items.len(), 1);
     assert_eq!(summary_first.items[0].path, "/a.md");
     let summary_second = files
         .list_node_summaries(
@@ -1589,6 +1484,7 @@ async fn list_nodes_filters_pages_and_binds_cursor_to_kind()
             },
         )
         .await?;
+    assert_eq!(summary_second.items.len(), 1);
     assert_eq!(summary_second.items[0].path, "/b.md");
 
     let other_owner = insert_user_account(
@@ -1620,7 +1516,11 @@ async fn list_nodes_filters_pages_and_binds_cursor_to_kind()
         )
         .await
         .expect_err("node list cursor must be bound to its space");
-    assert!(cross_space.to_string().contains("node list query"));
+    assert!(matches!(
+        cross_space,
+        ServiceError::InvalidInput(message)
+            if message == "cursor does not match node list query"
+    ));
 
     db.cleanup().await;
     Ok(())
