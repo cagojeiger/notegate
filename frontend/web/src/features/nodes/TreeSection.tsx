@@ -1,20 +1,17 @@
-import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import { ChevronsDownUp, Folder } from "lucide-react";
-import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent, RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { NodeSummary, Space } from "../../api/types";
 import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
 import { canMoveNodeToFolder, canMutateNode } from "./nodeWriteAccess";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
-import { findAdjacentNodeRowIndex, projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
+import { projectVisibleTree, type TreeFolderSnapshot, type TreeRow } from "./treeProjection";
 import type { NodeContextHandler, TreeKeyboardNavigationRegistrar } from "./types";
 import { useNodeChildrenQuery } from "./useNodeQueries";
 import { useTreeRestoreBatch } from "./useTreeRestoreBatch";
-
-const TREE_ROW_SIZE = 36;
-const TREE_OVERSCAN = 8;
+import { useVirtualTreeNavigation } from "./useVirtualTreeNavigation";
 
 type TreeProps = {
   activeSpace: Space;
@@ -98,8 +95,6 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
   const [snapshots, setSnapshots] = useState<Map<string, TreeFolderSnapshot>>(() => new Map());
   const [draggedNode, setDraggedNode] = useState<NodeSummary | null>(null);
   const [dropFolderId, setDropFolderId] = useState<string | null>(null);
-  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
-  const [pendingFocusNodeId, setPendingFocusNodeId] = useState<string | null>(null);
   const root = makeRootNode(activeSpace);
   const restoringTree = useTreeRestoreBatch(
     activeSpace.id,
@@ -110,48 +105,18 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
     () => projectVisibleTree(root.id, snapshots, expandedFolderIds),
     [expandedFolderIds, root.id, snapshots]
   );
-  const getItemKey = useCallback(
-    (index: number) => visibleTree.rows[index]?.key ?? index,
-    [visibleTree.rows]
-  );
-  const draggedIndex = draggedNode
-    ? visibleTree.rows.findIndex((row) => row.type === "node" && row.node.id === draggedNode.id)
-    : -1;
-  const focusedIndex = focusedNodeId
-    ? visibleTree.rows.findIndex((row) => row.type === "node" && row.node.id === focusedNodeId)
-    : -1;
-  const rangeExtractor = useCallback((range: Range) => {
-    const indexes = defaultRangeExtractor(range);
-    for (const pinnedIndex of [draggedIndex, focusedIndex]) {
-      if (pinnedIndex >= 0 && !indexes.includes(pinnedIndex)) indexes.push(pinnedIndex);
-    }
-    return indexes.sort((left, right) => left - right);
-  }, [draggedIndex, focusedIndex]);
-  const rowVirtualizer = useVirtualizer({
-    count: visibleTree.rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => TREE_ROW_SIZE,
-    getItemKey,
-    overscan: TREE_OVERSCAN,
-    rangeExtractor
+  const {
+    rowVirtualizer,
+    virtualItems,
+    handleTreeKeyDown,
+    handleTreeFocusCapture,
+    handleTreeBlurCapture
+  } = useVirtualTreeNavigation({
+    rows: visibleTree.rows,
+    draggedNodeId: draggedNode?.id ?? null,
+    scrollRef,
+    onTreeNavigationChange
   });
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const requestNodeFocus = useCallback((nodeId: string, index: number) => {
-    setPendingFocusNodeId(nodeId);
-    rowVirtualizer.scrollToIndex(index, { align: "auto" });
-  }, [rowVirtualizer]);
-  const focusLastNode = useCallback(() => {
-    const index = findAdjacentNodeRowIndex(visibleTree.rows, visibleTree.rows.length, -1);
-    const row = index === null ? undefined : visibleTree.rows[index];
-    if (index === null || row?.type !== "node") return false;
-    requestNodeFocus(row.node.id, index);
-    return true;
-  }, [requestNodeFocus, visibleTree.rows]);
-
-  useLayoutEffect(() => {
-    onTreeNavigationChange({ focusLastNode });
-    return () => onTreeNavigationChange(null);
-  }, [focusLastNode, onTreeNavigationChange]);
 
   const updateSnapshot = useCallback((parentId: string, snapshot: TreeFolderSnapshot) => {
     setSnapshots((current) => {
@@ -184,26 +149,6 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
     });
   }, [visibleTree.queryParentIds]);
 
-  useEffect(() => {
-    if (pendingFocusNodeId === null) return;
-    const pendingFocusIndex = visibleTree.rows.findIndex(
-      (row) => row.type === "node" && row.node.id === pendingFocusNodeId
-    );
-    if (pendingFocusIndex < 0) {
-      setPendingFocusNodeId(null);
-      return;
-    }
-    const button = scrollRef.current?.querySelector<HTMLButtonElement>(
-      `[data-tree-index="${pendingFocusIndex}"] [data-node-open]`
-    );
-    if (!button) {
-      rowVirtualizer.scrollToIndex(pendingFocusIndex, { align: "auto" });
-      return;
-    }
-    button.focus({ preventScroll: true });
-    setPendingFocusNodeId(null);
-  }, [pendingFocusNodeId, rowVirtualizer, virtualItems, visibleTree.rows]);
-
   function clearDrag() {
     setDraggedNode(null);
     setDropFolderId(null);
@@ -229,21 +174,6 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
     clearDrag();
   }
 
-  function handleTreeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const currentRow = (event.target as HTMLElement).closest("[data-tree-index]") as HTMLElement | null;
-    const currentIndex = Number(currentRow?.dataset.treeIndex);
-    if (!Number.isInteger(currentIndex)) return;
-    const direction = event.key === "ArrowDown" ? 1 : -1;
-    const nextIndex = findAdjacentNodeRowIndex(visibleTree.rows, currentIndex, direction);
-    if (nextIndex === null) return;
-    const nextRow = visibleTree.rows[nextIndex];
-    if (nextRow?.type !== "node") return;
-    event.preventDefault();
-    event.stopPropagation();
-    requestNodeFocus(nextRow.node.id, nextIndex);
-  }
-
   return (
     <>
       <div
@@ -252,15 +182,8 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
         aria-label="Files"
         className="mt-2 min-h-0 flex-1 overflow-y-auto"
         onKeyDown={handleTreeKeyDown}
-        onFocusCapture={(event) => {
-          const row = (event.target as HTMLElement).closest("[data-tree-index]") as HTMLElement | null;
-          const index = Number(row?.dataset.treeIndex);
-          const treeRow = Number.isInteger(index) ? visibleTree.rows[index] : undefined;
-          if (treeRow?.type === "node") setFocusedNodeId(treeRow.node.id);
-        }}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedNodeId(null);
-        }}
+        onFocusCapture={handleTreeFocusCapture}
+        onBlurCapture={handleTreeBlurCapture}
         onDragLeave={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropFolderId(null);
         }}
