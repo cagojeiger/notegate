@@ -1,6 +1,7 @@
-import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
+import { InfiniteQueryObserver } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
+import { createTestQueryClient } from "../test/queryClient";
 import {
   applyExternalFileChanges,
   invalidateFolderSubtree,
@@ -17,7 +18,7 @@ import { queryKeys } from "./queryKeys";
 
 describe("query invalidation", () => {
   it("invalidates only Recent and the affected parent folders for a node change", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const statKey = [
       ...queryKeys.children("space-1", "parent-1"),
@@ -45,9 +46,7 @@ describe("query invalidation", () => {
   });
 
   it("resets a multi-page Recent cache and refetches only its first page", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } }
-    });
+    const queryClient = createTestQueryClient();
     const key = queryKeys.recent("space-1");
     const page = (id: string, hasMore: boolean, nextCursor: string | null) => ({
       nodes: [{ id }],
@@ -85,9 +84,7 @@ describe("query invalidation", () => {
   });
 
   it("resets an affected multi-page folder and refetches only its first page", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } }
-    });
+    const queryClient = createTestQueryClient();
     const key = queryKeys.children("space-1", "folder-1");
     const page = (id: string, hasMore: boolean, nextCursor: string | null) => ({
       parent: { id: "folder-1", path: "/folder" },
@@ -126,7 +123,7 @@ describe("query invalidation", () => {
   });
 
   it("can refresh a space subtree without invalidating the spaces list", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     invalidateSpaceResources(queryClient, "space-1");
@@ -136,7 +133,7 @@ describe("query invalidation", () => {
   });
 
   it("invalidates descendant-bearing cache families after a folder path change", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const pathKey = queryKeys.markdownImagePreview("space-1", "/folder/image.png");
@@ -168,7 +165,7 @@ describe("query invalidation", () => {
   });
 
   it("coalesces multiple external changes into one list refresh per affected parent", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
@@ -202,7 +199,7 @@ describe("query invalidation", () => {
   });
 
   it("invalidates descendant node details after an external folder write-lock change", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
@@ -228,7 +225,7 @@ describe("query invalidation", () => {
   });
 
   it("refreshes every summary and detail affected by an inherited write lock", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
@@ -250,7 +247,7 @@ describe("query invalidation", () => {
   });
 
   it("falls back to the children family when an external event has no parent context", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
 
     await applyExternalFileChanges(queryClient, "space-1", [
@@ -266,7 +263,7 @@ describe("query invalidation", () => {
   });
 
   it("drops descendant content caches after an external recursive folder delete", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const deletedContent = queryKeys.text("space-1", "child-1");
     const unrelatedContent = queryKeys.text("space-2", "child-2");
     queryClient.setQueryData(deletedContent, { content: "deleted" });
@@ -285,7 +282,7 @@ describe("query invalidation", () => {
   });
 
   it("keeps file preview URLs outside space resource invalidation", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const previewKey = queryKeys.filePreviewUrl("space-1", "file-1", "image");
     queryClient.setQueryData(previewKey, { url: "https://storage.example/preview" });
 
@@ -296,7 +293,7 @@ describe("query invalidation", () => {
   });
 
   it("removes markdown preview caches only for the changed space", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const changed = queryKeys.markdownImagePreview("space-1", "/old/image.png");
     const other = queryKeys.markdownImagePreview("space-2", "/other/image.png");
     queryClient.setQueryData(changed, { id: "image-1" });
@@ -309,7 +306,7 @@ describe("query invalidation", () => {
   });
 
   it("removes only the affected markdown preview path for a local file move", () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const changed = queryKeys.markdownImagePreview("space-1", "/old/image.png");
     const sibling = queryKeys.markdownImagePreview("space-1", "/other/image.png");
     queryClient.setQueryData(changed, { id: "image-1" });
@@ -322,7 +319,7 @@ describe("query invalidation", () => {
   });
 
   it("removes only the deleted node resources for a non-recursive delete", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const deletedNode = {
       id: "file-1",
       space_id: "space-1",
@@ -349,7 +346,7 @@ describe("query invalidation", () => {
   });
 
   it("removes resource and preview queries only for the deleted space", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const deletedSpaceNode = queryKeys.node("space-1", "file-1");
     const otherSpaceNode = queryKeys.node("space-2", "file-2");
     const deletedSpacePreview = queryKeys.filePreviewUrl("space-1", "file-1", "image");

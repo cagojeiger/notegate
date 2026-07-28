@@ -1,14 +1,15 @@
-import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { MutationObserver } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { SpacesListResponse } from "../../api/types";
 import { makeSpace } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import { createSpaceMutationOptions } from "./useSpaceQueries";
 
 describe("createSpaceMutationOptions", () => {
   it("updates the spaces cache before notifying the caller", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const existingSpace = makeSpace({ id: "existing", sort_order: 10 });
     const createdSpace = makeSpace({ id: "created", sort_order: 5 });
     queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, {
@@ -37,7 +38,7 @@ describe("createSpaceMutationOptions", () => {
   });
 
   it("seeds an empty spaces cache before notifying the caller", async () => {
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const createdSpace = makeSpace({ id: "created", sort_order: 0 });
     const onCreated = vi.fn(() => {
       expect(queryClient.getQueryData<SpacesListResponse>(queryKeys.spaces)).toEqual({

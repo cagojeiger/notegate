@@ -1,10 +1,10 @@
-import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { batchResolveFilePreviews } from "../../api/files";
 import { queryKeys } from "../../api/queryKeys";
 import type { RestNode } from "../../api/types";
 import { createMockApiClient } from "../../test/apiClient";
+import { createTestQueryClient } from "../../test/queryClient";
 import { createMarkdownPreviewBatcher } from "./markdownPreviewBatcher";
 
 vi.mock("../../api/files", () => ({
@@ -22,7 +22,7 @@ describe("createMarkdownPreviewBatcher", () => {
     });
     const load = createMarkdownPreviewBatcher(
       createMockApiClient(),
-      new QueryClient(),
+      createTestQueryClient(),
       "space-1"
     );
 
@@ -47,7 +47,7 @@ describe("createMarkdownPreviewBatcher", () => {
         ready("/first.png", "node-1")
       ]
     });
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     const load = createMarkdownPreviewBatcher(
       createMockApiClient(),
       queryClient,
@@ -76,7 +76,7 @@ describe("createMarkdownPreviewBatcher", () => {
     );
     const load = createMarkdownPreviewBatcher(
       createMockApiClient(),
-      new QueryClient(),
+      createTestQueryClient(),
       "space-1"
     );
     const paths = Array.from({ length: 65 }, (_, index) => `/image-${index}.png`);
@@ -99,7 +99,7 @@ describe("createMarkdownPreviewBatcher", () => {
         expires_at: null
       }]
     });
-    const queryClient = new QueryClient();
+    const queryClient = createTestQueryClient();
     queryClient.setQueryData(
       queryKeys.node("space-1", "pdf-1"),
       { id: "pdf-1", space_id: "space-1", kind: "file" } as RestNode

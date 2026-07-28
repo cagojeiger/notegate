@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, render, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createTestQueryClient } from "../../test/queryClient";
 import { UploadProvider, useUploadActions, useUploadManager } from "./UploadProvider";
 
 const mocks = vi.hoisted(() => ({
@@ -135,7 +136,7 @@ describe("UploadProvider", () => {
       reportProgress = options.onProgress;
       return transfer.promise;
     });
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const renders = vi.fn();
 
     function ActionConsumer() {
@@ -213,12 +214,8 @@ describe("UploadProvider", () => {
 });
 
 function renderUploadManager() {
-  const queryClient = createQueryClient();
+  const queryClient = createTestQueryClient();
   return { ...renderHook(() => useUploadManager(), { wrapper: uploadWrapper(queryClient) }), queryClient };
-}
-
-function createQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 }
 
 function uploadWrapper(queryClient: QueryClient) {

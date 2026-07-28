@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { queryKeys } from "../../api/queryKeys";
 import { replaceText } from "../../api/text";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import { useSaveTextDocument } from "./useEditorQueries";
 
 const mockClient = vi.hoisted(() => ({}));
@@ -35,12 +36,7 @@ describe("useSaveTextDocument", () => {
     vi.mocked(replaceText).mockRejectedValue(
       new ApiError(message, 423, "node_write_locked")
     );
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        mutations: { retry: false },
-        queries: { retry: false }
-      }
-    });
+    const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const onSaved = vi.fn();
     const onConflict = vi.fn();

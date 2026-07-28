@@ -1,11 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
-import { makeRestNode } from "../../test/fixtures";
 import { createMockApiClient } from "../../test/apiClient";
+import { makeRestNode } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import { useNodeFreshness } from "../editor/useEditorQueries";
 import { useNodeChildrenQuery, useRecentNodesQuery } from "../nodes/useNodeQueries";
 
@@ -36,9 +37,7 @@ apiClientState.client = client;
 
 describe("workspace resource freshness", () => {
   it("does not attach independent polling intervals to tree, recent, or opened-node queries", async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } }
-    });
+    const queryClient = createTestQueryClient();
     const wrapper = ({ children }: PropsWithChildren) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );

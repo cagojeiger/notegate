@@ -1,4 +1,9 @@
-import { MutationObserver, QueryClient, QueryClientProvider, type InfiniteData } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClientProvider,
+  type InfiniteData,
+  type QueryClient
+} from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +13,7 @@ import { queryKeys } from "../../api/queryKeys";
 import { updateTextEncryption } from "../../api/text";
 import type { ChildrenResponse, RestNode } from "../../api/types";
 import { makeRestNode } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import {
   createUpdateNodeWriteLockMutationOptions,
   useDeleteNodeMutation,
@@ -37,7 +43,7 @@ vi.mock("../../api/text", () => ({
 
 describe("workbench node mutations", () => {
   it("updates search policy through its dedicated endpoint", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const current = node("text-1", "space-1", "text");
     const updated = {
       ...current,
@@ -65,7 +71,7 @@ describe("workbench node mutations", () => {
   });
 
   it("updates text encryption through the text policy endpoint", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const current = node("text-1", "space-1", "text");
     const updated = {
       ...current,
@@ -98,7 +104,7 @@ describe("workbench node mutations", () => {
   });
 
   it("updates write-lock caches after calling the dedicated endpoint", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const current = node("text-1", "space-1", "text");
     const updated = {
       ...current,
@@ -134,7 +140,7 @@ describe("workbench node mutations", () => {
   });
 
   it("shows a direct write lock in cached tree rows while the request is pending", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const current = node("text-1", "space-1", "text");
     const updated = {
       ...current,
@@ -180,7 +186,7 @@ describe("workbench node mutations", () => {
   });
 
   it("restores the previous write-lock state when an optimistic request fails", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const current = node("text-1", "space-1", "text");
     const onUpdated = vi.fn();
     const observer = observeWriteLockMutation(
@@ -196,7 +202,7 @@ describe("workbench node mutations", () => {
   });
 
   it("invalidates descendant node details when a folder lock changes", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const current = node("folder-1", "space-1", "folder");
     const updated = {
       ...current,
@@ -229,7 +235,7 @@ describe("workbench node mutations", () => {
   });
 
   it("removes every preview URL cached for a recursively deleted folder", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const folder = node("folder-1", "space-1", "folder");
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
@@ -264,7 +270,7 @@ describe("workbench node mutations", () => {
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const source = node("file-1", "space-1", "file");
     const moved = { ...source, parent_id: "folder-2", path: "/folder-2/file-1" };
     vi.mocked(moveNode).mockResolvedValue(moved);
@@ -289,7 +295,7 @@ describe("workbench node mutations", () => {
   });
 
   it("invalidates descendant cache families when moving a folder", async () => {
-    const queryClient = createQueryClient();
+    const queryClient = createTestQueryClient();
     const source = node("folder-1", "space-1", "folder");
     const moved = { ...source, parent_id: "folder-2", path: "/folder-2/folder-1" };
     vi.mocked(moveNode).mockResolvedValue(moved);
@@ -315,12 +321,6 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledOnce();
   });
 });
-
-function createQueryClient(): QueryClient {
-  return new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
-  });
-}
 
 function renderMutationHook<Result>(queryClient: QueryClient, callback: () => Result) {
   const wrapper = ({ children }: { children: ReactNode }) => (

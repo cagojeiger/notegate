@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
+import { createTestQueryClient } from "../../test/queryClient";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
 import type { useNodeFreshness } from "./useEditorQueries";
 
@@ -24,7 +25,7 @@ vi.mock("./useEditorQueries", () => ({
 const node = makeRestNode();
 
 function renderGuard() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = createTestQueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
       <OpenedNodeGuard node={node}>{(freshNode) => <span>{freshNode.name}</span>}</OpenedNodeGuard>
