@@ -1,14 +1,11 @@
-import { QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getNode } from "../../api/nodes";
 import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode, makeSpace } from "../../test/fixtures";
-import { createTestQueryClient } from "../../test/queryClient";
-import { useWorkbenchNodeActions } from "./useWorkbenchNodeActions";
+import type { CanonicalNodeLoader } from "./useCanonicalNodeLoader";
+import { useWorkbenchNodeCommandActions } from "./useWorkbenchNodeCommandActions";
 
 const mocks = vi.hoisted(() => ({
   createNode: vi.fn(),
@@ -16,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   downloadFile: vi.fn(),
   moveNode: vi.fn(),
   replaceMetadata: vi.fn(),
-  revealNode: vi.fn(),
   startUpload: vi.fn(),
   updateNode: vi.fn(),
   updateNodeSearchPolicy: vi.fn(),
@@ -26,11 +22,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => ({})
-}));
-
-vi.mock("../../api/nodes", () => ({
-  getNode: vi.fn(),
-  resolveNodePath: vi.fn()
 }));
 
 vi.mock("../../api/files", () => ({
@@ -59,22 +50,19 @@ vi.mock("./useWorkbenchQueries", () => {
     useUpdateTextEncryptionMutation: () => ({
       mutate: mocks.updateTextEncryption,
       isPending: false
-    }),
-    useRevealNode: () => mocks.revealNode
+    })
   };
 });
 
-describe("useWorkbenchNodeActions", () => {
+describe("useWorkbenchNodeCommandActions", () => {
   beforeEach(() => {
     window.localStorage.clear();
     useUiStore.setState(useUiStore.getInitialState(), true);
-    vi.mocked(getNode).mockReset();
     mocks.downloadFile.mockReset().mockResolvedValue(undefined);
     mocks.createNode.mockReset();
     mocks.deleteNode.mockReset();
     mocks.moveNode.mockReset();
     mocks.replaceMetadata.mockReset();
-    mocks.revealNode.mockReset();
     mocks.startUpload.mockReset();
     mocks.updateNode.mockReset();
     mocks.updateNodeSearchPolicy.mockReset();
@@ -82,37 +70,17 @@ describe("useWorkbenchNodeActions", () => {
     mocks.updateTextEncryption.mockReset();
   });
 
-  it("reuses the canonical node query when the same summary is opened again", async () => {
-    const activeSpace = space("space-1");
-    const targetNode = node("target", activeSpace.id, "/target.md");
-    vi.mocked(getNode).mockResolvedValue(targetNode);
-    mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
-    const { result } = renderNodeActions({
-      activeSpace,
-      activeNode: null,
-      canWriteActiveSpace: true,
-      setDialog: vi.fn()
-    });
-
-    await act(async () => {
-      await result.current.openNode(targetNode);
-      await result.current.openNode(targetNode);
-    });
-
-    expect(getNode).toHaveBeenCalledOnce();
-  });
-
   it("queues a selected file with the current space snapshot", async () => {
     const activeSpace = space("space-1");
     const destinationFolder = node("reports", activeSpace.id, "/Reports", "folder");
     const setDialog = vi.fn();
     const file = new File(["data"], "source.bin", { type: "application/octet-stream" });
-    const { result } = renderNodeActions({
-        activeSpace,
-        activeNode: destinationFolder,
-        canWriteActiveSpace: true,
-        setDialog
-      });
+    const { result } = renderCommandActions({
+      activeSpace,
+      activeNode: destinationFolder,
+      canWriteActiveSpace: true,
+      setDialog
+    });
 
     act(() => { result.current.handleFileSelected(file); });
     const dialog = setDialog.mock.calls[0]?.[0];
@@ -138,7 +106,7 @@ describe("useWorkbenchNodeActions", () => {
       effective_write_locked: true
     };
     const file = new File(["data"], "source.bin");
-    const { result } = renderNodeActions({
+    const { result } = renderCommandActions({
       activeSpace,
       activeNode: lockedFolder,
       canWriteActiveSpace: true,
@@ -180,7 +148,7 @@ describe("useWorkbenchNodeActions", () => {
     };
     const setDialog = vi.fn();
     const file = new File(["data"], "source.bin");
-    const { result } = renderNodeActions({
+    const { result } = renderCommandActions({
       activeSpace,
       activeNode: lockedText,
       canWriteActiveSpace: true,
@@ -218,7 +186,7 @@ describe("useWorkbenchNodeActions", () => {
         { node_id: "folder-1", name: "Policies", path: "/Policies" }
       ]
     };
-    const { result } = renderNodeActions({
+    const { result } = renderCommandActions({
       activeSpace,
       activeNode: lockedText,
       canWriteActiveSpace: true,
@@ -238,7 +206,7 @@ describe("useWorkbenchNodeActions", () => {
     const openText = node("open", activeSpace.id, "/open.md");
     const inspectedFolder = node("folder-1", activeSpace.id, "/Policies", "folder");
     const setDialog = vi.fn();
-    const { result } = renderNodeActions({
+    const { result } = renderCommandActions({
       activeSpace,
       activeNode: openText,
       inspectedNode: inspectedFolder,
@@ -278,7 +246,7 @@ describe("useWorkbenchNodeActions", () => {
       ]
     };
     const setDialog = vi.fn();
-    const { result } = renderNodeActions({
+    const { result } = renderCommandActions({
       activeSpace,
       activeNode: directlyLockedText,
       canWriteActiveSpace: true,
@@ -313,20 +281,19 @@ describe("useWorkbenchNodeActions", () => {
       ...fileSummary,
       original_filename: "source-report.pdf"
     };
-    vi.mocked(getNode).mockResolvedValue(fileNode);
-    const { result } = renderNodeActions({
-        activeSpace,
-        activeNode: fileNode,
-        canWriteActiveSpace: true,
-        setDialog: vi.fn()
-      });
+    const loadCanonicalNode = vi.fn<CanonicalNodeLoader>().mockResolvedValue(fileNode);
+    const { result } = renderCommandActions({
+      activeSpace,
+      activeNode: fileNode,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    }, loadCanonicalNode);
 
     await act(async () => { await result.current.downloadFileNode(fileSummary); });
 
-    expect(getNode).toHaveBeenCalledWith(
-      expect.anything(),
-      activeSpace.id,
-      fileNode.id
+    expect(loadCanonicalNode).toHaveBeenCalledWith(
+      fileSummary,
+      "Could not download file"
     );
     expect(mocks.downloadFile).toHaveBeenCalledWith(
       expect.anything(),
@@ -337,18 +304,21 @@ describe("useWorkbenchNodeActions", () => {
   });
 });
 
-function renderNodeActions(
-  props: Omit<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace" | "inspectedNode">
-    & Partial<Pick<Parameters<typeof useWorkbenchNodeActions>[0], "canManageActiveSpace" | "inspectedNode">>
+type CommandActionsProps = Parameters<typeof useWorkbenchNodeCommandActions>[0];
+
+function renderCommandActions(
+  props: Omit<CommandActionsProps, "canManageActiveSpace" | "inspectedNode" | "loadCanonicalNode">
+    & Partial<Pick<CommandActionsProps, "canManageActiveSpace" | "inspectedNode">>,
+  loadCanonicalNode: CanonicalNodeLoader = vi.fn()
 ) {
-  const queryClient = createTestQueryClient();
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
   const inspectedNode = props.inspectedNode === undefined ? props.activeNode : props.inspectedNode;
   return renderHook(
-    () => useWorkbenchNodeActions({ canManageActiveSpace: true, ...props, inspectedNode }),
-    { wrapper }
+    () => useWorkbenchNodeCommandActions({
+      canManageActiveSpace: true,
+      ...props,
+      inspectedNode,
+      loadCanonicalNode
+    })
   );
 }
 
