@@ -28,6 +28,9 @@ notegate_http_requests_in_flight
   `CONNECT`, `TRACE`, or `OTHER`.
 - `status_class` is one of `1xx`, `2xx`, `3xx`, `4xx`, `5xx`, or `other`.
 - Duration is recorded in seconds using fixed buckets from 5 ms through 30 s.
+- `/metrics`, `/health`, `/ready`, and frontend static/SPA fallback requests are
+  excluded. REST, MCP, authentication, metadata, and unmatched API requests are
+  included.
 - Histogram upkeep runs every 5 seconds and follows the server's graceful-shutdown
   lifecycle, so a monitoring outage does not leave samples accumulating until the
   next scrape.

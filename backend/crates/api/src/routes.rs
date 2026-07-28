@@ -277,7 +277,9 @@ async fn log_request(
 
     async move {
         let started_at = Instant::now();
-        let request_metrics = metrics_enabled.then(|| HttpRequestMetrics::start(&method, &route));
+        let request_metrics = (metrics_enabled
+            && should_record_http_metrics(&method, &route, &path))
+        .then(|| HttpRequestMetrics::start(&method, &route));
         let response = next.run(request).await;
         let latency = started_at.elapsed();
         if let Some(request_metrics) = request_metrics {
@@ -288,6 +290,24 @@ async fn log_request(
     }
     .instrument(span)
     .await
+}
+
+fn should_record_http_metrics(method: &Method, route: &str, path: &str) -> bool {
+    if matches!(route, "/metrics" | "/health" | "/ready")
+        || matches!(path, "/metrics" | "/health" | "/ready")
+    {
+        return false;
+    }
+
+    !(route.is_empty() && matches!(*method, Method::GET | Method::HEAD) && !is_backend_path(path))
+}
+
+fn is_backend_path(path: &str) -> bool {
+    matches!(path, "/api" | "/mcp" | "/auth" | "/.well-known")
+        || path.starts_with("/api/")
+        || path.starts_with("/mcp/")
+        || path.starts_with("/auth/")
+        || path.starts_with("/.well-known/")
 }
 
 fn log_request_end(
@@ -601,6 +621,37 @@ mod tests {
             ),
             RequestLogLevel::Error,
         );
+    }
+
+    #[test]
+    fn http_metrics_exclude_control_plane_and_web_fallback_requests() {
+        for path in ["/metrics", "/health", "/ready"] {
+            assert!(!should_record_http_metrics(&Method::GET, path, path));
+        }
+        assert!(!should_record_http_metrics(
+            &Method::GET,
+            "",
+            "/assets/app.js"
+        ));
+        assert!(!should_record_http_metrics(&Method::HEAD, "", "/dashboard"));
+    }
+
+    #[test]
+    fn http_metrics_include_backend_workloads_and_unmatched_api_requests() {
+        for (method, route, path) in [
+            (Method::GET, "/api/v1/me", "/api/v1/me"),
+            (Method::POST, "/mcp", "/mcp"),
+            (Method::GET, "/auth/login", "/auth/login"),
+            (
+                Method::GET,
+                "/.well-known/oauth-protected-resource",
+                "/.well-known/oauth-protected-resource",
+            ),
+            (Method::GET, "", "/api/v1/missing"),
+            (Method::GET, "", "/mcp/missing"),
+        ] {
+            assert!(should_record_http_metrics(&method, route, path));
+        }
     }
 
     #[tokio::test]
