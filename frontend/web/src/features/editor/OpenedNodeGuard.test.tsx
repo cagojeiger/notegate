@@ -6,10 +6,19 @@ import { ApiError } from "../../api/errors";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode } from "../../test/fixtures";
 import { OpenedNodeGuard } from "./OpenedNodeGuard";
-import { useNodeFreshness } from "./useEditorQueries";
+import type { useNodeFreshness } from "./useEditorQueries";
+
+type NodeFreshnessQuery = ReturnType<typeof useNodeFreshness>;
+type NodeFreshnessQueryMock = Pick<NodeFreshnessQuery, "data" | "error">;
+
+const editorQueryMocks = vi.hoisted(() => ({
+  useNodeFreshness: vi.fn<
+    (...args: Parameters<typeof useNodeFreshness>) => NodeFreshnessQueryMock
+  >()
+}));
 
 vi.mock("./useEditorQueries", () => ({
-  useNodeFreshness: vi.fn()
+  useNodeFreshness: editorQueryMocks.useNodeFreshness
 }));
 
 const node = makeRestNode();
@@ -30,7 +39,10 @@ describe("OpenedNodeGuard", () => {
   });
 
   it("updates opened editor groups with the latest node stat", async () => {
-    vi.mocked(useNodeFreshness).mockReturnValue({ data: { ...node, name: "renamed.md" }, error: null } as never);
+    editorQueryMocks.useNodeFreshness.mockReturnValue({
+      data: { ...node, name: "renamed.md" },
+      error: null
+    });
 
     renderGuard();
 
@@ -46,7 +58,10 @@ describe("OpenedNodeGuard", () => {
         { node_id: "folder-1", name: "Policies", path: "/Policies" }
       ]
     };
-    vi.mocked(useNodeFreshness).mockReturnValue({ data: locked, error: null } as never);
+    editorQueryMocks.useNodeFreshness.mockReturnValue({
+      data: locked,
+      error: null
+    });
 
     renderGuard();
 
@@ -59,7 +74,10 @@ describe("OpenedNodeGuard", () => {
   });
 
   it("clears an opened editor group when the node was deleted elsewhere", async () => {
-    vi.mocked(useNodeFreshness).mockReturnValue({ data: undefined, error: new ApiError("not found", 404) } as never);
+    editorQueryMocks.useNodeFreshness.mockReturnValue({
+      data: undefined,
+      error: new ApiError("not found", 404)
+    });
 
     renderGuard();
 

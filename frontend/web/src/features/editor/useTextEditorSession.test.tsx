@@ -4,11 +4,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReadTextResponse, RestNode } from "../../api/types";
 import { makeRestNode } from "../../test/fixtures";
 import { useTextEditorSession } from "./useTextEditorSession";
-import { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+import type { useSaveTextDocument, useTextDocument } from "./useEditorQueries";
+
+type TextDocumentQuery = ReturnType<typeof useTextDocument>;
+type TextDocumentRefetchResult = Pick<
+  Awaited<ReturnType<TextDocumentQuery["refetch"]>>,
+  "data" | "isError"
+>;
+type TextDocumentQueryMock = Pick<
+  TextDocumentQuery,
+  "data" | "isSuccess"
+> & {
+  refetch: () => Promise<TextDocumentRefetchResult>;
+};
+type SaveTextMutation = ReturnType<typeof useSaveTextDocument>;
+type SaveTextMutationMock = Pick<SaveTextMutation, "mutate" | "isPending">;
+
+const editorQueryMocks = vi.hoisted(() => ({
+  useTextDocument: vi.fn<
+    (...args: Parameters<typeof useTextDocument>) => TextDocumentQueryMock
+  >(),
+  useSaveTextDocument: vi.fn<
+    (...args: Parameters<typeof useSaveTextDocument>) => SaveTextMutationMock
+  >()
+}));
 
 vi.mock("./useEditorQueries", () => ({
-  useTextDocument: vi.fn(),
-  useSaveTextDocument: vi.fn()
+  useTextDocument: editorQueryMocks.useTextDocument,
+  useSaveTextDocument: editorQueryMocks.useSaveTextDocument
 }));
 
 const node = makeRestNode({ content_sha256: "sha-1" });
@@ -34,7 +57,10 @@ const textResponse = {
 
 describe("useTextEditorSession", () => {
   beforeEach(() => {
-    vi.mocked(useSaveTextDocument).mockReturnValue({ mutate: vi.fn(), isPending: false } as never);
+    editorQueryMocks.useSaveTextDocument.mockReturnValue({
+      mutate: vi.fn(),
+      isPending: false
+    });
   });
 
   it("reloads a clean editor once when the server content changes", async () => {
@@ -45,13 +71,13 @@ describe("useTextEditorSession", () => {
     let currentResponse = textResponse;
     const refetch = vi.fn().mockImplementation(async () => {
       currentResponse = updatedResponse;
-      return { data: updatedResponse };
+      return { data: updatedResponse, isError: false };
     });
-    vi.mocked(useTextDocument).mockImplementation(() => ({
+    editorQueryMocks.useTextDocument.mockImplementation(() => ({
       data: currentResponse,
       isSuccess: true,
       refetch
-    }) as never);
+    }));
 
     const { result, rerender } = renderHook(
       ({ latestNode }: { latestNode?: RestNode }) => useTextEditorSession({
@@ -82,11 +108,11 @@ describe("useTextEditorSession", () => {
     const refetch = vi.fn()
       .mockResolvedValueOnce({ data: textResponse, isError: true })
       .mockResolvedValueOnce({ data: updatedResponse, isError: false });
-    vi.mocked(useTextDocument).mockReturnValue({
+    editorQueryMocks.useTextDocument.mockReturnValue({
       data: textResponse,
       isSuccess: true,
       refetch
-    } as never);
+    });
 
     const { result, rerender } = renderHook(
       ({ latestNode }: { latestNode?: RestNode }) => useTextEditorSession({
@@ -118,15 +144,15 @@ describe("useTextEditorSession", () => {
     const reload = new Promise<{ data: ReadTextResponse; isError: boolean }>((resolve) => {
       resolveReload = resolve;
     });
-    vi.mocked(useTextDocument).mockImplementation((currentNode) => currentNode.id === node.id ? {
-      data: textResponse,
-      isSuccess: true,
-      refetch: () => reload
-    } as never : {
-      data: nextResponse,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    editorQueryMocks.useTextDocument.mockImplementation((currentNode) =>
+      currentNode.id === node.id
+        ? {
+            data: textResponse,
+            isSuccess: true,
+            refetch: () => reload
+          }
+        : textDocumentQuery(nextResponse)
+    );
 
     const { result, rerender } = renderHook(
       ({ currentNode, mode }: { currentNode: RestNode; mode: "preview" | "edit" }) => useTextEditorSession({
@@ -155,11 +181,7 @@ describe("useTextEditorSession", () => {
   });
 
   it("suppresses a dismissed external update until a newer sha arrives", async () => {
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: textResponse,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    editorQueryMocks.useTextDocument.mockReturnValue(textDocumentQuery());
 
     const { result, rerender } = renderHook(
       ({ latestNode }: { latestNode?: RestNode }) => useTextEditorSession({
@@ -187,11 +209,7 @@ describe("useTextEditorSession", () => {
 
   it("leaves edit mode when the node becomes effectively write-locked", async () => {
     const onSetMode = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: textResponse,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    editorQueryMocks.useTextDocument.mockReturnValue(textDocumentQuery());
 
     const { result } = renderHook(() => useTextEditorSession({
       node: { ...node, effective_write_locked: true },
@@ -206,11 +224,7 @@ describe("useTextEditorSession", () => {
 
   it("preserves an unsaved draft when a lock arrives during editing", async () => {
     const onSetMode = vi.fn();
-    vi.mocked(useTextDocument).mockReturnValue({
-      data: textResponse,
-      isSuccess: true,
-      refetch: vi.fn()
-    } as never);
+    editorQueryMocks.useTextDocument.mockReturnValue(textDocumentQuery());
 
     const { result, rerender } = renderHook(
       ({ currentNode }: { currentNode: RestNode }) => useTextEditorSession({
@@ -236,3 +250,13 @@ describe("useTextEditorSession", () => {
     expect(result.current.canSave).toBe(true);
   });
 });
+
+function textDocumentQuery(
+  data: ReadTextResponse = textResponse
+): TextDocumentQueryMock {
+  return {
+    data,
+    isSuccess: true,
+    refetch: vi.fn().mockResolvedValue({ data, isError: false })
+  };
+}

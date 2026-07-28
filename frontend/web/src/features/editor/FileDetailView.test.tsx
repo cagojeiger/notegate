@@ -5,11 +5,29 @@ import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
 import { makeRestNode } from "../../test/fixtures";
 import { FileDetailView } from "./FileDetailView";
-import { useFilePreviewUrl } from "./useFilePreviewQueries";
+import type { useFilePreviewUrl } from "./useFilePreviewQueries";
+
+type FilePreviewQuery = ReturnType<typeof useFilePreviewUrl>;
+type FilePreviewRefetchResult = Pick<
+  Awaited<ReturnType<FilePreviewQuery["refetch"]>>,
+  "data" | "isSuccess"
+>;
+type FilePreviewQueryMock = Pick<
+  FilePreviewQuery,
+  "data" | "error" | "isError" | "isLoading"
+> & {
+  refetch: () => Promise<FilePreviewRefetchResult>;
+};
+
+const filePreviewQueryMocks = vi.hoisted(() => ({
+  useFilePreviewUrl: vi.fn<
+    (...args: Parameters<typeof useFilePreviewUrl>) => FilePreviewQueryMock
+  >()
+}));
 
 vi.mock("./useFilePreviewQueries", async (importOriginal) => ({
   ...await importOriginal<typeof import("./useFilePreviewQueries")>(),
-  useFilePreviewUrl: vi.fn()
+  useFilePreviewUrl: filePreviewQueryMocks.useFilePreviewUrl
 }));
 
 vi.mock("./PdfPreview", () => ({
@@ -20,17 +38,17 @@ vi.mock("./PdfPreview", () => ({
 
 describe("FileDetailView", () => {
   beforeEach(() => {
-    vi.mocked(useFilePreviewUrl).mockReturnValue({ data: undefined } as never);
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery());
   });
 
   it("renders a verified image from its preview URL", () => {
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       data: {
         url: "https://storage.example/image.png",
         media_type: "image/png",
         expires_at: "2026-06-13T00:15:00Z"
       }
-    } as never);
+    }));
 
     render(<FileDetailView node={fileNode({
       media_type: "text/plain",
@@ -56,13 +74,13 @@ describe("FileDetailView", () => {
   });
 
   it("renders a verified PDF from its preview URL", async () => {
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       data: {
         url: "https://storage.example/document.pdf",
         media_type: "application/pdf",
         expires_at: "2026-06-13T00:15:00Z"
       }
-    } as never);
+    }));
 
     render(<FileDetailView node={fileNode({
       name: "document.pdf",
@@ -81,11 +99,10 @@ describe("FileDetailView", () => {
   });
 
   it("shows an error when preview URL issuance fails", () => {
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
-      data: undefined,
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       isError: true,
       error: new ApiError("storage unavailable", 503)
-    } as never);
+    }));
 
     render(<FileDetailView node={fileNode()} />);
 
@@ -93,11 +110,10 @@ describe("FileDetailView", () => {
   });
 
   it("uses PDF copy for PDF preview failures", () => {
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
-      data: undefined,
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       isError: true,
       error: new ApiError("storage unavailable", 503)
-    } as never);
+    }));
 
     render(<FileDetailView node={fileNode({
       media_type: "application/pdf",
@@ -109,11 +125,10 @@ describe("FileDetailView", () => {
   });
 
   it("does not show an error when the file is not previewable", () => {
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
-      data: undefined,
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       isError: true,
       error: new ApiError("not previewable", 404)
-    } as never);
+    }));
 
     render(<FileDetailView node={fileNode({ preview_available: undefined })} />);
 
@@ -131,10 +146,10 @@ describe("FileDetailView", () => {
       data: undefined,
       error: new ApiError("storage unavailable", 503)
     });
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       data: previewData,
       refetch
-    } as never);
+    }));
     render(<FileDetailView node={fileNode()} />);
 
     fireEvent.error(screen.getByRole("img", { name: "image.png" }));
@@ -151,10 +166,10 @@ describe("FileDetailView", () => {
       expires_at: "2026-06-13T00:15:00Z"
     };
     const refetch = vi.fn().mockResolvedValue({ isSuccess: true, data: previewData });
-    vi.mocked(useFilePreviewUrl).mockReturnValue({
+    filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       data: previewData,
       refetch
-    } as never);
+    }));
     render(<FileDetailView node={fileNode()} />);
 
     fireEvent.error(screen.getByRole("img", { name: "image.png" }));
@@ -177,14 +192,14 @@ describe("FileDetailView", () => {
         }
       };
     });
-    vi.mocked(useFilePreviewUrl).mockImplementation(() => ({
+    filePreviewQueryMocks.useFilePreviewUrl.mockImplementation(() => previewQuery({
       data: {
         url: previewUrl,
         media_type: "image/png",
         expires_at: "2026-06-13T00:15:00Z"
       },
       refetch
-    } as never));
+    }));
     render(<FileDetailView node={fileNode()} />);
 
     fireEvent.error(screen.getByRole("img", { name: "image.png" }));
@@ -197,6 +212,22 @@ describe("FileDetailView", () => {
     expect(screen.queryByText("Image cannot be displayed")).not.toBeInTheDocument();
   });
 });
+
+function previewQuery(
+  overrides: Partial<FilePreviewQueryMock> = {}
+): FilePreviewQueryMock {
+  return {
+    data: undefined,
+    error: null,
+    isError: false,
+    isLoading: false,
+    refetch: vi.fn().mockResolvedValue({
+      data: undefined,
+      isSuccess: false
+    }),
+    ...overrides
+  };
+}
 
 function fileNode(overrides: Partial<RestNode> = {}): RestNode {
   return makeRestNode({
