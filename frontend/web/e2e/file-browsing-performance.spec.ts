@@ -6,6 +6,7 @@ import type {
   RestNode,
   Space
 } from "../src/api/types";
+import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -33,7 +34,7 @@ test("Recent loads a second page once, deduplicates the boundary, and renders ho
   const recentRequests: string[] = [];
   const hostileName = `"><script>window.__notegateInjected=1</script>.md`;
 
-  await routeApi(page, ({ url }) => {
+  await routeJsonApi(page, (url) => {
     if (isNodesList(url)) {
       recentRequests.push(url.search);
       if (url.searchParams.get("cursor") === "recent-cursor-1") {
@@ -68,10 +69,10 @@ test("revealing a deeply nested recent node restores expanded folders with one b
   let batchRequests = 0;
   let nestedChildrenRequests = 0;
 
-  await routeApi(page, ({ url, method, postData }) => {
-    if (method === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
+  await routeJsonApi(page, (url, request) => {
+    if (request.method() === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
       batchRequests += 1;
-      const parentIds = bodyParentIds(postData);
+      const parentIds = bodyParentIds(request.postData());
       return { results: parentIds.map((parentId) => readyResult(parentId, folders, target)) };
     }
     if (isChildren(url) && !url.pathname.includes(`/${space.root_node_id}/`)) {
@@ -95,8 +96,8 @@ test("a malformed batch response falls back to individual folder queries", async
   let batchRequests = 0;
   const requestedParents = new Set<string>();
 
-  await routeApi(page, ({ url, method }) => {
-    if (method === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
+  await routeJsonApi(page, (url, request) => {
+    if (request.method() === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
       batchRequests += 1;
       return { results: [] };
     }
@@ -115,32 +116,6 @@ test("a malformed batch response falls back to individual folder queries", async
   expect(batchRequests).toBe(1);
   expect(requestedParents).toEqual(new Set(folders.map((folder) => folder.id)));
 });
-
-type RouteRequest = {
-  url: URL;
-  method: string;
-  postData: string | null;
-};
-
-async function routeApi(
-  page: import("@playwright/test").Page,
-  responseFor: (request: RouteRequest) => unknown
-) {
-  await page.route("**/api/v1/**", async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const body = responseFor({
-      url,
-      method: request.method(),
-      postData: request.postData()
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(body)
-    });
-  });
-}
 
 function baseResponse(url: URL, rootChildren: RestNode[]) {
   if (url.pathname === "/api/v1/me") return me;

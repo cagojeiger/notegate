@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
+import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -33,14 +34,9 @@ for (const viewport of [
     const requests = new Map<string, number>();
     await page.clock.install();
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await page.route("**/api/v1/**", async (route) => {
-      const url = new URL(route.request().url());
+    await routeJsonApi(page, (url) => {
       requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(responseFor(url))
-      });
+      return responseFor(url);
     });
 
     await page.goto("/");

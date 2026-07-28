@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
+import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -140,11 +141,7 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
       body: createPdf()
     });
   });
-  await page.route("**/api/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const response = responseFor(url, previewSvg);
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
-  });
+  await routeJsonApi(page, (url) => responseFor(url, previewSvg));
 }
 
 function responseFor(url: URL, previewSvg: string) {
