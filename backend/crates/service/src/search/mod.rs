@@ -27,6 +27,14 @@ mod tree;
 
 use body_cache::SearchBodyCache;
 
+/// Process-local snapshot of the decrypted search body cache.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SearchBodyCacheStats {
+    pub entries: u64,
+    pub size_bytes: u64,
+    pub capacity_bytes: u64,
+}
+
 /// Search service. The `find`/`grep` query methods are implemented in the
 /// [`find`] and [`grep`] submodules.
 #[derive(Debug, Clone)]
@@ -48,6 +56,10 @@ impl SearchService {
             store,
             body_cache: SearchBodyCache::new(body_cache_config),
         }
+    }
+
+    pub fn body_cache_stats(&self) -> SearchBodyCacheStats {
+        self.body_cache.stats()
     }
 
     async fn resolve_scope_folder(

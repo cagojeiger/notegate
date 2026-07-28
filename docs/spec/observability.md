@@ -35,6 +35,30 @@ notegate_http_requests_in_flight
   lifecycle, so a monitoring outage does not leave samples accumulating until the
   next scrape.
 
+## Resource utilization metrics
+
+```text
+notegate_db_pool_connections
+  labels: state (in_use, idle)
+
+notegate_db_pool_max_connections
+
+notegate_search_body_cache_size_bytes
+notegate_search_body_cache_capacity_bytes
+notegate_search_body_cache_entries
+```
+
+These gauges are read only when `/metrics` is scraped; application requests do not
+update them. DB pool utilization can be derived from `in_use / max_connections`.
+Cache utilization can be derived from `size_bytes / capacity_bytes`. Cache size and
+entry count are process-local Moka estimates and may briefly lag concurrent cache
+maintenance. A disabled cache reports zero capacity, size, and entries.
+
+SQLx does not expose the pool's waiter count through the current shared-pool API.
+NoteGate therefore does not publish a synthetic saturation value. Acquire wait
+duration can be added later if connection acquisition is centralized behind an
+instrumented boundary.
+
 ## Cardinality and data policy
 
 Metric labels must be bounded and must not contain:
