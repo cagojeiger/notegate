@@ -9,7 +9,10 @@ import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode, makeSpace } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
-import type { CanonicalNodeLoader } from "./useCanonicalNodeLoader";
+import {
+  type CanonicalNodeLoader,
+  useCanonicalNodeLoader
+} from "./useCanonicalNodeLoader";
 import { useWorkbenchNodeNavigationActions } from "./useWorkbenchNodeNavigationActions";
 
 const mocks = vi.hoisted(() => ({
@@ -178,6 +181,21 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
   });
 
+  it("reuses the canonical node query when the same summary is opened again", async () => {
+    const activeSpace = space("space-1");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    vi.mocked(getNode).mockResolvedValue(targetNode);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
+    const { result } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    await act(async () => {
+      await result.current.openNode(targetNode);
+      await result.current.openNode(targetNode);
+    });
+
+    expect(getNode).toHaveBeenCalledOnce();
+  });
+
   it("navigates backward using a fresh canonical node", async () => {
     const activeSpace = space("space-1");
     const first = node("first", activeSpace.id, "/first.md");
@@ -282,6 +300,17 @@ function renderNavigationActions(
     () => useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode }),
     { wrapper }
   );
+}
+
+function renderNavigationActionsWithCanonicalLoader(activeSpace: Space) {
+  const queryClient = createTestQueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return renderHook(() => {
+    const loadCanonicalNode = useCanonicalNodeLoader();
+    return useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode });
+  }, { wrapper });
 }
 
 function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
