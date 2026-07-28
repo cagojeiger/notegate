@@ -1,6 +1,7 @@
 //! Prometheus recorder, scrape endpoint, HTTP RED, and resource utilization metrics.
 
-use std::time::Duration;
+use std::future::Future;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::{Extension, State};
@@ -12,6 +13,9 @@ use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use notegate_service::search::SearchBodyCacheStats;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer};
 
 use crate::state::AppState;
 
@@ -44,6 +48,18 @@ pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
         )?
         .set_buckets_for_metric(
             Matcher::Full("notegate_search_stage_duration".to_owned()),
+            SEARCH_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_mcp_tool_duration".to_owned()),
+            HTTP_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_db_pool_acquire_duration".to_owned()),
+            SEARCH_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_text_decryption_duration".to_owned()),
             SEARCH_DURATION_BUCKETS_SECONDS,
         )?
         .install_recorder()?;
@@ -125,6 +141,164 @@ fn describe_metrics() {
         "notegate_search_cache_lookups",
         "Grep decrypted-body cache lookups by bounded result"
     );
+    metrics::describe_counter!(
+        "notegate_mcp_tool_calls",
+        "Completed MCP tool calls by bounded tool and outcome"
+    );
+    metrics::describe_histogram!(
+        "notegate_mcp_tool_duration",
+        Unit::Seconds,
+        "MCP tool execution duration in seconds"
+    );
+    metrics::describe_histogram!(
+        "notegate_db_pool_acquire_duration",
+        Unit::Seconds,
+        "SQLx database connection acquisition duration in seconds"
+    );
+    metrics::describe_counter!(
+        "notegate_db_pool_acquire_timeouts",
+        "Database connection acquisition timeouts"
+    );
+    metrics::describe_counter!(
+        "notegate_text_decryptions",
+        "Server-managed text decryption attempts by bounded boundary and outcome"
+    );
+    metrics::describe_counter!(
+        "notegate_text_decrypted_bytes",
+        Unit::Bytes,
+        "Plaintext bytes produced by successful server-managed text decryptions"
+    );
+    metrics::describe_histogram!(
+        "notegate_text_decryption_duration",
+        Unit::Seconds,
+        "Server-managed text decryption duration in seconds"
+    );
+}
+
+pub(crate) async fn observe_mcp_tool<T, E>(
+    enabled: bool,
+    tool: &'static str,
+    future: impl Future<Output = Result<T, E>>,
+) -> Result<T, E> {
+    if !enabled {
+        return future.await;
+    }
+
+    let started = Instant::now();
+    let result = future.await;
+    let outcome = if result.is_ok() { "success" } else { "error" };
+    metrics::counter!(
+        "notegate_mcp_tool_calls",
+        "tool" => tool,
+        "outcome" => outcome
+    )
+    .increment(1);
+    metrics::histogram!(
+        "notegate_mcp_tool_duration",
+        "tool" => tool,
+        "outcome" => outcome
+    )
+    .record(started.elapsed().as_secs_f64());
+    result
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct InternalMetricsLayer;
+
+impl<S> Layer<S> for InternalMetricsLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
+        match event.metadata().target() {
+            "sqlx::pool::acquire" => record_pool_acquire_event(event),
+            "notegate_db::pool" => {
+                metrics::counter!("notegate_db_pool_acquire_timeouts").increment(1);
+            }
+            "notegate_db::crypto" => record_text_decryption_event(event),
+            _ => {}
+        }
+    }
+}
+
+#[derive(Default)]
+struct InternalMetricsVisitor {
+    acquire_seconds: Option<f64>,
+    duration_seconds: Option<f64>,
+    byte_len: Option<u64>,
+    boundary: Option<String>,
+    outcome: Option<String>,
+}
+
+impl Visit for InternalMetricsVisitor {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        match field.name() {
+            // SQLx 0.8 emits the misspelled `aquired_after_secs` field.
+            "aquired_after_secs" | "acquired_after_secs" => self.acquire_seconds = Some(value),
+            "duration_seconds" => self.duration_seconds = Some(value),
+            _ => {}
+        }
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if field.name() == "byte_len" {
+            self.byte_len = Some(value);
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        match field.name() {
+            "boundary" => self.boundary = Some(value.to_owned()),
+            "outcome" => self.outcome = Some(value.to_owned()),
+            _ => {}
+        }
+    }
+
+    fn record_debug(&mut self, _field: &Field, _value: &dyn std::fmt::Debug) {}
+}
+
+fn record_pool_acquire_event(event: &Event<'_>) {
+    let mut visitor = InternalMetricsVisitor::default();
+    event.record(&mut visitor);
+    if let Some(seconds) = visitor.acquire_seconds {
+        metrics::histogram!("notegate_db_pool_acquire_duration").record(seconds);
+    }
+}
+
+fn record_text_decryption_event(event: &Event<'_>) {
+    let mut visitor = InternalMetricsVisitor::default();
+    event.record(&mut visitor);
+    let Some(duration_seconds) = visitor.duration_seconds else {
+        return;
+    };
+    let boundary = match visitor.boundary.as_deref() {
+        Some("search_body_load") => "search_body_load",
+        _ => "other",
+    };
+    let outcome = match visitor.outcome.as_deref() {
+        Some("success") => "success",
+        _ => "error",
+    };
+
+    metrics::counter!(
+        "notegate_text_decryptions",
+        "boundary" => boundary,
+        "outcome" => outcome
+    )
+    .increment(1);
+    metrics::histogram!(
+        "notegate_text_decryption_duration",
+        "boundary" => boundary,
+        "outcome" => outcome
+    )
+    .record(duration_seconds);
+    if outcome == "success" {
+        metrics::counter!(
+            "notegate_text_decrypted_bytes",
+            "boundary" => boundary
+        )
+        .increment(visitor.byte_len.unwrap_or(0));
+    }
 }
 
 pub(crate) fn spawn_upkeep(
@@ -291,6 +465,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use axum::body::to_bytes;
+    use tracing_subscriber::layer::SubscriberExt as _;
 
     use super::*;
 
@@ -312,6 +487,21 @@ mod tests {
             .unwrap()
             .set_buckets_for_metric(
                 Matcher::Full("notegate_search_stage_duration".to_owned()),
+                SEARCH_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_mcp_tool_duration".to_owned()),
+                HTTP_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_db_pool_acquire_duration".to_owned()),
+                SEARCH_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_text_decryption_duration".to_owned()),
                 SEARCH_DURATION_BUCKETS_SECONDS,
             )
             .unwrap()
@@ -378,6 +568,40 @@ mod tests {
             metrics::counter!("notegate_search_body_load_bytes", "operation" => "grep")
                 .increment(32);
             metrics::counter!("notegate_search_cache_lookups", "result" => "hit").increment(3);
+            metrics::counter!(
+                "notegate_mcp_tool_calls",
+                "tool" => "search",
+                "outcome" => "success"
+            )
+            .increment(1);
+            metrics::histogram!(
+                "notegate_mcp_tool_duration",
+                "tool" => "search",
+                "outcome" => "success"
+            )
+            .record(0.015);
+
+            let subscriber = tracing_subscriber::registry().with(InternalMetricsLayer);
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::trace!(
+                    target: "sqlx::pool::acquire",
+                    aquired_after_secs = 0.002,
+                    "acquired connection"
+                );
+                tracing::trace!(
+                    target: "notegate_db::crypto",
+                    event = "text.decrypt",
+                    boundary = "search_body_load",
+                    outcome = "success",
+                    byte_len = 128_u64,
+                    duration_seconds = 0.001,
+                );
+                tracing::warn!(
+                    target: "notegate_db::pool",
+                    event = "acquire.timeout",
+                    "database pool acquisition timed out"
+                );
+            });
         });
 
         let response = scrape_response(&handle);
@@ -411,5 +635,18 @@ mod tests {
         assert!(body.contains("notegate_search_scanned_bytes_total{operation=\"grep\"} 64"));
         assert!(body.contains("notegate_search_body_load_bytes_total{operation=\"grep\"} 32"));
         assert!(body.contains("notegate_search_cache_lookups_total{result=\"hit\"} 3"));
+        assert!(
+            body.contains("notegate_mcp_tool_calls_total{tool=\"search\",outcome=\"success\"} 1")
+        );
+        assert!(body.contains("notegate_mcp_tool_duration_seconds_bucket"));
+        assert!(body.contains("notegate_db_pool_acquire_duration_seconds_bucket"));
+        assert!(body.contains("notegate_db_pool_acquire_timeouts_total 1"));
+        assert!(body.contains(
+            "notegate_text_decryptions_total{boundary=\"search_body_load\",outcome=\"success\"} 1"
+        ));
+        assert!(
+            body.contains("notegate_text_decrypted_bytes_total{boundary=\"search_body_load\"} 128")
+        );
+        assert!(body.contains("notegate_text_decryption_duration_seconds_bucket"));
     }
 }

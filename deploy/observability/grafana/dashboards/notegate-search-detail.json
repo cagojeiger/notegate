@@ -32,6 +32,16 @@
       "url": "/d/notegate-service-overview/notegate-service-overview"
     },
     {
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Internals Detail →",
+      "type": "link",
+      "url": "/d/notegate-internals-detail/notegate-internals-detail"
+    },
+    {
       "icon": "external link",
       "includeVars": false,
       "keepTime": true,
@@ -62,7 +72,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Completed find and grep operations per second.",
+      "description": "Meaning: completed find and grep operations per second. A high rate is search load, not failure. If it rises with non-success rate or p95 latency, split by operation/mode and inspect the corresponding stage chart.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -122,7 +132,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Share of completed operations whose outcome is not success.",
+      "description": "Meaning: share of search operations ending as invalid, not-found, forbidden, conflict, or internal instead of success. Sustained growth needs classification in application logs: caller/input outcomes differ from internal failures. Compare operation/mode rate and HTTP status-class errors.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -192,7 +202,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "95th percentile end-to-end search operation latency.",
+      "description": "Meaning: 95% of completed searches are faster than this end-to-end value. A sustained rise relative to baseline is a search symptom. Check find/grep stage p95 first, then candidates/results, body-load bytes, and cache behavior.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -286,7 +296,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Operation throughput split by find/grep and match mode.",
+      "description": "Use this to identify which operation and match mode drives search load. A regex-heavy spike can increase matcher CPU; a grep-heavy spike also exercises body loading and decryption. Correlate the dominant series with stage latency rather than treating volume alone as failure.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -349,7 +359,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "End-to-end search latency percentiles across the selected operations.",
+      "description": "Compare p50, p95, and p99. A widening p99/p95 tail with stable p50 indicates intermittent expensive queries or contention; all percentiles rising suggests broad load or dependency slowdown. Continue with stage latency.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -485,7 +495,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "95th percentile latency for bounded find pipeline stages.",
+      "description": "Use this to locate slow find work. High candidate_query suggests recursive tree/DB cost; high prepare or match_reduce suggests matcher/filter CPU; high hydrate suggests result metadata loading. Confirm with DB acquire latency and candidate volume.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -545,7 +555,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "95th percentile latency for bounded grep pipeline stages.",
+      "description": "Use this to locate slow grep work. High candidate_query suggests tree/DB candidate cost; cache_lookup points to cache/coordination; body_load points to DB transfer plus decryption; match_reduce points to matcher CPU; hydrate points to result loading.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -618,7 +628,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Candidate rows processed and result nodes returned per second.",
+      "description": "Meaning: search candidates considered versus results returned. A large sustained candidate-to-result gap means low selectivity and wasted scan work, especially when latency also rises. Check query mode, path filters, candidate_query, and match_reduce.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -749,7 +759,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Plaintext matching throughput and bytes loaded through the database body boundary.",
+      "description": "Meaning: plaintext bytes scanned by grep versus bytes loaded from the DB body boundary. High values are workload. If DB body-load bytes approach scanned bytes and latency rises, cache reuse is low; check DB Load Avoidance, cache misses, decryption, and DB acquire latency.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -863,7 +873,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Share of grep body lookups that avoid a database body load through a direct hit or a coalesced concurrent load.",
+      "description": "Meaning: share of grep body lookups served by a cache hit or coalesced concurrent load. Higher is generally better. A sustained drop means more DB transfer and decryption; check miss rate, cache occupancy, document-change churn, and whether processes were recently restarted.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -946,7 +956,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Grep decrypted-body cache lookups per second by hit, miss, or coalesced result.",
+      "description": "Interpretation: hit avoids DB/decryption; miss performs a body load; coalesced means another concurrent request is already loading the same body. Miss spikes after restart or document changes are expected; sustained misses with a warm cache suggest eviction, low reuse, or high change churn.",
       "fieldConfig": {
         "defaults": {
           "color": {

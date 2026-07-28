@@ -56,7 +56,8 @@ pnpm web:dev
 Open [http://localhost:5173](http://localhost:5173). For the production-like Docker
 stack, run `make up` and open [NoteGate](http://localhost:9191) or its provisioned
 [Grafana service dashboard](http://localhost:3000/d/notegate-service-overview)
-and [search detail dashboard](http://localhost:3000/d/notegate-search-detail).
+with linked [search detail](http://localhost:3000/d/notegate-search-detail) and
+[internals detail](http://localhost:3000/d/notegate-internals-detail) dashboards.
 
 See the [development guide](docs/development.md) for architecture, configuration, service URLs, and checks.
 

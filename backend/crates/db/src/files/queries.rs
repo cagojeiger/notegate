@@ -967,6 +967,7 @@ pub mod search {
     use sqlx::FromRow;
     use sqlx::PgPool;
     use std::collections::HashMap;
+    use std::time::Instant;
     use uuid::Uuid;
 
     use super::super::error::map_sqlx_error;
@@ -1329,6 +1330,7 @@ pub mod search {
         space_id: Uuid,
         candidates: &[(Uuid, String, i64)],
         max_bytes: i64,
+        metrics_enabled: bool,
     ) -> Result<HashMap<Uuid, TextObject>> {
         if candidates.is_empty() {
             return Ok(HashMap::new());
@@ -1389,7 +1391,22 @@ pub mod search {
 
         let mut texts = HashMap::with_capacity(rows.len());
         for row in rows {
-            let text = row.into_text(crypto)?;
+            let byte_len = u64::try_from(row.byte_len).unwrap_or(0);
+            let started =
+                (metrics_enabled && row.at_rest_encryption == "server").then(Instant::now);
+            let result = row.into_text(crypto);
+            if let Some(started) = started {
+                let outcome = if result.is_ok() { "success" } else { "error" };
+                tracing::trace!(
+                    target: "notegate_db::crypto",
+                    event = "text.decrypt",
+                    boundary = "search_body_load",
+                    outcome,
+                    byte_len,
+                    duration_seconds = started.elapsed().as_secs_f64(),
+                );
+            }
+            let text = result?;
             texts.insert(text.node_id, text);
         }
         Ok(texts)

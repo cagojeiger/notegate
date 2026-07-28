@@ -30,7 +30,7 @@
 ## Information architecture
 
 - Primary navigation: Space Library/Workbench switch, Pinned Space rail, Files/Recent primary sidebar, editor groups, Inspector, Settings. An active Unpinned Space remains in the rail until the user changes destination, without changing its user MCP visibility.
-- Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces; Grafana Service Overview with Health, RED, resource/USE signals, and instance health; a separately linked Search Detail dashboard for `find` and `grep`.
+- Core routes/screens: AuthScreen and AppShell with Library and Workbench surfaces; Grafana Service Overview with Health, RED, resource/USE signals, and process fleet health; separately linked Search Detail for `find`/`grep` and Internals Detail for MCP, database-pool, and text-decryption diagnostics.
 - Content hierarchy: Product identity and current surface in the title bar; all owned Spaces in one user-ordered Library grid; Space capacity and manual usage checks in the selected Space Inspector; node content in the editor; identity, change protection, settings, metadata, and secondary details in that order in the Node Inspector; app state in the status bar or transient status surfaces. Navigation pinning is separate from User MCP access.
 
 ## Design principles
@@ -89,7 +89,7 @@
 
 - Tone: Short, direct, calm.
 - Terminology: `NoteGate`, `Google`, `space`, `node`, `Files`, `Recent`, and `Inspector`.
-- Microcopy rules: State the user action, not the authentication plumbing. Avoid persistent instructional copy when placement, labels, and contextual help can explain the interaction. The login CTA is `Continue with Google`; AuthGate is not presented as a user-facing provider.
+- Microcopy rules: State the user action, not the authentication plumbing. Avoid persistent instructional copy when placement, labels, and contextual help can explain the interaction. Operational panel help follows `meaning → unusual signal → check next`, distinguishes load from failure, and avoids fixed alert thresholds until a measured baseline or SLO exists. The login CTA is `Continue with Google`; AuthGate is not presented as a user-facing provider.
 
 ## Implementation constraints
 

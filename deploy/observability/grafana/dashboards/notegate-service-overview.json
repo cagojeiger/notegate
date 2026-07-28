@@ -32,6 +32,16 @@
       "url": "/d/notegate-search-detail/notegate-search-detail"
     },
     {
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": false,
+      "title": "Internals Detail →",
+      "type": "link",
+      "url": "/d/notegate-internals-detail/notegate-internals-detail"
+    },
+    {
       "icon": "external link",
       "includeVars": false,
       "keepTime": true,
@@ -62,7 +72,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Percentage of selected NoteGate process targets currently reachable by Prometheus.",
+      "description": "Meaning: percentage of selected NoteGate process targets currently reachable by Prometheus. Anything below 100% means at least one process or metrics path is unavailable. Check Unhealthy Processes and Scrape Health by Instance, then container/process and network logs.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -130,7 +140,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Completed NoteGate HTTP requests per second across selected replicas.",
+      "description": "Meaning: completed HTTP requests per second across selected processes. A high rate is load, not an incident by itself. If it rises with p95 latency, requests in flight, 5xx, or DB utilization, follow those signals to the bottleneck.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -194,7 +204,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Share of completed HTTP requests returning a 5xx response.",
+      "description": "Meaning: share of completed HTTP requests returning server-side 5xx responses. Sustained non-zero values indicate service or dependency failure. Check HTTP Error Rate, the affected route in logs, DB timeouts, and process health.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -267,7 +277,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "95th percentile handler response latency across selected routes.",
+      "description": "Meaning: 95% of completed HTTP requests are faster than this handler latency. A sustained rise relative to baseline is a symptom, not a cause. Check route rate/percentiles, requests in flight, DB pool, then Search or Internals Detail.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -363,7 +373,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Completed request rate grouped by bounded Axum route template.",
+      "description": "Use this to identify which bounded route drives load. A route spike is only problematic when accompanied by latency, errors, or saturation. For /mcp, continue to Internals Detail; for search-heavy traffic, continue to Search Detail.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -456,7 +466,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Aggregate response latency percentiles across selected NoteGate processes.",
+      "description": "Compare p50, p95, and p99. A widening tail with stable p50 indicates intermittent slow requests; all percentiles rising suggests broad load or dependency pressure. Correlate with route rate, DB acquire latency, and search stages.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -611,7 +621,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Client and server error response rates by bounded status class.",
+      "description": "Interpretation: 5xx is server/dependency failure; 4xx is commonly authentication, permission, input, or missing-resource behavior and may be expected. A sustained change needs route and log correlation before treating it as an incident.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -748,7 +758,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "HTTP requests currently executing in selected NoteGate processes.",
+      "description": "Meaning: HTTP requests currently executing. A sustained rise with flat completion rate or rising p95 indicates queueing, blocking work, or dependency slowdown. Check DB pool utilization/acquire latency, Search Detail, and process CPU.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -812,7 +822,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Checked-out DB connections divided by configured pool capacity.",
+      "description": "Meaning: checked-out DB connections divided by configured capacity. High utilization alone can be normal. Sustained near-capacity usage with rising acquire latency or timeouts indicates pool or PostgreSQL saturation; inspect Internals Detail before increasing pool size.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -885,7 +895,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Cache occupancy is informational: a full TinyLFU cache is not itself an error.",
+      "description": "Meaning: approximate decrypted grep-body cache bytes divided by capacity. A full TinyLFU cache is not itself an error because admission and eviction are expected. Investigate only when high occupancy coincides with low DB Load Avoidance, sustained misses, or latency growth.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -950,7 +960,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Current checked-out and idle PostgreSQL connections across selected replicas.",
+      "description": "Interpretation: in_use connections serve work; idle connections are reserved capacity. in_use approaching the max with rising acquire latency indicates contention; many idle connections are not saturation. Check Internals DB percentiles and PostgreSQL health.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1053,7 +1063,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Approximate decrypted body cache bytes and configured capacity across selected replicas.",
+      "description": "Compare used bytes with configured capacity across processes. Near-capacity usage means eviction pressure, not automatic failure. Check Search Detail: good DB Load Avoidance means the cache is still effective; sustained misses and body loads indicate insufficient reuse or capacity.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1200,7 +1210,175 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Prometheus scrape health for each Docker Compose web replica.",
+      "description": "Meaning: process targets currently discovered by Prometheus. Compare this with the expected replica count. Too few means discovery/deployment loss; too many may mean an unintended rollout overlap. Then check Healthy Processes and your deployment platform.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count(up{job=\"notegate\", instance=~\"$instance\"}) or vector(0)",
+          "instant": false,
+          "legendFormat": "processes",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Discovered Processes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Meaning: discovered process targets currently reachable by Prometheus. This should match Discovered Processes. A lower value means one or more processes, networks, or /metrics endpoints are unavailable; identify them in Scrape Health by Instance.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(up{job=\"notegate\", instance=~\"$instance\"}) or vector(0)",
+          "instant": false,
+          "legendFormat": "healthy",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Healthy Processes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Meaning: discovered targets that Prometheus cannot scrape. Any value above zero needs investigation. Use Scrape Health by Instance to identify the process, then check process health, /metrics availability, DNS/networking, and deployment events.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "id": 22,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(count(up{job=\"notegate\", instance=~\"$instance\"}) - sum(up{job=\"notegate\", instance=~\"$instance\"})) or vector(0)",
+          "instant": false,
+          "legendFormat": "unhealthy",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Unhealthy Processes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Use this to identify the exact process target behind availability or fleet-count problems. Down means Prometheus could not scrape /metrics; it does not by itself distinguish a stopped process from DNS, network, or endpoint failure. Check target error details and process logs.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1276,7 +1454,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 37
       },
       "id": 15,
       "options": {

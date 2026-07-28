@@ -34,6 +34,7 @@ pub struct FilesRepo {
     pool: PgPool,
     limits: Limits,
     crypto: PiiCrypto,
+    metrics_enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,7 +87,13 @@ impl FilesRepo {
             pool,
             limits,
             crypto,
+            metrics_enabled: false,
         }
+    }
+
+    pub fn with_metrics_enabled(mut self, enabled: bool) -> Self {
+        self.metrics_enabled = enabled;
+        self
     }
 }
 
@@ -384,6 +391,7 @@ impl FilesRepo {
             space_id,
             candidates,
             max_bytes,
+            self.metrics_enabled,
         )
         .await
     }

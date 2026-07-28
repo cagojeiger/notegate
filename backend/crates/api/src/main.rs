@@ -7,7 +7,9 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::{EnvFilter, Layer as _, util::SubscriberInitExt as _};
 
 mod auth;
 mod error;
@@ -40,9 +42,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Load `.env` for local development; absence is fine in production.
     let _ = dotenvy::dotenv();
-    init_tracing();
 
     let config = Config::load()?;
+    init_tracing(config.metrics_enabled);
     let metrics = observability::install(config.metrics_enabled)?;
 
     // fail-fast: install the SIGTERM handler during boot so a failure here
@@ -212,21 +214,40 @@ impl ShutdownSignals {
     }
 }
 
-fn init_tracing() {
+fn init_tracing(metrics_enabled: bool) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_error| {
         EnvFilter::new("notegate_api=info,notegate_db=info,tower_http=info")
     });
 
     let result = if std::env::var("LOG_FORMAT").as_deref() == Ok("json") {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
+        let internal_metrics =
+            observability::InternalMetricsLayer.with_filter(filter_fn(move |metadata| {
+                internal_metrics_event(metrics_enabled, metadata)
+            }));
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().json().with_filter(filter))
+            .with(internal_metrics)
             .try_init()
     } else {
-        tracing_subscriber::fmt().with_env_filter(filter).try_init()
+        let internal_metrics =
+            observability::InternalMetricsLayer.with_filter(filter_fn(move |metadata| {
+                internal_metrics_event(metrics_enabled, metadata)
+            }));
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_filter(filter))
+            .with(internal_metrics)
+            .try_init()
     };
 
     if let Err(error) = result {
         eprintln!("failed to initialize tracing: {error}");
     }
+}
+
+fn internal_metrics_event(metrics_enabled: bool, metadata: &tracing::Metadata<'_>) -> bool {
+    metrics_enabled
+        && matches!(
+            metadata.target(),
+            "sqlx::pool::acquire" | "notegate_db::pool" | "notegate_db::crypto"
+        )
 }
