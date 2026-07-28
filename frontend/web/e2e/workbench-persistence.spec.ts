@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
+import { routeJsonApi } from "./support/api";
 import { usageResponse } from "./support/usage";
 
 const me: Me = {
@@ -100,15 +101,7 @@ test("restores the saved workbench before showing the app and persists panel tog
 });
 
 async function mockApi(page: import("@playwright/test").Page) {
-  await page.route("**/api/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    const response = responseFor(url);
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(response)
-    });
-  });
+  await routeJsonApi(page, (url) => responseFor(url));
 }
 
 function responseFor(url: URL) {
