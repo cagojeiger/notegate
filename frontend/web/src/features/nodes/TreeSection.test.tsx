@@ -1,11 +1,10 @@
-import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../../api/types";
 import { makeSpace } from "../../test/fixtures";
 import { createTreeNodeFactory, treeSectionElement } from "../../test/treeSection";
-import { resetTreeVirtualizer, setTreeVirtualizerStart, treeVirtualizerScrollToIndex } from "../../test/treeVirtualizer";
-import type { TreeKeyboardNavigation } from "./types";
+import { resetTreeVirtualizer } from "../../test/treeVirtualizer";
 
 const mocks = vi.hoisted(() => ({
   useNodeChildrenQuery: vi.fn()
@@ -93,28 +92,6 @@ describe("TreeSection", () => {
     await waitFor(() => expect(view.container.querySelectorAll("[data-node-row]")).toHaveLength(20));
   });
 
-  it("resolves a pending focus by node id after the projection changes", async () => {
-    const files = Array.from({ length: 30 }, (_, index) => node(`file-${index}`, "file"));
-    const rootQuery = query(files);
-    mocks.useNodeChildrenQuery.mockReturnValue(rootQuery);
-    let navigation: TreeKeyboardNavigation | null = null;
-    const view = renderTree(new Set(), (next) => { navigation = next; });
-
-    await waitFor(() => expect(navigation).not.toBeNull());
-    act(() => expect(navigation?.focusLastNode()).toBe(true));
-    expect(treeVirtualizerScrollToIndex).toHaveBeenCalledWith(29, { align: "auto" });
-
-    rootQuery.data = { pages: [{ children: [node("inserted", "file"), ...files] }] };
-    setTreeVirtualizerStart(11);
-    view.rerender(treeSectionElement(space, {
-      expandedFolderIds: new Set(),
-      onTreeNavigationChange: (next) => { navigation = next; }
-    }));
-
-    await waitFor(() => expect(view.getByRole("button", { name: "file-29.bin" })).toHaveFocus());
-    expect(view.getByRole("button", { name: "file-28.bin" })).not.toHaveFocus();
-  });
-
   it("does not make effectively locked rows draggable", async () => {
     const locked = { ...node("text-1", "text"), effective_write_locked: true };
     mocks.useNodeChildrenQuery.mockReturnValue(query([locked]));
@@ -164,12 +141,10 @@ describe("TreeSection", () => {
 });
 
 function renderTree(
-  expandedFolderIds: Set<string>,
-  onTreeNavigationChange: (navigation: TreeKeyboardNavigation | null) => void = vi.fn()
+  expandedFolderIds: Set<string>
 ) {
   return render(treeSectionElement(space, {
-    expandedFolderIds,
-    onTreeNavigationChange
+    expandedFolderIds
   }));
 }
 

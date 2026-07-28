@@ -1,3 +1,4 @@
+import type { Range } from "@tanstack/react-virtual";
 import { vi } from "vitest";
 
 const TREE_ROW_SIZE = 36;
@@ -17,23 +18,32 @@ export function setTreeVirtualizerStart(index: number) {
   visibleStart = index;
 }
 
-export function defaultRangeExtractor({ startIndex, endIndex }: { startIndex: number; endIndex: number }) {
+export function defaultRangeExtractor({ startIndex, endIndex }: Range) {
   return Array.from({ length: endIndex - startIndex + 1 }, (_, index) => startIndex + index);
 }
 
-export function useVirtualizer({ count, getItemKey }: {
+export function useVirtualizer({ count, getItemKey, rangeExtractor = defaultRangeExtractor }: {
   count: number;
   getItemKey: (index: number) => string | number;
+  rangeExtractor?: (range: Range) => number[];
 }) {
   return {
     getTotalSize: () => count * TREE_ROW_SIZE,
-    getVirtualItems: () => Array.from(
-      { length: Math.min(Math.max(count - visibleStart, 0), visibleLimit) },
-      (_, offset) => {
-        const index = visibleStart + offset;
-        return { index, key: getItemKey(index), size: TREE_ROW_SIZE, start: index * TREE_ROW_SIZE };
-      }
-    ),
+    getVirtualItems: () => {
+      if (count <= visibleStart || visibleLimit <= 0) return [];
+      const endIndex = Math.min(visibleStart + visibleLimit - 1, count - 1);
+      return rangeExtractor({
+        startIndex: visibleStart,
+        endIndex,
+        overscan: 0,
+        count
+      }).map((index) => ({
+        index,
+        key: getItemKey(index),
+        size: TREE_ROW_SIZE,
+        start: index * TREE_ROW_SIZE
+      }));
+    },
     scrollToIndex: treeVirtualizerScrollToIndex
   };
 }
