@@ -1,11 +1,11 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
 import type { ApiClient } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { filePreviewStaleTime, getFilePreviewUrl } from "../../api/files";
-import { updateNodeCaches } from "../../api/nodeCache";
+import { updateExistingNodeCaches, updateNodeCaches } from "../../api/nodeCache";
 import { getNode } from "../../api/nodes";
 import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
@@ -19,10 +19,46 @@ export function useFilePreviewUrl(node: RestNode) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const previewKind = filePreviewKindForNode(node);
-  return useQuery({
+  const canonicalState = queryClient.getQueryState(queryKeys.node(node.space_id, node.id));
+  const previewQuery = useQuery({
     ...filePreviewQueryOptions(client, queryClient, node, previewKind ?? "image"),
     enabled: previewKind !== null
   });
+
+  useEffect(() => {
+    const preview = previewQuery.data;
+    if (!preview || previewKind === null) return;
+    refreshDiscoveredPreviewState(queryClient, node, preview.media_type, previewKind);
+    if (previewKind !== "image") return;
+
+    const canonicalNodeKey = queryKeys.node(node.space_id, node.id);
+    const currentCanonicalNode = queryClient.getQueryData<RestNode>(canonicalNodeKey);
+    const currentCanonicalState = queryClient.getQueryState(canonicalNodeKey);
+    if (!currentCanonicalNode
+      || currentCanonicalState?.status !== "success"
+      || currentCanonicalState.fetchStatus !== "idle"
+      || currentCanonicalState.isInvalidated) return;
+
+    queryClient.setQueryData<BatchFilePreviewItem>(
+      queryKeys.markdownImagePreview(node.space_id, currentCanonicalNode.path),
+      {
+        path: currentCanonicalNode.path,
+        status: "ready",
+        node_id: currentCanonicalNode.id,
+        media_type: preview.media_type,
+        url: preview.url,
+        expires_at: preview.expires_at
+      }
+    );
+  }, [
+    canonicalState,
+    node,
+    previewKind,
+    previewQuery.data,
+    queryClient
+  ]);
+
+  return previewQuery;
 }
 
 export function useMarkdownImageLoader(sourceNode: RestNode) {
@@ -72,7 +108,6 @@ function filePreviewQueryOptions(
     queryFn: async () => {
       try {
         const preview = await getFilePreviewUrl(client, node.space_id, node.id, previewKind);
-        refreshDiscoveredPreviewState(queryClient, node, preview.media_type, previewKind);
         return preview;
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
@@ -144,10 +179,24 @@ function refreshDiscoveredPreviewState(
     && node.file_preview_kind === nextPreviewKind
     && (!detectedMediaType || node.detected_media_type === detectedMediaType)) return;
 
-  updateNodeCaches(queryClient, node, (current) => ({
+  const canonicalKey = queryKeys.node(node.space_id, node.id);
+  const canonicalState = queryClient.getQueryState(canonicalKey);
+  const keepCanonicalInvalidated = canonicalState !== undefined && (
+    canonicalState.status !== "success"
+    || canonicalState.fetchStatus !== "idle"
+    || canonicalState.isInvalidated
+  );
+  updateExistingNodeCaches(queryClient, node.space_id, node.id, (current) => ({
     ...current,
     detected_media_type: detectedMediaType ?? current.detected_media_type ?? node.detected_media_type,
     preview_available: previewAvailable,
     file_preview_kind: nextPreviewKind
   }));
+  if (keepCanonicalInvalidated) {
+    void queryClient.invalidateQueries({
+      queryKey: canonicalKey,
+      exact: true,
+      refetchType: "none"
+    });
+  }
 }

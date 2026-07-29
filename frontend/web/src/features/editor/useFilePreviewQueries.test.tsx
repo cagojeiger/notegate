@@ -129,8 +129,73 @@ describe("useMarkdownImageLoader", () => {
 
 describe("useFilePreviewUrl", () => {
   beforeEach(() => {
+    vi.mocked(batchResolveFilePreviews).mockReset();
     vi.mocked(getFilePreviewUrl).mockReset();
     vi.mocked(getNode).mockReset();
+  });
+
+  it("seeds the canonical image path for Markdown without a batch request", async () => {
+    const queryClient = createTestQueryClient();
+    const staleImageNode = fileNode({ path: "/docs/old-image.png" });
+    const canonicalImageNode = {
+      ...staleImageNode,
+      path: "/docs/current-image.png"
+    };
+    queryClient.setQueryData(
+      queryKeys.node("space-1", staleImageNode.id),
+      canonicalImageNode
+    );
+    vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
+    const directPreview = renderHook(() => useFilePreviewUrl(staleImageNode), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(directPreview.result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(queryClient.getQueryData(
+      queryKeys.markdownImagePreview("space-1", canonicalImageNode.path)
+    )).toEqual({
+      path: canonicalImageNode.path,
+      status: "ready",
+      node_id: canonicalImageNode.id,
+      media_type: "image/png",
+      url: "https://storage.example/preview",
+      expires_at: "2026-06-13T00:15:00Z"
+    }));
+    expect(queryClient.getQueryData(
+      queryKeys.markdownImagePreview("space-1", staleImageNode.path)
+    )).toBeUndefined();
+
+    const markdownPreview = renderHook(() => useMarkdownImageLoader(sourceNode), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+    await expect(markdownPreview.result.current(canonicalImageNode.path)).resolves.toEqual({
+      status: "loaded",
+      url: "https://storage.example/preview"
+    });
+    expect(batchResolveFilePreviews).not.toHaveBeenCalled();
+  });
+
+  it("does not seed Markdown from an invalidated canonical image path", async () => {
+    const queryClient = createTestQueryClient();
+    const imageNode = fileNode({});
+    const canonicalKey = queryKeys.node("space-1", imageNode.id);
+    queryClient.setQueryData(canonicalKey, imageNode);
+    await queryClient.invalidateQueries({
+      queryKey: canonicalKey,
+      exact: true,
+      refetchType: "none"
+    });
+    vi.mocked(getFilePreviewUrl).mockResolvedValue(previewUrl());
+
+    const directPreview = renderHook(() => useFilePreviewUrl(imageNode), {
+      wrapper: createQueryWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(directPreview.result.current.isSuccess).toBe(true));
+    expect(queryClient.getQueryState(canonicalKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryData(
+      queryKeys.markdownImagePreview("space-1", imageNode.path)
+    )).toBeUndefined();
   });
 
   it("patches node collections without refetching after legacy preview metadata is discovered", async () => {
@@ -216,6 +281,10 @@ describe("useFilePreviewUrl", () => {
       media_type: "application/pdf",
       expires_at: "2026-06-13T00:15:00Z"
     });
+    queryClient.setQueryData(
+      queryKeys.node("space-1", pdfNode.id),
+      pdfNode
+    );
 
     const { result } = renderHook(() => useFilePreviewUrl(pdfNode), {
       wrapper: createQueryWrapper(queryClient)
@@ -227,6 +296,9 @@ describe("useFilePreviewUrl", () => {
     expect(queryClient.getQueryData(
       queryKeys.filePreviewUrl("space-1", "file-1", "pdf")
     )).toMatchObject({ media_type: "application/pdf" });
+    expect(queryClient.getQueryData(
+      queryKeys.markdownImagePreview("space-1", pdfNode.path)
+    )).toBeUndefined();
   });
 
   it("clears stale PDF preview metadata when the backend rejects it", async () => {
