@@ -186,9 +186,9 @@ GET /api/v1/spaces/{space_id}/nodes?view=summary&sort=updated_at_desc&limit=50&c
 - visible load-more sentinel을 통해 cursor page를 이어서 표시한다.
 - invalidation 시 기존 continuation page를 버리고 첫 page만 다시 읽는다.
 - row 선택 시 node를 열고 Files reveal을 시도한다.
-- summary row를 열 때 canonical node query를 한 번 조회하고 이후 open은 같은
-  query cache를 재사용한다.
-- reveal 실패는 open을 막지 않는다.
+- reveal 응답의 target을 canonical node query에 채운 뒤 editor를 연다.
+- reveal 실패는 open을 막지 않으며, 이때만 canonical node detail 조회로
+  fallback한다.
 
 ## Node actions
 
@@ -298,10 +298,11 @@ open node
 ```text
 click Back/Forward
 -> read the nearest node reference from that EditorGroup
--> GET canonical node detail
--> success: move current node reference to the opposite history and open target
--> 404: discard missing reference and continue in the same direction
--> other failure: keep current node and both histories, then show toast
+-> reveal target and ancestors
+-> success: cache target, move current node reference to the opposite history, open target
+-> reveal failure: GET canonical node detail as fallback
+-> reveal/detail 404: discard missing reference and continue in the same direction
+-> other detail failure: keep current node and both histories, then show toast
 ```
 
 규칙:

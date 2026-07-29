@@ -59,6 +59,31 @@ for (const viewport of [
   });
 }
 
+test("opens a recent node with one reveal request and no canonical node request", async ({ page }) => {
+  const requests = new Map<string, number>();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await routeJsonApi(page, (url) => {
+    requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
+    return responseFor(url);
+  });
+
+  await page.goto("/");
+  await page.locator("[data-recent-list]").getByRole("button", { name: "note.md" }).click();
+
+  const editor = page.locator('[data-editor-group][data-active="true"]');
+  await expect(editor).toContainText("note.md");
+  await expect(editor).toContainText("Request budget");
+  await expect.poll(() => count(
+    requests,
+    `/api/v1/spaces/${space.id}/nodes/text-1/reveal`
+  )).toBe(1);
+  await expect.poll(() => count(
+    requests,
+    `/api/v1/spaces/${space.id}/text/text-1`
+  )).toBe(1);
+  expect(count(requests, `/api/v1/spaces/${space.id}/nodes/text-1`)).toBe(0);
+});
+
 test("keeps one usage polling owner while the desktop Space Library is open", async ({ page }) => {
   const requests = new Map<string, number>();
   await page.clock.install();
@@ -100,6 +125,32 @@ function responseFor(url: URL) {
     return {
       nodes: [textNode()],
       page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+    };
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/text-1/reveal`) {
+    return { ancestors: [], target: textNode() };
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/text-1`) {
+    return textNode();
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/text/text-1`) {
+    return {
+      node: { id: "text-1", path: "/note.md" },
+      text: {
+        node_id: "text-1",
+        storage_format: "plain",
+        content: "# Request budget",
+        content_sha256: "sha-1",
+        byte_len: 16,
+        line_count: 1,
+        start_line: 1,
+        end_line: 1,
+        returned_lines: 1,
+        truncated: false,
+        next_start_line: null,
+        updated_by: me.account,
+        updated_at: "2026-07-24T00:00:00Z"
+      }
     };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/file-change-sync`) {

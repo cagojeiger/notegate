@@ -5,7 +5,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { getNode, resolveNodePath } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
-import type { NodeSummary, RestNode, Space } from "../../api/types";
+import type { NodeRevealResponse, NodeSummary, RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import type { EditorNavigationDirection } from "../../stores/uiStoreReducers";
 import type { CanonicalNodeLoader } from "./useCanonicalNodeLoader";
@@ -35,19 +35,11 @@ export function useWorkbenchNodeNavigationActions({
   const [navigatingGroupIds, setNavigatingGroupIds] = useState<ReadonlySet<number>>(new Set());
 
   async function openNode(summary: NodeSummary) {
-    const node = await loadCanonicalNode(summary, "Could not open node");
-    if (!node) return;
-    openInActiveGroup(node);
-    closeMobile();
-    await revealNodeBestEffort(node);
+    await openNodeFromSummary(summary, openInActiveGroup);
   }
 
   async function openNodeInNewGroup(summary: NodeSummary) {
-    const node = await loadCanonicalNode(summary, "Could not open node");
-    if (!node) return;
-    openInNewGroup(node);
-    closeMobile();
-    await revealNodeBestEffort(node);
+    await openNodeFromSummary(summary, openInNewGroup);
   }
 
   async function openMarkdownLink(groupId: number, sourceNode: RestNode, path: string) {
@@ -72,9 +64,10 @@ export function useWorkbenchNodeNavigationActions({
     }
     if (!isCurrentMarkdownLinkSource(spaceId, groupId, sourceNode)) return;
 
+    cacheCanonicalNode(node);
     openInGroup(groupId, node);
     closeMobile();
-    await revealNodeBestEffort(node);
+    await revealNodeBestEffort(spaceId, node);
   }
 
   async function navigateEditorGroup(groupId: number, direction: EditorNavigationDirection) {
@@ -91,13 +84,12 @@ export function useWorkbenchNodeNavigationActions({
         const target = entries[entries.length - 1];
         if (!target || target.spaceId !== spaceId) return;
 
-        let node: RestNode;
+        let resolved: {
+          node: RestNode;
+          reveal: NodeRevealResponse | null;
+        };
         try {
-          node = await queryClient.fetchQuery({
-            queryKey: queryKeys.node(spaceId, target.nodeId),
-            queryFn: () => getNode(client, spaceId, target.nodeId),
-            staleTime: 0
-          });
+          resolved = await loadNavigationNode(spaceId, target.nodeId);
         } catch (error) {
           if (error instanceof ApiError && error.status === 404) {
             if (!discardNavigationTarget(groupId, direction, target.nodeId)) return;
@@ -107,9 +99,16 @@ export function useWorkbenchNodeNavigationActions({
           return;
         }
 
-        if (node.space_id !== spaceId || !navigateGroup(groupId, direction, target.nodeId, node)) return;
+        if (
+          resolved.node.space_id !== spaceId
+          || !isCurrentNavigationTarget(spaceId, groupId, direction, target.nodeId)
+        ) return;
+        if (resolved.reveal) applyReveal(resolved.reveal);
+        if (!navigateGroup(groupId, direction, target.nodeId, resolved.node)) return;
         closeMobile();
-        await revealNodeBestEffort(node);
+        if (!resolved.reveal) {
+          showToast("Opened node, but could not reveal it in the tree");
+        }
         return;
       }
     } finally {
@@ -131,18 +130,107 @@ export function useWorkbenchNodeNavigationActions({
       && state.editorGroups.some((group) => group.id === groupId && group.node?.id === sourceNode.id);
   }
 
-  async function revealNodeBestEffort(node: NodeSummary) {
+  function isCurrentNavigationTarget(
+    spaceId: string,
+    groupId: number,
+    direction: EditorNavigationDirection,
+    nodeId: string
+  ): boolean {
+    const state = useUiStore.getState();
+    const group = state.editorGroups.find((candidate) => candidate.id === groupId);
+    const entries = group?.[direction] ?? [];
+    return state.activeSpaceId === spaceId && entries[entries.length - 1]?.nodeId === nodeId;
+  }
+
+  async function openNodeFromSummary(
+    summary: NodeSummary,
+    open: (node: RestNode) => void
+  ) {
+    let revealFailed = false;
+    if (activeSpace?.id === summary.space_id && summary.parent_id !== null) {
+      let reveal: NodeRevealResponse | null = null;
+      try {
+        reveal = await requestReveal(activeSpace.id, summary.id);
+      } catch {
+        revealFailed = true;
+      }
+      if (reveal) {
+        applyReveal(reveal);
+        open(reveal.target);
+        closeMobile();
+        return;
+      }
+    }
+
+    const node = await loadCanonicalNode(summary, "Could not open node");
+    if (!node) return;
+    open(node);
+    closeMobile();
+    if (revealFailed) {
+      showToast("Opened node, but could not reveal it in the tree");
+    }
+  }
+
+  async function revealNodeBestEffort(spaceId: string, node: NodeSummary) {
+    if (node.parent_id === null) return;
     try {
-      await revealNode(node);
+      applyReveal(await requestReveal(spaceId, node.id));
     } catch {
       showToast("Opened node, but could not reveal it in the tree");
     }
   }
 
-  async function revealNode(node: NodeSummary) {
-    if (!activeSpace || node.parent_id === null) return;
-    const reveal = await revealNodeInSpace(activeSpace.id, node.id);
+  async function requestReveal(spaceId: string, nodeId: string): Promise<NodeRevealResponse> {
+    let reveal: NodeRevealResponse | null = null;
+    // A row click selects the Inspector before opening the editor. Use the
+    // canonical key so that observer shares this in-flight reveal request.
+    await queryClient.fetchQuery({
+      queryKey: queryKeys.node(spaceId, nodeId),
+      queryFn: async () => {
+        reveal = await fetchReveal(spaceId, nodeId);
+        return reveal.target;
+      },
+      staleTime: 0,
+      retry: false
+    });
+    if (reveal) return reveal;
+    // Another canonical request already owned the key, so fetch the ancestor
+    // context that its RestNode result does not contain.
+    return fetchReveal(spaceId, nodeId);
+  }
+
+  async function fetchReveal(spaceId: string, nodeId: string): Promise<NodeRevealResponse> {
+    const reveal = await revealNodeInSpace(spaceId, nodeId);
+    if (reveal.target.space_id !== spaceId || reveal.target.id !== nodeId) {
+      throw new Error("Reveal returned a different node");
+    }
+    return reveal;
+  }
+
+  async function loadNavigationNode(
+    spaceId: string,
+    nodeId: string
+  ): Promise<{ node: RestNode; reveal: NodeRevealResponse | null }> {
+    try {
+      const reveal = await requestReveal(spaceId, nodeId);
+      return { node: reveal.target, reveal };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) throw error;
+      const node = await queryClient.fetchQuery({
+        queryKey: queryKeys.node(spaceId, nodeId),
+        queryFn: () => getNode(client, spaceId, nodeId),
+        staleTime: 0
+      });
+      return { node, reveal: null };
+    }
+  }
+
+  function applyReveal(reveal: NodeRevealResponse) {
     addExpanded(reveal.ancestors.map((ancestor) => ancestor.id));
+  }
+
+  function cacheCanonicalNode(node: RestNode) {
+    queryClient.setQueryData(queryKeys.node(node.space_id, node.id), node);
   }
 
   return {
