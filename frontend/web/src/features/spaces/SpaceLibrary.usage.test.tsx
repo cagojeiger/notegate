@@ -7,6 +7,7 @@ import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
 import { makeSpace } from "../../test/fixtures";
 import { SpaceLibrary } from "./SpaceLibrary";
+import { useUsageQuery } from "./useUsageQueries";
 
 vi.mock("./useSpaceQueries", () => ({
   useReorderSpacesMutation: () => ({ isPending: false, mutate: vi.fn() }),
@@ -37,13 +38,20 @@ function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
 }
 
-function renderLibrary() {
+function UsagePollingOwner() {
+  useUsageQuery();
+  return null;
+}
+
+function renderLibrary({ externalPollingOwner = false } = {}) {
   render(
     <ApiProvider apiKey="test-key" authCacheKey="space-library-usage:0">
+      {externalPollingOwner ? <UsagePollingOwner /> : null}
       <SpaceLibrary
         spaces={[space]}
         activeSpace={space}
         isMobile={false}
+        usagePollingEnabled={!externalPollingOwner}
         inspectorOpen
         onOpenInspector={vi.fn()}
         onCloseInspector={vi.fn()}
@@ -70,6 +78,15 @@ describe("SpaceLibrary usage", () => {
     expect(screen.getByRole("progressbar", { name: "Text usage" })).toHaveAttribute("aria-valuenow", "48120320");
     expect(screen.getByRole("progressbar", { name: "Files usage" })).toHaveAttribute("aria-valuenow", "80000000");
     expect(screen.getByRole("progressbar", { name: "Items usage" })).toHaveAttribute("aria-valuenow", "319");
+  });
+
+  it("consumes the desktop polling owner's cached usage without a second request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse(usage));
+
+    renderLibrary({ externalPollingOwner: true });
+
+    expect(await screen.findByText("45.9 MB / 128 MB")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("queues a usage check from the inspector and shows progress", async () => {

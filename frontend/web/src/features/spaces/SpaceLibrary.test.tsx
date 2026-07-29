@@ -53,6 +53,7 @@ const spaces: Space[] = [
 
 function renderLibrary(options: {
   isMobile?: boolean;
+  usagePollingEnabled?: boolean;
   inspectorOpen?: boolean;
   onOpenSpace?: (space: Space) => void;
 } = {}) {
@@ -68,6 +69,7 @@ function renderLibrary(options: {
         spaces={spaces}
         activeSpace={spaces[0]}
         isMobile={isMobile}
+        usagePollingEnabled={options.usagePollingEnabled ?? true}
         inspectorOpen={inspectorOpen}
         onOpenInspector={() => setInspectorOpen(true)}
         onCloseInspector={() => setInspectorOpen(false)}
@@ -151,6 +153,15 @@ describe("SpaceLibrary", () => {
 
     await user.click(screen.getByTitle("Search default off"));
     expect(screen.getByRole("button", { name: "Inspect Private" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each([
+    ["desktop cache consumer", false],
+    ["mobile polling owner", true]
+  ] as const)("configures usage polling for the %s", (_label, usagePollingEnabled) => {
+    renderLibrary({ usagePollingEnabled });
+
+    expect(mocks.useUsageQuery).toHaveBeenLastCalledWith(usagePollingEnabled);
   });
 
   it("keeps access and new-item defaults in the inspector", async () => {

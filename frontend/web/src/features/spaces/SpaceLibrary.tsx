@@ -16,6 +16,7 @@ type SpaceLibraryProps = {
   spaces: Space[];
   activeSpace: Space | null;
   isMobile: boolean;
+  usagePollingEnabled: boolean;
   inspectorOpen: boolean;
   onOpenInspector: () => void;
   onCloseInspector: () => void;
@@ -50,6 +51,7 @@ export function SpaceLibrary({
   spaces,
   activeSpace,
   isMobile,
+  usagePollingEnabled,
   inspectorOpen,
   onOpenInspector,
   onCloseInspector,
@@ -57,7 +59,7 @@ export function SpaceLibrary({
   onCreateSpace
 }: SpaceLibraryProps) {
   const [selectedSpaceId, setSelectedSpaceId] = useState(activeSpace?.id ?? spaces[0]?.id ?? null);
-  const usageQuery = useUsageQuery();
+  const usageQuery = useUsageQuery(usagePollingEnabled);
   const checkUsage = useCheckSpaceUsageMutation();
   const updateSpace = useUpdateSpaceMutation();
   const updateInspectorSpace = useUpdateSpaceMutation({ silentError: true });

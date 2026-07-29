@@ -59,6 +59,27 @@ for (const viewport of [
   });
 }
 
+test("keeps one usage polling owner while the desktop Space Library is open", async ({ page }) => {
+  const requests = new Map<string, number>();
+  await page.clock.install();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await routeJsonApi(page, (url) => {
+    requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
+    return responseFor(url);
+  });
+
+  await page.goto("/");
+  await expect.poll(() => count(requests, "/api/v1/me/usage")).toBe(1);
+
+  await page.clock.fastForward(10_000);
+  await page.getByRole("button", { name: "Open space library" }).click();
+  await expect(page.getByRole("heading", { name: /Spaces 1/ })).toBeVisible();
+
+  await page.clock.fastForward(61_000);
+
+  await expect.poll(() => count(requests, "/api/v1/me/usage")).toBe(2);
+});
+
 function responseFor(url: URL) {
   if (url.pathname === "/api/v1/me") return me;
   if (url.pathname === "/api/v1/me/usage") return usageResponse(space);

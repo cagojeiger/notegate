@@ -57,6 +57,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   const { actions } = workbench;
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
+  const statusUsageEnabled = me.account.kind === "user" && !workbench.isMobile;
   const railSpaces = me.account.kind === "user"
     ? workbench.spaces.filter((space) => space.navigation_pinned)
     : workbench.spaces;
@@ -168,6 +169,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 spaces={workbench.spaces}
                 activeSpace={workbench.activeSpace}
                 isMobile={workbench.isMobile}
+                usagePollingEnabled={!statusUsageEnabled}
                 inspectorOpen={workbench.isMobile ? workbench.mobileAuxOpen : workbench.showAuxiliary}
                 onOpenInspector={openInspector}
                 onCloseInspector={closeInspector}
@@ -271,7 +273,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         />
         <WorkspaceStatusBar
           activeSpace={workbench.activeSpace}
-          usageEnabled={me.account.kind === "user" && !workbench.isMobile}
+          usageEnabled={statusUsageEnabled}
         />
       </div>
       <Toast />
