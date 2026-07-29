@@ -15,10 +15,17 @@ Quota에 포함되는 live usage의 의미, counter 갱신, 분산 reconciliatio
 request_body_max_bytes = 2097152      # 2 MiB JSON/body 기본 상한
 server_timeout_seconds = 30
 control_plane_timeout_seconds = 5      # /health, /ready 등 control-plane 요청
-rate_limit_global_per_process = 600/minute
+rate_limit_ingress_per_process = 150/second, burst 200
+rate_limit_basic_api_per_process = 100/second, burst 150
+find_max_in_flight_per_process = 20
+grep_max_in_flight_per_process = 10
+grep_max_executing_per_process = 2
 ```
 
-`/health`, `/ready`는 rate limit 대상에서 제외한다.
+Ingress limit은 auth, metadata, OpenAPI, `/api`, `/mcp`를 함께 보호한다. Basic API limit은
+`/api`와 `/mcp`에 추가로 적용한다. `find`의 21번째 요청과 `grep`의 11번째 요청은 대기시키지
+않고 즉시 거부한다. 허용된 grep 요청 중 본문 조회·복호화·matching은 최대 2개만 동시에
+실행한다. `/health`, `/ready`는 rate limit 대상에서 제외한다.
 
 ## Account and credential limits
 

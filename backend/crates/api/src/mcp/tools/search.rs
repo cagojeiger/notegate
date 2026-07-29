@@ -5,12 +5,16 @@ use notegate_model::NodeKind;
 use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest,
 };
+use rmcp::model::ErrorCode;
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 
 use super::resolve::{caller, invalid_input_error, node_summary, resolve_target, service_error};
 use super::support::page_json;
+use crate::admission::SearchCapacity;
 use crate::state::AppState;
+
+const SEARCH_BUSY_ERROR_CODE: ErrorCode = ErrorCode(-32002);
 
 #[allow(clippy::too_many_arguments)]
 pub async fn find(
@@ -25,6 +29,10 @@ pub async fn find(
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
+    let _permit = state
+        .search_admission
+        .enter_find()
+        .map_err(search_busy_error)?;
     let caller = caller(parts)?;
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
@@ -82,6 +90,11 @@ pub async fn grep(
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
+    let _permit = state
+        .search_admission
+        .enter_grep()
+        .await
+        .map_err(search_busy_error)?;
     let caller = caller(parts)?;
     let (resolved, scope_path) = resolve_target(state, caller, &target).await?;
     let scope_path = Some(scope_path);
@@ -135,6 +148,24 @@ pub async fn grep(
     })))
 }
 
+fn search_busy_error(capacity: SearchCapacity) -> ErrorData {
+    let operation = match capacity {
+        SearchCapacity::Find => "find",
+        SearchCapacity::Grep => "grep",
+    };
+    ErrorData::new(
+        SEARCH_BUSY_ERROR_CODE,
+        format!("{operation} capacity is busy; retry shortly"),
+        Some(json!({
+            "kind": "search_busy",
+            "code": "search_busy",
+            "operation": operation,
+            "retryable": true,
+            "retry_after_ms": 1_000,
+        })),
+    )
+}
+
 fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
     NodeKind::parse(value)
         .ok_or_else(|| invalid_input_error("kind must be 'folder', 'text', or 'file'"))
@@ -178,8 +209,9 @@ mod tests {
 
     use super::{
         FindMatchMode, GrepLineMode, GrepMatchMode, NodeKind, parse_find_match_mode,
-        parse_grep_line_mode, parse_grep_match_mode, parse_kind,
+        parse_grep_line_mode, parse_grep_match_mode, parse_kind, search_busy_error,
     };
+    use crate::admission::SearchCapacity;
 
     fn assert_invalid_input(error: ErrorData, expected_message: &str) {
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
@@ -262,5 +294,19 @@ mod tests {
         let error =
             parse_grep_line_mode(Some("matching")).expect_err("unknown line mode must fail");
         assert_invalid_input(error, "lines must be 'none', 'first', or 'all'");
+    }
+
+    #[test]
+    fn search_busy_error_is_retryable_and_names_the_operation() {
+        let error = search_busy_error(SearchCapacity::Grep);
+
+        assert_eq!(error.code, super::SEARCH_BUSY_ERROR_CODE);
+        assert_eq!(error.message, "grep capacity is busy; retry shortly");
+        let data = error.data.expect("search busy error carries metadata");
+        assert_eq!(data["kind"], "search_busy");
+        assert_eq!(data["code"], "search_busy");
+        assert_eq!(data["operation"], "grep");
+        assert_eq!(data["retryable"], true);
+        assert_eq!(data["retry_after_ms"], 1_000);
     }
 }

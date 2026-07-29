@@ -20,6 +20,7 @@ use crate::identity::CallerResolver;
 use crate::object_storage::ObjectStorage;
 use crate::observability::MetricsHandle;
 
+use crate::admission::SearchAdmission;
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
 
@@ -54,6 +55,7 @@ pub struct AppState {
     pub agents: Agents,
     pub files: Files,
     pub search: Search,
+    pub(crate) search_admission: SearchAdmission,
     pub usage: Usage,
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
@@ -121,6 +123,7 @@ impl AppState {
             agents,
             files,
             search,
+            search_admission: SearchAdmission::default(),
             usage,
             accounts: account_repo,
             browser_sessions,
