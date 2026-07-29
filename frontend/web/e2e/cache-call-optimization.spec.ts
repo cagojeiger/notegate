@@ -110,7 +110,7 @@ test("opens a recent node with one reveal request and no canonical node request"
   expect(count(requests, `/api/v1/spaces/${space.id}/nodes/text-1`)).toBe(0);
 });
 
-test("keeps one usage polling owner while the desktop Space Library is open", async ({ page }) => {
+test("backs off idle usage polling with one owner while the desktop Space Library is open", async ({ page }) => {
   const requests = new Map<string, number>();
   await page.clock.install();
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -126,9 +126,16 @@ test("keeps one usage polling owner while the desktop Space Library is open", as
   await page.getByRole("button", { name: "Open space library" }).click();
   await expect(page.getByRole("heading", { name: /Spaces 1/ })).toBeVisible();
 
-  await page.clock.fastForward(61_000);
-
-  await expect.poll(() => count(requests, "/api/v1/me/usage")).toBe(2);
+  for (const [elapsedMs, expectedRequests] of [
+    [60_001, 2],
+    [120_001, 3],
+    [300_001, 4],
+    [300_001, 5]
+  ] as const) {
+    await page.clock.fastForward(elapsedMs);
+    await expect.poll(() => count(requests, "/api/v1/me/usage"))
+      .toBe(expectedRequests);
+  }
 });
 
 function responseFor(url: URL) {
