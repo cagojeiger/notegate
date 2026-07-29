@@ -17,8 +17,14 @@ pub const HTTP_REQUEST_BODY_MAX_BYTES: usize = 2_097_152;
 pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Maximum wall-clock time for control-plane probes before a 408 response.
 pub const HTTP_CONTROL_PLANE_TIMEOUT_SECS: u64 = 5;
-/// Maximum HTTP requests accepted per API process per minute.
-pub const HTTP_RATE_LIMIT_REQUESTS_PER_MINUTE: u32 = 600;
+/// Maximum HTTP requests accepted per API process per second.
+pub const HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 150;
+/// Maximum short burst accepted by the process-wide HTTP ingress limiter.
+pub const HTTP_INGRESS_RATE_LIMIT_BURST: u32 = 200;
+/// Maximum API and MCP requests accepted per API process per second.
+pub const HTTP_BASIC_API_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 100;
+/// Maximum short burst accepted by the API and MCP limiter.
+pub const HTTP_BASIC_API_RATE_LIMIT_BURST: u32 = 150;
 
 // --- Account, space, and credential limits ---
 
@@ -147,6 +153,12 @@ pub const SEARCH_QUERY_MAX_CHARS: usize = 256;
 pub const SEARCH_GLOB_PATTERNS_MAX: usize = 32;
 /// Maximum length of one include/exclude glob pattern, in Unicode scalar values.
 pub const SEARCH_GLOB_PATTERN_MAX_CHARS: usize = 256;
+/// Maximum concurrent find requests accepted per API process.
+pub const FIND_MAX_IN_FLIGHT: usize = 20;
+/// Maximum concurrent grep requests, including requests waiting for execution.
+pub const GREP_MAX_IN_FLIGHT: usize = 10;
+/// Maximum grep requests executing body hydration and matching concurrently.
+pub const GREP_MAX_EXECUTING: usize = 2;
 
 // --- Read limits ---
 
