@@ -68,11 +68,14 @@ Polling은 `document.visibilityState === "visible"`일 때만 돈다.
 
 | Query | Interval |
 |---|---:|
-| active Space forward file-change sync | 30s ±5s |
+| active Space forward file-change sync | idle 30s → 60s → 120s → 300s cap, each ±5s |
 
 규칙:
 
 - 첫 요청은 현재 latest event ID를 baseline token으로 설정하고 과거 이력을 재생하지 않는다.
+- 첫 baseline과 reset 직후의 polling interval은 30초다.
+- 변경이 없는 응답마다 interval을 한 단계 늘리고 300초에서 유지한다.
+- 변경/resync/error, 화면 복귀, focus/reconnect, active Space 전환은 interval을 30초로 reset한다.
 - 이후에는 마지막 적용 ID 이후의 event를 오름차순으로 모두 가져온다.
 - 여러 page는 전부 받은 뒤 token을 전진시키며 같은 parent invalidation은 한 번으로 병합한다.
 - token이 retention 범위를 벗어나면 node/children/text/metadata/file/path/preview cache만 한 번 재동기화한다.

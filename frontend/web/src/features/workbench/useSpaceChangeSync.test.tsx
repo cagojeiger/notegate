@@ -1,13 +1,20 @@
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import {
+  focusManager,
+  onlineManager,
+  QueryClientProvider,
+  type QueryClient
+} from "@tanstack/react-query";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/client";
+import { POLLING } from "../../api/polling";
 import { queryKeys } from "../../api/queryKeys";
 import { createMockApiClient } from "../../test/apiClient";
 import { createTestQueryClient } from "../../test/queryClient";
 import {
+  createSpaceChangePollingBackoff,
   createSpaceChangeSynchronizer,
   useSpaceChangeSync
 } from "./useSpaceChangeSync";
@@ -15,13 +22,14 @@ import {
 const apiClientState = vi.hoisted(
   (): { client: ApiClient | null } => ({ client: null })
 );
+const pageVisibility = vi.hoisted(() => ({ visible: true }));
 
 vi.mock("../../api/ApiProvider", () => ({
   useApiClient: () => apiClientState.client!
 }));
 
 vi.mock("../../shared/hooks/usePageVisible", () => ({
-  usePageVisible: () => true
+  usePageVisible: () => pageVisibility.visible
 }));
 
 const client = createMockApiClient();
@@ -29,11 +37,49 @@ const get = client.get;
 apiClientState.client = client;
 
 describe("useSpaceChangeSync", () => {
-  afterEach(() => {
+  beforeEach(() => {
+    pageVisibility.visible = true;
     get.mockReset();
   });
 
+  afterEach(() => {
+    cleanup();
+    focusManager.setFocused(undefined);
+    onlineManager.setOnline(true);
+    get.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  it("backs off empty syncs through the idle schedule and resets on activity", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const backoff = createSpaceChangePollingBackoff();
+
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[0]);
+    backoff.record(response(10));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[0]);
+    backoff.record(response(10));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[1]);
+    backoff.record(response(10));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[2]);
+    backoff.record(response(10));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[3]);
+    backoff.record(response(10));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[3]);
+
+    backoff.record(response(11, [change(11)]));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[0]);
+    backoff.record(response(11));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[1]);
+
+    backoff.reset();
+    backoff.record(response(11));
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[0]);
+    backoff.record({ ...response(12), resync_required: true });
+    expect(backoff.currentInterval()).toBe(POLLING.spaceChangesIdleMs[0]);
+  });
+
   it("establishes a baseline, then applies every returned change without a Space-wide refresh", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     get
       .mockResolvedValueOnce(response(10))
       .mockResolvedValueOnce(response(10))
@@ -52,16 +98,19 @@ describe("useSpaceChangeSync", () => {
     }, { wrapper: createWrapper(queryClient) });
 
     await waitForSignal(queryClient, 10);
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
     expect(invalidate).not.toHaveBeenCalled();
     const baselineRenderCount = renderCount;
 
     await refetchSignal(queryClient);
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[1]);
     expect(invalidate).not.toHaveBeenCalled();
     expect(renderCount).toBe(baselineRenderCount);
 
     await refetchSignal(queryClient);
     await waitForSignal(queryClient, 12);
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
     await waitFor(() => {
       expect(reset).toHaveBeenCalledWith({
         queryKey: queryKeys.children("space-1", "parent-1")
@@ -130,6 +179,132 @@ describe("useSpaceChangeSync", () => {
     });
   });
 
+  it("resets a backed-off cadence after focus and reconnect", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    get.mockResolvedValue(response(10));
+    const queryClient = createTestQueryClient();
+
+    renderHook(() => useSpaceChangeSync("space-1"), {
+      wrapper: createWrapper(queryClient)
+    });
+
+    await waitForSignal(queryClient, 10);
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[2]);
+
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(4));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(5));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[1]);
+
+    act(() => {
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+    });
+    expect(get).toHaveBeenCalledTimes(5);
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+  });
+
+  it("pauses while hidden and restarts at the initial cadence when visible", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    get.mockResolvedValue(response(10));
+    const queryClient = createTestQueryClient();
+    const view = renderHook(
+      ({ currentSpaceId }) => useSpaceChangeSync(currentSpaceId),
+      {
+        initialProps: { currentSpaceId: "space-1" },
+        wrapper: createWrapper(queryClient)
+      }
+    );
+
+    await waitForSignal(queryClient, 10);
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[1]);
+
+    pageVisibility.visible = false;
+    view.rerender({ currentSpaceId: "space-1" });
+    expect(signalInterval(queryClient, "space-1")).toBe(false);
+
+    pageVisibility.visible = true;
+    view.rerender({ currentSpaceId: "space-1" });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+  });
+
+  it("starts a fresh cadence when the active Space changes", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    get.mockResolvedValue(response(10));
+    const queryClient = createTestQueryClient();
+    const view = renderHook(
+      ({ currentSpaceId }) => useSpaceChangeSync(currentSpaceId),
+      {
+        initialProps: { currentSpaceId: "space-1" },
+        wrapper: createWrapper(queryClient)
+      }
+    );
+
+    await waitForSignal(queryClient, 10, "space-1");
+    await refetchSignal(queryClient, "space-1");
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    await refetchSignal(queryClient, "space-1");
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[2]);
+
+    view.rerender({ currentSpaceId: "space-2" });
+    await waitForSignal(queryClient, 10, "space-2");
+
+    expect(get.mock.calls[3]?.[0]).toBe(
+      "/api/v1/spaces/space-2/file-change-sync?limit=100"
+    );
+    expect(signalInterval(queryClient, "space-2")).toBe(POLLING.spaceChangesIdleMs[0]);
+
+    view.rerender({ currentSpaceId: "space-1" });
+    expect(get).toHaveBeenCalledTimes(4);
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+
+    await refetchSignal(queryClient, "space-1");
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(5));
+    expect(get.mock.calls[4]?.[0]).toBe(
+      "/api/v1/spaces/space-1/file-change-sync?limit=100&after_id=10"
+    );
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+  });
+
+  it("resets the cadence after a sync error", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    get
+      .mockResolvedValueOnce(response(10))
+      .mockResolvedValueOnce(response(10))
+      .mockRejectedValueOnce(new Error("sync unavailable"));
+    const queryClient = createTestQueryClient();
+
+    renderHook(() => useSpaceChangeSync("space-1"), {
+      wrapper: createWrapper(queryClient)
+    });
+
+    await waitForSignal(queryClient, 10);
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[1]);
+
+    await refetchSignal(queryClient);
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+    expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
+  });
+
   it("serializes sync requests so an older response cannot overwrite a newer token", async () => {
     const first = deferred<ReturnType<typeof response>>();
     get
@@ -157,20 +332,37 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
-async function refetchSignal(queryClient: QueryClient) {
+async function refetchSignal(queryClient: QueryClient, spaceId = "space-1") {
   await queryClient.refetchQueries({
-    queryKey: queryKeys.spaceChangeSignal("space-1"),
+    queryKey: queryKeys.spaceChangeSignal(spaceId),
     exact: true
   });
 }
 
-async function waitForSignal(queryClient: QueryClient, eventId: number) {
+async function waitForSignal(
+  queryClient: QueryClient,
+  eventId: number,
+  spaceId = "space-1"
+) {
   await waitFor(() => {
     const signal = queryClient.getQueryData<ReturnType<typeof response>>(
-      queryKeys.spaceChangeSignal("space-1")
+      queryKeys.spaceChangeSignal(spaceId)
     );
     expect(signal?.next_after_id).toBe(eventId);
   });
+}
+
+function signalInterval(queryClient: QueryClient, spaceId: string): number | false {
+  const query = queryClient.getQueryCache().find({
+    queryKey: queryKeys.spaceChangeSignal(spaceId),
+    exact: true
+  });
+  if (!query) throw new Error(`Missing Space change query for ${spaceId}`);
+  const intervalOption = query.observers[0]?.options.refetchInterval;
+  const interval = typeof intervalOption === "function"
+    ? intervalOption(query)
+    : intervalOption;
+  return interval ?? false;
 }
 
 function response(
