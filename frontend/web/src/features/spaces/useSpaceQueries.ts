@@ -7,7 +7,11 @@ import {
 } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { invalidateAuditEvents, removeDeletedSpaceQueries } from "../../api/queryInvalidation";
+import {
+  invalidateAuditEvents,
+  invalidateSpacesList,
+  removeDeletedSpaceQueries
+} from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import {
   createSpace,
@@ -51,7 +55,7 @@ export function createSpaceMutationOptions(
         ].sort((left, right) => left.sort_order - right.sort_order);
         return { ...current, spaces, page: { ...current.page, returned: spaces.length } };
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateSpacesList(queryClient);
       invalidateAuditEvents(queryClient);
       onCreated(space);
     }
@@ -82,7 +86,7 @@ export function useUpdateSpaceMutation(options: SpaceMutationOptions = {}) {
         ...current,
         spaces: current.spaces.map((space) => space.id === updatedSpace.id ? updatedSpace : space)
       } : current);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateSpacesList(queryClient);
       invalidateAuditEvents(queryClient);
     }
   });
@@ -97,7 +101,7 @@ export function useReorderSpacesMutation() {
       if (updates.length > 0) await reorderSpacesRequest(client, updates);
     },
     onMutate: async ({ spaces }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.spaces });
+      await queryClient.cancelQueries({ queryKey: queryKeys.spaces, exact: true });
       const previous = queryClient.getQueryData<SpacesListResponse>(queryKeys.spaces);
       if (previous) queryClient.setQueryData<SpacesListResponse>(queryKeys.spaces, { ...previous, spaces });
       return { previous };
@@ -106,7 +110,7 @@ export function useReorderSpacesMutation() {
       if (context?.previous) queryClient.setQueryData(queryKeys.spaces, context.previous);
     },
     onSettled: (_data, error) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateSpacesList(queryClient);
       if (!error) invalidateAuditEvents(queryClient);
     }
   });
@@ -121,7 +125,7 @@ export function useDeleteSpaceMutation(onDeleted: (spaceId: string) => void) {
     onSuccess: async (_data, spaceId) => {
       await removeDeletedSpaceQueries(queryClient, spaceId);
       onDeleted(spaceId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.spaces });
+      invalidateSpacesList(queryClient);
       invalidateAuditEvents(queryClient);
     }
   });

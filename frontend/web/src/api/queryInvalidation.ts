@@ -4,6 +4,14 @@ import type { FileChangeDelta, RestNode } from "./types";
 import { advanceChildrenRevision } from "./childrenRevision";
 import { queryKeys } from "./queryKeys";
 
+export function invalidateSpacesList(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.spaces, exact: true });
+}
+
+export function invalidateAgentsList(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.agents, exact: true });
+}
+
 export function invalidateAuditEvents(queryClient: QueryClient) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.auditEvents });
 }

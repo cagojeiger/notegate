@@ -1,13 +1,15 @@
-import { InfiniteQueryObserver } from "@tanstack/react-query";
+import { InfiniteQueryObserver, QueryObserver } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestQueryClient } from "../test/queryClient";
 import {
   applyExternalFileChanges,
+  invalidateAgentsList,
   invalidateFolderSubtree,
   invalidateNodeLists,
   invalidateRecentNodes,
   invalidateSpaceResources,
+  invalidateSpacesList,
   invalidateWriteLockState,
   removeMarkdownImageQueries,
   removeMarkdownImagePreviewQuery,
@@ -17,6 +19,71 @@ import {
 import { queryKeys } from "./queryKeys";
 
 describe("query invalidation", () => {
+  it("refetches the spaces list without refetching active space descendants", async () => {
+    const queryClient = createTestQueryClient();
+    const spacesQuery = vi.fn().mockResolvedValue({ spaces: [] });
+    const nodeQuery = vi.fn().mockResolvedValue({ id: "node-1" });
+    const textQuery = vi.fn().mockResolvedValue({ content: "text" });
+    const spacesObserver = new QueryObserver(queryClient, {
+      queryKey: queryKeys.spaces,
+      queryFn: spacesQuery,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    const nodeObserver = new QueryObserver(queryClient, {
+      queryKey: queryKeys.node("space-1", "node-1"),
+      queryFn: nodeQuery,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    const textObserver = new QueryObserver(queryClient, {
+      queryKey: queryKeys.text("space-1", "node-1"),
+      queryFn: textQuery,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    queryClient.setQueryData(queryKeys.spaces, { spaces: [] });
+    queryClient.setQueryData(queryKeys.node("space-1", "node-1"), { id: "node-1" });
+    queryClient.setQueryData(queryKeys.text("space-1", "node-1"), { content: "text" });
+    const unsubscribe = [
+      spacesObserver.subscribe(() => undefined),
+      nodeObserver.subscribe(() => undefined),
+      textObserver.subscribe(() => undefined)
+    ];
+
+    invalidateSpacesList(queryClient);
+
+    await vi.waitFor(() => expect(spacesQuery).toHaveBeenCalledOnce());
+    expect(nodeQuery).not.toHaveBeenCalled();
+    expect(textQuery).not.toHaveBeenCalled();
+    unsubscribe.forEach((stopObserving) => stopObserving());
+  });
+
+  it("refetches the agents list without refetching active agent keys", async () => {
+    const queryClient = createTestQueryClient();
+    const agentsQuery = vi.fn().mockResolvedValue({ agents: [] });
+    const agentKeysQuery = vi.fn().mockResolvedValue({ keys: [] });
+    const agentsObserver = new QueryObserver(queryClient, {
+      queryKey: queryKeys.agents,
+      queryFn: agentsQuery,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    const agentKeysObserver = new QueryObserver(queryClient, {
+      queryKey: queryKeys.agentKeys("agent-1"),
+      queryFn: agentKeysQuery,
+      staleTime: Number.POSITIVE_INFINITY
+    });
+    queryClient.setQueryData(queryKeys.agents, { agents: [] });
+    queryClient.setQueryData(queryKeys.agentKeys("agent-1"), { keys: [] });
+    const unsubscribe = [
+      agentsObserver.subscribe(() => undefined),
+      agentKeysObserver.subscribe(() => undefined)
+    ];
+
+    invalidateAgentsList(queryClient);
+
+    await vi.waitFor(() => expect(agentsQuery).toHaveBeenCalledOnce());
+    expect(agentKeysQuery).not.toHaveBeenCalled();
+    unsubscribe.forEach((stopObserving) => stopObserving());
+  });
+
   it("invalidates only Recent and the affected parent folders for a node change", () => {
     const queryClient = createTestQueryClient();
     const resetQueries = vi.spyOn(queryClient, "resetQueries");

@@ -4,7 +4,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { createAgent, createAgentKey, deleteAgent, listAgentKeys, listAgents, revokeAgentKey, type Agent } from "../../api/agents";
 import { connectAgent, disconnectAgent, listConnections, type Connection, type ConnectionListResponse, type Permission } from "../../api/connections";
 import { createMyKey, listMyKeys, revokeMyKey, type ApiKeyListResponse, type MintedKey } from "../../api/keys";
-import { invalidateAuditEvents } from "../../api/queryInvalidation";
+import { invalidateAgentsList, invalidateAuditEvents } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { listSpaces } from "../../api/spaces";
 
@@ -25,7 +25,7 @@ export function useCreateAgentMutation(onCreated: () => void) {
     mutationFn: (name: string) => createAgent(client, name),
     onSuccess: () => {
       onCreated();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+      invalidateAgentsList(queryClient);
       invalidateAuditEvents(queryClient);
     }
   });
@@ -38,7 +38,7 @@ export function useDeleteAgentMutation(onDeleted: () => void) {
     mutationFn: (id: string) => deleteAgent(client, id),
     onSuccess: () => {
       onDeleted();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents });
+      invalidateAgentsList(queryClient);
       invalidateAuditEvents(queryClient);
     }
   });
