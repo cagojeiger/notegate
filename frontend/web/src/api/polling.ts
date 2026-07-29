@@ -1,6 +1,6 @@
 export const POLLING = {
   usagePendingMs: 3_000,
-  usageSummaryMs: 60_000,
+  usageSummaryIdleMs: [60_000, 120_000, 300_000],
   spaceChangesMs: 30_000,
   spaceChangesIdleMs: [30_000, 60_000, 120_000, 300_000],
   spaceChangesJitterMs: 5_000
