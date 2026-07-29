@@ -30,9 +30,12 @@ for (const viewport of [
   { name: "tablet", width: 900, height: 1024, opensOverlay: false },
   { name: "mobile", width: 390, height: 844, opensOverlay: true }
 ]) {
-  test(`keeps active-space refresh requests constant on ${viewport.name}`, async ({ page }) => {
+  test(`backs off idle active-space refreshes on ${viewport.name}`, async ({ page }) => {
     const requests = new Map<string, number>();
     await page.clock.install();
+    await page.addInitScript(() => {
+      Math.random = () => 0.5;
+    });
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await routeJsonApi(page, (url) => {
       requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
@@ -51,11 +54,34 @@ for (const viewport of [
     await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`)).toBe(1);
     await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
 
-    await page.clock.fastForward(36_000);
+    for (const [elapsedMs, expectedRequests] of [
+      [30_001, 2],
+      [60_001, 3],
+      [120_001, 4],
+      [300_001, 5],
+      [300_001, 6]
+    ] as const) {
+      await page.clock.fastForward(elapsedMs);
+      await expect.poll(() => count(
+        requests,
+        `/api/v1/spaces/${space.id}/file-change-sync`
+      )).toBe(expectedRequests);
+    }
 
-    await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(2);
     expect(count(requests, `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`)).toBe(1);
     expect(count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
+
+    if (viewport.name === "desktop") {
+      await page.context().setOffline(true);
+      await page.context().setOffline(false);
+      expect(count(requests, `/api/v1/spaces/${space.id}/file-change-sync`)).toBe(6);
+
+      await page.clock.fastForward(30_001);
+      await expect.poll(() => count(
+        requests,
+        `/api/v1/spaces/${space.id}/file-change-sync`
+      )).toBe(7);
+    }
   });
 }
 

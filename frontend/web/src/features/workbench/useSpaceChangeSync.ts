@@ -1,5 +1,10 @@
-import { useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
+import {
+  focusManager,
+  onlineManager,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
@@ -53,6 +58,46 @@ export function createSpaceChangeSynchronizer(
   };
 }
 
+export function createSpaceChangePollingBackoff() {
+  let baselineEstablished = false;
+  let idleStep = 0;
+  let scheduledInterval = nextInterval();
+
+  function nextInterval() {
+    const baseInterval = POLLING.spaceChangesIdleMs[idleStep]
+      ?? POLLING.spaceChangesIdleMs[0];
+    return withPollingJitter(baseInterval, POLLING.spaceChangesJitterMs);
+  }
+
+  function setIdleStep(nextStep: number) {
+    idleStep = Math.min(nextStep, POLLING.spaceChangesIdleMs.length - 1);
+    scheduledInterval = nextInterval();
+  }
+
+  return {
+    currentInterval() {
+      return scheduledInterval;
+    },
+    record(response: Pick<FileChangeSyncResponse, "changes" | "resync_required">) {
+      if (response.resync_required || response.changes.length > 0) {
+        baselineEstablished = true;
+        setIdleStep(0);
+        return;
+      }
+      if (!baselineEstablished) {
+        baselineEstablished = true;
+        setIdleStep(0);
+        return;
+      }
+      setIdleStep(idleStep + 1);
+    },
+    reset() {
+      baselineEstablished = false;
+      setIdleStep(0);
+    }
+  };
+}
+
 export function useSpaceChangeSync(spaceId: string | null) {
   const client = useApiClient();
   const queryClient = useQueryClient();
@@ -61,19 +106,48 @@ export function useSpaceChangeSync(spaceId: string | null) {
     () => createSpaceChangeSynchronizer(client, queryClient),
     [client, queryClient]
   );
-  const refetchInterval = useMemo(
-    () => withPollingJitter(POLLING.spaceChangesMs, POLLING.spaceChangesJitterMs),
-    []
-  );
+  const pollingBackoff = useMemo(createSpaceChangePollingBackoff, [spaceId]);
+  const [, reschedulePolling] = useReducer((revision: number) => revision + 1, 0);
+  const resetPolling = useCallback(() => {
+    pollingBackoff.reset();
+    reschedulePolling();
+  }, [pollingBackoff]);
+
+  useEffect(() => {
+    if (pageVisible) resetPolling();
+  }, [pageVisible, resetPolling]);
+
+  useEffect(() => {
+    const unsubscribeFocus = focusManager.subscribe((focused) => {
+      if (focused) resetPolling();
+    });
+    const unsubscribeOnline = onlineManager.subscribe((online) => {
+      if (online) resetPolling();
+    });
+    return () => {
+      unsubscribeFocus();
+      unsubscribeOnline();
+    };
+  }, [resetPolling]);
+
   useQuery({
     queryKey: spaceId ? queryKeys.spaceChangeSignal(spaceId) : ["sync", "space-change", "none"],
-    queryFn: () => {
+    queryFn: async () => {
       if (!spaceId) throw new Error("No active space");
-      return syncSpaceChanges(spaceId);
+      try {
+        const response = await syncSpaceChanges(spaceId);
+        pollingBackoff.record(response);
+        return response;
+      } catch (error) {
+        pollingBackoff.reset();
+        throw error;
+      }
     },
     enabled: Boolean(spaceId) && pageVisible,
-    refetchInterval: pageVisible ? refetchInterval : false,
-    staleTime: refetchInterval,
+    refetchInterval: pageVisible
+      ? () => pollingBackoff.currentInterval()
+      : false,
+    staleTime: POLLING.spaceChangesMs,
     notifyOnChangeProps: ["data"]
   });
 }
