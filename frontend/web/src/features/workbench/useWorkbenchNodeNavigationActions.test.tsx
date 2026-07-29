@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
 import { getNode, resolveNodePath } from "../../api/nodes";
+import { queryKeys } from "../../api/queryKeys";
 import type { RestNode, Space } from "../../api/types";
 import { useUiStore } from "../../stores/uiStore";
 import { makeRestNode, makeSpace } from "../../test/fixtures";
@@ -50,7 +51,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     vi.mocked(resolveNodePath).mockResolvedValue(targetNode);
     mocks.revealNode.mockResolvedValue({ ancestors: [folder], target: targetNode });
 
-    const { result } = renderNavigationActions(activeSpace);
+    const { result, queryClient } = renderNavigationActions(activeSpace);
 
     await act(async () => {
       await result.current.openMarkdownLink(groupId, sourceNode, targetNode.path);
@@ -59,6 +60,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(resolveNodePath).toHaveBeenCalledWith(expect.anything(), activeSpace.id, targetNode.path);
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
+    expect(queryClient.getQueryData(queryKeys.node(activeSpace.id, targetNode.id))).toEqual(targetNode);
   });
 
   it("keeps the current editor state when markdown link resolution fails", async () => {
@@ -177,43 +179,84 @@ describe("useWorkbenchNodeNavigationActions", () => {
       await result.current.openNode(targetNode);
     });
 
+    expect(loadCanonicalNode).toHaveBeenCalledWith(targetNode, "Could not open node");
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
     expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
   });
 
-  it("reuses the canonical node query when the same summary is opened again", async () => {
+  it("opens a regular node from reveal and seeds the canonical cache without a node request", async () => {
     const activeSpace = space("space-1");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
     const targetNode = node("target", activeSpace.id, "/target.md");
-    vi.mocked(getNode).mockResolvedValue(targetNode);
+    mocks.revealNode.mockResolvedValue({ ancestors: [folder], target: targetNode });
+    const { result, queryClient } = renderNavigationActionsWithCanonicalLoader(activeSpace);
+
+    await act(async () => {
+      await result.current.openNode(targetNode);
+    });
+
+    expect(mocks.revealNode).toHaveBeenCalledWith(activeSpace.id, targetNode.id);
+    expect(getNode).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(queryKeys.node(activeSpace.id, targetNode.id))).toEqual(targetNode);
+    expect(useUiStore.getState().editorGroups[0].node).toEqual(targetNode);
+    expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
+  });
+
+  it("opens a revealed node in a new editor group without a node request", async () => {
+    const activeSpace = space("space-1");
+    const current = node("current", activeSpace.id, "/current.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    openSourceGroup(activeSpace, current);
     mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
     const { result } = renderNavigationActionsWithCanonicalLoader(activeSpace);
 
     await act(async () => {
-      await result.current.openNode(targetNode);
-      await result.current.openNode(targetNode);
+      await result.current.openNodeInNewGroup(targetNode);
     });
 
-    expect(getNode).toHaveBeenCalledOnce();
+    expect(getNode).not.toHaveBeenCalled();
+    expect(useUiStore.getState().editorGroups.map((group) => group.node?.id)).toEqual([
+      current.id,
+      targetNode.id
+    ]);
   });
 
-  it("navigates backward using a fresh canonical node", async () => {
+  it("opens a root node through the canonical loader without trying reveal", async () => {
+    const activeSpace = space("space-1");
+    const rootNode = node("root", activeSpace.id, "/", "folder", null);
+    const loadCanonicalNode = vi.fn<CanonicalNodeLoader>().mockResolvedValue(rootNode);
+    const { result } = renderNavigationActions(activeSpace, loadCanonicalNode);
+
+    await act(async () => {
+      await result.current.openNode(rootNode);
+    });
+
+    expect(mocks.revealNode).not.toHaveBeenCalled();
+    expect(loadCanonicalNode).toHaveBeenCalledWith(rootNode, "Could not open node");
+    expect(useUiStore.getState().editorGroups[0].node).toEqual(rootNode);
+  });
+
+  it("navigates backward from reveal without a node request", async () => {
     const activeSpace = space("space-1");
     const first = node("first", activeSpace.id, "/first.md");
     const second = node("second", activeSpace.id, "/second.md");
     const third = node("third", activeSpace.id, "/third.md");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
     const groupId = openSourceGroup(activeSpace, first);
     useUiStore.getState().openInGroup(groupId, second);
     useUiStore.getState().openInGroup(groupId, third);
-    vi.mocked(getNode).mockResolvedValue(second);
-    mocks.revealNode.mockResolvedValue({ ancestors: [], target: second });
-    const { result } = renderNavigationActions(activeSpace);
+    mocks.revealNode.mockResolvedValue({ ancestors: [folder], target: second });
+    const { result, queryClient } = renderNavigationActions(activeSpace);
 
     await act(async () => {
       await result.current.navigateEditorGroup(groupId, "back");
     });
 
     const group = useUiStore.getState().editorGroups[0];
-    expect(getNode).toHaveBeenCalledWith(expect.anything(), activeSpace.id, second.id);
+    expect(mocks.revealNode).toHaveBeenCalledWith(activeSpace.id, second.id);
+    expect(getNode).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(queryKeys.node(activeSpace.id, second.id))).toEqual(second);
+    expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
     expect(group.node?.id).toBe(second.id);
     expect(group.back.map((entry) => entry.nodeId)).toEqual([first.id]);
     expect(group.forward.map((entry) => entry.nodeId)).toEqual([third.id]);
@@ -227,10 +270,9 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const groupId = openSourceGroup(activeSpace, first);
     useUiStore.getState().openInGroup(groupId, deleted);
     useUiStore.getState().openInGroup(groupId, current);
-    vi.mocked(getNode)
+    mocks.revealNode
       .mockRejectedValueOnce(new ApiError("not found", 404))
-      .mockResolvedValueOnce(first);
-    mocks.revealNode.mockResolvedValue({ ancestors: [], target: first });
+      .mockResolvedValueOnce({ ancestors: [], target: first });
     const { result } = renderNavigationActions(activeSpace);
 
     await act(async () => {
@@ -241,7 +283,27 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(group.node?.id).toBe(first.id);
     expect(group.back).toEqual([]);
     expect(group.forward.map((entry) => entry.nodeId)).toEqual([current.id]);
-    expect(getNode).toHaveBeenCalledTimes(2);
+    expect(mocks.revealNode).toHaveBeenCalledTimes(2);
+    expect(getNode).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a fresh node request when history reveal fails", async () => {
+    const activeSpace = space("space-1");
+    const first = node("first", activeSpace.id, "/first.md");
+    const current = node("current", activeSpace.id, "/current.md");
+    const groupId = openSourceGroup(activeSpace, first);
+    useUiStore.getState().openInGroup(groupId, current);
+    mocks.revealNode.mockRejectedValue(new ApiError("unavailable", 503));
+    vi.mocked(getNode).mockResolvedValue(first);
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    expect(getNode).toHaveBeenCalledWith(expect.anything(), activeSpace.id, first.id);
+    expect(useUiStore.getState().editorGroups[0].node).toEqual(first);
+    expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
   });
 
   it("keeps navigation history when the target cannot be verified", async () => {
@@ -250,6 +312,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const current = node("current", activeSpace.id, "/current.md");
     const groupId = openSourceGroup(activeSpace, first);
     useUiStore.getState().openInGroup(groupId, current);
+    mocks.revealNode.mockRejectedValue(new ApiError("unavailable", 503));
     vi.mocked(getNode).mockRejectedValue(new ApiError("unavailable", 503));
     const { result } = renderNavigationActions(activeSpace);
 
@@ -268,23 +331,26 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const first = node("first", activeSpace.id, "/first.md");
     const current = node("current", activeSpace.id, "/current.md");
     const replacement = node("replacement", activeSpace.id, "/replacement.md");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
     const groupId = openSourceGroup(activeSpace, first);
     useUiStore.getState().openInGroup(groupId, current);
-    const pending = deferred<RestNode>();
-    vi.mocked(getNode).mockReturnValue(pending.promise);
-    const { result } = renderNavigationActions(activeSpace);
+    const pending = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result, queryClient } = renderNavigationActions(activeSpace);
 
     const navigation = result.current.navigateEditorGroup(groupId, "back");
     act(() => {
       useUiStore.getState().openInGroup(groupId, replacement);
-      pending.resolve(first);
+      pending.resolve({ ancestors: [folder], target: first });
     });
     await act(async () => {
       await navigation;
     });
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacement.id);
-    expect(mocks.revealNode).not.toHaveBeenCalled();
+    expect(queryClient.getQueryData(queryKeys.node(activeSpace.id, first.id))).toEqual(first);
+    expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(false);
+    expect(getNode).not.toHaveBeenCalled();
   });
 });
 
@@ -296,10 +362,11 @@ function renderNavigationActions(
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  return renderHook(
+  const rendered = renderHook(
     () => useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode }),
     { wrapper }
   );
+  return { ...rendered, queryClient };
 }
 
 function renderNavigationActionsWithCanonicalLoader(activeSpace: Space) {
@@ -307,10 +374,11 @@ function renderNavigationActionsWithCanonicalLoader(activeSpace: Space) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  return renderHook(() => {
+  const rendered = renderHook(() => {
     const loadCanonicalNode = useCanonicalNodeLoader();
     return useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode });
   }, { wrapper });
+  return { ...rendered, queryClient };
 }
 
 function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {
@@ -335,11 +403,17 @@ function space(id: string): Space {
   });
 }
 
-function node(id: string, spaceId: string, path: string, kind: RestNode["kind"] = "text"): RestNode {
+function node(
+  id: string,
+  spaceId: string,
+  path: string,
+  kind: RestNode["kind"] = "text",
+  parentId: string | null = `${spaceId}-root`
+): RestNode {
   return makeRestNode({
     id,
     space_id: spaceId,
-    parent_id: `${spaceId}-root`,
+    parent_id: parentId,
     name: path.split("/").pop() ?? id,
     kind,
     path,
