@@ -9,7 +9,7 @@ describe("ApiProvider", () => {
     const onMutationError = vi.fn();
 
     render(
-      <ApiProvider apiKey="test-key" authCacheKey="test-key:0" onMutationError={onMutationError}>
+      <ApiProvider authCacheKey="browser-session:0" onMutationError={onMutationError}>
         <FailingMutation />
       </ApiProvider>
     );
@@ -23,7 +23,7 @@ describe("ApiProvider", () => {
     const onMutationError = vi.fn();
 
     render(
-      <ApiProvider apiKey="test-key" authCacheKey="test-key:0" onMutationError={onMutationError}>
+      <ApiProvider authCacheKey="browser-session:0" onMutationError={onMutationError}>
         <FailingMutation silent />
       </ApiProvider>
     );

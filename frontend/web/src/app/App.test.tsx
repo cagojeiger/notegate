@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -20,8 +20,7 @@ describe("App auth boundary", () => {
     vi.restoreAllMocks();
   });
 
-  it("checks /api/v1/me on mount with the stored API key", async () => {
-    window.sessionStorage.setItem("notegate.devApiKey", "ngk_v1_test");
+  it("checks /api/v1/me on mount with the browser session", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(meResponse()), { status: 200 }));
 
     render(<App />);
@@ -36,17 +35,15 @@ describe("App auth boundary", () => {
       })
     );
     const [, init] = fetchMock.mock.calls[0];
-    expect((init?.headers as Headers).get("authorization")).toBe("Bearer ngk_v1_test");
+    expect((init?.headers as Headers).has("authorization")).toBe(false);
   });
 
-  it("shows the login gate and clears a stored API key when /me returns 401", async () => {
-    window.sessionStorage.setItem("notegate.devApiKey", "expired_key");
+  it("shows the login gate when the browser session is missing", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: "unauthorized", kind: "unauthorized", message: "unauthorized" }), { status: 401 }));
 
     render(<App />);
 
     await screen.findByText("Continue to NoteGate");
-    await waitFor(() => expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull());
   });
 
   it("keeps a browser session retryable when /me is temporarily unavailable", async () => {
@@ -69,7 +66,11 @@ describe("App auth boundary", () => {
   });
 
   it("switches back to the login gate when the workbench signs out", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(meResponse()), { status: 200 }));
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(meResponse()), { status: 200 }))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: "unauthorized", kind: "unauthorized", message: "unauthorized" }), { status: 401 })
+      );
 
     render(<App />);
 

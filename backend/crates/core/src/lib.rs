@@ -1,7 +1,7 @@
-//! Shared primitives for notegate: configuration and error types.
+//! Shared primitives for notegate: configuration, policy, and error types.
 //!
-//! This crate has no knowledge of HTTP or the database — keep it that way so
-//! every other crate can depend on it without pulling heavy dependencies.
+//! This crate defines shared contracts but contains no HTTP handlers or database
+//! implementation, so every other crate can depend on it without heavy dependencies.
 
 pub mod config;
 pub mod error;
@@ -10,5 +10,7 @@ pub mod security;
 pub mod tier;
 pub mod validation;
 
-pub use config::{Config, S3Config, SearchBodyCacheConfig};
+pub use config::{
+    Config, HttpRateLimitConfig, HttpRateLimitsConfig, S3Config, SearchBodyCacheConfig,
+};
 pub use error::{Error, Result, WriteLockScope};

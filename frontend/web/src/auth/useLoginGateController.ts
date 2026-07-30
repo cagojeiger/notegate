@@ -1,9 +1,6 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { writeDevApiKey } from "./session";
-
-export type DevAuthGateControllerProps = {
-  onAuthenticated: (apiKey: string) => void;
+export type LoginGateControllerProps = {
   onSessionAuthenticated: () => Promise<boolean>;
 };
 
@@ -11,8 +8,7 @@ export function loginUrl(): string {
   return "/auth/login";
 }
 
-export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticated }: DevAuthGateControllerProps) {
-  const [apiKey, setApiKey] = useState("");
+export function useLoginGateController({ onSessionAuthenticated }: LoginGateControllerProps) {
   const [loginHint, setLoginHint] = useState<string | null>(null);
   const popupCheckRef = useRef<number | null>(null);
   const loginPopupRef = useRef<Window | null>(null);
@@ -42,14 +38,6 @@ export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticat
       loginPopupRef.current = null;
     };
   }, [checkSession]);
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = apiKey.trim();
-    if (!trimmed) return;
-    writeDevApiKey(trimmed);
-    onAuthenticated(trimmed);
-  }
 
   function beginPolling(popup: Window | null) {
     if (popupCheckRef.current !== null) window.clearInterval(popupCheckRef.current);
@@ -86,12 +74,8 @@ export function useDevAuthGateController({ onAuthenticated, onSessionAuthenticat
   }
 
   return {
-    apiKey,
     loginHint,
     loginHref: loginUrl(),
-    canSubmitApiKey: Boolean(apiKey.trim()),
-    setApiKey,
-    handleSubmit,
     startLogin,
     beginPolling
   };

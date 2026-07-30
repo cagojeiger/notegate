@@ -2,13 +2,11 @@ import { useEffect } from "react";
 import { Moon, ShieldCheck, Sun } from "lucide-react";
 
 import { persistTheme, useUiStore } from "../stores/uiStore";
-import { BrandLockup, Button, Card, IconButton, TextField } from "../shared/ui";
-import { useDevAuthGateController, type DevAuthGateControllerProps } from "./useDevAuthGateController";
+import { BrandLockup, Card, IconButton } from "../shared/ui";
+import { useLoginGateController, type LoginGateControllerProps } from "./useLoginGateController";
 
-type DevAuthGateProps = DevAuthGateControllerProps & { devApiKeyFallbackEnabled: boolean };
-
-export function DevAuthGate({ devApiKeyFallbackEnabled, ...controllerProps }: DevAuthGateProps) {
-  const auth = useDevAuthGateController(controllerProps);
+export function LoginGate(controllerProps: LoginGateControllerProps) {
+  const auth = useLoginGateController(controllerProps);
   const theme = useUiStore((state) => state.theme);
   const toggleTheme = useUiStore((state) => state.toggleTheme);
 
@@ -35,8 +33,6 @@ export function DevAuthGate({ devApiKeyFallbackEnabled, ...controllerProps }: De
         </header>
 
         <Card
-          as="form"
-          onSubmit={auth.handleSubmit}
           className="w-full border-border bg-surface p-6 shadow-[var(--ng-focus-shadow)] sm:p-7"
           aria-labelledby="auth-title"
         >
@@ -69,23 +65,6 @@ export function DevAuthGate({ devApiKeyFallbackEnabled, ...controllerProps }: De
             <Card className="mt-3 text-xs leading-5 text-muted" padding="sm" role="status" aria-live="polite">
               {auth.loginHint}
             </Card>
-          ) : null}
-
-          {devApiKeyFallbackEnabled ? (
-            <details className="mt-5 rounded-xl border border-border bg-panel p-3">
-              <summary className="cursor-pointer rounded text-sm font-medium">Developer API key fallback</summary>
-              <TextField
-                id="api-key"
-                name="apiKey"
-                label="User API key"
-                value={auth.apiKey}
-                onChange={(event) => auth.setApiKey(event.target.value)}
-                inputClassName="mt-2 bg-bg font-mono text-sm"
-                placeholder="ngk_v1_..."
-                autoComplete="off"
-              />
-              <Button type="submit" className="mt-4 w-full" secondary disabled={!auth.canSubmitApiKey}>Open with API key</Button>
-            </details>
           ) : null}
         </Card>
       </section>

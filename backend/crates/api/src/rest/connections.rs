@@ -76,7 +76,7 @@ pub(crate) struct ConnectBody {
         ("cursor" = Option<String>, Query),
     ),
     responses((status = 200, description = "List agent connections", body = ConnectionListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -125,7 +125,7 @@ pub(crate) async fn list(
     params(("space_id" = Uuid, Path), ("agent_id" = Uuid, Path)),
     request_body = ConnectBody,
     responses((status = 200, description = "Connect or update agent", body = ConnectionOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn connect(
     State(state): State<AppState>,
@@ -159,7 +159,7 @@ pub(crate) async fn connect(
     tag = "connections",
     params(("space_id" = Uuid, Path), ("agent_id" = Uuid, Path)),
     responses((status = 204, description = "Disconnect agent")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn disconnect(
     State(state): State<AppState>,

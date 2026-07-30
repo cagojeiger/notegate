@@ -1,6 +1,6 @@
-# REST API
+# V1 브라우저 API
 
-REST는 브라우저/UI용 resource API다. UI가 선택한 `space_id`, `node_id`를 사용해 rename/move 이후에도 선택 상태를 안정적으로 유지한다.
+V1 REST는 NoteGate 브라우저 UI 전용 resource API다. UI가 선택한 `space_id`, `node_id`를 사용해 rename/move 이후에도 선택 상태를 안정적으로 유지한다. 외부 확장은 `../public-api-v2.md`의 V2 계약을 사용한다.
 
 ## Categories
 
@@ -18,10 +18,10 @@ REST는 브라우저/UI용 resource API다. UI가 선택한 `space_id`, `node_id
 ## Auth mapping
 
 ```text
-browser/authgate bearer -> user account
-ngk_v1_ user key       -> user account
-ngk_v1_ agent key      -> agent account
+browser session cookie -> user account
 ```
+
+V1은 API key와 OAuth bearer를 허용하지 않는다.
 
 ## Permission summary
 

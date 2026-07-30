@@ -6,7 +6,7 @@
 //! - browser login (OAuth callback) creates or updates a user account;
 //! - browser session cookies resolve an already-registered user account on the
 //!   browser channel;
-//! - REST/MCP bearer tokens resolve an already-registered user account
+//! - MCP OAuth bearer tokens resolve an already-registered user account
 //!   (an authenticated authgate identity with no local account is
 //!   [`IdentityError::NotRegistered`] — the spec onboarding path);
 //! - an API key resolves either a `kind='user'` or `kind='agent'` account,
@@ -87,11 +87,6 @@ impl Resolver {
             return Err(IdentityError::Inactive);
         }
         user_caller(account, user, Channel::Browser)
-    }
-
-    /// Resolve a REST bearer for an already-registered user account.
-    pub async fn resolve_api(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
-        self.resolve_registered_user(&attrs.sub, Channel::Api).await
     }
 
     /// Resolve an MCP bearer for an already-registered user account.

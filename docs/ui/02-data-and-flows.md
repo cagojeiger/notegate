@@ -55,14 +55,12 @@ App load
 ```text
 Logout
 -> POST /auth/logout
--> clear local API key fallback
 -> reset session
 -> AuthScreen
 ```
 
 ```text
 any /api/v1/* returns 401
--> clear local API key fallback
 -> reset session
 -> AuthScreen
 ```

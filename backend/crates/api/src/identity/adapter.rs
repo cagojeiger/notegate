@@ -27,11 +27,6 @@ pub trait CallerResolver: Send + Sync {
         user_id: Uuid,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
 
-    fn resolve_api(
-        &self,
-        attrs: ResolveAttrs,
-    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>>;
-
     fn resolve_mcp(
         &self,
         attrs: ResolveAttrs,
@@ -58,13 +53,6 @@ impl CallerResolver for Resolver {
         user_id: Uuid,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move { self.resolve_browser_session_user(user_id).await })
-    }
-
-    fn resolve_api(
-        &self,
-        attrs: ResolveAttrs,
-    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        Box::pin(async move { self.resolve_api(attrs).await })
     }
 
     fn resolve_mcp(

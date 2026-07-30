@@ -1,5 +1,5 @@
 import { apiErrorFromResponse } from "./errors";
-import { downloadBlob, downloadUrl } from "../shared/lib/downloadBlob";
+import { downloadUrl } from "../shared/lib/downloadUrl";
 
 export type ApiClient = {
   get<T>(path: string): Promise<T>;
@@ -15,11 +15,9 @@ type RequestOptions = {
   body?: unknown;
 };
 
-export function createApiClient(getApiKey: () => string | null): ApiClient {
+export function createApiClient(): ApiClient {
   async function request<T>(path: string, options: RequestOptions): Promise<T> {
-    const apiKey = getApiKey();
     const headers = new Headers();
-    if (apiKey) headers.set("authorization", `Bearer ${apiKey}`);
     if (options.body !== undefined) headers.set("content-type", "application/json");
 
     const response = await fetch(path, {
@@ -40,15 +38,6 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
     return (await response.json()) as T;
   }
 
-  async function fetchBlob(path: string): Promise<Blob> {
-    const apiKey = getApiKey();
-    const headers = new Headers();
-    if (apiKey) headers.set("authorization", `Bearer ${apiKey}`);
-    const response = await fetch(path, { method: "GET", headers, credentials: "same-origin" });
-    if (!response.ok) throw await apiErrorFromResponse(response);
-    return response.blob();
-  }
-
   return {
     get: <T>(path: string) => request<T>(path, { method: "GET" }),
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body }),
@@ -56,11 +45,7 @@ export function createApiClient(getApiKey: () => string | null): ApiClient {
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
     delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
     async download(path: string, filename: string) {
-      if (!getApiKey()) {
-        downloadUrl(path, filename);
-        return;
-      }
-      downloadBlob(await fetchBlob(path), filename);
+      downloadUrl(path, filename);
     }
   };
 }

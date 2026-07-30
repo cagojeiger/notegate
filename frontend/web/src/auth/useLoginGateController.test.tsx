@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { useDevAuthGateController } from "./useDevAuthGateController";
+import { useLoginGateController } from "./useLoginGateController";
 
 function dispatchLoginComplete(origin: string, source: MessageEventSource | null = null) {
   window.dispatchEvent(new MessageEvent("message", {
@@ -11,11 +11,10 @@ function dispatchLoginComplete(origin: string, source: MessageEventSource | null
   }));
 }
 
-describe("useDevAuthGateController", () => {
+describe("useLoginGateController", () => {
   it("accepts login completion only from the current origin", async () => {
     const onSessionAuthenticated = vi.fn().mockResolvedValue(true);
-    const { result } = renderHook(() => useDevAuthGateController({
-      onAuthenticated: vi.fn(),
+    const { result } = renderHook(() => useLoginGateController({
       onSessionAuthenticated
     }));
 
@@ -31,8 +30,7 @@ describe("useDevAuthGateController", () => {
     const onSessionAuthenticated = vi.fn().mockResolvedValue(true);
     const popup = { closed: false, focus: vi.fn() } as unknown as Window;
     vi.spyOn(window, "open").mockReturnValue(popup);
-    const { result } = renderHook(() => useDevAuthGateController({
-      onAuthenticated: vi.fn(),
+    const { result } = renderHook(() => useLoginGateController({
       onSessionAuthenticated
     }));
 

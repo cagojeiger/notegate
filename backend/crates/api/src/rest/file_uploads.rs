@@ -127,7 +127,7 @@ pub(crate) struct CompletedPartBody {
     params(("space_id" = Uuid, Path)),
     request_body = BeginUploadBody,
     responses((status = 201, description = "Object upload created", body = BeginUploadResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn begin(
     State(state): State<AppState>,
@@ -174,7 +174,7 @@ pub(crate) async fn begin(
     params(("space_id" = Uuid, Path), ("upload_id" = Uuid, Path)),
     request_body = PreparePartsBody,
     responses((status = 200, description = "Presigned multipart upload URLs", body = PreparePartsResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn parts(
     State(state): State<AppState>,
@@ -213,7 +213,7 @@ pub(crate) async fn parts(
     params(("space_id" = Uuid, Path), ("upload_id" = Uuid, Path)),
     request_body = Option<CompleteUploadBody>,
     responses((status = 201, description = "Object file attached", body = FileResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn complete(
     State(state): State<AppState>,
@@ -257,7 +257,7 @@ pub(crate) async fn complete(
     tag = "files",
     params(("space_id" = Uuid, Path), ("upload_id" = Uuid, Path)),
     responses((status = 204, description = "Object upload cleanup queued")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn abort(
     State(state): State<AppState>,

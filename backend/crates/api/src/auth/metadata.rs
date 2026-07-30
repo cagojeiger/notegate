@@ -37,11 +37,6 @@ fn split_origin_and_path(value: &str) -> (&str, &str) {
     }
 }
 
-pub fn challenge_header(meta_url: &str) -> HeaderValue {
-    HeaderValue::from_str(&format!("Bearer resource_metadata=\"{meta_url}\""))
-        .unwrap_or_else(|_error| HeaderValue::from_static("Bearer"))
-}
-
 pub fn scoped_challenge_header(meta_url: &str) -> HeaderValue {
     HeaderValue::from_str(&format!(
         "Bearer resource_metadata=\"{meta_url}\", scope=\"openid offline_access\""
@@ -137,8 +132,8 @@ mod tests {
     use secrecy::SecretString;
 
     use super::{
-        authorization_server_metadata_for_config, challenge_header,
-        protected_resource_metadata_url, scoped_challenge_header,
+        authorization_server_metadata_for_config, protected_resource_metadata_url,
+        scoped_challenge_header,
     };
 
     fn config() -> notegate_core::Config {
@@ -169,6 +164,7 @@ mod tests {
             s3: crate::state::test_s3_config(),
             default_user_tier: notegate_core::tier::UserTier::DEFAULT,
             limits: notegate_core::limits::Limits::default(),
+            http_rate_limits: notegate_core::HttpRateLimitsConfig::default(),
             search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
             secure_cookies: false,
         }
@@ -229,15 +225,6 @@ mod tests {
         );
         assert_eq!(metadata.code_challenge_methods_supported, vec!["S256"]);
         assert!(metadata.client_id_metadata_text_supported);
-    }
-
-    #[test]
-    fn bearer_challenge_includes_resource_metadata() {
-        let header =
-            challenge_header("http://localhost:9191/.well-known/oauth-protected-resource/mcp");
-        let value = header.to_str().unwrap_or_default();
-        assert!(value.starts_with("Bearer "));
-        assert!(value.contains("resource_metadata="));
     }
 
     #[test]

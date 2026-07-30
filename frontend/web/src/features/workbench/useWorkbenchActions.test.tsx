@@ -1,7 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { writeDevApiKey } from "../../auth/session";
 import { persistWorkbenchPanelState, persistSpaceWorkbench, workbenchSpaceKey } from "../../stores/workbenchStorage";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 
@@ -44,7 +43,6 @@ function renderActions(onSignOut = vi.fn()) {
 function persistBrowserWorkspace() {
   persistSpaceWorkbench("space-1", [{ id: 1, node: null, mode: "preview", back: [], forward: [] }], 0);
   persistWorkbenchPanelState({ primarySidebarOpen: true, auxiliaryOpen: false });
-  writeDevApiKey("dev-key");
 }
 
 describe("useWorkbenchActions", () => {
@@ -62,7 +60,6 @@ describe("useWorkbenchActions", () => {
 
     expect(window.localStorage.getItem(workbenchSpaceKey("space-1"))).toBeNull();
     expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull();
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
@@ -82,7 +79,6 @@ describe("useWorkbenchActions", () => {
 
     expect(error).toEqual(new Error("logout failed"));
     expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.getItem("notegate.devApiKey")).toBeNull();
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 });

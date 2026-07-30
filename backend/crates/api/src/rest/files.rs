@@ -95,7 +95,7 @@ pub(crate) struct BatchFilePreviewResponse {
     tag = "files",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses((status = 200, description = "File metadata", body = FileResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn stat(
     State(state): State<AppState>,
@@ -126,7 +126,7 @@ pub(crate) async fn stat(
     responses(
         (status = 302, description = "Redirect to a presigned object download URL")
     ),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn download(
     State(state): State<AppState>,
@@ -158,7 +158,7 @@ pub(crate) async fn download(
         (status = 200, description = "Short-lived URL for a detected raster image up to 10 MiB", body = FilePreviewUrlResponse),
         (status = 404, description = "File has no supported image preview or exceeds 10 MiB")
     ),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn preview_url(
     State(state): State<AppState>,
@@ -177,7 +177,7 @@ pub(crate) async fn preview_url(
         (status = 200, description = "Short-lived URL for a detected PDF up to 10 MiB", body = FilePreviewUrlResponse),
         (status = 404, description = "File has no supported PDF preview or exceeds 10 MiB")
     ),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn pdf_preview_url(
     State(state): State<AppState>,
@@ -232,7 +232,7 @@ async fn preview_response(
         (status = 200, description = "Ordered per-path image preview results", body = BatchFilePreviewResponse),
         (status = 400, description = "Invalid, duplicate, or excessive path input")
     ),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn batch_preview_urls(
     State(state): State<AppState>,

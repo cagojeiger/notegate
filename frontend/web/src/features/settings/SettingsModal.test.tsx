@@ -71,7 +71,7 @@ function mockSettingsApi(me: unknown = userMe, options: { failPermissionUpdate?:
 
 function renderSettings(me = userMe, onResetSavedWorkspace = vi.fn()) {
   render(
-    <ApiProvider apiKey="test-key" authCacheKey="test-key:0">
+    <ApiProvider authCacheKey="browser-session:0">
       <SettingsModal me={me} onClose={vi.fn()} onSignOut={vi.fn()} onResetSavedWorkspace={onResetSavedWorkspace} />
     </ApiProvider>
   );

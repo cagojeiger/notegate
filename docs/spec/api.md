@@ -1,41 +1,40 @@
-# API architecture
+# API 구조
 
-notegate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. REST는 브라우저/UI용 resource API이고, MCP는 agent/CLI용 path-first command API다.
+NoteGate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. V1은 브라우저 UI 전용 resource API, V2는 외부 확장용 API key API, MCP는 agent/CLI용 path-first command API다.
 
 ```text
-REST API = UI가 안정적으로 선택한 id 기반 resource API
-MCP tools = agent가 쓰기 쉬운 space name + path 기반 command/search API
+V1 REST  = 브라우저 UI가 사용하는 전체 resource API
+V2 REST  = 외부 확장이 사용하는 안정적인 공개 API
+MCP      = agent가 쓰기 쉬운 space name + path 기반 command/search API
 ```
 
-두 surface는 같은 service invariant를 사용한다. Search는 MCP/CLI command로 제공하고 REST resource API에는 노출하지 않는다.
+세 surface는 같은 service invariant를 사용한다. V2 초기 계약은 API key caller 확인만 제공한다.
 
-## API categories
+## API 분류
 
 ```text
 Auth        /auth/*, /.well-known/*
-Identity    /api/v1/me, /api/v1/me/keys, /api/v1/me/usage
-Spaces      /api/v1/spaces
-Nodes       /api/v1/spaces/{space_id}/nodes
-Text        /api/v1/spaces/{space_id}/text
-Files       /api/v1/spaces/{space_id}/files, /api/v1/spaces/{space_id}/file-uploads
-Agents      /api/v1/agents
-Connections /api/v1/spaces/{space_id}/agents
+Web API     /api/v1/*
+Public API  /api/v2/*
 System      /health, /ready
-API Docs    /openapi.json, /swagger-ui
+API Docs    /openapi/v2.json, /swagger-ui/v2
 MCP         /mcp
 ```
 
-## Layering
+V2의 초기 endpoint는 `public-api-v2.md`에서 정의한다.
+
+## 계층
 
 ```text
 api/rest/*     request/response, auth extraction, DTO mapping
+api/public_v2  공개 계약용 request/response와 DTO mapping
 api/mcp/*      tool schema, space/path resolve, DTO mapping
 service/*      authorization, limits, lifecycle invariant
 repo/db        transaction, SQL, DB constraint mapping
 model          shared domain types
 ```
 
-API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는다.
+API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는다. V2가 별도 프로세스로 분리되더라도 같은 service/model 계약을 사용한다.
 
 ## Identity mapping
 
@@ -47,6 +46,12 @@ ngk_v1_ API key             -> api_keys.account_id account
 ```
 
 OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser session cookie를 발급하고, BE가 저장한 encrypted authgate refresh token으로 server-side 갱신한다. API key는 `api_keys.account_id`가 가리키는 account kind로 caller를 결정한다.
+
+```text
+/api/v1/* -> browser session cookie만 허용
+/api/v2/* -> ngk_v1_ API key만 허용
+/mcp      -> ngk_v1_ API key 또는 MCP OAuth bearer 허용
+```
 
 ## Common invariants
 
