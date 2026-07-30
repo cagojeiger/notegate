@@ -29,17 +29,17 @@ impl NameMatcher {
     }
 }
 
-pub(super) enum ContentMatcher {
-    Literal(String),
-    Regex(Regex),
+pub(super) struct ContentMatcher {
+    regex: Regex,
 }
 
 impl ContentMatcher {
     pub(super) fn new(q: &str, mode: GrepMatchMode) -> ServiceResult<Self> {
-        match mode {
-            GrepMatchMode::Literal => Ok(Self::Literal(q.to_lowercase())),
-            GrepMatchMode::Regex => Ok(Self::Regex(compile_regex(q)?)),
-        }
+        let regex = match mode {
+            GrepMatchMode::Literal => compile_regex(&regex::escape(q))?,
+            GrepMatchMode::Regex => compile_regex(q)?,
+        };
+        Ok(Self { regex })
     }
 
     pub(super) fn match_lines(&self, content: &str, mode: GrepLineMode) -> Vec<i32> {
@@ -49,11 +49,7 @@ impl ContentMatcher {
 
         let mut lines = Vec::new();
         for (index, line) in logical_lines(content).enumerate() {
-            let matched = match self {
-                Self::Literal(needle) => line.to_lowercase().contains(needle),
-                Self::Regex(regex) => regex.is_match(line),
-            };
-            if !matched {
+            if !self.regex.is_match(line) {
                 continue;
             }
 
