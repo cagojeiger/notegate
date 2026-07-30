@@ -91,6 +91,7 @@ export function PrimarySidebar({
       {menu ? (
         <NodeContextMenu
           menu={menu}
+          qualifiedPath={activeSpace?.id === menu.node.space_id ? `${activeSpace.name}:${menu.node.path}` : null}
           onClose={() => setMenu(null)}
           onOpenNode={onOpenNode}
           onOpenInNewGroup={onOpenNodeInNewGroup}
