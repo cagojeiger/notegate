@@ -392,6 +392,36 @@ mod tests {
     }
 
     #[test]
+    fn content_literal_escapes_regex_syntax() {
+        let matcher = ContentMatcher::new(r"a.b*[x]\path", GrepMatchMode::Literal).unwrap();
+
+        assert_eq!(
+            matcher.match_lines(
+                "A.B*[X]\\PATH\naxbxxxpath\na.bbbbb[x]\\path\n",
+                GrepLineMode::All
+            ),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn content_literal_uses_ripgrep_unicode_case_folding() {
+        for (query, content, expected) in [
+            ("i", "İstanbul\nistanbul\n", vec![2]),
+            ("ς", "Σ\nσ\nς\n", vec![1, 2, 3]),
+            ("ss", "Straße\nSS\n", vec![2]),
+            ("k", "Kelvin\nkelvin\n", vec![1, 2]),
+        ] {
+            let matcher = ContentMatcher::new(query, GrepMatchMode::Literal).unwrap();
+            assert_eq!(
+                matcher.match_lines(content, GrepLineMode::All),
+                expected,
+                "query={query}"
+            );
+        }
+    }
+
+    #[test]
     fn content_regex_is_case_insensitive_and_matches_per_line() {
         let matcher = ContentMatcher::new(r"^error(?:-\d+)?$", GrepMatchMode::Regex).unwrap();
 
