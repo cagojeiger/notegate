@@ -1257,14 +1257,18 @@ pub mod search {
         limit: i64,
     ) -> Result<Vec<SearchNodeCandidate>> {
         let rows: Vec<NodeCandidateRow> = sqlx::query_as(&candidate_cte(
-            "SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, \
-                        created_by_account_id, updated_by_account_id, deleted_by_account_id, \
-                        purge_after, created_at, updated_at, deleted_at, path, sort_path \
+            "SELECT id, path, sort_path \
                  FROM subtree \
                  WHERE id <> $2 AND search_enabled = true \
                    AND ($4::text IS NULL OR sort_path > $4) \
                  ORDER BY sort_path \
                  LIMIT $5",
+            "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
+                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path \
+                 FROM selected s \
+                 JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
+                 ORDER BY s.sort_path",
         ))
         .bind(space_id)
         .bind(scope_node_id)
@@ -1290,15 +1294,13 @@ pub mod search {
     ) -> Result<Vec<SearchTextCandidate>> {
         let rows: Vec<TextCandidateRow> = sqlx::query_as(
             &candidate_cte(
-                "SELECT s.id, s.space_id, s.parent_id, s.name, s.kind, s.sort_order, s.metadata, s.search_enabled, s.write_locked, \
-                        s.created_by_account_id, s.updated_by_account_id, s.deleted_by_account_id, \
-                        s.purge_after, s.created_at, s.updated_at, s.deleted_at, s.path, s.sort_path, \
+                "SELECT s.id, s.path, s.sort_path, \
                         t.content_sha256 AS text_content_sha256, \
                         t.byte_len AS text_byte_len, \
                         t.line_count AS text_line_count, \
                         t.at_rest_encryption AS text_at_rest_encryption \
                  FROM subtree s \
-                 JOIN text_objects t ON t.space_id = s.space_id AND t.node_id = s.id \
+                 JOIN text_objects t ON t.space_id = $1 AND t.node_id = s.id \
                  WHERE s.id <> $2 \
                    AND s.kind = 'text' \
                    AND s.search_enabled = true \
@@ -1306,6 +1308,13 @@ pub mod search {
                    AND ($4::text IS NULL OR s.sort_path > $4) \
                  ORDER BY s.sort_path \
                  LIMIT $5",
+                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
+                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
+                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path, \
+                        s.text_content_sha256, s.text_byte_len, s.text_line_count, s.text_at_rest_encryption \
+                 FROM selected s \
+                 JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
+                 ORDER BY s.sort_path",
             ),
         )
         .bind(space_id)
@@ -1412,20 +1421,16 @@ pub mod search {
         Ok(texts)
     }
 
-    fn candidate_cte(select_sql: &str) -> String {
+    fn candidate_cte(selected_sql: &str, result_sql: &str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
-                SELECT id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, \
-                       created_by_account_id, updated_by_account_id, deleted_by_account_id, \
-                       purge_after, created_at, updated_at, deleted_at, \
+                SELECT id, kind, search_enabled, \
                        $3::text AS path, \
                        ''::text AS sort_path \
                 FROM nodes \
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
-                SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
-                       n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
-                       n.purge_after, n.created_at, n.updated_at, n.deleted_at, \
+                SELECT n.id, n.kind, n.search_enabled, \
                        CASE WHEN s.path = '/' THEN '/' || n.name ELSE s.path || '/' || n.name END, \
                        CASE WHEN s.sort_path = '' \
                             THEN concat(lpad((n.sort_order::bigint + 2147483648)::text, 10, '0'), E'\\x1f', n.name, E'\\x1f', n.id::text) \
@@ -1434,8 +1439,10 @@ pub mod search {
                 FROM nodes n \
                 JOIN subtree s ON n.parent_id = s.id \
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
+            ), selected AS ( \
+                {selected_sql} \
             ) \
-            {select_sql}"
+            {result_sql}"
         )
     }
 }
