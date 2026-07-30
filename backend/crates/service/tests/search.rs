@@ -142,6 +142,12 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
     )
     .await;
     let hidden_text = write_doc(&files, owner, ws, root, "hidden.md", "hidden marker").await;
+    let visible_metadata = serde_json::json!({"search_candidate": "fully_hydrated"});
+    sqlx::query("UPDATE nodes SET metadata = $2 WHERE id = $1")
+        .bind(visible_text)
+        .bind(&visible_metadata)
+        .execute(&db.pool)
+        .await?;
 
     for node_id in [hidden_folder, hidden_text] {
         files
@@ -192,6 +198,7 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
         )
         .await?;
     assert_eq!(child_find.items[0].node.id, visible_text);
+    assert_eq!(child_find.items[0].node.metadata, visible_metadata);
 
     let hidden_grep = search
         .grep(
@@ -228,6 +235,7 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
         )
         .await?;
     assert_eq!(visible_grep.items[0].node.node.id, visible_text);
+    assert_eq!(visible_grep.items[0].node.node.metadata, visible_metadata);
 
     db.cleanup().await;
     Ok(())
