@@ -21,7 +21,7 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
         <span className="min-w-0 truncate">{title}</span>
         {dirty ? <span className="size-1.5 shrink-0 rounded-full bg-warning" title="Unsaved changes" /> : null}
         {qualifiedPath || titleActions ? (
-          <div className="ml-1 flex shrink-0 items-center gap-1">
+          <div className={`flex shrink-0 items-center gap-1 ${qualifiedPath ? "" : "ml-1"}`}>
             {qualifiedPath ? (
               <span title="Copy path">
                 <IconButton label="Copy path" size="sm" onClick={() => { void copyPath(); }}>
