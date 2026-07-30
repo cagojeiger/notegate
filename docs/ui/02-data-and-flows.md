@@ -270,6 +270,7 @@ file   -> node detail + file metadata/download
 규칙:
 
 - header 왼쪽에는 node name과 pane별 Back/Forward를 표시한다.
+- header의 node name 옆에는 내부 `<space>:/path`를 복사하는 `Copy path` 아이콘을 둔다.
 - path와 metrics는 Inspector에 둔다.
 - text preview가 기본이다.
 - plain text는 단순 메모처럼 보여준다.

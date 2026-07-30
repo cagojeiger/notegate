@@ -9,6 +9,7 @@ import { canCreateInFolder, canMutateNode } from "./nodeWriteAccess";
 
 export function NodeContextMenu({
   menu,
+  qualifiedPath,
   canWriteActiveSpace,
   canOpenInNewGroup = false,
   showCreateActions = true,
@@ -24,6 +25,7 @@ export function NodeContextMenu({
   onUploadInFolder
 }: {
   menu: { x: number; y: number; node: NodeSummary };
+  qualifiedPath: string | null;
   canWriteActiveSpace: boolean;
   canOpenInNewGroup?: boolean;
   showCreateActions?: boolean;
@@ -60,7 +62,8 @@ export function NodeContextMenu({
   }
 
   async function copyPath() {
-    showToast((await copyText(node.path)) ? "Path copied" : "Could not copy path");
+    if (!qualifiedPath) return;
+    showToast((await copyText(qualifiedPath)) ? "Path copied" : "Could not copy path");
   }
 
   const maxHeight = showCreateInNode ? 304 : 236;
@@ -71,7 +74,7 @@ export function NodeContextMenu({
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
       <Card className="fixed z-50 w-52 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
-        <div className="truncate px-3 py-1 text-xs text-muted">{node.path}</div>
+        <div className="truncate px-3 py-1 text-xs text-muted">{qualifiedPath ?? node.path}</div>
         {showCreateInNode ? (
           <>
             <MenuButton onClick={() => run(() => onCreateInFolder(node, "folder"))} disabled={!canCreateInNode}><FolderPlus size={14} /> New folder</MenuButton>
@@ -88,7 +91,7 @@ export function NodeContextMenu({
         {onDownloadFile && node.kind === "file" ? <MenuButton onClick={() => run(() => onDownloadFile(node))}><Download size={14} /> Download</MenuButton> : null}
         <MenuButton onClick={() => run(() => onRenameNode(node))} disabled={!nodeCanBeMutated}><Pencil size={14} /> Rename</MenuButton>
         <MenuButton onClick={() => run(() => onMoveNode(node))} disabled={!nodeCanBeMutated}><Move size={14} /> Move…</MenuButton>
-        <MenuButton onClick={() => run(() => { void copyPath(); })}><Copy size={14} /> Copy path</MenuButton>
+        <MenuButton onClick={() => run(() => { void copyPath(); })} disabled={!qualifiedPath}><Copy size={14} /> Copy path</MenuButton>
         {onCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}
         <MenuButton danger onClick={() => run(() => onDeleteNode(node))} disabled={!nodeCanBeMutated}><Trash2 size={14} /> Delete</MenuButton>
       </Card>

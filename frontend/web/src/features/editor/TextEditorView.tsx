@@ -17,7 +17,7 @@ import { useMarkdownImageLoader } from "./useFilePreviewQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 import { useTextEditorSession } from "./useTextEditorSession";
 
-export function TextEditorView({ active, groupId, navigationActions, node, latestNode, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
+export function TextEditorView({ active, groupId, navigationActions, node, latestNode, qualifiedPath, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const loadMarkdownImage = useMarkdownImageLoader(node);
   const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
   const [structuredMode, setStructuredMode] = useState<StructuredPreviewMode>("tree");
@@ -78,7 +78,8 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   }
 
   async function copyPath() {
-    showToast((await copyText(node.path)) ? "Path copied" : "Could not copy path");
+    if (!qualifiedPath) return;
+    showToast((await copyText(qualifiedPath)) ? "Path copied" : "Could not copy path");
   }
 
   function editText() {
@@ -124,7 +125,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   );
   return (
     <>
-      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} />
+      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} qualifiedPath={qualifiedPath} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} />
       {textQuery.isLoading ? (
         <div className="p-10 text-muted">Loading text…</div>
       ) : textQuery.isError ? (
@@ -187,6 +188,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           canCopyContent={canCopyContent}
           canEditText={canEditText}
           canSave={canSave}
+          canCopyPath={Boolean(qualifiedPath)}
           canMutateNode={canMutateNode(node, canWriteActiveSpace)}
           canOpenInNewGroup={canOpenInNewGroup}
           canCloseGroup={canClose}
@@ -212,6 +214,7 @@ function EditorContextMenu({
   node,
   mode,
   canCopyContent,
+  canCopyPath,
   canEditText,
   canSave,
   canMutateNode,
@@ -233,6 +236,7 @@ function EditorContextMenu({
   node: RestNode;
   mode: "preview" | "edit";
   canCopyContent: boolean;
+  canCopyPath: boolean;
   canEditText: boolean;
   canSave: boolean;
   canMutateNode: boolean;
@@ -283,7 +287,7 @@ function EditorContextMenu({
           <MenuButton onClick={() => run(onEditText)} disabled={!canEditText}><Pencil size={14} /> Edit</MenuButton>
         )}
         <MenuButton onClick={() => run(onOpenInNewGroup)} disabled={!canOpenInNewGroup}><PanelRightOpen size={14} /> Open in new group</MenuButton>
-        <MenuButton onClick={() => run(onCopyPath)}><Copy size={14} /> Copy path</MenuButton>
+        <MenuButton onClick={() => run(onCopyPath)} disabled={!canCopyPath}><Copy size={14} /> Copy path</MenuButton>
         {canCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}
         <div className="my-1 border-t border-border" />
         <MenuButton onClick={() => run(onRenameNode)} disabled={!canMutateNode}><Pencil size={14} /> Rename</MenuButton>

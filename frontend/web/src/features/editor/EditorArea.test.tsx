@@ -1,11 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EditorArea } from "./EditorArea";
 import type { RestNode } from "../../api/types";
+import { copyText } from "../../shared/lib/clipboard";
 import type { EditorGroup } from "../../stores/uiStore";
-import { makeRestNode } from "../../test/fixtures";
+import { useUiStore } from "../../stores/uiStore";
+import { makeRestNode, makeSpace } from "../../test/fixtures";
+import { EditorArea } from "./EditorArea";
 
 vi.mock("./OpenedNodeGuard", () => ({
   OpenedNodeGuard: ({ node, children }: { node: RestNode; children: (node: RestNode) => ReactNode }) => children(node)
@@ -13,6 +15,10 @@ vi.mock("./OpenedNodeGuard", () => ({
 
 vi.mock("./FileDetailView", () => ({
   FileDetailView: () => <div>File detail</div>
+}));
+
+vi.mock("../../shared/lib/clipboard", () => ({
+  copyText: vi.fn()
 }));
 
 function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> = {}) {
@@ -51,6 +57,12 @@ function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> =
 }
 
 describe("EditorArea", () => {
+  beforeEach(() => {
+    useUiStore.setState(useUiStore.getInitialState(), true);
+    vi.mocked(copyText).mockReset();
+    vi.mocked(copyText).mockResolvedValue(true);
+  });
+
   it("keeps the active group and its neighbor visible when visible groups are capped", () => {
     const { container } = renderEditorArea({ visibleGroupCount: 2 });
 
@@ -93,22 +105,30 @@ describe("EditorArea", () => {
     expect(onDownloadFile).toHaveBeenCalledWith(node);
   });
 
-  it("keeps locked files downloadable while disabling node mutations", () => {
+  it("keeps locked files downloadable and their qualified path copyable while disabling node mutations", async () => {
     const node = { ...fileNode(), effective_write_locked: true };
     const onDownloadFile = vi.fn();
     renderEditorArea({
       groups: [{ id: 0, node, mode: "preview", back: [], forward: [] }],
       activeGroupIndex: 0,
+      activeSpace: makeSpace({ name: "daily" }),
       canWriteActiveSpace: true,
       onDownloadFile
     });
 
     const download = screen.getByRole("button", { name: "Download" });
+    const copyPath = screen.getByRole("button", { name: "Copy path" });
     expect(download).toBeEnabled();
+    expect(copyPath).toBeEnabled();
     expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
 
     fireEvent.click(download);
+    fireEvent.click(copyPath);
     expect(onDownloadFile).toHaveBeenCalledWith(node);
+    await waitFor(() => {
+      expect(copyText).toHaveBeenCalledWith("daily:/document.pdf");
+      expect(useUiStore.getState().toast).toBe("Path copied");
+    });
   });
 
   it("shows per-group navigation controls before the title", () => {

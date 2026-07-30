@@ -89,6 +89,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
       {headerMenu ? (
         <NodeContextMenu
           menu={headerMenu}
+          qualifiedPath={activeSpace?.id === headerMenu.node.space_id ? `${activeSpace.name}:${headerMenu.node.path}` : null}
           canWriteActiveSpace={canWriteActiveSpace}
           canOpenInNewGroup={groups.length < MAX_EDITOR_GROUPS}
           showCreateActions={false}
@@ -132,6 +133,7 @@ function GroupBody({ active, groupId, navigationActions, node, mode, activeSpace
           groupId={groupId}
           navigationActions={navigationActions}
           node={freshNode}
+          qualifiedPath={activeSpace?.id === freshNode.space_id ? `${activeSpace.name}:${freshNode.path}` : null}
           mode={mode}
           canWriteActiveSpace={canWriteActiveSpace}
           canClose={canClose}
@@ -151,9 +153,9 @@ function GroupBody({ active, groupId, navigationActions, node, mode, activeSpace
   );
 }
 
-function NodeGroupContent({ active, groupId, navigationActions, node, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions: ReactNode; node: RestNode; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function NodeGroupContent({ active, groupId, navigationActions, node, qualifiedPath, mode, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions: ReactNode; node: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (node.kind === "text") {
-    return <TextEditorView active={active} groupId={groupId} navigationActions={navigationActions} node={node} latestNode={node} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onOpenMarkdownLink={onOpenMarkdownLink} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
+    return <TextEditorView active={active} groupId={groupId} navigationActions={navigationActions} node={node} latestNode={node} qualifiedPath={qualifiedPath} mode={mode} canWriteActiveSpace={canWriteActiveSpace} canOpenInNewGroup={canOpenInNewGroup} canClose={canClose} onClose={onClose} onSetMode={onSetMode} onOpenNodeInNewGroup={onOpenNodeInNewGroup} onOpenMarkdownLink={onOpenMarkdownLink} onRenameNode={onRenameNode} onMoveNode={onMoveNode} onDeleteNode={onDeleteNode} />;
   }
   const Icon = nodeIcon(node);
   return (
@@ -163,6 +165,7 @@ function NodeGroupContent({ active, groupId, navigationActions, node, mode, canW
         title={node.name}
         icon={<Icon size={17} />}
         navigationActions={navigationActions}
+        qualifiedPath={qualifiedPath}
         canClose={canClose}
         onClose={onClose}
         onContextMenu={(event) => onHeaderContextMenu(node, event)}
