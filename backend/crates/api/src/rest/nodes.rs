@@ -93,7 +93,7 @@ pub(crate) struct ResolveQuery {
         ("path" = String, Query, description = "Absolute path inside the space"),
     ),
     responses((status = 200, description = "Resolve a path to a node", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn resolve_path(
     State(state): State<AppState>,
@@ -130,7 +130,7 @@ pub(crate) struct ListFileChangeEventsQuery {
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List file change event history in a space", body = FileChangeEventListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list_file_change_events(
     State(state): State<AppState>,
@@ -184,7 +184,7 @@ pub(crate) struct SyncFileChangesQuery {
         ("limit" = Option<i64>, Query, description = "Page size"),
     ),
     responses((status = 200, description = "Read file changes after a sync token", body = FileChangeSyncResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn sync_file_changes(
     State(state): State<AppState>,
@@ -221,7 +221,7 @@ pub(crate) async fn sync_file_changes(
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses((status = 200, description = "Get node", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn get_node(
     State(state): State<AppState>,
@@ -274,7 +274,7 @@ pub(crate) struct NodesListResponse {
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List nodes in a space", body = NodesListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -383,7 +383,7 @@ pub(crate) struct BatchChildrenResponse {
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List children", body = ChildrenResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn children(
     State(state): State<AppState>,
@@ -434,7 +434,7 @@ pub(crate) async fn children(
         (status = 200, description = "List the first children page for each requested parent", body = BatchChildrenResponse),
         (status = 400, description = "Invalid, duplicate, or excessive parent input")
     ),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn batch_children(
     State(state): State<AppState>,
@@ -605,7 +605,7 @@ pub(crate) struct RevealResponse {
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses((status = 200, description = "Reveal a node in the tree", body = RevealResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn reveal(
     State(state): State<AppState>,
@@ -651,7 +651,7 @@ pub(crate) struct CreateNodeBody {
     params(("space_id" = Uuid, Path)),
     request_body = CreateNodeBody,
     responses((status = 201, description = "Create node", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn create(
     State(state): State<AppState>,
@@ -755,7 +755,7 @@ pub(crate) struct UpdateNodeWriteLockBody {
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = UpdateNodeBody,
     responses((status = 200, description = "Rename or reorder node", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn update(
     State(state): State<AppState>,
@@ -789,7 +789,7 @@ pub(crate) async fn update(
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = UpdateNodeSearchPolicyBody,
     responses((status = 200, description = "Update node search policy", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn update_search_policy(
     State(state): State<AppState>,
@@ -823,7 +823,7 @@ pub(crate) async fn update_search_policy(
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = UpdateNodeWriteLockBody,
     responses((status = 200, description = "Update direct node write lock", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn update_write_lock(
     State(state): State<AppState>,
@@ -865,7 +865,7 @@ pub(crate) struct MetadataPatchBody {
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses((status = 200, description = "Get node metadata", body = MetadataBody)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn get_metadata(
     State(state): State<AppState>,
@@ -886,7 +886,7 @@ pub(crate) async fn get_metadata(
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = MetadataBody,
     responses((status = 200, description = "Replace node metadata", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn replace_metadata(
     State(state): State<AppState>,
@@ -912,7 +912,7 @@ pub(crate) async fn replace_metadata(
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = MetadataPatchBody,
     responses((status = 200, description = "Patch node metadata", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn patch_metadata(
     State(state): State<AppState>,
@@ -949,7 +949,7 @@ pub(crate) struct MoveNodeBody {
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = MoveNodeBody,
     responses((status = 200, description = "Move node", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn move_node(
     State(state): State<AppState>,
@@ -995,7 +995,7 @@ pub(crate) struct DeleteQuery {
         ("recursive" = Option<bool>, Query, description = "Required to delete folders"),
     ),
     responses((status = 204, description = "Delete node")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn delete(
     State(state): State<AppState>,

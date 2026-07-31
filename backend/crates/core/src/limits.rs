@@ -18,13 +18,13 @@ pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Maximum wall-clock time for control-plane probes before a 408 response.
 pub const HTTP_CONTROL_PLANE_TIMEOUT_SECS: u64 = 5;
 /// Maximum HTTP requests accepted per API process per second.
-pub const HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 150;
+pub const HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 500;
 /// Maximum short burst accepted by the process-wide HTTP ingress limiter.
-pub const HTTP_INGRESS_RATE_LIMIT_BURST: u32 = 200;
-/// Maximum API and MCP requests accepted per API process per second.
-pub const HTTP_BASIC_API_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 100;
-/// Maximum short burst accepted by the API and MCP limiter.
-pub const HTTP_BASIC_API_RATE_LIMIT_BURST: u32 = 150;
+pub const HTTP_INGRESS_RATE_LIMIT_BURST: u32 = 750;
+/// Default sustained rate for each API surface's process-local bucket.
+pub const HTTP_API_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 300;
+/// Default short burst for each API surface's process-local bucket.
+pub const HTTP_API_SURFACE_RATE_LIMIT_BURST: u32 = 450;
 
 // --- Account, space, and credential limits ---
 

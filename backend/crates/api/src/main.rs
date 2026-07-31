@@ -24,6 +24,7 @@ mod observability;
 mod openapi;
 mod page;
 mod periodic_worker;
+mod public_v2;
 mod purge_worker;
 mod rest;
 mod routes;

@@ -7,17 +7,16 @@ import { ApiError } from "./errors";
 const ApiClientContext = createContext<ApiClient | null>(null);
 
 type ApiProviderProps = {
-  apiKey: string | null;
   authCacheKey: string;
-  // Called when any request returns 401 so the app can drop the dead key and
-  // send the user back to the login gate instead of silently failing.
+  // Called when any request returns 401 so the app can re-check the browser
+  // session and return to the login gate instead of silently failing.
   onUnauthorized?: () => void;
   onMutationError?: (message: string) => void;
   children: ReactNode;
 };
 
-export function ApiProvider({ apiKey, authCacheKey, onUnauthorized, onMutationError, children }: ApiProviderProps) {
-  const client = useMemo(() => createApiClient(() => apiKey), [apiKey]);
+export function ApiProvider({ authCacheKey, onUnauthorized, onMutationError, children }: ApiProviderProps) {
+  const client = useMemo(() => createApiClient(), []);
   const onUnauthorizedRef = useRef(onUnauthorized);
   const onMutationErrorRef = useRef(onMutationError);
   onUnauthorizedRef.current = onUnauthorized;

@@ -88,7 +88,7 @@ pub(crate) struct ReconciliationQueuedResponse {
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List spaces", body = SpacesListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -118,7 +118,7 @@ pub(crate) async fn list(
     tag = "spaces",
     request_body = CreateBody,
     responses((status = 201, description = "Create space", body = SpaceOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn create(
     State(state): State<AppState>,
@@ -142,7 +142,7 @@ pub(crate) async fn create(
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
     responses((status = 200, description = "Get space", body = SpaceOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn get_one(
     State(state): State<AppState>,
@@ -160,7 +160,7 @@ pub(crate) async fn get_one(
     params(("space_id" = Uuid, Path, description = "Space id")),
     request_body = UpdateBody,
     responses((status = 200, description = "Update space", body = SpaceOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn update(
     State(state): State<AppState>,
@@ -193,7 +193,7 @@ pub(crate) async fn update(
     tag = "spaces",
     request_body = ReorderBody,
     responses((status = 204, description = "Atomically reorder spaces")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn reorder(
     State(state): State<AppState>,
@@ -223,7 +223,7 @@ pub(crate) async fn reorder(
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
     responses((status = 204, description = "Delete space")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn delete(
     State(state): State<AppState>,
@@ -247,7 +247,7 @@ pub(crate) async fn delete(
         (status = 409, description = "Reconciliation is already pending or within its cooldown", body = ErrorResponse),
         (status = 503, description = "Space usage is temporarily locked for maintenance", body = ErrorResponse),
     ),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn request_usage_reconciliation(
     State(state): State<AppState>,

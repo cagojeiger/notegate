@@ -411,6 +411,7 @@ mod tests {
             s3: crate::state::test_s3_config(),
             default_user_tier: notegate_core::tier::UserTier::DEFAULT,
             limits: notegate_core::limits::Limits::default(),
+            http_rate_limits: notegate_core::HttpRateLimitsConfig::default(),
             search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
             secure_cookies: false,
         });

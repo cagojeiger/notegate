@@ -1,7 +1,6 @@
 import { useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { Space, RestNode } from "../../api/types";
-import { clearDevApiKey } from "../../auth/session";
 import type { AppDialog } from "./dialogs/dialogTypes";
 import { usePointerDrag } from "../../shared/hooks/usePointerDrag";
 import { useUiStore } from "../../stores/uiStore";
@@ -55,7 +54,6 @@ export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, ca
     try {
       await logoutSession();
     } finally {
-      clearDevApiKey();
       clearPersistedWorkbenches();
       onSignOut();
     }

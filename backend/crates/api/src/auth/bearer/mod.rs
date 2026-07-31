@@ -1,12 +1,11 @@
 pub mod error;
 pub mod extractor;
-pub mod middleware;
 mod verify;
 
+pub(crate) use error::auth_error_response;
 pub use error::{
-    AuthError, auth_error_body, auth_error_response, map_identity_error,
-    shared_scoped_challenge_header, status_for_error,
+    AuthError, auth_error_body, map_identity_error, shared_scoped_challenge_header,
+    status_for_error,
 };
 pub use extractor::{extract_bearer, extract_cookie_value};
-pub use middleware::require_bearer;
-pub use verify::{verify_bearer, verify_bearer_mcp};
+pub use verify::verify_bearer_mcp;

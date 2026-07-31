@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, to_bytes};
-use axum::http::header::{CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -30,7 +30,7 @@ use crate::auth::jwt::JwtAuthority;
 use crate::identity::{CallerResolver, IdentityError, ResolveAttrs};
 use crate::state::AppState;
 
-use crate::auth::bearer::{AuthError, verify_bearer};
+use crate::auth::bearer::{AuthError, verify_bearer_mcp};
 use crate::auth::session::{
     BROWSER_SESSION_COOKIE, create_browser_session, verify_browser_session,
 };
@@ -63,6 +63,7 @@ WNYy7n/b2QYI1CcDUtrxjmDVGSbdQ1MG04Az3PhLBDh4UE/yOXb3slpLECmfjcK/
 lq0mdqBAHuT8W8E2jRw9CejdITWxllSS0L8xhhSv5JMJ+3CUmpbsWP1X6ByQmF/E
 EmW0T9kajxWyy7ochOgNdA==
 -----END PRIVATE KEY-----"#;
+const TEST_API_KEY: &str = "ngk_v1_00000000-0000-0000-0000-000000000000_test-secret";
 
 #[derive(Debug, Serialize)]
 struct TestClaims {
@@ -109,13 +110,6 @@ impl CallerResolver for TestResolver {
         })
     }
 
-    fn resolve_api(
-        &self,
-        attrs: ResolveAttrs,
-    ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        Box::pin(async move { self.resolve(attrs, Channel::Api) })
-    }
-
     fn resolve_mcp(
         &self,
         attrs: ResolveAttrs,
@@ -125,12 +119,22 @@ impl CallerResolver for TestResolver {
 
     fn resolve_api_key(
         &self,
-        _token: String,
-        _channel: Channel,
+        token: String,
+        channel: Channel,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
-        // The bearer test harness only exercises the JWT/cookie paths; an
-        // An unrecognized notegate API key resolves to nothing.
-        Box::pin(async { Err(IdentityError::NotRegistered) })
+        Box::pin(async move {
+            if token != TEST_API_KEY {
+                return Err(IdentityError::NotRegistered);
+            }
+            self.resolve(
+                ResolveAttrs {
+                    sub: "api-key-user".to_owned(),
+                    email: "api-key@example.test".to_owned(),
+                    name: "API Key User".to_owned(),
+                },
+                channel,
+            )
+        })
     }
 }
 
@@ -216,6 +220,7 @@ fn state_with_pool(
         s3: crate::state::test_s3_config(),
         default_user_tier: notegate_core::tier::UserTier::DEFAULT,
         limits: notegate_core::limits::Limits::default(),
+        http_rate_limits: notegate_core::HttpRateLimitsConfig::default(),
         search_body_cache: notegate_core::SearchBodyCacheConfig::default(),
         secure_cookies: false,
     });
@@ -304,7 +309,7 @@ async fn verify_accepts_valid_token() -> Result<(), Box<dyn std::error::Error>> 
         future_exp(),
         "kid-1",
     )?;
-    let caller = verify_bearer(&state, &token).await?;
+    let caller = verify_bearer_mcp(&state, &token).await?;
     assert_eq!(
         caller.user().and_then(|user| user.email.as_deref()),
         Some("user@example.test")
@@ -348,7 +353,7 @@ async fn verify_rejects_invalid_claims_without_panic() -> Result<(), Box<dyn std
         alg_none_token(),
     ];
     for (idx, candidate) in cases.into_iter().enumerate() {
-        let err = verify_bearer(&state, &candidate).await.err();
+        let err = verify_bearer_mcp(&state, &candidate).await.err();
         assert!(
             matches!(err, Some(AuthError::InvalidToken)),
             "case {idx}: {err:?}"
@@ -367,7 +372,7 @@ async fn verify_accepts_aud_array_and_trailing_slash() -> Result<(), Box<dyn std
         future_exp(),
         "kid-1",
     )?;
-    let caller = verify_bearer(&state, &token).await?;
+    let caller = verify_bearer_mcp(&state, &token).await?;
     assert_eq!(
         caller.user().and_then(|user| user.email.as_deref()),
         Some("user@example.test")
@@ -385,28 +390,30 @@ async fn verify_maps_registered_state_errors() -> Result<(), Box<dyn std::error:
         "kid-1",
     )?;
     let missing = state(ResolverMode::Missing)?;
-    let missing_err = verify_bearer(&missing, &valid).await.err();
+    let missing_err = verify_bearer_mcp(&missing, &valid).await.err();
     assert!(matches!(missing_err, Some(AuthError::NotRegistered)));
 
     let inactive = state(ResolverMode::Registered(false))?;
-    let inactive_err = verify_bearer(&inactive, &valid).await.err();
+    let inactive_err = verify_bearer_mcp(&inactive, &valid).await.err();
     assert!(matches!(inactive_err, Some(AuthError::Inactive)));
     Ok(())
 }
 
 #[tokio::test]
-async fn api_routes_require_bearer_before_handler() -> Result<(), Box<dyn std::error::Error>> {
+async fn v1_routes_require_browser_session_before_handler() -> Result<(), Box<dyn std::error::Error>>
+{
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(Request::builder().uri("/api/v1/me").body(Body::empty())?)
         .await?;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(!response.headers().contains_key(WWW_AUTHENTICATE));
     Ok(())
 }
 
 #[tokio::test]
-async fn api_routes_accept_valid_bearer() -> Result<(), Box<dyn std::error::Error>> {
+async fn v1_routes_reject_oauth_bearer() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let valid = token(
         "sub-1",
@@ -424,7 +431,23 @@ async fn api_routes_accept_valid_bearer() -> Result<(), Box<dyn std::error::Erro
         )
         .await?;
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn v1_routes_reject_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 
@@ -515,8 +538,93 @@ async fn api_cookie_mutation_requires_same_origin_header() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
-async fn bearer_mutation_does_not_require_browser_origin() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn v2_api_key_requests_do_not_require_browser_origin()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v2/missing")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_json_error(response, "not_found", "api route not found").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn v2_exposes_only_me_to_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/me")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/spaces")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+    assert_json_error(response, "not_found", "api route not found").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .oneshot(Request::builder().uri("/api/v2/me").body(Body::empty())?)
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer realm=\"notegate-public-api\"")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn v2_routes_reject_oauth_bearer() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let valid = token(
         "sub-1",
@@ -525,18 +633,42 @@ async fn bearer_mutation_does_not_require_browser_origin() -> Result<(), Box<dyn
         future_exp(),
         "kid-1",
     )?;
-
     let response = app
         .oneshot(
             Request::builder()
-                .method("POST")
-                .uri("/api/v1/missing")
+                .uri("/api/v2/me")
                 .header("authorization", format!("Bearer {valid}"))
                 .body(Body::empty())?,
         )
         .await?;
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_json_error(response, "not_found", "api route not found").await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+#[tokio::test]
+async fn v2_routes_reject_browser_sessions() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+    )?;
+    let session = valid_browser_session(&db, &state).await?;
+    let app = crate::routes::app(state);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/me")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    db.cleanup().await;
     Ok(())
 }
 
@@ -605,7 +737,8 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
-async fn unknown_api_routes_still_require_bearer() -> Result<(), Box<dyn std::error::Error>> {
+async fn unknown_v1_routes_still_require_browser_session() -> Result<(), Box<dyn std::error::Error>>
+{
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(

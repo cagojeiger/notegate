@@ -1,9 +1,8 @@
-//! API-key authentication: extract the raw bearer token and resolve it to a user
-//! or agent [`Caller`] via the service resolver.
+//! Shared API-key verification for transports that already extracted a raw
+//! credential and selected a [`Channel`].
 //!
-//! This is the EXTRACTION half of API-key auth; the hashing/lookup logic lives
-//! in `notegate-service` and the SQL in `notegate-db`. The token plaintext is
-//! never logged.
+//! Hashing and account resolution live in `notegate-service`; SQL lives in
+//! `notegate-db`. The token plaintext is never logged.
 
 use notegate_model::{Caller, Channel};
 

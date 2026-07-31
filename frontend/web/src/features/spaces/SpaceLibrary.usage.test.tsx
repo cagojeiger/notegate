@@ -45,7 +45,7 @@ function UsagePollingOwner() {
 
 function renderLibrary({ externalPollingOwner = false } = {}) {
   render(
-    <ApiProvider apiKey="test-key" authCacheKey="space-library-usage:0">
+    <ApiProvider authCacheKey="space-library-usage:0">
       {externalPollingOwner ? <UsagePollingOwner /> : null}
       <SpaceLibrary
         spaces={[space]}

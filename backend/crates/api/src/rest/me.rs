@@ -116,7 +116,7 @@ impl From<CurrentUserUsage> for CurrentUserUsageOut {
     path = "/api/v1/me",
     tag = "identity",
     responses((status = 200, description = "Get current caller", body = MeOutput)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutput> {
     Json(build_me(&caller))
@@ -127,7 +127,7 @@ pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeOutpu
     path = "/api/v1/me/usage",
     tag = "identity",
     responses((status = 200, description = "Get current user's Space usage", body = CurrentUserUsageOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn get_usage(
     State(state): State<AppState>,
@@ -149,7 +149,7 @@ pub(crate) async fn get_usage(
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List current user API keys", body = ApiKeyMetadataListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list_keys(
     State(state): State<AppState>,
@@ -183,7 +183,7 @@ pub(crate) async fn list_keys(
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List current user audit event history", body = AuditEventListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list_audit_events(
     State(state): State<AppState>,
@@ -224,7 +224,7 @@ pub(crate) async fn list_audit_events(
     tag = "identity",
     request_body = CreateApiKeyBody,
     responses((status = 201, description = "Create current user API key", body = CreatedUserApiKeyOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn create_key(
     State(state): State<AppState>,
@@ -264,7 +264,7 @@ pub(crate) async fn create_key(
     tag = "identity",
     params(("key_id" = Uuid, Path)),
     responses((status = 201, description = "Rotate current user API key", body = CreatedUserApiKeyOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn rotate_key(
     State(state): State<AppState>,
@@ -296,7 +296,7 @@ pub(crate) async fn rotate_key(
     tag = "identity",
     params(("key_id" = Uuid, Path)),
     responses((status = 204, description = "Revoke current user API key")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn revoke_key(
     State(state): State<AppState>,
@@ -315,7 +315,7 @@ pub(crate) async fn revoke_key(
     path = "/api/v1/me",
     tag = "identity",
     responses((status = 204, description = "Delete current user account")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn delete_me(
     State(state): State<AppState>,

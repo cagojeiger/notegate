@@ -155,9 +155,10 @@ jobs:
     env:
       NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
       NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
-      NOTEGATE_PUBLIC_URL: http://127.0.0.1:9191
+      NOTEGATE_PUBLIC_URL: http://localhost:9191
       NOTEGATE_OAUTH_CLIENT_ID: notegate-web
       NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
+      NOTEGATE_OPENAPI_ENABLED: "true"
       NOTEGATE_ENC_ROOT_KEY_ID: e2e-enc
       NOTEGATE_ENC_ROOT_SECRET: e2e-distinct-enc-root-secret-32-bytes
       NOTEGATE_LOOKUP_ROOT_KEY_ID: e2e-lookup
@@ -228,9 +229,13 @@ jobs:
         run: |
           output=$(cargo run --quiet --package notegate-api --example seed_user)
           token=$(printf '%s\n' "$output" | sed -n 's/^TOKEN=//p')
+          session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
           test -n "$token"
+          test -n "$session"
           echo "::add-mask::$token"
+          echo "::add-mask::$session"
           echo "api_key=$token" >> "$GITHUB_OUTPUT"
+          echo "browser_session=$session" >> "$GITHUB_OUTPUT"
 
       - name: Start application
         run: |
@@ -248,9 +253,26 @@ jobs:
           cat browser-e2e/web.log
           exit 1
 
+      - name: Test public V2 API
+        env:
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_browser_identity.outputs.api_key }}
+        run: |
+          curl --fail --silent \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v2/me >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v2/spaces)" = "404"
+          curl --fail --silent http://127.0.0.1:9191/openapi/v2.json >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v1/me)" = "401"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:9191/api/v2/me)" = "401"
+
       - name: Test browser workflow
         env:
-          NOTEGATE_WEB_E2E_API_KEY: ${{ steps.seed_browser_identity.outputs.api_key }}
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_browser_identity.outputs.browser_session }}
         run: pnpm --filter web test:e2e
 
       - name: Test Lighthouse budgets

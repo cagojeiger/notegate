@@ -3,19 +3,23 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const apiKey = process.env.NOTEGATE_WEB_E2E_API_KEY;
+const browserSession = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
 
-test("dev API key dashboard supports space, text, metadata, and file basics", async ({ page }) => {
-  test.skip(!apiKey, "set NOTEGATE_WEB_E2E_API_KEY to run dashboard smoke e2e");
+test("browser session dashboard supports space, text, metadata, and file basics", async ({ page, baseURL }) => {
+  test.skip(!browserSession, "set NOTEGATE_WEB_E2E_BROWSER_SESSION to run dashboard smoke e2e");
   const suffix = Date.now().toString(36);
   const spaceName = `web-e2e-${suffix}`;
   const textName = `note-${suffix}.md`;
   const fileName = `asset-${suffix}.txt`;
 
+  await page.context().addCookies([{
+    name: "notegate_browser_session",
+    value: browserSession!,
+    url: new URL(baseURL ?? "http://127.0.0.1:5173").origin,
+    httpOnly: true,
+    sameSite: "Lax"
+  }]);
   await page.goto("/");
-  await page.getByText("Developer API key fallback").click();
-  await page.getByLabel("User API key").fill(apiKey!);
-  await page.getByRole("button", { name: "Open with API key" }).click();
   await expect(page.locator('button[aria-label="Add space"]:visible')).toBeVisible();
 
   await page.locator('button[aria-label="Add space"]:visible').click();

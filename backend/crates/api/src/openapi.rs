@@ -4,21 +4,32 @@ use utoipa::openapi::Ref;
 use utoipa::openapi::content::Content;
 use utoipa::openapi::path::{Operation, PathItem};
 use utoipa::openapi::response::Response;
+#[cfg(test)]
+use utoipa::openapi::security::{ApiKey, ApiKeyValue};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
+#[cfg(test)]
 use crate::rest;
 use crate::state::AppState;
 
-/// The OpenAPI text is the machine-readable contract for the `/api/v1`
-/// JSON resource API only. Auth redirect/session endpoints, OAuth discovery
-/// metadata, MCP, and system health/readiness endpoints are intentionally kept
-/// outside this text; see `docs/spec/rest/README.md` for the scope decision.
-///
-/// The text is generated from `#[utoipa::path]` annotations on the actual
-/// REST resource handlers, so route/method drift is caught close to the code
-/// that serves each endpoint.
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        crate::public_v2::get_me,
+    ),
+    components(schemas(crate::error::ErrorResponse)),
+    modifiers(&ApiKeySecurityAddon),
+    tags(
+        (name = "identity", description = "API-key caller identity"),
+    )
+)]
+pub struct PublicApiDoc;
+
+/// Internal V1 handler catalog. The published OpenAPI contract is
+/// [`PublicApiDoc`]; V1 is reserved for the first-party browser application.
+#[cfg(test)]
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -79,7 +90,7 @@ use crate::state::AppState;
         rest::agents::revoke_key,
     ),
     components(schemas(crate::error::ErrorResponse)),
-    modifiers(&SecurityAddon),
+    modifiers(&BrowserSessionSecurityAddon),
     tags(
         (name = "identity", description = "Current caller identity"),
         (name = "events", description = "Audit and file change event history"),
@@ -93,17 +104,35 @@ use crate::state::AppState;
 )]
 pub struct ApiDoc;
 
-struct SecurityAddon;
+#[cfg(test)]
+struct BrowserSessionSecurityAddon;
+struct ApiKeySecurityAddon;
 
-impl Modify for SecurityAddon {
+#[cfg(test)]
+impl Modify for BrowserSessionSecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let components = openapi.components.get_or_insert_with(Default::default);
         components.add_security_scheme(
-            "bearer_auth",
+            "browser_session",
+            SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                "notegate_browser_session",
+                "Opaque browser session cookie",
+            ))),
+        );
+
+        add_default_error_response(openapi);
+    }
+}
+
+impl Modify for ApiKeySecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let components = openapi.components.get_or_insert_with(Default::default);
+        components.add_security_scheme(
+            "api_key",
             SecurityScheme::Http(
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
-                    .bearer_format("JWT or NoteGate API key")
+                    .bearer_format("NoteGate API key")
                     .build(),
             ),
         );
@@ -150,8 +179,8 @@ fn error_response() -> Response {
 
 pub fn routes(config: &Config) -> Router<AppState> {
     if config.openapi_enabled {
-        SwaggerUi::new("/swagger-ui")
-            .url("/openapi.json", ApiDoc::openapi())
+        SwaggerUi::new("/swagger-ui/v2")
+            .url("/openapi/v2.json", PublicApiDoc::openapi())
             .into()
     } else {
         Router::new()
@@ -159,7 +188,7 @@ pub fn routes(config: &Config) -> Router<AppState> {
 }
 
 pub fn json_pretty() -> serde_json::Result<String> {
-    serde_json::to_string_pretty(&ApiDoc::openapi())
+    serde_json::to_string_pretty(&PublicApiDoc::openapi())
 }
 
 #[cfg(test)]
@@ -173,18 +202,54 @@ mod tests {
     )]
     use utoipa::OpenApi;
 
-    use super::ApiDoc;
+    use super::{ApiDoc, PublicApiDoc};
 
     #[test]
-    fn openapi_defines_bearer_security_scheme() {
+    fn public_openapi_contains_only_v2_me() {
+        let value =
+            serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
+        let paths = value["paths"].as_object().expect("paths object");
+        let expected = ["/api/v2/me"];
+
+        assert_eq!(paths.len(), expected.len());
+        for path in expected {
+            let operations = paths
+                .get(path)
+                .unwrap_or_else(|| panic!("missing public path: {path}"))
+                .as_object()
+                .expect("path operations");
+            assert!(operations.contains_key("get"), "{path} must support GET");
+            assert!(
+                !operations
+                    .keys()
+                    .any(|method| matches!(method.as_str(), "post" | "put" | "patch" | "delete")),
+                "{path} must remain read-only"
+            );
+            assert_eq!(
+                operations["get"]["security"][0]["api_key"],
+                serde_json::json!([]),
+                "{path} must require the API-key scheme"
+            );
+        }
+    }
+
+    #[test]
+    fn public_openapi_defines_api_key_security() {
+        let value =
+            serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
+        let scheme = &value["components"]["securitySchemes"]["api_key"];
+        assert_eq!(scheme["scheme"].as_str(), Some("bearer"));
+        assert_eq!(scheme["bearerFormat"].as_str(), Some("NoteGate API key"));
+    }
+
+    #[test]
+    fn openapi_defines_browser_session_security_scheme() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
-        let scheme = &value["components"]["securitySchemes"]["bearer_auth"];
-        assert_eq!(scheme["scheme"].as_str(), Some("bearer"));
-        assert_eq!(
-            scheme["bearerFormat"].as_str(),
-            Some("JWT or NoteGate API key")
-        );
+        let scheme = &value["components"]["securitySchemes"]["browser_session"];
+        assert_eq!(scheme["type"].as_str(), Some("apiKey"));
+        assert_eq!(scheme["in"].as_str(), Some("cookie"));
+        assert_eq!(scheme["name"].as_str(), Some("notegate_browser_session"));
     }
 
     #[test]
@@ -622,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn openapi_marks_every_operation_as_bearer_secured() {
+    fn openapi_marks_every_v1_operation_as_browser_session_secured() {
         let doc = ApiDoc::openapi();
         let value = serde_json::to_value(doc).expect("serializes openapi");
         let paths = value["paths"].as_object().expect("paths object");
@@ -642,8 +707,8 @@ mod tests {
                 assert!(
                     security
                         .iter()
-                        .any(|requirement| requirement.get("bearer_auth").is_some()),
-                    "missing bearer_auth for {method} {path}"
+                        .any(|requirement| requirement.get("browser_session").is_some()),
+                    "missing browser_session for {method} {path}"
                 );
             }
         }

@@ -2,9 +2,7 @@ use axum::Json;
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
-use crate::auth::metadata::{
-    challenge_header, protected_resource_metadata_url, scoped_challenge_header,
-};
+use crate::auth::metadata::{protected_resource_metadata_url, scoped_challenge_header};
 use crate::identity::IdentityError;
 use crate::state::AppState;
 
@@ -22,7 +20,7 @@ pub fn map_identity_error(error: IdentityError) -> AuthError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
-    #[error("missing or malformed bearer token")]
+    #[error("missing authentication credential")]
     MissingToken,
     #[error("invalid token")]
     InvalidToken,
@@ -54,24 +52,24 @@ pub fn auth_error_body(state: &AppState, error: &AuthError) -> serde_json::Value
     }
 }
 
-pub fn auth_error_response(state: &AppState, error: AuthError) -> Response {
+pub(crate) fn auth_error_response(
+    state: &AppState,
+    error: AuthError,
+    challenge: Option<HeaderValue>,
+) -> Response {
     let status = status_for_error(&error);
     let code = code_for_error(&error);
     log_auth_denied(code, status, &error);
     let body = Json(auth_error_body(state, &error));
     let mut response = (status, body).into_response();
-    if status == StatusCode::UNAUTHORIZED {
-        response.headers_mut().insert(
-            axum::http::header::WWW_AUTHENTICATE,
-            shared_challenge_header(&state.config.resource_url),
-        );
+    if status == StatusCode::UNAUTHORIZED
+        && let Some(challenge) = challenge
+    {
+        response
+            .headers_mut()
+            .insert(axum::http::header::WWW_AUTHENTICATE, challenge);
     }
     response
-}
-
-pub fn shared_challenge_header(resource_url: &str) -> HeaderValue {
-    let meta = protected_resource_metadata_url(resource_url);
-    challenge_header(&meta.full_url)
 }
 
 pub fn shared_scoped_challenge_header(resource_url: &str) -> HeaderValue {
@@ -121,7 +119,7 @@ fn code_for_error(error: &AuthError) -> &'static str {
 
 fn message_for_error(error: &AuthError) -> &'static str {
     match error {
-        AuthError::MissingToken => "missing or malformed bearer token",
+        AuthError::MissingToken => "missing authentication credential",
         AuthError::InvalidToken => "invalid token",
         AuthError::NotRegistered => {
             "This account is authenticated but not registered in NoteGate yet. Open login_url once, then reconnect your MCP client."

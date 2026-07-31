@@ -15,17 +15,40 @@ Quota에 포함되는 live usage의 의미, counter 갱신, 분산 reconciliatio
 request_body_max_bytes = 2097152      # 2 MiB JSON/body 기본 상한
 server_timeout_seconds = 30
 control_plane_timeout_seconds = 5      # /health, /ready 등 control-plane 요청
-rate_limit_ingress_per_process = 150/second, burst 200
-rate_limit_basic_api_per_process = 100/second, burst 150
+rate_limit_ingress_per_process = 500/second, burst 750
+rate_limit_browser_v1_per_process = 300/second, burst 450
+rate_limit_public_v2_per_process = 300/second, burst 450
+rate_limit_mcp_per_process = 300/second, burst 450
 find_max_in_flight_per_process = 20
 grep_max_in_flight_per_process = 10
 grep_max_executing_per_process = 2
 ```
 
-Ingress limit은 auth, metadata, OpenAPI, `/api`, `/mcp`를 함께 보호한다. Basic API limit은
-`/api`와 `/mcp`에 추가로 적용한다. `find`의 21번째 요청과 `grep`의 11번째 요청은 대기시키지
-않고 즉시 거부한다. 허용된 grep 요청 중 본문 조회·복호화·matching은 최대 2개만 동시에
-실행한다. `/health`, `/ready`는 rate limit 대상에서 제외한다.
+Ingress limit은 auth, metadata, OpenAPI, `/api/v1`, `/api/v2`, `/mcp`를 함께 보호한다.
+Browser V1, Public V2, MCP에는 독립적인 process-local bucket을 추가로 적용한다. 한
+surface의 요청이 다른 surface의 전용 bucket을 소모하지 않지만 ingress 상한은 공유한다.
+각 surface의 RPS와 burst는 ingress 값을 넘을 수 없다. 이 값은 account/tier quota가 아니라
+process 보호를 위한 safety limit이다.
+
+기본값은 다음 환경 변수로 pod마다 독립 조정한다.
+
+```text
+NOTEGATE_HTTP_RATE_LIMITS__INGRESS__REQUESTS_PER_SECOND
+NOTEGATE_HTTP_RATE_LIMITS__INGRESS__BURST
+NOTEGATE_HTTP_RATE_LIMITS__BROWSER_V1__REQUESTS_PER_SECOND
+NOTEGATE_HTTP_RATE_LIMITS__BROWSER_V1__BURST
+NOTEGATE_HTTP_RATE_LIMITS__PUBLIC_V2__REQUESTS_PER_SECOND
+NOTEGATE_HTTP_RATE_LIMITS__PUBLIC_V2__BURST
+NOTEGATE_HTTP_RATE_LIMITS__MCP__REQUESTS_PER_SECOND
+NOTEGATE_HTTP_RATE_LIMITS__MCP__BURST
+```
+
+replica가 여러 개면 cluster 전체 허용량은 pod별 상한의 합으로 증가한다. Cluster-wide rate
+limit은 ingress/gateway에서 별도로 적용한다.
+
+`find`의 21번째 요청과 `grep`의 11번째 요청은 대기시키지 않고 즉시 거부한다. 허용된 grep
+요청 중 본문 조회·복호화·matching은 최대 2개만 동시에 실행한다. `/health`, `/ready`는
+rate limit 대상에서 제외한다.
 
 ## Account and credential limits
 

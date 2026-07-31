@@ -4,7 +4,11 @@ use axum_extra::extract::CookieJar;
 
 pub fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
-    let token = value.strip_prefix("Bearer ")?.trim();
+    let (scheme, token) = value.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
     if token.is_empty() { None } else { Some(token) }
 }
 
@@ -37,6 +41,8 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, "Bearer abc".parse()?);
         assert_eq!(extract_bearer(&headers), Some("abc"));
+        headers.insert(AUTHORIZATION, "bearer def".parse()?);
+        assert_eq!(extract_bearer(&headers), Some("def"));
         Ok(())
     }
 

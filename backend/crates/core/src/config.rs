@@ -14,7 +14,10 @@ use url::Url;
 use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::error::{Error, Result};
-use crate::limits::Limits;
+use crate::limits::{
+    HTTP_API_SURFACE_RATE_LIMIT_BURST, HTTP_API_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND,
+    HTTP_INGRESS_RATE_LIMIT_BURST, HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND, Limits,
+};
 use crate::tier::UserTier;
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:9191";
@@ -75,6 +78,48 @@ impl Default for SearchBodyCacheConfig {
     }
 }
 
+/// One process-local token bucket.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HttpRateLimitConfig {
+    /// Sustained requests accepted per second.
+    pub requests_per_second: u32,
+    /// Maximum short burst accepted by the bucket.
+    pub burst: u32,
+}
+
+/// Independent HTTP safety buckets sharing one process ingress cap.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HttpRateLimitsConfig {
+    /// Shared cap for all data-plane routes.
+    pub ingress: HttpRateLimitConfig,
+    /// Browser-session REST V1 cap.
+    pub browser_v1: HttpRateLimitConfig,
+    /// API-key REST V2 cap.
+    pub public_v2: HttpRateLimitConfig,
+    /// MCP transport cap.
+    pub mcp: HttpRateLimitConfig,
+}
+
+impl Default for HttpRateLimitsConfig {
+    fn default() -> Self {
+        let api_surface = HttpRateLimitConfig {
+            requests_per_second: HTTP_API_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND,
+            burst: HTTP_API_SURFACE_RATE_LIMIT_BURST,
+        };
+        Self {
+            ingress: HttpRateLimitConfig {
+                requests_per_second: HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND,
+                burst: HTTP_INGRESS_RATE_LIMIT_BURST,
+            },
+            browser_v1: api_surface,
+            public_v2: api_surface,
+            mcp: api_surface,
+        }
+    }
+}
+
 /// Server + database configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,7 +144,7 @@ pub struct Config {
     /// Exact redirect URL registered in authgate.
     #[serde(default)]
     pub oauth_redirect_url: String,
-    /// Resource/audience URL for REST and MCP, with trailing slash trimmed.
+    /// MCP resource/audience URL, with trailing slash trimmed.
     #[serde(default)]
     pub resource_url: String,
     /// Shared JWKS cache TTL.
@@ -147,6 +192,9 @@ pub struct Config {
     /// Runtime-overridable capacity limits. Defaults match `docs/spec/performance-limits.md`.
     #[serde(default)]
     pub limits: Limits,
+    /// Process-local HTTP safety limits for shared ingress and each API surface.
+    #[serde(default)]
+    pub http_rate_limits: HttpRateLimitsConfig,
     /// Decrypted text body cache used by content search.
     #[serde(default)]
     pub search_body_cache: SearchBodyCacheConfig,
@@ -251,6 +299,7 @@ impl Validate for Config {
             errors.add("s3.secret_key", ValidationError::new("length"));
         }
         validate_limits(&self.limits, &mut errors);
+        validate_http_rate_limits(&self.http_rate_limits, &mut errors);
         validate_search_body_cache(&self.search_body_cache, &mut errors);
 
         if errors.is_empty() {
@@ -295,6 +344,7 @@ impl Config {
 }
 
 fn load_from_sources(include_files: bool, environment: Environment) -> Result<Config> {
+    let rate_limits = HttpRateLimitsConfig::default();
     let mut builder = LayeredConfig::builder()
         .set_default("bind_addr", DEFAULT_BIND_ADDR)
         .map_err(map_config_error)?
@@ -312,6 +362,40 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         .set_default("openapi_enabled", DEFAULT_OPENAPI_ENABLED)
         .map_err(map_config_error)?
         .set_default("metrics_enabled", DEFAULT_METRICS_ENABLED)
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.ingress.requests_per_second",
+            rate_limits.ingress.requests_per_second,
+        )
+        .map_err(map_config_error)?
+        .set_default("http_rate_limits.ingress.burst", rate_limits.ingress.burst)
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.browser_v1.requests_per_second",
+            rate_limits.browser_v1.requests_per_second,
+        )
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.browser_v1.burst",
+            rate_limits.browser_v1.burst,
+        )
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.public_v2.requests_per_second",
+            rate_limits.public_v2.requests_per_second,
+        )
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.public_v2.burst",
+            rate_limits.public_v2.burst,
+        )
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.mcp.requests_per_second",
+            rate_limits.mcp.requests_per_second,
+        )
+        .map_err(map_config_error)?
+        .set_default("http_rate_limits.mcp.burst", rate_limits.mcp.burst)
         .map_err(map_config_error)?;
 
     if include_files {
@@ -442,6 +526,63 @@ fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
     }
 }
 
+fn validate_http_rate_limits(rate_limits: &HttpRateLimitsConfig, errors: &mut ValidationErrors) {
+    for (requests_field, burst_field, limit) in [
+        (
+            "http_rate_limits.ingress.requests_per_second",
+            "http_rate_limits.ingress.burst",
+            rate_limits.ingress,
+        ),
+        (
+            "http_rate_limits.browser_v1.requests_per_second",
+            "http_rate_limits.browser_v1.burst",
+            rate_limits.browser_v1,
+        ),
+        (
+            "http_rate_limits.public_v2.requests_per_second",
+            "http_rate_limits.public_v2.burst",
+            rate_limits.public_v2,
+        ),
+        (
+            "http_rate_limits.mcp.requests_per_second",
+            "http_rate_limits.mcp.burst",
+            rate_limits.mcp,
+        ),
+    ] {
+        if limit.requests_per_second == 0 {
+            errors.add(requests_field, ValidationError::new("range"));
+        }
+        if limit.burst == 0 {
+            errors.add(burst_field, ValidationError::new("range"));
+        }
+    }
+
+    for (requests_field, burst_field, limit) in [
+        (
+            "http_rate_limits.browser_v1.requests_per_second",
+            "http_rate_limits.browser_v1.burst",
+            rate_limits.browser_v1,
+        ),
+        (
+            "http_rate_limits.public_v2.requests_per_second",
+            "http_rate_limits.public_v2.burst",
+            rate_limits.public_v2,
+        ),
+        (
+            "http_rate_limits.mcp.requests_per_second",
+            "http_rate_limits.mcp.burst",
+            rate_limits.mcp,
+        ),
+    ] {
+        if limit.requests_per_second > rate_limits.ingress.requests_per_second {
+            errors.add(requests_field, ValidationError::new("exceeds_ingress"));
+        }
+        if limit.burst > rate_limits.ingress.burst {
+            errors.add(burst_field, ValidationError::new("exceeds_ingress"));
+        }
+    }
+}
+
 fn validate_search_body_cache(cache: &SearchBodyCacheConfig, errors: &mut ValidationErrors) {
     if cache.max_capacity_bytes == 0 {
         return;
@@ -529,7 +670,9 @@ mod tests {
     use crate::limits::Limits;
     use crate::tier::UserTier;
 
-    use super::{Config, SearchBodyCacheConfig, load_from_sources};
+    use super::{
+        Config, HttpRateLimitConfig, HttpRateLimitsConfig, SearchBodyCacheConfig, load_from_sources,
+    };
 
     fn valid_config() -> Config {
         Config {
@@ -569,6 +712,7 @@ mod tests {
             },
             default_user_tier: UserTier::DEFAULT,
             limits: Limits::default(),
+            http_rate_limits: HttpRateLimitsConfig::default(),
             search_body_cache: SearchBodyCacheConfig::default(),
             secure_cookies: false,
         }
@@ -699,6 +843,7 @@ mod tests {
             super::DEFAULT_BROWSER_SESSION_MAX_TTL_SECS
         );
         assert_eq!(config.limits, Limits::default());
+        assert_eq!(config.http_rate_limits, HttpRateLimitsConfig::default());
         assert_eq!(config.search_body_cache, SearchBodyCacheConfig::default());
         Ok(())
     }
@@ -728,6 +873,23 @@ mod tests {
                 ("NOTEGATE_LIMITS__SPACE_MAX_TEXT_BYTES", "1024"),
                 ("NOTEGATE_LIMITS__SPACE_MAX_FILE_BYTES", "2048"),
                 (
+                    "NOTEGATE_HTTP_RATE_LIMITS__INGRESS__REQUESTS_PER_SECOND",
+                    "210",
+                ),
+                ("NOTEGATE_HTTP_RATE_LIMITS__INGRESS__BURST", "230"),
+                (
+                    "NOTEGATE_HTTP_RATE_LIMITS__BROWSER_V1__REQUESTS_PER_SECOND",
+                    "60",
+                ),
+                ("NOTEGATE_HTTP_RATE_LIMITS__BROWSER_V1__BURST", "70"),
+                (
+                    "NOTEGATE_HTTP_RATE_LIMITS__PUBLIC_V2__REQUESTS_PER_SECOND",
+                    "80",
+                ),
+                ("NOTEGATE_HTTP_RATE_LIMITS__PUBLIC_V2__BURST", "90"),
+                ("NOTEGATE_HTTP_RATE_LIMITS__MCP__REQUESTS_PER_SECOND", "17"),
+                ("NOTEGATE_HTTP_RATE_LIMITS__MCP__BURST", "23"),
+                (
                     "NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES",
                     "268435456",
                 ),
@@ -740,6 +902,27 @@ mod tests {
         assert_eq!(config.limits.space_max_nodes, 5);
         assert_eq!(config.limits.space_max_text_bytes, 1024);
         assert_eq!(config.limits.space_max_file_bytes, 2048);
+        assert_eq!(
+            config.http_rate_limits,
+            HttpRateLimitsConfig {
+                ingress: HttpRateLimitConfig {
+                    requests_per_second: 210,
+                    burst: 230,
+                },
+                browser_v1: HttpRateLimitConfig {
+                    requests_per_second: 60,
+                    burst: 70,
+                },
+                public_v2: HttpRateLimitConfig {
+                    requests_per_second: 80,
+                    burst: 90,
+                },
+                mcp: HttpRateLimitConfig {
+                    requests_per_second: 17,
+                    burst: 23,
+                }
+            }
+        );
         assert_eq!(
             config.search_body_cache,
             SearchBodyCacheConfig {
@@ -838,6 +1021,14 @@ mod tests {
 
         let mut config = valid_config();
         config.limits.folder_max_children = crate::limits::FOLDER_MAX_CHILDREN + 1;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.http_rate_limits.mcp.requests_per_second = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.http_rate_limits.public_v2.burst = config.http_rate_limits.ingress.burst + 1;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

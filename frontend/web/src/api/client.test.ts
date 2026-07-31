@@ -2,26 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClient } from "./client";
 
-const downloadMocks = vi.hoisted(() => ({
-  downloadBlob: vi.fn(),
-  downloadUrl: vi.fn()
-}));
+const downloadMocks = vi.hoisted(() => ({ downloadUrl: vi.fn() }));
 
-vi.mock("../shared/lib/downloadBlob", () => downloadMocks);
+vi.mock("../shared/lib/downloadUrl", () => downloadMocks);
 
 describe("createApiClient", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("sends bearer credentials and same-origin cookies", async () => {
+  it("uses same-origin cookies without an Authorization header", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    const client = createApiClient(() => "user-key");
+    const client = createApiClient();
 
     await client.get<{ ok: boolean }>("/api/v1/me");
 
     const [, init] = fetchMock.mock.calls[0];
-    expect((init?.headers as Headers).get("authorization")).toBe("Bearer user-key");
+    expect((init?.headers as Headers).has("authorization")).toBe(false);
     expect(init?.credentials).toBe("same-origin");
   });
 
@@ -29,35 +26,18 @@ describe("createApiClient", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: "forbidden", kind: "forbidden", message: "nope" }), { status: 403 })
     );
-    const client = createApiClient(() => "user-key");
+    const client = createApiClient();
 
     await expect(client.get("/api/v1/me")).rejects.toMatchObject({ status: 403, kind: "forbidden", message: "nope" });
   });
 
   it("starts a browser-native download for cookie sessions", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    const client = createApiClient(() => null);
+    const client = createApiClient();
 
     await client.download("/api/v1/files/file-1/content", "report.pdf");
 
     expect(downloadMocks.downloadUrl).toHaveBeenCalledWith("/api/v1/files/file-1/content", "report.pdf");
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps the authenticated Blob fallback for development API keys", async () => {
-    const blob = new Blob(["file"]);
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      blob: vi.fn().mockResolvedValue(blob)
-    } as unknown as Response);
-    const client = createApiClient(() => "user-key");
-
-    await client.download("/api/v1/files/file-1/content", "report.pdf");
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect((init?.headers as Headers).get("authorization")).toBe("Bearer user-key");
-    expect(downloadMocks.downloadBlob).toHaveBeenCalledWith(blob, "report.pdf");
-    expect(downloadMocks.downloadUrl).not.toHaveBeenCalled();
   });
 });

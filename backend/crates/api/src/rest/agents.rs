@@ -97,7 +97,7 @@ pub(crate) struct CreatedAgentApiKeyOut {
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List agents", body = AgentsListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -128,7 +128,7 @@ pub(crate) async fn list(
     tag = "agents",
     request_body = CreateAgentBody,
     responses((status = 201, description = "Create agent", body = AgentOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn create(
     State(state): State<AppState>,
@@ -152,7 +152,7 @@ pub(crate) async fn create(
     tag = "agents",
     params(("agent_id" = Uuid, Path)),
     responses((status = 204, description = "Delete agent")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn delete_agent(
     State(state): State<AppState>,
@@ -176,7 +176,7 @@ pub(crate) async fn delete_agent(
         ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
     ),
     responses((status = 200, description = "List agent keys", body = ApiKeyMetadataListResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn list_keys(
     State(state): State<AppState>,
@@ -210,7 +210,7 @@ pub(crate) async fn list_keys(
     params(("agent_id" = Uuid, Path)),
     request_body = CreateApiKeyBody,
     responses((status = 201, description = "Create agent key", body = CreatedAgentApiKeyOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn create_key(
     State(state): State<AppState>,
@@ -252,7 +252,7 @@ pub(crate) async fn create_key(
     tag = "agents",
     params(("agent_id" = Uuid, Path), ("key_id" = Uuid, Path)),
     responses((status = 201, description = "Rotate agent key", body = CreatedAgentApiKeyOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn rotate_key(
     State(state): State<AppState>,
@@ -284,7 +284,7 @@ pub(crate) async fn rotate_key(
     tag = "agents",
     params(("agent_id" = Uuid, Path), ("key_id" = Uuid, Path)),
     responses((status = 204, description = "Revoke agent key")),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn revoke_key(
     State(state): State<AppState>,

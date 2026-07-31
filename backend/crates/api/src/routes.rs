@@ -12,7 +12,7 @@ use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use axum_governor::extractor::Global;
 use axum_governor::{GovernorConfigBuilder, GovernorLayer, Quota};
-use notegate_core::limits;
+use notegate_core::{HttpRateLimitConfig, HttpRateLimitsConfig, limits};
 use serde::Serialize;
 use tower::ServiceBuilder;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -21,11 +21,11 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::timeout::TimeoutLayer;
 use tracing::{Instrument, debug, error, info, info_span, warn};
 
-use crate::auth::bearer::require_bearer;
 use crate::auth::metadata::{
     authorization_server_metadata, protected_resource_metadata, protected_resource_metadata_url,
 };
 use crate::auth::oauth::{callback, login, logout, success};
+use crate::auth::{mark_private_no_store, require_browser_session, require_public_api_key};
 use crate::error::ApiError;
 use crate::mcp::server::mcp_handler;
 use crate::observability::{self, HttpRequestMetrics, MetricsHandle};
@@ -59,14 +59,7 @@ pub fn app(state: AppState) -> Router {
 struct DataPlaneLimits {
     request_body_max_bytes: usize,
     request_timeout: Duration,
-    ingress: RateLimit,
-    basic_api: RateLimit,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RateLimit {
-    requests_per_second: u32,
-    burst: u32,
+    rate_limits: HttpRateLimitsConfig,
 }
 
 impl Default for DataPlaneLimits {
@@ -74,14 +67,7 @@ impl Default for DataPlaneLimits {
         Self {
             request_body_max_bytes: limits::HTTP_REQUEST_BODY_MAX_BYTES,
             request_timeout: Duration::from_secs(limits::HTTP_REQUEST_TIMEOUT_SECS),
-            ingress: RateLimit {
-                requests_per_second: limits::HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND,
-                burst: limits::HTTP_INGRESS_RATE_LIMIT_BURST,
-            },
-            basic_api: RateLimit {
-                requests_per_second: limits::HTTP_BASIC_API_RATE_LIMIT_REQUESTS_PER_SECOND,
-                burst: limits::HTTP_BASIC_API_RATE_LIMIT_BURST,
-            },
+            rate_limits: HttpRateLimitsConfig::default(),
         }
     }
 }
@@ -107,18 +93,29 @@ fn control_plane_routes(metrics: Option<MetricsHandle>) -> Router<AppState> {
 }
 
 fn data_plane_routes(state: AppState) -> Router<AppState> {
-    let limits = DataPlaneLimits::default();
-    let basic_api = apply_rate_limit(
-        Router::new()
-            .nest("/api", rest_api_routes(state.clone()))
-            .route("/mcp", any(mcp_handler)),
-        limits.basic_api,
+    let limits = DataPlaneLimits {
+        rate_limits: state.config.http_rate_limits,
+        ..DataPlaneLimits::default()
+    };
+    let browser_v1 = apply_rate_limit(
+        Router::new().nest("/api", rest_api_routes(state.clone())),
+        limits.rate_limits.browser_v1,
+    );
+    let public_v2 = apply_rate_limit(
+        Router::new().nest("/api/v2", public_v2_routes(state.clone())),
+        limits.rate_limits.public_v2,
+    );
+    let mcp = apply_rate_limit(
+        Router::new().route("/mcp", any(mcp_handler)),
+        limits.rate_limits.mcp,
     );
     let router = Router::new()
         .merge(auth_routes())
         .merge(metadata_routes(&state))
         .merge(crate::openapi::routes(&state.config))
-        .merge(basic_api);
+        .merge(browser_v1)
+        .merge(public_v2)
+        .merge(mcp);
     apply_data_plane_limits(router, limits)
 }
 
@@ -143,11 +140,13 @@ where
                 StatusCode::REQUEST_TIMEOUT,
                 limits.request_timeout,
             ))
-            .layer(GovernorLayer::new(rate_limit_config(limits.ingress))),
+            .layer(GovernorLayer::new(rate_limit_config(
+                limits.rate_limits.ingress,
+            ))),
     )
 }
 
-fn apply_rate_limit<S>(router: Router<S>, limit: RateLimit) -> Router<S>
+fn apply_rate_limit<S>(router: Router<S>, limit: HttpRateLimitConfig) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
@@ -155,7 +154,7 @@ where
 }
 
 #[allow(clippy::expect_used)]
-fn rate_limit_config(limit: RateLimit) -> axum_governor::GovernorConfig<()> {
+fn rate_limit_config(limit: HttpRateLimitConfig) -> axum_governor::GovernorConfig<()> {
     let requests = std::num::NonZeroU32::new(limit.requests_per_second)
         .expect("HTTP rate limit must be greater than zero");
     let burst = std::num::NonZeroU32::new(limit.burst)
@@ -214,7 +213,14 @@ fn rest_api_routes(state: AppState) -> Router<AppState> {
         .merge(crate::rest::connections::routes())
         .merge(crate::rest::agents::routes())
         .fallback(api_not_found)
-        .layer(from_fn_with_state(state, require_bearer))
+        .layer(from_fn_with_state(state, require_browser_session))
+}
+
+fn public_v2_routes(state: AppState) -> Router<AppState> {
+    crate::public_v2::routes()
+        .fallback(api_not_found)
+        .layer(from_fn_with_state(state, require_public_api_key))
+        .layer(from_fn(mark_private_no_store))
 }
 
 /// Liveness: the process is up. No dependency checks.
@@ -476,15 +482,7 @@ mod tests {
             Router::new().route("/", post(|body: String| async move { body })),
             DataPlaneLimits {
                 request_body_max_bytes: 4,
-                request_timeout: Duration::from_secs(30),
-                ingress: RateLimit {
-                    requests_per_second: 100,
-                    burst: 100,
-                },
-                basic_api: RateLimit {
-                    requests_per_second: 100,
-                    burst: 100,
-                },
+                ..DataPlaneLimits::default()
             },
         );
 
@@ -507,16 +505,14 @@ mod tests {
         let app = apply_data_plane_limits(
             Router::new().route("/", get(|| async { "ok" })),
             DataPlaneLimits {
-                request_body_max_bytes: 1024,
-                request_timeout: Duration::from_secs(30),
-                ingress: RateLimit {
-                    requests_per_second: 1,
-                    burst: 1,
+                rate_limits: HttpRateLimitsConfig {
+                    ingress: HttpRateLimitConfig {
+                        requests_per_second: 1,
+                        burst: 1,
+                    },
+                    ..HttpRateLimitsConfig::default()
                 },
-                basic_api: RateLimit {
-                    requests_per_second: 100,
-                    burst: 100,
-                },
+                ..DataPlaneLimits::default()
             },
         );
 
@@ -536,30 +532,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn basic_api_limit_does_not_consume_public_route_capacity() {
-        let basic_api = apply_rate_limit(
+    async fn browser_v1_limit_does_not_consume_auth_route_capacity() {
+        let browser_v1 = apply_rate_limit(
             Router::new().route("/api", get(|| async { "api" })),
-            RateLimit {
+            HttpRateLimitConfig {
                 requests_per_second: 1,
                 burst: 1,
             },
         );
         let app = apply_data_plane_limits(
             Router::new()
-                .merge(basic_api)
+                .merge(browser_v1)
                 .route("/auth", get(|| async { "auth" })),
-            DataPlaneLimits {
-                request_body_max_bytes: 1024,
-                request_timeout: Duration::from_secs(30),
-                ingress: RateLimit {
-                    requests_per_second: 100,
-                    burst: 100,
-                },
-                basic_api: RateLimit {
-                    requests_per_second: 1,
-                    burst: 1,
-                },
-            },
+            DataPlaneLimits::default(),
         );
 
         let first_api = app
@@ -580,6 +565,85 @@ mod tests {
         assert_eq!(first_api.status(), StatusCode::OK);
         assert_eq!(second_api.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(public.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn browser_v1_public_v2_and_mcp_rate_limits_are_independent() {
+        let limit = HttpRateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        };
+        let app = Router::new()
+            .merge(apply_rate_limit(
+                Router::new().nest(
+                    "/api",
+                    Router::new().route("/v1/ping", get(|| async { "v1" })),
+                ),
+                limit,
+            ))
+            .merge(apply_rate_limit(
+                Router::new().nest(
+                    "/api/v2",
+                    Router::new().route("/ping", get(|| async { "v2" })),
+                ),
+                limit,
+            ))
+            .merge(apply_rate_limit(
+                Router::new().route("/mcp", get(|| async { "mcp" })),
+                limit,
+            ));
+
+        for path in ["/api/v1/ping", "/api/v2/ping", "/mcp"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+        for path in ["/api/v1/ping", "/api/v2/ping", "/mcp"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn ingress_rate_limit_is_shared_across_surfaces() {
+        let app = apply_data_plane_limits(
+            Router::new()
+                .route("/api/v1/ping", get(|| async { "v1" }))
+                .route("/api/v2/ping", get(|| async { "v2" }))
+                .route("/mcp", get(|| async { "mcp" })),
+            DataPlaneLimits {
+                rate_limits: HttpRateLimitsConfig {
+                    ingress: HttpRateLimitConfig {
+                        requests_per_second: 1,
+                        burst: 2,
+                    },
+                    ..HttpRateLimitsConfig::default()
+                },
+                ..DataPlaneLimits::default()
+            },
+        );
+
+        for path in ["/api/v1/ping", "/api/v2/ping"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+
+        let response = app
+            .oneshot(Request::builder().uri("/mcp").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]

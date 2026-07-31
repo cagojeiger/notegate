@@ -28,7 +28,7 @@ describe("EventHistoryModal", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 
     render(
-      <ApiProvider apiKey="agent-key" authCacheKey="agent-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -45,7 +45,7 @@ describe("EventHistoryModal", () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ events: [], page }));
     const { rerender } = render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -55,7 +55,7 @@ describe("EventHistoryModal", () => {
     fetchMock.mockClear();
 
     rerender(
-      <ApiProvider apiKey="agent-key" authCacheKey="agent-key:1">
+      <ApiProvider authCacheKey="browser-session:1">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents={false} onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -81,7 +81,7 @@ describe("EventHistoryModal", () => {
     });
 
     render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -114,7 +114,7 @@ describe("EventHistoryModal", () => {
     });
 
     render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -130,7 +130,7 @@ describe("EventHistoryModal", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 
     render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -159,7 +159,7 @@ describe("EventHistoryModal", () => {
     }));
 
     render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );
@@ -180,7 +180,7 @@ describe("EventHistoryModal", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({ events: [], page }));
 
     render(
-      <ApiProvider apiKey="user-key" authCacheKey="user-key:0">
+      <ApiProvider authCacheKey="browser-session:0">
         <EventHistoryModal spaces={[space, secondSpace]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
       </ApiProvider>
     );

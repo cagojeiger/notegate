@@ -116,7 +116,7 @@ pub(crate) struct ReadUnchangedOut {
         ("if_none_match_sha256" = Option<String>, Query, description = "Conditional read content hash"),
     ),
     responses((status = 200, description = "Read text", body = ReadResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn read(
     State(state): State<AppState>,
@@ -170,7 +170,7 @@ fn default_storage_format() -> String {
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = ReplaceBody,
     responses((status = 200, description = "Replace text", body = TextResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn replace(
     State(state): State<AppState>,
@@ -207,7 +207,7 @@ pub(crate) struct UpdateEncryptionBody {
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = UpdateEncryptionBody,
     responses((status = 200, description = "Update text encryption", body = NodeOut)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn update_encryption(
     State(state): State<AppState>,
@@ -295,7 +295,7 @@ pub(crate) struct PatchTextOut {
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = PatchBody,
     responses((status = 200, description = "Patch text", body = PatchResponse)),
-    security(("bearer_auth" = []))
+    security(("browser_session" = []))
 )]
 pub(crate) async fn patch(
     State(state): State<AppState>,

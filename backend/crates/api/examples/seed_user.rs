@@ -1,16 +1,19 @@
-//! Dev-only bootstrap: create one user account and mint a user API key, then
-//! print the plaintext token. Runs migrations + ensures crypto key epochs first
-//! so it works against a freshly-wiped database. Reuses the real PiiCrypto so the
-//! token hash matches the running API. Requires the same NOTEGATE_* env as the API.
+//! Dev-only bootstrap: create one user account, API key, and browser session.
+//! Runs migrations + ensures crypto key epochs first so it works against a
+//! freshly-wiped database. Requires the same NOTEGATE_* env as the API.
 
+use chrono::Utc;
 use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
+use notegate_db::browser_session_repo::{InsertBrowserSession, format_token, token_prefix};
 use notegate_db::{
-    AccountRepo, ApiKeyRepo, AuditEventRepo, CryptoKeyEpochRepo, connect, run_migrations,
+    AccountRepo, ApiKeyRepo, AuditEventRepo, BrowserSessionRepo, CryptoKeyEpochRepo, connect,
+    run_migrations,
 };
 use notegate_model::account::AccountKind;
 use notegate_model::{CreateApiKey, ResolveAttrs};
 use notegate_service::accounts::AccountService;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,6 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
+    let browser_session = create_browser_session(&config, &pool, &crypto, account.id).await?;
     let api_key_repo =
         ApiKeyRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
     let svc = AccountService::with_api_keys(
@@ -63,5 +67,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("ACCOUNT_ID={}", account.id);
     println!("TOKEN={}", minted.token);
+    println!("BROWSER_SESSION={browser_session}");
     Ok(())
+}
+
+async fn create_browser_session(
+    config: &Config,
+    pool: &notegate_db::PgPool,
+    crypto: &PiiCrypto,
+    user_id: Uuid,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let session_id = Uuid::new_v4();
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token_hash = crypto.browser_session_hash(&session_id.to_string(), &secret)?;
+    let refresh_token =
+        crypto.encrypt_browser_refresh_token(&session_id.to_string(), "e2e-refresh-token")?;
+    let now = Utc::now();
+    let validated_until = now + chrono::Duration::from_std(config.browser_session_ttl)?;
+    let expires_at = now + chrono::Duration::from_std(config.browser_session_max_ttl)?;
+    let token_prefix = token_prefix(session_id);
+
+    BrowserSessionRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version())
+        .insert_session(InsertBrowserSession {
+            session_id,
+            user_id,
+            token_prefix: &token_prefix,
+            token_hash: &token_hash,
+            refresh_token: &refresh_token,
+            refresh_token_enc_key_id: crypto.enc_key_id(),
+            refresh_token_enc_version: crypto.version(),
+            validated_until,
+            expires_at,
+        })
+        .await?;
+
+    Ok(format_token(session_id, &secret))
 }
