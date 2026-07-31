@@ -155,7 +155,7 @@ jobs:
     env:
       NOTEGATE_DATABASE_URL: postgres://notegate:notegate@localhost:5432/notegate
       NOTEGATE_AUTHGATE_URL: https://authgate.project-jelly.io
-      NOTEGATE_PUBLIC_URL: http://127.0.0.1:9191
+      NOTEGATE_PUBLIC_URL: http://localhost:9191
       NOTEGATE_OAUTH_CLIENT_ID: notegate-web
       NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
       NOTEGATE_OPENAPI_ENABLED: "true"

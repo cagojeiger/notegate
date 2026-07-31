@@ -20,7 +20,7 @@ NoteGate is a personal storage boundary for knowledge shared between a person an
 - Keep Markdown, JSON, YAML, plain text, images, PDFs, and other files together.
 - Read, edit, preview, search, and transfer content without maintaining a second agent-only store.
 - Give each user-managed agent read or write access only to the spaces it needs.
-- Sign in to the browser with Google SSO. REST and MCP access use bearer credentials.
+- Sign in to the browser with Google SSO. Public API and MCP access use bearer credentials.
 - Work across responsive light and dark interfaces.
 
 ## Screens

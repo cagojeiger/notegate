@@ -26,12 +26,13 @@ V2의 초기 endpoint는 `public-api-v2.md`에서 정의한다.
 ## 계층
 
 ```text
-api/rest/*     request/response, auth extraction, DTO mapping
-api/public_v2  공개 계약용 request/response와 DTO mapping
-api/mcp/*      tool schema, space/path resolve, DTO mapping
-service/*      authorization, limits, lifecycle invariant
-repo/db        transaction, SQL, DB constraint mapping
-model          shared domain types
+api/auth/*      transport 인증과 credential extraction
+api/rest/*      Web V1 request/response와 DTO mapping
+api/public_v2   공개 계약용 request/response와 DTO mapping
+api/mcp/*       tool schema, space/path resolve, DTO mapping
+service/*       authorization, limits, lifecycle invariant
+repo/db         transaction, SQL, DB constraint mapping
+model           shared domain types
 ```
 
 API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는다. V2가 별도 프로세스로 분리되더라도 같은 service/model 계약을 사용한다.

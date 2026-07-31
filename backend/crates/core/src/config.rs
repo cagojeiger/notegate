@@ -144,7 +144,7 @@ pub struct Config {
     /// Exact redirect URL registered in authgate.
     #[serde(default)]
     pub oauth_redirect_url: String,
-    /// Resource/audience URL for REST and MCP, with trailing slash trimmed.
+    /// MCP resource/audience URL, with trailing slash trimmed.
     #[serde(default)]
     pub resource_url: String,
     /// Shared JWKS cache TTL.
