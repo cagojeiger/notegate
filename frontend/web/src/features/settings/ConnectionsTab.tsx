@@ -26,7 +26,7 @@ export function ConnectionsTab({ canManageAgents }: { canManageAgents: boolean }
           </section>
 
           <section>
-            <SectionHeader title="API" description="Call the public API with an Agent API key." />
+            <SectionHeader title="REST API" description="Call the public API with an Agent API key." />
             <Card className="space-y-3 text-sm">
               <EndpointRow label="Base URL" value={`${origin}/api/v2`} copyLabel="Copy API base URL" />
               <a

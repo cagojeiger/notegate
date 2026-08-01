@@ -408,7 +408,7 @@ Connections:
 
 - user MCP OAuth 2.1 server URL.
 - agent MCP server URL.
-- public API base URL과 API 문서 링크.
+- REST API base URL과 API 문서 링크.
 
 Agents:
 
@@ -419,7 +419,7 @@ Agents:
 규칙:
 
 - 연결 URL은 agent마다 반복하지 않고 Connections에 한 번만 둔다.
-- 제품 표시는 `API`로 통일하고 실제 versioned base URL은 `/api/v2`를 사용한다.
+- 제품 표시는 `REST API`로 통일하고 실제 versioned base URL은 `/api/v2`를 사용한다.
 - API 문서는 새 탭으로 연다.
 - agent API key는 해당 agent 아래에 둔다.
 - `scopes`는 현재 정책상 표시하지 않는다.

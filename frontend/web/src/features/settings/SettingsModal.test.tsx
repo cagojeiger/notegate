@@ -95,7 +95,7 @@ describe("SettingsModal", () => {
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
   });
 
-  it("shows user MCP, Agent MCP, and API in the connections tab", async () => {
+  it("shows user MCP, Agent MCP, and REST API in the connections tab", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -105,9 +105,9 @@ describe("SettingsModal", () => {
     expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
     expect(screen.getByText("Agent MCP")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
-    expect(screen.getByText("API")).toBeInTheDocument();
+    expect(screen.getByText("REST API")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/api/v2")).toBeInTheDocument();
-    expect(screen.queryByText("API v2")).not.toBeInTheDocument();
+    expect(screen.queryByText("REST API v2")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "API documentation" })).toHaveAttribute("href", "http://localhost:3000/swagger-ui/v2/");
     expect(screen.getByRole("link", { name: "API documentation" })).toHaveAttribute("target", "_blank");
   });
@@ -241,6 +241,6 @@ describe("SettingsModal", () => {
     await user.click(screen.getByRole("tab", { name: "Connections" }));
     expect(screen.getByText("User MCP")).toBeInTheDocument();
     expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
-    expect(screen.queryByText("API")).not.toBeInTheDocument();
+    expect(screen.queryByText("REST API")).not.toBeInTheDocument();
   });
 });
