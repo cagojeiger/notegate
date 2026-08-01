@@ -381,7 +381,7 @@ async fn historical_user_owned_api_key_does_not_authenticate_or_mark_last_used()
 }
 
 #[tokio::test]
-async fn v2_agent_api_key_guard_retires_invalid_keys_and_blocks_legacy_writes()
+async fn v2_agent_api_key_cutover_retires_existing_keys_and_blocks_invalid_writes()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -489,17 +489,17 @@ async fn v2_agent_api_key_guard_retires_invalid_keys_and_blocks_legacy_writes()
     let row = |key_id| rows.iter().find(|row| row.0 == key_id).expect("key row");
 
     assert!(row(user_v1_id).1.is_some());
-    assert_eq!(row(user_v1_id).2.as_deref(), Some("user_api_key_retired"));
+    assert_eq!(row(user_v1_id).2.as_deref(), Some("api_key_v2_cutover"));
     assert!(row(user_v2_id).1.is_some());
-    assert_eq!(row(user_v2_id).2.as_deref(), Some("user_api_key_retired"));
+    assert_eq!(row(user_v2_id).2.as_deref(), Some("api_key_v2_cutover"));
     assert!(row(live_v1_id).1.is_some());
-    assert_eq!(row(live_v1_id).2.as_deref(), Some("legacy_api_key_retired"));
-    assert!(row(live_v2_id).1.is_none());
-    assert!(row(live_v2_id).2.is_none());
+    assert_eq!(row(live_v1_id).2.as_deref(), Some("api_key_v2_cutover"));
+    assert!(row(live_v2_id).1.is_some());
+    assert_eq!(row(live_v2_id).2.as_deref(), Some("api_key_v2_cutover"));
     assert!(row(malformed_v2_id).1.is_some());
     assert_eq!(
         row(malformed_v2_id).2.as_deref(),
-        Some("invalid_api_key_format_retired")
+        Some("api_key_v2_cutover")
     );
     assert!(row(revoked_v1_id).1.is_some());
     assert_eq!(row(revoked_v1_id).2.as_deref(), Some("manual-revocation"));
@@ -512,12 +512,19 @@ async fn v2_agent_api_key_guard_retires_invalid_keys_and_blocks_legacy_writes()
             user_v1_id,
             user_v2_id,
             live_v1_id,
+            live_v2_id,
             malformed_v2_id,
         ])
         .fetch_all(&db.pool)
         .await?;
-    assert_eq!(events.len(), 4);
-    for key_id in [user_v1_id, user_v2_id] {
+    assert_eq!(events.len(), 5);
+    for (key_id, op_type) in [
+        (user_v1_id, "user_key.revoke"),
+        (user_v2_id, "user_key.revoke"),
+        (live_v1_id, "agent_key.revoke"),
+        (live_v2_id, "agent_key.revoke"),
+        (malformed_v2_id, "agent_key.revoke"),
+    ] {
         let event = events
             .iter()
             .find(|event| event.resource_id == Some(key_id))
@@ -525,30 +532,10 @@ async fn v2_agent_api_key_guard_retires_invalid_keys_and_blocks_legacy_writes()
         assert_eq!(event.owner_user_id, Some(owner));
         assert_eq!(event.actor_account_id, None);
         assert_eq!(event.source, "system");
-        assert_eq!(event.op_type, "user_key.revoke");
+        assert_eq!(event.op_type, op_type);
         assert_eq!(event.resource_type, "api_key");
-        assert_eq!(event.reason, "user_api_key_retired");
+        assert_eq!(event.reason, "api_key_v2_cutover");
     }
-    let legacy_event = events
-        .iter()
-        .find(|event| event.resource_id == Some(live_v1_id))
-        .expect("legacy key audit event");
-    assert_eq!(legacy_event.owner_user_id, Some(owner));
-    assert_eq!(legacy_event.actor_account_id, None);
-    assert_eq!(legacy_event.source, "system");
-    assert_eq!(legacy_event.op_type, "agent_key.revoke");
-    assert_eq!(legacy_event.resource_type, "api_key");
-    assert_eq!(legacy_event.reason, "legacy_api_key_retired");
-    let malformed_event = events
-        .iter()
-        .find(|event| event.resource_id == Some(malformed_v2_id))
-        .expect("malformed key audit event");
-    assert_eq!(malformed_event.owner_user_id, Some(owner));
-    assert_eq!(malformed_event.actor_account_id, None);
-    assert_eq!(malformed_event.source, "system");
-    assert_eq!(malformed_event.op_type, "agent_key.revoke");
-    assert_eq!(malformed_event.resource_type, "api_key");
-    assert_eq!(malformed_event.reason, "invalid_api_key_format_retired");
 
     let late_user_key_id = Uuid::new_v4();
     let late_user_key = repo

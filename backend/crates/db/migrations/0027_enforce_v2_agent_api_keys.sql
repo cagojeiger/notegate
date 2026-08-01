@@ -32,24 +32,13 @@ BEFORE INSERT OR UPDATE OF account_id, token_prefix ON api_keys
 FOR EACH ROW
 EXECUTE FUNCTION enforce_v2_agent_api_key();
 
--- The DDL lock closes the rolling-deployment race: old writes either finish
--- before this retirement pass or wait and are rejected by the new trigger.
 WITH retired AS (
   UPDATE api_keys AS k
   SET revoked_at = now(),
-      revoked_reason = CASE
-        WHEN a.kind = 'user' THEN 'user_api_key_retired'
-        WHEN left(k.token_prefix, 7) = 'ngk_v1_' THEN 'legacy_api_key_retired'
-        ELSE 'invalid_api_key_format_retired'
-      END
+      revoked_reason = 'api_key_v2_cutover'
   FROM accounts AS a
   WHERE k.account_id = a.id
     AND k.revoked_at IS NULL
-    AND k.expires_at > now()
-    AND (
-      a.kind <> 'agent'
-      OR k.token_prefix <> ('ngk_v2_' || k.id::text)
-    )
   RETURNING k.id, k.account_id, a.kind, k.revoked_reason
 )
 INSERT INTO audit_events (
