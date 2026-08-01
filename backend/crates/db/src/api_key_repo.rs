@@ -1,4 +1,5 @@
-//! Unified API-key persistence for user and agent accounts.
+//! API-key persistence. Product issuance paths create Agent-owned keys only;
+//! generic account columns remain for existing rows and repository mechanics.
 
 use crate::audit_events::{self, ApiKeyOwnerKind, AuditContext};
 use crate::{active_account_predicate, map_sqlx_error};
@@ -85,28 +86,31 @@ impl ApiKeyRepo {
         Ok(row.map(ApiKey::from))
     }
 
-    pub async fn find_live_account_id_by_key(
+    pub async fn find_live_agent_id_by_key(
         &self,
         key_id: Uuid,
+        token_prefix: &str,
         token_hash: &str,
     ) -> Result<Option<Uuid>> {
         let live = live_key_predicate("k.");
         let active = active_account_predicate("acc.");
-        let account_id: Option<Uuid> = sqlx::query(&format!(
+        let agent_id: Option<Uuid> = sqlx::query(&format!(
             "SELECT k.account_id FROM api_keys k \
              JOIN accounts acc ON acc.id = k.account_id \
-             WHERE k.id = $1 AND k.token_hash = $2 \
+             WHERE k.id = $1 AND k.token_prefix = $2 AND k.token_hash = $3 \
                AND {live} \
-               AND {active}"
+               AND {active} \
+               AND acc.kind = 'agent'"
         ))
         .bind(key_id)
+        .bind(token_prefix)
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?
         .map(|row| row.get::<Uuid, _>("account_id"));
 
-        if account_id.is_some()
+        if agent_id.is_some()
             && let Err(error) = sqlx::query(
                 "UPDATE api_keys SET last_used_at = now() \
                  WHERE id = $1 \
@@ -119,7 +123,7 @@ impl ApiKeyRepo {
             tracing::warn!(event = "api_key.last_used_update_failed", %error);
         }
 
-        Ok(account_id)
+        Ok(agent_id)
     }
 
     pub async fn count_live_keys(&self, account_id: Uuid) -> Result<usize> {
@@ -179,7 +183,7 @@ impl ApiKeyRepo {
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        lock_active_account(&mut tx, args.account_id).await?;
+        lock_active_agent_account(&mut tx, args.account_id).await?;
 
         // Re-count live keys INSIDE the tx using the same predicate as count_live_keys.
         let live_count: i64 = sqlx::query_scalar(&format!(
@@ -245,7 +249,7 @@ impl ApiKeyRepo {
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        lock_active_account(&mut tx, args.account_id).await?;
+        lock_active_agent_account(&mut tx, args.account_id).await?;
 
         let old_exists: Option<Uuid> = sqlx::query_scalar(&format!(
             "SELECT id FROM api_keys \
@@ -411,10 +415,10 @@ async fn audit_context_for_key_account(
     }
 }
 
-async fn lock_active_account(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
+async fn lock_active_agent_account(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
     let active = active_account_predicate("");
     let exists: Option<Uuid> = sqlx::query_scalar(&format!(
-        "SELECT id FROM accounts WHERE id = $1 AND {active} FOR UPDATE"
+        "SELECT id FROM accounts WHERE id = $1 AND kind = 'agent' AND {active} FOR UPDATE"
     ))
     .bind(account_id)
     .fetch_optional(&mut *tx)

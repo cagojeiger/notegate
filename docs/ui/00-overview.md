@@ -51,7 +51,7 @@ AppRoot
 | `EditorGroupHeader` | EditorGroup 상단 헤더 |
 | `EditorViewport` | 실제 본문이 렌더링되는 영역 |
 | `InspectorPanel` | 선택 node의 속성과 metadata 표시 |
-| `SettingsModal` | Account, Agents, MCP 설정 화면 |
+| `SettingsModal` | General, Account, Agents 설정 화면 |
 | `StructuredPreview` | JSON/JSONL/YAML/TOML tree/source 뷰 |
 
 ## 기준 규칙

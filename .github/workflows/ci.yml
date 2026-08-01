@@ -158,7 +158,6 @@ jobs:
       NOTEGATE_PUBLIC_URL: http://localhost:9191
       NOTEGATE_OAUTH_CLIENT_ID: notegate-web
       NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
-      NOTEGATE_OPENAPI_ENABLED: "true"
       NOTEGATE_ENC_ROOT_KEY_ID: e2e-enc
       NOTEGATE_ENC_ROOT_SECRET: e2e-distinct-enc-root-secret-32-bytes
       NOTEGATE_LOOKUP_ROOT_KEY_ID: e2e-lookup
@@ -224,17 +223,17 @@ jobs:
             --entrypoint /bin/sh \
             minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
 
-      - name: Seed browser identity
-        id: seed_browser_identity
+      - name: Seed test identities
+        id: seed_test_identity
         run: |
           output=$(cargo run --quiet --package notegate-api --example seed_user)
-          token=$(printf '%s\n' "$output" | sed -n 's/^TOKEN=//p')
+          agent_api_key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
-          test -n "$token"
+          test -n "$agent_api_key"
           test -n "$session"
-          echo "::add-mask::$token"
+          echo "::add-mask::$agent_api_key"
           echo "::add-mask::$session"
-          echo "api_key=$token" >> "$GITHUB_OUTPUT"
+          echo "agent_api_key=$agent_api_key" >> "$GITHUB_OUTPUT"
           echo "browser_session=$session" >> "$GITHUB_OUTPUT"
 
       - name: Start application
@@ -255,7 +254,8 @@ jobs:
 
       - name: Test public V2 API
         env:
-          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_browser_identity.outputs.api_key }}
+          NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
+          NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
         run: |
           curl --fail --silent \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
@@ -263,7 +263,9 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
             http://127.0.0.1:9191/api/v2/spaces)" = "404"
-          curl --fail --silent http://127.0.0.1:9191/openapi/v2.json >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --cookie "notegate_browser_session=$NOTEGATE_BROWSER_SESSION" \
+            http://127.0.0.1:9191/openapi/v2.json)" = "200"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
             http://127.0.0.1:9191/api/v1/me)" = "401"
@@ -272,7 +274,7 @@ jobs:
 
       - name: Test browser workflow
         env:
-          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_browser_identity.outputs.browser_session }}
+          NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
         run: pnpm --filter web test:e2e
 
       - name: Test Lighthouse budgets

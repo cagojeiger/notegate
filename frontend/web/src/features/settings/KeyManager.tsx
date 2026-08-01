@@ -16,7 +16,6 @@ function expiryOptions(maxTtlDays: number) {
   }));
 }
 
-// Shared list/create/revoke UI for both user keys (/me/keys) and agent keys.
 export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No active keys.", maxTtlDays = 30 }: {
   queryKey: QueryKey;
   list: () => Promise<ApiKeyListResponse>;
@@ -71,16 +70,16 @@ export function KeyManager({ queryKey, list, create, revoke, emptyLabel = "No ac
         </Card>
       ) : null}
 
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_auto]">
         <TextField
           label="Name"
-          className="min-w-0 flex-1"
+          className="min-w-0"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") createKey(); }}
           placeholder="e.g. cli, ci, claude-test"
         />
-        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-36">
+        <SelectField label="Expires" value={days} onChange={(e) => setDays(Number(e.target.value))}>
           {options.map((option) => <option key={option.days} value={option.days}>{option.label}</option>)}
         </SelectField>
         <Button onClick={createKey} disabled={!canCreate}><Plus size={15} /> Create</Button>

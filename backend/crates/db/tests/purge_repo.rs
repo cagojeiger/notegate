@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, agent_api_key_prefix, insert_user_account};
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     ApiKeyRepo, BrowserSessionRepo, PurgeRepo, api_key_repo::InsertApiKey,
@@ -144,20 +144,22 @@ async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::err
 async fn seed_key(
     repo: &ApiKeyRepo,
     account_id: Uuid,
+    created_by: Uuid,
     name: &str,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let key_id = Uuid::new_v4();
     let key = repo
         .insert_key_unchecked_for_test(InsertApiKey {
-            key_id: Uuid::new_v4(),
+            key_id,
             account_id,
             command: &CreateApiKey {
                 name: name.to_owned(),
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v1_test",
+            token_prefix: &agent_api_key_prefix(key_id),
             token_hash: &format!("hash-{name}-{}", Uuid::new_v4()),
-            created_by: account_id,
+            created_by,
             rotated_from_key_id: None,
         })
         .await?;
@@ -196,13 +198,22 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
         return Ok(());
     };
     let user = insert_user_account(&db.pool, "key-purger", "key-purger@example.test").await?;
+    let agent: Uuid =
+        sqlx::query_scalar("INSERT INTO accounts (kind) VALUES ('agent') RETURNING id")
+            .fetch_one(&db.pool)
+            .await?;
+    sqlx::query("INSERT INTO agents (id, name, owner_user_id) VALUES ($1, 'key-purger', $2)")
+        .bind(agent)
+        .bind(user)
+        .execute(&db.pool)
+        .await?;
     let repo = ApiKeyRepo::new(db.pool.clone());
 
     // A key dies at the earlier of its revoke time and expiry. Retention is 30 days.
-    let live = seed_key(&repo, user, "live").await?;
-    let old_revoked = seed_key(&repo, user, "old-revoked").await?;
-    let old_expired = seed_key(&repo, user, "old-expired").await?;
-    let recent_revoked = seed_key(&repo, user, "recent-revoked").await?;
+    let live = seed_key(&repo, agent, user, "live").await?;
+    let old_revoked = seed_key(&repo, agent, user, "old-revoked").await?;
+    let old_expired = seed_key(&repo, agent, user, "old-expired").await?;
+    let recent_revoked = seed_key(&repo, agent, user, "recent-revoked").await?;
 
     sqlx::query(
         "UPDATE api_keys SET revoked_at = now() - interval '40 days', revoked_by_user_id = $2, \
@@ -230,7 +241,7 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
     assert_eq!(run.api_keys_deleted, 2, "only the two long-dead keys purge");
 
     let remaining: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM api_keys WHERE account_id = $1")
-        .bind(user)
+        .bind(agent)
         .fetch_all(&db.pool)
         .await?;
     assert_eq!(remaining.len(), 2);

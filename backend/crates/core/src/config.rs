@@ -98,8 +98,10 @@ pub struct HttpRateLimitsConfig {
     pub browser_v1: HttpRateLimitConfig,
     /// API-key REST V2 cap.
     pub public_v2: HttpRateLimitConfig,
-    /// MCP transport cap.
+    /// User OAuth MCP transport cap.
     pub mcp: HttpRateLimitConfig,
+    /// Agent API-key MCP V2 transport cap.
+    pub mcp_v2: HttpRateLimitConfig,
 }
 
 impl Default for HttpRateLimitsConfig {
@@ -116,6 +118,7 @@ impl Default for HttpRateLimitsConfig {
             browser_v1: api_surface,
             public_v2: api_surface,
             mcp: api_surface,
+            mcp_v2: api_surface,
         }
     }
 }
@@ -177,7 +180,7 @@ pub struct Config {
         deserialize_with = "duration_from_secs"
     )]
     pub browser_session_max_ttl: Duration,
-    /// Whether OpenAPI JSON and Swagger UI routes are exposed.
+    /// Deprecated OpenAPI toggle retained for configuration compatibility.
     pub openapi_enabled: bool,
     /// Whether Prometheus metrics are recorded and exposed at `/metrics`.
     pub metrics_enabled: bool,
@@ -396,6 +399,13 @@ fn load_from_sources(include_files: bool, environment: Environment) -> Result<Co
         )
         .map_err(map_config_error)?
         .set_default("http_rate_limits.mcp.burst", rate_limits.mcp.burst)
+        .map_err(map_config_error)?
+        .set_default(
+            "http_rate_limits.mcp_v2.requests_per_second",
+            rate_limits.mcp_v2.requests_per_second,
+        )
+        .map_err(map_config_error)?
+        .set_default("http_rate_limits.mcp_v2.burst", rate_limits.mcp_v2.burst)
         .map_err(map_config_error)?;
 
     if include_files {
@@ -548,6 +558,11 @@ fn validate_http_rate_limits(rate_limits: &HttpRateLimitsConfig, errors: &mut Va
             "http_rate_limits.mcp.burst",
             rate_limits.mcp,
         ),
+        (
+            "http_rate_limits.mcp_v2.requests_per_second",
+            "http_rate_limits.mcp_v2.burst",
+            rate_limits.mcp_v2,
+        ),
     ] {
         if limit.requests_per_second == 0 {
             errors.add(requests_field, ValidationError::new("range"));
@@ -572,6 +587,11 @@ fn validate_http_rate_limits(rate_limits: &HttpRateLimitsConfig, errors: &mut Va
             "http_rate_limits.mcp.requests_per_second",
             "http_rate_limits.mcp.burst",
             rate_limits.mcp,
+        ),
+        (
+            "http_rate_limits.mcp_v2.requests_per_second",
+            "http_rate_limits.mcp_v2.burst",
+            rate_limits.mcp_v2,
         ),
     ] {
         if limit.requests_per_second > rate_limits.ingress.requests_per_second {
@@ -890,6 +910,11 @@ mod tests {
                 ("NOTEGATE_HTTP_RATE_LIMITS__MCP__REQUESTS_PER_SECOND", "17"),
                 ("NOTEGATE_HTTP_RATE_LIMITS__MCP__BURST", "23"),
                 (
+                    "NOTEGATE_HTTP_RATE_LIMITS__MCP_V2__REQUESTS_PER_SECOND",
+                    "19",
+                ),
+                ("NOTEGATE_HTTP_RATE_LIMITS__MCP_V2__BURST", "29"),
+                (
                     "NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES",
                     "268435456",
                 ),
@@ -920,7 +945,11 @@ mod tests {
                 mcp: HttpRateLimitConfig {
                     requests_per_second: 17,
                     burst: 23,
-                }
+                },
+                mcp_v2: HttpRateLimitConfig {
+                    requests_per_second: 19,
+                    burst: 29,
+                },
             }
         );
         assert_eq!(
@@ -1025,6 +1054,10 @@ mod tests {
 
         let mut config = valid_config();
         config.http_rate_limits.mcp.requests_per_second = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.http_rate_limits.mcp_v2.requests_per_second = 0;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

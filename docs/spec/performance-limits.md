@@ -18,14 +18,15 @@ control_plane_timeout_seconds = 5      # /health, /ready 등 control-plane 요�
 rate_limit_ingress_per_process = 500/second, burst 750
 rate_limit_browser_v1_per_process = 300/second, burst 450
 rate_limit_public_v2_per_process = 300/second, burst 450
-rate_limit_mcp_per_process = 300/second, burst 450
+rate_limit_user_mcp_per_process = 300/second, burst 450
+rate_limit_agent_mcp_v2_per_process = 300/second, burst 450
 find_max_in_flight_per_process = 20
 grep_max_in_flight_per_process = 10
 grep_max_executing_per_process = 2
 ```
 
-Ingress limit은 auth, metadata, OpenAPI, `/api/v1`, `/api/v2`, `/mcp`를 함께 보호한다.
-Browser V1, Public V2, MCP에는 독립적인 process-local bucket을 추가로 적용한다. 한
+Ingress limit은 auth, metadata, OpenAPI, `/api/v1`, `/api/v2`, `/mcp`, `/mcp/v2`를 함께 보호한다.
+Browser V1, Public V2, User MCP, Agent MCP V2에는 독립적인 process-local bucket을 추가로 적용한다. 한
 surface의 요청이 다른 surface의 전용 bucket을 소모하지 않지만 ingress 상한은 공유한다.
 각 surface의 RPS와 burst는 ingress 값을 넘을 수 없다. 이 값은 account/tier quota가 아니라
 process 보호를 위한 safety limit이다.
@@ -41,6 +42,8 @@ NOTEGATE_HTTP_RATE_LIMITS__PUBLIC_V2__REQUESTS_PER_SECOND
 NOTEGATE_HTTP_RATE_LIMITS__PUBLIC_V2__BURST
 NOTEGATE_HTTP_RATE_LIMITS__MCP__REQUESTS_PER_SECOND
 NOTEGATE_HTTP_RATE_LIMITS__MCP__BURST
+NOTEGATE_HTTP_RATE_LIMITS__MCP_V2__REQUESTS_PER_SECOND
+NOTEGATE_HTTP_RATE_LIMITS__MCP_V2__BURST
 ```
 
 replica가 여러 개면 cluster 전체 허용량은 pod별 상한의 합으로 증가한다. Cluster-wide rate
@@ -59,9 +62,7 @@ spaces_per_user_max = 20 live spaces per user
 agents_per_user_max = 50 active agents per user
 connections_per_space_max = 50 active agent connections per space
 connected_spaces_per_agent_max = 100 live spaces per agent
-user_api_keys_per_account_max = 2 live user keys
 agent_api_keys_per_account_max = 5 live agent keys
-user_api_key_max_ttl_days = 30
 agent_api_key_max_ttl_days = 365
 api_key_name_max_chars = 63
 agent_name_max_chars = 63

@@ -57,7 +57,7 @@ curl localhost:9191/ready
 
 ## Production-like Docker stack
 
-The `web` image contains the built dashboard and Rust server. The server handles `/api`, `/auth`, and `/mcp`, and serves the browser app.
+The `web` image contains the built dashboard and Rust server. The server handles `/api`, `/auth`, `/mcp`, and `/mcp/v2`, and serves the browser app.
 
 ```sh
 cp .env.example .env
@@ -120,6 +120,8 @@ The OAuth redirect URL defaults to `${NOTEGATE_PUBLIC_URL}/auth/callback`. The M
 The encryption and lookup root secrets must each be at least 32 bytes. On startup, the API ensures and verifies the configured active key epochs. Startup fails if the database already has a different active key for either domain; key rotation is not automatic.
 
 For a first MCP connection, open `${NOTEGATE_PUBLIC_URL}/auth/login`, complete Google sign-in, and reconnect the client to `${NOTEGATE_PUBLIC_URL}/mcp`.
+
+Agent API keys connect to `${NOTEGATE_PUBLIC_URL}/mcp/v2`. This endpoint accepts only `ngk_v2_` Agent keys and does not accept OAuth bearer tokens.
 
 ## Checks
 

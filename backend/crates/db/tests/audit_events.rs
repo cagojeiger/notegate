@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account, set_user_tier};
+use common::{TestDb, agent_api_key_prefix, insert_user_account, set_user_tier};
 use notegate_core::security::PiiCrypto;
 use notegate_db::api_key_repo::InsertApiKey;
 use notegate_db::browser_session_repo::InsertBrowserSession;
@@ -21,6 +21,8 @@ use notegate_model::{
 };
 use serde_json::Value;
 use uuid::Uuid;
+
+const TEST_API_KEYS_PER_ACCOUNT_MAX: usize = 2;
 
 #[derive(Debug, sqlx::FromRow)]
 struct AuditRow {
@@ -205,35 +207,18 @@ async fn account_delete_audit_records_nonzero_cascade_counts()
         .await?;
     spaces.delete_space(space.id, user, user).await?;
 
+    let key_id = Uuid::new_v4();
     api_keys
         .insert_key_with_cap(
             InsertApiKey {
-                key_id: Uuid::new_v4(),
-                account_id: user,
-                command: &CreateApiKey {
-                    name: "live-user-key".to_owned(),
-                    scopes: Vec::new(),
-                    expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
-                },
-                token_prefix: "ngk_v1_user",
-                token_hash: "hash-user-delete-cascade",
-                created_by: user,
-                rotated_from_key_id: None,
-            },
-            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
-        )
-        .await?;
-    api_keys
-        .insert_key_with_cap(
-            InsertApiKey {
-                key_id: Uuid::new_v4(),
+                key_id,
                 account_id: agent,
                 command: &CreateApiKey {
                     name: "live-agent-key".to_owned(),
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_agent",
+                token_prefix: &agent_api_key_prefix(key_id),
                 token_hash: "hash-agent-delete-cascade",
                 created_by: user,
                 rotated_from_key_id: None,
@@ -258,7 +243,7 @@ async fn account_delete_audit_records_nonzero_cascade_counts()
     );
     assert_eq!(
         delete_event.metadata["revoked_api_keys"],
-        serde_json::json!(2)
+        serde_json::json!(1)
     );
     assert_eq!(
         delete_event.metadata["revoked_browser_sessions"],
@@ -327,7 +312,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_agent",
+                token_prefix: &agent_api_key_prefix(key_id),
                 token_hash: "hash-agent-audit",
                 created_by: owner,
                 rotated_from_key_id: None,
@@ -381,7 +366,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
 }
 
 #[tokio::test]
-async fn user_key_and_account_delete_mutations_write_audit_events()
+async fn agent_key_rotate_and_revoke_mutations_write_audit_events()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -389,24 +374,26 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
     let user = insert_user_account(&db.pool, "audit-user", "audit-user@example.test").await?;
     clear_setup_events(&db.pool).await?;
     let api_keys = ApiKeyRepo::new(db.pool.clone());
+    let agents = AgentRepo::new(db.pool.clone());
+    let agent = insert_agent(&agents, user, "audit-key-agent").await?;
 
     let first_key = Uuid::new_v4();
     api_keys
         .insert_key_with_cap(
             InsertApiKey {
                 key_id: first_key,
-                account_id: user,
+                account_id: agent,
                 command: &CreateApiKey {
-                    name: "user-key".to_owned(),
+                    name: "agent-key".to_owned(),
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_user",
-                token_hash: "hash-user-audit-1",
+                token_prefix: &agent_api_key_prefix(first_key),
+                token_hash: "hash-agent-audit-1",
                 created_by: user,
                 rotated_from_key_id: None,
             },
-            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+            TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     let rotated_key = Uuid::new_v4();
@@ -414,27 +401,24 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
         .rotate_key(
             InsertApiKey {
                 key_id: rotated_key,
-                account_id: user,
+                account_id: agent,
                 command: &CreateApiKey {
-                    name: "user-key".to_owned(),
+                    name: "agent-key".to_owned(),
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_user",
-                token_hash: "hash-user-audit-2",
+                token_prefix: &agent_api_key_prefix(rotated_key),
+                token_hash: "hash-agent-audit-2",
                 created_by: user,
                 rotated_from_key_id: Some(first_key),
             },
             first_key,
             user,
-            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+            TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     api_keys
-        .revoke_key(user, rotated_key, user, Some("manual"))
-        .await?;
-    AccountRepo::new(db.pool.clone())
-        .soft_delete_user(user, user)
+        .revoke_key(agent, rotated_key, user, Some("manual"))
         .await?;
 
     let rows = audit_rows(&db.pool).await?;
@@ -445,23 +429,22 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
     assert_eq!(
         op_types,
         vec![
-            "user_key.create",
-            "user_key.rotate",
-            "user_key.revoke",
-            "account.delete",
+            "agent.create",
+            "agent_key.create",
+            "agent_key.rotate",
+            "agent_key.revoke",
         ]
     );
     assert_eq!(
-        rows[1].resource_id,
+        rows[2].resource_id,
         Some(first_key),
         "rotate event should be indexed under the old key"
     );
     assert_eq!(
-        rows[1].metadata["created_key_id"],
+        rows[2].metadata["created_key_id"],
         serde_json::json!(rotated_key)
     );
-    assert_eq!(rows[2].metadata["reason"], serde_json::json!("manual"));
-    assert_eq!(rows[3].metadata["revoked_api_keys"], serde_json::json!(0));
+    assert_eq!(rows[3].metadata["reason"], serde_json::json!("manual"));
 
     db.cleanup().await;
     Ok(())

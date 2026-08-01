@@ -6,15 +6,13 @@ import { Modal, Tabs } from "../../shared/ui";
 import { AccountTab } from "./AccountTab";
 import { AgentsTab } from "./AgentsTab";
 import { GeneralTab } from "./GeneralTab";
-import { McpTab } from "./McpTab";
 
-type Tab = "general" | "account" | "agents" | "mcp";
+type Tab = "general" | "account" | "agents";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "account", label: "Account" },
-  { id: "agents", label: "Agents" },
-  { id: "mcp", label: "MCP" }
+  { id: "agents", label: "Agents" }
 ];
 
 export function SettingsModal({ me, onClose, onSignOut, onResetSavedWorkspace = () => undefined }: { me: Me; onClose: () => void; onSignOut: () => void; onResetSavedWorkspace?: () => void }) {
@@ -36,7 +34,6 @@ export function SettingsModal({ me, onClose, onSignOut, onResetSavedWorkspace = 
         {tab === "general" ? <GeneralTab onResetSavedWorkspace={onResetSavedWorkspace} /> : null}
         {tab === "account" ? <AccountTab me={me} onSignOut={onSignOut} /> : null}
         {tab === "agents" && showAgents ? <AgentsTab canManageAgents={showAgents} /> : null}
-        {tab === "mcp" ? <McpTab /> : null}
       </div>
     </Modal>
   );

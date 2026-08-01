@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{TestDb, insert_user_account, space_with_root};
+use common::{TestDb, agent_api_key_prefix, insert_user_account, space_with_root};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -230,19 +230,25 @@ async fn agent_key_token_hash_is_unique() -> TestResult {
         .bind(creator)
         .execute(&db.pool)
         .await?;
+    let first_key_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name, created_by_user_id, expires_at) \
-         VALUES ($1, 'dup-hash-1', 'dup-hash', 'test-lookup', 'k1', $2, now() + interval '1 day')",
+        "INSERT INTO api_keys (id, account_id, token_prefix, token_hash, hash_key_id, name, created_by_user_id, expires_at) \
+         VALUES ($1, $2, $3, 'dup-hash', 'test-lookup', 'k1', $4, now() + interval '1 day')",
     )
+    .bind(first_key_id)
     .bind(agent_account)
+    .bind(agent_api_key_prefix(first_key_id))
     .bind(creator)
     .execute(&db.pool)
     .await?;
+    let second_key_id = Uuid::new_v4();
     let dup = sqlx::query(
-        "INSERT INTO api_keys (account_id, token_prefix, token_hash, hash_key_id, name, created_by_user_id, expires_at) \
-         VALUES ($1, 'dup-hash-2', 'dup-hash', 'test-lookup', 'k2', $2, now() + interval '1 day')",
+        "INSERT INTO api_keys (id, account_id, token_prefix, token_hash, hash_key_id, name, created_by_user_id, expires_at) \
+         VALUES ($1, $2, $3, 'dup-hash', 'test-lookup', 'k2', $4, now() + interval '1 day')",
     )
+    .bind(second_key_id)
     .bind(agent_account)
+    .bind(agent_api_key_prefix(second_key_id))
     .bind(creator)
     .execute(&db.pool)
     .await;

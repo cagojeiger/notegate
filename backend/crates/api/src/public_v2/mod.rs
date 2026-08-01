@@ -17,7 +17,7 @@ pub fn routes() -> Router<AppState> {
     get,
     path = "/api/v2/me",
     tag = "identity",
-    responses((status = 200, description = "Get the API-key caller", body = MeResponse)),
+    responses((status = 200, description = "Get the Agent API-key caller", body = MeResponse)),
     security(("api_key" = []))
 )]
 pub(crate) async fn get_me(Extension(caller): Extension<Caller>) -> Json<MeResponse> {

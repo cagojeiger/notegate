@@ -1,4 +1,4 @@
-//! API-key service helpers shared by user and agent accounts.
+//! Agent API-key issuance and shared token-format helpers.
 
 use chrono::{Duration, Utc};
 use notegate_core::limits;
@@ -10,11 +10,7 @@ use uuid::Uuid;
 use crate::pagination::paginate_keyset;
 use crate::{ServiceError, ServiceResult};
 
-#[derive(Debug, Clone, Copy)]
-pub struct ApiKeyPolicy {
-    pub max_live_keys: usize,
-    pub max_ttl_days: i64,
-}
+const AGENT_API_KEY_PREFIX: &str = "ngk_v2_";
 
 pub async fn list_key_page(
     api_keys: &ApiKeyRepo,
@@ -46,16 +42,14 @@ pub async fn list_key_page(
     })
 }
 
-pub async fn create_key_for_account(
+pub async fn create_agent_key(
     api_keys: &ApiKeyRepo,
     crypto: &PiiCrypto,
-    account_id: Uuid,
+    agent_id: Uuid,
     created_by: Uuid,
     command: CreateApiKey,
-    rotated_from_key_id: Option<Uuid>,
-    policy: ApiKeyPolicy,
 ) -> ServiceResult<MintedApiKey> {
-    validate_key_command(&command, policy.max_ttl_days)?;
+    validate_key_command(&command)?;
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
     let token = format_token(key_id, &secret);
@@ -64,29 +58,28 @@ pub async fn create_key_for_account(
         .insert_key_with_cap(
             InsertApiKey {
                 key_id,
-                account_id,
+                account_id: agent_id,
                 command: &command,
                 token_prefix: &token_prefix(key_id),
                 token_hash: &token_hash,
                 created_by,
-                rotated_from_key_id,
+                rotated_from_key_id: None,
             },
-            policy.max_live_keys,
+            limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     Ok(MintedApiKey { key, token })
 }
 
-pub async fn rotate_key_for_account(
+pub async fn rotate_agent_key(
     api_keys: &ApiKeyRepo,
     crypto: &PiiCrypto,
-    account_id: Uuid,
+    agent_id: Uuid,
     created_by: Uuid,
     old_key_id: Uuid,
     command: CreateApiKey,
-    policy: ApiKeyPolicy,
 ) -> ServiceResult<MintedApiKey> {
-    validate_key_command(&command, policy.max_ttl_days)?;
+    validate_key_command(&command)?;
 
     let key_id = Uuid::new_v4();
     let secret = generate_secret();
@@ -96,7 +89,7 @@ pub async fn rotate_key_for_account(
         .rotate_key(
             InsertApiKey {
                 key_id,
-                account_id,
+                account_id: agent_id,
                 command: &command,
                 token_prefix: &token_prefix(key_id),
                 token_hash: &token_hash,
@@ -105,13 +98,13 @@ pub async fn rotate_key_for_account(
             },
             old_key_id,
             created_by,
-            policy.max_live_keys,
+            limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     Ok(MintedApiKey { key, token })
 }
 
-fn validate_key_command(command: &CreateApiKey, max_ttl_days: i64) -> ServiceResult<()> {
+fn validate_key_command(command: &CreateApiKey) -> ServiceResult<()> {
     if command.name.trim().is_empty() {
         return Err(ServiceError::InvalidInput(
             "api key name cannot be empty".to_owned(),
@@ -139,10 +132,11 @@ fn validate_key_command(command: &CreateApiKey, max_ttl_days: i64) -> ServiceRes
         ));
     }
 
-    let max_expires_at = now + Duration::days(max_ttl_days);
+    let max_expires_at = now + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS);
     if expires_at > max_expires_at {
         return Err(ServiceError::InvalidInput(format!(
-            "api key expires_at must be within {max_ttl_days} days"
+            "api key expires_at must be within {} days",
+            limits::AGENT_API_KEY_MAX_TTL_DAYS
         )));
     }
     Ok(())
@@ -156,25 +150,21 @@ fn generate_secret() -> String {
 }
 
 pub fn format_token(key_id: Uuid, secret: &str) -> String {
-    format!("ngk_v1_{key_id}_{secret}")
+    format!("{AGENT_API_KEY_PREFIX}{key_id}_{secret}")
 }
 
 pub fn token_prefix(key_id: Uuid) -> String {
-    format!("ngk_v1_{key_id}")
+    format!("{AGENT_API_KEY_PREFIX}{key_id}")
 }
 
-pub fn looks_like_token(token: &str) -> bool {
-    token.starts_with("ngk_v1_")
-}
-
-pub fn parse_token(token: &str) -> Option<(Uuid, &str)> {
-    let rest = token.strip_prefix("ngk_v1_")?;
+pub fn parse_token(token: &str) -> Option<(Uuid, &str, String)> {
+    let rest = token.strip_prefix(AGENT_API_KEY_PREFIX)?;
     let (key_id, secret) = rest.split_once('_')?;
     let key_id = Uuid::parse_str(key_id).ok()?;
     if secret.is_empty() {
         return None;
     }
-    Some((key_id, secret))
+    Some((key_id, secret, format!("{AGENT_API_KEY_PREFIX}{key_id}")))
 }
 
 #[cfg(test)]
@@ -189,7 +179,14 @@ mod tests {
         let parsed = parse_token(&token).unwrap();
         assert_eq!(parsed.0, key_id);
         assert_eq!(parsed.1, "secret-value");
-        assert_eq!(token_prefix(key_id), format!("ngk_v1_{key_id}"));
+        assert_eq!(parsed.2, format!("ngk_v2_{key_id}"));
+        assert_eq!(token_prefix(key_id), format!("ngk_v2_{key_id}"));
+    }
+
+    #[test]
+    fn api_key_parser_rejects_legacy_format() {
+        let key_id = Uuid::new_v4();
+        assert!(parse_token(&format!("ngk_v1_{key_id}_secret-value")).is_none());
     }
 
     #[test]
@@ -199,7 +196,7 @@ mod tests {
             scopes: Vec::new(),
             expires_at: None,
         };
-        assert!(validate_key_command(&command, 30).is_err());
+        assert!(validate_key_command(&command).is_err());
     }
 
     #[test]
@@ -210,14 +207,14 @@ mod tests {
             scopes: Vec::new(),
             expires_at,
         };
-        assert!(validate_key_command(&empty, 30).is_err());
+        assert!(validate_key_command(&empty).is_err());
 
         let too_long = CreateApiKey {
             name: "k".repeat(limits::API_KEY_NAME_MAX_CHARS + 1),
             scopes: Vec::new(),
             expires_at,
         };
-        assert!(validate_key_command(&too_long, 30).is_err());
+        assert!(validate_key_command(&too_long).is_err());
     }
 
     #[test]
@@ -225,9 +222,9 @@ mod tests {
         let command = CreateApiKey {
             name: "too-long".to_owned(),
             scopes: Vec::new(),
-            expires_at: Some(Utc::now() + Duration::days(31)),
+            expires_at: Some(Utc::now() + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS + 1)),
         };
-        assert!(validate_key_command(&command, 30).is_err());
+        assert!(validate_key_command(&command).is_err());
     }
 
     #[test]
@@ -235,23 +232,18 @@ mod tests {
         let command = CreateApiKey {
             name: "ok".to_owned(),
             scopes: Vec::new(),
-            expires_at: Some(Utc::now() + Duration::days(30) - Duration::seconds(1)),
+            expires_at: Some(
+                Utc::now() + Duration::days(limits::AGENT_API_KEY_MAX_TTL_DAYS)
+                    - Duration::seconds(1),
+            ),
         };
-        assert!(validate_key_command(&command, 30).is_ok());
+        assert!(validate_key_command(&command).is_ok());
     }
 
     #[test]
-    fn api_key_token_rejects_old_opaque_tokens() {
+    fn api_key_token_rejects_invalid_formats() {
         assert!(parse_token("old-token").is_none());
-        assert!(parse_token("ngk_v1_not-a-uuid_secret").is_none());
-        assert!(parse_token("ngk_v1_00000000-0000-0000-0000-000000000000_").is_none());
-    }
-
-    #[test]
-    fn api_key_token_prefix_is_detected_without_parsing() {
-        assert!(looks_like_token(
-            "ngk_v1_00000000-0000-0000-0000-000000000000_secret"
-        ));
-        assert!(!looks_like_token("jwt-like-token"));
+        assert!(parse_token("ngk_v2_not-a-uuid_secret").is_none());
+        assert!(parse_token("ngk_v2_00000000-0000-0000-0000-000000000000_").is_none());
     }
 }

@@ -63,7 +63,7 @@ impl AccountRef {
     }
 }
 
-/// API-key creation request shared by user and agent key endpoints.
+/// Agent API-key creation request.
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct CreateApiKeyBody {
     pub name: String,

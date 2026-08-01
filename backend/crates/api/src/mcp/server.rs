@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::header::WWW_AUTHENTICATE;
 use axum::http::request::Parts;
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::tool::Extension;
 use rmcp::handler::server::wrapper::Parameters;
@@ -23,9 +23,9 @@ use rmcp::{ErrorData, Json, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::Value;
 use url::Url;
 
-use notegate_model::Channel;
+use notegate_model::{Caller, Channel};
 
-use crate::auth::api_key::verify_api_key;
+use crate::auth::api_key::verify_agent_api_key;
 use crate::auth::bearer::{
     AuthError, auth_error_body, extract_bearer, shared_scoped_challenge_header, status_for_error,
     verify_bearer_mcp,
@@ -208,26 +208,35 @@ impl ServerHandler for McpServer {
     }
 }
 
-pub async fn mcp_handler(State(state): State<AppState>, mut request: Request<Body>) -> Response {
-    let (mut parts, body) = request.into_parts();
-    let Some(token) = extract_bearer(&parts.headers).map(str::to_owned) else {
-        return mcp_auth_response(&state, AuthError::MissingToken);
+pub async fn user_mcp_handler(State(state): State<AppState>, request: Request<Body>) -> Response {
+    let Some(token) = extract_bearer(request.headers()).map(str::to_owned) else {
+        return user_mcp_auth_response(&state, AuthError::MissingToken);
     };
-    // MCP is bearer-only: prefixed notegate API key → user/agent, otherwise
-    // OAuth bearer JWT → user.
-    let caller = if notegate_service::api_keys::looks_like_token(&token) {
-        match verify_api_key(&state, &token, Channel::Mcp).await {
-            Ok(caller) => caller,
-            Err(error) => return mcp_auth_response(&state, error),
-        }
-    } else {
-        match verify_bearer_mcp(&state, &token).await {
-            Ok(caller) => caller,
-            Err(error) => return mcp_auth_response(&state, error),
-        }
+    let caller = match verify_bearer_mcp(&state, &token).await {
+        Ok(caller) => caller,
+        Err(error) => return user_mcp_auth_response(&state, error),
     };
-    parts.extensions.insert(caller);
-    request = Request::from_parts(parts, body);
+
+    serve_mcp(state, request, caller).await
+}
+
+pub async fn agent_mcp_v2_handler(
+    State(state): State<AppState>,
+    request: Request<Body>,
+) -> Response {
+    let Some(token) = extract_bearer(request.headers()).map(str::to_owned) else {
+        return agent_mcp_auth_response(&state, AuthError::MissingToken);
+    };
+    let caller = match verify_agent_api_key(&state, &token, Channel::Mcp).await {
+        Ok(caller) => caller,
+        Err(error) => return agent_mcp_auth_response(&state, error),
+    };
+
+    serve_mcp(state, request, caller).await
+}
+
+async fn serve_mcp(state: AppState, mut request: Request<Body>, caller: Caller) -> Response {
+    request.extensions_mut().insert(caller);
 
     let config = StreamableHttpServerConfig::default()
         .with_stateful_mode(false)
@@ -286,15 +295,28 @@ fn log_mcp_auth_denied(error: &AuthError, status: StatusCode) {
     }
 }
 
-fn mcp_auth_response(state: &AppState, error: AuthError) -> Response {
+fn user_mcp_auth_response(state: &AppState, error: AuthError) -> Response {
+    mcp_auth_response(
+        state,
+        error,
+        shared_scoped_challenge_header(&state.config.resource_url),
+    )
+}
+
+fn agent_mcp_auth_response(state: &AppState, error: AuthError) -> Response {
+    mcp_auth_response(
+        state,
+        error,
+        HeaderValue::from_static("Bearer realm=\"notegate-agent-mcp-v2\""),
+    )
+}
+
+fn mcp_auth_response(state: &AppState, error: AuthError, challenge: HeaderValue) -> Response {
     let status = status_for_error(&error);
     log_mcp_auth_denied(&error, status);
     let mut response = (status, axum::Json(auth_error_body(state, &error))).into_response();
     if status == StatusCode::UNAUTHORIZED {
-        response.headers_mut().insert(
-            WWW_AUTHENTICATE,
-            shared_scoped_challenge_header(&state.config.resource_url),
-        );
+        response.headers_mut().insert(WWW_AUTHENTICATE, challenge);
     }
     response
 }

@@ -1,4 +1,4 @@
-//! API key credential metadata shared by user and agent accounts.
+//! Agent API key credential metadata.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
