@@ -7,7 +7,7 @@ use axum::{Json, Router};
 use notegate_model::{Caller, FileEncryptionMode};
 use notegate_service::files::BeginObjectUpload;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -53,7 +53,7 @@ pub(crate) struct BeginUploadBody {
     /// Name of the file node that will be attached by `complete`.
     name: String,
     /// Exact object size in bytes. The system cap is 100 GiB; space quota can be lower.
-    #[schema(minimum = 0, maximum = 107374182400)]
+    #[schema(minimum = 0, maximum = 107374182400_u64)]
     byte_len: i64,
     /// MIME type stored with the object.
     #[schema(example = "application/pdf")]

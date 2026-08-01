@@ -6,7 +6,6 @@ use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 

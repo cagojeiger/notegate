@@ -11,7 +11,6 @@ use notegate_service::files::{
 };
 use notegate_service::search::TreeRequest;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 

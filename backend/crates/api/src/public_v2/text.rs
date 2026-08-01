@@ -9,7 +9,6 @@ use notegate_service::files::{
     ReadResult, ReadText, ReadTextBody, TextView, WriteTarget, WriteText, WriteTextBody,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
