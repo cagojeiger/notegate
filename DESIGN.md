@@ -3,8 +3,8 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-08-01
-- Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown and structured previews, and operator observability dashboards.
+- Last refreshed: 2026-08-02
+- Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown, structured, and code previews, and operator observability dashboards.
 - Evidence reviewed: `docs/ui/*`, `frontend/web/src/design/*`, `frontend/web/src/styles/globals.css`, shared UI primitives, auth and layout components, the 2026-07-23 NoteGate brand asset set, and `deploy/observability/grafana/*`.
 
 ## Brand
@@ -55,8 +55,8 @@
 
 ## Components
 
-- Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`.
-- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, the workbench Inspector with compact accessible `Details`/`Outline` tabs, and provisioned Grafana row/panel layouts using native Grafana components.
+- Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`, `ShikiCodeBlock`.
+- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, the workbench Inspector with compact accessible `Details`/`Outline` tabs, read-only SQL/Python code previews, and provisioned Grafana row/panel layouts using native Grafana components.
 - Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected and dragging Space cards; navigation-pinned/unpinned Spaces; User MCP enabled/disabled Spaces; directly locked, inherited lock, and unlocked nodes.
 - Token/component ownership: `theme.css` owns semantic colors. Shared UI owns focus, controls, and repeated visual treatment. Feature components own data and state.
 
@@ -97,7 +97,7 @@
 
 - Framework/styling system: React, TypeScript, Tailwind utilities, and CSS custom properties.
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
-- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available. Markdown Outline uses the rendered preview DOM and never adds a document, metadata, or outline API request.
+- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available. Markdown Outline uses the rendered preview DOM and never adds a document, metadata, or outline API request. Text code previews reuse fine-grained Shiki grammar imports, add no execution or API request, and fall back to escaped source text.
 - Authentication constraints: Preserve the current OAuth popup behavior. Agent integrations use `ngk_v2_` keys through `/api/v2` and `/mcp/v2`.
 - Observability constraints: Dashboard variables and Prometheus labels remain bounded; search queries, paths, account/Space/node identifiers, filenames, and content never appear in metrics. Dashboard links preserve the selected time range and shared variables, refresh cadence matches the 15-second scrape interval, and repeated series use stable semantic colors.
 - Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, light/dark login screenshots, dashboard JSON validation, Prometheus config validation, and a rendered Grafana screenshot.

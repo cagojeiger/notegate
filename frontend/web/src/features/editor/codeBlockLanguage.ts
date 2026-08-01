@@ -1,5 +1,6 @@
 const LANGUAGE_ALIASES: Record<string, string> = {
   md: "markdown",
+  py: "python",
   text: "text",
   txt: "text",
   yml: "yaml"
@@ -13,7 +14,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   json: "JSON",
   jsx: "JSX",
   markdown: "Markdown",
-  py: "Python",
+  python: "Python",
   rs: "Rust",
   sh: "Shell",
   sql: "SQL",

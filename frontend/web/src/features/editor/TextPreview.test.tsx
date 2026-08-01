@@ -366,6 +366,30 @@ describe("TextPreview", () => {
     expect(screen.getByText("Code")).toBeInTheDocument();
   });
 
+  it("renders SQL text previews as highlighted source", async () => {
+    const content = "SELECT id, title FROM notes WHERE archived = false;";
+    const { container } = render(<TextPreview name="query.SQL" content={content} />);
+
+    await waitFor(() => expect(container.querySelector(".shiki")).toBeInTheDocument());
+    expect(container.querySelector(".shiki")?.textContent).toBe(content);
+    expect(container.querySelector(".shiki")).toHaveAttribute("tabindex", "0");
+    expect(container.querySelector(".ng-source-flat")).toBeInTheDocument();
+    expect(container.querySelector("pre.ng-code-fallback")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tree", { name: "Structured data tree" })).not.toBeInTheDocument();
+  });
+
+  it("renders Python text previews as highlighted source", async () => {
+    const content = "def render() -> str:\n    return \"</code><img src=x onerror=alert(1)>\"";
+    const { container } = render(<TextPreview name="greeting.py" content={content} />);
+
+    await waitFor(() => expect(container.querySelector(".shiki")).toBeInTheDocument());
+    expect(container.querySelector(".shiki")?.textContent).toBe(content);
+    expect(container.querySelector(".ng-source-flat")).toBeInTheDocument();
+    expect(container.querySelector("pre.ng-code-fallback")).not.toBeInTheDocument();
+    expect(container.querySelector("img")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tree", { name: "Structured data tree" })).not.toBeInTheDocument();
+  });
+
   it("renders plain text without a nested code-block card", () => {
     const { container } = render(<TextPreview name="notes.txt" content={"Just plain text."} />);
 

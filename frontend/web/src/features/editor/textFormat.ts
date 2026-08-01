@@ -1,4 +1,5 @@
-export type TextFormat = "markdown" | "json" | "jsonl" | "yaml" | "toml" | "plain";
+export type CodeFormat = "sql" | "python";
+export type TextFormat = "markdown" | "json" | "jsonl" | "yaml" | "toml" | CodeFormat | "plain";
 
 const FORMAT_BY_EXTENSION: Record<string, TextFormat> = {
   md: "markdown",
@@ -7,7 +8,11 @@ const FORMAT_BY_EXTENSION: Record<string, TextFormat> = {
   jsonl: "jsonl",
   yaml: "yaml",
   yml: "yaml",
-  toml: "toml"
+  toml: "toml",
+  sql: "sql",
+  py: "python",
+  pyi: "python",
+  pyw: "python"
 };
 
 export function inferTextFormat(name: string): TextFormat {
@@ -23,9 +28,15 @@ export function shikiLangForFormat(format: TextFormat): string {
   if (format === "jsonl") return "jsonl";
   if (format === "toml") return "toml";
   if (format === "json") return "json";
+  if (format === "sql") return "sql";
+  if (format === "python") return "python";
   return "text";
 }
 
 export function isStructuredFormat(format: TextFormat): format is "json" | "jsonl" | "yaml" | "toml" {
   return format === "json" || format === "jsonl" || format === "yaml" || format === "toml";
+}
+
+export function isCodeFormat(format: TextFormat): format is CodeFormat {
+  return format === "sql" || format === "python";
 }
