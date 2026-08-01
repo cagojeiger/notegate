@@ -49,8 +49,8 @@ fn resolver(db: &TestDb, crypto: PiiCrypto) -> Resolver {
 }
 
 #[tokio::test]
-async fn agent_api_key_resolution_rejects_user_owned_key() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn agent_api_key_resolution_rejects_historical_user_owned_key()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -58,7 +58,13 @@ async fn agent_api_key_resolution_rejects_user_owned_key() -> Result<(), Box<dyn
     let user_id = insert_user_account(&db.pool, "identity-user", "identity@example.test").await?;
     let key_repo =
         ApiKeyRepo::with_lookup_key(db.pool.clone(), crypto.lookup_key_id(), crypto.version());
+    sqlx::query("ALTER TABLE api_keys DISABLE TRIGGER api_keys_agent_owner")
+        .execute(&db.pool)
+        .await?;
     let token = insert_key(&key_repo, &crypto, user_id, user_id, "ngk_v1_").await?;
+    sqlx::query("ALTER TABLE api_keys ENABLE TRIGGER api_keys_agent_owner")
+        .execute(&db.pool)
+        .await?;
 
     let result = resolver(&db, crypto)
         .resolve_agent_api_key(&token, Channel::Api)

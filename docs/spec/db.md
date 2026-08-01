@@ -135,6 +135,7 @@ Credential DB 제약:
 api_keys.name: 1..63자이며 trim 후 빈 문자열이면 안 됨
 api_keys.scopes: cardinality(scopes) = 0
 api_keys.revoked_*: revoked_at, revoked_by_user_id, revoked_reason은 모두 NULL이거나 모두 non-NULL
+api_keys.account_id: Agent account만 참조할 수 있으며 DB trigger가 신규 User-owned key를 거부함
 ```
 
 ## Browser session table

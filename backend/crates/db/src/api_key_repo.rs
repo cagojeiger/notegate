@@ -183,7 +183,7 @@ impl ApiKeyRepo {
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        lock_active_account(&mut tx, args.account_id).await?;
+        lock_active_agent_account(&mut tx, args.account_id).await?;
 
         // Re-count live keys INSIDE the tx using the same predicate as count_live_keys.
         let live_count: i64 = sqlx::query_scalar(&format!(
@@ -249,7 +249,7 @@ impl ApiKeyRepo {
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
-        lock_active_account(&mut tx, args.account_id).await?;
+        lock_active_agent_account(&mut tx, args.account_id).await?;
 
         let old_exists: Option<Uuid> = sqlx::query_scalar(&format!(
             "SELECT id FROM api_keys \
@@ -415,10 +415,10 @@ async fn audit_context_for_key_account(
     }
 }
 
-async fn lock_active_account(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
+async fn lock_active_agent_account(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
     let active = active_account_predicate("");
     let exists: Option<Uuid> = sqlx::query_scalar(&format!(
-        "SELECT id FROM accounts WHERE id = $1 AND {active} FOR UPDATE"
+        "SELECT id FROM accounts WHERE id = $1 AND kind = 'agent' AND {active} FOR UPDATE"
     ))
     .bind(account_id)
     .fetch_optional(&mut *tx)

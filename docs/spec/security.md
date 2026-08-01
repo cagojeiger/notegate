@@ -41,6 +41,7 @@ token_hash      = HMAC(API_KEY_SUBKEY, "api-key:v1:" || key_id || ":" || secret)
 - Plaintext token은 생성/rotation 응답에서 한 번만 반환한다.
 - DB에는 `token_hash`, `hash_key_id`, `hash_version`, `token_prefix`만 저장한다.
 - Token format version과 HMAC domain version은 별도 계약이다. 호환 배포 동안 새 key는 v1 format으로 발급하고 인증기는 v1/v2 format을 모두 해석한다. HMAC domain은 v1을 유지한다.
+- API key는 Agent account만 소유할 수 있으며 DB trigger가 User-owned key의 신규 저장을 거부한다.
 - 인증 시 token에서 계산한 `token_prefix`와 DB 값을 정확히 비교한다.
 - 기존 `ngk_v1_` live key는 모든 replica와 client가 v2로 전환된 뒤 별도 migration에서 revoke한다.
 - LOOKUP root key 폐기가 필요하면 영향받는 live key를 revoke하고 재발급한다.

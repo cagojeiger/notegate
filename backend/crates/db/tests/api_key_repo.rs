@@ -131,14 +131,33 @@ async fn concurrent_create_respects_cap(
 }
 
 #[tokio::test]
-async fn concurrent_create_respects_cap_for_user_account() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn insert_key_with_cap_rejects_user_account() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
+    let repo = ApiKeyRepo::new(db.pool.clone());
     let user_id = insert_user_account(&db.pool, "race-user", "race-user@example.test").await?;
-    concurrent_create_respects_cap(&db.pool, user_id, user_id, TEST_API_KEYS_PER_ACCOUNT_MAX)
-        .await?;
+    let err = repo
+        .insert_key_with_cap(
+            InsertApiKey {
+                key_id: Uuid::new_v4(),
+                account_id: user_id,
+                command: &CreateApiKey {
+                    name: "user-key".to_owned(),
+                    scopes: Vec::new(),
+                    expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+                },
+                token_prefix: "ngk_v2_user",
+                token_hash: "hash-user-key-rejected",
+                created_by: user_id,
+                rotated_from_key_id: None,
+            },
+            TEST_API_KEYS_PER_ACCOUNT_MAX,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
     db.cleanup().await;
     Ok(())
 }
@@ -247,14 +266,15 @@ async fn list_by_account_returns_live_keys_only_and_pages() -> Result<(), Box<dy
         return Ok(());
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
-    let user_id = insert_user_account(&db.pool, "list-user", "list-user@example.test").await?;
+    let owner = insert_user_account(&db.pool, "list-user", "list-user@example.test").await?;
+    let agent_id = insert_agent_account(&db.pool, owner, "list-agent").await?;
 
     // Seed three live keys plus one revoked and one expired key. The list must
     // surface only the live keys; dead keys are excluded (they are purged later).
     for name in ["live-a", "live-b", "live-c", "to-revoke", "to-expire"] {
         repo.insert_key_unchecked_for_test(InsertApiKey {
             key_id: Uuid::new_v4(),
-            account_id: user_id,
+            account_id: agent_id,
             command: &CreateApiKey {
                 name: name.to_owned(),
                 scopes: Vec::new(),
@@ -262,26 +282,26 @@ async fn list_by_account_returns_live_keys_only_and_pages() -> Result<(), Box<dy
             },
             token_prefix: "ngk_v2_test",
             token_hash: &format!("hash-{name}"),
-            created_by: user_id,
+            created_by: owner,
             rotated_from_key_id: None,
         })
         .await?;
     }
 
-    let seeded = repo.list_by_account(user_id, 10, None).await?;
+    let seeded = repo.list_by_account(agent_id, 10, None).await?;
     let revoke_id = seeded
         .iter()
         .find(|k| k.name == "to-revoke")
         .map(|k| k.id)
         .expect("revoke target present");
-    repo.revoke_key(user_id, revoke_id, user_id, Some("test"))
+    repo.revoke_key(agent_id, revoke_id, owner, Some("test"))
         .await?;
     sqlx::query("UPDATE api_keys SET expires_at = now() - interval '1 hour' WHERE name = 'to-expire' AND account_id = $1")
-        .bind(user_id)
+        .bind(agent_id)
         .execute(&db.pool)
         .await?;
 
-    let live = repo.list_by_account(user_id, 10, None).await?;
+    let live = repo.list_by_account(agent_id, 10, None).await?;
     assert_eq!(live.len(), 3, "only the three live keys are listed");
     assert!(
         live.iter()
@@ -289,13 +309,13 @@ async fn list_by_account_returns_live_keys_only_and_pages() -> Result<(), Box<dy
         "revoked and expired keys must be excluded from the list"
     );
 
-    let first_page = repo.list_by_account(user_id, 2, None).await?;
+    let first_page = repo.list_by_account(agent_id, 2, None).await?;
     assert_eq!(first_page.len(), 2);
     let cursor = notegate_model::ApiKeyCursor {
         created_at: first_page.last().expect("second item").created_at,
         id: first_page.last().expect("second item").id,
     };
-    let second_page = repo.list_by_account(user_id, 2, Some(&cursor)).await?;
+    let second_page = repo.list_by_account(agent_id, 2, Some(&cursor)).await?;
     assert_eq!(second_page.len(), 1);
     assert!(
         !first_page.iter().any(|key| key.id == second_page[0].id),
@@ -307,7 +327,7 @@ async fn list_by_account_returns_live_keys_only_and_pages() -> Result<(), Box<dy
 }
 
 #[tokio::test]
-async fn user_owned_api_key_does_not_authenticate_or_mark_last_used()
+async fn historical_user_owned_api_key_does_not_authenticate_or_mark_last_used()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -316,6 +336,9 @@ async fn user_owned_api_key_does_not_authenticate_or_mark_last_used()
     let user_id = insert_user_account(&db.pool, "api-key-user", "user@example.test").await?;
     let key_id = Uuid::new_v4();
 
+    sqlx::query("ALTER TABLE api_keys DISABLE TRIGGER api_keys_agent_owner")
+        .execute(&db.pool)
+        .await?;
     repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id,
         account_id: user_id,
@@ -330,6 +353,9 @@ async fn user_owned_api_key_does_not_authenticate_or_mark_last_used()
         rotated_from_key_id: None,
     })
     .await?;
+    sqlx::query("ALTER TABLE api_keys ENABLE TRIGGER api_keys_agent_owner")
+        .execute(&db.pool)
+        .await?;
 
     let resolved = repo
         .find_live_agent_id_by_key(key_id, "ngk_v2_test", "hash-user-key")
@@ -348,12 +374,15 @@ async fn user_owned_api_key_does_not_authenticate_or_mark_last_used()
 }
 
 #[tokio::test]
-async fn agent_api_v2_compatibility_migration_retires_user_keys_and_preserves_agent_keys()
+async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
+    sqlx::query("DROP TRIGGER api_keys_agent_owner ON api_keys")
+        .execute(&db.pool)
+        .await?;
     let owner = insert_user_account(
         &db.pool,
         "legacy-key-owner",
@@ -392,9 +421,11 @@ async fn agent_api_v2_compatibility_migration_retires_user_keys_and_preserves_ag
     repo.revoke_key(agent_id, revoked_v1_id, owner, Some("manual-revocation"))
         .await?;
 
-    sqlx::raw_sql(include_str!("../migrations/0025_agent_api_key_v2.sql"))
-        .execute(&db.pool)
-        .await?;
+    sqlx::raw_sql(include_str!(
+        "../migrations/0026_enforce_agent_api_keys.sql"
+    ))
+    .execute(&db.pool)
+    .await?;
 
     let rows: Vec<(Uuid, Option<chrono::DateTime<chrono::Utc>>, Option<String>)> = sqlx::query_as(
         "SELECT id, revoked_at, revoked_reason FROM api_keys \
@@ -443,6 +474,43 @@ async fn agent_api_v2_compatibility_migration_retires_user_keys_and_preserves_ag
         assert_eq!(event.reason, "user_api_key_retired");
     }
 
+    let late_user_key = repo
+        .insert_key_unchecked_for_test(InsertApiKey {
+            key_id: Uuid::new_v4(),
+            account_id: owner,
+            command: &CreateApiKey {
+                name: "late-user-key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            },
+            token_prefix: "ngk_v2_late_user",
+            token_hash: "hash-late-user",
+            created_by: owner,
+            rotated_from_key_id: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        late_user_key
+            .to_string()
+            .contains("api keys may only belong to agent accounts")
+    );
+
+    repo.insert_key_unchecked_for_test(InsertApiKey {
+        key_id: Uuid::new_v4(),
+        account_id: agent_id,
+        command: &CreateApiKey {
+            name: "late-agent-key".to_owned(),
+            scopes: Vec::new(),
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+        },
+        token_prefix: "ngk_v2_late_agent",
+        token_hash: "hash-late-agent",
+        created_by: owner,
+        rotated_from_key_id: None,
+    })
+    .await?;
+
     db.cleanup().await;
     Ok(())
 }
@@ -454,7 +522,8 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
         return Ok(());
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
-    let user_id = insert_user_account(&db.pool, "rotate-user", "rotate@example.test").await?;
+    let owner = insert_user_account(&db.pool, "rotate-user", "rotate@example.test").await?;
+    let agent_id = insert_agent_account(&db.pool, owner, "rotate-agent").await?;
     let first_key_id = Uuid::new_v4();
 
     for index in 0..TEST_API_KEYS_PER_ACCOUNT_MAX {
@@ -466,7 +535,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
         let token_hash = format!("hash-{index}");
         repo.insert_key_unchecked_for_test(InsertApiKey {
             key_id,
-            account_id: user_id,
+            account_id: agent_id,
             command: &CreateApiKey {
                 name: format!("key-{index}"),
                 scopes: Vec::new(),
@@ -474,13 +543,13 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
             },
             token_prefix: "ngk_v2_test",
             token_hash: &token_hash,
-            created_by: user_id,
+            created_by: owner,
             rotated_from_key_id: None,
         })
         .await?;
     }
     assert_eq!(
-        repo.count_live_keys(user_id).await?,
+        repo.count_live_keys(agent_id).await?,
         TEST_API_KEYS_PER_ACCOUNT_MAX
     );
 
@@ -489,7 +558,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
         .rotate_key(
             InsertApiKey {
                 key_id: new_key_id,
-                account_id: user_id,
+                account_id: agent_id,
                 command: &CreateApiKey {
                     name: "key-0".to_owned(),
                     scopes: Vec::new(),
@@ -497,18 +566,18 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
                 },
                 token_prefix: "ngk_v2_rotated",
                 token_hash: "hash-rotated",
-                created_by: user_id,
+                created_by: owner,
                 rotated_from_key_id: Some(first_key_id),
             },
             first_key_id,
-            user_id,
+            owner,
             TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
 
     assert_eq!(rotated.rotated_from_key_id, Some(first_key_id));
     assert_eq!(
-        repo.count_live_keys(user_id).await?,
+        repo.count_live_keys(agent_id).await?,
         TEST_API_KEYS_PER_ACCOUNT_MAX
     );
 
@@ -530,17 +599,18 @@ async fn rotate_key_rejects_inactive_account() -> Result<(), Box<dyn std::error:
         return Ok(());
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
-    let user_id = insert_user_account(
+    let owner = insert_user_account(
         &db.pool,
         "inactive-rotate-user",
         "inactive-rotate@example.test",
     )
     .await?;
+    let agent_id = insert_agent_account(&db.pool, owner, "inactive-rotate-agent").await?;
     let old_key_id = Uuid::new_v4();
 
     repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id: old_key_id,
-        account_id: user_id,
+        account_id: agent_id,
         command: &CreateApiKey {
             name: "old-key".to_owned(),
             scopes: Vec::new(),
@@ -548,11 +618,11 @@ async fn rotate_key_rejects_inactive_account() -> Result<(), Box<dyn std::error:
         },
         token_prefix: "ngk_v2_test",
         token_hash: "hash-old-key",
-        created_by: user_id,
+        created_by: owner,
         rotated_from_key_id: None,
     })
     .await?;
-    deactivate_account(&db.pool, user_id, user_id).await?;
+    deactivate_account(&db.pool, agent_id, owner).await?;
 
     let command = CreateApiKey {
         name: "new-key".to_owned(),
@@ -563,22 +633,22 @@ async fn rotate_key_rejects_inactive_account() -> Result<(), Box<dyn std::error:
         .rotate_key(
             InsertApiKey {
                 key_id: Uuid::new_v4(),
-                account_id: user_id,
+                account_id: agent_id,
                 command: &command,
                 token_prefix: "ngk_v2_rotated",
                 token_hash: "hash-new-key",
-                created_by: user_id,
+                created_by: owner,
                 rotated_from_key_id: Some(old_key_id),
             },
             old_key_id,
-            user_id,
+            owner,
             TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await
         .unwrap_err();
 
     assert!(matches!(err, Error::NotFound(message) if message == "account not found"));
-    assert_eq!(repo.count_live_keys(user_id).await?, 1);
+    assert_eq!(repo.count_live_keys(agent_id).await?, 1);
 
     db.cleanup().await;
     Ok(())
@@ -730,12 +800,14 @@ async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
     let owner = insert_user_account(&db.pool, "owner", "owner@example.test").await?;
-    let other = insert_user_account(&db.pool, "other", "other@example.test").await?;
+    let other_owner = insert_user_account(&db.pool, "other", "other@example.test").await?;
+    let owner_agent = insert_agent_account(&db.pool, owner, "owner-agent").await?;
+    let other_agent = insert_agent_account(&db.pool, other_owner, "other-agent").await?;
     let key_id = Uuid::new_v4();
 
     repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id,
-        account_id: other,
+        account_id: other_agent,
         command: &CreateApiKey {
             name: "other-key".to_owned(),
             scopes: Vec::new(),
@@ -743,12 +815,14 @@ async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::
         },
         token_prefix: "ngk_v2_other",
         token_hash: "hash-other",
-        created_by: other,
+        created_by: other_owner,
         rotated_from_key_id: None,
     })
     .await?;
 
-    let result = repo.revoke_key(owner, key_id, owner, Some("test")).await;
+    let result = repo
+        .revoke_key(owner_agent, key_id, owner, Some("test"))
+        .await;
     assert!(result.is_err(), "wrong account id cannot revoke the key");
 
     let revoked_at: Option<chrono::DateTime<chrono::Utc>> =
@@ -758,8 +832,9 @@ async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::
             .await?;
     assert!(revoked_at.is_none());
 
-    repo.revoke_key(other, key_id, owner, Some("test")).await?;
-    assert_eq!(repo.count_live_keys(other).await?, 0);
+    repo.revoke_key(other_agent, key_id, other_owner, Some("test"))
+        .await?;
+    assert_eq!(repo.count_live_keys(other_agent).await?, 0);
 
     db.cleanup().await;
     Ok(())
