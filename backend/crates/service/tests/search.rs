@@ -1470,3 +1470,86 @@ async fn garbage_cursor_is_rejected() -> Result<(), Box<dyn std::error::Error>> 
     db.cleanup().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn cursor_rejects_colliding_filter_arrays_for_find_and_grep()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (ws_repo, files, search) = services(&db);
+    let owner = insert_user_account(
+        &db.pool,
+        "cursor-filter-boundary",
+        "cursor-filter-boundary@example.test",
+    )
+    .await?;
+    let (ws, root) = setup_space(&ws_repo, owner, "cursor-filter-boundary").await;
+    write_doc(&files, owner, ws, root, "a,b-match.md", "needle\n").await;
+    write_doc(&files, owner, ws, root, "c-match.md", "needle\n").await;
+
+    let original_filters = vec!["/a,b*.md".to_owned(), "/c*.md".to_owned()];
+    let colliding_filters = vec!["/a".to_owned(), "b*.md".to_owned(), "/c*.md".to_owned()];
+    assert_eq!(original_filters.join(","), colliding_filters.join(","));
+
+    let find_request = FindRequest {
+        q: "match".to_owned(),
+        path: None,
+        kind: None,
+        match_mode: FindMatchMode::Contains,
+        include: original_filters.clone(),
+        exclude: Vec::new(),
+        limit: Some(1),
+        cursor: None,
+    };
+    let find_page = search.find(owner, ws, find_request.clone()).await?;
+    let find_err = search
+        .find(
+            owner,
+            ws,
+            FindRequest {
+                include: colliding_filters.clone(),
+                cursor: find_page.next_cursor,
+                ..find_request
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        find_err,
+        ServiceError::InvalidInput(ref message)
+            if message == "search cursor does not match this query"
+    ));
+
+    let grep_request = GrepRequest {
+        q: "needle".to_owned(),
+        path: None,
+        match_mode: GrepMatchMode::Literal,
+        line_mode: GrepLineMode::None,
+        include: original_filters,
+        exclude: Vec::new(),
+        limit: Some(1),
+        cursor: None,
+    };
+    let grep_page = search.grep(owner, ws, grep_request.clone()).await?;
+    let grep_err = search
+        .grep(
+            owner,
+            ws,
+            GrepRequest {
+                include: colliding_filters,
+                cursor: grep_page.next_cursor,
+                ..grep_request
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        grep_err,
+        ServiceError::InvalidInput(ref message)
+            if message == "search cursor does not match this query"
+    ));
+
+    db.cleanup().await;
+    Ok(())
+}

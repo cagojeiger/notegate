@@ -176,7 +176,13 @@ fn join_path(parent: &str, name: &str) -> String {
 }
 
 fn search_fingerprint(parts: &[String]) -> String {
-    parts.join("\u{1f}")
+    let mut fingerprint = String::new();
+    for part in parts {
+        fingerprint.push_str(&part.len().to_string());
+        fingerprint.push(':');
+        fingerprint.push_str(part);
+    }
+    fingerprint
 }
 
 fn decode_search_cursor(
@@ -309,6 +315,18 @@ mod tests {
                     if message == "search cursor does not match this query"
             ));
         }
+    }
+
+    #[test]
+    fn search_cursor_fingerprint_preserves_filter_pattern_boundaries() {
+        let left_patterns = vec!["a,b".to_owned(), "c".to_owned()];
+        let right_patterns = vec!["a".to_owned(), "b,c".to_owned()];
+        assert_eq!(left_patterns.join(","), right_patterns.join(","));
+
+        assert_ne!(
+            search_fingerprint(&left_patterns),
+            search_fingerprint(&right_patterns)
+        );
     }
 
     #[test]
