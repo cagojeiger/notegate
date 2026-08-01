@@ -1,4 +1,11 @@
 mod dto;
+pub(crate) mod files;
+pub(crate) mod nodes;
+pub(crate) mod search;
+pub(crate) mod spaces;
+#[cfg(test)]
+mod tests;
+pub(crate) mod text;
 
 use axum::extract::Extension;
 use axum::routing::get;
@@ -10,7 +17,13 @@ use crate::state::AppState;
 use self::dto::MeResponse;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/me", get(get_me))
+    Router::new()
+        .route("/me", get(get_me))
+        .merge(spaces::routes())
+        .merge(nodes::routes())
+        .merge(text::routes())
+        .merge(search::routes())
+        .merge(files::routes())
 }
 
 #[utoipa::path(

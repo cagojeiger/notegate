@@ -17,13 +17,48 @@ use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
+    info(
+        title = "NoteGate REST API",
+        description = "Stable resource API for Agent integrations. Authenticate with an Agent-owned ngk_v2_ bearer key. Access is limited to connected spaces and their read/write permissions."
+    ),
     paths(
         crate::public_v2::get_me,
+        crate::public_v2::spaces::list,
+        crate::public_v2::spaces::get_one,
+        crate::public_v2::nodes::resolve_path,
+        crate::public_v2::nodes::tree,
+        crate::public_v2::nodes::create,
+        crate::public_v2::nodes::get_one,
+        crate::public_v2::nodes::children,
+        crate::public_v2::nodes::move_node,
+        crate::public_v2::nodes::copy_node,
+        crate::public_v2::nodes::delete,
+        crate::public_v2::text::read,
+        crate::public_v2::text::replace,
+        crate::public_v2::text::patch,
+        crate::public_v2::text::append,
+        crate::public_v2::text::edit,
+        crate::public_v2::search::find,
+        crate::public_v2::search::grep,
+        crate::public_v2::files::begin,
+        crate::public_v2::files::parts,
+        crate::public_v2::files::complete,
+        crate::public_v2::files::abort,
+        crate::public_v2::files::download,
     ),
     components(schemas(crate::error::ErrorResponse)),
     modifiers(&ApiKeySecurityAddon),
     tags(
         (name = "identity", description = "Agent API-key caller identity"),
+        (name = "spaces", description = "Spaces connected to the Agent and their effective permissions"),
+        (name = "nodes", description = "Folder, text, and file tree metadata and mutations"),
+        (name = "text", description = "Bounded plain-text reads and optimistic-concurrency mutations"),
+        (name = "search", description = "Bounded name, path, and plain-text search with opaque cursors"),
+        (name = "files", description = "Single and multipart transfer through S3-compatible presigned URLs"),
+    ),
+    external_docs(
+        url = "https://github.com/cagojeiger/notegate",
+        description = "NoteGate source and specification"
     )
 )]
 pub struct PublicApiDoc;
@@ -166,7 +201,9 @@ fn operations_mut(item: &mut PathItem) -> impl Iterator<Item = &mut Operation> {
 }
 
 fn error_response() -> Response {
-    let mut response = Response::new("Common REST error response");
+    let mut response = Response::new(
+        "Common JSON error. Inspect `error` for a stable code. Typical codes include invalid_input, forbidden, not_found, conflict, node_write_locked, subtree_write_locked, search_busy, object_storage_unavailable, and internal_error. Retryable responses can include a Retry-After header.",
+    );
     response.content.insert(
         "application/json".to_owned(),
         Content::new(Some(Ref::from_schema_name("ErrorResponse"))),
@@ -201,30 +238,94 @@ mod tests {
     use super::{ApiDoc, PublicApiDoc};
 
     #[test]
-    fn public_openapi_contains_only_v2_me() {
+    fn public_openapi_contains_exact_agent_resource_contract() {
         let value =
             serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
         let paths = value["paths"].as_object().expect("paths object");
-        let expected = ["/api/v2/me"];
+        let expected = [
+            ("/api/v2/me", &["get"][..]),
+            ("/api/v2/spaces", &["get"]),
+            ("/api/v2/spaces/{space_id}", &["get"]),
+            ("/api/v2/spaces/{space_id}/paths/resolve", &["get"]),
+            ("/api/v2/spaces/{space_id}/tree", &["get"]),
+            ("/api/v2/spaces/{space_id}/nodes", &["post"]),
+            (
+                "/api/v2/spaces/{space_id}/nodes/{node_id}",
+                &["get", "delete"],
+            ),
+            (
+                "/api/v2/spaces/{space_id}/nodes/{node_id}/children",
+                &["get"],
+            ),
+            ("/api/v2/spaces/{space_id}/nodes/{node_id}/move", &["post"]),
+            ("/api/v2/spaces/{space_id}/nodes/{node_id}/copy", &["post"]),
+            (
+                "/api/v2/spaces/{space_id}/text/{node_id}",
+                &["get", "put", "patch"],
+            ),
+            ("/api/v2/spaces/{space_id}/text/{node_id}/append", &["post"]),
+            ("/api/v2/spaces/{space_id}/text/{node_id}/edit", &["post"]),
+            ("/api/v2/spaces/{space_id}/search/find", &["post"]),
+            ("/api/v2/spaces/{space_id}/search/grep", &["post"]),
+            ("/api/v2/spaces/{space_id}/file-uploads", &["post"]),
+            (
+                "/api/v2/spaces/{space_id}/file-uploads/{upload_id}/parts",
+                &["post"],
+            ),
+            (
+                "/api/v2/spaces/{space_id}/file-uploads/{upload_id}/complete",
+                &["post"],
+            ),
+            (
+                "/api/v2/spaces/{space_id}/file-uploads/{upload_id}",
+                &["delete"],
+            ),
+            (
+                "/api/v2/spaces/{space_id}/files/{node_id}/download",
+                &["get"],
+            ),
+        ];
 
         assert_eq!(paths.len(), expected.len());
-        for path in expected {
+        for (path, methods) in expected {
             let operations = paths
                 .get(path)
                 .unwrap_or_else(|| panic!("missing public path: {path}"))
                 .as_object()
                 .expect("path operations");
-            assert!(operations.contains_key("get"), "{path} must support GET");
-            assert!(
-                !operations
-                    .keys()
-                    .any(|method| matches!(method.as_str(), "post" | "put" | "patch" | "delete")),
-                "{path} must remain read-only"
-            );
+            let actual_methods = operations
+                .keys()
+                .filter(|method| {
+                    matches!(method.as_str(), "get" | "post" | "put" | "patch" | "delete")
+                })
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>();
+            let expected_methods = methods
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
             assert_eq!(
-                operations["get"]["security"][0]["api_key"],
-                serde_json::json!([]),
-                "{path} must require the API-key scheme"
+                actual_methods, expected_methods,
+                "method mismatch for {path}"
+            );
+            for method in methods {
+                assert_eq!(
+                    operations[*method]["security"][0]["api_key"],
+                    serde_json::json!([]),
+                    "{method} {path} must require the API-key scheme"
+                );
+            }
+        }
+
+        for forbidden in [
+            "/api/v2/agents",
+            "/api/v2/spaces/{space_id}/agents",
+            "/api/v2/spaces/{space_id}/metadata",
+            "/api/v2/spaces/{space_id}/nodes/{node_id}/write-lock",
+        ] {
+            assert!(
+                !paths.contains_key(forbidden),
+                "must not publish {forbidden}"
             );
         }
     }
@@ -238,6 +339,45 @@ mod tests {
         assert_eq!(
             scheme["bearerFormat"].as_str(),
             Some("NoteGate ngk_v2_ Agent API key")
+        );
+    }
+
+    #[test]
+    fn public_openapi_describes_external_client_contract() {
+        let value =
+            serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
+        let schemas = &value["components"]["schemas"];
+
+        assert_eq!(value["info"]["title"], "NoteGate REST API");
+        assert!(
+            value["info"]["description"]
+                .as_str()
+                .is_some_and(|description| description.contains("ngk_v2_"))
+        );
+        assert_eq!(
+            value["externalDocs"]["url"],
+            "https://github.com/cagojeiger/notegate"
+        );
+        assert_eq!(
+            schemas["FindBody"]["properties"]["match"]["default"],
+            "contains"
+        );
+        assert_eq!(
+            schemas["GrepBody"]["properties"]["lines"]["default"],
+            "none"
+        );
+        assert_eq!(
+            schemas["PatchEditBody"]["properties"]["mode"]["default"],
+            "unique"
+        );
+        assert_eq!(
+            schemas["BeginUploadBody"]["properties"]["encryption_mode"]["default"],
+            "none"
+        );
+        assert!(
+            schemas["PageOut"]["properties"]["next_cursor"]["description"]
+                .as_str()
+                .is_some_and(|description| description.contains("Opaque"))
         );
     }
 

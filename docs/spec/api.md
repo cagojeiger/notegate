@@ -8,7 +8,7 @@ V2 REST  = 외부 확장이 사용하는 안정적인 공개 API
 MCP      = agent가 쓰기 쉬운 space name + path 기반 command/search API
 ```
 
-세 surface는 같은 service invariant를 사용한다. V2 초기 계약은 API key caller 확인만 제공한다.
+세 surface는 같은 service invariant를 사용한다. V2는 Agent MCP와 동등한 Space 내부 기능을 ID 기반 resource API로 제공한다.
 
 ## API 분류
 
@@ -22,7 +22,7 @@ User MCP    /mcp
 Agent MCP   /mcp/v2
 ```
 
-V2의 초기 endpoint는 `public-api-v2.md`에서 정의한다.
+V2의 공개 endpoint와 제외 범위는 `public-api-v2.md`에서 정의한다.
 
 ## 계층
 

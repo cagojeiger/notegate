@@ -1010,7 +1010,7 @@ async fn multipart_abort_cleanup_closes_the_provider_upload()
             &provider_upload_id,
             1,
             byte_len,
-            crate::object_storage::MCP_TRANSFER_URL_TTL,
+            crate::object_storage::AGENT_TRANSFER_URL_TTL,
         )
         .await
         .map_err(|error| format!("presign upload part: {error:?}"))?;

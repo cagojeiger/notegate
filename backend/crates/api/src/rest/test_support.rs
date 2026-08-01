@@ -98,7 +98,7 @@ fn test_config() -> Arc<Config> {
     })
 }
 
-pub(super) fn state(db: &TestDb) -> crate::state::AppState {
+pub(crate) fn state(db: &TestDb) -> crate::state::AppState {
     state_from_config(db, test_config())
 }
 
@@ -131,7 +131,7 @@ fn state_from_config(db: &TestDb, config: Arc<Config>) -> crate::state::AppState
     )
 }
 
-pub(super) async fn caller_and_space(
+pub(crate) async fn caller_and_space(
     state: &crate::state::AppState,
 ) -> Result<(Caller, Uuid, Uuid), Box<dyn std::error::Error>> {
     let (account, user) = AccountRepo::with_crypto_and_default_user_tier(
@@ -182,7 +182,7 @@ pub(super) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router 
         .with_state(state)
 }
 
-pub(super) async fn json_request(
+pub(crate) async fn json_request(
     app: Router,
     method: &str,
     uri: String,
@@ -209,7 +209,7 @@ pub(super) async fn json_response(
         .await?)
 }
 
-pub(super) async fn get_json(
+pub(crate) async fn get_json(
     app: Router,
     uri: String,
 ) -> Result<(StatusCode, Value), Box<dyn std::error::Error>> {
@@ -219,7 +219,7 @@ pub(super) async fn get_json(
     decode_response(response).await
 }
 
-pub(super) async fn empty_request(
+pub(crate) async fn empty_request(
     app: Router,
     method: &str,
     uri: String,

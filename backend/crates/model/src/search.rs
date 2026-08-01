@@ -26,6 +26,15 @@ pub enum FindMatchMode {
 }
 
 impl FindMatchMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "contains" => Some(Self::Contains),
+            "regex" => Some(Self::Regex),
+            "glob" => Some(Self::Glob),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Contains => "contains",
@@ -62,6 +71,14 @@ pub enum GrepMatchMode {
 }
 
 impl GrepMatchMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "literal" => Some(Self::Literal),
+            "regex" => Some(Self::Regex),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Literal => "literal",
@@ -78,6 +95,15 @@ pub enum GrepLineMode {
 }
 
 impl GrepLineMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "first" => Some(Self::First),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",

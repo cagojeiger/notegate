@@ -172,33 +172,18 @@ fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
 }
 
 fn parse_find_match_mode(value: Option<&str>) -> Result<FindMatchMode, ErrorData> {
-    match value.unwrap_or("contains") {
-        "contains" => Ok(FindMatchMode::Contains),
-        "regex" => Ok(FindMatchMode::Regex),
-        "glob" => Ok(FindMatchMode::Glob),
-        _ => Err(invalid_input_error(
-            "match must be 'contains', 'regex', or 'glob'",
-        )),
-    }
+    FindMatchMode::parse(value.unwrap_or("contains"))
+        .ok_or_else(|| invalid_input_error("match must be 'contains', 'regex', or 'glob'"))
 }
 
 fn parse_grep_match_mode(value: Option<&str>) -> Result<GrepMatchMode, ErrorData> {
-    match value.unwrap_or("literal") {
-        "literal" => Ok(GrepMatchMode::Literal),
-        "regex" => Ok(GrepMatchMode::Regex),
-        _ => Err(invalid_input_error("match must be 'literal' or 'regex'")),
-    }
+    GrepMatchMode::parse(value.unwrap_or("literal"))
+        .ok_or_else(|| invalid_input_error("match must be 'literal' or 'regex'"))
 }
 
 fn parse_grep_line_mode(value: Option<&str>) -> Result<GrepLineMode, ErrorData> {
-    match value.unwrap_or("none") {
-        "none" => Ok(GrepLineMode::None),
-        "first" => Ok(GrepLineMode::First),
-        "all" => Ok(GrepLineMode::All),
-        _ => Err(invalid_input_error(
-            "lines must be 'none', 'first', or 'all'",
-        )),
-    }
+    GrepLineMode::parse(value.unwrap_or("none"))
+        .ok_or_else(|| invalid_input_error("lines must be 'none', 'first', or 'all'"))
 }
 
 #[cfg(test)]

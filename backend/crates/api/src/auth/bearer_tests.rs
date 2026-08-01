@@ -653,7 +653,8 @@ async fn v2_api_key_requests_do_not_require_browser_origin()
 }
 
 #[tokio::test]
-async fn v2_exposes_only_me_to_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn v2_exposes_agent_resources_but_not_management_routes()
+-> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .clone()
@@ -678,9 +679,27 @@ async fn v2_exposes_only_me_to_api_keys() -> Result<(), Box<dyn std::error::Erro
     assert_eq!(body["account"]["kind"], "agent");
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/v2/spaces")
+                .uri("/api/v2/spaces/not-a-uuid")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response
+            .headers()
+            .get(CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store")
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/agents")
                 .header("authorization", format!("Bearer {TEST_API_KEY}"))
                 .body(Body::empty())?,
         )

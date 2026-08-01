@@ -109,6 +109,15 @@ pub enum PatchMode {
 }
 
 impl PatchMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unique" => Some(Self::Unique),
+            "first" => Some(Self::First),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Unique => "unique",
