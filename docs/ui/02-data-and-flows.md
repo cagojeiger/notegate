@@ -391,7 +391,7 @@ Expand all / Collapse all
 Tabs:
 
 ```text
-General | Account | Agents
+General | Account | Connections | Agents
 ```
 
 General:
@@ -402,21 +402,26 @@ Account:
 
 - current user/account.
 - theme.
-- user MCP OAuth 2.1 server URL.
 - sign out.
+
+Connections:
+
+- user MCP OAuth 2.1 server URL.
+- agent MCP server URL.
+- public API base URL과 API 문서 링크.
 
 Agents:
 
 - agent list.
 - 한 번에 하나의 agent만 펼친다.
-- 펼친 agent 안에 space permission, agent API keys, MCP와 REST API V2 연결 정보를 둔다.
-- REST API V2 문서는 새 탭으로 연다.
+- 펼친 agent 안에는 space permission과 agent API keys만 둔다.
 
 규칙:
 
-- user MCP OAuth 연결은 Account에 둔다.
+- 연결 URL은 agent마다 반복하지 않고 Connections에 한 번만 둔다.
+- 제품 표시는 `API`로 통일하고 실제 versioned base URL은 `/api/v2`를 사용한다.
+- API 문서는 새 탭으로 연다.
 - agent API key는 해당 agent 아래에 둔다.
-- connections는 펼친 agent 안에서 관리한다.
 - `scopes`는 현재 정책상 표시하지 않는다.
 - Agents tab은 agent 관리 권한이 있는 caller에게만 표시한다.
 

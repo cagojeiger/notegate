@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { Bot, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { Agent } from "../../api/agents";
@@ -15,7 +15,6 @@ import {
   useSetAgentSpaceAccessMutation,
   useSettingsSpacesQuery
 } from "./useSettingsQueries";
-import { EndpointRow } from "./EndpointRow";
 import { KeyManager } from "./KeyManager";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
@@ -82,7 +81,6 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
                     <SectionHeader title="Agent API Keys" description="Keys authenticate as this agent." />
                     <AgentKeyManager agentId={agent.id} />
                   </section>
-                  <AgentConnections agentName={agent.name} />
                 </div>
               ) : null}
             </Card>
@@ -90,33 +88,6 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
         </ul>
       )}
     </div>
-  );
-}
-
-function AgentConnections({ agentName }: { agentName: string }) {
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
-  return (
-    <section>
-      <SectionHeader title="Connections" description={`Use an API key created for ${agentName}.`} />
-      <div className="divide-y divide-seam border-y border-seam text-sm">
-        <div className="space-y-2 py-3">
-          <div className="font-medium">MCP</div>
-          <EndpointRow label="Server URL" value={`${origin}/mcp/v2`} copyLabel={`Copy ${agentName} MCP server URL`} />
-        </div>
-        <div className="space-y-3 py-3">
-          <div className="font-medium">REST API v2</div>
-          <EndpointRow label="Base URL" value={`${origin}/api/v2`} copyLabel={`Copy ${agentName} API base URL`} />
-          <a
-            href={`${origin}/swagger-ui/v2/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-primary outline-none transition hover:bg-[var(--ng-hover)] focus-visible:ring-2 focus-visible:ring-primary/45"
-          >
-            OpenAPI docs <ExternalLink size={14} />
-          </a>
-        </div>
-      </div>
-    </section>
   );
 }
 

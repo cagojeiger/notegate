@@ -82,7 +82,7 @@ describe("SettingsModal", () => {
     mockSettingsApi();
   });
 
-  it("places user OAuth MCP access inside the account tab", async () => {
+  it("keeps account identity and appearance inside the account tab", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -90,11 +90,26 @@ describe("SettingsModal", () => {
     await user.click(screen.getByRole("tab", { name: "Account" }));
 
     expect(screen.getByText("Appearance")).toBeInTheDocument();
-    expect(screen.getByText("MCP access")).toBeInTheDocument();
-    expect(screen.getByText("Connect as your account with OAuth 2.1.")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.queryByText("http://localhost:3000/mcp")).not.toBeInTheDocument();
     expect(screen.queryByText("My API Keys")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
+  });
+
+  it("shows user MCP, Agent MCP, and API in the connections tab", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByRole("tab", { name: "Connections" }));
+
+    expect(screen.getByText("User MCP")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.getByText("Agent MCP")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
+    expect(screen.getByText("API")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/api/v2")).toBeInTheDocument();
+    expect(screen.queryByText("API v2")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "API documentation" })).toHaveAttribute("href", "http://localhost:3000/swagger-ui/v2/");
+    expect(screen.getByRole("link", { name: "API documentation" })).toHaveAttribute("target", "_blank");
   });
 
   it("shows browser workspace reset controls in the general tab", async () => {
@@ -116,7 +131,7 @@ describe("SettingsModal", () => {
     expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
   });
 
-  it("shows agent permissions, keys, MCP, and API v2 inside an expanded agent", async () => {
+  it("shows only permissions and keys inside an expanded agent", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -128,11 +143,8 @@ describe("SettingsModal", () => {
     expect(screen.getByText("Space permissions")).toBeInTheDocument();
     expect(await screen.findByText("Personal")).toBeInTheDocument();
     expect(await screen.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
-    expect(screen.getByText("Connections")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/api/v2")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "OpenAPI docs" })).toHaveAttribute("href", "http://localhost:3000/swagger-ui/v2/");
-    expect(screen.getByRole("link", { name: "OpenAPI docs" })).toHaveAttribute("target", "_blank");
+    expect(screen.queryByText("http://localhost:3000/mcp/v2")).not.toBeInTheDocument();
+    expect(screen.queryByText("http://localhost:3000/api/v2")).not.toBeInTheDocument();
   });
 
   it("updates agent space permissions from the permission select", async () => {
@@ -218,10 +230,17 @@ describe("SettingsModal", () => {
     mockSettingsApi(agentMe);
 
     renderSettings(agentMe);
+    const user = userEvent.setup();
 
-    await userEvent.setup().click(screen.getByRole("tab", { name: "Account" }));
+    await user.click(screen.getByRole("tab", { name: "Account" }));
     expect(await screen.findByText("ci-bot")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Connections" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Connections" }));
+    expect(screen.getByText("User MCP")).toBeInTheDocument();
+    expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
+    expect(screen.queryByText("API")).not.toBeInTheDocument();
   });
 });
