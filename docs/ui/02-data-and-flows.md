@@ -397,6 +397,7 @@ General | Account | Connections | Agents
 General:
 
 - saved workspace reset.
+- About에 `VERSION` 파일 기준의 현재 NoteGate 버전을 표시한다.
 
 Account:
 

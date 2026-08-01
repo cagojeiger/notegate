@@ -56,6 +56,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY frontend/web/package.json ./frontend/web/package.json
 RUN --mount=type=cache,id=notegate-pnpm-store,target=/pnpm/store,sharing=locked \
     pnpm install --frozen-lockfile
+COPY VERSION ./VERSION
 COPY frontend ./frontend
 RUN pnpm --filter web build
 

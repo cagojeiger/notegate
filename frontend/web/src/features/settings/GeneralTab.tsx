@@ -2,6 +2,8 @@ import { RotateCcw } from "lucide-react";
 
 import { Button, Card, SectionHeader } from "../../shared/ui";
 
+const appVersion = import.meta.env.VITE_NOTEGATE_VERSION || "development";
+
 export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: () => void }) {
   return (
     <div className="space-y-4">
@@ -16,6 +18,14 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
             <RotateCcw size={15} />
             Reset
           </Button>
+        </Card>
+      </section>
+
+      <section>
+        <SectionHeader title="About" />
+        <Card className="flex items-center justify-between gap-4 text-sm">
+          <span className="font-medium">NoteGate</span>
+          <span className="text-muted">Version <code className="ml-1 font-mono text-text">v{appVersion}</code></span>
         </Card>
       </section>
     </div>

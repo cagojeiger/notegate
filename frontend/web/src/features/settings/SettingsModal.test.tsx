@@ -119,6 +119,8 @@ describe("SettingsModal", () => {
 
     expect(screen.getByText("Saved workspace")).toBeInTheDocument();
     expect(screen.getByText("Open panes and panel visibility are restored on this browser.")).toBeInTheDocument();
+    expect(screen.getByText("About")).toBeInTheDocument();
+    expect(screen.getByText(/^Version /)).toHaveTextContent("Version vdevelopment");
 
     await user.click(screen.getByRole("button", { name: "Reset" }));
 
