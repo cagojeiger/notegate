@@ -36,12 +36,8 @@ pub const CONNECTIONS_PER_SPACE_MAX: usize = 50;
 pub const CONNECTED_SPACES_PER_AGENT_MAX: usize = 100;
 /// Maximum active agents a single user creator account may create.
 pub const AGENTS_PER_CREATOR_MAX: usize = 50;
-/// Maximum live API keys for a user account.
-pub const USER_API_KEYS_PER_ACCOUNT_MAX: usize = 2;
 /// Maximum live API keys for an agent account.
 pub const AGENT_API_KEYS_PER_ACCOUNT_MAX: usize = 5;
-/// Maximum user API-key lifetime in days.
-pub const USER_API_KEY_MAX_TTL_DAYS: i64 = 30;
 /// Maximum agent API-key lifetime in days.
 pub const AGENT_API_KEY_MAX_TTL_DAYS: i64 = 365;
 

@@ -16,7 +16,6 @@ pub use notegate_model::{
 };
 use uuid::Uuid;
 
-use crate::api_keys::ApiKeyPolicy;
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::{clamp_limit, paginate_by_id};
 
@@ -87,7 +86,7 @@ impl AgentService {
         self.require_owned_active_agent(command.agent_id, caller_account_id)
             .await?;
 
-        crate::api_keys::create_key_for_account(
+        crate::api_keys::create_agent_key(
             &self.api_keys,
             &self.crypto,
             command.agent_id,
@@ -97,8 +96,6 @@ impl AgentService {
                 scopes: command.scopes,
                 expires_at: command.expires_at,
             },
-            None,
-            agent_api_key_policy(),
         )
         .await
     }
@@ -162,7 +159,7 @@ impl AgentService {
             .find_live_key(agent_id, key_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("api key not found".to_owned()))?;
-        crate::api_keys::rotate_key_for_account(
+        crate::api_keys::rotate_agent_key(
             &self.api_keys,
             &self.crypto,
             agent_id,
@@ -173,7 +170,6 @@ impl AgentService {
                 scopes: Vec::new(),
                 expires_at: Some(old.expires_at),
             },
-            agent_api_key_policy(),
         )
         .await
     }
@@ -187,13 +183,6 @@ impl AgentService {
             .find_active_agent_by_creator(agent_id, creator_account_id)
             .await?
             .ok_or_else(|| ServiceError::NotFound("agent not found".to_owned()))
-    }
-}
-
-fn agent_api_key_policy() -> ApiKeyPolicy {
-    ApiKeyPolicy {
-        max_live_keys: limits::AGENT_API_KEYS_PER_ACCOUNT_MAX,
-        max_ttl_days: limits::AGENT_API_KEY_MAX_TTL_DAYS,
     }
 }
 

@@ -22,6 +22,8 @@ use notegate_model::{
 use serde_json::Value;
 use uuid::Uuid;
 
+const TEST_API_KEYS_PER_ACCOUNT_MAX: usize = 2;
+
 #[derive(Debug, sqlx::FromRow)]
 struct AuditRow {
     op_type: String,
@@ -215,12 +217,12 @@ async fn account_delete_audit_records_nonzero_cascade_counts()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_user",
+                token_prefix: "ngk_v2_user",
                 token_hash: "hash-user-delete-cascade",
                 created_by: user,
                 rotated_from_key_id: None,
             },
-            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+            TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     api_keys
@@ -233,7 +235,7 @@ async fn account_delete_audit_records_nonzero_cascade_counts()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_agent",
+                token_prefix: "ngk_v2_agent",
                 token_hash: "hash-agent-delete-cascade",
                 created_by: user,
                 rotated_from_key_id: None,
@@ -327,7 +329,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_agent",
+                token_prefix: "ngk_v2_agent",
                 token_hash: "hash-agent-audit",
                 created_by: owner,
                 rotated_from_key_id: None,
@@ -401,12 +403,12 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_user",
+                token_prefix: "ngk_v2_user",
                 token_hash: "hash-user-audit-1",
                 created_by: user,
                 rotated_from_key_id: None,
             },
-            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+            TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     let rotated_key = Uuid::new_v4();
@@ -420,14 +422,14 @@ async fn user_key_and_account_delete_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v1_user",
+                token_prefix: "ngk_v2_user",
                 token_hash: "hash-user-audit-2",
                 created_by: user,
                 rotated_from_key_id: Some(first_key),
             },
             first_key,
             user,
-            notegate_core::limits::USER_API_KEYS_PER_ACCOUNT_MAX,
+            TEST_API_KEYS_PER_ACCOUNT_MAX,
         )
         .await?;
     api_keys

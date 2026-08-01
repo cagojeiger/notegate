@@ -53,26 +53,7 @@ User caller만 가능하다. 현재 tier와 소유 Space별 live Text/File/item 
 }
 ```
 
-Account, Agent, API key, connection limit은 각 리소스 API에서 별도로 검사하며 이 응답에 포함하지 않는다. 사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
-
-## Current user API keys
-
-```http
-GET    /api/v1/me/keys?limit=50&cursor=...
-POST   /api/v1/me/keys
-POST   /api/v1/me/keys/{key_id}
-DELETE /api/v1/me/keys/{key_id}
-```
-
-User caller만 가능하다.
-
-```json
-{"name":"local-cli","expires_at":"2026-07-01T00:00:00Z","scopes":[]}
-```
-
-- `expires_at`은 필수이며 최대 TTL은 30일이다.
-- `scopes`는 빈 배열만 허용한다.
-- User account당 live key 최대 2개다.
+Account, Agent, Agent API key, connection limit은 각 리소스 API에서 별도로 검사하며 이 응답에 포함하지 않는다. 사용량의 계산 기준과 reconciliation 동작은 `../usage-and-quotas.md`를 따른다.
 
 ## Current user event history
 

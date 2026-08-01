@@ -18,6 +18,8 @@ export default defineConfig({
       "/api": backendProxy,
       "/auth": backendProxy,
       "/mcp": backendProxy,
+      "/openapi": backendProxy,
+      "/swagger-ui": backendProxy,
       "/.well-known": backendProxy
     }
   }

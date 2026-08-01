@@ -9,8 +9,8 @@
 //! - MCP OAuth bearer tokens resolve an already-registered user account
 //!   (an authenticated authgate identity with no local account is
 //!   [`IdentityError::NotRegistered`] — the spec onboarding path);
-//! - an API key resolves either a `kind='user'` or `kind='agent'` account,
-//!   rejecting revoked, expired, or inactive credentials (enforced at the db layer).
+//! - an Agent API key resolves an active `kind='agent'` account, rejecting
+//!   revoked, expired, user-owned, or inactive credentials.
 
 use notegate_core::security::PiiCrypto;
 use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo};
@@ -94,8 +94,8 @@ impl Resolver {
         self.resolve_registered_user(&attrs.sub, Channel::Mcp).await
     }
 
-    /// Resolve an API key into a user or agent caller on the given channel.
-    pub async fn resolve_api_key(
+    /// Resolve an Agent API key on the given channel.
+    pub async fn resolve_agent_api_key(
         &self,
         token: &str,
         channel: Channel,
@@ -104,18 +104,12 @@ impl Resolver {
             return Err(IdentityError::NotRegistered);
         };
         let token_hash = self.crypto.api_key_hash(&key_id.to_string(), secret)?;
+        let token_prefix = crate::api_keys::token_prefix(key_id);
         let account_id = self
             .api_keys
-            .find_live_account_id_by_key(key_id, &token_hash)
+            .find_live_agent_id_by_key(key_id, &token_prefix, &token_hash)
             .await?
             .ok_or(IdentityError::NotRegistered)?;
-
-        if let Some((account, user)) = self.users.find_caller_by_account_id(account_id).await? {
-            if account.kind != AccountKind::User {
-                return Err(IdentityError::Inactive);
-            }
-            return user_caller(account, user, channel);
-        }
 
         let resolved = self.agents.find_active_agent_by_id(account_id).await?;
         let (account, agent) = resolved.ok_or(IdentityError::NotRegistered)?;

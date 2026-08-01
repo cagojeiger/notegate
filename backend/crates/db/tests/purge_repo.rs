@@ -155,7 +155,7 @@ async fn seed_key(
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v1_test",
+            token_prefix: "ngk_v2_test",
             token_hash: &format!("hash-{name}-{}", Uuid::new_v4()),
             created_by: account_id,
             rotated_from_key_id: None,

@@ -171,7 +171,7 @@ async fn delete_agent_deactivates_account_and_revokes_keys_and_access()
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v1_agent",
+            token_prefix: "ngk_v2_agent",
             token_hash: "hash-delete-token",
             created_by: owner,
             rotated_from_key_id: None,

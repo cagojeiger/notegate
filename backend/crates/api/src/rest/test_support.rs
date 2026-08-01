@@ -57,7 +57,7 @@ impl CallerResolver for UnusedResolver {
         Box::pin(async { Err(IdentityError::NotRegistered) })
     }
 
-    fn resolve_api_key(
+    fn resolve_agent_api_key(
         &self,
         _token: String,
         _channel: Channel,

@@ -334,5 +334,5 @@ fn browser_session_token_round_trips() {
 
     assert_eq!(parse_token(&token), Some((session_id, "secret")));
     assert!(parse_token("ngs_v1_not-a-uuid_secret").is_none());
-    assert!(parse_token("ngk_v1_wrong").is_none());
+    assert!(parse_token("ngk_v2_wrong").is_none());
 }

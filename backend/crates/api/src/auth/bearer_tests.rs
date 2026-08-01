@@ -12,13 +12,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, to_bytes};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE};
+use axum::http::header::{
+    ACCEPT, CACHE_CONTROL, CONTENT_TYPE, LOCATION, SET_COOKIE, WWW_AUTHENTICATE,
+};
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use notegate_db::{AccountRepo, browser_session_repo::format_token, test_support::TestDb};
 use notegate_model::account::{Account, AccountKind};
-use notegate_model::{Caller, CallerIdentity, Channel, User};
+use notegate_model::{Agent, Caller, CallerIdentity, Channel, User};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -63,7 +65,9 @@ WNYy7n/b2QYI1CcDUtrxjmDVGSbdQ1MG04Az3PhLBDh4UE/yOXb3slpLECmfjcK/
 lq0mdqBAHuT8W8E2jRw9CejdITWxllSS0L8xhhSv5JMJ+3CUmpbsWP1X6ByQmF/E
 EmW0T9kajxWyy7ochOgNdA==
 -----END PRIVATE KEY-----"#;
-const TEST_API_KEY: &str = "ngk_v1_00000000-0000-0000-0000-000000000000_test-secret";
+const TEST_API_KEY: &str = "ngk_v2_00000000-0000-0000-0000-000000000000_test-secret";
+const TEST_LEGACY_API_KEY: &str = "ngk_v1_00000000-0000-0000-0000-000000000000_test-secret";
+const MCP_INITIALIZE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#;
 
 #[derive(Debug, Serialize)]
 struct TestClaims {
@@ -117,7 +121,7 @@ impl CallerResolver for TestResolver {
         Box::pin(async move { self.resolve(attrs, Channel::Mcp) })
     }
 
-    fn resolve_api_key(
+    fn resolve_agent_api_key(
         &self,
         token: String,
         channel: Channel,
@@ -126,14 +130,11 @@ impl CallerResolver for TestResolver {
             if token != TEST_API_KEY {
                 return Err(IdentityError::NotRegistered);
             }
-            self.resolve(
-                ResolveAttrs {
-                    sub: "api-key-user".to_owned(),
-                    email: "api-key@example.test".to_owned(),
-                    name: "API Key User".to_owned(),
-                },
-                channel,
-            )
+            match self.mode {
+                ResolverMode::Missing => Err(IdentityError::NotRegistered),
+                ResolverMode::Registered(false) => Err(IdentityError::Inactive),
+                ResolverMode::Registered(true) => Ok(test_agent_caller(channel)),
+            }
         })
     }
 }
@@ -173,8 +174,37 @@ fn test_caller(attrs: ResolveAttrs, channel: Channel) -> Caller {
     }
 }
 
+fn test_agent_caller(channel: Channel) -> Caller {
+    let now = Utc::now();
+    let account_id = Uuid::nil();
+    Caller {
+        account: Account {
+            id: account_id,
+            kind: AccountKind::Agent,
+            display_name: "API Agent".to_owned(),
+            is_active: true,
+            deleted_at: None,
+            deleted_by: None,
+            created_at: now,
+            updated_at: now,
+        },
+        identity: CallerIdentity::Agent(Agent {
+            id: account_id,
+            name: "api-agent".to_owned(),
+            owner_user_id: Uuid::new_v4(),
+        }),
+        channel,
+    }
+}
+
 fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
     state_with_resource(mode, "https://api.example.test")
+}
+
+fn state_with_openapi(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
+    let pool =
+        PgPoolOptions::new().connect_lazy("postgres://notegate:notegate@localhost/notegate")?;
+    state_with_pool_and_openapi(mode, "https://api.example.test", pool, true)
 }
 
 fn state_with_resource(
@@ -190,6 +220,15 @@ fn state_with_pool(
     mode: ResolverMode,
     resource_url: &str,
     pool: PgPool,
+) -> Result<AppState, Box<dyn std::error::Error>> {
+    state_with_pool_and_openapi(mode, resource_url, pool, false)
+}
+
+fn state_with_pool_and_openapi(
+    mode: ResolverMode,
+    resource_url: &str,
+    pool: PgPool,
+    openapi_enabled: bool,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     let config = Arc::new(notegate_core::Config {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
@@ -214,7 +253,7 @@ fn state_with_pool(
         lookup_verify_0_secret: None,
         browser_session_ttl: Duration::from_secs(3600),
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
-        openapi_enabled: false,
+        openapi_enabled,
         metrics_enabled: false,
         web_dist_dir: None,
         s3: crate::state::test_s3_config(),
@@ -452,6 +491,79 @@ async fn v1_routes_reject_api_keys() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+async fn openapi_docs_redirect_unauthenticated_browser_to_login()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state_with_openapi(ResolverMode::Registered(true))?);
+
+    for path in ["/swagger-ui/v2/", "/openapi/v2.json"] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty())?)
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT, "{path}");
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL),
+            Some(&"private, no-store".parse()?),
+            "{path}"
+        );
+        let location = response
+            .headers()
+            .get(LOCATION)
+            .ok_or("missing login redirect location")?
+            .to_str()?;
+        let location = url::Url::parse(&format!("http://localhost{location}"))?;
+        assert_eq!(location.path(), "/auth/login", "{path}");
+        assert_eq!(
+            location
+                .query_pairs()
+                .find(|(key, _)| key == "next")
+                .map(|(_, value)| value.into_owned())
+                .as_deref(),
+            Some(path),
+            "{path}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_pool_and_openapi(
+        ResolverMode::Registered(true),
+        "https://api.example.test",
+        db.pool.clone(),
+        true,
+    )?;
+    let session = valid_browser_session(&db, &state).await?;
+    let app = crate::routes::app(state);
+
+    for path in ["/swagger-ui/v2/", "/openapi/v2.json"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL),
+            Some(&"private, no-store".parse()?),
+            "{path}"
+        );
+    }
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn api_routes_reject_unknown_browser_session() -> Result<(), Box<dyn std::error::Error>> {
     let state = state(ResolverMode::Registered(true))?;
     let app = crate::routes::app(state);
@@ -577,6 +689,9 @@ async fn v2_exposes_only_me_to_api_keys() -> Result<(), Box<dyn std::error::Erro
             .and_then(|value| value.to_str().ok()),
         Some("private, no-store")
     );
+    let body = to_bytes(response.into_body(), 16 * 1024).await?;
+    let body: Value = serde_json::from_slice(&body)?;
+    assert_eq!(body["account"]["kind"], "agent");
 
     let response = app
         .oneshot(
@@ -613,6 +728,29 @@ async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> 
             .and_then(|value| value.to_str().ok()),
         Some("private, no-store")
     );
+    assert_eq!(
+        response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer realm=\"notegate-public-api\"")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn v2_routes_reject_legacy_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v2/me")
+                .header("authorization", format!("Bearer {TEST_LEGACY_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
         response
             .headers()
@@ -714,6 +852,7 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
     let session = valid_browser_session(&db, &state).await?;
     let app = crate::routes::app(state);
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -732,7 +871,158 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
     assert!(challenge.contains("resource_metadata="));
     assert!(challenge.contains("/.well-known/oauth-protected-resource/mcp"));
     assert!(challenge.contains("scope=\"openid offline_access\""));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp/v2")
+                .header("cookie", format!("{BROWSER_SESSION_COOKIE}={session}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer realm=\"notegate-agent-mcp-v2\"")
+    );
     db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn user_mcp_rejects_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let challenge = response
+        .headers()
+        .get(WWW_AUTHENTICATE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(challenge.contains("resource_metadata="));
+    Ok(())
+}
+
+#[tokio::test]
+async fn user_mcp_accepts_oauth_bearer() -> Result<(), Box<dyn std::error::Error>> {
+    let resource_url = "https://api.example.test/mcp";
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        resource_url,
+    )?);
+    let oauth = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!(resource_url),
+        future_exp(),
+        "kid-1",
+    )?;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("host", "api.example.test")
+                .header("authorization", format!("Bearer {oauth}"))
+                .header(ACCEPT, "application/json, text/event-stream")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(MCP_INITIALIZE_REQUEST))?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn agent_mcp_v2_accepts_only_v2_agent_keys() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?);
+
+    let accepted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp/v2")
+                .header("host", "api.example.test")
+                .header("authorization", format!("Bearer {TEST_API_KEY}"))
+                .header(ACCEPT, "application/json, text/event-stream")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(MCP_INITIALIZE_REQUEST))?,
+        )
+        .await?;
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let rejected = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp/v2")
+                .header("authorization", format!("Bearer {TEST_LEGACY_API_KEY}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        rejected
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer realm=\"notegate-agent-mcp-v2\"")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn agent_mcp_v2_rejects_oauth_bearer() -> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?);
+    let oauth = token(
+        "sub-1",
+        "https://auth.example.test",
+        json!("https://api.example.test/mcp"),
+        future_exp(),
+        "kid-1",
+    )?;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp/v2")
+                .header("authorization", format!("Bearer {oauth}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer realm=\"notegate-agent-mcp-v2\"")
+    );
     Ok(())
 }
 
@@ -837,7 +1127,6 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
         "/.well-known/oauth-authorization-server",
         "/.well-known/oauth-protected-resource",
         "/.well-known/oauth-protected-resource/mcp",
-        "/.well-known/oauth-protected-resource/mcp/tools",
     ] {
         let response = app
             .clone()
@@ -852,6 +1141,15 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
             Some("application/json; charset=utf-8")
         );
     }
+
+    let agent_metadata = app
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/oauth-protected-resource/mcp/v2")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(agent_metadata.status(), StatusCode::NOT_FOUND);
     Ok(())
 }
 

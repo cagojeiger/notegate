@@ -1,5 +1,5 @@
 use axum::Router;
-use notegate_core::Config;
+use axum::middleware::{from_fn, from_fn_with_state};
 use utoipa::openapi::Ref;
 use utoipa::openapi::content::Content;
 use utoipa::openapi::path::{Operation, PathItem};
@@ -10,6 +10,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
+use crate::auth::{mark_private_no_store, require_browser_session_for_docs};
 #[cfg(test)]
 use crate::rest;
 use crate::state::AppState;
@@ -22,7 +23,7 @@ use crate::state::AppState;
     components(schemas(crate::error::ErrorResponse)),
     modifiers(&ApiKeySecurityAddon),
     tags(
-        (name = "identity", description = "API-key caller identity"),
+        (name = "identity", description = "Agent API-key caller identity"),
     )
 )]
 pub struct PublicApiDoc;
@@ -35,10 +36,6 @@ pub struct PublicApiDoc;
     paths(
         rest::me::get_me,
         rest::me::get_usage,
-        rest::me::list_keys,
-        rest::me::create_key,
-        rest::me::rotate_key,
-        rest::me::revoke_key,
         rest::me::list_audit_events,
         rest::me::delete_me,
         rest::spaces::list,
@@ -132,7 +129,7 @@ impl Modify for ApiKeySecurityAddon {
             SecurityScheme::Http(
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
-                    .bearer_format("NoteGate API key")
+                    .bearer_format("NoteGate Agent API key")
                     .build(),
             ),
         );
@@ -177,11 +174,14 @@ fn error_response() -> Response {
     response
 }
 
-pub fn routes(config: &Config) -> Router<AppState> {
-    if config.openapi_enabled {
-        SwaggerUi::new("/swagger-ui/v2")
+pub fn routes(state: AppState) -> Router<AppState> {
+    if state.config.openapi_enabled {
+        let router: Router<AppState> = SwaggerUi::new("/swagger-ui/v2")
             .url("/openapi/v2.json", PublicApiDoc::openapi())
-            .into()
+            .into();
+        router
+            .layer(from_fn_with_state(state, require_browser_session_for_docs))
+            .layer(from_fn(mark_private_no_store))
     } else {
         Router::new()
     }
@@ -239,7 +239,10 @@ mod tests {
             serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
         let scheme = &value["components"]["securitySchemes"]["api_key"];
         assert_eq!(scheme["scheme"].as_str(), Some("bearer"));
-        assert_eq!(scheme["bearerFormat"].as_str(), Some("NoteGate API key"));
+        assert_eq!(
+            scheme["bearerFormat"].as_str(),
+            Some("NoteGate Agent API key")
+        );
     }
 
     #[test]
@@ -363,7 +366,6 @@ mod tests {
 
         assert_query_params(&value, "/api/v1/spaces", "get", &["limit", "cursor"]);
         assert_query_params(&value, "/api/v1/agents", "get", &["limit", "cursor"]);
-        assert_query_params(&value, "/api/v1/me/keys", "get", &["limit", "cursor"]);
         assert_query_params(
             &value,
             "/api/v1/me/audit-events",
@@ -574,8 +576,6 @@ mod tests {
         let paths = &doc.paths.paths;
         for path in [
             "/api/v1/me",
-            "/api/v1/me/keys",
-            "/api/v1/me/keys/{key_id}",
             "/api/v1/me/audit-events",
             "/api/v1/spaces",
             "/api/v1/spaces:reorder",
@@ -627,7 +627,6 @@ mod tests {
         let mut expected = vec![
             "DELETE /api/v1/agents/{agent_id}",
             "DELETE /api/v1/agents/{agent_id}/keys/{key_id}",
-            "DELETE /api/v1/me/keys/{key_id}",
             "DELETE /api/v1/spaces/{space_id}",
             "DELETE /api/v1/spaces/{space_id}/agents/{agent_id}",
             "DELETE /api/v1/spaces/{space_id}/file-uploads/{upload_id}",
@@ -637,7 +636,6 @@ mod tests {
             "DELETE /api/v1/me",
             "GET /api/v1/me",
             "GET /api/v1/me/audit-events",
-            "GET /api/v1/me/keys",
             "GET /api/v1/me/usage",
             "GET /api/v1/spaces",
             "GET /api/v1/spaces/{space_id}",
@@ -662,8 +660,6 @@ mod tests {
             "POST /api/v1/agents",
             "POST /api/v1/agents/{agent_id}/keys",
             "POST /api/v1/agents/{agent_id}/keys/{key_id}",
-            "POST /api/v1/me/keys",
-            "POST /api/v1/me/keys/{key_id}",
             "POST /api/v1/spaces",
             "POST /api/v1/spaces:reorder",
             "POST /api/v1/spaces/{space_id}/file-uploads",

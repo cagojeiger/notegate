@@ -26,7 +26,6 @@ t=0:
 accounts.is_active=false
 accounts.deleted_at/deleted_by_account_id 설정
 owned agents deactivate
-owned user API keys revoke
 owned agent API keys revoke
 owned agent connections disconnect
 ```
@@ -174,19 +173,17 @@ Node/Text/File mutation은 같은 transaction에서 `space_usage` counter를 갱
 
 ### 생성
 
-User caller만 API key를 만든다.
+User caller만 자신이 소유한 Agent의 API key를 만든다.
 
 ```text
-api_keys(account_id=user_id, created_by_user_id=user_id)       -- user key
 api_keys(account_id=agent_id, created_by_user_id=owner_user_id) -- agent key
 ```
 
 - 평문 token은 생성/rotation 응답에서 한 번만 반환한다.
-- User key는 user 자신에게만 만든다.
 - Agent key는 caller가 소유한 active agent에게만 만든다.
 - `expires_at`은 필수이며 미래 시각이어야 한다.
-- User key TTL 최대 30일, agent key TTL 최대 365일.
-- User account당 live key 최대 2개, agent account당 live key 최대 5개.
+- Agent key TTL은 최대 365일이다.
+- Agent account당 live key는 최대 5개다.
 
 ### Revoke/rotation
 

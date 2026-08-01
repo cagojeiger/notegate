@@ -8,33 +8,6 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
 use uuid::Uuid;
 
-const MIGRATIONS: &[&str] = &[
-    include_str!("../migrations/0001_extensions.sql"),
-    include_str!("../migrations/0002_identity.sql"),
-    include_str!("../migrations/0003_spaces.sql"),
-    include_str!("../migrations/0004_nodes_content.sql"),
-    include_str!("../migrations/0005_unicode_names.sql"),
-    include_str!("../migrations/0006_browser_sessions.sql"),
-    include_str!("../migrations/0007_expand_text_line_limit.sql"),
-    include_str!("../migrations/0008_recent_nodes_index.sql"),
-    include_str!("../migrations/0009_audit_events.sql"),
-    include_str!("../migrations/0010_file_change_events.sql"),
-    include_str!("../migrations/0011_nodes_name_sort_index.sql"),
-    include_str!("../migrations/0012_space_usage.sql"),
-    include_str!("../migrations/0013_split_space_usage_bytes.sql"),
-    include_str!("../migrations/0014_object_storage.sql"),
-    include_str!("../migrations/0015_object_only_files.sql"),
-    include_str!("../migrations/0016_default_user_tier.sql"),
-    include_str!("../migrations/0017_multipart_object_uploads.sql"),
-    include_str!("../migrations/0018_detected_file_media_type.sql"),
-    include_str!("../migrations/0019_file_change_sync.sql"),
-    include_str!("../migrations/0020_space_pins.sql"),
-    include_str!("../migrations/0021_text_security_policies.sql"),
-    include_str!("../migrations/0022_space_navigation_and_mcp.sql"),
-    include_str!("../migrations/0023_text_encryption_state.sql"),
-    include_str!("../migrations/0024_node_write_locks.sql"),
-];
-
 /// A throwaway schema-isolated database for one test.
 pub struct TestDb {
     database_url: String,
@@ -81,8 +54,9 @@ impl TestDb {
             .connect_with(options)
             .await?;
 
-        for migration in MIGRATIONS {
+        for migration in crate::MIGRATOR.iter() {
             let schema_migration = migration
+                .sql
                 .lines()
                 .filter(|line| !line.trim_start().starts_with("CREATE EXTENSION"))
                 .collect::<Vec<_>>()

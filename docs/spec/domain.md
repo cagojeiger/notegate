@@ -14,7 +14,7 @@ Folder     하위 node를 담는 container.
 Text       plain UTF-8 또는 client-side encrypted payload content object.
 File       binary/object content. Text content operation과 grep 대상이 아니다.
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
-API key    User 또는 Agent account로 인증되는 bearer credential.
+API key    Agent account로 인증되는 bearer credential.
 Browser session  Browser UI용 HttpOnly cookie session. AuthGate refresh token으로 server-side 갱신된다.
 Metadata   Node에 붙는 JSON object. content가 아니며 서버가 읽을 수 있다.
 Markdown frontmatter  Markdown Text content 맨 앞의 YAML properties block. Node metadata와 별도다.
@@ -25,7 +25,7 @@ Markdown frontmatter  Markdown Text content 맨 앞의 YAML properties block. No
 ```text
 User owns Spaces
 User owns Agents
-User creates API keys
+User creates API keys for owned Agents
 User connects Agents to Spaces
 Agent acts only inside connected Spaces
 ```
@@ -38,7 +38,6 @@ Agent acts only inside connected Spaces
 User caller:
   owned space read/write/manage
   owned agent manage
-  own user API key manage
   owned agent API key manage
 
 Agent caller:

@@ -10,15 +10,15 @@ use crate::auth::bearer::AuthError;
 use crate::identity::IdentityError;
 use crate::state::AppState;
 
-/// Resolve a raw bearer token as an API key on the given channel.
-pub async fn verify_api_key(
+/// Resolve a raw bearer token as an Agent API key on the given channel.
+pub async fn verify_agent_api_key(
     state: &AppState,
     token: &str,
     channel: Channel,
 ) -> Result<Caller, AuthError> {
     state
         .resolver
-        .resolve_api_key(token.to_owned(), channel)
+        .resolve_agent_api_key(token.to_owned(), channel)
         .await
         .map_err(map_api_key_identity_error)
 }

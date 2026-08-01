@@ -12,7 +12,7 @@
 | files | EditorArea | `/api/v1/spaces/{space_id}/files/{node_id}` |
 | metadata | Inspector | `/api/v1/spaces/{space_id}/nodes/{node_id}/metadata` |
 | agents | Settings Agents | `/api/v1/agents` |
-| api keys | Settings Account/Agents | `/api/v1/me/keys`, `/api/v1/agents/{id}/keys` |
+| agent API keys | Settings Agents | `/api/v1/agents/{id}/keys` |
 | connections | Settings Agents | `/api/v1/spaces/{space_id}/agents` |
 
 ## 상태 분류
@@ -391,7 +391,7 @@ Expand all / Collapse all
 Tabs:
 
 ```text
-General | Account | Agents | MCP
+General | Account | Agents
 ```
 
 General:
@@ -402,24 +402,19 @@ Account:
 
 - current user/account.
 - theme.
-- user API keys.
+- user MCP OAuth 2.1 server URL.
 - sign out.
 
 Agents:
 
 - agent list.
 - 한 번에 하나의 agent만 펼친다.
-- 펼친 agent 안에 agent API keys와 space access를 둔다.
-
-MCP:
-
-- MCP server URL.
-- `Authorization: Bearer <credential>` header.
-- OAuth, user API key, agent API key 사용 요약.
+- 펼친 agent 안에 space permission, agent API keys, MCP와 REST API V2 연결 정보를 둔다.
+- REST API V2 문서는 새 탭으로 연다.
 
 규칙:
 
-- user API key는 Account에 둔다.
+- user MCP OAuth 연결은 Account에 둔다.
 - agent API key는 해당 agent 아래에 둔다.
 - connections는 펼친 agent 안에서 관리한다.
 - `scopes`는 현재 정책상 표시하지 않는다.

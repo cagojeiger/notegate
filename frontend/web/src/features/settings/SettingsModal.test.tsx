@@ -35,7 +35,6 @@ function mockSettingsApi(me: unknown = userMe, options: { failPermissionUpdate?:
   let spacePermission: SpacePermission = options.initialSpacePermission ?? "write";
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const path = String(input);
-    if (path.includes("/api/v1/me/keys")) return jsonResponse({ keys: [], page });
     if (path.includes("/api/v1/agents/agent-1/keys")) return jsonResponse({ keys: [], page });
     if (path.includes("/api/v1/spaces/space-1/agents/agent-1")) {
       if (init?.method === "PUT") {
@@ -83,7 +82,7 @@ describe("SettingsModal", () => {
     mockSettingsApi();
   });
 
-  it("keeps user API keys inside the account tab", async () => {
+  it("places user OAuth MCP access inside the account tab", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -91,10 +90,11 @@ describe("SettingsModal", () => {
     await user.click(screen.getByRole("tab", { name: "Account" }));
 
     expect(screen.getByText("Appearance")).toBeInTheDocument();
-    expect(screen.getByText("My API Keys")).toBeInTheDocument();
-    expect(await screen.findByText("No user API keys.")).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "API Keys" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.getByText("MCP access")).toBeInTheDocument();
+    expect(screen.getByText("Connect as your account with OAuth 2.1.")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.queryByText("My API Keys")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
   });
 
   it("shows browser workspace reset controls in the general tab", async () => {
@@ -116,21 +116,7 @@ describe("SettingsModal", () => {
     expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
   });
 
-  it("shows the MCP connection cheat sheet in its own tab", async () => {
-    const user = userEvent.setup();
-    renderSettings();
-
-    await user.click(screen.getByRole("tab", { name: "MCP" }));
-
-    expect(screen.getByText("External clients use one endpoint and one bearer header.")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
-    expect(screen.getByText("Authorization: Bearer <credential>")).toBeInTheDocument();
-    expect(screen.getByText("OAuth login")).toBeInTheDocument();
-    expect(screen.getByText("Agent API key")).toBeInTheDocument();
-    expect(screen.getByText("User API key")).toBeInTheDocument();
-  });
-
-  it("shows agent keys and space permissions inside an expanded agent", async () => {
+  it("shows agent permissions, keys, MCP, and API v2 inside an expanded agent", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -142,6 +128,11 @@ describe("SettingsModal", () => {
     expect(screen.getByText("Space permissions")).toBeInTheDocument();
     expect(await screen.findByText("Personal")).toBeInTheDocument();
     expect(await screen.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
+    expect(screen.getByText("Connections")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/api/v2")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "OpenAPI docs" })).toHaveAttribute("href", "http://localhost:3000/swagger-ui/v2/");
+    expect(screen.getByRole("link", { name: "OpenAPI docs" })).toHaveAttribute("target", "_blank");
   });
 
   it("updates agent space permissions from the permission select", async () => {

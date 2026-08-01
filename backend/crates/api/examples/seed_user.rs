@@ -1,4 +1,4 @@
-//! Dev-only bootstrap: create one user account, API key, and browser session.
+//! Dev-only bootstrap: create one user browser session and one Agent API key.
 //! Runs migrations + ensures crypto key epochs first so it works against a
 //! freshly-wiped database. Requires the same NOTEGATE_* env as the API.
 
@@ -7,12 +7,12 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::browser_session_repo::{InsertBrowserSession, format_token, token_prefix};
 use notegate_db::{
-    AccountRepo, ApiKeyRepo, AuditEventRepo, BrowserSessionRepo, CryptoKeyEpochRepo, connect,
+    AccountRepo, AgentRepo, ApiKeyRepo, BrowserSessionRepo, CryptoKeyEpochRepo, connect,
     run_migrations,
 };
 use notegate_model::account::AccountKind;
-use notegate_model::{CreateApiKey, ResolveAttrs};
-use notegate_service::accounts::AccountService;
+use notegate_model::{CreateAgent, CreateAgentApiKey, ResolveAttrs};
+use notegate_service::agents::AgentService;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -45,28 +45,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let browser_session = create_browser_session(&config, &pool, &crypto, account.id).await?;
-    let api_key_repo =
-        ApiKeyRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
-    let svc = AccountService::with_api_keys(
-        account_repo,
-        api_key_repo,
-        AuditEventRepo::new(pool.clone()),
-        crypto,
+    let agent_service = AgentService::with_crypto(
+        AgentRepo::new(pool.clone()),
+        ApiKeyRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version()),
+        crypto.clone(),
     );
-    let minted = svc
+    let agent = agent_service
+        .create_agent(
+            AccountKind::User,
+            account.id,
+            CreateAgent {
+                name: "e2e-agent".to_owned(),
+            },
+        )
+        .await?;
+    let agent_key = agent_service
         .create_key(
             AccountKind::User,
             account.id,
-            CreateApiKey {
-                name: "fe-test-key".to_owned(),
+            CreateAgentApiKey {
+                agent_id: agent.id,
+                name: "e2e-agent-key".to_owned(),
                 scopes: Vec::new(),
-                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(30)),
+                expires_at: Some(Utc::now() + chrono::Duration::days(1)),
             },
         )
         .await?;
 
     println!("ACCOUNT_ID={}", account.id);
-    println!("TOKEN={}", minted.token);
+    println!("AGENT_API_KEY={}", agent_key.token);
     println!("BROWSER_SESSION={browser_session}");
     Ok(())
 }

@@ -86,12 +86,8 @@ impl AppState {
             pii_crypto.clone(),
             config.default_user_tier,
         );
-        let account_lifecycle = AccountService::with_api_keys(
-            account_repo.clone(),
-            api_key_repo.clone(),
-            AuditEventRepo::new(db.clone()),
-            pii_crypto.clone(),
-        );
+        let account_lifecycle =
+            AccountService::new(account_repo.clone(), AuditEventRepo::new(db.clone()));
         let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents =

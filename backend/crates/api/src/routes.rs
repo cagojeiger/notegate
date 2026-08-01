@@ -27,7 +27,7 @@ use crate::auth::metadata::{
 use crate::auth::oauth::{callback, login, logout, success};
 use crate::auth::{mark_private_no_store, require_browser_session, require_public_api_key};
 use crate::error::ApiError;
-use crate::mcp::server::mcp_handler;
+use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
 use crate::observability::{self, HttpRequestMetrics, MetricsHandle};
 use crate::state::AppState;
 
@@ -105,17 +105,22 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         Router::new().nest("/api/v2", public_v2_routes(state.clone())),
         limits.rate_limits.public_v2,
     );
-    let mcp = apply_rate_limit(
-        Router::new().route("/mcp", any(mcp_handler)),
+    let user_mcp = apply_rate_limit(
+        Router::new().route("/mcp", any(user_mcp_handler)),
         limits.rate_limits.mcp,
+    );
+    let agent_mcp_v2 = apply_rate_limit(
+        Router::new().route("/mcp/v2", any(agent_mcp_v2_handler)),
+        limits.rate_limits.mcp_v2,
     );
     let router = Router::new()
         .merge(auth_routes())
         .merge(metadata_routes(&state))
-        .merge(crate::openapi::routes(&state.config))
+        .merge(crate::openapi::routes(state.clone()))
         .merge(browser_v1)
         .merge(public_v2)
-        .merge(mcp);
+        .merge(user_mcp)
+        .merge(agent_mcp_v2);
     apply_data_plane_limits(router, limits)
 }
 
@@ -194,12 +199,16 @@ fn metadata_routes(state: &AppState) -> Router<AppState> {
         );
 
     if metadata_path == "/.well-known/oauth-protected-resource" {
-        router.route(&wildcard_path, get(protected_resource_metadata))
+        router.route(&wildcard_path, get(oauth_metadata_not_found))
     } else {
         router
             .route(&metadata_path, get(protected_resource_metadata))
-            .route(&wildcard_path, get(protected_resource_metadata))
+            .route(&wildcard_path, get(oauth_metadata_not_found))
     }
+}
+
+async fn oauth_metadata_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 fn rest_api_routes(state: AppState) -> Router<AppState> {
@@ -410,7 +419,7 @@ fn is_static_or_spa_success(status: u16, method: &Method, route: &str, path: &st
         && route.is_empty()
         && !path.starts_with("/api/")
         && !path.starts_with("/auth/")
-        && path != "/mcp"
+        && !matches!(path, "/mcp" | "/mcp/v2")
         && !path.starts_with("/.well-known/")
 }
 
@@ -426,7 +435,7 @@ fn is_auth_flow(route: &str, path: &str) -> bool {
 }
 
 fn is_mcp_request(route: &str, path: &str) -> bool {
-    route == "/mcp" || path == "/mcp"
+    matches!(route, "/mcp" | "/mcp/v2") || matches!(path, "/mcp" | "/mcp/v2")
 }
 
 fn is_browser_auth_probe(status: u16, method: &Method, route: &str, path: &str) -> bool {
@@ -591,9 +600,13 @@ mod tests {
             .merge(apply_rate_limit(
                 Router::new().route("/mcp", get(|| async { "mcp" })),
                 limit,
+            ))
+            .merge(apply_rate_limit(
+                Router::new().route("/mcp/v2", get(|| async { "mcp-v2" })),
+                limit,
             ));
 
-        for path in ["/api/v1/ping", "/api/v2/ping", "/mcp"] {
+        for path in ["/api/v1/ping", "/api/v2/ping", "/mcp", "/mcp/v2"] {
             let response = app
                 .clone()
                 .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
@@ -601,7 +614,7 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{path}");
         }
-        for path in ["/api/v1/ping", "/api/v2/ping", "/mcp"] {
+        for path in ["/api/v1/ping", "/api/v2/ping", "/mcp", "/mcp/v2"] {
             let response = app
                 .clone()
                 .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
@@ -796,6 +809,7 @@ mod tests {
         for (method, route, path) in [
             (Method::GET, "/api/v1/me", "/api/v1/me"),
             (Method::POST, "/mcp", "/mcp"),
+            (Method::POST, "/mcp/v2", "/mcp/v2"),
             (Method::GET, "/auth/login", "/auth/login"),
             (
                 Method::GET,

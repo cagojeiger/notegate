@@ -1,6 +1,6 @@
 # REST 인증
 
-NoteGate는 자체 password login API를 두지 않는다. 사람 사용자는 authgate OAuth/OIDC로 로그인하고, API key는 연결된 account의 credential로 취급한다.
+NoteGate는 자체 password login API를 두지 않는다. 사람 사용자는 authgate OAuth/OIDC로 로그인하고, API key는 Agent credential로만 발급한다.
 
 Auth endpoint는 JSON resource API와 성격이 다르므로 `/api/v1` 아래에 넣지 않는다. Browser redirect/callback, session cookie 발급, OAuth protected-resource metadata를 담당한다.
 
@@ -63,10 +63,10 @@ Browser session absolute lifetime은 30일이다. Local validation lease는 1시
 GET /.well-known/oauth-authorization-server
 GET /.well-known/oauth-protected-resource
 GET /.well-known/oauth-protected-resource/mcp
-GET /.well-known/oauth-protected-resource/mcp/{path...}
 ```
 
 MCP OAuth client가 authgate authorization server와 resource metadata를 discovery할 수 있게 한다. MCP OAuth public client id 기본값은 `notegate-mcp`이며 설정으로 바꿀 수 있다.
+`/mcp/v2`는 Agent API key 전용이므로 OAuth protected-resource metadata를 제공하지 않는다.
 
 MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 포함한다.
 
@@ -76,9 +76,10 @@ MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 �
 - Browser session cookie는 `Path=/`, `HttpOnly`, `SameSite=Lax`로 발급한다. 운영 HTTPS 환경에서는 `Secure`를 붙인다.
 - Browser session cookie는 opaque token이다. Cookie token hash와 encrypted refresh token은 `browser_sessions`에 저장한다.
 - `/api/v1/*`는 browser session cookie만 허용한다. `Authorization` bearer를 보내면 인증을 거부한다.
-- `/api/v2/*`는 `Authorization: Bearer ngk_v1_...` API key만 허용한다. Browser session cookie와 OAuth JWT는 인증 수단으로 인정하지 않는다.
+- `/api/v2/*`는 `Authorization: Bearer ngk_v2_...` Agent API key만 허용한다. User 소유 API key, browser session cookie, OAuth JWT는 인증 수단으로 인정하지 않는다.
 - Cookie 기반 browser session으로 `POST`, `PUT`, `PATCH`, `DELETE`를 호출하려면 same-origin `Origin` 또는 `Referer`가 필요하다.
-- OpenAPI가 활성화된 배포에서는 공개 Swagger UI를 `/swagger-ui/v2`, OpenAPI JSON을 `/openapi/v2.json`에서 제공한다.
-- MCP는 bearer credential만 허용한다. Browser session cookie는 `/mcp`에서 인증 수단으로 인정하지 않는다.
-- MCP는 `ngk_v1_` API key와 MCP OAuth bearer를 모두 유지한다.
+- OpenAPI가 활성화된 배포에서는 Swagger UI를 `/swagger-ui/v2`, OpenAPI JSON을 `/openapi/v2.json`에서 제공하며 browser session을 요구한다. 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. 문서 열람 세션은 `/api/v2/*` 호출 권한이 아니며, Swagger API 호출은 별도의 API key를 사용한다.
+- MCP는 bearer credential만 허용한다. Browser session cookie는 `/mcp`와 `/mcp/v2`에서 인증 수단으로 인정하지 않는다.
+- `/mcp`는 user MCP OAuth bearer만 허용한다.
+- `/mcp/v2`는 Agent 소유 `ngk_v2_` API key만 허용한다.
 - Device flow는 authgate flow이며 user account로 resolve한다.

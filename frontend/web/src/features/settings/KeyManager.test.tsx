@@ -54,7 +54,7 @@ describe("KeyManager", () => {
     const create = vi.fn().mockResolvedValue({
       id: "key-1",
       name: "agent",
-      token: "ngk_v1_token",
+      token: "ngk_v2_token",
       expires_at: "2027-06-14T23:55:00.000Z",
       created_at: "2026-06-15T00:00:00.000Z"
     });

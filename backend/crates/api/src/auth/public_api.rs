@@ -6,7 +6,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use notegate_model::Channel;
 
-use crate::auth::api_key::verify_api_key;
+use crate::auth::api_key::verify_agent_api_key;
 use crate::auth::bearer::{AuthError, auth_error_response, extract_bearer};
 use crate::state::AppState;
 
@@ -16,10 +16,7 @@ pub async fn require_public_api_key(
     next: Next,
 ) -> Response {
     let caller = match extract_bearer(request.headers()) {
-        Some(token) if notegate_service::api_keys::looks_like_token(token) => {
-            verify_api_key(&state, token, Channel::Api).await
-        }
-        Some(_) => Err(AuthError::InvalidToken),
+        Some(token) => verify_agent_api_key(&state, token, Channel::Api).await,
         None => Err(AuthError::MissingToken),
     };
     let caller = match caller {
