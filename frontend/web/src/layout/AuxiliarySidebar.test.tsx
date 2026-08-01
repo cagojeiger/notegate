@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ComponentProps } from "react";
+import { useEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeRestNode } from "../test/fixtures";
+import { MarkdownOutlineProvider, useMarkdownOutlineContext, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 
 const mocks = vi.hoisted(() => ({
@@ -17,7 +18,18 @@ vi.mock("../features/editor/useEditorQueries", () => ({
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
 
 function renderSidebar(overrides: Partial<SidebarProps> = {}) {
-  const props: SidebarProps = {
+  const props = sidebarProps(overrides);
+  const view = render(<AuxiliarySidebar {...props} />);
+  return {
+    ...view,
+    rerenderSidebar(nextOverrides: Partial<SidebarProps>) {
+      view.rerender(<AuxiliarySidebar {...props} {...nextOverrides} />);
+    }
+  };
+}
+
+function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
+  return {
     activeNode: textNode,
     canWriteActiveSpace: true,
     canManageActiveSpace: true,
@@ -31,13 +43,6 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
     ...overrides
-  };
-  const view = render(<AuxiliarySidebar {...props} />);
-  return {
-    ...view,
-    rerenderSidebar(nextOverrides: Partial<SidebarProps>) {
-      view.rerender(<AuxiliarySidebar {...props} {...nextOverrides} />);
-    }
   };
 }
 
@@ -75,7 +80,7 @@ describe("AuxiliarySidebar", () => {
 
     const search = screen.getByRole("switch", { name: "Include in search" });
     const encryption = screen.getByRole("switch", { name: "Stored text encryption" });
-    const writeLock = screen.getByRole("switch", { name: "Lock this node" });
+    const writeLock = screen.getByRole("switch", { name: "Lock changes" });
     expect(search).toBeChecked();
     expect(encryption).not.toBeChecked();
 
@@ -88,21 +93,21 @@ describe("AuxiliarySidebar", () => {
     expect(onWriteLockedChange).toHaveBeenCalledWith(true);
   });
 
-  it("explains that node settings apply immediately", () => {
+  it("explains that settings apply immediately", () => {
     renderSidebar();
 
-    expect(screen.getByRole("button", { name: "About Node settings" })).toHaveAccessibleDescription(
-      "Changes apply immediately to this node. A direct lock protects this node and its descendants; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
+    expect(screen.getByRole("button", { name: "About Settings" })).toHaveAccessibleDescription(
+      "Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
     );
   });
 
   it("prioritizes node identity and keeps secondary details collapsed", () => {
     renderSidebar();
 
-    expect(screen.getByText("Text")).toBeInTheDocument();
+    expect(screen.getAllByText("Document").length).toBeGreaterThan(0);
     expect(screen.getByText("1.8 KB")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
-    expect(screen.getByText("Details").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("System details").closest("details")).not.toHaveAttribute("open");
   });
 
   it("shows direct child count for folders without text-only fields", () => {
@@ -125,7 +130,7 @@ describe("AuxiliarySidebar", () => {
       })
     });
 
-    expect(screen.getByText("Folder")).toBeInTheDocument();
+    expect(screen.getAllByText("Folder").length).toBeGreaterThan(0);
     expect(screen.getByText("2+")).toBeInTheDocument();
     expect(screen.queryByText("Size")).not.toBeInTheDocument();
     expect(screen.queryByText("Lines")).not.toBeInTheDocument();
@@ -158,7 +163,7 @@ describe("AuxiliarySidebar", () => {
     expect(screen.getByRole("button", { name: "Edit metadata" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
   });
 
   it("tracks search and encryption requests independently", () => {
@@ -171,7 +176,7 @@ describe("AuxiliarySidebar", () => {
   it("tracks write-lock requests independently", () => {
     renderSidebar({ writeLockPending: true });
 
-    expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeEnabled();
   });
@@ -204,7 +209,7 @@ describe("AuxiliarySidebar", () => {
       }
     });
 
-    expect(screen.getByRole("switch", { name: "Lock this node" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Lock changes" })).toBeChecked();
     expect(screen.getByText("Locked here")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit metadata" })).toBeDisabled();
     expect(screen.queryByTitle("/Policies")).not.toBeInTheDocument();
@@ -234,7 +239,7 @@ describe("AuxiliarySidebar", () => {
     });
 
     expect(screen.getByText("Inherited")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Lock this node" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Lock changes" })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Edit metadata" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
     expect(screen.queryByTitle("/Policies")).not.toBeInTheDocument();
@@ -280,7 +285,7 @@ describe("AuxiliarySidebar", () => {
       writeLockAvailable: false
     });
 
-    expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
     expect(screen.getAllByText("Unavailable")).toHaveLength(2);
     expect(screen.queryByText("Max")).not.toBeInTheDocument();
   });
@@ -295,7 +300,7 @@ describe("AuxiliarySidebar", () => {
       }
     });
 
-    expect(screen.getByRole("switch", { name: "Lock this node" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
     expect(screen.getByText("Root")).toBeInTheDocument();
   });
 
@@ -315,7 +320,7 @@ describe("AuxiliarySidebar", () => {
       onWriteLockedChange
     });
 
-    const writeLock = screen.getByRole("switch", { name: "Lock this node" });
+    const writeLock = screen.getByRole("switch", { name: "Lock changes" });
     expect(writeLock).toBeChecked();
     expect(writeLock).toBeEnabled();
     expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
@@ -330,7 +335,92 @@ describe("AuxiliarySidebar", () => {
     expect(screen.getByText("No metadata.")).toBeInTheDocument();
     expect(screen.queryByText("{}")).not.toBeInTheDocument();
   });
+
+  it("keeps the preferred Outline view and targets the active document", async () => {
+    const user = userEvent.setup();
+    mocks.useFolderChildrenStat.mockClear();
+    const navigate = vi.fn();
+    const onOutlineNavigate = vi.fn();
+    const outline: MarkdownOutlineSnapshot = {
+      groupId: 7,
+      spaceId: textNode.space_id,
+      nodeId: textNode.id,
+      activeItemId: "overview",
+      items: [
+        { id: "overview", label: "개요", level: 1 },
+        { id: "details", label: "세부 사항", level: 2 }
+      ],
+      navigate
+    };
+    const folderNode = makeRestNode({ id: "folder-2", kind: "folder", name: "Archive" });
+    const view = render(
+      <MarkdownOutlineProvider>
+        <OutlinePublisher outline={outline} />
+        <AuxiliarySidebar {...sidebarProps({ activeNode: textNode, activeGroupId: 7, onOutlineNavigate })} />
+      </MarkdownOutlineProvider>
+    );
+
+    const outlineTab = screen.getByRole("tab", { name: "Outline" });
+    await waitFor(() => expect(outlineTab).toBeEnabled());
+    await user.click(outlineTab);
+    expect(mocks.useFolderChildrenStat).not.toHaveBeenCalled();
+    expect(screen.getByRole("tabpanel", { name: "Outline" })).toBeVisible();
+    expect(screen.getByRole("tabpanel", { name: "Outline" })).toHaveAttribute("aria-labelledby", expect.stringMatching(/-outline-tab$/));
+    const outlineNavigation = screen.getByRole("navigation", { name: "Document outline" });
+    const currentHeading = within(outlineNavigation).getByRole("button", { name: "개요" });
+    const otherHeading = within(outlineNavigation).getByRole("button", { name: "세부 사항" });
+    expect(currentHeading).toHaveAttribute("aria-current", "location");
+    expect(currentHeading.closest("li")?.querySelector('[aria-hidden="true"]')).toBeInTheDocument();
+    expect(otherHeading).not.toHaveAttribute("aria-current");
+    expect(otherHeading.closest("li")?.querySelector('[aria-hidden="true"]')).not.toBeInTheDocument();
+
+    await user.click(otherHeading);
+    expect(navigate).toHaveBeenCalledWith("details");
+    expect(onOutlineNavigate).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <MarkdownOutlineProvider>
+        <OutlinePublisher outline={outline} />
+      </MarkdownOutlineProvider>
+    );
+    view.rerender(
+      <MarkdownOutlineProvider>
+        <OutlinePublisher outline={outline} />
+        <AuxiliarySidebar {...sidebarProps({ activeNode: textNode, activeGroupId: 7, onOutlineNavigate })} />
+      </MarkdownOutlineProvider>
+    );
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Outline" })).toHaveAttribute("aria-selected", "true"));
+
+    view.rerender(
+      <MarkdownOutlineProvider>
+        <OutlinePublisher outline={outline} />
+        <AuxiliarySidebar {...sidebarProps({ activeNode: folderNode, activeGroupId: 7, onOutlineNavigate })} />
+      </MarkdownOutlineProvider>
+    );
+    expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Outline" })).toBeDisabled();
+
+    view.rerender(
+      <MarkdownOutlineProvider>
+        <OutlinePublisher outline={outline} />
+        <AuxiliarySidebar {...sidebarProps({ activeNode: textNode, activeGroupId: 7, onOutlineNavigate })} />
+      </MarkdownOutlineProvider>
+    );
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Outline" })).toHaveAttribute("aria-selected", "true"));
+  });
 });
+
+function OutlinePublisher({ outline }: { outline: MarkdownOutlineSnapshot }) {
+  const outlineContext = useMarkdownOutlineContext();
+  const publishOutline = outlineContext?.publishOutline;
+  const clearOutline = outlineContext?.clearOutline;
+
+  useEffect(() => {
+    publishOutline?.(outline);
+    return () => clearOutline?.(outline);
+  }, [clearOutline, outline, publishOutline]);
+  return null;
+}
 
 const textNode = makeRestNode({
   byte_len: 1842,

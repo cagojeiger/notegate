@@ -22,7 +22,7 @@ export function deleteSpaceDialog(space: Space, onDelete: (spaceId: string) => v
   return {
     kind: "confirm",
     title: "Delete space",
-    message: `Delete space "${space.name}"? This permanently removes all of its nodes.`,
+    message: `Delete space "${space.name}"? This permanently removes everything inside it.`,
     danger: true,
     confirmLabel: "Delete",
     onConfirm: () => onDelete(space.id)
@@ -32,7 +32,7 @@ export function deleteSpaceDialog(space: Space, onDelete: (spaceId: string) => v
 export function createNodeDialog(parentId: string, kind: "folder" | "text", onCreate: (input: { parentId: string; kind: "folder" | "text"; name: string; content?: string }) => void): AppDialog {
   return {
     kind: "prompt",
-    title: kind === "folder" ? "New folder" : "New text",
+    title: kind === "folder" ? "New folder" : "New document",
     label: "Name",
     initial: "",
     submitLabel: "Create",
@@ -44,7 +44,7 @@ export function uploadFileDialog(parentId: string, file: File, onUpload: (input:
   return {
     kind: "prompt",
     title: "Upload file",
-    label: "File node name",
+    label: "File name",
     initial: file.name,
     submitLabel: "Upload",
     onSubmit: (name) => onUpload({ parentId, name, file })

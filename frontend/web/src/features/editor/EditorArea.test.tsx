@@ -120,7 +120,7 @@ describe("EditorArea", () => {
     const copyPath = screen.getByRole("button", { name: "Copy path" });
     expect(download).toBeEnabled();
     expect(copyPath).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeDisabled();
 
     fireEvent.click(download);
     fireEvent.click(copyPath);

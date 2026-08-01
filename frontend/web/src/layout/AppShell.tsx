@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from "react";
 import type { Me, Space } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
+import { MarkdownOutlineProvider } from "../features/editor/MarkdownOutlineContext";
 import { EventHistoryModal } from "../features/events/EventHistoryModal";
 import { SettingsModal } from "../features/settings/SettingsModal";
 import { useUsageQuery } from "../features/spaces/useUsageQueries";
@@ -131,6 +132,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
   if (workbench.error) return <FullScreenStatus label="Could not load spaces" detail={workbench.error} />;
 
   return (
+    <MarkdownOutlineProvider>
     <div className="flex h-full flex-col overflow-hidden bg-bg text-text">
       <TitleBar
         activeSpace={workbench.activeSpace}
@@ -239,6 +241,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
               <AuxiliarySidebarFrame mode={layout.auxiliaryMode}>
                 <AuxiliarySidebar
                   activeNode={workbench.inspectedNode}
+                  activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}
                   loadingNode={workbench.inspectorNodeLoading}
                   canWriteActiveSpace={workbench.canWriteActiveSpace}
                   canManageActiveSpace={workbench.canManageActiveSpace}
@@ -251,6 +254,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   onSearchEnabledChange={actions.setNodeSearchEnabled}
                   onWriteLockedChange={actions.setNodeWriteLocked}
                   onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}
+                  onOutlineNavigate={closeMobilePanels}
                 />
               </AuxiliarySidebarFrame>
               <PanelOverlay visible={mobileOverlayVisible} onClose={closeMobilePanels} />
@@ -281,5 +285,6 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
       {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}
       <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />
     </div>
+    </MarkdownOutlineProvider>
   );
 }

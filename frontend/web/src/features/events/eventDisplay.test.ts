@@ -84,7 +84,7 @@ describe("eventDisplay", () => {
     expect(formatFileChangeDetails(event)).toEqual([
       { label: "Parent", value: "87654321…4321" },
       { label: "Size", value: "1.5 KB" },
-      { label: "Node", value: "12345678…9012" }
+      { label: "Item", value: "12345678…9012" }
     ]);
     expect(formatFileChangeDetails({
       ...event,
@@ -98,7 +98,7 @@ describe("eventDisplay", () => {
     })).toEqual([
       { label: "Size", value: "1 KB → 2 KB" },
       { label: "Lines", value: "12 → 18" },
-      { label: "Node", value: "12345678…9012" }
+      { label: "Item", value: "12345678…9012" }
     ]);
   });
 
@@ -138,7 +138,7 @@ describe("eventDisplay", () => {
       { label: "From parent", value: "parent-1" },
       { label: "To parent", value: "parent-2" },
       { label: "Also renamed", value: "Yes" },
-      { label: "Node", value: "node-1" }
+      { label: "Item", value: "node-1" }
     ]);
     expect(formatFileChangeDetails({
       ...event,
@@ -158,7 +158,7 @@ describe("eventDisplay", () => {
       { label: "Copied texts", value: "2" },
       { label: "Copied files", value: "1" },
       { label: "Recursive", value: "Yes" },
-      { label: "Node", value: "node-1" }
+      { label: "Item", value: "node-1" }
     ]);
     expect(formatFileChangeDetails({
       ...event,
@@ -167,7 +167,7 @@ describe("eventDisplay", () => {
     })).toEqual([
       { label: "Deleted items", value: "4" },
       { label: "Recursive", value: "Yes" },
-      { label: "Node", value: "node-1" }
+      { label: "Item", value: "node-1" }
     ]);
     expect(formatFileChangeDetails({
       ...event,
@@ -175,7 +175,7 @@ describe("eventDisplay", () => {
       metadata: { name_changed: true, sort_order_changed: true }
     })).toEqual([
       { label: "Changed", value: "Name, Order" },
-      { label: "Node", value: "node-1" }
+      { label: "Item", value: "node-1" }
     ]);
     expect(formatFileChangeDetails({
       ...event,
@@ -183,7 +183,7 @@ describe("eventDisplay", () => {
       metadata: { write_lock_changed: true, write_locked: false }
     })).toEqual([
       { label: "Changed", value: "Write lock" },
-      { label: "Node", value: "node-1" }
+      { label: "Item", value: "node-1" }
     ]);
   });
 });

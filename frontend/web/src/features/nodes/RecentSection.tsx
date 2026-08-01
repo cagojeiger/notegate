@@ -36,7 +36,7 @@ function RecentList({ activeSpace, openedNodeId, inspectedNodeId, density, scrol
   }, [recentQuery.data?.pages]);
   if (recentQuery.isLoading) return <div className="text-xs text-muted">Loading recent…</div>;
   if (recentQuery.isError) return <EmptyState>Recent is unavailable for this server build.</EmptyState>;
-  if (nodes.length === 0) return <div className="text-xs text-muted">No recent nodes yet.</div>;
+  if (nodes.length === 0) return <div className="text-xs text-muted">No recent items yet.</div>;
   return (
     <div className="space-y-1">
       {nodes.map((node) => (

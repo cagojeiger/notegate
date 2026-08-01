@@ -22,7 +22,7 @@ export function NodeActionMenu({ onRenameNode, onMoveNode, onDeleteNode, disable
   return (
     <div ref={anchorRef} className="relative">
       <IconButton
-        label="Node actions"
+        label="More actions"
         expanded={menuOpen}
         controls={menuOpen ? overlayId : undefined}
         hasPopup="dialog"
@@ -36,7 +36,7 @@ export function NodeActionMenu({ onRenameNode, onMoveNode, onDeleteNode, disable
         open={menuOpen}
         onClose={closeMenu}
         id={overlayId}
-        label="Node actions"
+        label="More actions"
         role="dialog"
         width={160}
         estimatedHeight={120}

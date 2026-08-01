@@ -63,8 +63,8 @@ export function StatusBar({
               </span>
               <span
                 role="img"
-                title={`New text encryption is ${activeSpace.default_text_encryption_enabled ? "on" : "off"}`}
-                aria-label={`New text encryption is ${activeSpace.default_text_encryption_enabled ? "on" : "off"}`}
+                title={`New document encryption is ${activeSpace.default_text_encryption_enabled ? "on" : "off"}`}
+                aria-label={`New document encryption is ${activeSpace.default_text_encryption_enabled ? "on" : "off"}`}
               >
                 {activeSpace.default_text_encryption_enabled ? <LockKeyhole size={13} aria-hidden="true" /> : <UnlockKeyhole size={13} aria-hidden="true" />}
               </span>
