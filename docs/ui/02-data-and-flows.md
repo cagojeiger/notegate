@@ -397,7 +397,7 @@ General | Account | Agents
 General:
 
 - saved workspace reset.
-- About에 `VERSION` 파일 기준의 현재 NoteGate 버전을 표시한다.
+- About에 `VERSION` 파일 기준의 현재 NoteGate 버전과 공식 GitHub 저장소 링크를 표시한다.
 
 Account:
 
