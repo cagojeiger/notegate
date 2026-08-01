@@ -129,7 +129,7 @@ impl Modify for ApiKeySecurityAddon {
             SecurityScheme::Http(
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
-                    .bearer_format("NoteGate Agent API key")
+                    .bearer_format("NoteGate ngk_v2_ Agent API key")
                     .build(),
             ),
         );
@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(scheme["scheme"].as_str(), Some("bearer"));
         assert_eq!(
             scheme["bearerFormat"].as_str(),
-            Some("NoteGate Agent API key")
+            Some("NoteGate ngk_v2_ Agent API key")
         );
     }
 

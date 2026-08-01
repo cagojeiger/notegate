@@ -58,11 +58,11 @@ async fn agent_api_key_resolution_rejects_historical_user_owned_key()
     let user_id = insert_user_account(&db.pool, "identity-user", "identity@example.test").await?;
     let key_repo =
         ApiKeyRepo::with_lookup_key(db.pool.clone(), crypto.lookup_key_id(), crypto.version());
-    sqlx::query("ALTER TABLE api_keys DISABLE TRIGGER api_keys_agent_owner")
+    sqlx::query("ALTER TABLE api_keys DISABLE TRIGGER api_keys_v2_agent_owner")
         .execute(&db.pool)
         .await?;
-    let token = insert_key(&key_repo, &crypto, user_id, user_id, "ngk_v1_").await?;
-    sqlx::query("ALTER TABLE api_keys ENABLE TRIGGER api_keys_agent_owner")
+    let token = insert_key(&key_repo, &crypto, user_id, user_id, "ngk_v2_").await?;
+    sqlx::query("ALTER TABLE api_keys ENABLE TRIGGER api_keys_v2_agent_owner")
         .execute(&db.pool)
         .await?;
 
@@ -98,17 +98,21 @@ async fn agent_api_key_resolution_returns_agent_caller() -> Result<(), Box<dyn s
     let key_repo =
         ApiKeyRepo::with_lookup_key(db.pool.clone(), crypto.lookup_key_id(), crypto.version());
     let resolver = resolver(&db, crypto.clone());
-    for format_prefix in ["ngk_v1_", "ngk_v2_"] {
-        let token = insert_key(&key_repo, &crypto, agent.id, user_id, format_prefix).await?;
-        let caller = resolver.resolve_agent_api_key(&token, Channel::Mcp).await?;
+    let token = insert_key(&key_repo, &crypto, agent.id, user_id, "ngk_v2_").await?;
+    let caller = resolver.resolve_agent_api_key(&token, Channel::Mcp).await?;
 
-        assert_eq!(caller.account_id(), agent.id);
-        assert_eq!(caller.channel, Channel::Mcp);
-        assert_eq!(
-            caller.agent().map(|agent| agent.name.as_str()),
-            Some("identity-agent")
-        );
-    }
+    assert_eq!(caller.account_id(), agent.id);
+    assert_eq!(caller.channel, Channel::Mcp);
+    assert_eq!(
+        caller.agent().map(|agent| agent.name.as_str()),
+        Some("identity-agent")
+    );
+
+    let legacy = format!("ngk_v1_{}_legacy-secret", Uuid::new_v4());
+    assert!(matches!(
+        resolver.resolve_agent_api_key(&legacy, Channel::Mcp).await,
+        Err(IdentityError::NotRegistered)
+    ));
     db.cleanup().await;
     Ok(())
 }

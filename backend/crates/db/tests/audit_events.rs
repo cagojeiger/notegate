@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account, set_user_tier};
+use common::{TestDb, agent_api_key_prefix, insert_user_account, set_user_tier};
 use notegate_core::security::PiiCrypto;
 use notegate_db::api_key_repo::InsertApiKey;
 use notegate_db::browser_session_repo::InsertBrowserSession;
@@ -207,17 +207,18 @@ async fn account_delete_audit_records_nonzero_cascade_counts()
         .await?;
     spaces.delete_space(space.id, user, user).await?;
 
+    let key_id = Uuid::new_v4();
     api_keys
         .insert_key_with_cap(
             InsertApiKey {
-                key_id: Uuid::new_v4(),
+                key_id,
                 account_id: agent,
                 command: &CreateApiKey {
                     name: "live-agent-key".to_owned(),
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v2_agent",
+                token_prefix: &agent_api_key_prefix(key_id),
                 token_hash: "hash-agent-delete-cascade",
                 created_by: user,
                 rotated_from_key_id: None,
@@ -311,7 +312,7 @@ async fn agent_connection_and_agent_key_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v2_agent",
+                token_prefix: &agent_api_key_prefix(key_id),
                 token_hash: "hash-agent-audit",
                 created_by: owner,
                 rotated_from_key_id: None,
@@ -387,7 +388,7 @@ async fn agent_key_rotate_and_revoke_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v2_agent",
+                token_prefix: &agent_api_key_prefix(first_key),
                 token_hash: "hash-agent-audit-1",
                 created_by: user,
                 rotated_from_key_id: None,
@@ -406,7 +407,7 @@ async fn agent_key_rotate_and_revoke_mutations_write_audit_events()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v2_agent",
+                token_prefix: &agent_api_key_prefix(rotated_key),
                 token_hash: "hash-agent-audit-2",
                 created_by: user,
                 rotated_from_key_id: Some(first_key),

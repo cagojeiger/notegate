@@ -5,12 +5,12 @@ V2는 외부 확장 서버가 사용하는 Agent API key 전용 공개 계약이
 ## 인증
 
 ```http
-Authorization: Bearer ngk_v1_...
+Authorization: Bearer ngk_v2_...
 ```
 
 - Browser session cookie와 OAuth JWT는 V2 인증 수단이 아니다.
 - User 소유 API key는 인증되지 않는다.
-- 호환 배포 동안 Agent 소유 `ngk_v1_`과 `ngk_v2_` key를 모두 허용한다.
+- Agent 소유 `ngk_v2_` key만 허용한다.
 - DB의 `token_prefix`는 요청 token에서 계산한 접두사와 정확히 일치해야 한다.
 - V2 응답은 `Cache-Control: private, no-store`로 전달한다.
 

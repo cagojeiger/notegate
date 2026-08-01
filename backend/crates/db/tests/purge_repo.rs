@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, insert_user_account};
+use common::{TestDb, agent_api_key_prefix, insert_user_account};
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     ApiKeyRepo, BrowserSessionRepo, PurgeRepo, api_key_repo::InsertApiKey,
@@ -147,16 +147,17 @@ async fn seed_key(
     created_by: Uuid,
     name: &str,
 ) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let key_id = Uuid::new_v4();
     let key = repo
         .insert_key_unchecked_for_test(InsertApiKey {
-            key_id: Uuid::new_v4(),
+            key_id,
             account_id,
             command: &CreateApiKey {
                 name: name.to_owned(),
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v2_test",
+            token_prefix: &agent_api_key_prefix(key_id),
             token_hash: &format!("hash-{name}-{}", Uuid::new_v4()),
             created_by,
             rotated_from_key_id: None,

@@ -9,7 +9,7 @@
 )]
 mod common;
 
-use common::{TestDb, deactivate_account, insert_user_account};
+use common::{TestDb, agent_api_key_prefix, deactivate_account, insert_user_account};
 use notegate_core::{Error, limits};
 use notegate_db::{ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::CreateApiKey;
@@ -36,16 +36,17 @@ async fn insert_capped(
     label: &str,
     max_live_keys: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let key_id = Uuid::new_v4();
     repo.insert_key_with_cap(
         InsertApiKey {
-            key_id: Uuid::new_v4(),
+            key_id,
             account_id,
             command: &CreateApiKey {
                 name: label.to_owned(),
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v2_test",
+            token_prefix: &agent_api_key_prefix(key_id),
             token_hash: &format!("hash-{label}-{}", Uuid::new_v4()),
             created_by,
             rotated_from_key_id: None,
@@ -92,16 +93,17 @@ async fn concurrent_create_respects_cap(
     for index in 0..8 {
         let repo = repo.clone();
         handles.push(tokio::spawn(async move {
+            let key_id = Uuid::new_v4();
             repo.insert_key_with_cap(
                 InsertApiKey {
-                    key_id: Uuid::new_v4(),
+                    key_id,
                     account_id,
                     command: &CreateApiKey {
                         name: format!("race-{index}"),
                         scopes: Vec::new(),
                         expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                     },
-                    token_prefix: "ngk_v2_test",
+                    token_prefix: &agent_api_key_prefix(key_id),
                     token_hash: &format!("hash-race-{index}-{}", Uuid::new_v4()),
                     created_by,
                     rotated_from_key_id: None,
@@ -137,17 +139,18 @@ async fn insert_key_with_cap_rejects_user_account() -> Result<(), Box<dyn std::e
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
     let user_id = insert_user_account(&db.pool, "race-user", "race-user@example.test").await?;
+    let key_id = Uuid::new_v4();
     let err = repo
         .insert_key_with_cap(
             InsertApiKey {
-                key_id: Uuid::new_v4(),
+                key_id,
                 account_id: user_id,
                 command: &CreateApiKey {
                     name: "user-key".to_owned(),
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v2_user",
+                token_prefix: &agent_api_key_prefix(key_id),
                 token_hash: "hash-user-key-rejected",
                 created_by: user_id,
                 rotated_from_key_id: None,
@@ -199,13 +202,14 @@ async fn insert_key_rejects_blank_or_overlong_name() -> Result<(), Box<dyn std::
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         };
         let token_hash = format!("hash-invalid-{}", Uuid::new_v4());
+        let key_id = Uuid::new_v4();
         let err = repo
             .insert_key_with_cap(
                 InsertApiKey {
-                    key_id: Uuid::new_v4(),
+                    key_id,
                     account_id: user_id,
                     command: &command,
-                    token_prefix: "ngk_v2_test",
+                    token_prefix: &agent_api_key_prefix(key_id),
                     token_hash: &token_hash,
                     created_by: user_id,
                     rotated_from_key_id: None,
@@ -236,13 +240,14 @@ async fn insert_key_with_cap_rejects_inactive_account() -> Result<(), Box<dyn st
         scopes: Vec::new(),
         expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
     };
+    let key_id = Uuid::new_v4();
     let err = repo
         .insert_key_with_cap(
             InsertApiKey {
-                key_id: Uuid::new_v4(),
+                key_id,
                 account_id: user_id,
                 command: &command,
-                token_prefix: "ngk_v2_test",
+                token_prefix: &agent_api_key_prefix(key_id),
                 token_hash: "hash-inactive-key",
                 created_by: user_id,
                 rotated_from_key_id: None,
@@ -272,15 +277,16 @@ async fn list_by_account_returns_live_keys_only_and_pages() -> Result<(), Box<dy
     // Seed three live keys plus one revoked and one expired key. The list must
     // surface only the live keys; dead keys are excluded (they are purged later).
     for name in ["live-a", "live-b", "live-c", "to-revoke", "to-expire"] {
+        let key_id = Uuid::new_v4();
         repo.insert_key_unchecked_for_test(InsertApiKey {
-            key_id: Uuid::new_v4(),
+            key_id,
             account_id: agent_id,
             command: &CreateApiKey {
                 name: name.to_owned(),
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v2_test",
+            token_prefix: &agent_api_key_prefix(key_id),
             token_hash: &format!("hash-{name}"),
             created_by: owner,
             rotated_from_key_id: None,
@@ -335,8 +341,9 @@ async fn historical_user_owned_api_key_does_not_authenticate_or_mark_last_used()
     let repo = ApiKeyRepo::new(db.pool.clone());
     let user_id = insert_user_account(&db.pool, "api-key-user", "user@example.test").await?;
     let key_id = Uuid::new_v4();
+    let token_prefix = agent_api_key_prefix(key_id);
 
-    sqlx::query("ALTER TABLE api_keys DISABLE TRIGGER api_keys_agent_owner")
+    sqlx::query("ALTER TABLE api_keys DISABLE TRIGGER api_keys_v2_agent_owner")
         .execute(&db.pool)
         .await?;
     repo.insert_key_unchecked_for_test(InsertApiKey {
@@ -347,18 +354,18 @@ async fn historical_user_owned_api_key_does_not_authenticate_or_mark_last_used()
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_test",
+        token_prefix: &token_prefix,
         token_hash: "hash-user-key",
         created_by: user_id,
         rotated_from_key_id: None,
     })
     .await?;
-    sqlx::query("ALTER TABLE api_keys ENABLE TRIGGER api_keys_agent_owner")
+    sqlx::query("ALTER TABLE api_keys ENABLE TRIGGER api_keys_v2_agent_owner")
         .execute(&db.pool)
         .await?;
 
     let resolved = repo
-        .find_live_agent_id_by_key(key_id, "ngk_v2_test", "hash-user-key")
+        .find_live_agent_id_by_key(key_id, &token_prefix, "hash-user-key")
         .await?;
     assert_eq!(resolved, None);
 
@@ -374,12 +381,23 @@ async fn historical_user_owned_api_key_does_not_authenticate_or_mark_last_used()
 }
 
 #[tokio::test]
-async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
+async fn v2_agent_api_key_guard_retires_invalid_keys_and_blocks_legacy_writes()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
     let repo = ApiKeyRepo::new(db.pool.clone());
+    sqlx::query("DROP TRIGGER api_keys_v2_agent_owner ON api_keys")
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("DROP FUNCTION enforce_v2_agent_api_key()")
+        .execute(&db.pool)
+        .await?;
+    sqlx::raw_sql(include_str!(
+        "../migrations/0026_enforce_agent_api_keys.sql"
+    ))
+    .execute(&db.pool)
+    .await?;
     sqlx::query("DROP TRIGGER api_keys_agent_owner ON api_keys")
         .execute(&db.pool)
         .await?;
@@ -394,14 +412,41 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
     let user_v2_id = Uuid::new_v4();
     let live_v1_id = Uuid::new_v4();
     let live_v2_id = Uuid::new_v4();
+    let malformed_v2_id = Uuid::new_v4();
     let revoked_v1_id = Uuid::new_v4();
 
     for (key_id, account_id, name, prefix) in [
-        (user_v1_id, owner, "user-v1", "ngk_v1_user"),
-        (user_v2_id, owner, "user-v2", "ngk_v2_user"),
-        (live_v1_id, agent_id, "live-v1", "ngk_v1_live"),
-        (live_v2_id, agent_id, "live-v2", "ngk_v2_live"),
-        (revoked_v1_id, agent_id, "revoked-v1", "ngk_v1_revoked"),
+        (user_v1_id, owner, "user-v1", format!("ngk_v1_{user_v1_id}")),
+        (
+            user_v2_id,
+            owner,
+            "user-v2",
+            agent_api_key_prefix(user_v2_id),
+        ),
+        (
+            live_v1_id,
+            agent_id,
+            "live-v1",
+            format!("ngk_v1_{live_v1_id}"),
+        ),
+        (
+            live_v2_id,
+            agent_id,
+            "live-v2",
+            agent_api_key_prefix(live_v2_id),
+        ),
+        (
+            malformed_v2_id,
+            agent_id,
+            "malformed-v2",
+            "ngk_v2_malformed".to_owned(),
+        ),
+        (
+            revoked_v1_id,
+            agent_id,
+            "revoked-v1",
+            format!("ngk_v1_{revoked_v1_id}"),
+        ),
     ] {
         repo.insert_key_unchecked_for_test(InsertApiKey {
             key_id,
@@ -411,7 +456,7 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: prefix,
+            token_prefix: &prefix,
             token_hash: &format!("hash-{name}"),
             created_by: owner,
             rotated_from_key_id: None,
@@ -422,7 +467,7 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
         .await?;
 
     sqlx::raw_sql(include_str!(
-        "../migrations/0026_enforce_agent_api_keys.sql"
+        "../migrations/0027_enforce_v2_agent_api_keys.sql"
     ))
     .execute(&db.pool)
     .await?;
@@ -436,6 +481,7 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
         user_v2_id,
         live_v1_id,
         live_v2_id,
+        malformed_v2_id,
         revoked_v1_id,
     ])
     .fetch_all(&db.pool)
@@ -446,10 +492,15 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
     assert_eq!(row(user_v1_id).2.as_deref(), Some("user_api_key_retired"));
     assert!(row(user_v2_id).1.is_some());
     assert_eq!(row(user_v2_id).2.as_deref(), Some("user_api_key_retired"));
-    assert!(row(live_v1_id).1.is_none());
-    assert!(row(live_v1_id).2.is_none());
+    assert!(row(live_v1_id).1.is_some());
+    assert_eq!(row(live_v1_id).2.as_deref(), Some("legacy_api_key_retired"));
     assert!(row(live_v2_id).1.is_none());
     assert!(row(live_v2_id).2.is_none());
+    assert!(row(malformed_v2_id).1.is_some());
+    assert_eq!(
+        row(malformed_v2_id).2.as_deref(),
+        Some("invalid_api_key_format_retired")
+    );
     assert!(row(revoked_v1_id).1.is_some());
     assert_eq!(row(revoked_v1_id).2.as_deref(), Some("manual-revocation"));
 
@@ -457,10 +508,15 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
             "SELECT owner_user_id, actor_account_id, source, op_type, resource_type, resource_id, metadata->>'reason' AS reason \
              FROM audit_events WHERE resource_type = 'api_key' AND resource_id = ANY($1)",
         )
-        .bind(vec![user_v1_id, user_v2_id])
+        .bind(vec![
+            user_v1_id,
+            user_v2_id,
+            live_v1_id,
+            malformed_v2_id,
+        ])
         .fetch_all(&db.pool)
         .await?;
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 4);
     for key_id in [user_v1_id, user_v2_id] {
         let event = events
             .iter()
@@ -473,17 +529,38 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
         assert_eq!(event.resource_type, "api_key");
         assert_eq!(event.reason, "user_api_key_retired");
     }
+    let legacy_event = events
+        .iter()
+        .find(|event| event.resource_id == Some(live_v1_id))
+        .expect("legacy key audit event");
+    assert_eq!(legacy_event.owner_user_id, Some(owner));
+    assert_eq!(legacy_event.actor_account_id, None);
+    assert_eq!(legacy_event.source, "system");
+    assert_eq!(legacy_event.op_type, "agent_key.revoke");
+    assert_eq!(legacy_event.resource_type, "api_key");
+    assert_eq!(legacy_event.reason, "legacy_api_key_retired");
+    let malformed_event = events
+        .iter()
+        .find(|event| event.resource_id == Some(malformed_v2_id))
+        .expect("malformed key audit event");
+    assert_eq!(malformed_event.owner_user_id, Some(owner));
+    assert_eq!(malformed_event.actor_account_id, None);
+    assert_eq!(malformed_event.source, "system");
+    assert_eq!(malformed_event.op_type, "agent_key.revoke");
+    assert_eq!(malformed_event.resource_type, "api_key");
+    assert_eq!(malformed_event.reason, "invalid_api_key_format_retired");
 
+    let late_user_key_id = Uuid::new_v4();
     let late_user_key = repo
         .insert_key_unchecked_for_test(InsertApiKey {
-            key_id: Uuid::new_v4(),
+            key_id: late_user_key_id,
             account_id: owner,
             command: &CreateApiKey {
                 name: "late-user-key".to_owned(),
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v2_late_user",
+            token_prefix: &agent_api_key_prefix(late_user_key_id),
             token_hash: "hash-late-user",
             created_by: owner,
             rotated_from_key_id: None,
@@ -496,15 +573,62 @@ async fn agent_api_key_guard_retires_late_user_keys_and_preserves_agent_keys()
             .contains("api keys may only belong to agent accounts")
     );
 
+    let late_legacy_key_id = Uuid::new_v4();
+    let late_legacy_key = repo
+        .insert_key_unchecked_for_test(InsertApiKey {
+            key_id: late_legacy_key_id,
+            account_id: agent_id,
+            command: &CreateApiKey {
+                name: "late-legacy-key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            },
+            token_prefix: &format!("ngk_v1_{late_legacy_key_id}"),
+            token_hash: "hash-late-legacy-agent",
+            created_by: owner,
+            rotated_from_key_id: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        late_legacy_key
+            .to_string()
+            .contains("agent api key prefix must match ngk_v2_{key_id}")
+    );
+
+    let late_malformed_key_id = Uuid::new_v4();
+    let late_malformed_key = repo
+        .insert_key_unchecked_for_test(InsertApiKey {
+            key_id: late_malformed_key_id,
+            account_id: agent_id,
+            command: &CreateApiKey {
+                name: "late-malformed-key".to_owned(),
+                scopes: Vec::new(),
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            },
+            token_prefix: "ngk_v2_malformed",
+            token_hash: "hash-late-malformed-agent",
+            created_by: owner,
+            rotated_from_key_id: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        late_malformed_key
+            .to_string()
+            .contains("agent api key prefix must match ngk_v2_{key_id}")
+    );
+
+    let late_agent_key_id = Uuid::new_v4();
     repo.insert_key_unchecked_for_test(InsertApiKey {
-        key_id: Uuid::new_v4(),
+        key_id: late_agent_key_id,
         account_id: agent_id,
         command: &CreateApiKey {
             name: "late-agent-key".to_owned(),
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_late_agent",
+        token_prefix: &agent_api_key_prefix(late_agent_key_id),
         token_hash: "hash-late-agent",
         created_by: owner,
         rotated_from_key_id: None,
@@ -541,7 +665,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
                 scopes: Vec::new(),
                 expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
             },
-            token_prefix: "ngk_v2_test",
+            token_prefix: &agent_api_key_prefix(key_id),
             token_hash: &token_hash,
             created_by: owner,
             rotated_from_key_id: None,
@@ -564,7 +688,7 @@ async fn rotate_key_is_atomic_and_excludes_old_key_from_live_cap()
                     scopes: Vec::new(),
                     expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
                 },
-                token_prefix: "ngk_v2_rotated",
+                token_prefix: &agent_api_key_prefix(new_key_id),
                 token_hash: "hash-rotated",
                 created_by: owner,
                 rotated_from_key_id: Some(first_key_id),
@@ -616,7 +740,7 @@ async fn rotate_key_rejects_inactive_account() -> Result<(), Box<dyn std::error:
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_test",
+        token_prefix: &agent_api_key_prefix(old_key_id),
         token_hash: "hash-old-key",
         created_by: owner,
         rotated_from_key_id: None,
@@ -629,13 +753,14 @@ async fn rotate_key_rejects_inactive_account() -> Result<(), Box<dyn std::error:
         scopes: Vec::new(),
         expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
     };
+    let new_key_id = Uuid::new_v4();
     let err = repo
         .rotate_key(
             InsertApiKey {
-                key_id: Uuid::new_v4(),
+                key_id: new_key_id,
                 account_id: agent_id,
                 command: &command,
-                token_prefix: "ngk_v2_rotated",
+                token_prefix: &agent_api_key_prefix(new_key_id),
                 token_hash: "hash-new-key",
                 created_by: owner,
                 rotated_from_key_id: Some(old_key_id),
@@ -664,6 +789,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     let creator = insert_user_account(&db.pool, "agent-owner", "agent-owner@example.test").await?;
     let agent_id = insert_agent_account(&db.pool, creator, "api-agent").await?;
     let key_id = Uuid::new_v4();
+    let token_prefix = agent_api_key_prefix(key_id);
 
     repo.insert_key_unchecked_for_test(InsertApiKey {
         key_id,
@@ -673,7 +799,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_agent",
+        token_prefix: &token_prefix,
         token_hash: "hash-agent-key",
         created_by: creator,
         rotated_from_key_id: None,
@@ -681,7 +807,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     .await?;
 
     assert_eq!(
-        repo.find_live_agent_id_by_key(key_id, "ngk_v2_agent", "hash-agent-key")
+        repo.find_live_agent_id_by_key(key_id, &token_prefix, "hash-agent-key")
             .await?,
         Some(agent_id)
     );
@@ -699,7 +825,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     .execute(&db.pool)
     .await?;
     assert_eq!(
-        repo.find_live_agent_id_by_key(key_id, "ngk_v2_agent", "hash-agent-key")
+        repo.find_live_agent_id_by_key(key_id, &token_prefix, "hash-agent-key")
             .await?,
         None
     );
@@ -729,7 +855,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_live",
+        token_prefix: &agent_api_key_prefix(live_id),
         token_hash: "hash-live",
         created_by: user_id,
         rotated_from_key_id: None,
@@ -743,7 +869,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_revoked",
+        token_prefix: &agent_api_key_prefix(revoked_id),
         token_hash: "hash-revoked",
         created_by: user_id,
         rotated_from_key_id: None,
@@ -759,7 +885,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_expired",
+        token_prefix: &agent_api_key_prefix(expired_id),
         token_hash: "hash-expired",
         created_by: user_id,
         rotated_from_key_id: None,
@@ -773,18 +899,26 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         .await?;
 
     assert_eq!(
-        repo.find_live_agent_id_by_key(live_id, "ngk_v2_live", "hash-live")
+        repo.find_live_agent_id_by_key(live_id, &agent_api_key_prefix(live_id), "hash-live")
             .await?,
         Some(agent_id)
     );
     assert_eq!(
-        repo.find_live_agent_id_by_key(revoked_id, "ngk_v2_revoked", "hash-revoked")
-            .await?,
+        repo.find_live_agent_id_by_key(
+            revoked_id,
+            &agent_api_key_prefix(revoked_id),
+            "hash-revoked",
+        )
+        .await?,
         None
     );
     assert_eq!(
-        repo.find_live_agent_id_by_key(expired_id, "ngk_v2_expired", "hash-expired")
-            .await?,
+        repo.find_live_agent_id_by_key(
+            expired_id,
+            &agent_api_key_prefix(expired_id),
+            "hash-expired",
+        )
+        .await?,
         None
     );
     assert_eq!(repo.count_live_keys(agent_id).await?, 1);
@@ -813,7 +947,7 @@ async fn revoke_key_is_scoped_to_account_id() -> Result<(), Box<dyn std::error::
             scopes: Vec::new(),
             expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
         },
-        token_prefix: "ngk_v2_other",
+        token_prefix: &agent_api_key_prefix(key_id),
         token_hash: "hash-other",
         created_by: other_owner,
         rotated_from_key_id: None,

@@ -44,16 +44,16 @@ API layer는 space/text/file/agent 업무 규칙을 직접 구현하지 않는�
 browser login via authgate -> user account
 MCP OAuth via authgate      -> user account
 device flow via authgate    -> user account
-ngk_v1_/ngk_v2_ Agent API key -> agent account
+ngk_v2_ Agent API key       -> agent account
 ```
 
 OAuth 계열 인증은 user로 처리한다. Browser login은 opaque browser session cookie를 발급하고, BE가 저장한 encrypted authgate refresh token으로 server-side 갱신한다. API key는 active Agent account로만 resolve한다.
 
 ```text
 /api/v1/* -> browser session cookie만 허용
-/api/v2/* -> Agent 소유 ngk_v1_/ngk_v2_ API key 허용
-/mcp      -> user MCP OAuth bearer + 호환 기간의 Agent ngk_v1_ key 허용
-/mcp/v2   -> Agent 소유 ngk_v1_/ngk_v2_ API key 허용
+/api/v2/* -> Agent 소유 ngk_v2_ API key만 허용
+/mcp      -> user MCP OAuth bearer만 허용
+/mcp/v2   -> Agent 소유 ngk_v2_ API key만 허용
 ```
 
 두 MCP endpoint는 같은 tool engine과 업무 규칙을 사용한다. 경로를 나누는 목적은 인증과

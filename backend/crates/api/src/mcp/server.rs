@@ -212,12 +212,7 @@ pub async fn user_mcp_handler(State(state): State<AppState>, request: Request<Bo
     let Some(token) = extract_bearer(request.headers()).map(str::to_owned) else {
         return user_mcp_auth_response(&state, AuthError::MissingToken);
     };
-    let caller = if notegate_service::api_keys::looks_like_legacy_agent_token(&token) {
-        verify_agent_api_key(&state, &token, Channel::Mcp).await
-    } else {
-        verify_bearer_mcp(&state, &token).await
-    };
-    let caller = match caller {
+    let caller = match verify_bearer_mcp(&state, &token).await {
         Ok(caller) => caller,
         Err(error) => return user_mcp_auth_response(&state, error),
     };

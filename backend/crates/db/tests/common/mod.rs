@@ -14,6 +14,11 @@ use notegate_model::{FileEncryptionMode, FileObject, Node, ResolveAttrs};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+#[allow(dead_code)]
+pub fn agent_api_key_prefix(key_id: Uuid) -> String {
+    format!("ngk_v2_{key_id}")
+}
+
 /// Insert a `kind='user'` account + matching `users` row, returning the id.
 ///
 /// Shared by the agent tests; `account_repo` builds its users through the repo,

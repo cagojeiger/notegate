@@ -96,7 +96,7 @@
 - Framework/styling system: React, TypeScript, Tailwind utilities, and CSS custom properties.
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
 - Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available.
-- Compatibility constraints: Preserve the current OAuth popup and developer API-key fallback behavior.
+- Authentication constraints: Preserve the current OAuth popup behavior. Agent integrations use `ngk_v2_` keys through `/api/v2` and `/mcp/v2`.
 - Observability constraints: Dashboard variables and Prometheus labels remain bounded; search queries, paths, account/Space/node identifiers, filenames, and content never appear in metrics. Dashboard links preserve the selected time range and shared variables, refresh cadence matches the 15-second scrape interval, and repeated series use stable semantic colors.
 - Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, light/dark login screenshots, dashboard JSON validation, Prometheus config validation, and a rendered Grafana screenshot.
 

@@ -127,7 +127,7 @@ impl CallerResolver for TestResolver {
         channel: Channel,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move {
-            if token != TEST_API_KEY && token != TEST_LEGACY_API_KEY {
+            if token != TEST_API_KEY {
                 return Err(IdentityError::NotRegistered);
             }
             match self.mode {
@@ -723,8 +723,7 @@ async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[tokio::test]
-async fn v2_routes_accept_legacy_agent_keys_during_compatibility_rollout()
--> Result<(), Box<dyn std::error::Error>> {
+async fn v2_routes_reject_legacy_agent_keys() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(
@@ -735,7 +734,7 @@ async fn v2_routes_accept_legacy_agent_keys_during_compatibility_rollout()
         )
         .await?;
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 
@@ -872,52 +871,31 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
-async fn user_mcp_rejects_v2_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn user_mcp_rejects_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state_with_resource(
         ResolverMode::Registered(true),
         "https://api.example.test/mcp",
     )?);
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("authorization", format!("Bearer {TEST_API_KEY}"))
-                .body(Body::empty())?,
-        )
-        .await?;
+    for token in [TEST_API_KEY, TEST_LEGACY_API_KEY] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    let challenge = response
-        .headers()
-        .get(WWW_AUTHENTICATE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    assert!(challenge.contains("resource_metadata="));
-    Ok(())
-}
-
-#[tokio::test]
-async fn user_mcp_accepts_legacy_agent_keys_during_compatibility_rollout()
--> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state_with_resource(
-        ResolverMode::Registered(true),
-        "https://api.example.test/mcp",
-    )?);
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("host", "api.example.test")
-                .header("authorization", format!("Bearer {TEST_LEGACY_API_KEY}"))
-                .header(ACCEPT, "application/json, text/event-stream")
-                .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(MCP_INITIALIZE_REQUEST))?,
-        )
-        .await?;
-
-    assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let challenge = response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        assert!(challenge.contains("resource_metadata="));
+    }
     Ok(())
 }
 
@@ -953,8 +931,8 @@ async fn user_mcp_accepts_oauth_bearer() -> Result<(), Box<dyn std::error::Error
 }
 
 #[tokio::test]
-async fn agent_mcp_v2_accepts_v1_and_v2_agent_keys_during_compatibility_rollout()
--> Result<(), Box<dyn std::error::Error>> {
+async fn agent_mcp_v2_accepts_v2_and_rejects_legacy_keys() -> Result<(), Box<dyn std::error::Error>>
+{
     let app = crate::routes::app(state_with_resource(
         ResolverMode::Registered(true),
         "https://api.example.test/mcp",
@@ -987,7 +965,7 @@ async fn agent_mcp_v2_accepts_v1_and_v2_agent_keys_during_compatibility_rollout(
                 .body(Body::from(MCP_INITIALIZE_REQUEST))?,
         )
         .await?;
-    assert_eq!(legacy.status(), StatusCode::OK);
+    assert_eq!(legacy.status(), StatusCode::UNAUTHORIZED);
     Ok(())
 }
 
