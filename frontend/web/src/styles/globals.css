@@ -631,6 +631,11 @@ button.markdown-image-fallback {
   background: transparent !important;
 }
 
+:root[data-theme="dark"] .ng-source-flat .shiki,
+:root[data-theme="dark"] .ng-source-flat .shiki span {
+  background-color: transparent !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
