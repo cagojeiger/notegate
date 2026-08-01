@@ -196,7 +196,7 @@ describe("SpaceLibrary", () => {
       "Controls whether User MCP can list and access this space. Agent MCP access is configured separately. Pinning does not affect MCP access."
     );
     expect(screen.getByRole("button", { name: "About New item defaults" })).toHaveAccessibleDescription(
-      "These settings apply only to new nodes created in this space. Search applies to every new node, while encryption applies only to new text nodes. Existing nodes are unchanged."
+      "These settings apply only to new items created in this space. Search applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
     );
   });
 

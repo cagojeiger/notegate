@@ -7,6 +7,7 @@ import { Button, Card, IconButton, MenuButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { canMutateNode } from "../nodes/nodeWriteAccess";
 import { EditorGroupHeader } from "./EditorGroupHeader";
+import type { MarkdownOutlineIdentity } from "./MarkdownOutlineContext";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { TextPreview } from "./TextPreview";
 import { inferTextFormat, isStructuredFormat } from "./textFormat";
@@ -61,6 +62,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
     }),
     [loadMarkdownImage, node.path]
   );
+  const markdownOutlineIdentity = useMemo<MarkdownOutlineIdentity>(() => ({
+    groupId,
+    spaceId: node.space_id,
+    nodeId: node.id
+  }), [groupId, node.id, node.space_id]);
 
   useEffect(() => {
     setStructuredMode("tree");
@@ -141,12 +147,12 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           ) : null}
           {mode === "edit" && node.effective_write_locked ? (
             <div className="border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
-              This node is now locked. Unsaved edits are preserved here but cannot be saved.
+              This document is now locked. Unsaved edits are preserved here but cannot be saved.
             </div>
           ) : null}
           {conflict ? (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
-              <span>This node changed elsewhere since you opened it.</span>
+              <span>This document changed elsewhere since you opened it.</span>
               <div className="flex gap-2">
                 <Button size="sm" secondary onClick={reloadConflict}>Reload</Button>
                 <Button size="sm" variant="danger" onClick={overwriteDraft}>Overwrite</Button>
@@ -174,6 +180,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
               content={content}
               markdownLinkPolicy={markdownLinkPolicy}
               markdownImagePolicy={markdownImagePolicy}
+              markdownOutlineIdentity={markdownOutlineIdentity}
               structuredMode={structuredMode}
               structuredExpansionMode={structuredExpansionMode}
             />

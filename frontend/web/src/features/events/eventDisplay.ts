@@ -155,7 +155,7 @@ export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetai
     if (changes.length > 0) details.push({ label: "Changed", value: changes.join(", ") });
   }
 
-  if (event.node_id) details.push({ label: "Node", value: shortId(event.node_id) });
+  if (event.node_id) details.push({ label: "Item", value: shortId(event.node_id) });
   return details;
 }
 

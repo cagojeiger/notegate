@@ -24,13 +24,17 @@ test("browser session dashboard supports space, text, metadata, and file basics"
 
   await page.locator('button[aria-label="Add space"]:visible').click();
   await page.getByLabel("Space name").fill(spaceName);
-  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.getByRole("dialog", { name: "New space" })
+    .getByRole("button", { name: "Create", exact: true })
+    .click();
   await expect(page.locator("body")).toContainText(spaceName);
 
-  await page.getByLabel("Create node").click();
-  await page.getByRole("button", { name: "New text" }).first().click();
-  await page.getByLabel("Name", { exact: true }).fill(textName);
   await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.getByRole("button", { name: "New document" }).first().click();
+  await page.getByLabel("Name", { exact: true }).fill(textName);
+  await page.getByRole("dialog", { name: "New document" })
+    .getByRole("button", { name: "Create", exact: true })
+    .click();
   await expect(page.locator("body")).toContainText(textName);
 
   await page.getByRole("button", { name: "Edit", exact: true }).click();
@@ -50,7 +54,7 @@ test("browser session dashboard supports space, text, metadata, and file basics"
   const uploadPath = join(dir, fileName);
   writeFileSync(uploadPath, "small upload from web smoke e2e\n");
 
-  await page.getByLabel("Create node").click();
+  await page.getByRole("button", { name: "Create", exact: true }).click();
   const fileChooserPromise = page.waitForEvent("filechooser");
   await page.getByText("Upload file").click();
   const fileChooser = await fileChooserPromise;

@@ -76,7 +76,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     });
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
-    expect(useUiStore.getState().toast).toBe("Linked node not found");
+    expect(useUiStore.getState().toast).toBe("Link target not found");
   });
 
   it("opens markdown links even when tree reveal fails", async () => {
@@ -94,7 +94,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     });
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
-    expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
+    expect(useUiStore.getState().toast).toBe("Opened item, but could not reveal it in Files");
   });
 
   it("opens a resolved markdown link in the original source group when focus changes before resolution", async () => {
@@ -164,7 +164,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     });
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
-    expect(useUiStore.getState().toast).toBe("Could not open linked node");
+    expect(useUiStore.getState().toast).toBe("Could not open link target");
   });
 
   it("opens regular nodes even when tree reveal fails", async () => {
@@ -179,9 +179,9 @@ describe("useWorkbenchNodeNavigationActions", () => {
       await result.current.openNode(targetNode);
     });
 
-    expect(loadCanonicalNode).toHaveBeenCalledWith(targetNode, "Could not open node");
+    expect(loadCanonicalNode).toHaveBeenCalledWith(targetNode, "Could not open item");
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(targetNode.id);
-    expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
+    expect(useUiStore.getState().toast).toBe("Opened item, but could not reveal it in Files");
   });
 
   it("opens a regular node from reveal and seeds the canonical cache without a node request", async () => {
@@ -232,7 +232,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     });
 
     expect(mocks.revealNode).not.toHaveBeenCalled();
-    expect(loadCanonicalNode).toHaveBeenCalledWith(rootNode, "Could not open node");
+    expect(loadCanonicalNode).toHaveBeenCalledWith(rootNode, "Could not open item");
     expect(useUiStore.getState().editorGroups[0].node).toEqual(rootNode);
   });
 
@@ -303,7 +303,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
 
     expect(getNode).toHaveBeenCalledWith(expect.anything(), activeSpace.id, first.id);
     expect(useUiStore.getState().editorGroups[0].node).toEqual(first);
-    expect(useUiStore.getState().toast).toBe("Opened node, but could not reveal it in the tree");
+    expect(useUiStore.getState().toast).toBe("Opened item, but could not reveal it in Files");
   });
 
   it("keeps navigation history when the target cannot be verified", async () => {
@@ -323,7 +323,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const group = useUiStore.getState().editorGroups[0];
     expect(group.node?.id).toBe(current.id);
     expect(group.back.map((entry) => entry.nodeId)).toEqual([first.id]);
-    expect(useUiStore.getState().toast).toBe("Could not navigate to node");
+    expect(useUiStore.getState().toast).toBe("Could not go back");
   });
 
   it("does not apply a navigation result after the group changes", async () => {

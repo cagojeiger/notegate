@@ -171,7 +171,7 @@ describe("TextEditorView", () => {
 
     expect(screen.getByRole("button", { name: "Copy content" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Node actions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "More actions" })).toBeDisabled();
 
     fireEvent.contextMenu(await screen.findByText("Large note"));
     const menu = within(screen.getByRole("menu"));
