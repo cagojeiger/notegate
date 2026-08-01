@@ -1,10 +1,11 @@
 //! Router assembly and HTTP handlers.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{MatchedPath, State};
-use axum::http::header::{CONTENT_TYPE, HeaderName};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName};
 use axum::http::{HeaderValue, Method, Request, StatusCode};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::Response;
@@ -77,11 +78,46 @@ where
     S: Clone + Send + Sync + 'static,
 {
     match web_dist_dir {
-        Some(dir) => router.fallback_service(
-            ServeDir::new(dir).fallback(ServeFile::new(format!("{dir}/index.html"))),
-        ),
+        Some(dir) => {
+            let assets = Router::<()>::new()
+                .fallback_service(ServeDir::new(Path::new(dir).join("assets")))
+                .layer(from_fn(set_asset_cache_headers));
+            let web = Router::<()>::new()
+                .fallback_service(
+                    ServeDir::new(dir).fallback(ServeFile::new(format!("{dir}/index.html"))),
+                )
+                .layer(from_fn(set_html_revalidation));
+
+            router.nest_service("/assets", assets).fallback_service(web)
+        }
         None => router,
     }
+}
+
+async fn set_asset_cache_headers(request: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    if response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED {
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
+    response
+}
+
+async fn set_html_revalidation(request: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    if response
+        .headers()
+        .get(CONTENT_TYPE)
+        .is_some_and(|value| value.as_bytes().starts_with(b"text/html"))
+    {
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, must-revalidate"),
+        );
+    }
+    response
 }
 
 fn control_plane_routes(metrics: Option<MetricsHandle>) -> Router<AppState> {
@@ -442,13 +478,14 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use axum::http::header::CACHE_CONTROL;
     use axum::routing::{get, post};
     use tower::ServiceExt as _;
 
     use super::*;
 
     #[tokio::test]
-    async fn web_fallback_serves_index_for_unknown_route() {
+    async fn web_fallback_serves_index_with_revalidation() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -458,20 +495,72 @@ mod tests {
         fs::write(dir.join("index.html"), "<html>notegate</html>").unwrap();
 
         let app = with_web_fallback(Router::new(), Some(dir.to_str().unwrap()));
-        let response = app
+        for path in ["/", "/index.html", "/dashboard"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(
+                response.headers().get(CACHE_CONTROL),
+                Some(&HeaderValue::from_static("no-cache, must-revalidate")),
+                "{path}"
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(&body[..], b"<html>notegate</html>", "{path}");
+        }
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn web_assets_are_immutable_and_missing_assets_do_not_use_spa_fallback() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("notegate-web-assets-{nonce}"));
+        fs::create_dir_all(dir.join("assets")).unwrap();
+        fs::write(dir.join("index.html"), "<html>notegate</html>").unwrap();
+        fs::write(dir.join("assets/app-abc123.js"), "export default true;").unwrap();
+
+        let app = with_web_fallback(Router::new(), Some(dir.to_str().unwrap()));
+        let asset_response = app
+            .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/dashboard")
+                    .uri("/assets/app-abc123.js")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        assert_eq!(asset_response.status(), StatusCode::OK);
+        assert_eq!(
+            asset_response.headers().get(CACHE_CONTROL),
+            Some(&HeaderValue::from_static(
+                "public, max-age=31536000, immutable"
+            ))
+        );
+
+        let missing_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/removed-chunk.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        assert_eq!(&body[..], b"<html>notegate</html>");
+        assert_eq!(missing_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(missing_response.headers().get(CACHE_CONTROL), None);
+        let missing_body = axum::body::to_bytes(missing_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_ne!(&missing_body[..], b"<html>notegate</html>");
 
         fs::remove_dir_all(dir).unwrap();
     }
