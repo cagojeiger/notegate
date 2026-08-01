@@ -5,12 +5,12 @@ V2는 외부 확장 서버가 사용하는 Agent API key 전용 공개 계약이
 ## 인증
 
 ```http
-Authorization: Bearer ngk_v2_...
+Authorization: Bearer ngk_v1_...
 ```
 
 - Browser session cookie와 OAuth JWT는 V2 인증 수단이 아니다.
 - User 소유 API key는 인증되지 않는다.
-- `ngk_v2_`보다 이전 형식의 key는 인증되지 않는다.
+- 호환 배포 동안 Agent 소유 `ngk_v1_`과 `ngk_v2_` key를 모두 허용한다.
 - DB의 `token_prefix`는 요청 token에서 계산한 접두사와 정확히 일치해야 한다.
 - V2 응답은 `Cache-Control: private, no-store`로 전달한다.
 
@@ -30,4 +30,4 @@ Browser V1, Public V2, User MCP, Agent MCP V2는 각각 독립된 in-process rat
 
 브라우저 세션 인증, V2 Agent API key 인증, MCP 인증은 서로 다른 transport middleware에서 처리한다. Agent API key hash와 live credential 판정만 공용 검증 경로를 사용한다.
 
-OpenAPI가 활성화된 배포에서는 JSON을 `/openapi/v2.json`, Swagger UI를 `/swagger-ui/v2`에서 제공한다. 두 문서 경로는 browser session을 요구하며, 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. Swagger UI에서 `/api/v2/*`를 호출할 때는 Agent API key를 `Authorize`에 입력해야 한다.
+OpenAPI JSON은 `/openapi/v2.json`, Swagger UI는 `/swagger-ui/v2`에서 제공한다. 두 문서 경로는 browser session을 요구하며, 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. Swagger UI에서 `/api/v2/*`를 호출할 때는 Agent API key를 `Authorize`에 입력해야 한다.

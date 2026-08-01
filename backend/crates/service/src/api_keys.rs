@@ -10,7 +10,11 @@ use uuid::Uuid;
 use crate::pagination::paginate_keyset;
 use crate::{ServiceError, ServiceResult};
 
-const AGENT_API_KEY_TOKEN_PREFIX: &str = "ngk_v2_";
+const AGENT_API_KEY_V1_PREFIX: &str = "ngk_v1_";
+const AGENT_API_KEY_V2_PREFIX: &str = "ngk_v2_";
+const AGENT_API_KEY_ISSUANCE_PREFIX: &str = AGENT_API_KEY_V1_PREFIX;
+const AGENT_API_KEY_ACCEPTED_PREFIXES: [&str; 2] =
+    [AGENT_API_KEY_V1_PREFIX, AGENT_API_KEY_V2_PREFIX];
 
 pub async fn list_key_page(
     api_keys: &ApiKeyRepo,
@@ -150,21 +154,28 @@ fn generate_secret() -> String {
 }
 
 pub fn format_token(key_id: Uuid, secret: &str) -> String {
-    format!("{AGENT_API_KEY_TOKEN_PREFIX}{key_id}_{secret}")
+    format!("{AGENT_API_KEY_ISSUANCE_PREFIX}{key_id}_{secret}")
 }
 
 pub fn token_prefix(key_id: Uuid) -> String {
-    format!("{AGENT_API_KEY_TOKEN_PREFIX}{key_id}")
+    format!("{AGENT_API_KEY_ISSUANCE_PREFIX}{key_id}")
 }
 
-pub fn parse_token(token: &str) -> Option<(Uuid, &str)> {
-    let rest = token.strip_prefix(AGENT_API_KEY_TOKEN_PREFIX)?;
+pub fn looks_like_legacy_agent_token(token: &str) -> bool {
+    token.starts_with(AGENT_API_KEY_V1_PREFIX)
+}
+
+pub fn parse_token(token: &str) -> Option<(Uuid, &str, String)> {
+    let prefix = AGENT_API_KEY_ACCEPTED_PREFIXES
+        .into_iter()
+        .find(|prefix| token.starts_with(prefix))?;
+    let rest = token.strip_prefix(prefix)?;
     let (key_id, secret) = rest.split_once('_')?;
     let key_id = Uuid::parse_str(key_id).ok()?;
     if secret.is_empty() {
         return None;
     }
-    Some((key_id, secret))
+    Some((key_id, secret, format!("{prefix}{key_id}")))
 }
 
 #[cfg(test)]
@@ -179,7 +190,19 @@ mod tests {
         let parsed = parse_token(&token).unwrap();
         assert_eq!(parsed.0, key_id);
         assert_eq!(parsed.1, "secret-value");
-        assert_eq!(token_prefix(key_id), format!("ngk_v2_{key_id}"));
+        assert_eq!(parsed.2, format!("ngk_v1_{key_id}"));
+        assert_eq!(token_prefix(key_id), format!("ngk_v1_{key_id}"));
+    }
+
+    #[test]
+    fn api_key_parser_accepts_v2_during_the_compatibility_rollout() {
+        let key_id = Uuid::new_v4();
+        let token = format!("ngk_v2_{key_id}_secret-value");
+        let parsed = parse_token(&token).unwrap();
+
+        assert_eq!(parsed.0, key_id);
+        assert_eq!(parsed.1, "secret-value");
+        assert_eq!(parsed.2, format!("ngk_v2_{key_id}"));
     }
 
     #[test]
@@ -234,10 +257,20 @@ mod tests {
     }
 
     #[test]
-    fn api_key_token_rejects_invalid_and_legacy_formats() {
+    fn api_key_token_rejects_invalid_formats() {
         assert!(parse_token("old-token").is_none());
         assert!(parse_token("ngk_v2_not-a-uuid_secret").is_none());
         assert!(parse_token("ngk_v2_00000000-0000-0000-0000-000000000000_").is_none());
-        assert!(parse_token("ngk_v1_00000000-0000-0000-0000-000000000000_secret").is_none());
+    }
+
+    #[test]
+    fn legacy_agent_token_detection_does_not_match_v2_or_oauth_tokens() {
+        assert!(looks_like_legacy_agent_token(
+            "ngk_v1_00000000-0000-0000-0000-000000000000_secret"
+        ));
+        assert!(!looks_like_legacy_agent_token(
+            "ngk_v2_00000000-0000-0000-0000-000000000000_secret"
+        ));
+        assert!(!looks_like_legacy_agent_token("oauth-token"));
     }
 }

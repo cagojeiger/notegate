@@ -107,7 +107,7 @@ describe("SettingsModal", () => {
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
     expect(screen.getByText("Agent MCP")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
     expect(screen.getByText("REST API")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/api/v2")).toBeInTheDocument();
     expect(screen.queryByText("REST API v2")).not.toBeInTheDocument();

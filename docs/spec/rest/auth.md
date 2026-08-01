@@ -76,10 +76,10 @@ MCP `401` 응답은 `WWW-Authenticate` header에 resource metadata와 scope를 �
 - Browser session cookie는 `Path=/`, `HttpOnly`, `SameSite=Lax`로 발급한다. 운영 HTTPS 환경에서는 `Secure`를 붙인다.
 - Browser session cookie는 opaque token이다. Cookie token hash와 encrypted refresh token은 `browser_sessions`에 저장한다.
 - `/api/v1/*`는 browser session cookie만 허용한다. `Authorization` bearer를 보내면 인증을 거부한다.
-- `/api/v2/*`는 `Authorization: Bearer ngk_v2_...` Agent API key만 허용한다. User 소유 API key, browser session cookie, OAuth JWT는 인증 수단으로 인정하지 않는다.
+- `/api/v2/*`는 Agent 소유 API key만 허용한다. 호환 배포 동안 `ngk_v1_`과 `ngk_v2_` format을 모두 해석하며 User 소유 API key, browser session cookie, OAuth JWT는 인증 수단으로 인정하지 않는다.
 - Cookie 기반 browser session으로 `POST`, `PUT`, `PATCH`, `DELETE`를 호출하려면 same-origin `Origin` 또는 `Referer`가 필요하다.
-- OpenAPI가 활성화된 배포에서는 Swagger UI를 `/swagger-ui/v2`, OpenAPI JSON을 `/openapi/v2.json`에서 제공하며 browser session을 요구한다. 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. 문서 열람 세션은 `/api/v2/*` 호출 권한이 아니며, Swagger API 호출은 별도의 API key를 사용한다.
+- Swagger UI는 `/swagger-ui/v2`, OpenAPI JSON은 `/openapi/v2.json`에서 제공하며 browser session을 요구한다. 미로그인 브라우저는 로그인 후 요청했던 문서 경로로 복귀한다. 문서 열람 세션은 `/api/v2/*` 호출 권한이 아니며, Swagger API 호출은 별도의 API key를 사용한다.
 - MCP는 bearer credential만 허용한다. Browser session cookie는 `/mcp`와 `/mcp/v2`에서 인증 수단으로 인정하지 않는다.
-- `/mcp`는 user MCP OAuth bearer만 허용한다.
-- `/mcp/v2`는 Agent 소유 `ngk_v2_` API key만 허용한다.
+- `/mcp`는 user MCP OAuth bearer와 호환 배포 중인 Agent 소유 `ngk_v1_` API key를 허용한다.
+- `/mcp/v2`는 Agent 소유 `ngk_v1_`과 `ngk_v2_` API key를 허용한다.
 - Device flow는 authgate flow이며 user account로 resolve한다.

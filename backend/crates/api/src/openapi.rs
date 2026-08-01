@@ -175,16 +175,12 @@ fn error_response() -> Response {
 }
 
 pub fn routes(state: AppState) -> Router<AppState> {
-    if state.config.openapi_enabled {
-        let router: Router<AppState> = SwaggerUi::new("/swagger-ui/v2")
-            .url("/openapi/v2.json", PublicApiDoc::openapi())
-            .into();
-        router
-            .layer(from_fn_with_state(state, require_browser_session_for_docs))
-            .layer(from_fn(mark_private_no_store))
-    } else {
-        Router::new()
-    }
+    let router: Router<AppState> = SwaggerUi::new("/swagger-ui/v2")
+        .url("/openapi/v2.json", PublicApiDoc::openapi())
+        .into();
+    router
+        .layer(from_fn_with_state(state, require_browser_session_for_docs))
+        .layer(from_fn(mark_private_no_store))
 }
 
 pub fn json_pretty() -> serde_json::Result<String> {

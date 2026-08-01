@@ -7,7 +7,6 @@ use common::{TestDb, insert_user_account};
 use notegate_core::security::PiiCrypto;
 use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo, api_key_repo::InsertApiKey};
 use notegate_model::{Channel, CreateAgent, CreateApiKey};
-use notegate_service::api_keys::{format_token, token_prefix};
 use notegate_service::identity::{IdentityError, Resolver};
 use uuid::Uuid;
 
@@ -16,11 +15,12 @@ async fn insert_key(
     crypto: &PiiCrypto,
     account_id: Uuid,
     created_by: Uuid,
+    format_prefix: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let key_id = Uuid::new_v4();
     let secret = "identity-test-secret";
     let token_hash = crypto.api_key_hash(&key_id.to_string(), secret)?;
-    let prefix = token_prefix(key_id);
+    let prefix = format!("{format_prefix}{key_id}");
     let command = CreateApiKey {
         name: "identity-test".to_owned(),
         scopes: Vec::new(),
@@ -36,7 +36,7 @@ async fn insert_key(
         rotated_from_key_id: None,
     })
     .await?;
-    Ok(format_token(key_id, secret))
+    Ok(format!("{prefix}_{secret}"))
 }
 
 fn resolver(db: &TestDb, crypto: PiiCrypto) -> Resolver {
@@ -58,7 +58,7 @@ async fn agent_api_key_resolution_rejects_user_owned_key() -> Result<(), Box<dyn
     let user_id = insert_user_account(&db.pool, "identity-user", "identity@example.test").await?;
     let key_repo =
         ApiKeyRepo::with_lookup_key(db.pool.clone(), crypto.lookup_key_id(), crypto.version());
-    let token = insert_key(&key_repo, &crypto, user_id, user_id).await?;
+    let token = insert_key(&key_repo, &crypto, user_id, user_id, "ngk_v1_").await?;
 
     let result = resolver(&db, crypto)
         .resolve_agent_api_key(&token, Channel::Api)
@@ -91,18 +91,18 @@ async fn agent_api_key_resolution_returns_agent_caller() -> Result<(), Box<dyn s
         .await?;
     let key_repo =
         ApiKeyRepo::with_lookup_key(db.pool.clone(), crypto.lookup_key_id(), crypto.version());
-    let token = insert_key(&key_repo, &crypto, agent.id, user_id).await?;
+    let resolver = resolver(&db, crypto.clone());
+    for format_prefix in ["ngk_v1_", "ngk_v2_"] {
+        let token = insert_key(&key_repo, &crypto, agent.id, user_id, format_prefix).await?;
+        let caller = resolver.resolve_agent_api_key(&token, Channel::Mcp).await?;
 
-    let caller = resolver(&db, crypto)
-        .resolve_agent_api_key(&token, Channel::Mcp)
-        .await?;
-
-    assert_eq!(caller.account_id(), agent.id);
-    assert_eq!(caller.channel, Channel::Mcp);
-    assert_eq!(
-        caller.agent().map(|agent| agent.name.as_str()),
-        Some("identity-agent")
-    );
+        assert_eq!(caller.account_id(), agent.id);
+        assert_eq!(caller.channel, Channel::Mcp);
+        assert_eq!(
+            caller.agent().map(|agent| agent.name.as_str()),
+            Some("identity-agent")
+        );
+    }
     db.cleanup().await;
     Ok(())
 }

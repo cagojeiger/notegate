@@ -180,7 +180,7 @@ pub struct Config {
         deserialize_with = "duration_from_secs"
     )]
     pub browser_session_max_ttl: Duration,
-    /// Whether OpenAPI JSON and Swagger UI routes are exposed.
+    /// Deprecated OpenAPI toggle retained for configuration compatibility.
     pub openapi_enabled: bool,
     /// Whether Prometheus metrics are recorded and exposed at `/metrics`.
     pub metrics_enabled: bool,

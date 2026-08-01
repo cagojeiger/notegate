@@ -158,7 +158,6 @@ jobs:
       NOTEGATE_PUBLIC_URL: http://localhost:9191
       NOTEGATE_OAUTH_CLIENT_ID: notegate-web
       NOTEGATE_MCP_OAUTH_CLIENT_ID: notegate-mcp
-      NOTEGATE_OPENAPI_ENABLED: "true"
       NOTEGATE_ENC_ROOT_KEY_ID: e2e-enc
       NOTEGATE_ENC_ROOT_SECRET: e2e-distinct-enc-root-secret-32-bytes
       NOTEGATE_LOOKUP_ROOT_KEY_ID: e2e-lookup

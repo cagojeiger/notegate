@@ -121,7 +121,7 @@ The encryption and lookup root secrets must each be at least 32 bytes. On startu
 
 For a first MCP connection, open `${NOTEGATE_PUBLIC_URL}/auth/login`, complete Google sign-in, and reconnect the client to `${NOTEGATE_PUBLIC_URL}/mcp`.
 
-Agent API keys use `${NOTEGATE_PUBLIC_URL}/mcp/v2`. The user OAuth endpoint does not accept Agent keys, and the Agent endpoint does not accept OAuth bearer tokens.
+During the compatibility rollout, Agent API keys use `${NOTEGATE_PUBLIC_URL}/mcp`. The server also exposes `${NOTEGATE_PUBLIC_URL}/mcp/v2` so every replica can learn the new route before clients switch to it. The Agent endpoint does not accept OAuth bearer tokens.
 
 ## Checks
 

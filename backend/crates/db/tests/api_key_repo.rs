@@ -17,6 +17,17 @@ use uuid::Uuid;
 
 const TEST_API_KEYS_PER_ACCOUNT_MAX: usize = 2;
 
+#[derive(sqlx::FromRow)]
+struct AuditEventRow {
+    owner_user_id: Option<Uuid>,
+    actor_account_id: Option<Uuid>,
+    source: String,
+    op_type: String,
+    resource_type: String,
+    resource_id: Option<Uuid>,
+    reason: String,
+}
+
 /// Insert one live key with a unique token hash via the capped insert path.
 async fn insert_capped(
     repo: &ApiKeyRepo,
@@ -337,7 +348,7 @@ async fn user_owned_api_key_does_not_authenticate_or_mark_last_used()
 }
 
 #[tokio::test]
-async fn legacy_key_retirement_migration_revokes_only_live_v1_keys()
+async fn agent_api_v2_compatibility_migration_retires_user_keys_and_preserves_agent_keys()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -350,18 +361,22 @@ async fn legacy_key_retirement_migration_revokes_only_live_v1_keys()
     )
     .await?;
     let agent_id = insert_agent_account(&db.pool, owner, "legacy-key-agent").await?;
+    let user_v1_id = Uuid::new_v4();
+    let user_v2_id = Uuid::new_v4();
     let live_v1_id = Uuid::new_v4();
     let live_v2_id = Uuid::new_v4();
     let revoked_v1_id = Uuid::new_v4();
 
-    for (key_id, name, prefix) in [
-        (live_v1_id, "live-v1", "ngk_v1_live"),
-        (live_v2_id, "live-v2", "ngk_v2_live"),
-        (revoked_v1_id, "revoked-v1", "ngk_v1_revoked"),
+    for (key_id, account_id, name, prefix) in [
+        (user_v1_id, owner, "user-v1", "ngk_v1_user"),
+        (user_v2_id, owner, "user-v2", "ngk_v2_user"),
+        (live_v1_id, agent_id, "live-v1", "ngk_v1_live"),
+        (live_v2_id, agent_id, "live-v2", "ngk_v2_live"),
+        (revoked_v1_id, agent_id, "revoked-v1", "ngk_v1_revoked"),
     ] {
         repo.insert_key_unchecked_for_test(InsertApiKey {
             key_id,
-            account_id: agent_id,
+            account_id,
             command: &CreateApiKey {
                 name: name.to_owned(),
                 scopes: Vec::new(),
@@ -385,20 +400,48 @@ async fn legacy_key_retirement_migration_revokes_only_live_v1_keys()
         "SELECT id, revoked_at, revoked_reason FROM api_keys \
              WHERE id = ANY($1) ORDER BY id",
     )
-    .bind(vec![live_v1_id, live_v2_id, revoked_v1_id])
+    .bind(vec![
+        user_v1_id,
+        user_v2_id,
+        live_v1_id,
+        live_v2_id,
+        revoked_v1_id,
+    ])
     .fetch_all(&db.pool)
     .await?;
     let row = |key_id| rows.iter().find(|row| row.0 == key_id).expect("key row");
 
-    assert!(row(live_v1_id).1.is_some());
-    assert_eq!(
-        row(live_v1_id).2.as_deref(),
-        Some("credential_format_v1_retired")
-    );
+    assert!(row(user_v1_id).1.is_some());
+    assert_eq!(row(user_v1_id).2.as_deref(), Some("user_api_key_retired"));
+    assert!(row(user_v2_id).1.is_some());
+    assert_eq!(row(user_v2_id).2.as_deref(), Some("user_api_key_retired"));
+    assert!(row(live_v1_id).1.is_none());
+    assert!(row(live_v1_id).2.is_none());
     assert!(row(live_v2_id).1.is_none());
     assert!(row(live_v2_id).2.is_none());
     assert!(row(revoked_v1_id).1.is_some());
     assert_eq!(row(revoked_v1_id).2.as_deref(), Some("manual-revocation"));
+
+    let events: Vec<AuditEventRow> = sqlx::query_as(
+            "SELECT owner_user_id, actor_account_id, source, op_type, resource_type, resource_id, metadata->>'reason' AS reason \
+             FROM audit_events WHERE resource_type = 'api_key' AND resource_id = ANY($1)",
+        )
+        .bind(vec![user_v1_id, user_v2_id])
+        .fetch_all(&db.pool)
+        .await?;
+    assert_eq!(events.len(), 2);
+    for key_id in [user_v1_id, user_v2_id] {
+        let event = events
+            .iter()
+            .find(|event| event.resource_id == Some(key_id))
+            .expect("key audit event");
+        assert_eq!(event.owner_user_id, Some(owner));
+        assert_eq!(event.actor_account_id, None);
+        assert_eq!(event.source, "system");
+        assert_eq!(event.op_type, "user_key.revoke");
+        assert_eq!(event.resource_type, "api_key");
+        assert_eq!(event.reason, "user_api_key_retired");
+    }
 
     db.cleanup().await;
     Ok(())

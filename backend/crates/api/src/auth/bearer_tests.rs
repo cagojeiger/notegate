@@ -127,7 +127,7 @@ impl CallerResolver for TestResolver {
         channel: Channel,
     ) -> Pin<Box<dyn Future<Output = Result<Caller, IdentityError>> + Send + '_>> {
         Box::pin(async move {
-            if token != TEST_API_KEY {
+            if token != TEST_API_KEY && token != TEST_LEGACY_API_KEY {
                 return Err(IdentityError::NotRegistered);
             }
             match self.mode {
@@ -201,12 +201,6 @@ fn state(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
     state_with_resource(mode, "https://api.example.test")
 }
 
-fn state_with_openapi(mode: ResolverMode) -> Result<AppState, Box<dyn std::error::Error>> {
-    let pool =
-        PgPoolOptions::new().connect_lazy("postgres://notegate:notegate@localhost/notegate")?;
-    state_with_pool_and_openapi(mode, "https://api.example.test", pool, true)
-}
-
 fn state_with_resource(
     mode: ResolverMode,
     resource_url: &str,
@@ -220,15 +214,6 @@ fn state_with_pool(
     mode: ResolverMode,
     resource_url: &str,
     pool: PgPool,
-) -> Result<AppState, Box<dyn std::error::Error>> {
-    state_with_pool_and_openapi(mode, resource_url, pool, false)
-}
-
-fn state_with_pool_and_openapi(
-    mode: ResolverMode,
-    resource_url: &str,
-    pool: PgPool,
-    openapi_enabled: bool,
 ) -> Result<AppState, Box<dyn std::error::Error>> {
     let config = Arc::new(notegate_core::Config {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
@@ -253,7 +238,7 @@ fn state_with_pool_and_openapi(
         lookup_verify_0_secret: None,
         browser_session_ttl: Duration::from_secs(3600),
         browser_session_max_ttl: Duration::from_secs(30 * 86_400),
-        openapi_enabled,
+        openapi_enabled: false,
         metrics_enabled: false,
         web_dist_dir: None,
         s3: crate::state::test_s3_config(),
@@ -493,7 +478,7 @@ async fn v1_routes_reject_api_keys() -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::test]
 async fn openapi_docs_redirect_unauthenticated_browser_to_login()
 -> Result<(), Box<dyn std::error::Error>> {
-    let app = crate::routes::app(state_with_openapi(ResolverMode::Registered(true))?);
+    let app = crate::routes::app(state(ResolverMode::Registered(true))?);
 
     for path in ["/swagger-ui/v2/", "/openapi/v2.json"] {
         let response = app
@@ -532,11 +517,10 @@ async fn openapi_docs_accept_valid_browser_session() -> Result<(), Box<dyn std::
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let state = state_with_pool_and_openapi(
+    let state = state_with_pool(
         ResolverMode::Registered(true),
         "https://api.example.test",
         db.pool.clone(),
-        true,
     )?;
     let session = valid_browser_session(&db, &state).await?;
     let app = crate::routes::app(state);
@@ -739,7 +723,8 @@ async fn v2_routes_require_api_keys() -> Result<(), Box<dyn std::error::Error>> 
 }
 
 #[tokio::test]
-async fn v2_routes_reject_legacy_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn v2_routes_accept_legacy_agent_keys_during_compatibility_rollout()
+-> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state(ResolverMode::Registered(true))?);
     let response = app
         .oneshot(
@@ -750,14 +735,7 @@ async fn v2_routes_reject_legacy_api_keys() -> Result<(), Box<dyn std::error::Er
         )
         .await?;
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        response
-            .headers()
-            .get(WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Bearer realm=\"notegate-public-api\"")
-    );
+    assert_eq!(response.status(), StatusCode::OK);
     Ok(())
 }
 
@@ -894,7 +872,7 @@ async fn mcp_routes_reject_cookie_without_bearer() -> Result<(), Box<dyn std::er
 }
 
 #[tokio::test]
-async fn user_mcp_rejects_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn user_mcp_rejects_v2_agent_api_keys() -> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state_with_resource(
         ResolverMode::Registered(true),
         "https://api.example.test/mcp",
@@ -916,6 +894,30 @@ async fn user_mcp_rejects_agent_api_keys() -> Result<(), Box<dyn std::error::Err
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     assert!(challenge.contains("resource_metadata="));
+    Ok(())
+}
+
+#[tokio::test]
+async fn user_mcp_accepts_legacy_agent_keys_during_compatibility_rollout()
+-> Result<(), Box<dyn std::error::Error>> {
+    let app = crate::routes::app(state_with_resource(
+        ResolverMode::Registered(true),
+        "https://api.example.test/mcp",
+    )?);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("host", "api.example.test")
+                .header("authorization", format!("Bearer {TEST_LEGACY_API_KEY}"))
+                .header(ACCEPT, "application/json, text/event-stream")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(MCP_INITIALIZE_REQUEST))?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::OK);
     Ok(())
 }
 
@@ -951,7 +953,8 @@ async fn user_mcp_accepts_oauth_bearer() -> Result<(), Box<dyn std::error::Error
 }
 
 #[tokio::test]
-async fn agent_mcp_v2_accepts_only_v2_agent_keys() -> Result<(), Box<dyn std::error::Error>> {
+async fn agent_mcp_v2_accepts_v1_and_v2_agent_keys_during_compatibility_rollout()
+-> Result<(), Box<dyn std::error::Error>> {
     let app = crate::routes::app(state_with_resource(
         ResolverMode::Registered(true),
         "https://api.example.test/mcp",
@@ -972,23 +975,19 @@ async fn agent_mcp_v2_accepts_only_v2_agent_keys() -> Result<(), Box<dyn std::er
         .await?;
     assert_eq!(accepted.status(), StatusCode::OK);
 
-    let rejected = app
+    let legacy = app
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/mcp/v2")
+                .header("host", "api.example.test")
                 .header("authorization", format!("Bearer {TEST_LEGACY_API_KEY}"))
-                .body(Body::empty())?,
+                .header(ACCEPT, "application/json, text/event-stream")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(MCP_INITIALIZE_REQUEST))?,
         )
         .await?;
-    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        rejected
-            .headers()
-            .get(WWW_AUTHENTICATE)
-            .and_then(|value| value.to_str().ok()),
-        Some("Bearer realm=\"notegate-agent-mcp-v2\"")
-    );
+    assert_eq!(legacy.status(), StatusCode::OK);
     Ok(())
 }
 
