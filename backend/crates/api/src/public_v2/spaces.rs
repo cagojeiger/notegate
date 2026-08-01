@@ -33,6 +33,7 @@ pub(crate) struct SpacesResponse {
 #[utoipa::path(
     get,
     path = "/api/v2/spaces",
+    operation_id = "list_spaces",
     tag = "spaces",
     params(
         ("limit" = Option<i64>, Query, description = "Page size; defaults to 50 and is capped at 100"),
@@ -66,6 +67,7 @@ pub(crate) async fn list(
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}",
+    operation_id = "get_space",
     tag = "spaces",
     params(("space_id" = Uuid, Path, description = "Space id")),
     responses((status = 200, description = "Get a connected space", body = SpaceOut)),

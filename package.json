@@ -12,5 +12,8 @@
     "overrides": {
       "dompurify": "3.4.12"
     }
+  },
+  "devDependencies": {
+    "@redocly/cli": "2.40.0"
   }
 }

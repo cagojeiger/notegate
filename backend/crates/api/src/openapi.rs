@@ -202,7 +202,7 @@ fn operations_mut(item: &mut PathItem) -> impl Iterator<Item = &mut Operation> {
 
 fn error_response() -> Response {
     let mut response = Response::new(
-        "Common JSON error. Inspect `error` for a stable code. Typical codes include invalid_input, forbidden, not_found, conflict, node_write_locked, subtree_write_locked, search_busy, object_storage_unavailable, and internal_error. Retryable responses can include a Retry-After header.",
+        "Common JSON error. Inspect `error` for a stable code. Typical codes include invalid_input, forbidden, not_found, method_not_allowed, request_timeout, conflict, payload_too_large, node_write_locked, subtree_write_locked, search_busy, rate_limited, object_storage_unavailable, and internal_error. Retryable responses can include a Retry-After header.",
     );
     response.content.insert(
         "application/json".to_owned(),
@@ -343,6 +343,33 @@ mod tests {
     }
 
     #[test]
+    fn public_openapi_operation_ids_are_present_and_unique() {
+        let value =
+            serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
+        let paths = value["paths"].as_object().expect("paths object");
+        let mut operation_ids = std::collections::BTreeSet::new();
+
+        for (path, item) in paths {
+            let item = item.as_object().expect("path item object");
+            for (method, operation) in item {
+                if !matches!(
+                    method.as_str(),
+                    "get" | "put" | "post" | "delete" | "patch" | "options" | "head" | "trace"
+                ) {
+                    continue;
+                }
+                let operation_id = operation["operationId"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("missing operationId for {method} {path}"));
+                assert!(
+                    operation_ids.insert(operation_id),
+                    "duplicate operationId {operation_id} for {method} {path}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn public_openapi_describes_external_client_contract() {
         let value =
             serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
@@ -374,6 +401,56 @@ mod tests {
             schemas["BeginUploadBody"]["properties"]["encryption_mode"]["default"],
             "none"
         );
+        for (schema, values) in [
+            ("AccountKindOut", serde_json::json!(["user", "agent"])),
+            ("PermissionOut", serde_json::json!(["read", "write"])),
+            ("NodeKindOut", serde_json::json!(["folder", "text", "file"])),
+            (
+                "TextStorageFormatOut",
+                serde_json::json!(["plain", "encrypted"]),
+            ),
+            (
+                "TextAtRestEncryptionOut",
+                serde_json::json!(["none", "server"]),
+            ),
+            (
+                "FileEncryptionModeOut",
+                serde_json::json!(["none", "client"]),
+            ),
+            ("CreateNodeKind", serde_json::json!(["folder", "text"])),
+            (
+                "SearchNodeKind",
+                serde_json::json!(["folder", "text", "file"]),
+            ),
+            (
+                "FindMatch",
+                serde_json::json!(["contains", "regex", "glob"]),
+            ),
+            ("GrepMatch", serde_json::json!(["literal", "regex"])),
+            ("GrepLines", serde_json::json!(["none", "first", "all"])),
+            (
+                "PatchMatchMode",
+                serde_json::json!(["unique", "first", "all"]),
+            ),
+            (
+                "LineEditOperation",
+                serde_json::json!([
+                    "insert_before_line",
+                    "insert_after_line",
+                    "replace_lines",
+                    "delete_lines"
+                ]),
+            ),
+            (
+                "UploadEncryptionMode",
+                serde_json::json!(["none", "client"]),
+            ),
+        ] {
+            assert_eq!(
+                schemas[schema]["enum"], values,
+                "enum mismatch for {schema}"
+            );
+        }
         assert!(
             schemas["PageOut"]["properties"]["next_cursor"]["description"]
                 .as_str()

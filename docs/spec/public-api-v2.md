@@ -141,10 +141,10 @@ curl --fail-with-body --silent --show-error \
 
 Search는 include/exclude glob, pagination, process-wide admission limit을 사용한다. 용량이 가득 차면 `429 search_busy`와 `Retry-After`를 반환한다.
 
-| 작업 | `match` | `lines` | 기본 path |
-|---|---|---|---|
-| Find | `contains`(기본), `regex`, `glob` | 해당 없음 | `/` |
-| Grep | `literal`(기본), `regex` | `none`(기본), `first`, `all` | `/` |
+| 작업 | `kind` | `match` | `lines` | 기본 path |
+|---|---|---|---|---|
+| Find | 선택: `folder`, `text`, `file` | `contains`(기본), `regex`, `glob` | 해당 없음 | `/` |
+| Grep | 해당 없음 | `literal`(기본), `regex` | `none`(기본), `first`, `all` | `/` |
 
 `include`와 `exclude`는 canonical relative path에 적용하는 glob 배열이다. 검색 query는 한 줄이며 최대 256자다. 패턴 배열은 각각 최대 32개, 패턴 하나는 최대 256자다.
 
@@ -208,9 +208,13 @@ Client는 전송 성공 후 반드시 complete를 호출한다. 중단할 때는
 | 401 | `missing_token`, `invalid_token` | Agent API key가 없거나 유효하지 않음 |
 | 403 | `forbidden` | 연결 권한 또는 write 권한 부족 |
 | 404 | `not_found` | 보이지 않거나 존재하지 않는 resource |
+| 405 | `method_not_allowed` | resource에서 지원하지 않는 HTTP method |
+| 408 | `request_timeout` | 요청 처리 시간 상한 초과 |
 | 409 | `conflict` | hash/parent 불일치, 중복 또는 상태 충돌 |
+| 413 | `payload_too_large` | 요청 본문 크기 상한 초과 |
 | 423 | `node_write_locked`, `subtree_write_locked` | 직접·상속 write lock에 의해 변경 차단 |
-| 429 | `search_busy` 또는 HTTP rate limit | 현재 처리 용량 초과 |
+| 429 | `search_busy`, `rate_limited` | 검색 또는 HTTP 처리 용량 초과 |
+| 500 | `internal_error` | 공개하지 않는 내부 처리 실패 |
 | 503 | `object_storage_unavailable`, `usage_recalculation_in_progress` | 일시적인 의존성 또는 유지보수 상태 |
 
 재시도 가능한 응답은 `Retry-After` header를 포함할 수 있다.

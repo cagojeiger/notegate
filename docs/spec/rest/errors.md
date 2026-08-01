@@ -2,7 +2,7 @@
 
 ## Error policy
 
-REST 오류 응답은 항상 같은 기본 shape을 사용한다.
+REST handler와 인증 middleware가 반환하는 오류는 같은 기본 shape을 사용한다. 공개 V2는 extractor, body limit, timeout, rate limit에서 발생한 transport 오류도 이 shape으로 정규화한다.
 
 ```json
 {
@@ -18,9 +18,13 @@ REST 오류 응답은 항상 같은 기본 shape을 사용한다.
 invalid_input  -> 400 invalid field/name/path, malformed limit, malformed/tampered cursor
 forbidden      -> 403 authenticated but not allowed
 not_found      -> 404 not found or cross-space hidden resource
+method_not_allowed -> 405 unsupported HTTP method on a V2 resource
+request_timeout -> 408 request processing deadline exceeded
 conflict       -> 409 state conflict, quota conflict, stale hash, duplicate destination, subtree too large
+payload_too_large -> 413 request body limit exceeded
 node_write_locked    -> 423 target node or an ancestor is write-locked
 subtree_write_locked -> 423 source subtree contains a directly write-locked node
+rate_limited   -> 429 process-wide HTTP capacity exceeded
 usage_reconciliation_pending  -> 409 reconciliation job already queued
 usage_reconciliation_cooldown -> 409 reconciliation completed within the cooldown window
 internal_error -> 500 redacted internal error

@@ -40,13 +40,12 @@ pub(crate) struct FindBody {
     #[serde(default = "default_path")]
     path: String,
     /// Optional node kind filter: `folder`, `text`, or `file`.
-    #[schema(examples("folder", "text", "file"))]
     #[serde(default)]
-    kind: Option<String>,
+    kind: Option<SearchNodeKind>,
     /// Matching strategy: `contains` (default), `regex`, or `glob`.
-    #[schema(default = "contains", examples("contains", "regex", "glob"))]
+    #[schema(default = "contains")]
     #[serde(default, rename = "match")]
-    match_mode: Option<String>,
+    match_mode: FindMatch,
     /// Glob patterns that a canonical relative path must match.
     #[serde(default)]
     include: Vec<String>,
@@ -60,6 +59,43 @@ pub(crate) struct FindBody {
     /// Opaque continuation cursor returned by the preceding response.
     #[serde(default)]
     cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SearchNodeKind {
+    Folder,
+    Text,
+    File,
+}
+
+impl From<SearchNodeKind> for NodeKind {
+    fn from(value: SearchNodeKind) -> Self {
+        match value {
+            SearchNodeKind::Folder => Self::Folder,
+            SearchNodeKind::Text => Self::Text,
+            SearchNodeKind::File => Self::File,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum FindMatch {
+    #[default]
+    Contains,
+    Regex,
+    Glob,
+}
+
+impl From<FindMatch> for FindMatchMode {
+    fn from(value: FindMatch) -> Self {
+        match value {
+            FindMatch::Contains => Self::Contains,
+            FindMatch::Regex => Self::Regex,
+            FindMatch::Glob => Self::Glob,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -79,6 +115,7 @@ pub(crate) struct SearchHitOut {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/search/find",
+    operation_id = "find_nodes",
     tag = "search",
     params(("space_id" = Uuid, Path)),
     request_body = FindBody,
@@ -98,7 +135,6 @@ pub(crate) async fn find(
         .search_admission
         .enter_find()
         .map_err(|_| ApiError::search_busy("find"))?;
-    let kind = body.kind.as_deref().map(parse_kind).transpose()?;
     let page = state
         .search
         .find(
@@ -107,8 +143,8 @@ pub(crate) async fn find(
             FindRequest {
                 q: body.q,
                 path: Some(body.path),
-                kind,
-                match_mode: parse_find_match_mode(body.match_mode.as_deref())?,
+                kind: body.kind.map(NodeKind::from),
+                match_mode: body.match_mode.into(),
                 include: body.include,
                 exclude: body.exclude,
                 limit: body.limit,
@@ -149,13 +185,13 @@ pub(crate) struct GrepBody {
     #[serde(default = "default_path")]
     path: String,
     /// Matching strategy: `literal` (default) or `regex`.
-    #[schema(default = "literal", examples("literal", "regex"))]
+    #[schema(default = "literal")]
     #[serde(default, rename = "match")]
-    match_mode: Option<String>,
+    match_mode: GrepMatch,
     /// Matching line details: `none` (default), `first`, or `all`.
-    #[schema(default = "none", examples("none", "first", "all"))]
+    #[schema(default = "none")]
     #[serde(default)]
-    lines: Option<String>,
+    lines: GrepLines,
     /// Glob patterns that a canonical relative path must match.
     #[serde(default)]
     include: Vec<String>,
@@ -171,9 +207,46 @@ pub(crate) struct GrepBody {
     cursor: Option<String>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GrepMatch {
+    #[default]
+    Literal,
+    Regex,
+}
+
+impl From<GrepMatch> for GrepMatchMode {
+    fn from(value: GrepMatch) -> Self {
+        match value {
+            GrepMatch::Literal => Self::Literal,
+            GrepMatch::Regex => Self::Regex,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GrepLines {
+    #[default]
+    None,
+    First,
+    All,
+}
+
+impl From<GrepLines> for GrepLineMode {
+    fn from(value: GrepLines) -> Self {
+        match value {
+            GrepLines::None => Self::None,
+            GrepLines::First => Self::First,
+            GrepLines::All => Self::All,
+        }
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/search/grep",
+    operation_id = "grep_text",
     tag = "search",
     params(("space_id" = Uuid, Path)),
     request_body = GrepBody,
@@ -202,8 +275,8 @@ pub(crate) async fn grep(
             GrepRequest {
                 q: body.q,
                 path: Some(body.path),
-                match_mode: parse_grep_match_mode(body.match_mode.as_deref())?,
-                line_mode: parse_grep_line_mode(body.lines.as_deref())?,
+                match_mode: body.match_mode.into(),
+                line_mode: body.lines.into(),
                 include: body.include,
                 exclude: body.exclude,
                 limit: body.limit,
@@ -229,47 +302,38 @@ fn default_path() -> String {
     "/".to_owned()
 }
 
-fn parse_kind(value: &str) -> Result<NodeKind, ApiError> {
-    NodeKind::parse(value)
-        .ok_or_else(|| ApiError::invalid_field("kind must be 'folder', 'text', or 'file'"))
-}
-
-fn parse_find_match_mode(value: Option<&str>) -> Result<FindMatchMode, ApiError> {
-    FindMatchMode::parse(value.unwrap_or("contains"))
-        .ok_or_else(|| ApiError::invalid_field("match must be 'contains', 'regex', or 'glob'"))
-}
-
-fn parse_grep_match_mode(value: Option<&str>) -> Result<GrepMatchMode, ApiError> {
-    GrepMatchMode::parse(value.unwrap_or("literal"))
-        .ok_or_else(|| ApiError::invalid_field("match must be 'literal' or 'regex'"))
-}
-
-fn parse_grep_line_mode(value: Option<&str>) -> Result<GrepLineMode, ApiError> {
-    GrepLineMode::parse(value.unwrap_or("none"))
-        .ok_or_else(|| ApiError::invalid_field("lines must be 'none', 'first', or 'all'"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn search_defaults_match_agent_mcp_contract() {
-        assert_eq!(
-            parse_find_match_mode(None).ok(),
-            Some(FindMatchMode::Contains)
-        );
-        assert_eq!(
-            parse_grep_match_mode(None).ok(),
-            Some(GrepMatchMode::Literal)
-        );
-        assert_eq!(parse_grep_line_mode(None).ok(), Some(GrepLineMode::None));
+    fn search_defaults_match_agent_mcp_contract() -> Result<(), serde_json::Error> {
+        let find: FindBody = serde_json::from_value(serde_json::json!({"q": "README"}))?;
+        assert_eq!(find.match_mode, FindMatch::Contains);
+
+        let grep: GrepBody = serde_json::from_value(serde_json::json!({"q": "TODO"}))?;
+        assert_eq!(grep.match_mode, GrepMatch::Literal);
+        assert_eq!(grep.lines, GrepLines::None);
+        Ok(())
     }
 
     #[test]
     fn search_rejects_unknown_modes() {
-        assert!(parse_find_match_mode(Some("literal")).is_err());
-        assert!(parse_grep_match_mode(Some("glob")).is_err());
-        assert!(parse_grep_line_mode(Some("matching")).is_err());
+        assert!(
+            serde_json::from_value::<FindBody>(
+                serde_json::json!({"q": "README", "match": "literal"})
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<GrepBody>(serde_json::json!({"q": "TODO", "match": "glob"}))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<GrepBody>(
+                serde_json::json!({"q": "TODO", "lines": "matching"})
+            )
+            .is_err()
+        );
     }
 }

@@ -29,6 +29,7 @@ pub fn routes() -> Router<AppState> {
 #[utoipa::path(
     get,
     path = "/api/v2/me",
+    operation_id = "get_me",
     tag = "identity",
     responses((status = 200, description = "Get the Agent API-key caller", body = MeResponse)),
     security(("api_key" = []))

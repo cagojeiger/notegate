@@ -1,5 +1,8 @@
 use chrono::{DateTime, Utc};
-use notegate_model::Caller;
+use notegate_model::{
+    AccountKind, Caller, FileEncryptionMode, NodeKind, Permission, TextAtRestEncryption,
+    TextStorageFormat,
+};
 use notegate_service::files::{NodeSummaryView, NodeView, WriteLockSource};
 use notegate_service::spaces::SpaceView;
 use serde::Serialize;
@@ -15,8 +18,24 @@ pub struct MeResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AccountOut {
     pub id: Uuid,
-    pub kind: String,
+    pub kind: AccountKindOut,
     pub display_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountKindOut {
+    User,
+    Agent,
+}
+
+impl From<AccountKind> for AccountKindOut {
+    fn from(kind: AccountKind) -> Self {
+        match kind {
+            AccountKind::User => Self::User,
+            AccountKind::Agent => Self::Agent,
+        }
+    }
 }
 
 impl From<&Caller> for MeResponse {
@@ -24,7 +43,7 @@ impl From<&Caller> for MeResponse {
         Self {
             account: AccountOut {
                 id: caller.account.id,
-                kind: caller.account.kind.as_str().to_owned(),
+                kind: caller.account.kind.into(),
                 display_name: caller.account.display_name.clone(),
             },
         }
@@ -61,8 +80,7 @@ pub struct SpaceOut {
     pub id: Uuid,
     pub name: String,
     /// Effective connection permission: `read` or `write`.
-    #[schema(examples("read", "write"))]
-    pub permission: String,
+    pub permission: PermissionOut,
     pub root_node_id: Uuid,
     /// Default search policy inherited by newly created nodes.
     pub default_search_enabled: bool,
@@ -71,6 +89,22 @@ pub struct SpaceOut {
     pub features: SpaceFeaturesOut,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionOut {
+    Read,
+    Write,
+}
+
+impl From<Permission> for PermissionOut {
+    fn from(permission: Permission) -> Self {
+        match permission {
+            Permission::Read => Self::Read,
+            Permission::Write => Self::Write,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -85,7 +119,7 @@ impl From<&SpaceView> for SpaceOut {
         Self {
             id: view.space.id,
             name: view.space.name.clone(),
-            permission: view.permission.as_str().to_owned(),
+            permission: view.permission.into(),
             root_node_id: view.root_node_id,
             default_search_enabled: view.space.default_search_enabled,
             default_text_encryption_enabled: view.space.default_text_encryption_enabled,
@@ -107,8 +141,7 @@ pub struct NodeOut {
     pub parent_id: Option<Uuid>,
     pub name: String,
     /// `folder`, `text`, or `file`.
-    #[schema(examples("folder", "text", "file"))]
-    pub kind: String,
+    pub kind: NodeKindOut,
     /// Canonical absolute path derived from parent relationships and names.
     pub path: String,
     pub sort_order: i32,
@@ -128,22 +161,88 @@ pub struct NodeOut {
     pub line_count: Option<i32>,
     /// Text storage representation, when kind is `text`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_storage_format: Option<String>,
+    pub text_storage_format: Option<TextStorageFormatOut>,
     /// Server-managed at-rest encryption state, when kind is `text`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_at_rest_encryption: Option<String>,
+    pub text_at_rest_encryption: Option<TextAtRestEncryptionOut>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_filename: Option<String>,
     /// File encryption mode: `none` or `client`, when kind is `file`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub encryption_mode: Option<String>,
+    pub encryption_mode: Option<FileEncryptionModeOut>,
     /// Opaque client encryption metadata. Never contains the encryption key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption_metadata: Option<Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeKindOut {
+    Folder,
+    Text,
+    File,
+}
+
+impl From<NodeKind> for NodeKindOut {
+    fn from(kind: NodeKind) -> Self {
+        match kind {
+            NodeKind::Folder => Self::Folder,
+            NodeKind::Text => Self::Text,
+            NodeKind::File => Self::File,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TextStorageFormatOut {
+    Plain,
+    Encrypted,
+}
+
+impl From<TextStorageFormat> for TextStorageFormatOut {
+    fn from(format: TextStorageFormat) -> Self {
+        match format {
+            TextStorageFormat::Plain => Self::Plain,
+            TextStorageFormat::Encrypted => Self::Encrypted,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAtRestEncryptionOut {
+    None,
+    Server,
+}
+
+impl From<TextAtRestEncryption> for TextAtRestEncryptionOut {
+    fn from(encryption: TextAtRestEncryption) -> Self {
+        match encryption {
+            TextAtRestEncryption::None => Self::None,
+            TextAtRestEncryption::Server => Self::Server,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FileEncryptionModeOut {
+    None,
+    Client,
+}
+
+impl From<FileEncryptionMode> for FileEncryptionModeOut {
+    fn from(mode: FileEncryptionMode) -> Self {
+        match mode {
+            FileEncryptionMode::None => Self::None,
+            FileEncryptionMode::Client => Self::Client,
+        }
+    }
 }
 
 impl From<&NodeView> for NodeOut {
@@ -154,7 +253,7 @@ impl From<&NodeView> for NodeOut {
             space_id: node.space_id,
             parent_id: node.parent_id,
             name: node.name.clone(),
-            kind: node.kind.as_str().to_owned(),
+            kind: node.kind.into(),
             path: view.path.clone(),
             sort_order: node.sort_order,
             search_enabled: node.search_enabled,
@@ -173,23 +272,17 @@ impl From<&NodeView> for NodeOut {
                 .map(|text| text.byte_len)
                 .or_else(|| view.file.as_ref().map(|file| file.byte_len)),
             line_count: view.text.as_ref().map(|text| text.line_count),
-            text_storage_format: view
-                .text
-                .as_ref()
-                .map(|text| text.storage_format.as_str().to_owned()),
+            text_storage_format: view.text.as_ref().map(|text| text.storage_format.into()),
             text_at_rest_encryption: view
                 .text
                 .as_ref()
-                .map(|text| text.at_rest_encryption.as_str().to_owned()),
+                .map(|text| text.at_rest_encryption.into()),
             media_type: view.file.as_ref().map(|file| file.media_type.clone()),
             original_filename: view
                 .file
                 .as_ref()
                 .and_then(|file| file.original_filename.clone()),
-            encryption_mode: view
-                .file
-                .as_ref()
-                .map(|file| file.encryption_mode.as_str().to_owned()),
+            encryption_mode: view.file.as_ref().map(|file| file.encryption_mode.into()),
             encryption_metadata: view
                 .file
                 .as_ref()
@@ -206,7 +299,7 @@ pub struct NodeSummaryOut {
     pub id: Uuid,
     pub parent_id: Option<Uuid>,
     pub name: String,
-    pub kind: String,
+    pub kind: NodeKindOut,
     /// Canonical absolute path.
     pub path: String,
     pub has_children: bool,
@@ -227,7 +320,7 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
             id: view.node.id,
             parent_id: view.node.parent_id,
             name: view.node.name.clone(),
-            kind: view.node.kind.as_str().to_owned(),
+            kind: view.node.kind.into(),
             path: view.path.clone(),
             has_children: view.has_children,
             effective_write_locked: view.effective_write_locked,
@@ -249,7 +342,7 @@ impl NodeSummaryOut {
             id: view.node.id,
             parent_id: view.node.parent_id,
             name: view.node.name.clone(),
-            kind: view.node.kind.as_str().to_owned(),
+            kind: view.node.kind.into(),
             path: view.path.clone(),
             has_children: view.has_children,
             effective_write_locked: !view.write_lock_sources.is_empty(),

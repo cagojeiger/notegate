@@ -84,6 +84,7 @@ pub(crate) struct ReadUnchangedOut {
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}/text/{node_id}",
+    operation_id = "read_text",
     tag = "text",
     params(
         ("space_id" = Uuid, Path),
@@ -163,6 +164,7 @@ pub(crate) struct ReplaceBody {
 #[utoipa::path(
     put,
     path = "/api/v2/spaces/{space_id}/text/{node_id}",
+    operation_id = "replace_text",
     tag = "text",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = ReplaceBody,
@@ -221,6 +223,7 @@ pub(crate) struct AppendBody {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/text/{node_id}/append",
+    operation_id = "append_text",
     tag = "text",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = AppendBody,
@@ -277,17 +280,37 @@ pub(crate) struct PatchEditBody {
     /// Replacement text.
     new_text: String,
     /// Match selection: `unique` (default), `first`, or `all`.
-    #[schema(default = "unique", examples("unique", "first", "all"))]
+    #[schema(default = "unique")]
     #[serde(default)]
-    mode: Option<String>,
+    mode: PatchMatchMode,
     /// Optional assertion for the number of matches before mutation.
     #[serde(default)]
     expected_count: Option<usize>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PatchMatchMode {
+    #[default]
+    Unique,
+    First,
+    All,
+}
+
+impl From<PatchMatchMode> for PatchMode {
+    fn from(value: PatchMatchMode) -> Self {
+        match value {
+            PatchMatchMode::Unique => Self::Unique,
+            PatchMatchMode::First => Self::First,
+            PatchMatchMode::All => Self::All,
+        }
+    }
+}
+
 #[utoipa::path(
     patch,
     path = "/api/v2/spaces/{space_id}/text/{node_id}",
+    operation_id = "patch_text",
     tag = "text",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = PatchBody,
@@ -303,15 +326,13 @@ pub(crate) async fn patch(
     let edits = body
         .edits
         .into_iter()
-        .map(|edit| {
-            Ok(ServiceEdit {
-                old_text: edit.old_text,
-                new_text: edit.new_text,
-                mode: parse_patch_mode(edit.mode.as_deref())?,
-                expected_count: edit.expected_count,
-            })
+        .map(|edit| ServiceEdit {
+            old_text: edit.old_text,
+            new_text: edit.new_text,
+            mode: edit.mode.into(),
+            expected_count: edit.expected_count,
         })
-        .collect::<Result<Vec<_>, ApiError>>()?;
+        .collect();
     let result = state
         .files
         .patch_text(
@@ -351,13 +372,7 @@ pub(crate) struct LineEditBody {
 #[serde(deny_unknown_fields)]
 pub(crate) struct LineEditItem {
     /// `insert_before_line`, `insert_after_line`, `replace_lines`, or `delete_lines`.
-    #[schema(examples(
-        "insert_before_line",
-        "insert_after_line",
-        "replace_lines",
-        "delete_lines"
-    ))]
-    op: String,
+    op: LineEditOperation,
     /// Required by insert operations. Lines are 1-based.
     #[serde(default)]
     line: Option<i64>,
@@ -372,9 +387,19 @@ pub(crate) struct LineEditItem {
     content: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LineEditOperation {
+    InsertBeforeLine,
+    InsertAfterLine,
+    ReplaceLines,
+    DeleteLines,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/text/{node_id}/edit",
+    operation_id = "edit_text",
     tag = "text",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = LineEditBody,
@@ -464,33 +489,25 @@ fn encrypted_text_error() -> ApiError {
     ))
 }
 
-fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ApiError> {
-    PatchMode::parse(raw.unwrap_or("unique"))
-        .ok_or_else(|| ApiError::invalid_field("mode must be 'unique', 'first', or 'all'"))
-}
-
 fn parse_line_edit(input: LineEditItem) -> Result<LineEdit, ApiError> {
-    match input.op.as_str() {
-        "insert_before_line" => Ok(LineEdit::InsertBefore {
+    match input.op {
+        LineEditOperation::InsertBeforeLine => Ok(LineEdit::InsertBefore {
             line: required(input.line, "line")?,
             content: required(input.content, "content")?,
         }),
-        "insert_after_line" => Ok(LineEdit::InsertAfter {
+        LineEditOperation::InsertAfterLine => Ok(LineEdit::InsertAfter {
             line: required(input.line, "line")?,
             content: required(input.content, "content")?,
         }),
-        "replace_lines" => Ok(LineEdit::ReplaceLines {
+        LineEditOperation::ReplaceLines => Ok(LineEdit::ReplaceLines {
             start_line: required(input.start_line, "start_line")?,
             end_line: required(input.end_line, "end_line")?,
             content: required(input.content, "content")?,
         }),
-        "delete_lines" => Ok(LineEdit::DeleteLines {
+        LineEditOperation::DeleteLines => Ok(LineEdit::DeleteLines {
             start_line: required(input.start_line, "start_line")?,
             end_line: required(input.end_line, "end_line")?,
         }),
-        _ => Err(ApiError::invalid_field(
-            "op must be insert_before_line, insert_after_line, replace_lines, or delete_lines",
-        )),
     }
 }
 
@@ -507,7 +524,7 @@ mod tests {
     #[test]
     fn line_edit_inputs_require_operation_fields() {
         let error = parse_line_edit(LineEditItem {
-            op: "replace_lines".to_owned(),
+            op: LineEditOperation::ReplaceLines,
             line: None,
             start_line: Some(1),
             end_line: None,
@@ -521,9 +538,19 @@ mod tests {
 
     #[test]
     fn patch_modes_match_agent_mcp_contract() {
-        for mode in [None, Some("unique"), Some("first"), Some("all")] {
-            assert!(parse_patch_mode(mode).is_ok());
-        }
-        assert!(parse_patch_mode(Some("replace")).is_err());
+        let edit: PatchEditBody = serde_json::from_value(serde_json::json!({
+            "old_text": "draft",
+            "new_text": "published"
+        }))
+        .expect("patch edit defaults mode");
+        assert_eq!(edit.mode, PatchMatchMode::Unique);
+        assert!(
+            serde_json::from_value::<PatchEditBody>(serde_json::json!({
+                "old_text": "draft",
+                "new_text": "published",
+                "mode": "replace"
+            }))
+            .is_err()
+        );
     }
 }

@@ -62,12 +62,29 @@ pub(crate) struct BeginUploadBody {
     #[serde(default)]
     original_filename: Option<String>,
     /// `none` (default) or `client`. NoteGate never receives a client encryption key.
-    #[schema(default = "none", examples("none", "client"))]
-    #[serde(default = "default_encryption_mode")]
-    encryption_mode: String,
+    #[schema(default = "none")]
+    #[serde(default)]
+    encryption_mode: UploadEncryptionMode,
     /// Client-defined JSON object required for `client` encryption and omitted for `none`.
     #[serde(default)]
     encryption_metadata: Option<Value>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum UploadEncryptionMode {
+    #[default]
+    None,
+    Client,
+}
+
+impl From<UploadEncryptionMode> for FileEncryptionMode {
+    fn from(value: UploadEncryptionMode) -> Self {
+        match value {
+            UploadEncryptionMode::None => Self::None,
+            UploadEncryptionMode::Client => Self::Client,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -104,6 +121,7 @@ pub(crate) enum UploadTransferOut {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/file-uploads",
+    operation_id = "begin_file_upload",
     tag = "files",
     params(("space_id" = Uuid, Path)),
     request_body = BeginUploadBody,
@@ -116,15 +134,13 @@ pub(crate) async fn begin(
     Path(space_id): Path<Uuid>,
     Json(body): Json<BeginUploadBody>,
 ) -> Result<(StatusCode, Json<BeginUploadResponse>), ApiError> {
-    let encryption_mode = FileEncryptionMode::parse(&body.encryption_mode)
-        .ok_or_else(|| ApiError::invalid_field("encryption_mode must be 'none' or 'client'"))?;
     let command = BeginObjectUpload {
         parent_node_id: body.parent_id,
         name: body.name,
         byte_len: body.byte_len,
         media_type: body.media_type,
         original_filename: body.original_filename,
-        encryption_mode,
+        encryption_mode: body.encryption_mode.into(),
         encryption_metadata: body.encryption_metadata,
     };
     let begun = begin_upload(
@@ -160,10 +176,6 @@ pub(crate) async fn begin(
     ))
 }
 
-fn default_encryption_mode() -> String {
-    "none".to_owned()
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Requests presigned PUT URLs for selected multipart parts.
@@ -193,6 +205,7 @@ pub(crate) struct UploadPartOut {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/file-uploads/{upload_id}/parts",
+    operation_id = "prepare_file_upload_parts",
     tag = "files",
     params(("space_id" = Uuid, Path), ("upload_id" = Uuid, Path)),
     request_body = PreparePartsBody,
@@ -268,6 +281,7 @@ pub(crate) struct FileResponse {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/file-uploads/{upload_id}/complete",
+    operation_id = "complete_file_upload",
     tag = "files",
     params(("space_id" = Uuid, Path), ("upload_id" = Uuid, Path)),
     request_body = Option<CompleteUploadBody>,
@@ -307,6 +321,7 @@ pub(crate) async fn complete(
 #[utoipa::path(
     delete,
     path = "/api/v2/spaces/{space_id}/file-uploads/{upload_id}",
+    operation_id = "abort_file_upload",
     tag = "files",
     params(("space_id" = Uuid, Path), ("upload_id" = Uuid, Path)),
     responses((status = 204, description = "Queue incomplete upload cleanup")),
@@ -334,6 +349,7 @@ pub(crate) struct DownloadResponse {
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}/files/{node_id}/download",
+    operation_id = "download_file",
     tag = "files",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses((status = 200, description = "Create a presigned file download URL", body = DownloadResponse)),

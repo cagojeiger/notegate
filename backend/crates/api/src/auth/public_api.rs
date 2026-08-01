@@ -38,8 +38,12 @@ pub async fn require_public_api_key(
 
 pub async fn mark_private_no_store(request: Request<Body>, next: Next) -> Response {
     let mut response = next.run(request).await;
+    set_private_no_store(&mut response);
+    response
+}
+
+pub fn set_private_no_store(response: &mut Response) {
     response
         .headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
-    response
 }

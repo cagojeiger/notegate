@@ -256,6 +256,8 @@ jobs:
         env:
           NOTEGATE_PUBLIC_V2_API_KEY: ${{ steps.seed_test_identity.outputs.agent_api_key }}
           NOTEGATE_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
+          REDOCLY_TELEMETRY: "off"
+          REDOCLY_SUPPRESS_UPDATE_NOTICE: "true"
         run: |
           curl --fail --silent \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
@@ -263,9 +265,23 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
             http://127.0.0.1:9191/api/v2/spaces)" = "200"
-          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          test "$(curl --silent \
+            --dump-header browser-e2e/public-v2-error.headers \
+            --output browser-e2e/public-v2-error.json \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
+            http://127.0.0.1:9191/api/v2/spaces/not-a-uuid)" = "400"
+          jq --exit-status \
+            '.error == "invalid_input" and .kind == "invalid_input"' \
+            browser-e2e/public-v2-error.json >/dev/null
+          grep --ignore-case --quiet \
+            '^cache-control: private, no-store' \
+            browser-e2e/public-v2-error.headers
+          curl --fail --silent \
             --cookie "notegate_browser_session=$NOTEGATE_BROWSER_SESSION" \
-            http://127.0.0.1:9191/openapi/v2.json)" = "200"
+            --output browser-e2e/openapi-v2.json \
+            http://127.0.0.1:9191/openapi/v2.json
+          pnpm exec redocly lint --extends=spec browser-e2e/openapi-v2.json
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
             http://127.0.0.1:9191/api/v1/me)" = "401"

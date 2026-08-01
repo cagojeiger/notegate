@@ -4,7 +4,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use notegate_core::validation::normalize_path;
-use notegate_model::{Caller, NodeKind};
+use notegate_model::Caller;
 use notegate_service::files::{
     ChildrenRequest, CopyNode, CreateFolder, CreateText, DeleteNode, MoveNode, WriteTarget,
     WriteText, WriteTextBody,
@@ -41,6 +41,7 @@ pub(crate) struct ResolveQuery {
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}/paths/resolve",
+    operation_id = "resolve_node_path",
     tag = "nodes",
     params(
         ("space_id" = Uuid, Path, description = "Space id"),
@@ -65,6 +66,7 @@ pub(crate) async fn resolve_path(
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}/nodes/{node_id}",
+    operation_id = "get_node",
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     responses((status = 200, description = "Get node metadata and effective write-lock state", body = NodeOut)),
@@ -98,6 +100,7 @@ pub(crate) struct ChildrenResponse {
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}/nodes/{node_id}/children",
+    operation_id = "list_node_children",
     tag = "nodes",
     params(
         ("space_id" = Uuid, Path),
@@ -157,6 +160,7 @@ pub(crate) struct TreeResponse {
 #[utoipa::path(
     get,
     path = "/api/v2/spaces/{space_id}/tree",
+    operation_id = "list_tree",
     tag = "nodes",
     params(
         ("space_id" = Uuid, Path),
@@ -224,17 +228,24 @@ pub(crate) struct CreateNodeBody {
     /// Name of the new node, not a path.
     #[schema(example = "README.md")]
     name: String,
-    /// Node kind. Allowed values are `folder` and `text`.
-    #[schema(examples("folder", "text"))]
-    kind: String,
+    /// Node kind. File nodes are created through the upload lifecycle.
+    kind: CreateNodeKind,
     /// Initial UTF-8 text. Allowed only when `kind=text`; omitted content creates an empty text.
     #[serde(default)]
     content: Option<String>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CreateNodeKind {
+    Folder,
+    Text,
+}
+
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/nodes",
+    operation_id = "create_node",
     tag = "nodes",
     params(("space_id" = Uuid, Path)),
     request_body = CreateNodeBody,
@@ -248,8 +259,8 @@ pub(crate) async fn create(
     Json(body): Json<CreateNodeBody>,
 ) -> Result<(StatusCode, Json<NodeOut>), ApiError> {
     let account_id = caller.account_id();
-    let view = match NodeKind::parse(&body.kind) {
-        Some(NodeKind::Folder) if body.content.is_none() => {
+    let view = match body.kind {
+        CreateNodeKind::Folder if body.content.is_none() => {
             state
                 .files
                 .create_folder(
@@ -262,7 +273,7 @@ pub(crate) async fn create(
                 )
                 .await?
         }
-        Some(NodeKind::Text) => match body.content {
+        CreateNodeKind::Text => match body.content {
             Some(content) => {
                 state
                     .files
@@ -296,18 +307,10 @@ pub(crate) async fn create(
                     .node
             }
         },
-        Some(NodeKind::Folder) => {
+        CreateNodeKind::Folder => {
             return Err(ApiError::invalid_field(
                 "content is only valid when kind=text",
             ));
-        }
-        Some(NodeKind::File) => {
-            return Err(ApiError::invalid_field(
-                "files must be created through file-uploads",
-            ));
-        }
-        None => {
-            return Err(ApiError::invalid_field("kind must be 'folder' or 'text'"));
         }
     };
     Ok((StatusCode::CREATED, Json(NodeOut::from(&view))))
@@ -335,6 +338,7 @@ pub(crate) struct MoveNodeBody {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/nodes/{node_id}/move",
+    operation_id = "move_node",
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = MoveNodeBody,
@@ -398,6 +402,7 @@ pub(crate) struct CopyCountsOut {
 #[utoipa::path(
     post,
     path = "/api/v2/spaces/{space_id}/nodes/{node_id}/copy",
+    operation_id = "copy_node",
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = CopyNodeBody,
@@ -452,6 +457,7 @@ pub(crate) struct DeleteNodeResponse {
 #[utoipa::path(
     delete,
     path = "/api/v2/spaces/{space_id}/nodes/{node_id}",
+    operation_id = "delete_node",
     tag = "nodes",
     params(
         ("space_id" = Uuid, Path),
