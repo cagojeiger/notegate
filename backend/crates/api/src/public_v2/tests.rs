@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::Extension;
 use axum::http::StatusCode;
 use notegate_db::{AccountRepo, AgentRepo, ConnectionRepo, SpaceRepo, test_support::TestDb};
-use notegate_model::{Caller, CallerIdentity, Channel, ConnectAgent, Permission};
+use notegate_model::{Caller, CallerIdentity, Channel, ConnectAgent, Permission, ResolveAttrs};
 use notegate_service::agents::CreateAgent;
 use notegate_service::spaces::CreateSpace;
 use serde_json::json;
@@ -145,9 +145,20 @@ async fn v2_respects_connection_permission_and_space_visibility()
     .await?;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
 
+    let (hidden_owner, _) = AccountRepo::with_crypto_and_default_user_tier(
+        state.db.clone(),
+        state.security.clone(),
+        state.config.default_user_tier,
+    )
+    .upsert_user_by_sub(&ResolveAttrs {
+        sub: "v2-hidden-owner".to_owned(),
+        email: "v2-hidden-owner@example.test".to_owned(),
+        name: "V2 Hidden Owner".to_owned(),
+    })
+    .await?;
     let hidden = SpaceRepo::new(state.db.clone())
         .create_space(
-            owner.account_id(),
+            hidden_owner.id,
             &CreateSpace {
                 name: "v2-hidden".to_owned(),
             },
