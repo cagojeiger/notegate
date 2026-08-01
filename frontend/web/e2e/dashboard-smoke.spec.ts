@@ -24,13 +24,17 @@ test("browser session dashboard supports space, text, metadata, and file basics"
 
   await page.locator('button[aria-label="Add space"]:visible').click();
   await page.getByLabel("Space name").fill(spaceName);
-  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.getByRole("dialog", { name: "New space" })
+    .getByRole("button", { name: "Create", exact: true })
+    .click();
   await expect(page.locator("body")).toContainText(spaceName);
 
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("button", { name: "New document" }).first().click();
   await page.getByLabel("Name", { exact: true }).fill(textName);
-  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.getByRole("dialog", { name: "New document" })
+    .getByRole("button", { name: "Create", exact: true })
+    .click();
   await expect(page.locator("body")).toContainText(textName);
 
   await page.getByRole("button", { name: "Edit", exact: true }).click();
