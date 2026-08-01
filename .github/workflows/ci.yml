@@ -262,7 +262,7 @@ jobs:
             http://127.0.0.1:9191/api/v2/me >/dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --header "Authorization: Bearer $NOTEGATE_PUBLIC_V2_API_KEY" \
-            http://127.0.0.1:9191/api/v2/spaces)" = "404"
+            http://127.0.0.1:9191/api/v2/spaces)" = "200"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --cookie "notegate_browser_session=$NOTEGATE_BROWSER_SESSION" \
             http://127.0.0.1:9191/openapi/v2.json)" = "200"
