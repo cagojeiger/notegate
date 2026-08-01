@@ -9,6 +9,7 @@ use notegate_service::files::{
     ReadResult, ReadText, ReadTextBody, TextView, WriteTarget, WriteText, WriteTextBody,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -148,7 +149,7 @@ pub(crate) async fn read(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Replaces the complete plain-text content.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "content": "# Updated document\n",
     "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }))]
@@ -201,7 +202,7 @@ pub(crate) async fn replace(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Appends UTF-8 content to an existing plain-text node.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "content": "Next entry",
     "ensure_newline": true,
     "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -252,7 +253,7 @@ pub(crate) async fn append(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Applies one or more exact string replacements atomically.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "edits": [{
         "old_text": "draft",
         "new_text": "published",
@@ -330,7 +331,7 @@ pub(crate) async fn patch(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Applies one or more 1-based line edits atomically.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "edits": [{
         "op": "replace_lines",
         "start_line": 2,

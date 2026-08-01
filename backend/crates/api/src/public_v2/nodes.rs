@@ -11,6 +11,7 @@ use notegate_service::files::{
 };
 use notegate_service::search::TreeRequest;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -206,12 +207,12 @@ pub(crate) async fn tree(
 #[serde(deny_unknown_fields)]
 /// Creates a folder or a plain-text node below an existing folder.
 #[schema(examples(
-    serde_json::json!({
+    json!({
         "parent_id": "11111111-1111-1111-1111-111111111111",
         "name": "notes",
         "kind": "folder"
     }),
-    serde_json::json!({
+    json!({
         "parent_id": "11111111-1111-1111-1111-111111111111",
         "name": "README.md",
         "kind": "text",
@@ -316,7 +317,7 @@ pub(crate) async fn create(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Moves a node to another folder in the same space and optionally renames it.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "new_parent_id": "22222222-2222-2222-2222-222222222222",
     "new_name": "renamed.md",
     "expected_parent_id": "11111111-1111-1111-1111-111111111111"
@@ -366,7 +367,7 @@ pub(crate) async fn move_node(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Copies a node to another folder in the same space.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "new_parent_id": "22222222-2222-2222-2222-222222222222",
     "new_name": "README-copy.md",
     "recursive": false

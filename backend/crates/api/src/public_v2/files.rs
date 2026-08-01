@@ -7,7 +7,7 @@ use axum::{Json, Router};
 use notegate_model::{Caller, FileEncryptionMode};
 use notegate_service::files::BeginObjectUpload;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -39,7 +39,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Starts a presigned object upload and reserves the destination file name.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "parent_id": "11111111-1111-1111-1111-111111111111",
     "name": "report.pdf",
     "byte_len": 7340032,
@@ -167,7 +167,7 @@ fn default_encryption_mode() -> String {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Requests presigned PUT URLs for selected multipart parts.
-#[schema(example = serde_json::json!({"part_numbers": [1, 2, 3]}))]
+#[schema(example = json!({"part_numbers": [1, 2, 3]}))]
 pub(crate) struct PreparePartsBody {
     /// Unique 1-based part numbers. At most 16 values are accepted per request.
     #[schema(min_items = 1, max_items = 16)]
@@ -238,8 +238,8 @@ pub(crate) async fn parts(
 /// Omit `completed_parts` for single PUT uploads. Multipart uploads must include every
 /// part number and the ETag returned by the provider PUT response.
 #[schema(examples(
-    serde_json::json!({}),
-    serde_json::json!({
+    json!({}),
+    json!({
         "completed_parts": [
             {"part_number": 1, "etag": "\"provider-etag-1\""},
             {"part_number": 2, "etag": "\"provider-etag-2\""}

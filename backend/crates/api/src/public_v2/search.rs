@@ -6,6 +6,7 @@ use notegate_service::search::{
     FindMatchMode, FindRequest, GrepLineMode, GrepMatchMode, GrepRequest,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -23,7 +24,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Finds nodes by name or canonical path inside a bounded folder scope.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "q": "README",
     "path": "/docs",
     "kind": "text",
@@ -133,7 +134,7 @@ pub(crate) async fn find(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 /// Searches plain-text content inside a bounded folder scope.
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "q": "TODO",
     "path": "/docs",
     "match": "literal",

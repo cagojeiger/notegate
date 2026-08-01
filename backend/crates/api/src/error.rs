@@ -19,7 +19,7 @@ pub struct ApiError {
 
 /// Common REST error response body. Runtime construction happens in [`ApiError::into_response`].
 #[derive(Debug, Serialize, ToSchema)]
-#[schema(example = serde_json::json!({
+#[schema(example = json!({
     "error": "conflict",
     "kind": "conflict",
     "message": "expected_sha256 does not match the current text; read it again"
