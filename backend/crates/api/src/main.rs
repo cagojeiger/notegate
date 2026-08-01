@@ -12,6 +12,7 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::{EnvFilter, Layer as _, util::SubscriberInitExt as _};
 
 mod admission;
+mod agent_text;
 mod auth;
 mod error;
 mod file_preview;

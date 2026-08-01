@@ -13,6 +13,6 @@ mod file_upload_tests;
 #[cfg(test)]
 mod spaces_tests;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 #[cfg(test)]
 mod usage_tests;

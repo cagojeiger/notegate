@@ -11,7 +11,7 @@ use super::resolve::{
     caller, invalid_input_error, node_summary, resolve_target, service_error, split_parent_name,
 };
 use super::unified::FileTransferInput;
-use crate::object_storage::{CompletedUploadPart, MCP_TRANSFER_URL_TTL, ObjectStorageError};
+use crate::object_storage::{AGENT_TRANSFER_URL_TTL, CompletedUploadPart, ObjectStorageError};
 use crate::object_upload_flow::{
     BegunTransfer, BegunUpload, PART_UPLOAD_CONCURRENCY_MAX, PART_URL_BATCH_MAX, UploadFlowError,
     UploadPartTransfer, abort_upload as abort_object_upload, begin_upload as begin_object_upload,
@@ -75,7 +75,7 @@ async fn begin_upload(
         caller.account_id(),
         resolved.space_id(),
         &command,
-        MCP_TRANSFER_URL_TTL,
+        AGENT_TRANSFER_URL_TTL,
     )
     .await
     .map_err(flow_error)?;
@@ -123,7 +123,7 @@ fn build_begin_upload_response(target: String, byte_len: i64, begun: BegunUpload
                 "url": transfer.url,
                 "headers": transfer.headers,
                 "content_length": byte_len,
-                "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
+                "expires_in_seconds": AGENT_TRANSFER_URL_TTL.as_secs(),
             },
             "next_action": {
                 "kind": "http_upload",
@@ -163,7 +163,7 @@ async fn prepare_parts(
         caller.account_id(),
         upload,
         part_numbers,
-        MCP_TRANSFER_URL_TTL,
+        AGENT_TRANSFER_URL_TTL,
     )
     .await
     .map_err(flow_error)?;
@@ -183,7 +183,7 @@ fn build_prepare_parts_response(
                 "url": part.transfer.url,
                 "headers": part.transfer.headers,
                 "content_length": part.content_length,
-                "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
+                "expires_in_seconds": AGENT_TRANSFER_URL_TTL.as_secs(),
             })
         })
         .collect::<Vec<_>>();
@@ -317,7 +317,7 @@ async fn prepare_download(
         .presign_get_with_ttl(
             &file.file.object_key,
             file.file.original_filename.as_deref(),
-            MCP_TRANSFER_URL_TTL,
+            AGENT_TRANSFER_URL_TTL,
         )
         .await
         .map_err(storage_error)?;
@@ -327,7 +327,7 @@ async fn prepare_download(
             "method": "GET",
             "url": url,
             "headers": {},
-            "expires_in_seconds": MCP_TRANSFER_URL_TTL.as_secs(),
+            "expires_in_seconds": AGENT_TRANSFER_URL_TTL.as_secs(),
         },
         "node": node_summary(&file.node),
         "next_action": {

@@ -405,14 +405,8 @@ fn write_body(
 }
 
 fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ApiError> {
-    match raw.unwrap_or("unique") {
-        "unique" => Ok(PatchMode::Unique),
-        "first" => Ok(PatchMode::First),
-        "all" => Ok(PatchMode::All),
-        _ => Err(ApiError::invalid_field(
-            "mode must be 'unique', 'first', or 'all'",
-        )),
-    }
+    PatchMode::parse(raw.unwrap_or("unique"))
+        .ok_or_else(|| ApiError::invalid_field("mode must be 'unique', 'first', or 'all'"))
 }
 
 /// Build the response returned after a successful replace.

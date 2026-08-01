@@ -19,9 +19,19 @@ pub struct ApiError {
 
 /// Common REST error response body. Runtime construction happens in [`ApiError::into_response`].
 #[derive(Debug, Serialize, ToSchema)]
+#[schema(example = json!({
+    "error": "conflict",
+    "kind": "conflict",
+    "message": "expected_sha256 does not match the current text; read it again"
+}))]
 pub struct ErrorResponse {
+    /// Stable machine-readable error code.
+    #[schema(example = "conflict")]
     pub error: String,
+    /// Alias of `error`, shared with the MCP error taxonomy.
+    #[schema(example = "conflict")]
     pub kind: String,
+    /// Human-readable explanation. Clients must branch on `error`, not this text.
     pub message: String,
 }
 
@@ -86,6 +96,15 @@ impl ApiError {
             "usage_reconciliation_cooldown",
             "space usage was reconciled recently; try again later",
         )
+    }
+
+    pub fn search_busy(operation: &'static str) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "search_busy",
+            message: format!("{operation} capacity is busy; retry shortly"),
+            retry_after_seconds: Some(1),
+        }
     }
 
     pub fn object_storage_unavailable() -> Self {
@@ -254,6 +273,20 @@ mod tests {
                 .get(RETRY_AFTER)
                 .and_then(|value| value.to_str().ok()),
             Some("5")
+        );
+    }
+
+    #[test]
+    fn search_busy_is_retryable_after_one_second() {
+        let response = ApiError::search_busy("grep").into_response();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            response
+                .headers()
+                .get(RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("1")
         );
     }
 }

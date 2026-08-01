@@ -18,6 +18,7 @@ use super::resolve::{
     caller, invalid_input_error, node_summary, resolve_target, service_error, split_parent_name,
 };
 use super::support::page_json;
+use crate::agent_text::guarded_plain_text_sha;
 use crate::state::AppState;
 
 /// One exact replacement.
@@ -351,7 +352,7 @@ pub async fn write(
     target: String,
     content: String,
     create: bool,
-    expected_sha256: Option<String>,
+    mut expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
@@ -362,7 +363,16 @@ pub async fn write(
         resolve_write_target(state, account_id, space_id, &path, create).await?;
 
     if let Some(view) = &existing {
-        ensure_mcp_plain_text(state, account_id, space_id, view.node.id).await?;
+        let current_sha = guarded_plain_text_sha(
+            state,
+            account_id,
+            space_id,
+            view.node.id,
+            expected_sha256.as_deref(),
+        )
+        .await
+        .map_err(service_error)?;
+        expected_sha256 = Some(current_sha);
     }
 
     let view = state
@@ -688,44 +698,9 @@ pub async fn rm(
     })))
 }
 
-async fn ensure_mcp_plain_text(
-    state: &AppState,
-    account_id: uuid::Uuid,
-    space_id: uuid::Uuid,
-    node_id: uuid::Uuid,
-) -> Result<(), ErrorData> {
-    let result = state
-        .files
-        .read_text(
-            account_id,
-            space_id,
-            ReadText {
-                node_id,
-                start_line: None,
-                max_lines: None,
-                max_bytes: Some(1),
-                if_none_match_sha256: None,
-            },
-        )
-        .await
-        .map_err(service_error)?;
-    if result.storage_format == TextStorageFormat::Encrypted {
-        return Err(service_error(ServiceError::InvalidInput(
-            "encrypted text cannot be modified through MCP content tools".to_owned(),
-        )));
-    }
-    Ok(())
-}
-
 fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ErrorData> {
-    match raw.unwrap_or("unique") {
-        "unique" => Ok(PatchMode::Unique),
-        "first" => Ok(PatchMode::First),
-        "all" => Ok(PatchMode::All),
-        _ => Err(invalid_input_error(
-            "mode must be 'unique', 'first', or 'all'",
-        )),
-    }
+    PatchMode::parse(raw.unwrap_or("unique"))
+        .ok_or_else(|| invalid_input_error("mode must be 'unique', 'first', or 'all'"))
 }
 
 fn parse_line_edit(input: LineEditInput) -> Result<LineEdit, ErrorData> {
@@ -1187,7 +1162,7 @@ mod tests {
         let account_id = caller.account_id();
 
         // Create an encrypted text node directly through the service, bypassing
-        // the MCP plain-text guard that `write()` enforces.
+        // the Agent plain-text guard that `write()` enforces.
         state
             .files
             .write_text(

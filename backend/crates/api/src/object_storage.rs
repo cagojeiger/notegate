@@ -15,7 +15,7 @@ use tokio::io::AsyncReadExt as _;
 use crate::error::ApiError;
 
 pub const TRANSFER_URL_TTL: Duration = Duration::from_secs(15 * 60);
-pub const MCP_TRANSFER_URL_TTL: Duration = Duration::from_secs(5 * 60);
+pub const AGENT_TRANSFER_URL_TTL: Duration = Duration::from_secs(5 * 60);
 pub const MULTIPART_PART_SIZE: i64 = 64 * 1024 * 1024;
 const MAX_MULTIPART_PARTS: i32 = 10_000;
 

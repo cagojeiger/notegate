@@ -9,6 +9,7 @@ use notegate_model::files::{
 use notegate_service::ServiceError;
 use uuid::Uuid;
 
+use crate::error::ApiError;
 use crate::object_storage::{
     CompletedUploadPart, MULTIPART_PART_SIZE, ObjectStorageError, PresignedPut,
     multipart_part_count, multipart_part_len, uses_multipart,
@@ -51,6 +52,20 @@ impl From<ServiceError> for UploadFlowError {
 impl From<ObjectStorageError> for UploadFlowError {
     fn from(error: ObjectStorageError) -> Self {
         Self::Storage(error)
+    }
+}
+
+impl From<UploadFlowError> for ApiError {
+    fn from(error: UploadFlowError) -> Self {
+        match error {
+            UploadFlowError::InvalidInput(message) => Self::invalid_field(message),
+            UploadFlowError::Service(error) => error.into(),
+            UploadFlowError::Storage(error) => error.into(),
+            UploadFlowError::Internal(message) => {
+                tracing::error!(event = "error.internal", detail = message);
+                Self::internal("internal server error")
+            }
+        }
     }
 }
 

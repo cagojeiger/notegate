@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::error::ApiError;
 use crate::object_storage::{CompletedUploadPart, TRANSFER_URL_TTL};
 use crate::object_upload_flow::{
-    BegunTransfer, UploadFlowError, abort_upload, begin_upload, complete_upload, prepare_parts,
+    BegunTransfer, abort_upload, begin_upload, complete_upload, prepare_parts,
 };
 use crate::rest::dto::{NodeOut, attribution_ids};
 use crate::rest::files::FileResponse;
@@ -143,8 +143,7 @@ pub(crate) async fn begin(
         &command,
         TRANSFER_URL_TTL,
     )
-    .await
-    .map_err(api_error)?;
+    .await?;
     let transfer = match begun.transfer {
         BegunTransfer::Single(transfer) => UploadTransferOut::Single {
             url: transfer.url,
@@ -193,8 +192,7 @@ pub(crate) async fn parts(
         body.part_numbers,
         TRANSFER_URL_TTL,
     )
-    .await
-    .map_err(api_error)?
+    .await?
     .into_iter()
     .map(|part| UploadPartOut {
         part_number: part.part_number,
@@ -236,9 +234,7 @@ pub(crate) async fn complete(
                 })
                 .collect()
         });
-    let view = complete_upload(&state, caller.account_id(), upload, completed_parts)
-        .await
-        .map_err(api_error)?;
+    let view = complete_upload(&state, caller.account_id(), upload, completed_parts).await?;
     let refs = state
         .accounts
         .find_account_refs(&attribution_ids([&view.node]))
@@ -268,22 +264,8 @@ pub(crate) async fn abort(
         .files
         .object_upload(caller.account_id(), space_id, upload_id)
         .await?;
-    abort_upload(&state, caller.account_id(), &upload)
-        .await
-        .map_err(api_error)?;
+    abort_upload(&state, caller.account_id(), &upload).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-fn api_error(error: UploadFlowError) -> ApiError {
-    match error {
-        UploadFlowError::InvalidInput(message) => ApiError::invalid_field(message),
-        UploadFlowError::Service(error) => error.into(),
-        UploadFlowError::Storage(error) => error.into(),
-        UploadFlowError::Internal(message) => {
-            tracing::error!(event = "error.internal", detail = message);
-            ApiError::internal("internal server error")
-        }
-    }
 }
 
 #[cfg(test)]

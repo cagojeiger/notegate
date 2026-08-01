@@ -5,10 +5,12 @@ use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{MatchedPath, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName};
+use axum::http::header::{
+    ALLOW, CACHE_CONTROL, CONTENT_TYPE, HeaderName, RETRY_AFTER, WWW_AUTHENTICATE,
+};
 use axum::http::{HeaderValue, Method, Request, StatusCode};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use axum_governor::extractor::Global;
@@ -26,7 +28,7 @@ use crate::auth::metadata::{
     authorization_server_metadata, protected_resource_metadata, protected_resource_metadata_url,
 };
 use crate::auth::oauth::{callback, login, logout, success};
-use crate::auth::{mark_private_no_store, require_browser_session, require_public_api_key};
+use crate::auth::{require_browser_session, require_public_api_key, set_private_no_store};
 use crate::error::ApiError;
 use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
 use crate::observability::{self, HttpRequestMetrics, MetricsHandle};
@@ -157,7 +159,83 @@ fn data_plane_routes(state: AppState) -> Router<AppState> {
         .merge(public_v2)
         .merge(user_mcp)
         .merge(agent_mcp_v2);
-    apply_data_plane_limits(router, limits)
+    apply_public_v2_contract(apply_data_plane_limits(router, limits))
+}
+
+fn apply_public_v2_contract<S>(router: Router<S>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    router.layer(from_fn(enforce_public_v2_contract))
+}
+
+async fn enforce_public_v2_contract(request: Request<Body>, next: Next) -> Response {
+    let is_public_v2 = is_public_v2_path(request.uri().path());
+    let mut response = next.run(request).await;
+    if !is_public_v2 {
+        return response;
+    }
+
+    if (response.status().is_client_error() || response.status().is_server_error())
+        && !response
+            .headers()
+            .get(CONTENT_TYPE)
+            .is_some_and(is_application_json)
+    {
+        response = normalize_public_v2_error(response);
+    }
+    set_private_no_store(&mut response);
+    response
+}
+
+fn is_public_v2_path(path: &str) -> bool {
+    path == "/api/v2" || path.starts_with("/api/v2/")
+}
+
+fn normalize_public_v2_error(response: Response) -> Response {
+    let status = response.status();
+    let preserved_headers = [RETRY_AFTER, ALLOW, WWW_AUTHENTICATE]
+        .into_iter()
+        .filter_map(|name| {
+            response
+                .headers()
+                .get(&name)
+                .cloned()
+                .map(|value| (name, value))
+        })
+        .collect::<Vec<_>>();
+    let mut response = public_v2_transport_error(status).into_response();
+    for (name, value) in preserved_headers {
+        response.headers_mut().insert(name, value);
+    }
+    response
+}
+
+fn public_v2_transport_error(status: StatusCode) -> ApiError {
+    match status {
+        StatusCode::BAD_REQUEST
+        | StatusCode::UNPROCESSABLE_ENTITY
+        | StatusCode::UNSUPPORTED_MEDIA_TYPE => {
+            ApiError::invalid_input("request parameters or body are invalid")
+        }
+        StatusCode::REQUEST_TIMEOUT => {
+            ApiError::new(status, "request_timeout", "request processing timed out")
+        }
+        StatusCode::PAYLOAD_TOO_LARGE => {
+            ApiError::new(status, "payload_too_large", "request body is too large")
+        }
+        StatusCode::TOO_MANY_REQUESTS => {
+            ApiError::new(status, "rate_limited", "request rate limit exceeded")
+        }
+        StatusCode::METHOD_NOT_ALLOWED => {
+            ApiError::new(status, "method_not_allowed", "HTTP method is not allowed")
+        }
+        StatusCode::NOT_FOUND => ApiError::not_found("api route not found"),
+        _ if status.is_server_error() => {
+            ApiError::new(status, "internal_error", "internal server error")
+        }
+        _ => ApiError::new(status, "request_failed", "request failed"),
+    }
 }
 
 fn apply_control_plane_limits<S>(router: Router<S>) -> Router<S>
@@ -265,7 +343,6 @@ fn public_v2_routes(state: AppState) -> Router<AppState> {
     crate::public_v2::routes()
         .fallback(api_not_found)
         .layer(from_fn_with_state(state, require_public_api_key))
-        .layer(from_fn(mark_private_no_store))
 }
 
 /// Liveness: the process is up. No dependency checks.
@@ -627,6 +704,204 @@ mod tests {
         assert_eq!(first.status(), StatusCode::OK);
         assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
         assert!(second.headers().contains_key("retry-after"));
+    }
+
+    #[tokio::test]
+    async fn public_v2_contract_normalizes_extractor_errors() {
+        let app = apply_public_v2_contract(
+            Router::new()
+                .route(
+                    "/api/v2/items/{item_id}",
+                    get(
+                        |axum::extract::Path(_item_id): axum::extract::Path<uuid::Uuid>| async {
+                            "ok"
+                        },
+                    ),
+                )
+                .route(
+                    "/api/v2/items",
+                    post(|Json(_item_id): Json<uuid::Uuid>| async { "ok" }),
+                ),
+        );
+
+        let path_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/items/not-a-uuid")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_public_v2_error(path_response, StatusCode::BAD_REQUEST, "invalid_input").await;
+
+        let json_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v2/items")
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#""not-a-uuid""#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_public_v2_error(json_response, StatusCode::BAD_REQUEST, "invalid_input").await;
+    }
+
+    #[tokio::test]
+    async fn public_v2_contract_normalizes_outer_limit_errors() {
+        let app = apply_public_v2_contract(apply_data_plane_limits(
+            Router::new().route("/api/v2/upload", post(|body: String| async move { body })),
+            DataPlaneLimits {
+                request_body_max_bytes: 4,
+                ..DataPlaneLimits::default()
+            },
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v2/upload")
+                    .body(Body::from("12345"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_public_v2_error(response, StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large").await;
+    }
+
+    #[tokio::test]
+    async fn public_v2_contract_preserves_retry_after_on_rate_limit() {
+        let app = apply_public_v2_contract(apply_data_plane_limits(
+            Router::new().route("/api/v2/items", get(|| async { "ok" })),
+            DataPlaneLimits {
+                rate_limits: HttpRateLimitsConfig {
+                    ingress: HttpRateLimitConfig {
+                        requests_per_second: 1,
+                        burst: 1,
+                    },
+                    ..HttpRateLimitsConfig::default()
+                },
+                ..DataPlaneLimits::default()
+            },
+        ));
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/items")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v2/items")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(first.status(), StatusCode::OK);
+        assert!(second.headers().contains_key(RETRY_AFTER));
+        assert_public_v2_error(second, StatusCode::TOO_MANY_REQUESTS, "rate_limited").await;
+    }
+
+    #[tokio::test]
+    async fn public_v2_contract_normalizes_method_not_allowed_and_preserves_allow() {
+        let app =
+            apply_public_v2_contract(Router::new().route("/api/v2/items", get(|| async { "ok" })));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v2/items")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            response
+                .headers()
+                .get(ALLOW)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.contains("GET"))
+        );
+        assert_public_v2_error(
+            response,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn public_v2_contract_does_not_change_v1_errors() {
+        let app = apply_public_v2_contract(Router::new().route(
+            "/api/v1/items",
+            get(|| async { (StatusCode::BAD_REQUEST, "bad request") }),
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/items")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers().get(CACHE_CONTROL), None);
+        assert!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .is_some_and(|value| value.as_bytes().starts_with(b"text/plain"))
+        );
+    }
+
+    async fn assert_public_v2_error(response: Response, status: StatusCode, code: &str) {
+        assert_eq!(response.status(), status);
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL),
+            Some(&HeaderValue::from_static("private, no-store"))
+        );
+        assert!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .is_some_and(is_application_json)
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body.get("error").and_then(serde_json::Value::as_str),
+            Some(code)
+        );
+        assert_eq!(
+            body.get("kind").and_then(serde_json::Value::as_str),
+            Some(code)
+        );
+        assert!(
+            body.get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| !message.is_empty())
+        );
     }
 
     #[tokio::test]
