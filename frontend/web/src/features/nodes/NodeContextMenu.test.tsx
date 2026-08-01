@@ -39,7 +39,7 @@ describe("NodeContextMenu", () => {
 
     const menu = within(screen.getByRole("menu"));
     expect(menu.queryByRole("button", { name: "New folder" })).not.toBeInTheDocument();
-    expect(menu.queryByRole("button", { name: "New text" })).not.toBeInTheDocument();
+    expect(menu.queryByRole("button", { name: "New document" })).not.toBeInTheDocument();
     expect(menu.queryByText("Upload file")).not.toBeInTheDocument();
     expect(menu.getByRole("button", { name: "Copy path" })).toBeEnabled();
   });
@@ -71,7 +71,7 @@ describe("NodeContextMenu", () => {
 
     const menu = within(screen.getByRole("menu"));
     expect(menu.getByRole("button", { name: "New folder" })).toBeDisabled();
-    expect(menu.getByRole("button", { name: "New text" })).toBeDisabled();
+    expect(menu.getByRole("button", { name: "New document" })).toBeDisabled();
     expect(menu.getByText("Upload file").closest("label")?.querySelector("input")).toBeDisabled();
     expect(menu.getByRole("button", { name: "Rename" })).toBeDisabled();
     expect(menu.getByRole("button", { name: "Move…" })).toBeDisabled();

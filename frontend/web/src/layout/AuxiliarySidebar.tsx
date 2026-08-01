@@ -1,15 +1,18 @@
 import { ChevronRight, LockKeyhole, Search } from "lucide-react";
+import { useId, useState } from "react";
 
 import type { RestNode } from "../api/types";
+import { useMarkdownOutlineContext, type MarkdownInspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
 import { useFolderChildrenStat } from "../features/editor/useEditorQueries";
 import { formatBytes } from "../shared/lib/formatBytes";
-import { Button, MetaRow, SectionHeader, SettingToggle } from "../shared/ui";
+import { Button, MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
 import { WriteLockStatus } from "./WriteLockStatus";
 
 const EMPTY = "—";
 
 type AuxiliarySidebarProps = {
   activeNode: RestNode | null;
+  activeGroupId?: number | null;
   loadingNode?: boolean;
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
@@ -22,10 +25,12 @@ type AuxiliarySidebarProps = {
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
+  onOutlineNavigate?: () => void;
 };
 
 export function AuxiliarySidebar({
   activeNode,
+  activeGroupId = null,
   loadingNode = false,
   canWriteActiveSpace,
   canManageActiveSpace,
@@ -37,8 +42,22 @@ export function AuxiliarySidebar({
   onReplaceMetadata,
   onSearchEnabledChange,
   onWriteLockedChange,
-  onTextEncryptionEnabledChange
+  onTextEncryptionEnabledChange,
+  onOutlineNavigate
 }: AuxiliarySidebarProps) {
+  const [localPreferredView, setLocalPreferredView] = useState<MarkdownInspectorView>("details");
+  const panelIdPrefix = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const outlineContext = useMarkdownOutlineContext();
+  const preferredView = outlineContext?.preferredInspectorView ?? localPreferredView;
+  const setPreferredView = outlineContext?.setPreferredInspectorView ?? setLocalPreferredView;
+  const outline = activeGroupId === null ? undefined : outlineContext?.outlinesByGroup[activeGroupId];
+  const outlineAvailable = Boolean(
+    outline
+    && activeNode
+    && outline.spaceId === activeNode.space_id
+    && outline.nodeId === activeNode.id
+  );
+  const selectedView: MarkdownInspectorView = preferredView === "outline" && outlineAvailable ? "outline" : "details";
   const metadata = activeNode?.metadata ?? {};
   const clientEncrypted = activeNode?.text_storage_format === "encrypted";
   const serverEncrypted = activeNode?.text_at_rest_encryption === "server";
@@ -48,13 +67,31 @@ export function AuxiliarySidebar({
   return (
     <aside className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
       <div className="flex h-12 shrink-0 items-center border-b border-seam px-3 text-sm font-medium">Inspector</div>
+      <div className="shrink-0 px-3 pt-3">
+        <Tabs
+          items={[
+            { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
+            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable }
+          ]}
+          value={selectedView}
+          onChange={setPreferredView}
+          label="Inspector sections"
+          variant="compact"
+        />
+      </div>
+      <div className="min-h-0 flex-1">
       <div
-        className="min-h-0 flex-1 overflow-y-auto p-3"
+        id={`${panelIdPrefix}-details`}
+        role="tabpanel"
+        aria-labelledby={`${panelIdPrefix}-details-tab`}
+        tabIndex={0}
+        hidden={selectedView !== "details"}
+        className="h-full overflow-y-auto p-3"
         data-testid="node-inspector-scroll-region"
       >
         <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
           <section className="p-4">
-            <SectionHeader title="Node" />
+            <SectionHeader title={activeNode ? nodeKindLabel(activeNode) : "Details"} />
             {activeNode ? (
               <>
                 <dl className="space-y-2">
@@ -77,7 +114,7 @@ export function AuxiliarySidebar({
                 />
               </>
             ) : (
-              <p className="text-xs text-muted">{loadingNode ? "Loading node…" : "Select a node to inspect."}</p>
+              <p className="text-xs text-muted">{loadingNode ? "Loading details…" : "Choose something from Files to inspect."}</p>
             )}
           </section>
           <section className="p-4">
@@ -102,14 +139,14 @@ export function AuxiliarySidebar({
           </section>
           <section className="p-4">
             <SectionHeader
-              title="Node settings"
-              help="Changes apply immediately to this node. A direct lock protects this node and its descendants; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
+              title="Settings"
+              help="Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
             />
             {activeNode ? (
               <div className="space-y-3">
                 <SettingToggle
                   icon={<LockKeyhole size={16} />}
-                  label="Lock this node"
+                  label="Lock changes"
                   badge={
                     activeNode.parent_id === null
                       ? "Root"
@@ -156,12 +193,12 @@ export function AuxiliarySidebar({
                 ) : null}
               </div>
             ) : (
-              <p className="text-xs text-muted">Select a node to manage its settings.</p>
+              <p className="text-xs text-muted">Choose something from Files to manage its settings.</p>
             )}
           </section>
           <details className="group p-4">
             <summary className="flex cursor-pointer list-none items-center justify-between outline-none focus-visible:ring-2 focus-visible:ring-primary/45 [&::-webkit-details-marker]:hidden">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Details</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">System details</span>
               <ChevronRight
                 size={16}
                 className="text-muted transition-transform group-open:rotate-90"
@@ -171,12 +208,65 @@ export function AuxiliarySidebar({
             <dl className="mt-3 space-y-2">
               <MetaRow label="Created" value={activeNode ? `${activeNode.created_by.display_name || EMPTY} · ${activeNode.created_at.slice(0, 10)}` : EMPTY} />
               <MetaRow label="Updated" value={activeNode ? `${activeNode.updated_by.display_name || EMPTY} · ${activeNode.updated_at.slice(0, 10)}` : EMPTY} />
-              <MetaRow label="Node id" value={activeNode?.id ?? EMPTY} />
+              <MetaRow label="Internal ID" value={activeNode?.id ?? EMPTY} />
             </dl>
           </details>
         </div>
       </div>
+      <div
+        id={`${panelIdPrefix}-outline`}
+        role="tabpanel"
+        aria-labelledby={`${panelIdPrefix}-outline-tab`}
+        tabIndex={0}
+        hidden={selectedView !== "outline"}
+        className="h-full overflow-y-auto p-3"
+      >
+        {outlineAvailable && outline ? (
+          <OutlinePanel outline={outline} onNavigate={onOutlineNavigate} />
+        ) : null}
+      </div>
+      </div>
     </aside>
+  );
+}
+
+function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapshot; onNavigate?: () => void }) {
+  if (outline.items.length === 0) {
+    return <p className="text-xs text-muted">No headings in this document.</p>;
+  }
+  const baseLevel = Math.min(...outline.items.map((item) => item.level));
+
+  return (
+    <nav aria-label="Document outline" className="rounded-xl border border-seam bg-surface p-2">
+      <ul className="relative space-y-0.5 before:pointer-events-none before:absolute before:inset-y-1 before:left-1 before:w-px before:bg-seam">
+        {outline.items.map((item) => {
+          const active = item.id === outline.activeItemId;
+          return (
+            <li key={item.id} className="relative pl-3">
+              {active ? (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-1 left-[3px] z-10 w-0.5 rounded-full bg-[var(--ng-active-border)]"
+                />
+              ) : null}
+              <button
+                type="button"
+                aria-current={active ? "location" : undefined}
+                className={`flex min-h-8 w-full items-center rounded-lg py-1.5 pr-2 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${active ? "bg-[var(--ng-active-surface)] font-medium text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+                style={{ paddingInlineStart: `${8 + (item.level - baseLevel) * 12}px` }}
+                onClick={() => {
+                  outline.navigate(item.id);
+                  onNavigate?.();
+                }}
+                title={item.label}
+              >
+                <span className="truncate">{item.label}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 
@@ -191,5 +281,6 @@ function FolderChildCount({ node }: { node: RestNode }) {
 }
 
 function nodeKindLabel(node: RestNode): string {
-  return node.kind === "folder" ? "Folder" : node.kind === "text" ? "Text" : "File";
+  if (node.parent_id === null) return "Space";
+  return node.kind === "folder" ? "Folder" : node.kind === "text" ? "Document" : "File";
 }

@@ -54,12 +54,12 @@ export function useWorkbenchNodeNavigationActions({
     try {
       node = await resolveNodePath(client, spaceId, path);
     } catch (error) {
-      showToast(error instanceof ApiError && error.status === 404 ? "Linked node not found" : "Could not open linked node");
+      showToast(error instanceof ApiError && error.status === 404 ? "Link target not found" : "Could not open link target");
       return;
     }
 
     if (node.space_id !== spaceId) {
-      showToast("Could not open linked node");
+      showToast("Could not open link target");
       return;
     }
     if (!isCurrentMarkdownLinkSource(spaceId, groupId, sourceNode)) return;
@@ -95,7 +95,7 @@ export function useWorkbenchNodeNavigationActions({
             if (!discardNavigationTarget(groupId, direction, target.nodeId)) return;
             continue;
           }
-          showToast("Could not navigate to node");
+          showToast(`Could not go ${direction}`);
           return;
         }
 
@@ -107,7 +107,7 @@ export function useWorkbenchNodeNavigationActions({
         if (!navigateGroup(groupId, direction, target.nodeId, resolved.node)) return;
         closeMobile();
         if (!resolved.reveal) {
-          showToast("Opened node, but could not reveal it in the tree");
+          showToast("Opened item, but could not reveal it in Files");
         }
         return;
       }
@@ -162,12 +162,12 @@ export function useWorkbenchNodeNavigationActions({
       }
     }
 
-    const node = await loadCanonicalNode(summary, "Could not open node");
+    const node = await loadCanonicalNode(summary, "Could not open item");
     if (!node) return;
     open(node);
     closeMobile();
     if (revealFailed) {
-      showToast("Opened node, but could not reveal it in the tree");
+      showToast("Opened item, but could not reveal it in Files");
     }
   }
 
@@ -176,7 +176,7 @@ export function useWorkbenchNodeNavigationActions({
     try {
       applyReveal(await requestReveal(spaceId, node.id));
     } catch {
-      showToast("Opened node, but could not reveal it in the tree");
+      showToast("Opened item, but could not reveal it in Files");
     }
   }
 

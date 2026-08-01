@@ -120,7 +120,7 @@ function GroupBody({ active, groupId, navigationActions, node, mode, activeSpace
   if (!node) {
     return (
       <>
-        <EditorGroupHeader title="Open a node" navigationActions={navigationActions} canClose={canClose} onClose={onClose} active={active} />
+        <EditorGroupHeader title="Choose from Files" navigationActions={navigationActions} canClose={canClose} onClose={onClose} active={active} />
         <EmptyEditor activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} />
       </>
     );

@@ -78,7 +78,7 @@ export function NodeContextMenu({
         {showCreateInNode ? (
           <>
             <MenuButton onClick={() => run(() => onCreateInFolder(node, "folder"))} disabled={!canCreateInNode}><FolderPlus size={14} /> New folder</MenuButton>
-            <MenuButton onClick={() => run(() => onCreateInFolder(node, "text"))} disabled={!canCreateInNode}><FilePlus size={14} /> New text</MenuButton>
+            <MenuButton onClick={() => run(() => onCreateInFolder(node, "text"))} disabled={!canCreateInNode}><FilePlus size={14} /> New document</MenuButton>
             <label className={`flex items-center gap-2 rounded-lg px-3 py-2 ${canCreateInNode ? "cursor-pointer text-muted hover:bg-panel hover:text-text" : "cursor-not-allowed text-faint"}`}>
               <Upload size={14} /> Upload file
               <input className="hidden" type="file" disabled={!canCreateInNode} onChange={(event) => { const file = event.target.files?.[0] ?? null; onClose(); onUploadInFolder(node, file); }} />

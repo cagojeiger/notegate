@@ -31,18 +31,18 @@ describe("NodeActionMenu", () => {
   it("uses dialog semantics and closes when the node becomes disabled", async () => {
     const user = userEvent.setup();
     const { rerenderMenu } = renderMenu();
-    const trigger = screen.getByRole("button", { name: "Node actions" });
+    const trigger = screen.getByRole("button", { name: "More actions" });
 
     expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
 
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("dialog", { name: "Node actions" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "More actions" })).toBeInTheDocument();
 
     rerenderMenu(true);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Node actions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "More actions" })).not.toBeInTheDocument();
     });
     expect(trigger).toBeDisabled();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -52,7 +52,7 @@ describe("NodeActionMenu", () => {
     const user = userEvent.setup();
     const { rerenderMenu } = renderMenu();
 
-    await user.click(screen.getByRole("button", { name: "Node actions" }));
+    await user.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("button", { name: "Rename" })).toHaveFocus();
 
     await user.tab();

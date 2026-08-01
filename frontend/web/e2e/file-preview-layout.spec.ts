@@ -104,7 +104,7 @@ for (const viewport of [
   });
 }
 
-test("mobile Node Inspector remains scrollable on a short viewport", async ({ page }) => {
+test("mobile Inspector details remain scrollable on a short viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 640 });
   await mockFilePreviewApi(page);
   await page.goto("/");
@@ -125,7 +125,7 @@ test("mobile Node Inspector remains scrollable on a short viewport", async ({ pa
   await expect
     .poll(async () => scrollRegion.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
-  await expect(scrollRegion.getByText("Node settings", { exact: true })).toBeInViewport();
+  await expect(scrollRegion.getByText("Settings", { exact: true })).toBeInViewport();
 });
 
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {

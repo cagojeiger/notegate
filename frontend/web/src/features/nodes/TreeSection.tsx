@@ -315,7 +315,7 @@ function VirtualTreeRow({
     return <div role="status" className="flex h-8 items-center py-1 text-xs text-muted" style={{ paddingLeft: `${8 + row.depth * 14}px` }}>Loading…</div>;
   }
   if (row.type === "empty") {
-    return <div role="status" className="flex h-8 items-center px-2 py-2 text-xs text-muted">No nodes yet.</div>;
+    return <div role="status" className="flex h-8 items-center px-2 py-2 text-xs text-muted">No items yet.</div>;
   }
   if (row.type === "load-more") {
     return (

@@ -22,8 +22,8 @@ const jsonTreeStyle: NonNullable<JsonViewProps["style"]> = {
   noQuotesForStringValues: false,
   stringifyStringValues: true,
   ariaLables: {
-    collapseJson: "Collapse JSON node",
-    expandJson: "Expand JSON node"
+    collapseJson: "Collapse JSON value",
+    expandJson: "Expand JSON value"
   }
 };
 
