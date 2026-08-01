@@ -500,6 +500,8 @@ fn required<T>(value: Option<T>, field: &'static str) -> Result<T, ApiError> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
 
     #[test]
