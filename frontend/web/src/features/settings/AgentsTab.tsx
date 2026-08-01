@@ -15,6 +15,7 @@ import {
   useSetAgentSpaceAccessMutation,
   useSettingsSpacesQuery
 } from "./useSettingsQueries";
+import { AgentConnections } from "./AgentConnections";
 import { KeyManager } from "./KeyManager";
 
 export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
@@ -36,17 +37,22 @@ export function AgentsTab({ canManageAgents }: { canManageAgents: boolean }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-end gap-2">
-        <TextField
-          label="New agent name"
-          className="min-w-0 flex-1"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(name.trim()); }}
-          placeholder="e.g. ci-bot, importer"
-        />
-        <Button onClick={() => createMutation.mutate(name.trim())} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
-      </div>
+      <AgentConnections />
+
+      <section>
+        <SectionHeader title="Agents" description="Manage API keys and space permissions for each agent." />
+        <div className="flex items-end gap-2">
+          <TextField
+            label="New agent name"
+            className="min-w-0 flex-1"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) createMutation.mutate(name.trim()); }}
+            placeholder="e.g. ci-bot, importer"
+          />
+          <Button onClick={() => createMutation.mutate(name.trim())} disabled={!name.trim() || createMutation.isPending}><Plus size={15} /> Create</Button>
+        </div>
+      </section>
 
       {agentsQuery.isLoading ? (
         <div className="text-sm text-muted">Loading…</div>

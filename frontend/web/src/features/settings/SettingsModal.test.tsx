@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -82,7 +82,7 @@ describe("SettingsModal", () => {
     mockSettingsApi();
   });
 
-  it("keeps account identity and appearance inside the account tab", async () => {
+  it("keeps account identity, appearance, and user MCP inside the account tab", async () => {
     const user = userEvent.setup();
     renderSettings();
 
@@ -90,19 +90,22 @@ describe("SettingsModal", () => {
     await user.click(screen.getByRole("tab", { name: "Account" }));
 
     expect(screen.getByText("Appearance")).toBeInTheDocument();
-    expect(screen.queryByText("http://localhost:3000/mcp")).not.toBeInTheDocument();
+    expect(screen.getByText("User MCP")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
     expect(screen.queryByText("My API Keys")).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
+    expect(screen.queryByText("REST API")).not.toBeInTheDocument();
   });
 
-  it("shows user MCP, Agent MCP, and REST API in the connections tab", async () => {
+  it("shows shared Agent MCP and REST API connections in the agents tab", async () => {
     const user = userEvent.setup();
     renderSettings();
 
-    await user.click(screen.getByRole("tab", { name: "Connections" }));
+    await user.click(await screen.findByRole("tab", { name: "Agents" }));
 
-    expect(screen.getByText("User MCP")).toBeInTheDocument();
-    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
     expect(screen.getByText("Agent MCP")).toBeInTheDocument();
     expect(screen.getByText("http://localhost:3000/mcp/v2")).toBeInTheDocument();
     expect(screen.getByText("REST API")).toBeInTheDocument();
@@ -138,15 +141,19 @@ describe("SettingsModal", () => {
     renderSettings();
 
     await user.click(await screen.findByRole("tab", { name: "Agents" }));
-    await user.click(await screen.findByRole("button", { name: "Toggle ci-bot details" }));
+    const agentToggle = await screen.findByRole("button", { name: "Toggle ci-bot details" });
+    await user.click(agentToggle);
+    const agentCard = agentToggle.closest("li");
+    expect(agentCard).not.toBeNull();
+    const agentDetails = within(agentCard as HTMLElement);
 
-    expect(screen.getByText("Agent API Keys")).toBeInTheDocument();
-    expect(await screen.findByText("No keys for this agent.")).toBeInTheDocument();
-    expect(screen.getByText("Space permissions")).toBeInTheDocument();
-    expect(await screen.findByText("Personal")).toBeInTheDocument();
-    expect(await screen.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
-    expect(screen.queryByText("http://localhost:3000/mcp/v2")).not.toBeInTheDocument();
-    expect(screen.queryByText("http://localhost:3000/api/v2")).not.toBeInTheDocument();
+    expect(agentDetails.getByText("Agent API Keys")).toBeInTheDocument();
+    expect(await agentDetails.findByText("No keys for this agent.")).toBeInTheDocument();
+    expect(agentDetails.getByText("Space permissions")).toBeInTheDocument();
+    expect(await agentDetails.findByText("Personal")).toBeInTheDocument();
+    expect(await agentDetails.findByRole("combobox", { name: "Personal permission" })).toHaveValue("write");
+    expect(agentDetails.queryByText("Agent MCP")).not.toBeInTheDocument();
+    expect(agentDetails.queryByText("REST API")).not.toBeInTheDocument();
   });
 
   it("updates agent space permissions from the permission select", async () => {
@@ -236,12 +243,11 @@ describe("SettingsModal", () => {
 
     await user.click(screen.getByRole("tab", { name: "Account" }));
     expect(await screen.findByText("ci-bot")).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Connections" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Connections" }));
     expect(screen.getByText("User MCP")).toBeInTheDocument();
+    expect(screen.getByText("http://localhost:3000/mcp")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Connections" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Usage" })).not.toBeInTheDocument();
     expect(screen.queryByText("Agent MCP")).not.toBeInTheDocument();
     expect(screen.queryByText("REST API")).not.toBeInTheDocument();
   });
