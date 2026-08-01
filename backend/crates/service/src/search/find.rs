@@ -100,8 +100,8 @@ impl SearchService {
                                 .map(|kind| kind.as_str().to_owned())
                                 .unwrap_or_default(),
                             request.match_mode.as_str().to_owned(),
-                            request.include.join(","),
-                            request.exclude.join(","),
+                            search_fingerprint(&request.include),
+                            search_fingerprint(&request.exclude),
                             scope_node_id.to_string(),
                             "case-insensitive".to_owned(),
                             "dfs-sort_order-name-id".to_owned(),
