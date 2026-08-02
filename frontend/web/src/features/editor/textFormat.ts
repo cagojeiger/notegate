@@ -1,4 +1,4 @@
-export type CodeFormat = "sql" | "python";
+export type CodeFormat = "go" | "javascript" | "jsx" | "python" | "rust" | "shellscript" | "sql" | "tsx" | "typescript";
 export type TextFormat = "markdown" | "json" | "jsonl" | "yaml" | "toml" | CodeFormat | "plain";
 
 const FORMAT_BY_EXTENSION: Record<string, TextFormat> = {
@@ -9,11 +9,27 @@ const FORMAT_BY_EXTENSION: Record<string, TextFormat> = {
   yaml: "yaml",
   yml: "yaml",
   toml: "toml",
+  go: "go",
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  jsx: "jsx",
+  rs: "rust",
+  sh: "shellscript",
+  bash: "shellscript",
+  zsh: "shellscript",
+  ksh: "shellscript",
   sql: "sql",
+  ts: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  tsx: "tsx",
   py: "python",
   pyi: "python",
   pyw: "python"
 };
+
+const CODE_FORMATS = new Set<TextFormat>(["go", "javascript", "jsx", "python", "rust", "shellscript", "sql", "tsx", "typescript"]);
 
 export function inferTextFormat(name: string): TextFormat {
   const dot = name.lastIndexOf(".");
@@ -23,14 +39,7 @@ export function inferTextFormat(name: string): TextFormat {
 }
 
 export function shikiLangForFormat(format: TextFormat): string {
-  if (format === "markdown") return "markdown";
-  if (format === "yaml") return "yaml";
-  if (format === "jsonl") return "jsonl";
-  if (format === "toml") return "toml";
-  if (format === "json") return "json";
-  if (format === "sql") return "sql";
-  if (format === "python") return "python";
-  return "text";
+  return format === "plain" ? "text" : format;
 }
 
 export function isStructuredFormat(format: TextFormat): format is "json" | "jsonl" | "yaml" | "toml" {
@@ -38,5 +47,5 @@ export function isStructuredFormat(format: TextFormat): format is "json" | "json
 }
 
 export function isCodeFormat(format: TextFormat): format is CodeFormat {
-  return format === "sql" || format === "python";
+  return CODE_FORMATS.has(format);
 }

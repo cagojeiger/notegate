@@ -390,6 +390,23 @@ describe("TextPreview", () => {
     expect(screen.queryByRole("tree", { name: "Structured data tree" })).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["server.go", "package main\nfunc main() {}"],
+    ["lib.rs", "pub fn ready() -> bool { true }"],
+    ["app.js", "export const ready = true;"],
+    ["view.jsx", "export const App = () => <main>Ready</main>;"],
+    ["app.ts", "export const ready: boolean = true;"],
+    ["view.tsx", "export const App = () => <main>Ready</main>;"],
+    ["deploy.sh", "#!/bin/sh\nset -eu"]
+  ])("renders %s text previews as highlighted source", async (name, content) => {
+    const { container } = render(<TextPreview name={name} content={content} />);
+
+    await waitFor(() => expect(container.querySelector(".shiki")).toBeInTheDocument());
+    expect(container.querySelector(".shiki")?.textContent).toBe(content);
+    expect(container.querySelector(".ng-source-flat")).toBeInTheDocument();
+    expect(container.querySelector("pre.ng-code-fallback")).not.toBeInTheDocument();
+  });
+
   it("renders plain text without a nested code-block card", () => {
     const { container } = render(<TextPreview name="notes.txt" content={"Just plain text."} />);
 
