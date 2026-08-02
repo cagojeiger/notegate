@@ -70,6 +70,7 @@ struct BegunUpload {
 
 fn transfer_continuation(op: &str, upload_id: String) -> FileTransferInput {
     FileTransferInput {
+        purpose: "continue test file transfer".to_owned(),
         op: op.to_owned(),
         target: None,
         byte_len: None,
@@ -1485,6 +1486,7 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test guided single upload".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/guided-single.bin".to_owned()),
             byte_len: Some(4),
@@ -1506,6 +1508,7 @@ async fn mcp_single_upload_guides_put_completion_and_abort()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test guided single upload abort".to_owned(),
             op: "abort_upload".to_owned(),
             target: None,
             byte_len: None,
@@ -1548,6 +1551,7 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
         &state,
         &user_parts,
         FileTransferInput {
+            purpose: "test upload visibility after pin removal".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/pin-revoked.bin".to_owned()),
             byte_len: Some(4),
@@ -1620,6 +1624,7 @@ async fn mcp_upload_continuations_follow_current_user_pin_but_not_agent_pin()
         &state,
         &agent_parts,
         FileTransferInput {
+            purpose: "test agent upload visibility".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/agent-unpinned.bin".to_owned()),
             byte_len: Some(4),
@@ -1673,6 +1678,7 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test multipart upload".to_owned(),
             op: "begin_upload".to_owned(),
             target: Some("rest-test:/large.bin".to_owned()),
             byte_len: Some(byte_len),
@@ -1696,6 +1702,7 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test multipart part preparation".to_owned(),
             op: "prepare_parts".to_owned(),
             target: None,
             byte_len: None,
@@ -1723,6 +1730,7 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test multipart upload completion".to_owned(),
             op: "complete_upload".to_owned(),
             target: None,
             byte_len: None,
@@ -1742,6 +1750,7 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test completed upload rejection".to_owned(),
             op: "prepare_parts".to_owned(),
             target: None,
             byte_len: None,
@@ -1775,6 +1784,7 @@ async fn mcp_multipart_upload_and_presigned_download_round_trip()
         &state,
         &request_parts,
         FileTransferInput {
+            purpose: "test presigned download".to_owned(),
             op: "prepare_download".to_owned(),
             target: Some("rest-test:/large.bin".to_owned()),
             byte_len: None,

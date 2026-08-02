@@ -24,7 +24,8 @@ pub async fn call(
     parts: &Parts,
     input: FileTransferInput,
 ) -> Result<Json<Value>, ErrorData> {
-    match input.op.as_str() {
+    let purpose = input.purpose.clone();
+    let mut response = match input.op.as_str() {
         "begin_upload" => begin_upload(state, parts, input).await,
         "prepare_parts" => prepare_parts(state, parts, input).await,
         "complete_upload" => complete_upload(state, parts, input).await,
@@ -33,6 +34,29 @@ pub async fn call(
         _ => Err(invalid_input_error(
             "invalid op for file_transfer; allowed values are: begin_upload, prepare_parts, complete_upload, abort_upload, prepare_download",
         )),
+    }?;
+    add_purpose_to_tool_inputs(&mut response.0, &purpose);
+    Ok(response)
+}
+
+fn add_purpose_to_tool_inputs(value: &mut Value, purpose: &str) {
+    match value {
+        Value::Object(object) => {
+            if object.contains_key("tool")
+                && let Some(Value::Object(input)) = object.get_mut("input")
+            {
+                input.insert("purpose".to_owned(), Value::String(purpose.to_owned()));
+            }
+            for child in object.values_mut() {
+                add_purpose_to_tool_inputs(child, purpose);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                add_purpose_to_tool_inputs(child, purpose);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -387,11 +411,40 @@ fn storage_error(error: ObjectStorageError) -> ErrorData {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::indexing_slicing)]
+
     use std::collections::BTreeMap;
 
     use crate::object_storage::PresignedPut;
 
     use super::*;
+
+    #[test]
+    fn purpose_is_added_to_every_follow_up_tool_input() {
+        let mut response = json!({
+            "next_action": {
+                "repeat": {
+                    "tool": "file_transfer",
+                    "input": {"op": "prepare_parts"}
+                },
+                "then": {
+                    "tool": "file_transfer",
+                    "input": {"op": "complete_upload"}
+                }
+            }
+        });
+
+        add_purpose_to_tool_inputs(&mut response, "finish uploading the report");
+
+        assert_eq!(
+            response["next_action"]["repeat"]["input"]["purpose"],
+            "finish uploading the report"
+        );
+        assert_eq!(
+            response["next_action"]["then"]["input"]["purpose"],
+            "finish uploading the report"
+        );
+    }
 
     fn presigned_put(url: &str, content_type: &str) -> PresignedPut {
         let mut headers = BTreeMap::new();

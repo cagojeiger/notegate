@@ -18,6 +18,7 @@ use crate::state::AppState;
 pub async fn call(
     state: &AppState,
     parts: &Parts,
+    purpose: &str,
     target: String,
     limit: Option<i64>,
     direction: Option<String>,
@@ -36,9 +37,10 @@ pub async fn call(
                 caller.account_id(),
                 resolved.space_id(),
                 resolved.name(),
+                purpose,
                 target,
                 limit,
-                require_newer_cursor(cursor, &root_target)?,
+                require_newer_cursor(cursor, &root_target, purpose)?,
             )
             .await
         }
@@ -48,6 +50,7 @@ pub async fn call(
                 caller.account_id(),
                 resolved.space_id(),
                 resolved.name(),
+                purpose,
                 &target,
                 limit,
                 cursor,
@@ -80,7 +83,11 @@ fn parse_change_direction(raw: Option<&str>) -> Result<ChangeDirection, ErrorDat
     }
 }
 
-fn require_newer_cursor(cursor: Option<String>, target: &str) -> Result<String, ErrorData> {
+fn require_newer_cursor(
+    cursor: Option<String>,
+    target: &str,
+    purpose: &str,
+) -> Result<String, ErrorData> {
     cursor.ok_or_else(|| {
         actionable_input_error(
             "changes_cursor_required",
@@ -90,24 +97,26 @@ fn require_newer_cursor(cursor: Option<String>, target: &str) -> Result<String, 
                 "kind": "rebuild_snapshot",
                 "baseline_call": {
                     "tool": "read",
-                    "input": {"op": "changes", "target": target, "limit": 1},
+                    "input": {"purpose": purpose, "op": "changes", "target": target, "limit": 1},
                 },
             }),
         )
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn older(
     state: &AppState,
     account_id: Uuid,
     space_id: Uuid,
     space_name: &str,
+    purpose: &str,
     target: &str,
     limit: Option<i64>,
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     if let Some(cursor) = cursor.as_deref() {
-        decode_change_cursor(cursor, space_id, ChangeDirection::Older, target)?;
+        decode_change_cursor(cursor, space_id, ChangeDirection::Older, target, purpose)?;
     }
     let page = state
         .files
@@ -163,11 +172,13 @@ async fn newer(
     account_id: Uuid,
     space_id: Uuid,
     space_name: &str,
+    purpose: &str,
     target: String,
     limit: Option<i64>,
     cursor: String,
 ) -> Result<Json<Value>, ErrorData> {
-    let after_cursor = decode_change_cursor(&cursor, space_id, ChangeDirection::Newer, &target)?;
+    let after_cursor =
+        decode_change_cursor(&cursor, space_id, ChangeDirection::Newer, &target, purpose)?;
 
     let page = state
         .files
@@ -188,6 +199,7 @@ async fn newer(
     let next_action = changes_next_action(
         &target,
         &continuation_cursor,
+        purpose,
         page.has_more,
         page.resync_required,
         page.limit,
@@ -239,6 +251,7 @@ fn decode_change_cursor(
     space_id: Uuid,
     direction: ChangeDirection,
     target: &str,
+    purpose: &str,
 ) -> Result<FileChangeEventIdCursor, ErrorData> {
     let decoded = cursor::decode::<FileChangeEventIdCursor>(raw).map_err(|_error| {
         changes_cursor_error(
@@ -246,6 +259,7 @@ fn decode_change_cursor(
             "invalid changes cursor",
             direction,
             target,
+            purpose,
         )
     })?;
     if decoded.space_id != space_id {
@@ -254,6 +268,7 @@ fn decode_change_cursor(
             "changes cursor does not match this Space",
             direction,
             target,
+            purpose,
         ));
     }
     Ok(decoded)
@@ -264,6 +279,7 @@ fn changes_cursor_error(
     message: &'static str,
     direction: ChangeDirection,
     target: &str,
+    purpose: &str,
 ) -> ErrorData {
     let (hint, next_action) = match direction {
         ChangeDirection::Older => (
@@ -271,7 +287,7 @@ fn changes_cursor_error(
             json!({
                 "kind": "call_tool",
                 "tool": "read",
-                "input": {"op": "changes", "target": target},
+                "input": {"purpose": purpose, "op": "changes", "target": target},
             }),
         ),
         ChangeDirection::Newer => (
@@ -280,7 +296,7 @@ fn changes_cursor_error(
                 "kind": "rebuild_snapshot",
                 "baseline_call": {
                     "tool": "read",
-                    "input": {"op": "changes", "target": target, "limit": 1},
+                    "input": {"purpose": purpose, "op": "changes", "target": target, "limit": 1},
                 },
             }),
         ),
@@ -309,6 +325,7 @@ fn event_json(event: &FileChangeEvent) -> Value {
 fn changes_next_action(
     target: &str,
     checkpoint_cursor: &str,
+    purpose: &str,
     has_more: bool,
     resync_required: bool,
     limit: i64,
@@ -326,6 +343,7 @@ fn changes_next_action(
             "reason": "More changes are available. Apply this page in order, then continue from its checkpoint_cursor.",
             "tool": "read",
             "input": {
+                "purpose": purpose,
                 "op": "changes",
                 "target": target,
                 "limit": limit,
@@ -354,6 +372,8 @@ mod tests {
 
     use super::*;
 
+    const TEST_PURPOSE: &str = "synchronize test changes";
+
     #[test]
     fn changes_direction_defaults_to_older_and_rejects_unknown_values() {
         assert_eq!(
@@ -377,7 +397,8 @@ mod tests {
 
     #[test]
     fn newer_direction_requires_a_checkpoint_cursor() {
-        let error = require_newer_cursor(None, "daily:/").expect_err("cursor is required");
+        let error =
+            require_newer_cursor(None, "daily:/", TEST_PURPOSE).expect_err("cursor is required");
         let data = error.data.expect("structured recovery data");
         assert_eq!(data["code"], "changes_cursor_required");
         assert_eq!(data["next_action"]["kind"], "rebuild_snapshot");
@@ -401,6 +422,7 @@ mod tests {
             Uuid::nil(),
             ChangeDirection::Older,
             "daily:/",
+            TEST_PURPOSE,
         )
         .expect_err("invalid older cursor");
         let older_data = older.data.expect("older recovery data");
@@ -412,6 +434,7 @@ mod tests {
             Uuid::nil(),
             ChangeDirection::Newer,
             "daily:/",
+            TEST_PURPOSE,
         )
         .expect_err("invalid newer cursor");
         let newer_data = newer.data.expect("newer recovery data");
@@ -455,6 +478,7 @@ mod tests {
         let latest = call(
             &state,
             &parts,
+            TEST_PURPOSE,
             "rest-test:/".to_owned(),
             Some(1),
             None,
@@ -483,6 +507,7 @@ mod tests {
         let older_history = call(
             &state,
             &parts,
+            TEST_PURPOSE,
             "rest-test:/".to_owned(),
             Some(1),
             Some("older".to_owned()),
@@ -501,6 +526,7 @@ mod tests {
         let subtree_error = call(
             &state,
             &parts,
+            TEST_PURPOSE,
             "rest-test:/before-a".to_owned(),
             None,
             None,
@@ -527,6 +553,7 @@ mod tests {
         let first_newer = call(
             &state,
             &parts,
+            TEST_PURPOSE,
             "rest-test:/".to_owned(),
             Some(1),
             Some("newer".to_owned()),
@@ -554,6 +581,7 @@ mod tests {
         let second_newer = call(
             &state,
             &parts,
+            TEST_PURPOSE,
             "rest-test:/".to_owned(),
             Some(1),
             Some("newer".to_owned()),
@@ -573,6 +601,7 @@ mod tests {
         let invalid_continuation = call(
             &state,
             &parts,
+            TEST_PURPOSE,
             "rest-test:/".to_owned(),
             Some(1),
             Some("newer".to_owned()),
@@ -629,7 +658,7 @@ mod tests {
 
     #[test]
     fn continuation_action_uses_the_checkpoint_cursor() {
-        let action = changes_next_action("daily:/", "opaque-41", true, false, 25);
+        let action = changes_next_action("daily:/", "opaque-41", TEST_PURPOSE, true, false, 25);
 
         assert_eq!(action["kind"], "call_tool");
         assert_eq!(action["tool"], "read");
@@ -638,11 +667,12 @@ mod tests {
         assert_eq!(action["input"]["limit"], 25);
         assert_eq!(action["input"]["direction"], "newer");
         assert_eq!(action["input"]["cursor"], "opaque-41");
+        assert_eq!(action["input"]["purpose"], TEST_PURPOSE);
     }
 
     #[test]
     fn completed_action_tells_the_caller_to_store_the_cursor() {
-        let action = changes_next_action("daily:/", "opaque-41", false, false, 25);
+        let action = changes_next_action("daily:/", "opaque-41", TEST_PURPOSE, false, false, 25);
 
         assert_eq!(action["kind"], "store_cursor");
         assert_eq!(action["cursor"], "opaque-41");
@@ -650,7 +680,7 @@ mod tests {
 
     #[test]
     fn invalid_cursor_action_requires_a_full_resync() {
-        let action = changes_next_action("daily:/", "opaque-99", false, true, 25);
+        let action = changes_next_action("daily:/", "opaque-99", TEST_PURPOSE, false, true, 25);
 
         assert_eq!(action["kind"], "rebuild_snapshot");
         assert_eq!(action["cursor"], "opaque-99");

@@ -16,6 +16,8 @@ file_change_events
   file-tree/file content change 이력
 ```
 
+MCP 호출 자체는 domain mutation stream과 다른 `mcp_invocations`에 기록한다. 이 표는 read와 실패 호출도 포함하는 실행 이력이며 현재 state나 mutation history의 source of truth가 아니다.
+
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
 Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
@@ -45,6 +47,14 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 ```
 
 이 보장은 operation history가 현재 domain state와 어긋나지 않게 하기 위한 기본 계약이다.
+
+`mcp_invocations`는 domain transaction 밖에서 best-effort로 저장한다. 기록 실패는 이미 수행된 read/mutation 결과를 실패로 바꾸지 않으며 warning log를 남긴다. MCP 입력 schema 검증 전에 거부된 malformed call과 유효하지 않은 `purpose`는 실행 이력에 포함하지 않는다.
+
+## MCP invocation history
+
+`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, success/error, 안정적인 error code, 실행 시간을 저장한다. `me`는 purpose 예외이므로 NULL이다. 다른 tool의 purpose는 1..200자의 짧은 호출 이유다.
+
+전체 tool input, 검색어, target path, Text content, edit, 암호화 metadata, presigned URL, 응답 payload는 저장하지 않는다. Purpose에도 secret, 본문, 검색 결과를 넣지 않는다. 새 MCP 조회 tool은 제공하지 않으며 retention과 관리 조회 surface는 별도 운영 정책으로 결정한다.
 
 ## Audit event sources
 
