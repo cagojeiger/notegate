@@ -7,10 +7,12 @@
     clippy::unwrap_in_result
 )]
 
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header::CACHE_CONTROL};
 use notegate_db::{NewMcpInvocation, test_support::TestDb};
 
-use super::test_support::{caller_and_space, get_json, rest_app, state};
+use super::test_support::{
+    caller_and_space, decode_response, get_json, json_response, rest_app, state,
+};
 
 #[tokio::test]
 async fn mcp_invocations_returns_only_the_current_users_paginated_history()
@@ -40,7 +42,18 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     }
 
     let app = rest_app(state.clone(), caller.clone());
-    let (status, first) = get_json(app, "/v1/me/mcp-invocations?limit=1".to_owned()).await?;
+    let response = json_response(
+        app,
+        "GET",
+        "/v1/me/mcp-invocations?limit=1".to_owned(),
+        serde_json::json!({}),
+    )
+    .await?;
+    assert_eq!(
+        response.headers().get(CACHE_CONTROL),
+        Some(&"private, no-store".parse()?)
+    );
+    let (status, first) = decode_response(response).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(first["invocations"][0]["purpose"], "second purpose");
     assert_eq!(

@@ -10,6 +10,7 @@
 
 use axum::extract::{Extension, Query, State};
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use notegate_model::{Caller, ListAuditEvents, ListMcpInvocations};
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::auth::set_private_no_store;
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
@@ -179,7 +181,7 @@ pub(crate) async fn list_mcp_invocations(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Query(query): Query<ListEventsQuery>,
-) -> Result<Json<McpInvocationListResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let page = state
         .account_lifecycle
         .list_mcp_invocations(
@@ -202,10 +204,13 @@ pub(crate) async fn list_mcp_invocations(
         .iter()
         .map(|invocation| McpInvocationOut::from_invocation(invocation, &refs))
         .collect();
-    Ok(Json(McpInvocationListResponse {
+    let mut response = Json(McpInvocationListResponse {
         invocations,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
-    }))
+    })
+    .into_response();
+    set_private_no_store(&mut response);
+    Ok(response)
 }
 
 #[utoipa::path(
