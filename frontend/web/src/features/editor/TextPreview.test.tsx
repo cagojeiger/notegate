@@ -69,6 +69,24 @@ describe("TextPreview", () => {
     expect(container).not.toHaveTextContent("---");
   });
 
+  it("renders BOM-prefixed CRLF markdown frontmatter through the lazy frontmatter preview", async () => {
+    const { container } = render(
+      <TextPreview
+        name="note.md"
+        content={"\uFEFF---\r\ntitle: Note\r\ntags:\r\n  - one\r\n  - two\r\n---\r\n# Body"}
+      />
+    );
+
+    const properties = await screen.findByRole("region", { name: "Properties" });
+    expect(properties).toHaveTextContent("title");
+    expect(properties).toHaveTextContent("Note");
+    expect(properties).toHaveTextContent("tags");
+    expect(properties).toHaveTextContent("one, two");
+    expect(await screen.findByRole("heading", { name: "Body" })).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("title: Note");
+    expect(container).not.toHaveTextContent("---");
+  });
+
   it("opens conservative markdown node links through the preview callback", async () => {
     const onOpenInternalLink = vi.fn();
     render(
@@ -324,6 +342,14 @@ describe("TextPreview", () => {
     expect(await screen.findByRole("heading", { name: "Still markdown" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Properties" })).not.toBeInTheDocument();
     expect(container.querySelectorAll(".markdown hr")).toHaveLength(2);
+  });
+
+  it("keeps malformed markdown frontmatter as raw markdown through the lazy frontmatter preview", async () => {
+    render(<TextPreview name="note.md" content={"---\ntitle: [unterminated\n---\n\n# Still markdown"} />);
+
+    expect(await screen.findByText("title: [unterminated")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Still markdown" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Properties" })).not.toBeInTheDocument();
   });
 
   it("preserves no-language markdown code blocks", async () => {

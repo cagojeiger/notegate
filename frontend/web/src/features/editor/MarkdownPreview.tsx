@@ -7,7 +7,15 @@ import { activeMarkdownHeadingId, collectMarkdownHeadings } from "./markdownOutl
 
 const NAVIGATION_SETTLE_MS = 140;
 
-export function MarkdownPreview({ content, linkPolicy, imagePolicy, outlineIdentity }: { content: string; linkPolicy?: MarkdownLinkPolicy; imagePolicy?: MarkdownImagePolicy; outlineIdentity?: MarkdownOutlineIdentity }) {
+export type MarkdownPreviewProps = {
+  content: string;
+  frontmatter?: Record<string, unknown> | null;
+  linkPolicy?: MarkdownLinkPolicy;
+  imagePolicy?: MarkdownImagePolicy;
+  outlineIdentity?: MarkdownOutlineIdentity;
+};
+
+export function MarkdownPreview({ content, frontmatter, linkPolicy, imagePolicy, outlineIdentity }: MarkdownPreviewProps) {
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
   const outlineContext = useMarkdownOutlineContext();
   const publishOutline = outlineContext?.publishOutline;
@@ -105,11 +113,11 @@ export function MarkdownPreview({ content, linkPolicy, imagePolicy, outlineIdent
       writeScrollPosition(outlineIdentity, root.scrollTop);
       clearOutline(outlineIdentity);
     };
-  }, [clearOutline, content, idPrefix, outlineIdentity, publishOutline, readScrollPosition, writeScrollPosition]);
+  }, [clearOutline, content, frontmatter, idPrefix, outlineIdentity, publishOutline, readScrollPosition, writeScrollPosition]);
 
   return (
     <div ref={scrollRootRef} className="min-h-0 w-full flex-1 overflow-y-auto px-5 py-8 md:px-6 md:py-10 lg:px-8 lg:py-12" data-testid="markdown-preview-scroll-region">
-      <Markdown content={content} linkPolicy={linkPolicy} imagePolicy={imagePolicy} imageViewportRoot={scrollRootRef} />
+      <Markdown content={content} frontmatter={frontmatter} linkPolicy={linkPolicy} imagePolicy={imagePolicy} imageViewportRoot={scrollRootRef} />
     </div>
   );
 }

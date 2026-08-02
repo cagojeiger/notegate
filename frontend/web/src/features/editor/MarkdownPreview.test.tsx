@@ -13,10 +13,8 @@ describe("MarkdownPreview outline", () => {
       <MarkdownOutlineProvider>
         <MarkdownPreview
           outlineIdentity={firstDocument}
+          frontmatter={{ title: "# Frontmatter heading" }}
           content={[
-            "---",
-            "title: '# Frontmatter heading'",
-            "---",
             "# 개요",
             "## 반복 제목",
             "## 반복 제목",

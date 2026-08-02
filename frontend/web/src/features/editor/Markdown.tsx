@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { CopyableCodeBlock } from "../../shared/ui/CopyableCodeBlock";
-import { formatFrontmatterValue, parseMarkdownDocument } from "../../shared/lib/markdownDocument";
+import { formatFrontmatterValue } from "../../shared/lib/markdownFrontmatter";
 import {
   classifyMarkdownLink,
   safeMarkdownUrlTransform,
@@ -140,16 +140,17 @@ function TableBlock({ children, ...props }: ComponentProps<"table">) {
 // intentionally not enabled (no rehype-raw), so embedded HTML is escaped.
 export const Markdown = memo(function Markdown({
   content,
+  frontmatter,
   linkPolicy,
   imagePolicy,
   imageViewportRoot
 }: {
   content: string;
+  frontmatter?: Record<string, unknown> | null;
   linkPolicy?: MarkdownLinkPolicy;
   imagePolicy?: MarkdownImagePolicy;
   imageViewportRoot?: RefObject<Element | null>;
 }) {
-  const document = useMemo(() => parseMarkdownDocument(content), [content]);
   const components = useMemo(
     () => createComponents(linkPolicy, imagePolicy, imageViewportRoot),
     [imagePolicy, imageViewportRoot, linkPolicy]
@@ -157,8 +158,8 @@ export const Markdown = memo(function Markdown({
 
   return (
     <div className="markdown">
-      <FrontmatterProperties properties={document.frontmatter} />
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={safeMarkdownUrlTransform}>{document.body}</ReactMarkdown>
+      <FrontmatterProperties properties={frontmatter ?? null} />
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={safeMarkdownUrlTransform}>{content}</ReactMarkdown>
     </div>
   );
 });
