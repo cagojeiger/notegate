@@ -344,6 +344,13 @@ describe("useUiStore", () => {
     useUiStore.getState().setPrimaryWidth(900);
     expect(useUiStore.getState().primaryWidth).toBe(WORKBENCH_LAYOUT.maxPrimaryWidth);
 
+    useUiStore.getState().setAuxiliaryWidth(100);
+    expect(useUiStore.getState().auxiliaryWidth).toBe(WORKBENCH_LAYOUT.minAuxiliaryWidth);
+    useUiStore.getState().setAuxiliaryWidth(900);
+    expect(useUiStore.getState().auxiliaryWidth).toBe(WORKBENCH_LAYOUT.maxAuxiliaryWidth);
+    useUiStore.getState().setAuxiliaryWidth(347.6);
+    expect(useUiStore.getState().auxiliaryWidth).toBe(348);
+
     useUiStore.getState().setTreeRatio(0.05);
     expect(useUiStore.getState().treeRatio).toBe(WORKBENCH_LAYOUT.minTreeRatio);
     useUiStore.getState().setTreeRatio(0.95);

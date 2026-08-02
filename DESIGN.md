@@ -48,7 +48,7 @@
 
 - Color: Brand ink `#17212b` and paper `#f7f9fb` anchor neutral surfaces. Blue is reserved for links, selection, focus, primary actions, and neutral operational volume. The Markdown Outline uses one subtle surface canvas and a faint reading rail rather than per-heading cards. Green means confirmed health or efficiency; amber means warning; red means failure. Healthy states use colored values instead of large saturated panel backgrounds.
 - Typography: Apple/system sans for UI and reading; system monospace for code, paths, identifiers, and structured data.
-- Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; 48 px aligned workbench body headers; generous Markdown reading padding. Grafana overview cards stay compact, while diagnostic charts receive enough width for readable axes and legends.
+- Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; 48 px aligned workbench body headers; generous Markdown reading padding. The workbench Inspector uses one 48 px `Details`/`Outline` tab header rather than a separate title row. Docked Files and Inspector panels are independently width-adjustable for the current session. Grafana overview cards stay compact, while diagnostic charts receive enough width for readable axes and legends.
 - Shape/radius/elevation: 8–10 px controls, 12–16 px panels, no shadow except floating or modal surfaces. Each panel boundary has one 1 px seam; resize handles may use a wider invisible hit target without adding another default line.
 - Motion: Short color/opacity transitions plus transform-only card reordering; preserve scroll position and respect reduced motion.
 - Imagery/iconography: Official NoteGate SVG/PNG assets for identity. Lucide only for functional icons, normally 16 px with 1.75 px stroke. Auth and onboarding may use a low-contrast Gate Field mark at the screen edge; content surfaces remain flat and undecorated.
@@ -63,7 +63,7 @@
 ## Accessibility
 
 - Target standard: WCAG 2.2 Level AA.
-- Keyboard/focus behavior: 2 px visible outline with offset on links, buttons, fields, summaries, and explicit focus targets. Space reordering uses native keyboard activation on dedicated earlier/later buttons; the drag handle is pointer/touch only.
+- Keyboard/focus behavior: 2 px visible outline with offset on links, buttons, fields, summaries, and explicit focus targets. Docked panel separators are keyboard-focusable; Left/Right moves each separator in the corresponding physical direction, while Home/End selects its minimum/maximum panel width. Space reordering uses native keyboard activation on dedicated earlier/later buttons; the drag handle is pointer/touch only.
 - Contrast/readability: 4.5:1 for normal text, 3:1 for large text and meaningful UI boundaries; light and dark themes are tested separately.
 - Screen-reader semantics: Decorative marks are hidden; identity images have concise names; async feedback uses live status regions; icon-only earlier/later buttons have contextual accessible labels, while pointer-only drag handles are hidden from assistive technology.
 - Pointer alternatives: Dragging is never the only way to reorder. Earlier/later buttons provide a single-click and single-tap alternative.
@@ -73,12 +73,12 @@
 ## Responsive behavior
 
 - Supported breakpoints/devices: Existing desktop/tablet/mobile layout policy remains authoritative.
-- Layout adaptations: Login stays centered and bounded; Workbench sidebars and editor behavior remain unchanged; the Space Library uses one column on mobile, two on tablet, three on desktop, and four on wide desktop; the Space Inspector is right-docked on desktop/tablet and inline below the cards on mobile.
+- Layout adaptations: Login stays centered and bounded; docked Workbench sidebars are width-adjustable while mobile sidebar overlays keep their fixed responsive geometry; the Space Library uses one column on mobile, two on tablet, three on desktop, and four on wide desktop; the Space Inspector is right-docked on desktop/tablet and inline below the cards on mobile.
 - Touch/hover differences: Essential actions do not depend on hover; mobile controls keep touch-safe spacing.
 
 ## Interaction states
 
-- Active/current: The current surface, Space, and opened item use a primary edge indicator plus a selection background and semantic current/selected state. Only one surface or Space is current within its navigation scope. A Markdown Outline row is a current document location, not a selected value: only the current heading uses `aria-current="location"`, text weight, a subtle active surface, and an active reading-rail segment. Keyboard focus remains a separate focus ring. Programmatic heading navigation keeps its target current until scrolling settles, manual scrolling derives current from the viewport, and the document end maps to the final heading.
+- Active/current: The current surface, Space, and opened item use a primary edge indicator plus a selection background and semantic current/selected state. Only one surface or Space is current within its navigation scope. A Markdown Outline row is a current document location, not a selected value: only the current heading uses `aria-current="location"`, text weight, a subtle active surface, and an active reading-rail segment. Keyboard focus remains a separate focus ring. Programmatic heading navigation keeps its target current until scrolling settles, manual scrolling derives current from the viewport, and the document end maps to the final heading. Long Outlines keep the rounded canvas fixed while the heading list scrolls inside it.
 - Inspector continuity: The preferred `Details`/`Outline` view is remembered for the current workbench session. When Outline is temporarily unavailable, the Inspector shows Details without overwriting that preference. Markdown preview scroll is remembered in memory per editor group and document, so returning through editor Back/Forward restores the last viewed position; a full page reload intentionally starts a new UI session.
 - Loading: Branded but quiet, with visible text and an activity indicator. A pending usage check keeps the current values visible, disables duplicate checks, and reports progress in the Space Inspector.
 - Empty: Explain the next available action without decorative illustration.

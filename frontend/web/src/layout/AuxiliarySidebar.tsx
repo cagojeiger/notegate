@@ -65,9 +65,8 @@ export function AuxiliarySidebar({
   const metadataEntries = Object.entries(metadata);
 
   return (
-    <aside className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
-      <div className="flex h-12 shrink-0 items-center border-b border-seam px-3 text-sm font-medium">Inspector</div>
-      <div className="shrink-0 px-3 pt-3">
+    <aside aria-label="Inspector" className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
+      <div className="flex h-12 shrink-0 items-end border-b border-seam px-3">
         <Tabs
           items={[
             { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
@@ -76,7 +75,7 @@ export function AuxiliarySidebar({
           value={selectedView}
           onChange={setPreferredView}
           label="Inspector sections"
-          variant="compact"
+          variant="header"
         />
       </div>
       <div className="min-h-0 flex-1">
@@ -217,9 +216,9 @@ export function AuxiliarySidebar({
         id={`${panelIdPrefix}-outline`}
         role="tabpanel"
         aria-labelledby={`${panelIdPrefix}-outline-tab`}
-        tabIndex={0}
+        tabIndex={outlineAvailable && outline?.items.length ? undefined : 0}
         hidden={selectedView !== "outline"}
-        className="h-full overflow-y-auto p-3"
+        className="h-full min-h-0 overflow-hidden p-3"
       >
         {outlineAvailable && outline ? (
           <OutlinePanel outline={outline} onNavigate={onOutlineNavigate} />
@@ -237,7 +236,11 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
   const baseLevel = Math.min(...outline.items.map((item) => item.level));
 
   return (
-    <nav aria-label="Document outline" className="rounded-xl border border-seam bg-surface p-2">
+    <nav
+      aria-label="Document outline"
+      tabIndex={0}
+      className="max-h-full overflow-y-auto rounded-xl border border-seam bg-surface p-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+    >
       <ul className="relative space-y-0.5 before:pointer-events-none before:absolute before:inset-y-1 before:left-1 before:w-px before:bg-seam">
         {outline.items.map((item) => {
           const active = item.id === outline.activeItemId;

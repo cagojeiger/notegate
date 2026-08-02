@@ -113,6 +113,8 @@ test("mobile Inspector details remain scrollable on a short viewport", async ({ 
   await page.getByRole("button", { name: imageNode.name }).first().click();
   await page.getByRole("button", { name: "Toggle right sidebar" }).click();
 
+  await expect(page.getByRole("separator", { name: "Resize Inspector" })).toHaveCount(0);
+
   const scrollRegion = page.getByTestId("node-inspector-scroll-region");
   await expect(scrollRegion).toBeVisible();
   await expect.poll(
@@ -126,6 +128,31 @@ test("mobile Inspector details remain scrollable on a short viewport", async ({ 
     .poll(async () => scrollRegion.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
   await expect(scrollRegion.getByText("Settings", { exact: true })).toBeInViewport();
+});
+
+test("desktop Inspector can grow without pushing the preview outside its editor", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockFilePreviewApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: imageNode.name }).first().click();
+  const preview = page.getByRole("img", { name: imageNode.name });
+  await expect(preview).toBeVisible();
+
+  const separator = page.getByRole("separator", { name: "Resize Inspector" });
+  await expect(separator).toHaveAttribute("aria-valuenow", "320");
+  const separatorBox = await separator.boundingBox();
+  expect(separatorBox?.width).toBeGreaterThanOrEqual(24);
+  if (!separatorBox) throw new Error("Inspector separator is not visible");
+
+  await page.mouse.move(separatorBox.x + separatorBox.width / 2, separatorBox.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(separatorBox.x + separatorBox.width / 2 - 80, separatorBox.y + 80);
+  await page.mouse.up();
+
+  await expect(separator).toHaveAttribute("aria-valuenow", "400");
+  await expect(page.getByRole("complementary", { name: "Inspector" })).toHaveCSS("width", "400px");
+  await expectInsideActiveEditor(page, preview);
 });
 
 async function mockFilePreviewApi(page: import("@playwright/test").Page) {

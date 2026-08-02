@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { AuxiliarySidebarFrame, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
+import { AuxiliarySidebarFrame, AuxiliarySidebarResizeHandle, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
 import { WORKBENCH_LAYOUT } from "../shared/model/workbenchLayout";
 
 describe("WorkbenchFrames", () => {
@@ -21,7 +21,7 @@ describe("WorkbenchFrames", () => {
 
   it("renders floating auxiliary panels without consuming flex width", () => {
     const { container } = render(
-      <AuxiliarySidebarFrame mode="overlay">
+      <AuxiliarySidebarFrame mode="overlay" width={320}>
         <div>Inspector</div>
       </AuxiliarySidebarFrame>
     );
@@ -40,6 +40,12 @@ describe("WorkbenchFrames", () => {
         <PrimarySidebarResizeHandle
           visible={false}
           value={300}
+          onPointerDown={vi.fn()}
+          onValueChange={vi.fn()}
+        />
+        <AuxiliarySidebarResizeHandle
+          visible={false}
+          value={320}
           onPointerDown={vi.fn()}
           onValueChange={vi.fn()}
         />
@@ -84,16 +90,35 @@ describe("WorkbenchFrames", () => {
     });
   });
 
-  it("docks the auxiliary sidebar with the shared inspector width", () => {
+  it("docks the auxiliary sidebar with the current inspector width", () => {
     const { container } = render(
-      <AuxiliarySidebarFrame mode="docked">
+      <AuxiliarySidebarFrame mode="docked" width={380}>
         <div>Inspector</div>
       </AuxiliarySidebarFrame>
     );
 
     const frame = container.firstElementChild as HTMLElement;
-    expect(frame).toHaveStyle({ width: `${WORKBENCH_LAYOUT.auxiliaryWidth}px` });
+    expect(frame).toHaveStyle({ width: "380px" });
     expect(frame).toHaveClass("flex", "shrink-0");
+  });
+
+  it("exposes a wide accessible resize target for the inspector", () => {
+    const { container } = render(
+      <AuxiliarySidebarResizeHandle
+        visible
+        value={320}
+        onPointerDown={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+
+    const handle = container.firstElementChild;
+    expect(handle).toHaveClass("w-0", "bg-transparent");
+    expect(handle).not.toHaveClass("bg-seam");
+    expect(screen.getByRole("separator", { name: "Resize Inspector" })).toHaveAttribute(
+      "aria-controls",
+      "auxiliary-sidebar-panel"
+    );
   });
 
   it("closes overlay panels from the backdrop", async () => {

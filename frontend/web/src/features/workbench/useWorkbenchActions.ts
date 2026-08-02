@@ -17,10 +17,11 @@ type WorkbenchActionsProps = {
   canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   primaryWidth: number;
+  auxiliaryWidth: number;
   onSignOut: () => void;
 };
 
-export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, canCreateSpace, canWriteActiveSpace, canManageActiveSpace, primaryWidth, onSignOut }: WorkbenchActionsProps) {
+export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, canCreateSpace, canWriteActiveSpace, canManageActiveSpace, primaryWidth, auxiliaryWidth, onSignOut }: WorkbenchActionsProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dialog, setDialog] = useState<AppDialog | null>(null);
 
@@ -32,6 +33,7 @@ export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, ca
   const toggleFolder = useUiStore((state) => state.toggleFolder);
   const togglePrimarySidebar = useUiStore((state) => state.togglePrimarySidebar);
   const setPrimaryWidth = useUiStore((state) => state.setPrimaryWidth);
+  const setAuxiliaryWidth = useUiStore((state) => state.setAuxiliaryWidth);
   const toggleAuxiliary = useUiStore((state) => state.toggleAuxiliary);
   const toggleMobileTree = useUiStore((state) => state.toggleMobileTree);
   const toggleMobileAux = useUiStore((state) => state.toggleMobileAux);
@@ -64,6 +66,13 @@ export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, ca
     const startX = event.clientX;
     const startWidth = primaryWidth;
     startPointerDrag((moveEvent) => setPrimaryWidth(startWidth + (moveEvent.clientX - startX)));
+  }
+
+  function startAuxiliaryResize(event: ReactPointerEvent) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = auxiliaryWidth;
+    startPointerDrag((moveEvent) => setAuxiliaryWidth(startWidth + (startX - moveEvent.clientX)));
   }
 
   function confirmResetSavedWorkspace() {
@@ -102,7 +111,9 @@ export function useWorkbenchActions({ activeSpace, activeNode, inspectedNode, ca
       confirmResetSavedWorkspace,
       toggleFolder,
       setPrimaryWidth,
-      startPrimaryResize
+      startPrimaryResize,
+      setAuxiliaryWidth,
+      startAuxiliaryResize
     }
   };
 }

@@ -65,15 +65,16 @@ describe("Tabs", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("keeps the default appearance and offers compact Inspector spacing", () => {
+  it("keeps the default appearance and offers flush header tabs", () => {
     const { rerender } = render(<Tabs items={[...items]} value="outline" onChange={() => undefined} />);
 
     expect(screen.getByRole("tablist")).toHaveClass("mb-5");
     expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass("px-3", "py-2", "text-sm");
 
-    rerender(<Tabs items={[...items]} value="outline" onChange={() => undefined} variant="compact" />);
+    rerender(<Tabs items={[...items]} value="outline" onChange={() => undefined} variant="header" />);
 
-    expect(screen.getByRole("tablist")).toHaveClass("mb-3");
-    expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass("px-2", "py-1.5", "text-xs");
+    expect(screen.getByRole("tablist")).toHaveClass("h-full", "items-end");
+    expect(screen.getByRole("tablist")).not.toHaveClass("mb-5", "border-b");
+    expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass("h-9", "px-2.5", "text-xs");
   });
 });

@@ -2,14 +2,16 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { persistWorkbenchPanelState, persistSpaceWorkbench, workbenchSpaceKey } from "../../stores/workbenchStorage";
+import { useUiStore } from "../../stores/uiStore";
 import { useWorkbenchActions } from "./useWorkbenchActions";
 
 const mocks = vi.hoisted(() => ({
-  logout: vi.fn()
+  logout: vi.fn(),
+  startPointerDrag: vi.fn()
 }));
 
 vi.mock("../../shared/hooks/usePointerDrag", () => ({
-  usePointerDrag: () => vi.fn()
+  usePointerDrag: () => mocks.startPointerDrag
 }));
 
 vi.mock("./useWorkbenchNodeActions", () => ({
@@ -35,6 +37,7 @@ function renderActions(onSignOut = vi.fn()) {
       canWriteActiveSpace: false,
       canManageActiveSpace: false,
       primaryWidth: 280,
+      auxiliaryWidth: 320,
       onSignOut
     }))
   };
@@ -48,6 +51,8 @@ function persistBrowserWorkspace() {
 describe("useWorkbenchActions", () => {
   beforeEach(() => {
     mocks.logout.mockReset().mockResolvedValue(undefined);
+    mocks.startPointerDrag.mockReset();
+    useUiStore.setState(useUiStore.getInitialState(), true);
   });
 
   it("clears browser workspace metadata after logout", async () => {
@@ -80,5 +85,24 @@ describe("useWorkbenchActions", () => {
     expect(error).toEqual(new Error("logout failed"));
     expect(window.localStorage.length).toBe(0);
     expect(onSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("widens the inspector when its left edge is dragged left", () => {
+    const { result } = renderActions();
+    const preventDefault = vi.fn();
+
+    act(() => {
+      result.current.actions.startAuxiliaryResize({ clientX: 1000, preventDefault } as never);
+    });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    const onMove = mocks.startPointerDrag.mock.calls[0]?.[0] as ((event: PointerEvent) => void) | undefined;
+    expect(onMove).toBeTypeOf("function");
+
+    act(() => {
+      onMove?.({ clientX: 940 } as PointerEvent);
+    });
+
+    expect(useUiStore.getState().auxiliaryWidth).toBe(380);
   });
 });

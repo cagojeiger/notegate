@@ -19,6 +19,7 @@ type UiState = {
   expandedFolderIdsBySpace: Record<string, string[]>;
   primarySidebarOpen: boolean;
   primaryWidth: number;
+  auxiliaryWidth: number;
   treeRatio: number;
   treeSectionOpen: boolean;
   recentSectionOpen: boolean;
@@ -47,6 +48,7 @@ type UiState = {
   setExpanded: (ids: string[]) => void;
   togglePrimarySidebar: () => void;
   setPrimaryWidth: (width: number) => void;
+  setAuxiliaryWidth: (width: number) => void;
   setTreeRatio: (ratio: number) => void;
   toggleTreeSection: () => void;
   toggleRecentSection: () => void;
@@ -74,6 +76,7 @@ export function createUiStore(persistence: UiStorePersistence): UiStore {
   expandedFolderIdsBySpace: {},
   primarySidebarOpen: true,
   primaryWidth: WORKBENCH_LAYOUT.defaultPrimaryWidth,
+  auxiliaryWidth: WORKBENCH_LAYOUT.defaultAuxiliaryWidth,
   treeRatio: WORKBENCH_LAYOUT.defaultTreeRatio,
   treeSectionOpen: true,
   recentSectionOpen: true,
@@ -150,6 +153,7 @@ export function createUiStore(persistence: UiStorePersistence): UiStore {
       return { primarySidebarOpen };
     }),
   setPrimaryWidth: (width) => set({ primaryWidth: Math.max(WORKBENCH_LAYOUT.minPrimaryWidth, Math.min(WORKBENCH_LAYOUT.maxPrimaryWidth, Math.round(width))) }),
+  setAuxiliaryWidth: (width) => set({ auxiliaryWidth: Math.max(WORKBENCH_LAYOUT.minAuxiliaryWidth, Math.min(WORKBENCH_LAYOUT.maxAuxiliaryWidth, Math.round(width))) }),
   setTreeRatio: (ratio) => set({ treeRatio: Math.max(WORKBENCH_LAYOUT.minTreeRatio, Math.min(WORKBENCH_LAYOUT.maxTreeRatio, ratio)) }),
   toggleTreeSection: () => set((state) => ({ treeSectionOpen: !state.treeSectionOpen })),
   toggleRecentSection: () => set((state) => ({ recentSectionOpen: !state.recentSectionOpen })),

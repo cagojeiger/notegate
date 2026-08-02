@@ -162,6 +162,28 @@ describe("AppShell history", () => {
     expect(view.container.querySelector("main")).not.toHaveClass("border-y", "border-seam");
   });
 
+  it("wires the docked Inspector to its resizable width", () => {
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(),
+      auxiliaryOpen: true,
+      showAuxiliary: true,
+      auxiliaryWidth: 380,
+      actions: {
+        startAuxiliaryResize: vi.fn(),
+        setAuxiliaryWidth: vi.fn()
+      }
+    });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(document.getElementById("auxiliary-sidebar-panel")).toHaveStyle({ width: "380px" });
+    expect(screen.getByRole("separator", { name: "Resize Inspector" })).toHaveAttribute(
+      "aria-valuenow",
+      "380"
+    );
+  });
+
   it("keeps global shell regions mounted while changing surfaces", async () => {
     const user = userEvent.setup();
     mocks.useWorkbenchController.mockReturnValue(workbench());
@@ -208,6 +230,7 @@ function workbench() {
     primarySidebarOpen: true,
     auxiliaryOpen: false,
     primaryWidth: 300,
+    auxiliaryWidth: 320,
     mobileTreeOpen: false,
     mobileAuxOpen: false,
     showAuxiliary: false,

@@ -12,6 +12,7 @@ type ResizeSeparatorProps = {
   step: number;
   valueText?: string;
   controls?: string;
+  reverseArrowDirection?: boolean;
   onPointerDown: PointerEventHandler<HTMLDivElement>;
   onValueChange: (value: number) => void;
 };
@@ -25,6 +26,7 @@ export function ResizeSeparator({
   step,
   valueText,
   controls,
+  reverseArrowDirection = false,
   onPointerDown,
   onValueChange
 }: ResizeSeparatorProps) {
@@ -35,8 +37,8 @@ export function ResizeSeparator({
     const increaseKey = vertical ? "ArrowRight" : "ArrowDown";
     let nextValue: number | null = null;
 
-    if (event.key === decreaseKey) nextValue = value - step;
-    if (event.key === increaseKey) nextValue = value + step;
+    if (event.key === decreaseKey) nextValue = value + (reverseArrowDirection ? step : -step);
+    if (event.key === increaseKey) nextValue = value + (reverseArrowDirection ? -step : step);
     if (event.key === "Home") nextValue = min;
     if (event.key === "End") nextValue = max;
     if (nextValue === null) return;
