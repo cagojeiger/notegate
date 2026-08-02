@@ -150,7 +150,7 @@ connection.upsert | connection.disconnect
 
 ## File change events
 
-File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Transport surface(REST/MCP/Browser), API key id, request id, IP, user agent 같은 request/security context는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
+File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Space 내부 mutation sequence는 `id`로 식별하고, 기존 REST self-review history는 `created_at desc, id desc` 표시 순서를 유지한다. Transport surface(REST/MCP/Browser), API key id, request id, IP, user agent 같은 request/security context는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
 
 초기 file change event type:
 

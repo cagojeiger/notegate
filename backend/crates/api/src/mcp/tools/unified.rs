@@ -7,8 +7,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::invalid_input_error;
-use super::{files, search, spaces};
+use super::resolve::{actionable_input_error, invalid_input_error};
+use super::{events, files, search, spaces};
 use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
@@ -16,7 +16,7 @@ const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// Operation: spaces/ls/tree/stat/read.
+    /// Operation: spaces/ls/tree/stat/read/changes.
     pub op: String,
     /// Single target in `<space>:/absolute/path` form.
     #[serde(default)]
@@ -33,6 +33,9 @@ pub struct ReadInput {
     /// Opaque pagination cursor.
     #[serde(default)]
     pub cursor: Option<String>,
+    /// For `op=changes`, read older events (default) or newer events.
+    #[serde(default)]
+    pub direction: Option<String>,
     /// 1-based first line for `op=read`.
     #[serde(default)]
     pub start_line: Option<i64>,
@@ -236,9 +239,12 @@ pub struct SequenceCommand {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor.
+    /// Opaque pagination cursor for paginated reads and searches.
     #[serde(default)]
     pub cursor: Option<String>,
+    /// For `read op=changes`, read older events (default) or newer events.
+    #[serde(default)]
+    pub direction: Option<String>,
 
     /// 1-based first line for read.
     #[serde(default)]
@@ -267,6 +273,7 @@ impl SequenceCommand {
             depth: self.depth,
             limit: self.limit,
             cursor: self.cursor,
+            direction: self.direction,
             start_line: self.start_line,
             max_lines: self.max_lines,
             max_bytes: self.max_bytes,
@@ -318,6 +325,7 @@ pub async fn read(
     parts: &Parts,
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
+    validate_read_change_fields(&input)?;
     match input.op.as_str() {
         "spaces" => spaces::list(state, parts, input.name, input.limit, input.cursor).await,
         "ls" => {
@@ -355,11 +363,40 @@ pub async fn read(
             )
             .await
         }
+        "changes" => {
+            events::call(
+                state,
+                parts,
+                required(input.target, "target", "changes")?,
+                input.limit,
+                input.direction,
+                input.cursor,
+            )
+            .await
+        }
         _ => Err(invalid_op(
             "read",
-            &["spaces", "ls", "tree", "stat", "read"],
+            &["spaces", "ls", "tree", "stat", "read", "changes"],
         )),
     }
+}
+
+fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
+    if input.op == "changes" {
+        return Ok(());
+    }
+    if input.direction.is_some() {
+        return Err(actionable_input_error(
+            "changes_fields_not_allowed",
+            "direction is only valid for read op=changes",
+            "Remove direction or change op to changes.",
+            json!({
+                "kind": "remove_fields",
+                "fields": ["direction"],
+            }),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn search(
@@ -556,6 +593,17 @@ async fn dispatch_command(
     parts: &Parts,
     command: SequenceCommand,
 ) -> Result<Json<Value>, ErrorData> {
+    if command.tool != "read" && command.direction.is_some() {
+        return Err(actionable_input_error(
+            "changes_fields_not_allowed",
+            "direction is only valid for read op=changes",
+            "Remove direction or use it only with a read changes command.",
+            json!({
+                "kind": "remove_fields",
+                "fields": ["direction"],
+            }),
+        ));
+    }
     match command.tool.as_str() {
         "read" => read(state, parts, Parameters(command.into_read_input())).await,
         "search" => search(state, parts, Parameters(command.into_search_input()?)).await,
@@ -575,11 +623,7 @@ fn error_json(error: ErrorData) -> Value {
     })
 }
 
-fn required(
-    value: Option<String>,
-    field: &'static str,
-    op: &'static str,
-) -> Result<String, ErrorData> {
+fn required<T>(value: Option<T>, field: &'static str, op: &'static str) -> Result<T, ErrorData> {
     value.ok_or_else(|| {
         invalid_input_error(format!(
             "op={op} requires {field}; retry with field `{field}` set"
@@ -615,7 +659,7 @@ fn invalid_op(tool: &'static str, allowed: &[&str]) -> ErrorData {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
     use super::*;
     use serde_json::json;
@@ -651,5 +695,55 @@ mod tests {
         assert_eq!(command.tool, "manage");
         assert_eq!(command.op, "mkdir");
         assert!(command.parents);
+    }
+
+    #[test]
+    fn changes_uses_the_shared_opaque_cursor_with_a_direction() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "op": "changes",
+            "target": "daily:/",
+            "direction": "newer",
+            "cursor": "opaque-change-cursor",
+            "limit": 25
+        }))
+        .expect("valid changes input parses");
+
+        assert_eq!(input.direction.as_deref(), Some("newer"));
+        assert_eq!(input.cursor.as_deref(), Some("opaque-change-cursor"));
+    }
+
+    #[test]
+    fn changes_fields_on_other_read_ops_name_the_fields_to_remove() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "op": "read",
+            "target": "daily:/note.md",
+            "direction": "older"
+        }))
+        .expect("known fields parse before operation validation");
+        let error = validate_read_change_fields(&input)
+            .expect_err("changes fields are rejected outside changes");
+
+        let data = error.data.expect("structured recovery data");
+        assert_eq!(data["code"], "changes_fields_not_allowed");
+        assert_eq!(data["next_action"]["kind"], "remove_fields");
+        assert_eq!(data["next_action"]["fields"], json!(["direction"]));
+    }
+
+    #[test]
+    fn run_sequence_accepts_a_changes_cursor() {
+        let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "commands": [{
+                "tool": "read",
+                "op": "changes",
+                "target": "daily:/",
+                "direction": "newer",
+                "cursor": "opaque-change-cursor"
+            }]
+        }))
+        .expect("valid changes sequence parses");
+
+        let command = input.commands.first().expect("one command");
+        assert_eq!(command.direction.as_deref(), Some("newer"));
+        assert_eq!(command.cursor.as_deref(), Some("opaque-change-cursor"));
     }
 }

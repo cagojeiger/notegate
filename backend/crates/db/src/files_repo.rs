@@ -330,6 +330,18 @@ impl FilesRepo {
         .await
     }
 
+    pub async fn list_file_change_events_by_id(
+        &self,
+        space_id: Uuid,
+        limit: i64,
+        before_id: Option<i64>,
+    ) -> Result<Vec<notegate_model::FileChangeEvent>> {
+        file_change_event_repo::list_file_change_events_by_id(
+            &self.pool, space_id, limit, before_id,
+        )
+        .await
+    }
+
     pub async fn sync_file_change_events(
         &self,
         space_id: Uuid,

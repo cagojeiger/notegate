@@ -20,8 +20,8 @@ pub use api_key::{ApiKey, ApiKeyCursor, ApiKeyPage, CreateApiKey, ListApiKeys, M
 pub use audit_event::{AuditEvent, AuditEventCursor, AuditEventPage, ListAuditEvents};
 pub use event_history::EventCursor;
 pub use file_change_event::{
-    FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
-    ListFileChangeEvents, SyncFileChanges,
+    FileChangeEvent, FileChangeEventCursor, FileChangeEventIdCursor, FileChangeEventPage,
+    FileChangeSyncPage, ListFileChangeEvents, ListFileChangeEventsById, SyncFileChanges,
 };
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use node::{Node, NodeKind, NodeSummary};

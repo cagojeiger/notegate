@@ -74,3 +74,37 @@ where
 
     Ok(rows)
 }
+
+pub(crate) async fn list_event_rows_by_id<R>(
+    pool: &PgPool,
+    table: &'static str,
+    columns: &'static str,
+    required: UuidFilter,
+    limit: i64,
+    before_id: Option<i64>,
+) -> Result<Vec<R>>
+where
+    for<'row> R: FromRow<'row, PgRow> + Send + Unpin,
+{
+    let mut next_param = 2;
+    let mut filters = format!("{} = $1", required.column);
+    if before_id.is_some() {
+        filters.push_str(&format!(" AND id < ${next_param}"));
+        next_param += 1;
+    }
+
+    let sql = format!(
+        "SELECT {columns} FROM {table} \
+         WHERE {filters} \
+         ORDER BY id DESC LIMIT ${next_param}"
+    );
+    let mut query = sqlx::query_as::<_, R>(&sql).bind(required.value);
+    if let Some(before_id) = before_id {
+        query = query.bind(before_id);
+    }
+    query
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(map_sqlx_error)
+}

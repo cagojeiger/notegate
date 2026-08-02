@@ -27,6 +27,19 @@ pub struct ListFileChangeEvents {
 
 pub type FileChangeEventCursor = EventCursor;
 
+/// Opaque cursor for mutation-sequence history ordered by `id DESC`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileChangeEventIdCursor {
+    pub space_id: Uuid,
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListFileChangeEventsById {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileChangeEventPage {
     pub items: Vec<FileChangeEvent>,
@@ -44,6 +57,7 @@ pub struct SyncFileChanges {
 #[derive(Debug, Clone)]
 pub struct FileChangeSyncPage {
     pub items: Vec<FileChangeEvent>,
+    pub limit: i64,
     pub next_after_id: i64,
     pub has_more: bool,
     pub resync_required: bool,

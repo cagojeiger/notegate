@@ -225,6 +225,7 @@ audit_events_retention_idx(created_at)
 
 file_change_events_space_time_idx(space_id, created_at desc, id desc)
 file_change_events_node_time_idx(space_id, node_id, created_at desc, id desc)
+file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
 ```

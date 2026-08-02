@@ -12,6 +12,7 @@ mod common;
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
+use notegate_model::FileChangeEventCursor;
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
 };
@@ -186,6 +187,50 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
             "text.create",
             "folder.create",
         ]
+    );
+    assert!(events.windows(2).all(|events| events[0].id > events[1].id));
+    let expected_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+    let older = repo
+        .list_file_change_events(
+            space_id,
+            None,
+            20,
+            Some(&FileChangeEventCursor {
+                created_at: events[2].created_at,
+                id: events[2].id,
+            }),
+        )
+        .await?;
+    assert_eq!(older.first().map(|event| event.id), Some(events[3].id));
+
+    sqlx::query(
+        "UPDATE file_change_events SET created_at = created_at + INTERVAL '1 day' WHERE id = $1",
+    )
+    .bind(events.last().expect("oldest event").id)
+    .execute(&db.pool)
+    .await?;
+    let time_shifted = repo
+        .list_file_change_events(space_id, None, 20, None)
+        .await?;
+    assert_eq!(
+        time_shifted.first().map(|event| event.id),
+        events.last().map(|event| event.id),
+        "existing REST history remains ordered by created_at DESC, id DESC"
+    );
+
+    let id_ordered = repo
+        .list_file_change_events_by_id(space_id, 20, None)
+        .await?;
+    assert_eq!(
+        id_ordered.iter().map(|event| event.id).collect::<Vec<_>>(),
+        expected_ids
+    );
+    let older_by_id = repo
+        .list_file_change_events_by_id(space_id, 20, Some(events[2].id))
+        .await?;
+    assert_eq!(
+        older_by_id.first().map(|event| event.id),
+        Some(events[3].id)
     );
     assert!(events.iter().all(|event| event.space_id == space_id));
     assert!(

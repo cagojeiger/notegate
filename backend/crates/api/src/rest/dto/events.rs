@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::AccountRef;
+use crate::file_change::FileChangeImpact;
 
 /// Audit event history entry returned by `GET /api/v1/me/audit-events`.
 #[derive(Debug, Serialize, ToSchema)]
@@ -102,55 +103,18 @@ pub(crate) struct FileChangeDeltaOut {
 
 impl FileChangeDeltaOut {
     pub(crate) fn from_event(event: &FileChangeEvent) -> Self {
-        let item_kind = metadata_string(&event.metadata, "item_kind");
-        let affected_parent_ids = [
-            metadata_uuid(&event.metadata, "parent_node_id_before"),
-            metadata_uuid(&event.metadata, "parent_node_id_after"),
-            metadata_uuid(&event.metadata, "parent_node_id"),
-        ]
-        .into_iter()
-        .flatten()
-        .fold(Vec::new(), |mut ids, id| {
-            if !ids.contains(&id) {
-                ids.push(id);
-            }
-            ids
-        });
-        let parent_scope_known = [
-            "parent_node_id",
-            "parent_node_id_before",
-            "parent_node_id_after",
-        ]
-        .into_iter()
-        .any(|key| event.metadata.get(key).is_some());
-        let path_changed = matches!(
-            event.op_type.as_str(),
-            "folder.create"
-                | "text.create"
-                | "file.create"
-                | "item.copy"
-                | "item.move"
-                | "item.delete"
-        ) || (event.op_type == "item.update"
-            && metadata_bool(&event.metadata, "name_changed"));
-        let subtree_changed = item_kind.as_deref() == Some("folder")
-            && (event.op_type == "item.move"
-                || (event.op_type == "item.update"
-                    && metadata_bool(&event.metadata, "name_changed"))
-                || (event.op_type == "item.delete" && metadata_bool(&event.metadata, "recursive")));
-        let write_lock_changed =
-            event.op_type == "item.update" && metadata_bool(&event.metadata, "write_lock_changed");
+        let impact = FileChangeImpact::from_event(event);
 
         Self {
             id: event.id,
             node_id: event.node_id,
             op_type: event.op_type.clone(),
-            item_kind,
-            affected_parent_ids,
-            parent_scope_known,
-            path_changed,
-            subtree_changed,
-            write_lock_changed,
+            item_kind: impact.item_kind,
+            affected_parent_ids: impact.affected_parent_ids,
+            parent_scope_known: impact.parent_scope_known,
+            path_changed: impact.path_changed,
+            subtree_changed: impact.subtree_changed,
+            write_lock_changed: impact.write_lock_changed,
         }
     }
 }
@@ -161,18 +125,6 @@ pub(crate) struct FileChangeSyncResponse {
     pub next_after_id: i64,
     pub has_more: bool,
     pub resync_required: bool,
-}
-
-fn metadata_string(metadata: &Value, key: &str) -> Option<String> {
-    metadata.get(key)?.as_str().map(str::to_owned)
-}
-
-fn metadata_uuid(metadata: &Value, key: &str) -> Option<Uuid> {
-    metadata.get(key)?.as_str()?.parse().ok()
-}
-
-fn metadata_bool(metadata: &Value, key: &str) -> bool {
-    metadata.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 #[cfg(test)]

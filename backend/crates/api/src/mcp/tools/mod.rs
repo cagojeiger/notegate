@@ -1,5 +1,6 @@
 //! MCP tools grouped by product category.
 
+pub mod events;
 pub mod files;
 pub mod identity;
 pub mod resolve;
