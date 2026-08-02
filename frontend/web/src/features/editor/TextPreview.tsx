@@ -1,9 +1,10 @@
 import { lazy, Suspense } from "react";
 
+import { CodePreview } from "./CodePreview";
 import { PlainTextPreview } from "./PlainTextPreview";
 import type { MarkdownImagePolicy, MarkdownLinkPolicy } from "../../shared/lib/markdownLinks";
 import type { MarkdownOutlineIdentity } from "./MarkdownOutlineContext";
-import { inferTextFormat, isStructuredFormat } from "./textFormat";
+import { inferTextFormat, isCodeFormat, isStructuredFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 
@@ -19,6 +20,10 @@ export function TextPreview({ name, content, markdownLinkPolicy, markdownImagePo
 
   if (isStructuredFormat(format)) {
     return <PreviewSuspense><StructuredPreview format={format} content={content} mode={structuredMode} expansionMode={structuredExpansionMode} /></PreviewSuspense>;
+  }
+
+  if (isCodeFormat(format)) {
+    return <CodePreview format={format} content={content} />;
   }
 
   return <PlainTextPreview content={content} />;

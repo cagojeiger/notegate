@@ -1,27 +1,39 @@
 const LANGUAGE_ALIASES: Record<string, string> = {
+  bash: "shellscript",
+  cjs: "javascript",
+  cts: "typescript",
+  js: "javascript",
+  ksh: "shellscript",
   md: "markdown",
+  mjs: "javascript",
+  mts: "typescript",
+  py: "python",
+  rs: "rust",
+  sh: "shellscript",
+  shell: "shellscript",
   text: "text",
+  ts: "typescript",
   txt: "text",
-  yml: "yaml"
+  yml: "yaml",
+  zsh: "shellscript"
 };
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  bash: "Bash",
   css: "CSS",
+  go: "Go",
   html: "HTML",
-  js: "JavaScript",
+  javascript: "JavaScript",
   json: "JSON",
   jsx: "JSX",
   markdown: "Markdown",
-  py: "Python",
-  rs: "Rust",
-  sh: "Shell",
+  python: "Python",
+  rust: "Rust",
+  shellscript: "Shell",
   sql: "SQL",
   text: "Text",
-  ts: "TypeScript",
+  typescript: "TypeScript",
   tsx: "TSX",
-  yaml: "YAML",
-  zsh: "Zsh"
+  yaml: "YAML"
 };
 
 export function normalizeCodeLanguage(language: string): string {
