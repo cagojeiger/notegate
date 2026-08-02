@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
-import { routeJsonApi } from "./support/api";
+import { routeWorkbenchJsonApi } from "./support/linkIndex";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -34,7 +34,7 @@ for (const viewport of [
     const children = Array.from({ length: 1_000 }, (_, index) => fileNode(index));
     let childRequestCount = 0;
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await routeJsonApi(page, (url) => {
+    await routeWorkbenchJsonApi(page, (url) => {
       if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
         childRequestCount += 1;
       }

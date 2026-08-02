@@ -15,8 +15,8 @@ use std::time::Duration;
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{FilesRepo, LinkIndexRepo, SpaceRepo, TextMutationKind};
 use notegate_model::files::{StoredContent, WriteTextBody};
-use notegate_model::{LinkIndexFreshness, LinkReferenceStatus};
-use notegate_service::link_index::{LinkIndexRun, LinkIndexService};
+use notegate_model::{LinkIndexFreshness, LinkIndexStatus, LinkReferenceStatus};
+use notegate_service::link_index::{LinkIndexProjector, LinkIndexRun, LinkIndexService};
 use sha2::{Digest, Sha256};
 
 fn text(content: &str) -> StoredContent {
@@ -29,11 +29,11 @@ fn text(content: &str) -> StoredContent {
 }
 
 async fn drain(
-    service: &LinkIndexService,
+    projector: &LinkIndexProjector,
 ) -> Result<Vec<LinkIndexRun>, Box<dyn std::error::Error>> {
     let mut runs = Vec::new();
     for _ in 0..8 {
-        match service.process_next().await? {
+        match projector.process_next().await? {
             LinkIndexRun::Idle => return Ok(runs),
             run => runs.push(run),
         }
@@ -57,7 +57,8 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     let (space_id, root_id) = setup_space(&spaces, owner, "link-index-lifecycle").await;
     let files = FilesRepo::new(db.pool.clone());
     let index = LinkIndexRepo::new(db.pool.clone());
-    let service = LinkIndexService::new(index, files.clone());
+    let service = LinkIndexService::new(index.clone(), files.clone());
+    let projector = LinkIndexProjector::new(index, files.clone());
 
     let (target, _) = files
         .insert_text(space_id, root_id, "target.md", &text("target"), owner)
@@ -72,13 +73,17 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
         )
         .await?;
 
-    let runs = drain(&service).await?;
+    let runs = drain(&projector).await?;
     assert!(matches!(runs.as_slice(), [LinkIndexRun::Rebuilt { .. }]));
 
     let source_links = service.node_links(owner, space_id, source.id).await?;
     assert_eq!(source_links.index.freshness(), LinkIndexFreshness::Current);
     assert_eq!(source_links.outgoing_count, 2);
     assert_eq!(source_links.broken_count, 1);
+    assert_eq!(
+        source_links.outgoing[0].source_path.as_deref(),
+        Some("/source.md")
+    );
     assert_eq!(
         source_links
             .outgoing
@@ -90,6 +95,10 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     );
     let target_links = service.node_links(owner, space_id, target.id).await?;
     assert_eq!(target_links.incoming_count, 1);
+    assert_eq!(
+        target_links.incoming[0].target_path.as_deref(),
+        Some("/target.md")
+    );
 
     let (latest, _) = files
         .insert_text(space_id, root_id, "latest.md", &text("latest"), owner)
@@ -115,7 +124,7 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
         )
         .await?;
 
-    drain(&service).await?;
+    drain(&projector).await?;
     let rewritten = service.node_links(owner, space_id, source.id).await?;
     assert_eq!(rewritten.outgoing_count, 1);
     assert_eq!(rewritten.outgoing[0].raw_href, "latest.md");
@@ -131,7 +140,7 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     files
         .soft_delete_node(space_id, latest.id, owner, false)
         .await?;
-    drain(&service).await?;
+    drain(&projector).await?;
     let deleted_target = service.node_links(owner, space_id, source.id).await?;
     assert_eq!(deleted_target.broken_count, 1);
     assert_eq!(
@@ -142,7 +151,7 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     let (replacement, _) = files
         .insert_text(space_id, root_id, "latest.md", &text("replacement"), owner)
         .await?;
-    drain(&service).await?;
+    drain(&projector).await?;
     let rebound = service.node_links(owner, space_id, source.id).await?;
     assert_eq!(rebound.broken_count, 0);
     assert_eq!(rebound.outgoing[0].status, LinkReferenceStatus::Resolved);
@@ -151,7 +160,7 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     files
         .soft_delete_node(space_id, source.id, owner, false)
         .await?;
-    drain(&service).await?;
+    drain(&projector).await?;
     assert_eq!(
         service
             .node_links(owner, space_id, replacement.id)
@@ -184,6 +193,51 @@ async fn only_one_worker_claims_a_space() -> Result<(), Box<dyn std::error::Erro
         .await?
         .expect("first worker claims queued space");
     assert_eq!(first.space_id, space_id);
+    assert!(
+        index
+            .claim_next(Duration::from_secs(30), 1)
+            .await?
+            .is_none()
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rebuild_request_does_not_queue_a_second_active_rebuild()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-rebuild-idempotency",
+        "link-index-rebuild-idempotency@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-rebuild-idempotency").await;
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let claim = index
+        .claim_next(Duration::from_secs(30), 1)
+        .await?
+        .expect("queued space is claimed");
+    let base_generation = index
+        .begin_rebuild(&claim, 1, Duration::from_secs(30))
+        .await?;
+
+    let state = index.request_rebuild(space_id).await?;
+    assert_eq!(state.status, LinkIndexStatus::Rebuilding);
+    let rebuild_requested: bool = sqlx::query_scalar(
+        "SELECT rebuild_requested FROM space_link_index_states WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(!rebuild_requested);
+
+    index.finish_rebuild(&claim, base_generation).await?;
     assert!(
         index
             .claim_next(Duration::from_secs(30), 1)
@@ -246,11 +300,11 @@ async fn space_generations_do_not_follow_global_event_id_order()
     .await?;
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, root_id) = setup_space(&spaces, owner, "link-index-generation-order").await;
-    let service = LinkIndexService::new(
+    let projector = LinkIndexProjector::new(
         LinkIndexRepo::new(db.pool.clone()),
         FilesRepo::new(db.pool.clone()),
     );
-    drain(&service).await?;
+    drain(&projector).await?;
 
     let lower_id: i64 =
         sqlx::query_scalar("SELECT nextval(pg_get_serial_sequence('file_change_events', 'id'))")
@@ -282,7 +336,7 @@ async fn space_generations_do_not_follow_global_event_id_order()
 
     assert!(lower_id < higher_id);
     assert_eq!((first_generation, second_generation), (1, 2));
-    let runs = drain(&service).await?;
+    let runs = drain(&projector).await?;
     assert!(matches!(
         runs.as_slice(),
         [LinkIndexRun::Incremental { events: 2, .. }]
@@ -313,11 +367,11 @@ async fn missing_pending_generation_falls_back_to_a_rebuild()
     .await?;
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, root_id) = setup_space(&spaces, owner, "link-index-generation-gap").await;
-    let service = LinkIndexService::new(
+    let projector = LinkIndexProjector::new(
         LinkIndexRepo::new(db.pool.clone()),
         FilesRepo::new(db.pool.clone()),
     );
-    drain(&service).await?;
+    drain(&projector).await?;
 
     for _ in 0..2 {
         sqlx::query(
@@ -340,11 +394,11 @@ async fn missing_pending_generation_falls_back_to_a_rebuild()
     .await?;
 
     assert!(matches!(
-        service.process_next().await?,
+        projector.process_next().await?,
         LinkIndexRun::RebuildQueued { space_id: queued_space } if queued_space == space_id
     ));
     assert!(matches!(
-        drain(&service).await?.as_slice(),
+        drain(&projector).await?.as_slice(),
         [LinkIndexRun::Rebuilt { .. }]
     ));
     let (desired_generation, applied_generation): (i64, i64) = sqlx::query_as(
@@ -375,7 +429,9 @@ async fn indexes_a_long_unresolved_href_without_a_btree_key_failure()
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, root_id) = setup_space(&spaces, owner, "link-index-long-href").await;
     let files = FilesRepo::new(db.pool.clone());
-    let service = LinkIndexService::new(LinkIndexRepo::new(db.pool.clone()), files.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let service = LinkIndexService::new(index.clone(), files.clone());
+    let projector = LinkIndexProjector::new(index, files.clone());
     let href = format!("{}.md", "x".repeat(4_000));
     let (source, _) = files
         .insert_text(
@@ -387,7 +443,7 @@ async fn indexes_a_long_unresolved_href_without_a_btree_key_failure()
         )
         .await?;
 
-    drain(&service).await?;
+    drain(&projector).await?;
     let links = service.node_links(owner, space_id, source.id).await?;
     assert_eq!(links.outgoing_count, 1);
     assert_eq!(links.outgoing[0].raw_href, href);
@@ -411,12 +467,12 @@ async fn an_older_worker_does_not_downgrade_a_newer_parser_projection()
     .await?;
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-newer-parser").await;
-    let service = LinkIndexService::new(
+    let projector = LinkIndexProjector::new(
         LinkIndexRepo::new(db.pool.clone()),
         FilesRepo::new(db.pool.clone()),
     );
 
-    drain(&service).await?;
+    drain(&projector).await?;
     sqlx::query(
         "UPDATE space_link_index_states \
          SET parser_version = 2, status = 'ready', rebuild_requested = false \
@@ -426,9 +482,9 @@ async fn an_older_worker_does_not_downgrade_a_newer_parser_projection()
     .execute(&db.pool)
     .await?;
 
-    assert!(drain(&service).await?.is_empty());
+    assert!(drain(&projector).await?.is_empty());
     assert!(matches!(
-        service.ensure_worker_compatible().await,
+        projector.ensure_compatible().await,
         Err(notegate_service::ServiceError::Internal(message))
             if message.contains("roll forward")
     ));

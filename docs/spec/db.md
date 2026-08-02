@@ -451,7 +451,6 @@ node_link_refs
   raw_href text not null
   normalized_target_path text null
   occurrence_count int not null check > 0
-  indexed_at timestamptz not null default now()
 ```
 
 `space_link_index_states`는 Space별 durable queue와 재구성 lease를 함께 보관한다. `desired_generation`은 정본 변경 위치이고 `applied_generation`은 현재 링크 투영이 반영한 위치다. `node_link_refs`는 source Text의 현재 outgoing 참조만 저장하며 incoming은 `target_node_id` 역조회로 계산한다. Source와 target composite FK는 같은 Space 안의 node만 허용한다. Target hard purge는 `target_node_id`만 NULL로 바꾸어 unresolved path를 보존한다. 상세 갱신 및 조회 계약은 `docs/spec/link-index.md`가 정본이다.

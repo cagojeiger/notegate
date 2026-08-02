@@ -108,5 +108,7 @@ GET  /api/v1/spaces/{space_id}/nodes/{node_id}/links
 - Space Library의 Space Inspector는 상태와 링크 재인덱싱 버튼만 제공한다.
 - Node Inspector는 선택한 node의 outgoing, incoming, broken 관계를 bounded 목록과 count로 표시한다.
 - 재인덱싱 요청은 비동기이며 현재 작업 상태를 반환한다.
+- 이미 전체 재인덱싱이 실행 중이면 같은 요청은 추가 재인덱싱을 예약하지 않는다.
+- 관계 상태, count, bounded 목록, 표시 path는 하나의 repeatable-read snapshot에서 조회한다.
 
 이번 계약에는 전체 Space 그래프 시각화, 외부 URL health check, AI 의미 관계, 관계 변경 이력, 링크 기반 삭제 차단을 포함하지 않는다.

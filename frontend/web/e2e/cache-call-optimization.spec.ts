@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
-import { routeJsonApi } from "./support/api";
+import { routeWorkbenchJsonApi } from "./support/linkIndex";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -37,7 +37,7 @@ for (const viewport of [
       Math.random = () => 0.5;
     });
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await routeJsonApi(page, (url) => {
+    await routeWorkbenchJsonApi(page, (url) => {
       requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
       return responseFor(url);
     });
@@ -88,7 +88,7 @@ for (const viewport of [
 test("opens a recent node with one reveal request and no canonical node request", async ({ page }) => {
   const requests = new Map<string, number>();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await routeJsonApi(page, (url) => {
+  await routeWorkbenchJsonApi(page, (url) => {
     requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
     return responseFor(url);
   });
@@ -112,7 +112,7 @@ test("opens a recent node with one reveal request and no canonical node request"
 
 test("loads deferred global dialogs after the production entry renders", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await routeJsonApi(page, (url) => responseFor(url));
+  await routeWorkbenchJsonApi(page, (url) => responseFor(url));
   await page.goto("/");
 
   await page.getByRole("button", { name: "History" }).click();
@@ -146,7 +146,7 @@ test("refreshes restored editors through one focus-owned Space sync", async ({ p
       groups: restoredNodes.map((node) => ({ node, mode: "preview", back: [], forward: [] }))
     }));
   }, { restoredNodes: nodes, spaceId: space.id });
-  await routeJsonApi(page, (url) => {
+  await routeWorkbenchJsonApi(page, (url) => {
     requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
     if (url.pathname === syncPath) {
       if (count(requests, syncPath) === 3) {
@@ -216,7 +216,7 @@ test("backs off idle usage polling with one owner while the desktop Space Librar
   const requests = new Map<string, number>();
   await page.clock.install();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await routeJsonApi(page, (url) => {
+  await routeWorkbenchJsonApi(page, (url) => {
     requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
     return responseFor(url);
   });

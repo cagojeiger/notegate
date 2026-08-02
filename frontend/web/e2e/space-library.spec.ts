@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type { Me, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
-import { defaultLinkIndexState } from "./support/api";
+import { defaultLinkIndexState } from "./support/linkIndex";
 
 const me: Me = {
   account: { id: "user-1", kind: "user", display_name: "User" },

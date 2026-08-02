@@ -1,4 +1,4 @@
-//! Durable Space link-index queue, projection writes, and bounded relation reads.
+//! Durable Space link-index queue and projection writes.
 
 use std::time::Duration;
 
@@ -10,6 +10,10 @@ use sqlx::{FromRow, PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
 
 use crate::map_sqlx_error;
+
+mod relations;
+
+pub use relations::{LinkReferenceRecord, NodeLinkRecords};
 
 const LINK_INSERT_CHUNK_SIZE: usize = 500;
 
@@ -59,32 +63,6 @@ pub struct SourceLinkSet {
     pub references: Vec<NewLinkReference>,
 }
 
-#[derive(Debug, Clone)]
-pub struct LinkReferenceRecord {
-    pub id: i64,
-    pub kind: LinkReferenceKind,
-    pub raw_href: String,
-    pub normalized_target_path: Option<String>,
-    pub occurrence_count: i32,
-    pub source_node_id: Uuid,
-    pub source_name: String,
-    pub target_node_id: Option<Uuid>,
-    pub target_name: Option<String>,
-    pub target_deleted: bool,
-}
-
-#[derive(Debug)]
-pub struct NodeLinkRecords {
-    pub index: SpaceLinkIndexState,
-    pub outgoing_count: i64,
-    pub incoming_count: i64,
-    pub broken_count: i64,
-    pub outgoing: Vec<LinkReferenceRecord>,
-    pub incoming: Vec<LinkReferenceRecord>,
-    pub outgoing_truncated: bool,
-    pub incoming_truncated: bool,
-}
-
 impl LinkIndexRepo {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -110,10 +88,32 @@ impl LinkIndexRepo {
     }
 
     pub async fn request_rebuild(&self, space_id: Uuid) -> Result<SpaceLinkIndexState> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO space_link_index_states (space_id) VALUES ($1) \
+             ON CONFLICT (space_id) DO NOTHING",
+        )
+        .bind(space_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        let current = sqlx::query_as::<_, RebuildRequestStateRow>(
+            "SELECT space_id, desired_generation, applied_generation, status, last_indexed_at, \
+                    rebuild_base_generation \
+             FROM space_link_index_states WHERE space_id = $1 FOR UPDATE",
+        )
+        .bind(space_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+        if current.is_rebuilding() {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return current.into_public();
+        }
+
         let row = sqlx::query_as::<_, LinkIndexStateRow>(
-            "INSERT INTO space_link_index_states (space_id) \
-             VALUES ($1) \
-             ON CONFLICT (space_id) DO UPDATE \
+            "UPDATE space_link_index_states \
              SET rebuild_requested = true, \
                  status = CASE \
                     WHEN space_link_index_states.status IN ('running', 'rebuilding') \
@@ -123,12 +123,14 @@ impl LinkIndexRepo {
                  run_after = now(), \
                  last_error = NULL, \
                  updated_at = now() \
+             WHERE space_id = $1 \
              RETURNING space_id, desired_generation, applied_generation, status, last_indexed_at",
         )
         .bind(space_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+        tx.commit().await.map_err(map_sqlx_error)?;
         row.into_public()
     }
 
@@ -433,50 +435,6 @@ impl LinkIndexRepo {
         .map_err(map_sqlx_error)?;
         Ok(())
     }
-
-    pub async fn node_links(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-        limit: i64,
-    ) -> Result<Option<NodeLinkRecords>> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-        let Some(state) = sqlx::query_as::<_, LinkIndexStateRow>(
-            "SELECT space_id, desired_generation, applied_generation, status, last_indexed_at \
-             FROM space_link_index_states WHERE space_id = $1",
-        )
-        .bind(space_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-        else {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(None);
-        };
-
-        let (outgoing_count, incoming_count, broken_count) =
-            relation_counts(&mut tx, space_id, node_id).await?;
-        let outgoing_rows = outgoing_rows(&mut tx, space_id, node_id, limit + 1).await?;
-        let incoming_rows = incoming_rows(&mut tx, space_id, node_id, limit + 1).await?;
-        tx.commit().await.map_err(map_sqlx_error)?;
-
-        let (outgoing, outgoing_truncated) = truncate_records(outgoing_rows, limit)?;
-        let (incoming, incoming_truncated) = truncate_records(incoming_rows, limit)?;
-        Ok(Some(NodeLinkRecords {
-            index: state.into_public()?,
-            outgoing_count,
-            incoming_count,
-            broken_count,
-            outgoing,
-            incoming,
-            outgoing_truncated,
-            incoming_truncated,
-        }))
-    }
 }
 
 async fn assert_claim(
@@ -589,7 +547,7 @@ async fn rebind_targets_by_path(
         .collect::<Vec<_>>();
     sqlx::query(
         "UPDATE node_link_refs reference \
-         SET target_node_id = resolved.node_id, indexed_at = now() \
+         SET target_node_id = resolved.node_id \
          FROM unnest($2::text[], $3::uuid[]) AS resolved(path, node_id) \
          WHERE reference.space_id = $1 \
            AND md5(reference.normalized_target_path) = md5(resolved.path) \
@@ -612,95 +570,6 @@ async fn rebind_targets_by_path(
     Ok(())
 }
 
-async fn relation_counts(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    space_id: Uuid,
-    node_id: Uuid,
-) -> Result<(i64, i64, i64)> {
-    sqlx::query_as(
-        "SELECT \
-            (SELECT count(*) FROM node_link_refs WHERE space_id = $1 AND source_node_id = $2), \
-            (SELECT count(*) FROM node_link_refs reference \
-             JOIN nodes source ON source.id = reference.source_node_id \
-             WHERE reference.space_id = $1 AND reference.target_node_id = $2 \
-               AND source.deleted_at IS NULL), \
-            (SELECT count(*) FROM node_link_refs reference \
-             LEFT JOIN nodes target ON target.id = reference.target_node_id \
-             WHERE reference.space_id = $1 AND reference.source_node_id = $2 \
-               AND (reference.normalized_target_path IS NULL \
-                    OR reference.target_node_id IS NULL \
-                    OR target.deleted_at IS NOT NULL))",
-    )
-    .bind(space_id)
-    .bind(node_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)
-}
-
-async fn outgoing_rows(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    space_id: Uuid,
-    node_id: Uuid,
-    limit: i64,
-) -> Result<Vec<LinkReferenceRow>> {
-    sqlx::query_as::<_, LinkReferenceRow>(&format!(
-        "SELECT {LINK_REFERENCE_COLUMNS} \
-         FROM node_link_refs reference \
-         JOIN nodes source ON source.id = reference.source_node_id \
-         LEFT JOIN nodes target ON target.id = reference.target_node_id \
-         WHERE reference.space_id = $1 AND reference.source_node_id = $2 \
-           AND source.deleted_at IS NULL \
-         ORDER BY reference.id LIMIT $3"
-    ))
-    .bind(space_id)
-    .bind(node_id)
-    .bind(limit)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)
-}
-
-async fn incoming_rows(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    space_id: Uuid,
-    node_id: Uuid,
-    limit: i64,
-) -> Result<Vec<LinkReferenceRow>> {
-    sqlx::query_as::<_, LinkReferenceRow>(&format!(
-        "SELECT {LINK_REFERENCE_COLUMNS} \
-         FROM node_link_refs reference \
-         JOIN nodes source ON source.id = reference.source_node_id \
-         LEFT JOIN nodes target ON target.id = reference.target_node_id \
-         WHERE reference.space_id = $1 AND reference.target_node_id = $2 \
-           AND source.deleted_at IS NULL \
-         ORDER BY reference.id LIMIT $3"
-    ))
-    .bind(space_id)
-    .bind(node_id)
-    .bind(limit)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(map_sqlx_error)
-}
-
-fn truncate_records(
-    mut rows: Vec<LinkReferenceRow>,
-    limit: i64,
-) -> Result<(Vec<LinkReferenceRecord>, bool)> {
-    let limit =
-        usize::try_from(limit).map_err(|_| Error::internal("invalid link relation limit"))?;
-    let truncated = rows.len() > limit;
-    if truncated {
-        rows.pop();
-    }
-    let records = rows
-        .into_iter()
-        .map(LinkReferenceRow::into_record)
-        .collect::<Result<Vec<_>>>()?;
-    Ok((records, truncated))
-}
-
 fn duration_seconds(duration: Duration) -> Result<i32> {
     i32::try_from(duration.as_secs())
         .map_err(|_| Error::internal("link index lease duration exceeds i32"))
@@ -713,6 +582,33 @@ struct LinkIndexStateRow {
     applied_generation: i64,
     status: String,
     last_indexed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, FromRow)]
+struct RebuildRequestStateRow {
+    space_id: Uuid,
+    desired_generation: i64,
+    applied_generation: i64,
+    status: String,
+    last_indexed_at: Option<DateTime<Utc>>,
+    rebuild_base_generation: Option<i64>,
+}
+
+impl RebuildRequestStateRow {
+    fn is_rebuilding(&self) -> bool {
+        self.status == "rebuilding" || self.rebuild_base_generation.is_some()
+    }
+
+    fn into_public(self) -> Result<SpaceLinkIndexState> {
+        LinkIndexStateRow {
+            space_id: self.space_id,
+            desired_generation: self.desired_generation,
+            applied_generation: self.applied_generation,
+            status: self.status,
+            last_indexed_at: self.last_indexed_at,
+        }
+        .into_public()
+    }
 }
 
 impl LinkIndexStateRow {
@@ -807,46 +703,3 @@ fn generations_are_contiguous(rows: &[FileChangeEventRow], applied_generation: i
     }
     true
 }
-
-#[derive(Debug, FromRow)]
-struct LinkReferenceRow {
-    id: i64,
-    reference_kind: String,
-    raw_href: String,
-    normalized_target_path: Option<String>,
-    occurrence_count: i32,
-    source_node_id: Uuid,
-    source_name: String,
-    target_node_id: Option<Uuid>,
-    target_name: Option<String>,
-    target_deleted: bool,
-}
-
-impl LinkReferenceRow {
-    fn into_record(self) -> Result<LinkReferenceRecord> {
-        let kind = LinkReferenceKind::parse(&self.reference_kind).ok_or_else(|| {
-            Error::internal(format!(
-                "unknown link reference kind: {}",
-                self.reference_kind
-            ))
-        })?;
-        Ok(LinkReferenceRecord {
-            id: self.id,
-            kind,
-            raw_href: self.raw_href,
-            normalized_target_path: self.normalized_target_path,
-            occurrence_count: self.occurrence_count,
-            source_node_id: self.source_node_id,
-            source_name: self.source_name,
-            target_node_id: self.target_node_id,
-            target_name: self.target_name,
-            target_deleted: self.target_deleted,
-        })
-    }
-}
-
-const LINK_REFERENCE_COLUMNS: &str = "reference.id, reference.reference_kind, reference.raw_href, \
-     reference.normalized_target_path, reference.occurrence_count, \
-     reference.source_node_id, source.name AS source_name, \
-     reference.target_node_id, target.name AS target_name, \
-     COALESCE(target.deleted_at IS NOT NULL, false) AS target_deleted";

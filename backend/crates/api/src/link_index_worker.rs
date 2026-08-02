@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use notegate_service::link_index::{LinkIndexRun, LinkIndexService};
+use notegate_service::link_index::{LinkIndexProjector, LinkIndexRun};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -10,24 +10,24 @@ use crate::periodic_worker;
 
 const LINK_INDEX_INTERVAL: Duration = Duration::from_secs(2);
 
-pub fn spawn(service: LinkIndexService, shutdown: CancellationToken) -> JoinHandle<()> {
+pub fn spawn(projector: LinkIndexProjector, shutdown: CancellationToken) -> JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(event = "link_index_worker.started");
         let drain_shutdown = shutdown.clone();
         periodic_worker::run(LINK_INDEX_INTERVAL, shutdown, || {
-            let service = service.clone();
+            let projector = projector.clone();
             let shutdown = drain_shutdown.clone();
-            async move { drain_ready_spaces(&service, &shutdown).await }
+            async move { drain_ready_spaces(&projector, &shutdown).await }
         })
         .await;
         tracing::info!(event = "link_index_worker.stopped");
     })
 }
 
-async fn drain_ready_spaces(service: &LinkIndexService, shutdown: &CancellationToken) {
+async fn drain_ready_spaces(projector: &LinkIndexProjector, shutdown: &CancellationToken) {
     while !shutdown.is_cancelled() {
         let started = Instant::now();
-        match service.process_next().await {
+        match projector.process_next().await {
             Ok(LinkIndexRun::Idle) => return,
             Ok(LinkIndexRun::Incremental { space_id, events }) => {
                 tracing::debug!(

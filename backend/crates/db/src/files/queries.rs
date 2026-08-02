@@ -370,7 +370,7 @@ pub mod node {
     use notegate_core::{Error, Result};
     use notegate_model::files::NodeListSort;
     use notegate_model::{Node, NodeKind, NodeSummary};
-    use sqlx::PgPool;
+    use sqlx::{Executor, PgPool, Postgres};
     use std::collections::{HashMap, HashSet};
     use uuid::Uuid;
 
@@ -442,6 +442,17 @@ pub mod node {
         space_id: Uuid,
         node_ids: &[Uuid],
     ) -> Result<std::collections::HashMap<Uuid, String>> {
+        node_paths_many_with(pool, space_id, node_ids).await
+    }
+
+    pub(crate) async fn node_paths_many_with<'e, E>(
+        executor: E,
+        space_id: Uuid,
+        node_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         if node_ids.is_empty() {
             return Ok(std::collections::HashMap::new());
         }
@@ -467,7 +478,7 @@ pub mod node {
         )
         .bind(space_id)
         .bind(node_ids.to_vec())
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .map_err(map_sqlx_error)?;
 

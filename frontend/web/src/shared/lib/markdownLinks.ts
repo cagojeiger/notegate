@@ -1,7 +1,7 @@
 import { defaultUrlTransform } from "react-markdown";
 
 const SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F-\u009F]/;
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(["http", "https", "mailto", "tel"]);
 const SAFE_MARKDOWN_IMAGE_PROTOCOLS = new Set(["http", "https"]);
 

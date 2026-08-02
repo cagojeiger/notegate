@@ -360,8 +360,8 @@ async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, Ap
             ApiError::internal("database not ready")
         })?;
     state
-        .link_index
-        .ensure_worker_compatible()
+        .link_index_projector
+        .ensure_compatible()
         .await
         .map_err(|error| {
             tracing::error!(event = "ready.link_index_parser_incompatible", %error);

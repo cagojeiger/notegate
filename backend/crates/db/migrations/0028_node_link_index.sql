@@ -40,7 +40,6 @@ CREATE TABLE node_link_refs (
     raw_href TEXT NOT NULL CHECK (raw_href <> ''),
     normalized_target_path TEXT,
     occurrence_count INTEGER NOT NULL CHECK (occurrence_count > 0),
-    indexed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     FOREIGN KEY (source_node_id, space_id)
         REFERENCES nodes(id, space_id) ON DELETE CASCADE,
     FOREIGN KEY (target_node_id, space_id)

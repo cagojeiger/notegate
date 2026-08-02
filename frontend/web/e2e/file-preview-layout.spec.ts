@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
-import { routeJsonApi } from "./support/api";
+import { routeWorkbenchJsonApi } from "./support/linkIndex";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -168,7 +168,7 @@ async function mockFilePreviewApi(page: import("@playwright/test").Page) {
       body: createPdf()
     });
   });
-  await routeJsonApi(page, (url) => responseFor(url, previewSvg));
+  await routeWorkbenchJsonApi(page, (url) => responseFor(url, previewSvg));
 }
 
 function responseFor(url: URL, previewSvg: string) {

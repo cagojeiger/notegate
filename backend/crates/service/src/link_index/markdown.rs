@@ -202,13 +202,40 @@ fn yaml_is_mapping(source: &str) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
 
+    use serde::Deserialize;
+
     use super::*;
+
+    #[derive(Deserialize)]
+    struct PathContractCase {
+        name: String,
+        source_path: String,
+        href: String,
+        expected: String,
+    }
 
     fn paths(source: &str, markdown: &str) -> Vec<Option<String>> {
         parse_references(source, markdown)
             .into_iter()
             .map(|reference| reference.normalized_target_path)
             .collect()
+    }
+
+    #[test]
+    fn matches_the_shared_browser_path_contract() {
+        let cases: Vec<PathContractCase> = serde_json::from_str(include_str!(
+            "../../../../../docs/spec/fixtures/markdown-link-paths.json"
+        ))
+        .unwrap();
+
+        for case in cases {
+            let actual = match classify_path(&case.source_path, &case.href) {
+                None => "external".to_owned(),
+                Some(None) => "invalid".to_owned(),
+                Some(Some(path)) => path,
+            };
+            assert_eq!(actual, case.expected, "{}", case.name);
+        }
     }
 
     #[test]

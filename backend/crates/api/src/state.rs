@@ -12,7 +12,7 @@ use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
-use notegate_service::link_index::LinkIndexService;
+use notegate_service::link_index::{LinkIndexProjector, LinkIndexService};
 use notegate_service::search::SearchService;
 use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
@@ -43,6 +43,8 @@ pub type Search = SearchService;
 pub type Usage = UsageService;
 /// Asynchronous Markdown link projection and relation query service.
 pub type LinkIndex = LinkIndexService;
+/// Background Markdown link projection worker service.
+pub type LinkIndexProjection = LinkIndexProjector;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -63,6 +65,7 @@ pub struct AppState {
     pub(crate) search_admission: SearchAdmission,
     pub usage: Usage,
     pub link_index: LinkIndex,
+    pub(crate) link_index_projector: LinkIndexProjection,
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
@@ -109,7 +112,9 @@ impl AppState {
             FilesRepo::with_limits_and_crypto(db.clone(), config.limits, pii_crypto.clone())
                 .with_metrics_enabled(config.metrics_enabled);
         let files = FilesService::new(files_repo.clone());
-        let link_index = LinkIndexService::new(LinkIndexRepo::new(db.clone()), files_repo.clone());
+        let link_index_repo = LinkIndexRepo::new(db.clone());
+        let link_index = LinkIndexService::new(link_index_repo.clone(), files_repo.clone());
+        let link_index_projector = LinkIndexProjector::new(link_index_repo, files_repo.clone());
         let search = SearchService::with_body_cache_config(files_repo, config.search_body_cache)
             .with_metrics_enabled(config.metrics_enabled);
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
@@ -136,6 +141,7 @@ impl AppState {
             search_admission: SearchAdmission::default(),
             usage,
             link_index,
+            link_index_projector,
             accounts: account_repo,
             browser_sessions,
             metadata_writes: MetadataWriteBuffer::default(),

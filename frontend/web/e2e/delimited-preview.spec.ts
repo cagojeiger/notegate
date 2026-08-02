@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
-import { routeJsonApi } from "./support/api";
+import { routeWorkbenchJsonApi } from "./support/linkIndex";
 import { usageResponse } from "./support/usage";
 
 const me: Me = {
@@ -116,7 +116,7 @@ for (const viewport of [
 }
 
 async function mockApi(page: import("@playwright/test").Page) {
-  await routeJsonApi(page, (url) => responseFor(url));
+  await routeWorkbenchJsonApi(page, (url) => responseFor(url));
 }
 
 function responseFor(url: URL) {

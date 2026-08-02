@@ -139,8 +139,10 @@ async fn main() -> anyhow::Result<()> {
         metadata_write_shutdown_token.clone(),
         config.metrics_enabled,
     );
-    let link_index_worker =
-        link_index_worker::spawn(state.link_index.clone(), background_shutdown_token.clone());
+    let link_index_worker = link_index_worker::spawn(
+        state.link_index_projector.clone(),
+        background_shutdown_token.clone(),
+    );
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
