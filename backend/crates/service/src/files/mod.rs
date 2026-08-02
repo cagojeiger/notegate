@@ -31,8 +31,9 @@ pub use notegate_model::files::{
     UpdateTextEncryption, WriteLockSource, WriteTarget, WriteText, WriteTextBody,
 };
 pub use notegate_model::{
-    AccountKind, FileChangeEvent, FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage,
-    ListFileChangeEvents, SyncFileChanges,
+    AccountKind, FileChangeEvent, FileChangeEventCursor, FileChangeEventIdCursor,
+    FileChangeEventPage, FileChangeSyncPage, ListFileChangeEvents, ListFileChangeEventsById,
+    SyncFileChanges,
 };
 pub use patch::{PatchError, apply_edits};
 pub use policy::FileCommand;

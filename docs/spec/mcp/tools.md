@@ -6,7 +6,7 @@
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
-- 페이지네이션은 `limit`과 `cursor`를 사용한다.
+- 일반 목록과 `changes mode=history`는 `limit`과 opaque `cursor`를 사용한다. `changes mode=sync`는 별도의 `after_event_id` 체크포인트를 사용한다.
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
 - MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
@@ -26,12 +26,14 @@ Read-only tool이다.
 
 ```ts
 type ReadInput = {
-  op: "spaces" | "ls" | "tree" | "stat" | "read"
+  op: "spaces" | "ls" | "tree" | "stat" | "read" | "changes"
   target?: string
+  mode?: "history" | "sync"
   name?: string
   depth?: number
   limit?: number
   cursor?: string
+  after_event_id?: number
   start_line?: number
   max_lines?: number
   max_bytes?: number
@@ -44,6 +46,28 @@ type ReadInput = {
 - `op=tree`: `target` folder의 subtree를 DFS pre-order로 반환한다. `depth` 생략 시 5를 사용한다.
 - `op=stat`: Folder/Text/File node summary를 반환한다.
 - `op=read`: plain Text content를 읽는다. line/byte range를 지원한다.
+- `op=changes`: 하나의 mutation change-event stream을 읽는다. 모든 mode에서 같은 `events[]`와 안정적인 `event_id` 체계를 반환한다.
+
+### `changes` mode 선택
+
+| 목적 | op | 순서 | 이어서 읽는 값 |
+| --- | --- | --- | --- |
+| 사용자 또는 LLM이 과거 기록 탐색 | `changes`, `mode=history` | `event_id DESC` | `page.next_cursor` → `cursor` |
+| 외부 캐시/복제본 동기화 | `changes`, `mode=sync` | `event_id ASC` | `checkpoint.next_after_event_id` → `after_event_id` |
+
+`event_id`는 두 mode가 공유하는 동일 mutation event 식별자이며 Space 안에서는 큰 값이 더 최신이다. `created_at`은 표시 시각이고 정본 순서는 `event_id`다. `cursor`와 `after_event_id`는 서로 교환하지 않는다. History cursor는 페이지 위치일 뿐 누락 없는 동기화를 증명하지 않는다. Sync의 `after_event_id`는 해당 Space에서 마지막으로 완전히 적용한 변경을 뜻한다.
+
+`mode=history` target이 `<space>:/`이면 Space 전체 기록을 반환한다. 특정 node path이면 그 node 자체의 기록만 반환하며 descendants는 포함하지 않는다. `mode=sync`는 move/delete의 subtree 경계를 잘못 해석하지 않도록 `<space>:/` root target만 허용한다.
+
+`mode=sync` 첫 호출에서 `after_event_id`를 생략하면 과거 event를 반환하지 않고 현재 `next_after_event_id`만 baseline으로 준다. 새 캐시는 **baseline 저장 → 현재 Space snapshot 구성 → 같은 baseline을 `after_event_id`로 sync 조회** 순서로 시작한다. 마지막 조회가 snapshot을 읽는 동안 발생한 변경을 회수한다. 응답의 event를 `event_id ASC` 순서대로 모두 적용한 뒤에만 새 체크포인트를 저장한다. `batch.has_more=true`이면 저장한 값을 다음 호출의 `after_event_id`로 넘겨 계속 읽는다. `resync_required=true`이면 기존 체크포인트로 연속성을 보장할 수 없으므로 현재 Space tree를 다시 만들고 응답의 기준점에서 재개한다.
+
+History 응답은 다른 목록과 동일한 `page: {limit, returned, has_more, next_cursor}`를 사용한다. Sync 응답은 `batch: {limit, returned, has_more}`와 `checkpoint: {input_after_event_id, next_after_event_id}`를 분리한다. Sync의 `next_action`은 다음 상태를 구조화한다.
+
+- `call_tool`: 같은 `limit`과 새 `after_event_id`로 다음 batch를 호출한다.
+- `store_checkpoint`: 반환된 event를 모두 적용한 뒤 checkpoint를 저장한다.
+- `resync_required`: 현재 Space snapshot을 다시 구성하고 새 baseline에서 재개한다.
+
+두 mode의 `events[]`는 동일하게 `event_id`, `created_at`, `node_id`, `actor_account_id`, `operation`, `metadata`, `item_kind`, `affected_parent_ids`와 `path_changed`, `subtree_changed`, `write_lock_changed` 영향 flag를 반환한다. `parent_scope_known=false`인 이전 event는 정확한 parent 범위를 알 수 없으므로 보수적으로 현재 상태를 다시 조회한다.
 
 Node summary의 `write_locked`는 대상에 직접 설정된 잠금, `effective_write_locked`는 직접 또는 상속 잠금의 적용 여부다. `op=stat`은 현재 쓰기를 막는 직접 잠금 source를 `write_lock_sources[]`의 `node_id`, `name`, `path`로 함께 반환한다.
 
@@ -55,6 +79,7 @@ ls:     op, target
 tree:   op, target
 stat:   op, target
 read:   op, target
+changes: op, target, mode
 ```
 
 ## `search`
@@ -216,6 +241,7 @@ type SequenceCommand = {
   tool: "read" | "search" | "write" | "manage"
   op: string
   target?: string
+  mode?: "history" | "sync"
   source?: string
   destination?: string
   name?: string
@@ -234,6 +260,7 @@ type SequenceCommand = {
   depth?: number
   limit?: number
   cursor?: string
+  after_event_id?: number
   start_line?: number
   max_lines?: number
   max_bytes?: number

@@ -15,6 +15,7 @@ mod admission;
 mod agent_text;
 mod auth;
 mod error;
+mod file_change;
 mod file_preview;
 mod identity;
 mod mcp;

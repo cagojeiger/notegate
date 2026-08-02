@@ -3,13 +3,13 @@
 use notegate_core::limits;
 use notegate_db::FileChangeSyncRows;
 use notegate_model::{
-    FileChangeEventCursor, FileChangeEventPage, FileChangeSyncPage, ListFileChangeEvents,
-    SyncFileChanges,
+    FileChangeEventCursor, FileChangeEventIdCursor, FileChangeEventPage, FileChangeSyncPage,
+    ListFileChangeEvents, ListFileChangeEventsById, SyncFileChanges,
 };
 use uuid::Uuid;
 
-use crate::ServiceResult;
 use crate::pagination::{clamp_limit, paginate_keyset};
+use crate::{ServiceError, ServiceResult};
 
 use super::{FileCommand, FilesService};
 
@@ -21,6 +21,7 @@ fn shape_file_change_sync_page(
     if !batch.token_valid {
         return FileChangeSyncPage {
             items: Vec::new(),
+            limit,
             next_after_id: batch.latest_id,
             has_more: false,
             resync_required: true,
@@ -38,6 +39,7 @@ fn shape_file_change_sync_page(
 
     FileChangeSyncPage {
         items,
+        limit,
         next_after_id,
         has_more,
         resync_required: false,
@@ -68,6 +70,56 @@ impl FilesService {
             },
             |event| FileChangeEventCursor {
                 created_at: event.created_at,
+                id: event.id,
+            },
+        )
+        .await?;
+
+        Ok(FileChangeEventPage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
+    }
+
+    /// List mutation events by `id DESC` for MCP history. This intentionally
+    /// does not alter the existing REST history cursor or display-time order.
+    pub async fn list_file_change_events_by_id(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        request: ListFileChangeEventsById,
+    ) -> ServiceResult<FileChangeEventPage> {
+        self.authorize(space_id, caller_account_id, FileCommand::Stat)
+            .await?;
+
+        let (items, limit, has_more, next_cursor) = paginate_keyset(
+            request.limit,
+            limits::FILE_CHANGE_EVENTS_DEFAULT_LIMIT,
+            limits::FILE_CHANGE_EVENTS_MAX_LIMIT,
+            request.cursor.as_deref(),
+            |limit, cursor: Option<FileChangeEventIdCursor>| async move {
+                if cursor.as_ref().is_some_and(|cursor| {
+                    cursor.space_id != space_id || cursor.node_id != request.node_id
+                }) {
+                    return Err(ServiceError::InvalidInput(
+                        "change history cursor does not match this scope".to_owned(),
+                    ));
+                }
+                Ok(self
+                    .store
+                    .list_file_change_events_by_id(
+                        space_id,
+                        request.node_id,
+                        limit,
+                        cursor.map(|cursor| cursor.id),
+                    )
+                    .await?)
+            },
+            |event| FileChangeEventIdCursor {
+                space_id,
+                node_id: request.node_id,
                 id: event.id,
             },
         )

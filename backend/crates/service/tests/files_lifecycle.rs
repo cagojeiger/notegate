@@ -104,6 +104,12 @@ async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::er
         .map(|event| event.op_type.as_str())
         .collect();
     assert_eq!(first_ops, vec!["text.write", "text.create"]);
+    assert!(
+        first_page
+            .items
+            .windows(2)
+            .all(|events| events[0].id > events[1].id)
+    );
     assert!(first_page.has_more);
 
     let second_page = files

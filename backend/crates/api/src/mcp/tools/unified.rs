@@ -8,19 +8,31 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::resolve::invalid_input_error;
-use super::{files, search, spaces};
+use super::{events, files, search, spaces};
 use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
 
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeMode {
+    /// Browse the shared event stream from higher event ids to lower ids.
+    History,
+    /// Synchronize the shared event stream from lower event ids to higher ids.
+    Sync,
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// Operation: spaces/ls/tree/stat/read.
+    /// Operation: spaces/ls/tree/stat/read/changes. For changes, choose mode=history or mode=sync.
     pub op: String,
     /// Single target in `<space>:/absolute/path` form.
     #[serde(default)]
     pub target: Option<String>,
+    /// Read mode for `op=changes`: history browses newest-to-oldest; sync reads oldest-to-newest from a checkpoint.
+    #[serde(default)]
+    pub mode: Option<ChangeMode>,
     /// Optional exact, case-sensitive space name filter for `op=spaces`.
     #[serde(default)]
     pub name: Option<String>,
@@ -30,9 +42,12 @@ pub struct ReadInput {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor.
+    /// Opaque pagination cursor for spaces/ls/tree or `changes mode=history`.
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Last fully applied event id for `changes mode=sync`. Omit on the first sync call to establish a baseline.
+    #[serde(default)]
+    pub after_event_id: Option<i64>,
     /// 1-based first line for `op=read`.
     #[serde(default)]
     pub start_line: Option<i64>,
@@ -181,6 +196,9 @@ pub struct SequenceCommand {
     /// Single target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
     #[serde(default)]
     pub target: Option<String>,
+    /// Read mode for `read op=changes`: history or sync.
+    #[serde(default)]
+    pub mode: Option<ChangeMode>,
     /// Source target for `mv` and `cp`.
     #[serde(default)]
     pub source: Option<String>,
@@ -236,9 +254,12 @@ pub struct SequenceCommand {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor.
+    /// Opaque pagination cursor for paginated reads and searches. Never use it as a changes checkpoint.
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Last fully applied event id for `read op=changes`. Omit on the first call to establish a baseline.
+    #[serde(default)]
+    pub after_event_id: Option<i64>,
 
     /// 1-based first line for read.
     #[serde(default)]
@@ -263,10 +284,12 @@ impl SequenceCommand {
         ReadInput {
             op: self.op,
             target: self.target,
+            mode: self.mode,
             name: self.name,
             depth: self.depth,
             limit: self.limit,
             cursor: self.cursor,
+            after_event_id: self.after_event_id,
             start_line: self.start_line,
             max_lines: self.max_lines,
             max_bytes: self.max_bytes,
@@ -355,9 +378,21 @@ pub async fn read(
             )
             .await
         }
+        "changes" => {
+            events::call(
+                state,
+                parts,
+                required(input.target, "target", "changes")?,
+                required(input.mode, "mode", "changes")?,
+                input.limit,
+                input.cursor,
+                input.after_event_id,
+            )
+            .await
+        }
         _ => Err(invalid_op(
             "read",
-            &["spaces", "ls", "tree", "stat", "read"],
+            &["spaces", "ls", "tree", "stat", "read", "changes"],
         )),
     }
 }
@@ -575,11 +610,7 @@ fn error_json(error: ErrorData) -> Value {
     })
 }
 
-fn required(
-    value: Option<String>,
-    field: &'static str,
-    op: &'static str,
-) -> Result<String, ErrorData> {
+fn required<T>(value: Option<T>, field: &'static str, op: &'static str) -> Result<T, ErrorData> {
     value.ok_or_else(|| {
         invalid_input_error(format!(
             "op={op} requires {field}; retry with field `{field}` set"
@@ -651,5 +682,56 @@ mod tests {
         assert_eq!(command.tool, "manage");
         assert_eq!(command.op, "mkdir");
         assert!(command.parents);
+    }
+
+    #[test]
+    fn changes_uses_an_event_checkpoint_not_a_page_cursor() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "op": "changes",
+            "target": "daily:/",
+            "mode": "sync",
+            "after_event_id": 42,
+            "limit": 25
+        }))
+        .expect("valid changes input parses");
+
+        assert_eq!(input.mode, Some(ChangeMode::Sync));
+        assert_eq!(input.after_event_id, Some(42));
+        assert!(input.cursor.is_none());
+    }
+
+    #[test]
+    fn changes_rejects_an_unknown_mode() {
+        let error = serde_json::from_value::<ReadInput>(json!({
+            "op": "changes",
+            "target": "daily:/",
+            "mode": "latest"
+        }))
+        .expect_err("unknown changes mode is rejected by the input contract");
+
+        assert!(error.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn run_sequence_accepts_a_changes_checkpoint() {
+        let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "commands": [{
+                "tool": "read",
+                "op": "changes",
+                "target": "daily:/",
+                "mode": "sync",
+                "after_event_id": 42
+            }]
+        }))
+        .expect("valid changes sequence parses");
+
+        assert_eq!(
+            input.commands.first().expect("one command").after_event_id,
+            Some(42)
+        );
+        assert_eq!(
+            input.commands.first().expect("one command").mode,
+            Some(ChangeMode::Sync)
+        );
     }
 }

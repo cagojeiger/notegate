@@ -1,7 +1,9 @@
 //! File-change event persistence: insert plus space/node-scoped listing for
 //! event history.
 
-use crate::event_history_query::{EventCursorPosition, UuidFilter, list_event_rows};
+use crate::event_history_query::{
+    EventCursorPosition, UuidFilter, list_event_rows, list_event_rows_by_id,
+};
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
@@ -42,8 +44,8 @@ pub(crate) async fn insert_file_change_event(
 }
 
 /// List file-change events for `space_id` (optionally scoped to `node_id`),
-/// newest first. Matches the `file_change_events_space_time_idx` /
-/// `file_change_events_node_time_idx` order.
+/// newest first by display time. Matches the existing REST history contract and
+/// the `file_change_events_space_time_idx` / `file_change_events_node_time_idx` order.
 pub(crate) async fn list_file_change_events(
     pool: &PgPool,
     space_id: Uuid,
@@ -62,6 +64,32 @@ pub(crate) async fn list_file_change_events(
             created_at: cursor.created_at,
             id: cursor.id,
         }),
+    )
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(notegate_model::FileChangeEvent::from)
+        .collect())
+}
+
+/// List the same event rows by the canonical Space-local mutation sequence.
+/// This is used by MCP history so it is the exact reverse of forward sync.
+pub(crate) async fn list_file_change_events_by_id(
+    pool: &PgPool,
+    space_id: Uuid,
+    node_id: Option<Uuid>,
+    limit: i64,
+    before_id: Option<i64>,
+) -> Result<Vec<notegate_model::FileChangeEvent>> {
+    let rows = list_event_rows_by_id::<FileChangeEventRow>(
+        pool,
+        "file_change_events",
+        FILE_CHANGE_EVENT_COLUMNS,
+        UuidFilter::new("space_id", space_id),
+        node_id.map(|node_id| UuidFilter::new("node_id", node_id)),
+        limit,
+        before_id,
     )
     .await?;
 
