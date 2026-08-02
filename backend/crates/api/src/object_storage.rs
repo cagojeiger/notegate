@@ -12,8 +12,6 @@ use notegate_core::limits::SINGLE_PUT_MAX_BYTES;
 use secrecy::ExposeSecret as _;
 use tokio::io::AsyncReadExt as _;
 
-use crate::error::ApiError;
-
 pub const TRANSFER_URL_TTL: Duration = Duration::from_secs(15 * 60);
 pub const AGENT_TRANSFER_URL_TTL: Duration = Duration::from_secs(5 * 60);
 pub const MULTIPART_PART_SIZE: i64 = 64 * 1024 * 1024;
@@ -36,23 +34,6 @@ pub enum ObjectStorageError {
     SizeMismatch,
     InvalidMultipart,
     Unavailable,
-}
-
-impl From<ObjectStorageError> for ApiError {
-    fn from(error: ObjectStorageError) -> Self {
-        match error {
-            ObjectStorageError::Missing => ApiError::conflict(
-                "uploaded object was not found; upload the file before completing",
-            ),
-            ObjectStorageError::SizeMismatch => {
-                ApiError::invalid_field("uploaded object size does not match the declared size")
-            }
-            ObjectStorageError::InvalidMultipart => {
-                ApiError::invalid_field("multipart completion parts are invalid")
-            }
-            ObjectStorageError::Unavailable => ApiError::object_storage_unavailable(),
-        }
-    }
 }
 
 #[derive(Clone)]

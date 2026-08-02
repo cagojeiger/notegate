@@ -9,6 +9,9 @@ use serde::Serialize;
 use serde_json::json;
 use utoipa::ToSchema;
 
+use crate::object_storage::ObjectStorageError;
+use crate::object_upload_flow::UploadFlowError;
+
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
@@ -142,6 +145,37 @@ impl From<ServiceError> for ApiError {
             } => Self::usage_recalculation_in_progress(retry_after_seconds),
             ServiceError::Internal(message) => {
                 tracing::error!(event = "error.internal", detail = %message);
+                Self::internal("internal server error")
+            }
+        }
+    }
+}
+
+impl From<ObjectStorageError> for ApiError {
+    fn from(error: ObjectStorageError) -> Self {
+        match error {
+            ObjectStorageError::Missing => {
+                Self::conflict("uploaded object was not found; upload the file before completing")
+            }
+            ObjectStorageError::SizeMismatch => {
+                Self::invalid_field("uploaded object size does not match the declared size")
+            }
+            ObjectStorageError::InvalidMultipart => {
+                Self::invalid_field("multipart completion parts are invalid")
+            }
+            ObjectStorageError::Unavailable => Self::object_storage_unavailable(),
+        }
+    }
+}
+
+impl From<UploadFlowError> for ApiError {
+    fn from(error: UploadFlowError) -> Self {
+        match error {
+            UploadFlowError::InvalidInput(message) => Self::invalid_field(message),
+            UploadFlowError::Service(error) => error.into(),
+            UploadFlowError::Storage(error) => error.into(),
+            UploadFlowError::Internal(message) => {
+                tracing::error!(event = "error.internal", detail = message);
                 Self::internal("internal server error")
             }
         }

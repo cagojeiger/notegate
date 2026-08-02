@@ -79,6 +79,8 @@ Agent가 보내는 `account_id`나 `user_id`는 없다. 서버가 API key에서 
 
 Node 생성에서 File은 허용하지 않는다. File은 upload lifecycle을 통해서만 생성한다. 목록 응답의 `cursor`는 opaque 값이며 클라이언트가 해석하거나 생성하지 않는다.
 
+Node copy는 File node 또는 File을 포함한 subtree를 지원하지 않으며 `409 conflict`를 반환한다. Folder copy에는 `recursive=true`가 필요하다.
+
 Tree의 `depth` 기본값은 2, 최대값은 7이다. 폴더나 Text 생성 본문은 다음과 같다.
 
 ```json

@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserUiStorePersistence } from "./uiStorePersistence";
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
 
@@ -35,5 +38,25 @@ describe("browserUiStorePersistence", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(window.localStorage.getItem("notegate.theme")).toBe("dark");
     expect(window.localStorage.getItem("notegate.lastActiveSpaceId")).toBe("space-2");
+  });
+
+  it("falls back when browser storage reads are unavailable", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+
+    expect(browserUiStorePersistence.loadTheme()).toBe("light");
+    expect(browserUiStorePersistence.loadLastActiveSpaceId()).toBeNull();
+  });
+
+  it("applies the theme when browser storage writes are unavailable", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+
+    expect(() => browserUiStorePersistence.saveTheme("dark")).not.toThrow();
+    expect(() => browserUiStorePersistence.saveLastActiveSpaceId("space-2")).not.toThrow();
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 });

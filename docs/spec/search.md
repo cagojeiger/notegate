@@ -1,6 +1,6 @@
 # Search
 
-Search는 MCP/CLI용 path-first command다. REST resource API는 search endpoint를 제공하지 않는다.
+Search는 MCP/CLI와 Public V2 REST가 공유하는 path-first command다. Browser V1 REST는 search endpoint를 제공하지 않는다.
 
 검색은 항상 folder scope의 subtree를 대상으로 한다. Scope를 생략하면 Space root `/`를 scope로 사용한다.
 
@@ -19,7 +19,10 @@ Search는 read permission으로 실행한다. 권한이 없으면 존재 여부�
 
 ## Result shape
 
-`find` result는 `schemas.md`의 `McpNodeSummary[] + Page`다. `grep` result는 `McpGrepSummary[] + Page`다. 본문 또는 metadata는 search 응답에 싣지 않는다. 자세한 내용은 `read op=stat`, `read op=read`로 조회한다.
+본문 또는 metadata는 search 응답에 싣지 않는다.
+
+- MCP `find` result는 `schemas.md`의 `McpNodeSummary[] + Page`, `grep` result는 `McpGrepSummary[] + Page`다. 자세한 내용은 `read op=stat`, `read op=read`로 조회한다.
+- Public V2 REST는 `{ items: SearchHitOut[], page: Page }`를 반환한다. `grep` hit에는 요청한 line mode에 따른 `match_lines`가 추가된다. Node 상세는 `GET /api/v2/spaces/{space_id}/nodes/{node_id}`, Text 본문은 `GET /api/v2/spaces/{space_id}/text/{node_id}`로 조회한다.
 
 ## Common traversal
 

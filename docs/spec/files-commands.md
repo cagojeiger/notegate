@@ -100,7 +100,7 @@ File은 binary/object content node다. MCP `file_transfer`는 presigned URL을 �
 
 ## Search semantics
 
-Search는 MCP/CLI용 command semantics다. REST resource API는 search endpoint를 제공하지 않는다. 세부 traversal, cursor, memory budget은 `search.md`를 따른다.
+Search는 MCP/CLI와 Public V2 REST가 공유하는 command semantics다. Browser V1 REST는 search endpoint를 제공하지 않는다. 세부 traversal, cursor, memory budget은 `search.md`를 따른다.
 
 ```text
 find        folder/text/file node name/kind/scope 검색
