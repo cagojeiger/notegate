@@ -1,5 +1,7 @@
 export const POLLING = {
   usagePendingMs: 3_000,
+  linkIndexPendingMs: 2_000,
+  linkIndexFailedMs: 30_000,
   usageSummaryIdleMs: [60_000, 120_000, 300_000],
   spaceChangesFocusFreshMs: 5_000,
   spaceChangesMs: 30_000,

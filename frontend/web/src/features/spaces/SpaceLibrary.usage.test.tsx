@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiProvider } from "../../api/ApiProvider";
+import type { LinkIndexState } from "../../api/linkIndex";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage } from "../../api/usage";
 import { makeSpace } from "../../test/fixtures";
@@ -34,8 +35,31 @@ const usage: CurrentUserUsage = {
   }]
 };
 
+const linkIndexState: LinkIndexState = {
+  space_id: space.id,
+  desired_generation: 7,
+  applied_generation: 7,
+  status: "ready",
+  freshness: "current",
+  last_indexed_at: "2026-08-02T00:00:00Z"
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
+}
+
+function requestUrl(input: RequestInfo | URL) {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+function isLinkIndexRequest(input: RequestInfo | URL) {
+  return requestUrl(input) === `/api/v1/spaces/${space.id}/link-index`;
+}
+
+function isUsageRequest(input: RequestInfo | URL) {
+  return requestUrl(input) === "/api/v1/me/usage";
 }
 
 function UsagePollingOwner() {
@@ -68,7 +92,9 @@ describe("SpaceLibrary usage", () => {
   });
 
   it("shows independent usage limits in the inspector", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse(usage));
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => (
+      isLinkIndexRequest(input) ? jsonResponse(linkIndexState) : jsonResponse(usage)
+    ));
 
     renderLibrary();
 
@@ -81,12 +107,14 @@ describe("SpaceLibrary usage", () => {
   });
 
   it("consumes the desktop polling owner's cached usage without a second request", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse(usage));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => (
+      isLinkIndexRequest(input) ? jsonResponse(linkIndexState) : jsonResponse(usage)
+    ));
 
     renderLibrary({ externalPollingOwner: true });
 
     expect(await screen.findByText("45.9 MB / 128 MB")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([input]) => isUsageRequest(input))).toHaveLength(1);
   });
 
   it("queues a usage check from the inspector and shows progress", async () => {
@@ -96,6 +124,7 @@ describe("SpaceLibrary usage", () => {
         pending = true;
         return jsonResponse({ status: "queued" }, 202);
       }
+      if (isLinkIndexRequest(_input)) return jsonResponse(linkIndexState);
       return jsonResponse({
         ...usage,
         spaces: usage.spaces.map((item) => ({ ...item, reconciliation_pending: pending }))
@@ -115,9 +144,12 @@ describe("SpaceLibrary usage", () => {
   });
 
   it("presents a reconciliation cooldown as up to date", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => init?.method === "POST"
-      ? jsonResponse({ kind: "usage_reconciliation_cooldown", message: "space usage was reconciled recently; try again later" }, 409)
-      : jsonResponse(usage));
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (init?.method === "POST") {
+        return jsonResponse({ kind: "usage_reconciliation_cooldown", message: "space usage was reconciled recently; try again later" }, 409);
+      }
+      return isLinkIndexRequest(input) ? jsonResponse(linkIndexState) : jsonResponse(usage);
+    });
     const user = userEvent.setup();
     renderLibrary();
 
@@ -130,7 +162,8 @@ describe("SpaceLibrary usage", () => {
 
   it("retries after the usage query fails", async () => {
     let failures = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (isLinkIndexRequest(input)) return jsonResponse(linkIndexState);
       if (failures < 2) {
         failures += 1;
         return jsonResponse({ kind: "internal_error", message: "temporarily unavailable" }, 500);

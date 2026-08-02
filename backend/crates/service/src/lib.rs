@@ -13,6 +13,7 @@ pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod identity;
+pub mod link_index;
 pub mod mcp_invocations;
 mod pagination;
 pub mod search;

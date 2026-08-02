@@ -13,11 +13,15 @@ const mocks = vi.hoisted(() => ({
   checkUsage: vi.fn(),
   resetUsageCheck: vi.fn(),
   retryUsage: vi.fn(),
+  reindexLinks: vi.fn(),
+  resetLinkReindex: vi.fn(),
   reorder: vi.fn(),
   useCheckSpaceUsageMutation: vi.fn(),
   useUsageQuery: vi.fn(),
   useReorderSpacesMutation: vi.fn(),
-  useUpdateSpaceMutation: vi.fn()
+  useUpdateSpaceMutation: vi.fn(),
+  useLinkIndexStateQuery: vi.fn(),
+  useRequestLinkReindexMutation: vi.fn()
 }));
 
 vi.mock("./useUsageQueries", () => ({
@@ -28,6 +32,11 @@ vi.mock("./useUsageQueries", () => ({
 vi.mock("./useSpaceQueries", () => ({
   useReorderSpacesMutation: mocks.useReorderSpacesMutation,
   useUpdateSpaceMutation: mocks.useUpdateSpaceMutation
+}));
+
+vi.mock("../links/useLinkIndexQueries", () => ({
+  useLinkIndexStateQuery: mocks.useLinkIndexStateQuery,
+  useRequestLinkReindexMutation: mocks.useRequestLinkReindexMutation
 }));
 
 const spaces: Space[] = [
@@ -92,6 +101,8 @@ describe("SpaceLibrary", () => {
     mocks.checkUsage.mockReset();
     mocks.resetUsageCheck.mockReset();
     mocks.retryUsage.mockReset();
+    mocks.reindexLinks.mockReset();
+    mocks.resetLinkReindex.mockReset();
     mocks.useUpdateSpaceMutation.mockImplementation((options?: { silentError?: boolean }) => ({
       mutate: options?.silentError ? mocks.inspectorMutate : mocks.cardMutate,
       isPending: false,
@@ -128,6 +139,25 @@ describe("SpaceLibrary", () => {
           }
         ]
       }
+    });
+    mocks.useLinkIndexStateQuery.mockReturnValue({
+      data: {
+        space_id: "daily",
+        desired_generation: 7,
+        applied_generation: 7,
+        status: "ready",
+        freshness: "current",
+        last_indexed_at: "2026-08-02T01:02:03Z"
+      },
+      isError: false,
+      isLoading: false
+    });
+    mocks.useRequestLinkReindexMutation.mockReturnValue({
+      isError: false,
+      isPending: false,
+      mutate: mocks.reindexLinks,
+      reset: mocks.resetLinkReindex,
+      variables: undefined
     });
   });
 
@@ -253,6 +283,24 @@ describe("SpaceLibrary", () => {
 
     expect(mocks.resetUsageCheck).toHaveBeenCalledTimes(1);
     expect(mocks.checkUsage).toHaveBeenCalledWith("daily");
+  });
+
+  it("shows link-index state and queues a Space reindex", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+
+    expect(screen.getByText("Current")).toBeInTheDocument();
+    const expectedTime = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(new Date("2026-08-02T01:02:03Z"));
+    expect(screen.getByText(expectedTime)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reindex links in Daily" }));
+
+    expect(mocks.resetLinkReindex).toHaveBeenCalledTimes(1);
+    expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
   });
 
   it("retries usage loading from the inspector", async () => {

@@ -13,12 +13,14 @@ api_keys
 audit_events
 file_change_events
 mcp_invocations
+space_link_index_states
 spaces
 space_usage
 space_usage_reconcile_jobs
 space_usage_reconcile_executions
 space_agent_connections
 nodes
+node_link_refs
 text_objects
 file_objects
 object_storage_objects
@@ -204,9 +206,10 @@ file_change_events
   actor_account_id uuid null
   op_type text not null
   metadata jsonb not null default '{}'
+  link_index_generation bigint null check > 0
 ```
 
-`file_change_events`는 space 안의 파일/폴더/문서 변경을 기록한다. Retention policy는 3 months이며, space 전체 조회와 node별 조회를 위해 별도 index를 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`file_change_events`는 space 안의 파일/폴더/문서 변경을 기록한다. Retention policy는 3 months이며, space 전체 조회와 node별 조회를 위해 별도 index를 둔다. `link_index_generation`은 마이그레이션 이후 이벤트에 Space별 commit 순서로 부여되는 링크 투영 cursor다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 `mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. Tool/op별 allowlist와 redaction policy를 적용하고 크기를 제한한 request/response snapshot을 JSONB로 저장한다.
 
@@ -251,6 +254,7 @@ file_change_events_node_time_idx(space_id, node_id, created_at desc, id desc)
 file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
+file_change_events_link_index_generation_idx(space_id, link_index_generation) unique where non-null
 
 mcp_invocations_owner_time_idx(owner_user_id, created_at desc, id desc)
 mcp_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
@@ -417,6 +421,50 @@ object_storage_objects
 ```
 
 `object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete transaction은 연결된 object를 즉시 `delete_pending`으로 전환한다. Hard purge의 같은 전환은 이전에 누락된 요청을 보정하는 안전장치다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 90일 뒤 bounded batch로 삭제한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+
+## Link index projection
+
+```text
+space_link_index_states
+  space_id uuid pk references spaces(id) on delete cascade
+  desired_generation bigint not null default 0
+  applied_generation bigint not null default 0
+  status text check ('queued','running','rebuilding','ready','failed')
+  rebuild_requested bool not null default true
+  rebuild_base_generation bigint null
+  rebuild_after_node_id uuid null
+  parser_version int not null default 1
+  claim_token uuid null
+  claim_until timestamptz null
+  retry_count int not null default 0
+  run_after timestamptz not null default now()
+  last_error text null
+  last_indexed_at timestamptz null
+  updated_at timestamptz not null default now()
+
+node_link_refs
+  id bigserial pk
+  space_id uuid not null references spaces(id) on delete cascade
+  source_node_id uuid not null
+  target_node_id uuid null
+  reference_kind text check ('link','image')
+  raw_href text not null
+  normalized_target_path text null
+  occurrence_count int not null check > 0
+  indexed_at timestamptz not null default now()
+```
+
+`space_link_index_states`는 Space별 durable queue와 재구성 lease를 함께 보관한다. `desired_generation`은 정본 변경 위치이고 `applied_generation`은 현재 링크 투영이 반영한 위치다. `node_link_refs`는 source Text의 현재 outgoing 참조만 저장하며 incoming은 `target_node_id` 역조회로 계산한다. Source와 target composite FK는 같은 Space 안의 node만 허용한다. Target hard purge는 `target_node_id`만 NULL로 바꾸어 unresolved path를 보존한다. 상세 갱신 및 조회 계약은 `docs/spec/link-index.md`가 정본이다.
+
+권장 index:
+
+```text
+space_link_index_states_ready_idx(run_after, updated_at, space_id) partial
+node_link_refs_outgoing_idx(space_id, source_node_id, id)
+node_link_refs_incoming_idx(space_id, target_node_id, id) where target_node_id is not null
+node_link_refs_target_path_hash_idx(space_id, md5(normalized_target_path)) partial
+nodes_live_text_link_rebuild_idx(space_id, id) where live non-root text
+```
 
 Content FK invariant:
 

@@ -1,5 +1,5 @@
 import { ChevronRight, LockKeyhole, Search } from "lucide-react";
-import { useId, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 
 import type { RestNode } from "../api/types";
 import { useMarkdownOutlineContext, type MarkdownInspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
@@ -9,6 +9,7 @@ import { Button, MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/u
 import { WriteLockStatus } from "./WriteLockStatus";
 
 const EMPTY = "—";
+const NodeLinksSection = lazy(() => import("../features/links/NodeLinksSection").then((module) => ({ default: module.NodeLinksSection })));
 
 type AuxiliarySidebarProps = {
   activeNode: RestNode | null;
@@ -116,6 +117,9 @@ export function AuxiliarySidebar({
               <p className="text-xs text-muted">{loadingNode ? "Loading details…" : "Choose something from Files to inspect."}</p>
             )}
           </section>
+          <Suspense fallback={<LinkSectionFallback />}>
+            <NodeLinksSection node={activeNode} />
+          </Suspense>
           <section className="p-4">
             <SectionHeader
               title="Metadata"
@@ -226,6 +230,15 @@ export function AuxiliarySidebar({
       </div>
       </div>
     </aside>
+  );
+}
+
+function LinkSectionFallback() {
+  return (
+    <section className="p-4">
+      <SectionHeader title="Links" />
+      <p className="text-xs text-muted">Loading links…</p>
+    </section>
   );
 }
 

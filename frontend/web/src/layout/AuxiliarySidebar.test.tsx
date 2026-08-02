@@ -15,6 +15,10 @@ vi.mock("../features/editor/useEditorQueries", () => ({
   useFolderChildrenStat: mocks.useFolderChildrenStat
 }));
 
+vi.mock("../features/links/NodeLinksSection", () => ({
+  NodeLinksSection: () => <section>Link relations</section>
+}));
+
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
 
 function renderSidebar(overrides: Partial<SidebarProps> = {}) {

@@ -10,6 +10,8 @@ export const queryKeys = {
   connections: (spaceId: string) => ["spaces", spaceId, "connections"] as const,
   spaces: ["spaces"] as const,
   space: (spaceId: string) => ["spaces", spaceId] as const,
+  linkIndex: (spaceId: string) => ["spaces", spaceId, "link-index"] as const,
+  nodeLinks: (spaceId: string, nodeId: string) => ["spaces", spaceId, "link-index", "nodes", nodeId] as const,
   childrenFamily: (spaceId: string) => ["spaces", spaceId, "children"] as const,
   childrenRevision: (spaceId: string) => ["spaces", spaceId, "children-revision"] as const,
   spaceChangeSignal: (spaceId: string) => ["sync", "space-change", spaceId] as const,
