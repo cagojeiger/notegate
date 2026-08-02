@@ -17,7 +17,8 @@ module.exports = {
         "categories:best-practices": ["error", { minScore: 0.9, aggregationMethod: "optimistic" }],
         "largest-contentful-paint": ["error", { maxNumericValue: 2500, aggregationMethod: "optimistic" }],
         "cumulative-layout-shift": ["error", { maxNumericValue: 0.1, aggregationMethod: "optimistic" }],
-        "total-blocking-time": ["error", { maxNumericValue: 200, aggregationMethod: "optimistic" }]
+        "total-blocking-time": ["error", { maxNumericValue: 200, aggregationMethod: "optimistic" }],
+        "resource-summary:script:size": ["error", { maxNumericValue: 120_000, aggregationMethod: "pessimistic" }]
       }
     },
     upload: {

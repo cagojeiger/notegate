@@ -4,8 +4,6 @@ import type { Me, Space } from "../api/types";
 import { canViewAuditEvents } from "../auth/permissions";
 import { EditorArea } from "../features/editor/EditorArea";
 import { MarkdownOutlineProvider } from "../features/editor/MarkdownOutlineContext";
-import { EventHistoryModal } from "../features/events/EventHistoryModal";
-import { SettingsModal } from "../features/settings/SettingsModal";
 import { useUsageQuery } from "../features/spaces/useUsageQueries";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
@@ -13,7 +11,6 @@ import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { mergeVisibleSpaceOrder } from "../features/spaces/spaceReorder";
 import { UploadProgressDock } from "../features/uploads/UploadProgressDock";
-import { DialogHost } from "../features/workbench/dialogs/DialogHost";
 import { useWorkbenchController } from "../features/workbench/useWorkbenchController";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 import { FullScreenStatus } from "./FullScreenStatus";
@@ -35,6 +32,9 @@ type HistoryScope = {
 type AppSurface = "workbench" | "library";
 
 const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((module) => ({ default: module.SpaceLibrary })));
+const EventHistoryModal = lazy(() => import("../features/events/EventHistoryModal").then((module) => ({ default: module.EventHistoryModal })));
+const SettingsModal = lazy(() => import("../features/settings/SettingsModal").then((module) => ({ default: module.SettingsModal })));
+const DialogHost = lazy(() => import("../features/workbench/dialogs/DialogHost").then((module) => ({ default: module.DialogHost })));
 
 function WorkspaceStatusBar({
   activeSpace,
@@ -277,9 +277,9 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         />
       </div>
       <Toast />
-      {historyScope ? <EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /> : null}
-      {workbench.settingsOpen ? <SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /> : null}
-      <DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} />
+      {historyScope ? <Suspense fallback={null}><EventHistoryModal spaces={workbench.spaces} initialSpaceId={historyScope.initialSpaceId} canViewAuditEvents={canViewAuditEvents(me)} onClose={() => setHistoryScope(null)} /></Suspense> : null}
+      {workbench.settingsOpen ? <Suspense fallback={null}><SettingsModal me={me} onClose={() => actions.setSettingsOpen(false)} onSignOut={actions.handleSignOut} onResetSavedWorkspace={actions.confirmResetSavedWorkspace} /></Suspense> : null}
+      {workbench.dialog ? <Suspense fallback={null}><DialogHost dialog={workbench.dialog} onClose={() => actions.setDialog(null)} /></Suspense> : null}
     </div>
     </MarkdownOutlineProvider>
   );

@@ -46,6 +46,12 @@ vi.mock("../features/events/EventHistoryModal", () => ({
     />
   )
 }));
+vi.mock("../features/settings/SettingsModal", () => ({
+  SettingsModal: () => <div data-testid="settings-modal" />
+}));
+vi.mock("../features/workbench/dialogs/DialogHost", () => ({
+  DialogHost: () => <div data-testid="dialog-host" />
+}));
 
 const space = makeSpace({
   updated_at: "2026-07-10T00:00:00Z"
@@ -67,7 +73,7 @@ const privateSpace = makeSpace({
   root_node_id: "root-2"
 });
 
-describe("AppShell history", () => {
+describe("AppShell", () => {
   beforeEach(() => {
     useUiStore.setState(useUiStore.getInitialState(), true);
   });
@@ -84,10 +90,37 @@ describe("AppShell history", () => {
 
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    const modal = screen.getByTestId("history-modal");
+    const modal = await screen.findByTestId("history-modal");
     expect(modal).toHaveAttribute("data-space-id", space.id);
     expect(modal).toHaveAttribute("data-space-count", "1");
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
+  });
+
+  it("loads settings when the deferred modal is opened", async () => {
+    mocks.useWorkbenchController.mockReturnValue({ ...workbench(), settingsOpen: true });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(await screen.findByTestId("settings-modal")).toBeInTheDocument();
+  });
+
+  it("loads the deferred dialog host for an active workbench dialog", async () => {
+    mocks.useWorkbenchController.mockReturnValue({
+      ...workbench(),
+      dialog: {
+        kind: "prompt",
+        title: "New text",
+        label: "Name",
+        initial: "",
+        onSubmit: vi.fn()
+      }
+    });
+    mocks.useUploadManager.mockReturnValue(uploadManager());
+
+    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+    expect(await screen.findByTestId("dialog-host")).toBeInTheDocument();
   });
 
   it("keeps inactive navigation-unpinned spaces out of the user rail while showing all spaces in the library", async () => {
