@@ -35,7 +35,7 @@ use crate::mcp::tools;
 use crate::observability::observe_mcp_tool;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. `read op=changes` reads one mutation change-event stream with stable event_id values. Use mode=history to browse higher-to-lower event ids with an opaque cursor. Use mode=sync for lossless lower-to-higher synchronization: omit after_event_id once to establish a baseline, build the current snapshot, then request events after that baseline and store each response's next_after_event_id only after applying all returned events. Never interchange a history cursor and a sync event checkpoint. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. `read op=changes` reads every mutation in one Space-root event stream. Omit before/after for the latest events, pass page.next.before for older events, or store head_cursor before reading a Space snapshot and later pass it as after to read newer events in application order. Store applied_cursor only after applying every returned event; if resync_required is true, rebuild the Space snapshot. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -82,7 +82,7 @@ impl McpServer {
 
     #[tool(
         name = "read",
-        description = "Read NoteGate spaces, nodes, text, and one mutation change-event stream. Read-only. Use op=spaces/ls/tree/stat/read/changes. For changes, mode=history reads event_id descending with cursor; mode=sync reads the same event ids ascending from after_event_id with baseline and resync guarantees. Never use a history cursor as after_event_id. Space names are exact and case-sensitive.",
+        description = "Read NoteGate spaces, nodes, text, and one Space-root mutation stream. Read-only. Use op=spaces/ls/tree/stat/read/changes. For changes, omit before/after for latest events, use before for older events, or use after for newer events. Changes cursors are opaque and Space-bound; before and after are mutually exclusive. Space names are exact and case-sensitive.",
         annotations(title = "Read NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -377,7 +377,7 @@ mod tests {
             ("me", "", ""),
             (
                 "read",
-                "op target mode name depth limit cursor after_event_id start_line max_lines max_bytes if_none_match_sha256",
+                "op target name depth limit cursor before after start_line max_lines max_bytes if_none_match_sha256",
                 "op",
             ),
             (
@@ -407,25 +407,24 @@ mod tests {
         }
 
         let read = tools.get("read").expect("read tool exists");
-        let mode_schema = read
+        let properties = read
             .input_schema
             .get("properties")
             .and_then(Value::as_object)
-            .and_then(|properties| properties.get("mode"))
-            .expect("read mode schema exists")
-            .to_string();
-        assert!(mode_schema.contains("history"));
-        assert!(mode_schema.contains("sync"));
+            .expect("read properties exist");
+        assert!(properties.contains_key("before"));
+        assert!(properties.contains_key("after"));
+        assert!(!properties.contains_key("mode"));
+        assert!(!properties.contains_key("after_event_id"));
     }
 
     #[test]
     fn server_instructions_describe_all_mcp_categories() {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("mode=history"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("mode=sync"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("next_after_event_id"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("stable event_id"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next.before"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("head_cursor"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("applied_cursor"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));
@@ -455,11 +454,9 @@ mod tests {
             .description
             .as_deref()
             .expect("read description exists");
-        assert!(description.contains("mode=history"));
-        assert!(description.contains("mode=sync"));
-        assert!(description.contains("same event ids"));
-        assert!(description.contains("after_event_id"));
-        assert!(description.contains("Never use a history cursor"));
+        assert!(description.contains("before"));
+        assert!(description.contains("after"));
+        assert!(description.contains("mutually exclusive"));
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {

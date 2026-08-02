@@ -80,7 +80,6 @@ pub(crate) async fn list_event_rows_by_id<R>(
     table: &'static str,
     columns: &'static str,
     required: UuidFilter,
-    optional: Option<UuidFilter>,
     limit: i64,
     before_id: Option<i64>,
 ) -> Result<Vec<R>>
@@ -89,10 +88,6 @@ where
 {
     let mut next_param = 2;
     let mut filters = format!("{} = $1", required.column);
-    if let Some(optional) = optional {
-        filters.push_str(&format!(" AND {} = ${next_param}", optional.column));
-        next_param += 1;
-    }
     if before_id.is_some() {
         filters.push_str(&format!(" AND id < ${next_param}"));
         next_param += 1;
@@ -104,9 +99,6 @@ where
          ORDER BY id DESC LIMIT ${next_param}"
     );
     let mut query = sqlx::query_as::<_, R>(&sql).bind(required.value);
-    if let Some(optional) = optional {
-        query = query.bind(optional.value);
-    }
     if let Some(before_id) = before_id {
         query = query.bind(before_id);
     }

@@ -219,14 +219,14 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     );
 
     let id_ordered = repo
-        .list_file_change_events_by_id(space_id, None, 20, None)
+        .list_file_change_events_by_id(space_id, 20, None)
         .await?;
     assert_eq!(
         id_ordered.iter().map(|event| event.id).collect::<Vec<_>>(),
         expected_ids
     );
     let older_by_id = repo
-        .list_file_change_events_by_id(space_id, None, 20, Some(events[2].id))
+        .list_file_change_events_by_id(space_id, 20, Some(events[2].id))
         .await?;
     assert_eq!(
         older_by_id.first().map(|event| event.id),

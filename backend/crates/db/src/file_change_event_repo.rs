@@ -73,12 +73,11 @@ pub(crate) async fn list_file_change_events(
         .collect())
 }
 
-/// List the same event rows by the canonical Space-local mutation sequence.
-/// This is used by MCP history so it is the exact reverse of forward sync.
+/// List the same event rows before an MCP changes cursor by the canonical
+/// Space-local mutation sequence.
 pub(crate) async fn list_file_change_events_by_id(
     pool: &PgPool,
     space_id: Uuid,
-    node_id: Option<Uuid>,
     limit: i64,
     before_id: Option<i64>,
 ) -> Result<Vec<notegate_model::FileChangeEvent>> {
@@ -87,7 +86,6 @@ pub(crate) async fn list_file_change_events_by_id(
         "file_change_events",
         FILE_CHANGE_EVENT_COLUMNS,
         UuidFilter::new("space_id", space_id),
-        node_id.map(|node_id| UuidFilter::new("node_id", node_id)),
         limit,
         before_id,
     )

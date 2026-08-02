@@ -13,26 +13,14 @@ use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
 
-#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ChangeMode {
-    /// Browse the shared event stream from higher event ids to lower ids.
-    History,
-    /// Synchronize the shared event stream from lower event ids to higher ids.
-    Sync,
-}
-
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// Operation: spaces/ls/tree/stat/read/changes. For changes, choose mode=history or mode=sync.
+    /// Operation: spaces/ls/tree/stat/read/changes.
     pub op: String,
     /// Single target in `<space>:/absolute/path` form.
     #[serde(default)]
     pub target: Option<String>,
-    /// Read mode for `op=changes`: history browses newest-to-oldest; sync reads oldest-to-newest from a checkpoint.
-    #[serde(default)]
-    pub mode: Option<ChangeMode>,
     /// Optional exact, case-sensitive space name filter for `op=spaces`.
     #[serde(default)]
     pub name: Option<String>,
@@ -42,12 +30,15 @@ pub struct ReadInput {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor for spaces/ls/tree or `changes mode=history`.
+    /// Opaque pagination cursor for spaces/ls/tree. Changes uses before/after instead.
     #[serde(default)]
     pub cursor: Option<String>,
-    /// Last fully applied event id for `changes mode=sync`. Omit on the first sync call to establish a baseline.
+    /// For `op=changes`, return older events before this opaque cursor.
     #[serde(default)]
-    pub after_event_id: Option<i64>,
+    pub before: Option<String>,
+    /// For `op=changes`, return newer events after this opaque cursor.
+    #[serde(default)]
+    pub after: Option<String>,
     /// 1-based first line for `op=read`.
     #[serde(default)]
     pub start_line: Option<i64>,
@@ -196,9 +187,6 @@ pub struct SequenceCommand {
     /// Single target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
     #[serde(default)]
     pub target: Option<String>,
-    /// Read mode for `read op=changes`: history or sync.
-    #[serde(default)]
-    pub mode: Option<ChangeMode>,
     /// Source target for `mv` and `cp`.
     #[serde(default)]
     pub source: Option<String>,
@@ -254,12 +242,15 @@ pub struct SequenceCommand {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor for paginated reads and searches. Never use it as a changes checkpoint.
+    /// Opaque pagination cursor for paginated reads and searches. Changes uses before/after instead.
     #[serde(default)]
     pub cursor: Option<String>,
-    /// Last fully applied event id for `read op=changes`. Omit on the first call to establish a baseline.
+    /// For `read op=changes`, return older events before this opaque cursor.
     #[serde(default)]
-    pub after_event_id: Option<i64>,
+    pub before: Option<String>,
+    /// For `read op=changes`, return newer events after this opaque cursor.
+    #[serde(default)]
+    pub after: Option<String>,
 
     /// 1-based first line for read.
     #[serde(default)]
@@ -284,12 +275,12 @@ impl SequenceCommand {
         ReadInput {
             op: self.op,
             target: self.target,
-            mode: self.mode,
             name: self.name,
             depth: self.depth,
             limit: self.limit,
             cursor: self.cursor,
-            after_event_id: self.after_event_id,
+            before: self.before,
+            after: self.after,
             start_line: self.start_line,
             max_lines: self.max_lines,
             max_bytes: self.max_bytes,
@@ -341,6 +332,7 @@ pub async fn read(
     parts: &Parts,
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
+    validate_read_change_fields(&input)?;
     match input.op.as_str() {
         "spaces" => spaces::list(state, parts, input.name, input.limit, input.cursor).await,
         "ls" => {
@@ -383,10 +375,9 @@ pub async fn read(
                 state,
                 parts,
                 required(input.target, "target", "changes")?,
-                required(input.mode, "mode", "changes")?,
                 input.limit,
-                input.cursor,
-                input.after_event_id,
+                input.before,
+                input.after,
             )
             .await
         }
@@ -395,6 +386,23 @@ pub async fn read(
             &["spaces", "ls", "tree", "stat", "read", "changes"],
         )),
     }
+}
+
+fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
+    if input.op == "changes" {
+        if input.cursor.is_some() {
+            return Err(invalid_input_error(
+                "op=changes uses before/after, not cursor",
+            ));
+        }
+        return Ok(());
+    }
+    if input.before.is_some() || input.after.is_some() {
+        return Err(invalid_input_error(
+            "before/after are only valid for read op=changes",
+        ));
+    }
+    Ok(())
 }
 
 pub async fn search(
@@ -591,6 +599,11 @@ async fn dispatch_command(
     parts: &Parts,
     command: SequenceCommand,
 ) -> Result<Json<Value>, ErrorData> {
+    if command.tool != "read" && (command.before.is_some() || command.after.is_some()) {
+        return Err(invalid_input_error(
+            "before/after are only valid for read op=changes",
+        ));
+    }
     match command.tool.as_str() {
         "read" => read(state, parts, Parameters(command.into_read_input())).await,
         "search" => search(state, parts, Parameters(command.into_search_input()?)).await,
@@ -685,53 +698,54 @@ mod tests {
     }
 
     #[test]
-    fn changes_uses_an_event_checkpoint_not_a_page_cursor() {
+    fn changes_uses_opaque_before_and_after_cursors() {
         let input = serde_json::from_value::<ReadInput>(json!({
             "op": "changes",
             "target": "daily:/",
-            "mode": "sync",
-            "after_event_id": 42,
+            "after": "opaque-change-cursor",
             "limit": 25
         }))
         .expect("valid changes input parses");
 
-        assert_eq!(input.mode, Some(ChangeMode::Sync));
-        assert_eq!(input.after_event_id, Some(42));
+        assert_eq!(input.after.as_deref(), Some("opaque-change-cursor"));
+        assert!(input.before.is_none());
         assert!(input.cursor.is_none());
     }
 
     #[test]
-    fn changes_rejects_an_unknown_mode() {
-        let error = serde_json::from_value::<ReadInput>(json!({
+    fn changes_rejects_the_generic_page_cursor() {
+        let input = serde_json::from_value::<ReadInput>(json!({
             "op": "changes",
             "target": "daily:/",
-            "mode": "latest"
+            "cursor": "generic-page-cursor"
         }))
-        .expect_err("unknown changes mode is rejected by the input contract");
+        .expect("known fields parse before operation validation");
+        let error = validate_read_change_fields(&input)
+            .expect_err("changes must use its directional cursors");
 
-        assert!(error.to_string().contains("unknown variant"));
+        assert!(error.message.contains("before/after"));
     }
 
     #[test]
-    fn run_sequence_accepts_a_changes_checkpoint() {
+    fn run_sequence_accepts_a_changes_cursor() {
         let input = serde_json::from_value::<RunSequenceInput>(json!({
             "commands": [{
                 "tool": "read",
                 "op": "changes",
                 "target": "daily:/",
-                "mode": "sync",
-                "after_event_id": 42
+                "after": "opaque-change-cursor"
             }]
         }))
         .expect("valid changes sequence parses");
 
         assert_eq!(
-            input.commands.first().expect("one command").after_event_id,
-            Some(42)
-        );
-        assert_eq!(
-            input.commands.first().expect("one command").mode,
-            Some(ChangeMode::Sync)
+            input
+                .commands
+                .first()
+                .expect("one command")
+                .after
+                .as_deref(),
+            Some("opaque-change-cursor")
         );
     }
 }

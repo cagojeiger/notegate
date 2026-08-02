@@ -83,8 +83,8 @@ impl FilesService {
         })
     }
 
-    /// List mutation events by `id DESC` for MCP history. This intentionally
-    /// does not alter the existing REST history cursor or display-time order.
+    /// List mutation events before an MCP changes cursor by `id DESC`. This
+    /// intentionally does not alter the existing REST display-time order.
     pub async fn list_file_change_events_by_id(
         &self,
         caller_account_id: Uuid,
@@ -100,26 +100,21 @@ impl FilesService {
             limits::FILE_CHANGE_EVENTS_MAX_LIMIT,
             request.cursor.as_deref(),
             |limit, cursor: Option<FileChangeEventIdCursor>| async move {
-                if cursor.as_ref().is_some_and(|cursor| {
-                    cursor.space_id != space_id || cursor.node_id != request.node_id
-                }) {
+                if cursor
+                    .as_ref()
+                    .is_some_and(|cursor| cursor.space_id != space_id)
+                {
                     return Err(ServiceError::InvalidInput(
                         "change history cursor does not match this scope".to_owned(),
                     ));
                 }
                 Ok(self
                     .store
-                    .list_file_change_events_by_id(
-                        space_id,
-                        request.node_id,
-                        limit,
-                        cursor.map(|cursor| cursor.id),
-                    )
+                    .list_file_change_events_by_id(space_id, limit, cursor.map(|cursor| cursor.id))
                     .await?)
             },
             |event| FileChangeEventIdCursor {
                 space_id,
-                node_id: request.node_id,
                 id: event.id,
             },
         )

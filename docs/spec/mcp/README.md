@@ -22,6 +22,6 @@ run_sequence  ordered command sequence 실행
 
 MCP는 space create/delete/rename, agent 관리, API key 관리를 제공하지 않는다. 이 작업은 REST/dashboard user-only API에서 한다.
 
-변경 기록은 `read op=changes` 하나의 mutation change-event stream이다. 동일한 `event_id` 체계를 `mode=history`에서는 내림차순으로 탐색하고, `mode=sync`에서는 마지막으로 적용한 `after_event_id` 이후를 오름차순으로 동기화한다. History cursor와 sync checkpoint는 호환되지 않는다.
+변경 기록은 `read op=changes` 하나의 Space-root mutation stream이다. `before`와 `after`를 모두 생략하면 최신 변경을, `before`는 더 오래된 변경을, `after`는 더 새로운 변경을 읽는다. 세 방향은 같은 Space-bound opaque cursor를 사용한다.
 
 정본 tool contract는 [`tools.md`](./tools.md)를 따른다.

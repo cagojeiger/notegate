@@ -31,13 +31,11 @@ pub type FileChangeEventCursor = EventCursor;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileChangeEventIdCursor {
     pub space_id: Uuid,
-    pub node_id: Option<Uuid>,
     pub id: i64,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ListFileChangeEventsById {
-    pub node_id: Option<Uuid>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }

@@ -1,13 +1,16 @@
-//! File change history and forward-sync handlers for the unified MCP `read` tool.
+//! Directional file-change reads for the unified MCP `read` tool.
 
 use axum::http::request::Parts;
-use notegate_service::files::{FileChangeEvent, ListFileChangeEventsById, SyncFileChanges};
+use notegate_service::ServiceError;
+use notegate_service::cursor;
+use notegate_service::files::{
+    FileChangeEvent, FileChangeEventIdCursor, ListFileChangeEventsById, SyncFileChanges,
+};
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use super::resolve::{caller, invalid_input_error, resolve_target, service_error};
-use super::support::page_json;
-use super::unified::ChangeMode;
 use crate::file_change::FileChangeImpact;
 use crate::state::AppState;
 
@@ -15,158 +18,224 @@ pub async fn call(
     state: &AppState,
     parts: &Parts,
     target: String,
-    mode: ChangeMode,
     limit: Option<i64>,
-    cursor: Option<String>,
-    after_event_id: Option<i64>,
+    before: Option<String>,
+    after: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
-    validate_change_request(mode, cursor.as_deref(), after_event_id)?;
-    match mode {
-        ChangeMode::History => history(state, parts, target, limit, cursor).await,
-        ChangeMode::Sync => sync(state, parts, target, after_event_id, limit).await,
-    }
-}
-
-fn validate_change_request(
-    mode: ChangeMode,
-    cursor: Option<&str>,
-    after_event_id: Option<i64>,
-) -> Result<(), ErrorData> {
-    match mode {
-        ChangeMode::History if after_event_id.is_some() => Err(invalid_input_error(
-            "changes mode=history uses cursor, not after_event_id",
-        )),
-        ChangeMode::Sync if cursor.is_some() => Err(invalid_input_error(
-            "changes mode=sync uses after_event_id, not cursor",
-        )),
-        ChangeMode::Sync if after_event_id.is_some_and(|event_id| event_id < 0) => Err(
-            invalid_input_error("after_event_id must be zero or greater"),
-        ),
-        _ => Ok(()),
-    }
-}
-
-async fn history(
-    state: &AppState,
-    parts: &Parts,
-    target: String,
-    limit: Option<i64>,
-    cursor: Option<String>,
-) -> Result<Json<Value>, ErrorData> {
+    validate_change_request(before.as_deref(), after.as_deref())?;
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
-    let node_id = if path == "/" {
-        None
-    } else {
-        Some(
-            state
-                .files
-                .resolve_path(caller.account_id(), resolved.space_id(), &path)
-                .await
-                .map_err(service_error)?
-                .node
-                .id,
-        )
-    };
+    require_space_root(&path)?;
+
+    match after {
+        Some(after) => {
+            newer(
+                state,
+                caller.account_id(),
+                resolved.space_id(),
+                resolved.name(),
+                target,
+                limit,
+                after,
+            )
+            .await
+        }
+        None => {
+            older(
+                state,
+                caller.account_id(),
+                resolved.space_id(),
+                resolved.name(),
+                limit,
+                before,
+            )
+            .await
+        }
+    }
+}
+
+fn validate_change_request(before: Option<&str>, after: Option<&str>) -> Result<(), ErrorData> {
+    if before.is_some() && after.is_some() {
+        return Err(invalid_input_error(
+            "op=changes accepts either before or after, not both",
+        ));
+    }
+    Ok(())
+}
+
+async fn older(
+    state: &AppState,
+    account_id: Uuid,
+    space_id: Uuid,
+    space_name: &str,
+    limit: Option<i64>,
+    before: Option<String>,
+) -> Result<Json<Value>, ErrorData> {
     let page = state
         .files
         .list_file_change_events_by_id(
-            caller.account_id(),
-            resolved.space_id(),
+            account_id,
+            space_id,
             ListFileChangeEventsById {
-                node_id,
                 limit,
-                cursor,
+                cursor: before.clone(),
             },
         )
         .await
         .map_err(service_error)?;
     let events = page.items.iter().map(event_json).collect::<Vec<_>>();
     let returned = events.len();
+    let start_cursor = page
+        .items
+        .first()
+        .map(|event| encode_change_cursor(space_id, event.id))
+        .transpose()?;
+    let end_cursor = page
+        .items
+        .last()
+        .map(|event| encode_change_cursor(space_id, event.id))
+        .transpose()?;
+    let head_cursor = if before.is_none() {
+        Some(
+            start_cursor
+                .clone()
+                .unwrap_or(encode_change_cursor(space_id, 0)?),
+        )
+    } else {
+        None
+    };
+    let next = page.next_cursor.as_ref().map(|cursor| {
+        json!({
+            "before": cursor,
+        })
+    });
+
     Ok(Json(json!({
-        "mode": "history",
-        "space": resolved.name(),
-        "path": path,
+        "space": space_name,
+        "path": "/",
         "scope": {
-            "kind": if node_id.is_some() { "node" } else { "space" },
-            "includes_descendants": node_id.is_none(),
+            "kind": "space",
+            "includes_descendants": true,
         },
+        "direction": if before.is_some() { "before" } else { "latest" },
         "order": "event_id_desc",
         "events": events,
-        "page": page_json(
-            page.limit,
-            returned,
-            page.has_more,
-            page.next_cursor.as_deref(),
-        ),
+        "page": {
+            "limit": page.limit,
+            "returned": returned,
+            "has_more": page.has_more,
+            "start_cursor": start_cursor,
+            "end_cursor": end_cursor,
+            "next": next,
+        },
+        "head_cursor": head_cursor,
+        "resync_required": false,
     })))
 }
 
-async fn sync(
+#[allow(clippy::too_many_arguments)]
+async fn newer(
     state: &AppState,
-    parts: &Parts,
+    account_id: Uuid,
+    space_id: Uuid,
+    space_name: &str,
     target: String,
-    after_event_id: Option<i64>,
     limit: Option<i64>,
+    after: String,
 ) -> Result<Json<Value>, ErrorData> {
-    let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &target).await?;
-    require_sync_root(&path)?;
+    let after_cursor = decode_change_cursor(&after, space_id)?;
 
     let page = state
         .files
         .sync_file_changes(
-            caller.account_id(),
-            resolved.space_id(),
+            account_id,
+            space_id,
             SyncFileChanges {
-                after_id: after_event_id,
+                after_id: Some(after_cursor.id),
                 limit,
             },
         )
         .await
         .map_err(service_error)?;
     let events = page.items.iter().map(event_json).collect::<Vec<_>>();
-    let next_action = sync_next_action(
+    let continuation_cursor = encode_change_cursor(space_id, page.next_after_id)?;
+    let applied_cursor = (!page.resync_required).then(|| continuation_cursor.clone());
+    let head_cursor = page.resync_required.then(|| continuation_cursor.clone());
+    let start_cursor = page
+        .items
+        .first()
+        .map(|event| encode_change_cursor(space_id, event.id))
+        .transpose()?;
+    let end_cursor = page
+        .items
+        .last()
+        .map(|event| encode_change_cursor(space_id, event.id))
+        .transpose()?;
+    let next = page.has_more.then(|| {
+        json!({
+            "after": continuation_cursor,
+        })
+    });
+    let next_action = changes_next_action(
         &target,
-        page.next_after_id,
+        &continuation_cursor,
         page.has_more,
         page.resync_required,
-        after_event_id.is_none(),
         page.limit,
     );
     let returned = events.len();
 
     Ok(Json(json!({
-        "mode": "sync",
-        "space": resolved.name(),
-        "path": path,
+        "space": space_name,
+        "path": "/",
         "scope": {
             "kind": "space",
             "includes_descendants": true,
         },
+        "direction": "after",
         "order": "event_id_asc",
         "events": events,
-        "batch": {
+        "page": {
             "limit": page.limit,
             "returned": returned,
             "has_more": page.has_more,
+            "start_cursor": start_cursor,
+            "end_cursor": end_cursor,
+            "next": next,
         },
-        "checkpoint": {
-            "input_after_event_id": after_event_id,
-            "next_after_event_id": page.next_after_id,
-        },
+        "applied_cursor": applied_cursor,
+        "head_cursor": head_cursor,
         "resync_required": page.resync_required,
         "next_action": next_action,
     })))
 }
 
-fn require_sync_root(path: &str) -> Result<(), ErrorData> {
+fn require_space_root(path: &str) -> Result<(), ErrorData> {
     if path == "/" {
         return Ok(());
     }
     Err(invalid_input_error(
-        "changes mode=sync requires a Space-root target such as `my-space:/`; subtree sync is not supported",
+        "op=changes requires a Space-root target such as `my-space:/`; node and subtree filters are not supported",
     ))
+}
+
+fn encode_change_cursor(space_id: Uuid, id: i64) -> Result<String, ErrorData> {
+    cursor::encode(&FileChangeEventIdCursor { space_id, id }).map_err(|_error| {
+        service_error(ServiceError::Internal(
+            "failed to encode change cursor".to_owned(),
+        ))
+    })
+}
+
+fn decode_change_cursor(raw: &str, space_id: Uuid) -> Result<FileChangeEventIdCursor, ErrorData> {
+    let decoded = cursor::decode::<FileChangeEventIdCursor>(raw)
+        .map_err(|_error| invalid_input_error("invalid changes cursor"))?;
+    if decoded.space_id != space_id {
+        return Err(invalid_input_error(
+            "changes cursor does not match this Space scope",
+        ));
+    }
+    Ok(decoded)
 }
 
 fn event_json(event: &FileChangeEvent) -> Value {
@@ -187,47 +256,38 @@ fn event_json(event: &FileChangeEvent) -> Value {
     })
 }
 
-fn sync_next_action(
+fn changes_next_action(
     target: &str,
-    next_after_event_id: i64,
+    applied_cursor: &str,
     has_more: bool,
     resync_required: bool,
-    established_baseline: bool,
     limit: i64,
 ) -> Value {
     if resync_required {
         return json!({
             "kind": "resync_required",
-            "reason": "The supplied checkpoint cannot prove lossless continuity. Rebuild the current Space state, then store checkpoint.next_after_event_id as the new baseline.",
-            "new_baseline_event_id": next_after_event_id,
+            "reason": "The supplied cursor cannot prove continuous replay. Rebuild the current Space state and use new_head_cursor as the new baseline.",
+            "new_head_cursor": applied_cursor,
         });
     }
     if has_more {
         return json!({
             "kind": "call_tool",
-            "reason": "More changes are available. Apply this page in order, then continue from its checkpoint.",
+            "reason": "More changes are available. Apply this page in order, then continue after its applied_cursor.",
             "tool": "read",
             "input": {
                 "op": "changes",
                 "target": target,
-                "mode": "sync",
                 "limit": limit,
-                "after_event_id": next_after_event_id,
+                "after": applied_cursor,
             },
-        });
-    }
-    if established_baseline {
-        return json!({
-            "kind": "store_checkpoint",
-            "reason": "No past events are returned when establishing a baseline. Store this event id. If initializing a cache, read the current Space state now, then call changes with this id to catch changes that occurred while reading that snapshot.",
-            "after_event_id": next_after_event_id,
         });
     }
 
     json!({
-        "kind": "store_checkpoint",
-        "reason": "All currently available changes were returned. Store this event id after applying them and use it as after_event_id later.",
-        "after_event_id": next_after_event_id,
+        "kind": "store_cursor",
+        "reason": "All currently available changes were returned. Store applied_cursor after applying them and use it as after later.",
+        "after": applied_cursor,
     })
 }
 
@@ -244,29 +304,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn change_modes_reject_the_other_modes_continuation_token() {
-        let history = validate_change_request(ChangeMode::History, None, Some(41))
-            .expect_err("history rejects a sync checkpoint");
-        assert!(history.message.contains("uses cursor"));
-
-        let sync = validate_change_request(ChangeMode::Sync, Some("cursor"), None)
-            .expect_err("sync rejects a history cursor");
-        assert!(sync.message.contains("uses after_event_id"));
-
-        let negative = validate_change_request(ChangeMode::Sync, None, Some(-1))
-            .expect_err("sync rejects a negative checkpoint");
-        assert!(negative.message.contains("zero or greater"));
+    fn changes_accepts_one_direction_at_a_time() {
+        assert!(validate_change_request(None, None).is_ok());
+        assert!(validate_change_request(Some("before"), None).is_ok());
+        assert!(validate_change_request(None, Some("after")).is_ok());
+        let error = validate_change_request(Some("before"), Some("after"))
+            .expect_err("both directions are ambiguous");
+        assert!(error.message.contains("not both"));
     }
 
     #[test]
-    fn sync_requires_a_space_root_path() {
-        assert!(require_sync_root("/").is_ok());
-        let error = require_sync_root("/folder").expect_err("subtree sync is rejected");
-        assert!(error.message.contains("mode=sync"));
+    fn changes_requires_a_space_root_path() {
+        assert!(require_space_root("/").is_ok());
+        let error = require_space_root("/folder").expect_err("filtered changes are rejected");
+        assert!(error.message.contains("Space-root"));
     }
 
     #[tokio::test]
-    async fn history_and_sync_read_the_same_mutation_event_stream()
+    async fn changes_reads_latest_older_and_newer_from_one_cursor_stream()
     -> Result<(), Box<dyn std::error::Error>> {
         let Some(db) = TestDb::setup().await? else {
             return Ok(());
@@ -294,126 +349,64 @@ mod tests {
                 .await?;
         }
 
-        let history = call(
+        let latest = call(
             &state,
             &parts,
             "rest-test:/".to_owned(),
-            ChangeMode::History,
             Some(1),
             None,
             None,
         )
         .await?
         .0;
-        assert_eq!(history["mode"], "history");
-        assert_eq!(history["order"], "event_id_desc");
-        assert_eq!(history["events"][0]["operation"], "folder.create");
-        assert_eq!(history["page"]["limit"], 1);
-        assert_eq!(history["page"]["returned"], 1);
-        assert_eq!(history["page"]["has_more"], true);
-        assert!(history.get("next_action").is_none());
-        let history_cursor = history["page"]["next_cursor"]
+        assert_eq!(latest["direction"], "latest");
+        assert_eq!(latest["order"], "event_id_desc");
+        assert_eq!(latest["events"][0]["operation"], "folder.create");
+        assert_eq!(latest["page"]["limit"], 1);
+        assert_eq!(latest["page"]["returned"], 1);
+        assert_eq!(latest["page"]["has_more"], true);
+        assert!(latest.get("next_action").is_none());
+        let head_cursor = latest["head_cursor"]
             .as_str()
-            .expect("history cursor")
+            .expect("latest response exposes a cache baseline")
             .to_owned();
-        let first_history_id = history["events"][0]["event_id"]
+        let first_event_id = latest["events"][0]["event_id"]
             .as_i64()
-            .expect("history event id");
-        let mismatched_history_cursor = call(
-            &state,
-            &parts,
-            "rest-test:/before-a".to_owned(),
-            ChangeMode::History,
-            Some(1),
-            Some(history_cursor.clone()),
-            None,
-        )
-        .await
-        .err()
-        .expect("history cursor is bound to its Space and node scope");
-        assert!(
-            mismatched_history_cursor
-                .message
-                .contains("does not match this scope")
-        );
+            .expect("latest event id");
+        let before_cursor = latest["page"]["next"]["before"]
+            .as_str()
+            .expect("older changes cursor")
+            .to_owned();
         let older_history = call(
             &state,
             &parts,
             "rest-test:/".to_owned(),
-            ChangeMode::History,
             Some(1),
-            Some(history_cursor),
+            Some(before_cursor),
             None,
         )
         .await?
         .0;
+        assert_eq!(older_history["direction"], "before");
         assert!(
-            first_history_id
+            first_event_id
                 > older_history["events"][0]["event_id"]
                     .as_i64()
                     .expect("older history event id")
         );
 
-        let history_checkpoint_error = call(
-            &state,
-            &parts,
-            "rest-test:/".to_owned(),
-            ChangeMode::History,
-            None,
-            None,
-            Some(first_history_id),
-        )
-        .await
-        .err()
-        .expect("history rejects sync checkpoints");
-        assert!(history_checkpoint_error.message.contains("uses cursor"));
-
-        let sync_cursor_error = call(
-            &state,
-            &parts,
-            "rest-test:/".to_owned(),
-            ChangeMode::Sync,
-            None,
-            Some("history-cursor".to_owned()),
-            None,
-        )
-        .await
-        .err()
-        .expect("sync rejects history cursors");
-        assert!(sync_cursor_error.message.contains("uses after_event_id"));
-
-        let subtree_sync_error = call(
+        let subtree_error = call(
             &state,
             &parts,
             "rest-test:/before-a".to_owned(),
-            ChangeMode::Sync,
             None,
             None,
             None,
         )
         .await
         .err()
-        .expect("sync requires a Space root");
-        assert!(subtree_sync_error.message.contains("mode=sync"));
-
-        let baseline = call(
-            &state,
-            &parts,
-            "rest-test:/".to_owned(),
-            ChangeMode::Sync,
-            Some(1),
-            None,
-            None,
-        )
-        .await?
-        .0;
-        assert_eq!(baseline["events"], json!([]));
-        assert_eq!(baseline["batch"]["limit"], 1);
-        assert_eq!(baseline["batch"]["returned"], 0);
-        assert_eq!(baseline["batch"]["has_more"], false);
-        let baseline_id = baseline["checkpoint"]["next_after_event_id"]
-            .as_i64()
-            .expect("baseline event id");
+        .expect("changes requires a Space root");
+        assert!(subtree_error.message.contains("Space-root"));
 
         for name in ["after-a", "after-b"] {
             state
@@ -428,69 +421,77 @@ mod tests {
                 )
                 .await?;
         }
-        let first_sync = call(
+        let first_newer = call(
             &state,
             &parts,
             "rest-test:/".to_owned(),
-            ChangeMode::Sync,
             Some(1),
             None,
-            Some(baseline_id),
+            Some(head_cursor),
         )
         .await?
         .0;
-        assert_eq!(first_sync["mode"], "sync");
-        assert_eq!(first_sync["order"], "event_id_asc");
-        assert_eq!(first_sync["events"][0]["operation"], "folder.create");
-        assert_eq!(first_sync["batch"]["limit"], 1);
-        assert_eq!(first_sync["batch"]["returned"], 1);
-        assert_eq!(first_sync["batch"]["has_more"], true);
-        assert_eq!(first_sync["next_action"]["input"]["limit"], 1);
-        let first_synced_event_id = first_sync["events"][0]["event_id"]
+        assert_eq!(first_newer["direction"], "after");
+        assert_eq!(first_newer["order"], "event_id_asc");
+        assert_eq!(first_newer["events"][0]["operation"], "folder.create");
+        assert_eq!(first_newer["page"]["limit"], 1);
+        assert_eq!(first_newer["page"]["returned"], 1);
+        assert_eq!(first_newer["page"]["has_more"], true);
+        assert_eq!(first_newer["next_action"]["input"]["limit"], 1);
+        assert!(first_newer["head_cursor"].is_null());
+        let first_newer_event_id = first_newer["events"][0]["event_id"]
             .as_i64()
-            .expect("synced event id");
-        assert!(first_synced_event_id > baseline_id);
+            .expect("newer event id");
+        assert!(first_newer_event_id > first_event_id);
+        let applied_cursor = first_newer["applied_cursor"]
+            .as_str()
+            .expect("applied cursor")
+            .to_owned();
 
-        let second_sync = call(
+        let second_newer = call(
             &state,
             &parts,
             "rest-test:/".to_owned(),
-            ChangeMode::Sync,
             Some(1),
             None,
-            Some(first_synced_event_id),
+            Some(applied_cursor),
         )
         .await?
         .0;
-        assert_eq!(second_sync["batch"]["limit"], 1);
-        assert_eq!(second_sync["batch"]["returned"], 1);
-        assert_eq!(second_sync["batch"]["has_more"], false);
-        let second_synced_event_id = second_sync["events"][0]["event_id"]
+        assert_eq!(second_newer["page"]["limit"], 1);
+        assert_eq!(second_newer["page"]["returned"], 1);
+        assert_eq!(second_newer["page"]["has_more"], false);
+        let second_newer_event_id = second_newer["events"][0]["event_id"]
             .as_i64()
-            .expect("second synced event id");
-        assert!(first_synced_event_id < second_synced_event_id);
+            .expect("second newer event id");
+        assert!(first_newer_event_id < second_newer_event_id);
 
-        let invalid_checkpoint = call(
+        let invalid_cursor = encode_change_cursor(space_id, second_newer_event_id + 1000)?;
+        let invalid_continuation = call(
             &state,
             &parts,
             "rest-test:/".to_owned(),
-            ChangeMode::Sync,
             Some(1),
             None,
-            Some(second_synced_event_id + 1000),
+            Some(invalid_cursor),
         )
         .await?
         .0;
-        assert_eq!(invalid_checkpoint["events"], json!([]));
-        assert_eq!(invalid_checkpoint["resync_required"], true);
-        assert_eq!(invalid_checkpoint["next_action"]["kind"], "resync_required");
+        assert_eq!(invalid_continuation["events"], json!([]));
+        assert_eq!(invalid_continuation["resync_required"], true);
+        assert!(invalid_continuation["applied_cursor"].is_null());
+        assert!(invalid_continuation["head_cursor"].is_string());
+        assert_eq!(
+            invalid_continuation["next_action"]["kind"],
+            "resync_required"
+        );
 
         db.cleanup().await;
         Ok(())
     }
 
     #[test]
-    fn history_event_names_the_event_id_and_time_explicitly() {
+    fn change_event_names_the_event_id_and_time_explicitly() {
         let event = event("text.write", json!({ "item_kind": "text" }));
 
         let output = event_json(&event);
@@ -525,37 +526,31 @@ mod tests {
     }
 
     #[test]
-    fn baseline_action_tells_the_caller_to_store_the_checkpoint() {
-        let action = sync_next_action("daily:/", 41, false, false, true, 25);
-
-        assert_eq!(action["kind"], "store_checkpoint");
-        assert_eq!(action["after_event_id"], 41);
-        assert!(
-            action["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains("current Space state"))
-        );
-    }
-
-    #[test]
-    fn continuation_action_uses_the_last_returned_event_id() {
-        let action = sync_next_action("daily:/", 41, true, false, false, 25);
+    fn continuation_action_uses_the_last_applied_cursor() {
+        let action = changes_next_action("daily:/", "opaque-41", true, false, 25);
 
         assert_eq!(action["kind"], "call_tool");
         assert_eq!(action["tool"], "read");
         assert_eq!(action["input"]["op"], "changes");
-        assert_eq!(action["input"]["mode"], "sync");
         assert_eq!(action["input"]["target"], "daily:/");
         assert_eq!(action["input"]["limit"], 25);
-        assert_eq!(action["input"]["after_event_id"], 41);
+        assert_eq!(action["input"]["after"], "opaque-41");
     }
 
     #[test]
-    fn invalid_checkpoint_action_requires_a_full_resync() {
-        let action = sync_next_action("daily:/", 99, false, true, false, 25);
+    fn completed_action_tells_the_caller_to_store_the_cursor() {
+        let action = changes_next_action("daily:/", "opaque-41", false, false, 25);
+
+        assert_eq!(action["kind"], "store_cursor");
+        assert_eq!(action["after"], "opaque-41");
+    }
+
+    #[test]
+    fn invalid_cursor_action_requires_a_full_resync() {
+        let action = changes_next_action("daily:/", "opaque-99", false, true, 25);
 
         assert_eq!(action["kind"], "resync_required");
-        assert_eq!(action["new_baseline_event_id"], 99);
+        assert_eq!(action["new_head_cursor"], "opaque-99");
     }
 
     fn event(operation: &str, metadata: Value) -> FileChangeEvent {
