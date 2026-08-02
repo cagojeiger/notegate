@@ -67,6 +67,21 @@ describe("workbenchStorage", () => {
     expect(group.forward.map((entry) => entry.nodeId)).toEqual(["node-4"]);
   });
 
+  it("falls back to an empty workbench when browser storage is unavailable", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+
+    expect(restoreSpaceWorkbench("space-1", 0)).toMatchObject({
+      activeGroupIndex: 0,
+      nextGroupId: 1,
+      editorGroups: [{ id: 0, node: null, mode: "preview", back: [], forward: [] }]
+    });
+  });
+
   it("clears one persisted space snapshot", () => {
     persistSpaceWorkbench("space-1", [{ id: 1, node: node("node-1"), mode: "preview", back: [], forward: [] }], 0);
 

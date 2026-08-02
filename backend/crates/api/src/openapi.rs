@@ -343,6 +343,22 @@ mod tests {
     }
 
     #[test]
+    fn public_openapi_copy_conflict_uses_the_common_error_body() {
+        let value =
+            serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");
+
+        assert_eq!(
+            response_ref(
+                &value,
+                "/api/v2/spaces/{space_id}/nodes/{node_id}/copy",
+                "post",
+                "409",
+            ),
+            "#/components/schemas/ErrorResponse"
+        );
+    }
+
+    #[test]
     fn public_openapi_operation_ids_are_present_and_unique() {
         let value =
             serde_json::to_value(PublicApiDoc::openapi()).expect("serializes public openapi");

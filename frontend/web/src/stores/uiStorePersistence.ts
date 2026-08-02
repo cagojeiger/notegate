@@ -11,6 +11,24 @@ import {
 const THEME_KEY = "notegate.theme";
 const LAST_SPACE_KEY = "notegate.lastActiveSpaceId";
 
+function readLocalStorage(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string, value: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Browser-local UI state is best-effort.
+  }
+}
+
 export type UiStorePersistence = {
   loadTheme: () => ThemeMode;
   applyTheme: (theme: ThemeMode) => void;
@@ -26,7 +44,7 @@ export type UiStorePersistence = {
 export const browserUiStorePersistence: UiStorePersistence = {
   loadTheme: () => {
     if (typeof window === "undefined") return "dark";
-    const stored = window.localStorage.getItem(THEME_KEY);
+    const stored = readLocalStorage(THEME_KEY);
     if (stored === "light" || stored === "dark") return stored;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   },
@@ -35,14 +53,11 @@ export const browserUiStorePersistence: UiStorePersistence = {
   },
   saveTheme: (theme) => {
     document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem(THEME_KEY, theme);
+    writeLocalStorage(THEME_KEY, theme);
   },
-  loadLastActiveSpaceId: () => {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(LAST_SPACE_KEY);
-  },
+  loadLastActiveSpaceId: () => readLocalStorage(LAST_SPACE_KEY),
   saveLastActiveSpaceId: (spaceId) => {
-    window.localStorage.setItem(LAST_SPACE_KEY, spaceId);
+    writeLocalStorage(LAST_SPACE_KEY, spaceId);
   },
   loadSpaceWorkbench: restoreSpaceWorkbench,
   saveSpaceWorkbench: persistSpaceWorkbench,

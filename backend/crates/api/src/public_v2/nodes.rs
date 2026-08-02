@@ -380,7 +380,7 @@ pub(crate) struct CopyNodeBody {
     new_parent_id: Uuid,
     /// Name of the copied root node.
     new_name: String,
-    /// Must be true to copy a non-empty folder subtree.
+    /// Must be true to copy a folder.
     #[schema(default = false)]
     #[serde(default)]
     recursive: bool,
@@ -406,7 +406,10 @@ pub(crate) struct CopyCountsOut {
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
     request_body = CopyNodeBody,
-    responses((status = 201, description = "Copy a node inside the same space", body = CopyNodeResponse)),
+    responses(
+        (status = 201, description = "Copy a node inside the same space", body = CopyNodeResponse),
+        (status = 409, description = "Copy conflicts, including file nodes or file-containing subtrees", body = crate::error::ErrorResponse)
+    ),
     security(("api_key" = []))
 )]
 pub(crate) async fn copy_node(

@@ -9,10 +9,14 @@ use axum::Router;
 use axum::extract::Extension;
 use axum::http::StatusCode;
 use notegate_db::{AccountRepo, AgentRepo, ConnectionRepo, SpaceRepo, test_support::TestDb};
-use notegate_model::{Caller, CallerIdentity, Channel, ConnectAgent, Permission, ResolveAttrs};
+use notegate_model::files::{BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration};
+use notegate_model::{
+    Caller, CallerIdentity, Channel, ConnectAgent, FileEncryptionMode, Permission, ResolveAttrs,
+};
 use notegate_service::agents::CreateAgent;
 use notegate_service::spaces::CreateSpace;
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::rest::test_support::{caller_and_space, empty_request, get_json, json_request, state};
 
@@ -117,6 +121,82 @@ async fn connected_write_agent_can_use_v2_resource_flow() -> Result<(), Box<dyn 
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{deleted}");
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn copy_rejects_a_folder_containing_a_file() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state(&db);
+    let (owner, space_id, root_id) = caller_and_space(&state).await?;
+    let caller = agent_caller(&state, owner.account_id(), space_id, Permission::Write).await?;
+
+    let (status, folder) = json_request(
+        app(state.clone(), caller.clone()),
+        "POST",
+        format!("/spaces/{space_id}/nodes"),
+        json!({
+            "parent_id": root_id,
+            "name": "assets",
+            "kind": "folder",
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED, "{folder}");
+    let folder_id = Uuid::parse_str(folder["id"].as_str().expect("folder id"))?;
+
+    let upload_id = Uuid::new_v4();
+    let upload = BeginObjectUpload {
+        parent_node_id: folder_id,
+        name: "diagram.bin".to_owned(),
+        byte_len: 11,
+        media_type: "application/octet-stream".to_owned(),
+        original_filename: None,
+        encryption_mode: FileEncryptionMode::None,
+        encryption_metadata: None,
+    };
+    state
+        .files
+        .prepare_object_upload(caller.account_id(), space_id, &upload)
+        .await?;
+    state
+        .files
+        .record_registered_object_upload(
+            &ObjectUploadRegistration {
+                id: upload_id,
+                object_key: format!("objects/{upload_id}"),
+                upload_mode: ObjectUploadMode::Single,
+                multipart_upload_id: None,
+                multipart_part_size: None,
+            },
+            caller.account_id(),
+            space_id,
+            &upload,
+        )
+        .await?;
+    state
+        .files
+        .complete_object_upload(caller.account_id(), space_id, upload_id, None)
+        .await?;
+
+    let (status, conflict) = json_request(
+        app(state, caller),
+        "POST",
+        format!("/spaces/{space_id}/nodes/{folder_id}/copy"),
+        json!({
+            "new_parent_id": root_id,
+            "new_name": "assets-copy",
+            "recursive": true,
+        }),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CONFLICT, "{conflict}");
+    assert_eq!(conflict["error"], "conflict");
+    assert_eq!(conflict["message"], "copy does not support file nodes");
 
     db.cleanup().await;
     Ok(())

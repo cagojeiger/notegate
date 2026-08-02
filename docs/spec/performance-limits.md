@@ -228,7 +228,7 @@ api_keys_max_limit = 100
 
 ## Search memory model
 
-Search는 MCP/CLI command이며 REST resource API에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다. 내부 구조는 DB candidate scan과 application matcher의 2단계다.
+Search는 MCP/CLI와 Public V2 REST가 공유하며 Browser V1 REST에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다. 내부 구조는 DB candidate scan과 application matcher의 2단계다.
 
 최악의 논리 scan 범위:
 
