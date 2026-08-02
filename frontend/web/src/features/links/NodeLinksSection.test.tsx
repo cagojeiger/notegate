@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeRestNode } from "../../test/fixtures";
@@ -84,7 +85,7 @@ describe("NodeLinksSection", () => {
   });
 
   it("shows bounded outgoing, incoming, and broken relations", () => {
-    render(<NodeLinksSection node={node} />);
+    render(<NodeLinksSection node={node} onOpenLinkedNode={vi.fn()} />);
 
     expect(screen.getByText("2 outgoing")).toBeInTheDocument();
     expect(screen.getByText("1 incoming")).toBeInTheDocument();
@@ -93,6 +94,19 @@ describe("NodeLinksSection", () => {
     expect(screen.getByText("/missing.png")).toBeInTheDocument();
     expect(screen.getByText("Missing target")).toBeInTheDocument();
     expect(screen.getByText("backlink.md")).toBeInTheDocument();
+  });
+
+  it("opens resolved outgoing and incoming nodes but not broken references", async () => {
+    const user = userEvent.setup();
+    const onOpenLinkedNode = vi.fn();
+    render(<NodeLinksSection node={node} onOpenLinkedNode={onOpenLinkedNode} />);
+
+    await user.click(screen.getByRole("button", { name: "Open target.md" }));
+    expect(onOpenLinkedNode).toHaveBeenLastCalledWith("daily", "target");
+
+    await user.click(screen.getByRole("button", { name: "Open backlink.md" }));
+    expect(onOpenLinkedNode).toHaveBeenLastCalledWith("daily", "backlink");
+    expect(screen.queryByRole("button", { name: /missing/i })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -105,7 +119,7 @@ describe("NodeLinksSection", () => {
       data: { ...current.data, index: { ...current.data.index, freshness } }
     });
 
-    render(<NodeLinksSection node={node} />);
+    render(<NodeLinksSection node={node} onOpenLinkedNode={vi.fn()} />);
 
     expect(screen.getByText(message)).toBeInTheDocument();
     expect(screen.queryByText("target.md")).not.toBeInTheDocument();

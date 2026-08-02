@@ -202,6 +202,33 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
   });
 
+  it("opens an indexed link by node id and records it in editor navigation", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    mocks.revealNode
+      .mockResolvedValueOnce({ ancestors: [], target: targetNode })
+      .mockResolvedValueOnce({ ancestors: [], target: sourceNode });
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openLinkedNode(activeSpace.id, targetNode.id);
+    });
+
+    let group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(targetNode.id);
+    expect(group.back.map((entry) => entry.nodeId)).toEqual([sourceNode.id]);
+
+    await act(async () => {
+      await result.current.navigateEditorGroup(groupId, "back");
+    });
+
+    group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(sourceNode.id);
+    expect(group.forward.map((entry) => entry.nodeId)).toEqual([targetNode.id]);
+  });
+
   it("opens a revealed node in a new editor group without a node request", async () => {
     const activeSpace = space("space-1");
     const current = node("current", activeSpace.id, "/current.md");

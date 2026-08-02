@@ -46,6 +46,7 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
     onSearchEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
+    onOpenLinkedNode: vi.fn(),
     ...overrides
   };
 }

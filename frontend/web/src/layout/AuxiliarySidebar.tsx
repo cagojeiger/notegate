@@ -26,6 +26,7 @@ type AuxiliarySidebarProps = {
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
+  onOpenLinkedNode: (spaceId: string, nodeId: string) => void;
   onOutlineNavigate?: () => void;
 };
 
@@ -44,6 +45,7 @@ export function AuxiliarySidebar({
   onSearchEnabledChange,
   onWriteLockedChange,
   onTextEncryptionEnabledChange,
+  onOpenLinkedNode,
   onOutlineNavigate
 }: AuxiliarySidebarProps) {
   const [localPreferredView, setLocalPreferredView] = useState<InspectorView>("details");
@@ -240,7 +242,7 @@ export function AuxiliarySidebar({
         {selectedView === "links" ? (
           <div className="rounded-2xl border border-border bg-surface">
             <Suspense fallback={<LinkSectionFallback />}>
-              <NodeLinksSection node={activeNode} />
+              <NodeLinksSection node={activeNode} onOpenLinkedNode={onOpenLinkedNode} />
             </Suspense>
           </div>
         ) : null}

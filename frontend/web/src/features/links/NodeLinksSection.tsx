@@ -5,7 +5,13 @@ import type { RestNode } from "../../api/types";
 import { SectionHeader } from "../../shared/ui";
 import { useNodeLinksQuery } from "./useLinkIndexQueries";
 
-export function NodeLinksSection({ node }: { node: RestNode | null }) {
+export function NodeLinksSection({
+  node,
+  onOpenLinkedNode
+}: {
+  node: RestNode | null;
+  onOpenLinkedNode: (spaceId: string, nodeId: string) => void;
+}) {
   const links = useNodeLinksQuery(node?.space_id ?? null, node?.id ?? null);
 
   return (
@@ -14,12 +20,23 @@ export function NodeLinksSection({ node }: { node: RestNode | null }) {
       {!node ? <p className="text-xs text-muted">Choose something from Files to inspect its links.</p> : null}
       {node && links.isLoading ? <p className="text-xs text-muted">Loading links…</p> : null}
       {node && links.isError ? <p className="text-xs text-danger">Could not load links.</p> : null}
-      {links.data ? <NodeLinkContent summary={links.data} /> : null}
+      {node && links.data ? (
+        <NodeLinkContent
+          summary={links.data}
+          onOpenLinkedNode={(nodeId) => onOpenLinkedNode(node.space_id, nodeId)}
+        />
+      ) : null}
     </section>
   );
 }
 
-function NodeLinkContent({ summary }: { summary: NodeLinkSummary }) {
+function NodeLinkContent({
+  summary,
+  onOpenLinkedNode
+}: {
+  summary: NodeLinkSummary;
+  onOpenLinkedNode: (nodeId: string) => void;
+}) {
   if (summary.index.freshness === "rebuilding") {
     return <p className="text-xs text-muted">Reindexing links…</p>;
   }
@@ -38,8 +55,8 @@ function NodeLinkContent({ summary }: { summary: NodeLinkSummary }) {
         ) : null}
       </div>
       {!hasRelations ? <p className="text-xs text-muted">No indexed links.</p> : null}
-      <RelationList title="Outgoing" items={summary.outgoing} outgoing truncated={summary.outgoing_truncated} />
-      <RelationList title="Incoming" items={summary.incoming} outgoing={false} truncated={summary.incoming_truncated} />
+      <RelationList title="Outgoing" items={summary.outgoing} outgoing truncated={summary.outgoing_truncated} onOpenLinkedNode={onOpenLinkedNode} />
+      <RelationList title="Incoming" items={summary.incoming} outgoing={false} truncated={summary.incoming_truncated} onOpenLinkedNode={onOpenLinkedNode} />
       {summary.index.freshness === "updating" ? <p className="text-xs text-muted">Updating index…</p> : null}
     </div>
   );
@@ -49,12 +66,14 @@ function RelationList({
   title,
   items,
   outgoing,
-  truncated
+  truncated,
+  onOpenLinkedNode
 }: {
   title: string;
   items: LinkReference[];
   outgoing: boolean;
   truncated: boolean;
+  onOpenLinkedNode: (nodeId: string) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -68,14 +87,31 @@ function RelationList({
           const path = outgoing ? reference.target_path ?? reference.normalized_target_path : reference.source_path;
           const status = referenceStatusLabel(reference.status);
           const Icon = reference.kind === "image" ? Image : Link2;
-          return (
-            <li key={reference.id} className="flex min-w-0 items-start gap-2 text-xs">
+          const linkedNodeId = outgoing ? reference.target_node_id : reference.source_node_id;
+          const content = (
+            <>
               <Icon size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden="true" />
               <span className="min-w-0">
                 <span className={reference.status === "resolved" ? "block truncate text-text" : "block truncate text-warning"} title={label}>{label}</span>
                 {path && path !== label ? <span className="block truncate text-muted" title={path}>{path}</span> : null}
                 {status ? <span className="block text-warning">{status}</span> : null}
               </span>
+            </>
+          );
+          return (
+            <li key={reference.id} className="min-w-0 text-xs">
+              {reference.status === "resolved" && linkedNodeId ? (
+                <button
+                  type="button"
+                  className="flex w-full min-w-0 items-start gap-2 rounded-md px-1 py-0.5 text-left hover:bg-[var(--ng-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  onClick={() => onOpenLinkedNode(linkedNodeId)}
+                  aria-label={`Open ${label}`}
+                >
+                  {content}
+                </button>
+              ) : (
+                <div className="flex min-w-0 items-start gap-2 px-1 py-0.5">{content}</div>
+              )}
             </li>
           );
         })}
