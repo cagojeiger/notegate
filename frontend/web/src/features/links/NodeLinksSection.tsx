@@ -37,11 +37,14 @@ function NodeLinkContent({
   summary: NodeLinkSummary;
   onOpenLinkedNode: (nodeId: string) => void;
 }) {
+  if (summary.index.freshness === "uninitialized") {
+    return <p className="text-xs text-muted">Index links from the Space Inspector to view relations.</p>;
+  }
   if (summary.index.freshness === "rebuilding") {
     return <p className="text-xs text-muted">Reindexing links…</p>;
   }
   if (summary.index.freshness === "failed") {
-    return <p className="text-xs text-danger">The last link-index update failed.</p>;
+    return <p className="text-xs text-danger">The link index failed. Retry from the Space Inspector.</p>;
   }
 
   const hasRelations = summary.outgoing_count > 0 || summary.incoming_count > 0;

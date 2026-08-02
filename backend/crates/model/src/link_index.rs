@@ -40,6 +40,7 @@ pub enum LinkReferenceStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkIndexStatus {
+    Uninitialized,
     Queued,
     Running,
     Rebuilding,
@@ -50,6 +51,7 @@ pub enum LinkIndexStatus {
 impl LinkIndexStatus {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
+            "uninitialized" => Some(Self::Uninitialized),
             "queued" => Some(Self::Queued),
             "running" => Some(Self::Running),
             "rebuilding" => Some(Self::Rebuilding),
@@ -71,7 +73,9 @@ pub struct SpaceLinkIndexState {
 
 impl SpaceLinkIndexState {
     pub fn freshness(&self) -> LinkIndexFreshness {
-        if self.status == LinkIndexStatus::Rebuilding {
+        if self.status == LinkIndexStatus::Uninitialized {
+            LinkIndexFreshness::Uninitialized
+        } else if self.status == LinkIndexStatus::Rebuilding {
             LinkIndexFreshness::Rebuilding
         } else if self.status == LinkIndexStatus::Failed {
             LinkIndexFreshness::Failed
@@ -88,6 +92,7 @@ impl SpaceLinkIndexState {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkIndexFreshness {
+    Uninitialized,
     Current,
     Updating,
     Rebuilding,

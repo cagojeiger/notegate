@@ -110,8 +110,9 @@ describe("NodeLinksSection", () => {
   });
 
   it.each([
+    ["uninitialized", "Index links from the Space Inspector to view relations."],
     ["rebuilding", "Reindexing links…"],
-    ["failed", "The last link-index update failed."]
+    ["failed", "The link index failed. Retry from the Space Inspector."]
   ] as const)("does not expose relation rows while the index is %s", (freshness, message) => {
     const current = mocks.useNodeLinksQuery();
     mocks.useNodeLinksQuery.mockReturnValue({

@@ -86,7 +86,9 @@ impl LinkIndexService {
 fn hydrate_records(records: NodeLinkRecords) -> NodeLinkSummary {
     if matches!(
         records.index.freshness(),
-        LinkIndexFreshness::Rebuilding | LinkIndexFreshness::Failed
+        LinkIndexFreshness::Uninitialized
+            | LinkIndexFreshness::Rebuilding
+            | LinkIndexFreshness::Failed
     ) {
         return NodeLinkSummary {
             index: records.index,

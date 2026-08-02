@@ -2,6 +2,7 @@ import { Bot, FolderOpen, LockKeyhole, Pin, RefreshCw, Search } from "lucide-rea
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../../api/errors";
+import type { LinkIndexFreshness } from "../../api/linkIndex";
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
@@ -241,6 +242,8 @@ function SpaceInspector({
       || linkIndex.data?.freshness === "rebuilding"
     )
   );
+  const linkIndexUninitialized = linkIndex.data?.freshness === "uninitialized";
+  const linkActionLabel = linkIndexUninitialized ? "Index links" : "Reindex links";
   const linkAction = space ? (
     <Button
       secondary
@@ -250,10 +253,10 @@ function SpaceInspector({
         requestLinkReindex.mutate(space.id);
       }}
       disabled={space.permission !== "write" || linkReindexPending}
-      aria-label={`Reindex links in ${space.name}`}
+      aria-label={`${linkActionLabel} in ${space.name}`}
     >
       <RefreshCw size={14} className={linkReindexPending ? "animate-spin" : undefined} />
-      {linkReindexPending ? "Reindexing…" : "Reindex links"}
+      {linkReindexPending ? "Indexing…" : linkActionLabel}
     </Button>
   ) : undefined;
 
@@ -408,8 +411,9 @@ function usageState(query: { isLoading: boolean; isError: boolean; data?: Curren
   return "ready";
 }
 
-function formatLinkIndexStatus(freshness: "current" | "updating" | "rebuilding" | "failed") {
+function formatLinkIndexStatus(freshness: LinkIndexFreshness) {
   switch (freshness) {
+    case "uninitialized": return "Not indexed";
     case "current": return "Current";
     case "updating": return "Updating";
     case "rebuilding": return "Rebuilding";

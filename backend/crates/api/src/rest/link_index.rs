@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LinkIndexStatusOut {
+    Uninitialized,
     Queued,
     Running,
     Rebuilding,
@@ -42,6 +43,7 @@ pub(crate) enum LinkIndexStatusOut {
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LinkIndexFreshnessOut {
+    Uninitialized,
     Current,
     Updating,
     Rebuilding,
@@ -184,6 +186,7 @@ impl From<SpaceLinkIndexState> for LinkIndexStateOut {
 impl From<LinkIndexStatus> for LinkIndexStatusOut {
     fn from(status: LinkIndexStatus) -> Self {
         match status {
+            LinkIndexStatus::Uninitialized => Self::Uninitialized,
             LinkIndexStatus::Queued => Self::Queued,
             LinkIndexStatus::Running => Self::Running,
             LinkIndexStatus::Rebuilding => Self::Rebuilding,
@@ -196,6 +199,7 @@ impl From<LinkIndexStatus> for LinkIndexStatusOut {
 impl From<LinkIndexFreshness> for LinkIndexFreshnessOut {
     fn from(freshness: LinkIndexFreshness) -> Self {
         match freshness {
+            LinkIndexFreshness::Uninitialized => Self::Uninitialized,
             LinkIndexFreshness::Current => Self::Current,
             LinkIndexFreshness::Updating => Self::Updating,
             LinkIndexFreshness::Rebuilding => Self::Rebuilding,

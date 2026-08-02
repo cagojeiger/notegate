@@ -1,7 +1,7 @@
 import type { ApiClient } from "./client";
 
-export type LinkIndexStatus = "queued" | "running" | "rebuilding" | "ready" | "failed";
-export type LinkIndexFreshness = "current" | "updating" | "rebuilding" | "failed";
+export type LinkIndexStatus = "uninitialized" | "queued" | "running" | "rebuilding" | "ready" | "failed";
+export type LinkIndexFreshness = "uninitialized" | "current" | "updating" | "rebuilding" | "failed";
 export type LinkReferenceKind = "link" | "image";
 export type LinkReferenceStatus = "resolved" | "deleted" | "missing" | "invalid";
 

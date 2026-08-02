@@ -6,9 +6,9 @@ CREATE TABLE space_link_index_states (
     space_id UUID PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
     desired_generation BIGINT NOT NULL DEFAULT 0 CHECK (desired_generation >= 0),
     applied_generation BIGINT NOT NULL DEFAULT 0 CHECK (applied_generation >= 0),
-    status TEXT NOT NULL DEFAULT 'queued'
-        CHECK (status IN ('queued', 'running', 'rebuilding', 'ready', 'failed')),
-    rebuild_requested BOOLEAN NOT NULL DEFAULT true,
+    status TEXT NOT NULL DEFAULT 'uninitialized'
+        CHECK (status IN ('uninitialized', 'queued', 'running', 'rebuilding', 'ready', 'failed')),
+    rebuild_requested BOOLEAN NOT NULL DEFAULT false,
     rebuild_base_generation BIGINT CHECK (rebuild_base_generation IS NULL OR rebuild_base_generation >= 0),
     rebuild_after_node_id UUID,
     parser_version INTEGER NOT NULL DEFAULT 1 CHECK (parser_version > 0),
@@ -25,7 +25,9 @@ CREATE TABLE space_link_index_states (
 
 CREATE INDEX space_link_index_states_ready_idx
     ON space_link_index_states (run_after, updated_at, space_id)
-    WHERE status <> 'ready' OR applied_generation < desired_generation OR rebuild_requested;
+    WHERE rebuild_requested
+       OR (status <> 'uninitialized'
+           AND (status <> 'ready' OR applied_generation < desired_generation));
 
 CREATE UNIQUE INDEX file_change_events_link_index_generation_idx
     ON file_change_events (space_id, link_index_generation)
@@ -68,8 +70,8 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO space_link_index_states (space_id)
-    VALUES (NEW.id)
+    INSERT INTO space_link_index_states (space_id, status, rebuild_requested)
+    VALUES (NEW.id, 'ready', false)
     ON CONFLICT (space_id) DO NOTHING;
     RETURN NEW;
 END;
@@ -94,6 +96,7 @@ BEGIN
     UPDATE space_link_index_states
     SET desired_generation = desired_generation + 1,
         status = CASE
+            WHEN status = 'uninitialized' THEN status
             WHEN status IN ('running', 'rebuilding') THEN status
             ELSE 'queued'
         END,
@@ -123,7 +126,7 @@ SELECT
     s.id,
     0,
     0,
-    'queued',
-    true
+    'uninitialized',
+    false
 FROM spaces s
 ON CONFLICT (space_id) DO NOTHING;

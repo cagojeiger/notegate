@@ -429,8 +429,8 @@ space_link_index_states
   space_id uuid pk references spaces(id) on delete cascade
   desired_generation bigint not null default 0
   applied_generation bigint not null default 0
-  status text check ('queued','running','rebuilding','ready','failed')
-  rebuild_requested bool not null default true
+  status text check ('uninitialized','queued','running','rebuilding','ready','failed')
+  rebuild_requested bool not null default false
   rebuild_base_generation bigint null
   rebuild_after_node_id uuid null
   parser_version int not null default 1
@@ -453,7 +453,7 @@ node_link_refs
   occurrence_count int not null check > 0
 ```
 
-`space_link_index_states`는 Space별 durable queue와 재구성 lease를 함께 보관한다. `desired_generation`은 정본 변경 위치이고 `applied_generation`은 현재 링크 투영이 반영한 위치다. `node_link_refs`는 source Text의 현재 outgoing 참조만 저장하며 incoming은 `target_node_id` 역조회로 계산한다. Source와 target composite FK는 같은 Space 안의 node만 허용한다. Target hard purge는 `target_node_id`만 NULL로 바꾸어 unresolved path를 보존한다. 상세 갱신 및 조회 계약은 `docs/spec/link-index.md`가 정본이다.
+`space_link_index_states`는 Space별 durable queue와 재구성 lease를 함께 보관한다. 마이그레이션 시 기존 Space는 `uninitialized`로 두고 사용자가 최초 인덱싱을 요청하며, 새 Space는 빈 graph가 현재 상태이므로 `ready`로 생성한다. `desired_generation`은 정본 변경 위치이고 `applied_generation`은 현재 링크 투영이 반영한 위치다. `node_link_refs`는 source Text의 현재 outgoing 참조만 저장하며 incoming은 `target_node_id` 역조회로 계산한다. Source와 target composite FK는 같은 Space 안의 node만 허용한다. Target hard purge는 `target_node_id`만 NULL로 바꾸어 unresolved path를 보존한다. 상세 갱신 및 조회 계약은 `docs/spec/link-index.md`가 정본이다.
 
 권장 index:
 

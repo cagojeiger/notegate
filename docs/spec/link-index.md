@@ -51,7 +51,9 @@ UI는 `deleted`, `missing`, `invalid`를 모두 Broken으로 집계하되 상세
 
 파일 변경 transaction은 `file_change_events`를 기록하면서 같은 transaction에서 해당 Space의 `desired_generation`를 전진시킨다. 이벤트의 `link_index_generation`은 Space 상태 row를 잠근 상태에서 부여한다. 같은 Space의 다음 transaction은 앞선 transaction이 commit 또는 rollback될 때까지 기다리므로, 전역 event id의 발급 순서와 관계없이 commit된 변경 순서대로 연속된 generation을 갖는다. 서로 다른 Space는 서로의 상태 row를 잠그지 않는다.
 
-따라서 변경은 성공했지만 링크 인덱싱 작업이 사라지는 상태를 만들지 않는다. 마이그레이션 전에 쌓인 event는 generation을 소급 부여하지 않고 최초 Space 재인덱싱으로 현재 상태를 구성한다.
+따라서 변경은 성공했지만 링크 인덱싱 작업이 사라지는 상태를 만들지 않는다. 마이그레이션 전에 존재한 Space는 `uninitialized`로 시작하며 사용자가 Space Inspector에서 최초 인덱싱을 요청해야 한다. 마이그레이션 전에 쌓인 event에는 generation을 소급 부여하지 않고, 최초 전체 인덱싱으로 현재 상태를 구성한다.
+
+새로 생성한 Space는 빈 graph가 이미 현재 상태이므로 `ready`로 시작한다. 이후 변경은 증분 처리한다. `uninitialized` Space에서도 변경 generation은 계속 전진하지만 worker는 최초 인덱싱 요청 전까지 이를 claim하지 않는다. 주기적인 전체 Space scan은 수행하지 않는다.
 
 Worker는 Space별 상태 row를 lease로 claim한다. 여러 API pod가 동시에 실행되어도 하나의 Space는 한 worker만 처리한다. 서로 다른 Space는 병렬 처리할 수 있다.
 
@@ -82,12 +84,13 @@ applied_generation = 링크 투영이 반영한 위치
 
 - `applied_generation < desired_generation`이면 결과는 갱신 중일 수 있다.
 - 두 cursor가 같고 상태가 ready이면 같은 event 위치까지 반영되었다.
+- `uninitialized`는 기존 Space의 최초 전체 인덱싱이 아직 요청되지 않은 상태다. 이 상태에서는 관계 결과를 노출하지 않는다.
 - event retention gap, parser version 변경, 안전하게 범위를 계산할 수 없는 topology 변경은 전체 재인덱싱을 요구한다.
 - 실패한 작업은 backoff 후 재시도한다. 사용자가 실패한 재인덱싱을 다시 요청하면 저장된 cursor를 유지한 채 즉시 재개한다.
 - 전체 재인덱싱은 bounded source batch마다 cursor를 commit하고 claim을 반환한다. Lease가 batch 도중 만료되면 projection commit은 거부되고 다른 worker가 마지막 commit cursor부터 Space를 다시 claim한다.
 - source 단위 교체와 Space 재인덱싱은 재실행해도 같은 결과가 되는 멱등 연산이다.
 
-재인덱싱은 문서 read/write를 막지 않는다. 재구성 중 Node Inspector는 부분 결과를 정상 결과처럼 노출하지 않고 rebuilding 상태를 표시한다.
+재인덱싱은 문서 read/write를 막지 않는다. Node Inspector는 `uninitialized`, `rebuilding`, `failed` 상태에서 부분 관계를 정상 결과처럼 노출하지 않는다. 실패한 재구성을 사용자가 다시 요청해도 완료 전까지 `rebuilding`을 유지한다.
 
 ## 삭제와 재생성
 
@@ -107,7 +110,7 @@ POST /api/v1/spaces/{space_id}/link-index/rebuild
 GET  /api/v1/spaces/{space_id}/nodes/{node_id}/links
 ```
 
-- Space Library의 Space Inspector는 상태와 링크 재인덱싱 버튼만 제공한다.
+- Space Library의 Space Inspector는 상태와 링크 인덱싱 버튼만 제공한다. 기존 Space가 `uninitialized`이면 `Index links`, 이후에는 `Reindex links`로 표시한다.
 - Node Inspector는 선택한 node의 outgoing, incoming, broken 관계를 bounded 목록과 count로 표시한다.
 - 재인덱싱 요청은 비동기이며 현재 작업 상태를 반환한다.
 - 이미 전체 재인덱싱이 실행 중이면 같은 요청은 추가 재인덱싱을 예약하지 않는다.

@@ -303,6 +303,29 @@ describe("SpaceLibrary", () => {
     expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
   });
 
+  it("offers initial indexing for an uninitialized Space", async () => {
+    mocks.useLinkIndexStateQuery.mockReturnValue({
+      data: {
+        space_id: "daily",
+        desired_generation: 7,
+        applied_generation: 0,
+        status: "uninitialized",
+        freshness: "uninitialized",
+        last_indexed_at: null
+      },
+      isError: false,
+      isLoading: false
+    });
+    const user = userEvent.setup();
+    renderLibrary();
+
+    expect(screen.getByText("Not indexed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Index links in Daily" }));
+
+    expect(mocks.resetLinkReindex).toHaveBeenCalledTimes(1);
+    expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
+  });
+
   it("retries usage loading from the inspector", async () => {
     mocks.useUsageQuery.mockReturnValue({
       data: undefined,

@@ -118,6 +118,8 @@ impl LinkIndexRepo {
             "UPDATE space_link_index_states \
              SET rebuild_requested = NOT $2, \
                  status = CASE \
+                    WHEN $2 THEN 'rebuilding' \
+                    WHEN space_link_index_states.status = 'uninitialized' THEN 'rebuilding' \
                     WHEN space_link_index_states.status = 'running' \
                         THEN space_link_index_states.status \
                     ELSE 'queued' \
@@ -152,8 +154,10 @@ impl LinkIndexRepo {
                 WHERE run_after <= now() \
                   AND (claim_until IS NULL OR claim_until <= now()) \
                   AND parser_version <= $3 \
-                  AND (status <> 'ready' OR applied_generation < desired_generation \
-                       OR rebuild_requested OR parser_version < $3) \
+                  AND (rebuild_requested \
+                       OR (status <> 'uninitialized' \
+                           AND (status <> 'ready' OR applied_generation < desired_generation \
+                                OR parser_version < $3))) \
                 ORDER BY run_after, updated_at, space_id \
                 FOR UPDATE SKIP LOCKED \
                 LIMIT 1 \

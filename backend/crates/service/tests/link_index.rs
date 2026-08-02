@@ -74,7 +74,10 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
         .await?;
 
     let runs = drain(&projector).await?;
-    assert!(matches!(runs.as_slice(), [LinkIndexRun::Rebuilt { .. }]));
+    assert!(matches!(
+        runs.as_slice(),
+        [LinkIndexRun::Incremental { events: 2, .. }]
+    ));
 
     let source_links = service.node_links(owner, space_id, source.id).await?;
     assert_eq!(source_links.index.freshness(), LinkIndexFreshness::Current);
@@ -187,6 +190,7 @@ async fn only_one_worker_claims_a_space() -> Result<(), Box<dyn std::error::Erro
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-claim").await;
     let index = LinkIndexRepo::new(db.pool.clone());
+    index.request_rebuild(space_id).await?;
 
     let first = index
         .claim_next(Duration::from_secs(30), 1)
@@ -219,6 +223,7 @@ async fn rebuild_request_does_not_queue_a_second_active_rebuild()
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-rebuild-idempotency").await;
     let index = LinkIndexRepo::new(db.pool.clone());
+    index.request_rebuild(space_id).await?;
     let claim = index
         .claim_next(Duration::from_secs(30), 1)
         .await?
@@ -264,6 +269,7 @@ async fn rebuild_request_resumes_a_failed_rebuild_immediately()
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-rebuild-resume").await;
     let index = LinkIndexRepo::new(db.pool.clone());
+    index.request_rebuild(space_id).await?;
     let claim = index
         .claim_next(Duration::from_secs(30), 1)
         .await?
@@ -274,7 +280,7 @@ async fn rebuild_request_resumes_a_failed_rebuild_immediately()
     index.fail_claim(&claim, "retry the rebuild").await?;
 
     let state = index.request_rebuild(space_id).await?;
-    assert_eq!(state.status, LinkIndexStatus::Queued);
+    assert_eq!(state.status, LinkIndexStatus::Rebuilding);
     let (saved_base, rebuild_requested, retry_count, ready_now): (Option<i64>, bool, i32, bool) =
         sqlx::query_as(
             "SELECT rebuild_base_generation, rebuild_requested, retry_count, run_after <= now() \
@@ -300,6 +306,149 @@ async fn rebuild_request_resumes_a_failed_rebuild_immediately()
 }
 
 #[tokio::test]
+async fn existing_space_waits_for_manual_initial_indexing() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-manual-initial",
+        "link-index-manual-initial@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, root_id) = setup_space(&spaces, owner, "link-index-manual-initial").await;
+    let files = FilesRepo::new(db.pool.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let service = LinkIndexService::new(index.clone(), files.clone());
+    let projector = LinkIndexProjector::new(index.clone(), files.clone());
+    let (_target, _) = files
+        .insert_text(space_id, root_id, "target.md", &text("target"), owner)
+        .await?;
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("[target](target.md)"),
+            owner,
+        )
+        .await?;
+
+    sqlx::query(
+        "UPDATE space_link_index_states \
+         SET status = 'uninitialized', rebuild_requested = false, applied_generation = 0 \
+         WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+
+    assert!(matches!(
+        projector.process_next().await?,
+        LinkIndexRun::Idle
+    ));
+    let pending = service.node_links(owner, space_id, source.id).await?;
+    assert_eq!(pending.index.freshness(), LinkIndexFreshness::Uninitialized);
+    assert_eq!(pending.outgoing_count, 0);
+    assert!(pending.outgoing.is_empty());
+
+    let state = index.request_rebuild(space_id).await?;
+    assert_eq!(state.status, LinkIndexStatus::Rebuilding);
+    let indexing = service.node_links(owner, space_id, source.id).await?;
+    assert_eq!(indexing.index.freshness(), LinkIndexFreshness::Rebuilding);
+    assert_eq!(indexing.outgoing_count, 0);
+    assert!(indexing.outgoing.is_empty());
+    assert!(matches!(
+        drain(&projector).await?.as_slice(),
+        [LinkIndexRun::Rebuilt { .. }]
+    ));
+    let indexed = service.node_links(owner, space_id, source.id).await?;
+    assert_eq!(indexed.index.freshness(), LinkIndexFreshness::Current);
+    assert_eq!(indexed.outgoing_count, 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_resumable_rebuild_never_exposes_partial_relations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-hidden-partial",
+        "link-index-hidden-partial@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, root_id) = setup_space(&spaces, owner, "link-index-hidden-partial").await;
+    let files = FilesRepo::new(db.pool.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let service = LinkIndexService::new(index.clone(), files.clone());
+    let projector = LinkIndexProjector::new(index.clone(), files.clone());
+    for source_index in 0..9 {
+        files
+            .insert_text(
+                space_id,
+                root_id,
+                &format!("source-{source_index}.md"),
+                &text("[missing](target.md)"),
+                owner,
+            )
+            .await?;
+    }
+    index.request_rebuild(space_id).await?;
+
+    assert!(matches!(
+        projector.process_next().await?,
+        LinkIndexRun::RebuildProgress { sources: 8, .. }
+    ));
+    let partial_source_id: uuid::Uuid =
+        sqlx::query_scalar("SELECT source_node_id FROM node_link_refs WHERE space_id = $1 LIMIT 1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    let claim = index
+        .claim_next(Duration::from_secs(30), 1)
+        .await?
+        .expect("resumable rebuild is reclaimable");
+    index.fail_claim(&claim, "simulated failure").await?;
+
+    let failed = service
+        .node_links(owner, space_id, partial_source_id)
+        .await?;
+    assert_eq!(failed.index.freshness(), LinkIndexFreshness::Failed);
+    assert_eq!(failed.outgoing_count, 0);
+    assert!(failed.outgoing.is_empty());
+
+    let retrying = index.request_rebuild(space_id).await?;
+    assert_eq!(retrying.status, LinkIndexStatus::Rebuilding);
+    let rebuilding = service
+        .node_links(owner, space_id, partial_source_id)
+        .await?;
+    assert_eq!(rebuilding.index.freshness(), LinkIndexFreshness::Rebuilding);
+    assert_eq!(rebuilding.outgoing_count, 0);
+    assert!(rebuilding.outgoing.is_empty());
+
+    assert!(matches!(
+        drain(&projector).await?.as_slice(),
+        [LinkIndexRun::Rebuilt { .. }]
+    ));
+    let current = service
+        .node_links(owner, space_id, partial_source_id)
+        .await?;
+    assert_eq!(current.index.freshness(), LinkIndexFreshness::Current);
+    assert_eq!(current.outgoing_count, 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn rebuild_releases_its_claim_after_each_source_batch()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -314,7 +463,8 @@ async fn rebuild_releases_its_claim_after_each_source_batch()
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, root_id) = setup_space(&spaces, owner, "link-index-rebuild-batches").await;
     let files = FilesRepo::new(db.pool.clone());
-    let projector = LinkIndexProjector::new(LinkIndexRepo::new(db.pool.clone()), files.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let projector = LinkIndexProjector::new(index.clone(), files.clone());
     for index in 0..9 {
         files
             .insert_text(
@@ -326,6 +476,7 @@ async fn rebuild_releases_its_claim_after_each_source_batch()
             )
             .await?;
     }
+    index.request_rebuild(space_id).await?;
 
     assert!(matches!(
         projector.process_next().await?,
@@ -380,6 +531,7 @@ async fn an_expired_claim_cannot_commit_and_the_space_is_reclaimable()
     let spaces = SpaceRepo::new(db.pool.clone());
     let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-expired-claim").await;
     let index = LinkIndexRepo::new(db.pool.clone());
+    index.request_rebuild(space_id).await?;
 
     let expired = index
         .claim_next(Duration::ZERO, 1)
