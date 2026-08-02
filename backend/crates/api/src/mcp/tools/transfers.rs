@@ -35,28 +35,31 @@ pub async fn call(
             "invalid op for file_transfer; allowed values are: begin_upload, prepare_parts, complete_upload, abort_upload, prepare_download",
         )),
     }?;
-    add_purpose_to_tool_inputs(&mut response.0, &purpose);
+    add_purpose_to_next_action_inputs(&mut response.0, &purpose);
     Ok(response)
 }
 
-fn add_purpose_to_tool_inputs(value: &mut Value, purpose: &str) {
-    match value {
-        Value::Object(object) => {
-            if object.contains_key("tool")
-                && let Some(Value::Object(input)) = object.get_mut("input")
-            {
-                input.insert("purpose".to_owned(), Value::String(purpose.to_owned()));
-            }
-            for child in object.values_mut() {
-                add_purpose_to_tool_inputs(child, purpose);
-            }
+fn add_purpose_to_next_action_inputs(response: &mut Value, purpose: &str) {
+    let Some(next_action) = response
+        .get_mut("next_action")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+
+    add_purpose_to_call_tool(next_action, purpose);
+    for key in ["repeat", "then"] {
+        if let Some(action) = next_action.get_mut(key).and_then(Value::as_object_mut) {
+            add_purpose_to_call_tool(action, purpose);
         }
-        Value::Array(values) => {
-            for child in values {
-                add_purpose_to_tool_inputs(child, purpose);
-            }
-        }
-        _ => {}
+    }
+}
+
+fn add_purpose_to_call_tool(action: &mut serde_json::Map<String, Value>, purpose: &str) {
+    if action.contains_key("tool")
+        && let Some(Value::Object(input)) = action.get_mut("input")
+    {
+        input.insert("purpose".to_owned(), Value::String(purpose.to_owned()));
     }
 }
 
@@ -434,7 +437,7 @@ mod tests {
             }
         });
 
-        add_purpose_to_tool_inputs(&mut response, "finish uploading the report");
+        add_purpose_to_next_action_inputs(&mut response, "finish uploading the report");
 
         assert_eq!(
             response["next_action"]["repeat"]["input"]["purpose"],
@@ -442,6 +445,28 @@ mod tests {
         );
         assert_eq!(
             response["next_action"]["then"]["input"]["purpose"],
+            "finish uploading the report"
+        );
+    }
+
+    #[test]
+    fn purpose_propagation_does_not_mutate_unrelated_response_objects() {
+        let mut response = json!({
+            "metadata": {
+                "tool": "file_transfer",
+                "input": {"op": "prepare_parts"}
+            },
+            "next_action": {
+                "tool": "file_transfer",
+                "input": {"op": "complete_upload"}
+            }
+        });
+
+        add_purpose_to_next_action_inputs(&mut response, "finish uploading the report");
+
+        assert_eq!(response["metadata"]["input"].get("purpose"), None);
+        assert_eq!(
+            response["next_action"]["input"]["purpose"],
             "finish uploading the report"
         );
     }

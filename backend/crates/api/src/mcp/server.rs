@@ -218,12 +218,10 @@ impl McpServer {
     ) -> Result<Json<Value>, ErrorData> {
         let Parameters(input) = params;
         let purpose = input.purpose.clone();
-        invocation::execute(
+        invocation::execute_sequence(
             &self.state,
             &parts,
-            "run_sequence",
-            None,
-            Some(&purpose),
+            &purpose,
             tools::unified::run_sequence(&self.state, &parts, Parameters(input)),
         )
         .await
