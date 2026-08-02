@@ -85,6 +85,23 @@ async fn me_is_the_only_tool_allowed_without_a_purpose() -> Result<(), Box<dyn s
         .await;
     assert!(missing_search_purpose.is_err());
 
+    for padded_purpose in ["\tsearch notes", "search notes\n"] {
+        let padded_search_purpose = repo
+            .insert(NewMcpInvocation {
+                owner_user_id: owner,
+                actor_account_id: owner,
+                caller_kind: "user",
+                tool: "search",
+                op: Some("find"),
+                purpose: Some(padded_purpose),
+                outcome: "success",
+                error_code: None,
+                duration_ms: 0,
+            })
+            .await;
+        assert!(padded_search_purpose.is_err());
+    }
+
     db.cleanup().await;
     Ok(())
 }

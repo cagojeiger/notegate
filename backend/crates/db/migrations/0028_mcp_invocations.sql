@@ -18,7 +18,7 @@ CREATE TABLE mcp_invocations (
       tool <> 'me'
       AND purpose IS NOT NULL
       AND char_length(purpose) BETWEEN 1 AND 200
-      AND purpose = btrim(purpose)
+      AND purpose !~ '^[[:space:]]|[[:space:]]$'
     )
   ),
   CONSTRAINT mcp_invocations_error_consistent CHECK (
