@@ -286,8 +286,10 @@ deleted_node_retention_days = 30
 account_deletion_retention_days = 15
 subtree_delete_max_nodes = 1000
 api_key_retention_days = 30
+mcp_invocation_retention_days = 90
 purge_batch_spaces = 100
 purge_batch_nodes = 1000
 purge_batch_accounts = 100
 purge_batch_api_keys = 1000
+purge_batch_mcp_invocations = 1000
 ```

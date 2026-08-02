@@ -277,6 +277,7 @@ Retention policy:
 ```text
 audit_events: 1 year
 file_change_events: 3 months
+mcp_invocations: 90 days
 ```
 
-현재 migration은 retention 조회/삭제를 위한 `created_at` index만 둔다. 실제 삭제 enforcement는 purge 작업 범위에서 구현한다.
+각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. `mcp_invocations`는 기존 purge worker가 90일을 초과한 행을 bounded batch로 삭제한다. `audit_events`와 `file_change_events`의 삭제 enforcement는 아직 purge 작업 범위에 포함되지 않는다.

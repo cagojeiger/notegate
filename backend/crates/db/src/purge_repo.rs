@@ -18,6 +18,7 @@ const NODE_PURGE_BATCH: i64 = 1_000;
 const ACCOUNT_PURGE_BATCH: i64 = 100;
 const API_KEY_PURGE_BATCH: i64 = 1_000;
 const BROWSER_SESSION_PURGE_BATCH: i64 = 1_000;
+const MCP_INVOCATION_PURGE_BATCH: i64 = 1_000;
 
 #[derive(Debug, Clone)]
 pub struct PurgeRepo {
@@ -51,6 +52,7 @@ impl PurgeRepo {
                 accounts_anonymized: 0,
                 api_keys_deleted: 0,
                 browser_sessions_deleted: 0,
+                mcp_invocations_deleted: 0,
                 object_deletions_queued: 0,
             });
         }
@@ -234,6 +236,26 @@ impl PurgeRepo {
         .map_err(map_sqlx_error)?
         .get("deleted_count");
 
+        let mcp_invocations_deleted: i64 = sqlx::query(
+            "WITH due AS ( \
+                 SELECT id FROM mcp_invocations \
+                 WHERE created_at <= now() - make_interval(days => $1::int) \
+                 ORDER BY created_at, id \
+                 LIMIT $2 \
+             ), deleted AS ( \
+                 DELETE FROM mcp_invocations m USING due \
+                 WHERE m.id = due.id \
+                 RETURNING m.id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(i32::try_from(limits::MCP_INVOCATION_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(MCP_INVOCATION_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(PurgeRun {
             lock_acquired: true,
@@ -242,6 +264,7 @@ impl PurgeRepo {
             accounts_anonymized: accounts_anonymized.max(0) as u64,
             api_keys_deleted: api_keys_deleted.max(0) as u64,
             browser_sessions_deleted: browser_sessions_deleted.max(0) as u64,
+            mcp_invocations_deleted: mcp_invocations_deleted.max(0) as u64,
             object_deletions_queued: queued_for_spaces + queued_for_nodes,
         })
     }
@@ -255,5 +278,6 @@ pub struct PurgeRun {
     pub accounts_anonymized: u64,
     pub api_keys_deleted: u64,
     pub browser_sessions_deleted: u64,
+    pub mcp_invocations_deleted: u64,
     pub object_deletions_queued: u64,
 }

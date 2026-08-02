@@ -225,7 +225,7 @@ mcp_invocations
   duration_ms bigint not null check >= 0
 ```
 
-`me`만 `purpose=NULL`을 허용하고 나머지 tool은 앞뒤 공백 없는 1..200자를 요구한다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회하며 retention 기간은 별도 운영 정책으로 정한다. 현재는 purge를 위한 `created_at` index만 둔다.
+`me`만 `purpose=NULL`을 허용하고 나머지 tool은 앞뒤 공백 없는 1..200자를 요구한다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 기존 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
 
 Event history DB 제약:
 
