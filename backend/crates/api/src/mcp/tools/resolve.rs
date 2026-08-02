@@ -249,6 +249,27 @@ pub fn invalid_input_error(message: impl Into<Cow<'static, str>>) -> ErrorData {
     ErrorData::invalid_params(message, error_meta("invalid_input"))
 }
 
+/// Build an invalid-input error that a caller can correct without parsing the
+/// human-readable message.
+pub fn actionable_input_error(
+    code: &'static str,
+    message: impl Into<Cow<'static, str>>,
+    hint: &'static str,
+    next_action: serde_json::Value,
+) -> ErrorData {
+    ErrorData::invalid_params(
+        message,
+        Some(json!({
+            "kind": "invalid_input",
+            "code": code,
+            "retryable": false,
+            "recoverable": true,
+            "hint": hint,
+            "next_action": next_action,
+        })),
+    )
+}
+
 /// Split an absolute path into its parent path and basename.
 ///
 /// `/projects/note.md` → (`/projects`, `note.md`); `/note.md` → (`/`, `note.md`).
@@ -538,6 +559,25 @@ mod tests {
         let internal_data = internal.data.expect("internal_error carries data");
         assert_eq!(internal_data["kind"], "internal_error");
         assert_eq!(internal_data["code"], "internal_error");
+    }
+
+    #[test]
+    fn actionable_input_error_extends_the_common_error_contract() {
+        let error = actionable_input_error(
+            "field_not_allowed",
+            "field is not allowed",
+            "Remove the field and retry.",
+            json!({"kind": "remove_fields", "fields": ["field"]}),
+        );
+
+        assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+        let data = error.data.expect("actionable input error carries data");
+        assert_eq!(data["kind"], "invalid_input");
+        assert_eq!(data["code"], "field_not_allowed");
+        assert_eq!(data["retryable"], false);
+        assert_eq!(data["recoverable"], true);
+        assert_eq!(data["hint"], "Remove the field and retry.");
+        assert_eq!(data["next_action"]["kind"], "remove_fields");
     }
 
     #[test]

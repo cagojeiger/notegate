@@ -1,7 +1,5 @@
 //! Directional file-change reads for the unified MCP `read` tool.
 
-use std::borrow::Cow;
-
 use axum::http::request::Parts;
 use notegate_service::ServiceError;
 use notegate_service::cursor;
@@ -12,7 +10,7 @@ use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::resolve::{caller, resolve_target, service_error};
+use super::resolve::{actionable_input_error, caller, resolve_target, service_error};
 use crate::file_change::FileChangeImpact;
 use crate::state::AppState;
 
@@ -60,7 +58,7 @@ pub async fn call(
 
 fn validate_change_request(before: Option<&str>, after: Option<&str>) -> Result<(), ErrorData> {
     if before.is_some() && after.is_some() {
-        return Err(changes_input_error(
+        return Err(actionable_input_error(
             "changes_direction_conflict",
             "before and after cannot be used together",
             "Choose one direction: keep before for older events or keep after for newer events.",
@@ -74,25 +72,6 @@ fn validate_change_request(before: Option<&str>, after: Option<&str>) -> Result<
         ));
     }
     Ok(())
-}
-
-pub(crate) fn changes_input_error(
-    code: &'static str,
-    message: impl Into<Cow<'static, str>>,
-    hint: &'static str,
-    next_action: Value,
-) -> ErrorData {
-    ErrorData::invalid_params(
-        message,
-        Some(json!({
-            "kind": "invalid_input",
-            "code": code,
-            "retryable": false,
-            "recoverable": true,
-            "hint": hint,
-            "next_action": next_action,
-        })),
-    )
 }
 
 async fn older(
@@ -251,7 +230,7 @@ fn require_space_root(path: &str, root_target: &str) -> Result<(), ErrorData> {
     if path == "/" {
         return Ok(());
     }
-    Err(changes_input_error(
+    Err(actionable_input_error(
         "changes_scope_invalid",
         "op=changes requires a Space-root target",
         "Replace target with the resolved Space root; node and subtree filters are not supported.",
@@ -328,7 +307,7 @@ fn changes_cursor_error(
             }),
         ),
     };
-    changes_input_error(code, message, hint, next_action)
+    actionable_input_error(code, message, hint, next_action)
 }
 
 fn event_json(event: &FileChangeEvent) -> Value {

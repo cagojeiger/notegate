@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::invalid_input_error;
+use super::resolve::{actionable_input_error, invalid_input_error};
 use super::{events, files, search, spaces};
 use crate::state::AppState;
 
@@ -391,7 +391,7 @@ pub async fn read(
 fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
     if input.op == "changes" {
         if input.cursor.is_some() {
-            return Err(events::changes_input_error(
+            return Err(actionable_input_error(
                 "changes_cursor_field_invalid",
                 "op=changes uses before/after, not cursor",
                 "Move the opaque changes cursor to before for older events or after for newer events.",
@@ -409,7 +409,7 @@ fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
     }
     if input.before.is_some() || input.after.is_some() {
         let fields = change_fields(input.before.is_some(), input.after.is_some());
-        return Err(events::changes_input_error(
+        return Err(actionable_input_error(
             "changes_fields_not_allowed",
             "before/after are only valid for read op=changes",
             "Remove the listed fields or change op to changes.",
@@ -625,7 +625,7 @@ async fn dispatch_command(
 ) -> Result<Json<Value>, ErrorData> {
     if command.tool != "read" && (command.before.is_some() || command.after.is_some()) {
         let fields = change_fields(command.before.is_some(), command.after.is_some());
-        return Err(events::changes_input_error(
+        return Err(actionable_input_error(
             "changes_fields_not_allowed",
             "before/after are only valid for read op=changes",
             "Remove the listed fields or use them only with a read changes command.",

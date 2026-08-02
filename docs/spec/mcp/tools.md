@@ -15,6 +15,7 @@
 - `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
 - Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
 - Space reconciliation 중 해당 Space의 read tool은 정상 동작하고 mutation tool은 `data.kind=usage_recalculation_in_progress`, `retryable=true`, `retry_after_seconds`를 포함한 JSON-RPC server error를 반환한다. 관리자 전체 재계산도 Space 단위로 순차 진행되므로 같은 규칙이 Space별로 적용된다. 상세 계약은 `../usage-and-quotas.md`를 따른다.
+- Tool handler가 반환하는 MCP error `data`는 공통 분류 `kind`와 안정적인 `code`를 사용한다. 호출자가 자연어 message를 해석하지 않고 입력을 수정할 수 있는 경우에는 `retryable=false`, `recoverable=true`, `hint`, `next_action`을 추가한다.
 
 ## `me`
 
@@ -91,7 +92,7 @@ ls:     op, target
 tree:   op, target
 stat:   op, target
 read:   op, target
-changes: op, target, mode
+changes: op, target
 ```
 
 ## `search`
