@@ -68,6 +68,32 @@ test("marks the final outline row current after navigating to the document botto
   await expect(finalHeading).toHaveAttribute("aria-current", "location");
 });
 
+test("keeps the outline frame fixed while its headings scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 520 });
+  await mockApi(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: markdownNode.name }).first().click();
+  await page.getByRole("tab", { name: "Outline" }).click();
+
+  const panel = page.getByRole("tabpanel", { name: "Outline" });
+  const outline = page.getByRole("navigation", { name: "Document outline" });
+  await expect(outline).toBeVisible();
+  await outline.focus();
+  await expect(outline).toBeFocused();
+
+  const initialGeometry = await outlineGeometry(panel, outline);
+  expect(initialGeometry.topInset).toBeGreaterThanOrEqual(11);
+  expect(initialGeometry.bottomInset).toBeGreaterThanOrEqual(11);
+
+  await outline.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => outline.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+  expect(await outlineGeometry(panel, outline)).toEqual(initialGeometry);
+});
+
 test("closes the mobile Inspector after an outline navigation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
@@ -76,13 +102,15 @@ test("closes the mobile Inspector after an outline navigation", async ({ page })
   await page.getByRole("button", { name: "Toggle left sidebar" }).click();
   await page.getByRole("button", { name: markdownNode.name }).first().click();
   await page.getByRole("button", { name: "Toggle right sidebar" }).click();
-  await page.getByRole("tab", { name: "Outline" }).click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await expect(inspector).toBeVisible();
+  await inspector.getByRole("tab", { name: "Outline" }).click();
 
   await page.getByRole("navigation", { name: "Document outline" })
     .getByRole("button", { name: "Final heading" })
     .click();
 
-  await expect(page.getByText("Inspector", { exact: true })).toHaveCount(0);
+  await expect(inspector).toHaveCount(0);
 });
 
 async function mockApi(page: import("@playwright/test").Page) {
@@ -141,6 +169,23 @@ async function scrollMetrics(locator: import("@playwright/test").Locator) {
   return locator.evaluate((element) => ({
     atBottom: element.scrollTop + element.clientHeight >= element.scrollHeight - 2
   }));
+}
+
+async function outlineGeometry(
+  panel: import("@playwright/test").Locator,
+  outline: import("@playwright/test").Locator
+) {
+  const panelBox = await panel.boundingBox();
+  const outlineBox = await outline.boundingBox();
+  if (!panelBox || !outlineBox) throw new Error("Outline geometry is unavailable");
+  return {
+    x: outlineBox.x,
+    y: outlineBox.y,
+    width: outlineBox.width,
+    height: outlineBox.height,
+    topInset: outlineBox.y - panelBox.y,
+    bottomInset: panelBox.y + panelBox.height - outlineBox.y - outlineBox.height
+  };
 }
 
 function longMarkdown() {

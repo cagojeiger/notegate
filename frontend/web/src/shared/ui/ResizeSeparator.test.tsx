@@ -55,4 +55,31 @@ describe("ResizeSeparator", () => {
     expect(onValueChange).toHaveBeenNthCalledWith(1, 290);
     expect(onValueChange).toHaveBeenNthCalledWith(2, 310);
   });
+
+  it("reverses horizontal arrows for a panel docked on the right", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <ResizeSeparator
+        orientation="vertical"
+        label="Resize Inspector"
+        value={320}
+        min={280}
+        max={520}
+        step={10}
+        reverseArrowDirection
+        onPointerDown={vi.fn()}
+        onValueChange={onValueChange}
+      />
+    );
+
+    const separator = screen.getByRole("separator", { name: "Resize Inspector" });
+    await separator.focus();
+    await user.keyboard("{ArrowLeft}{ArrowRight}{Home}{End}");
+
+    expect(onValueChange).toHaveBeenNthCalledWith(1, 330);
+    expect(onValueChange).toHaveBeenNthCalledWith(2, 310);
+    expect(onValueChange).toHaveBeenNthCalledWith(3, 280);
+    expect(onValueChange).toHaveBeenNthCalledWith(4, 520);
+  });
 });

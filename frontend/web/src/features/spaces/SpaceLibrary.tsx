@@ -164,7 +164,7 @@ export function SpaceLibrary({
         <aside
           aria-label="Space inspector"
           className="flex h-full min-h-0 shrink-0 overflow-hidden"
-          style={{ width: WORKBENCH_LAYOUT.auxiliaryWidth }}
+          style={{ width: WORKBENCH_LAYOUT.defaultAuxiliaryWidth }}
         >
           <SpaceInspector {...inspectorProps} />
         </aside>

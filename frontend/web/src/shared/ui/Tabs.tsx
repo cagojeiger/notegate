@@ -12,7 +12,7 @@ type TabsProps<T extends string> = {
   value: T;
   onChange: (value: T) => void;
   label?: string;
-  variant?: "default" | "compact";
+  variant?: "default" | "header";
 };
 
 export function Tabs<T extends string>({ items, value, onChange, label = "Tabs", variant = "default" }: TabsProps<T>) {
@@ -47,7 +47,9 @@ export function Tabs<T extends string>({ items, value, onChange, label = "Tabs",
     <div
       role="tablist"
       aria-label={label}
-      className={`${variant === "compact" ? "mb-3" : "mb-5"} flex max-w-full gap-1 overflow-x-auto border-b border-seam`}
+      className={variant === "header"
+        ? "flex h-full max-w-full items-end gap-1 overflow-x-auto"
+        : "mb-5 flex max-w-full gap-1 overflow-x-auto border-b border-seam"}
     >
       {items.map((item, index) => (
         <button
@@ -65,7 +67,7 @@ export function Tabs<T extends string>({ items, value, onChange, label = "Tabs",
           tabIndex={index === tabStopIndex ? 0 : -1}
           onClick={() => onChange(item.id)}
           onKeyDown={(event) => handleKeyDown(event, index)}
-          className={`-mb-px shrink-0 rounded-t-lg border-b-2 ${variant === "compact" ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm"} font-medium transition ${value === item.id ? "border-primary text-text" : item.disabled ? "border-transparent text-muted" : "border-transparent text-muted hover:bg-[var(--ng-hover)] hover:text-text"}${item.disabled ? " cursor-not-allowed opacity-50" : ""}`}
+          className={`-mb-px shrink-0 rounded-t-lg border-b-2 ${variant === "header" ? "flex h-9 items-center px-2.5 text-xs" : "px-3 py-2 text-sm"} font-medium transition ${value === item.id ? "border-primary text-text" : item.disabled ? "border-transparent text-muted" : "border-transparent text-muted hover:bg-[var(--ng-hover)] hover:text-text"}${item.disabled ? " cursor-not-allowed opacity-50" : ""}`}
         >
           {item.label}
         </button>

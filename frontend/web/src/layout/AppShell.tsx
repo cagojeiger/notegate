@@ -20,7 +20,7 @@ import { FullScreenStatus } from "./FullScreenStatus";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { Toast } from "./Toast";
-import { AuxiliarySidebarFrame, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
+import { AuxiliarySidebarFrame, AuxiliarySidebarResizeHandle, PanelOverlay, PrimarySidebarFrame, PrimarySidebarResizeHandle } from "./WorkbenchFrames";
 import { useWorkbenchLayout } from "./workbenchLayout";
 
 type AppShellProps = {
@@ -238,7 +238,13 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 onDownloadFile={actions.downloadFileNode}
                 canWriteActiveSpace={workbench.canWriteActiveSpace}
               />
-              <AuxiliarySidebarFrame mode={layout.auxiliaryMode}>
+              <AuxiliarySidebarResizeHandle
+                visible={layout.auxiliaryMode === "docked"}
+                value={workbench.auxiliaryWidth}
+                onPointerDown={actions.startAuxiliaryResize}
+                onValueChange={actions.setAuxiliaryWidth}
+              />
+              <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode={layout.auxiliaryMode} width={workbench.auxiliaryWidth}>
                 <AuxiliarySidebar
                   activeNode={workbench.inspectedNode}
                   activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}

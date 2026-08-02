@@ -54,7 +54,7 @@ describe("AuxiliarySidebar", () => {
     });
   });
 
-  it("uses the shared workbench body-header height and seam", () => {
+  it("uses the Details and Outline tabs as the single workbench header", () => {
     renderSidebar({
       activeNode: null,
       canWriteActiveSpace: false,
@@ -63,7 +63,12 @@ describe("AuxiliarySidebar", () => {
       writeLockAvailable: false
     });
 
-    expect(screen.getByText("Inspector")).toHaveClass("h-12", "border-b", "border-seam");
+    const inspector = screen.getByRole("complementary", { name: "Inspector" });
+    const tablist = within(inspector).getByRole("tablist", { name: "Inspector sections" });
+    expect(within(inspector).queryByText("Inspector", { exact: true })).not.toBeInTheDocument();
+    expect(tablist.parentElement).toHaveClass("h-12", "border-b", "border-seam");
+    expect(tablist).toHaveClass("h-full", "items-end");
+    expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("changes search, write lock, and stored-text encryption independently", async () => {
@@ -365,8 +370,13 @@ describe("AuxiliarySidebar", () => {
     await user.click(outlineTab);
     expect(mocks.useFolderChildrenStat).not.toHaveBeenCalled();
     expect(screen.getByRole("tabpanel", { name: "Outline" })).toBeVisible();
-    expect(screen.getByRole("tabpanel", { name: "Outline" })).toHaveAttribute("aria-labelledby", expect.stringMatching(/-outline-tab$/));
+    const outlinePanel = screen.getByRole("tabpanel", { name: "Outline" });
+    expect(outlinePanel).toHaveAttribute("aria-labelledby", expect.stringMatching(/-outline-tab$/));
+    expect(outlinePanel).not.toHaveAttribute("tabindex");
+    expect(outlinePanel).toHaveClass("overflow-hidden", "p-3");
     const outlineNavigation = screen.getByRole("navigation", { name: "Document outline" });
+    expect(outlineNavigation).toHaveAttribute("tabindex", "0");
+    expect(outlineNavigation).toHaveClass("max-h-full", "overflow-y-auto");
     const currentHeading = within(outlineNavigation).getByRole("button", { name: "개요" });
     const otherHeading = within(outlineNavigation).getByRole("button", { name: "세부 사항" });
     expect(currentHeading).toHaveAttribute("aria-current", "location");

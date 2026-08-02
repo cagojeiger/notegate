@@ -30,18 +30,59 @@ export function PrimarySidebarResizeHandle({
   onPointerDown: PointerEventHandler<HTMLDivElement>;
   onValueChange: (value: number) => void;
 }) {
+  return <SidebarResizeHandle visible={visible} value={value} min={WORKBENCH_LAYOUT.minPrimaryWidth} max={WORKBENCH_LAYOUT.maxPrimaryWidth} label="Resize Files sidebar" controls="primary-sidebar-panel" onPointerDown={onPointerDown} onValueChange={onValueChange} />;
+}
+
+export function AuxiliarySidebarResizeHandle({
+  visible,
+  value,
+  onPointerDown,
+  onValueChange
+}: {
+  visible: boolean;
+  value: number;
+  onPointerDown: PointerEventHandler<HTMLDivElement>;
+  onValueChange: (value: number) => void;
+}) {
+  return <SidebarResizeHandle visible={visible} value={value} min={WORKBENCH_LAYOUT.minAuxiliaryWidth} max={WORKBENCH_LAYOUT.maxAuxiliaryWidth} label="Resize Inspector" controls="auxiliary-sidebar-panel" overlayBoundary reverseArrowDirection onPointerDown={onPointerDown} onValueChange={onValueChange} />;
+}
+
+function SidebarResizeHandle({
+  visible,
+  value,
+  min,
+  max,
+  label,
+  controls,
+  overlayBoundary = false,
+  reverseArrowDirection = false,
+  onPointerDown,
+  onValueChange
+}: {
+  visible: boolean;
+  value: number;
+  min: number;
+  max: number;
+  label: string;
+  controls: string;
+  overlayBoundary?: boolean;
+  reverseArrowDirection?: boolean;
+  onPointerDown: PointerEventHandler<HTMLDivElement>;
+  onValueChange: (value: number) => void;
+}) {
   if (!visible) return null;
   return (
-    <div className="relative hidden w-1 shrink-0 bg-transparent md:block">
+    <div className={`relative hidden shrink-0 bg-transparent md:block ${overlayBoundary ? "w-0" : "w-1"}`}>
       <ResizeSeparator
         orientation="vertical"
-        label="Resize Files sidebar"
+        label={label}
         value={value}
-        min={WORKBENCH_LAYOUT.minPrimaryWidth}
-        max={WORKBENCH_LAYOUT.maxPrimaryWidth}
+        min={min}
+        max={max}
         step={10}
         valueText={`${value} pixels`}
-        controls="primary-sidebar-panel"
+        controls={controls}
+        reverseArrowDirection={reverseArrowDirection}
         onPointerDown={onPointerDown}
         onValueChange={onValueChange}
       />
@@ -49,17 +90,17 @@ export function PrimarySidebarResizeHandle({
   );
 }
 
-export function AuxiliarySidebarFrame({ mode, children }: { mode: WorkbenchPanelMode; children: ReactNode }) {
+export function AuxiliarySidebarFrame({ mode, width, children, id }: { mode: WorkbenchPanelMode; width: number; children: ReactNode; id?: string }) {
   if (mode === "hidden") return null;
 
-  const style = mode === "docked" ? { width: WORKBENCH_LAYOUT.auxiliaryWidth } : undefined;
+  const style = mode === "docked" ? { width } : undefined;
   const className =
     mode === "docked"
       ? "min-h-0 flex shrink-0"
       : "fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-40 flex h-[70dvh] min-h-0 max-w-none rounded-t-2xl shadow-2xl";
 
   return (
-    <div style={style} className={className}>
+    <div id={id} style={style} className={className}>
       {children}
     </div>
   );
