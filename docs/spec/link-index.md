@@ -11,7 +11,9 @@ NoteGate는 같은 Space 안의 Markdown 링크와 이미지 참조를 현재 �
 ![이미지](./assets/diagram.png)
 ```
 
-외부 URL, 현재 문서 anchor, Obsidian wikilink, raw HTML 링크는 저장하지 않는다. Query string이 있거나 path가 유효하지 않은 내부 후보는 invalid 참조로 저장한다. Client-encrypted Text는 서버가 본문을 읽을 수 없으므로 인덱싱하지 않는다. 서버 저장 암호화 Text는 복호화한 현재 본문을 인덱싱한다.
+외부 URL, 현재 문서 anchor, Obsidian wikilink, raw HTML 링크는 저장하지 않는다. Query string이 있거나 path가 유효하지 않은 내부 후보는 invalid 참조로 저장한다. Client-encrypted Text는 서버가 본문을 읽을 수 없으므로 인덱싱하지 않는다.
+
+서버 저장 암호화 Text도 영속 링크 인덱스의 source로 사용하지 않는다. 링크 원문뿐 아니라 본문에서 파생된 source/target 관계도 DB에 평문 metadata로 남기지 않기 위해서다. 다른 일반 Text가 암호화 Text를 가리키는 incoming 관계는 대상 node metadata만 사용하므로 유지한다. 서버 저장 암호화 여부는 `grep` 동작에는 영향을 주지 않는다.
 
 검색 포함 여부와 링크 인덱싱 여부는 서로 독립적이다.
 
@@ -71,7 +73,7 @@ Worker는 Space별 상태 row를 lease로 claim한다. 여러 API pod가 동시�
 
 따라서 같은 문서가 연속으로 여러 번 저장되어도 마지막 현재 상태가 투영된다. 투영 교체와 `applied_generation` 전진은 같은 transaction에서 완료한다.
 
-Move, rename, recursive copy처럼 여러 source의 상대 path 또는 여러 target path를 바꾸는 topology 변경은 부분 영향을 추측하지 않고 Space 재인덱싱으로 승격한다. 한 증분 batch에서 처리할 source가 작업 상한을 넘는 경우에도 참조를 일부 생략하지 않고 Space 재인덱싱으로 승격한다. 삭제된 source의 outgoing 참조는 제거한다. 삭제된 target을 가리키는 참조는 삭제하지 않고 `deleted`로 보존한다.
+Move, rename, recursive copy처럼 여러 source의 상대 path 또는 여러 target path를 바꾸는 topology 변경은 부분 영향을 추측하지 않고 Space 재인덱싱으로 승격한다. 일반 변경에서 source 작업 상한을 넘으면 연속 generation prefix를 상한만큼 증분 처리하고 나머지는 다음 claim에서 이어서 처리한다. 참조를 생략하거나 전체 Space 재인덱싱으로 승격하지 않는다. 삭제된 source의 outgoing 참조는 제거한다. 삭제된 target을 가리키는 참조는 삭제하지 않고 `deleted`로 보존한다.
 
 ## 최종 일관성
 

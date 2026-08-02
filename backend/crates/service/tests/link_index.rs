@@ -15,9 +15,12 @@ use std::time::Duration;
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{FilesRepo, LinkIndexRepo, SpaceRepo, TextMutationKind};
 use notegate_model::files::{StoredContent, WriteTextBody};
-use notegate_model::{LinkIndexFreshness, LinkIndexStatus, LinkReferenceStatus};
+use notegate_model::{AccountKind, LinkIndexFreshness, LinkIndexStatus, LinkReferenceStatus};
+use notegate_service::files::{FilesService, UpdateTextEncryption};
 use notegate_service::link_index::{LinkIndexProjector, LinkIndexRun, LinkIndexService};
 use sha2::{Digest, Sha256};
+
+const PARSER_VERSION: i32 = 2;
 
 fn text(content: &str) -> StoredContent {
     StoredContent {
@@ -193,16 +196,149 @@ async fn only_one_worker_claims_a_space() -> Result<(), Box<dyn std::error::Erro
     index.request_rebuild(space_id).await?;
 
     let first = index
-        .claim_next(Duration::from_secs(30), 1)
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
         .await?
         .expect("first worker claims queued space");
     assert_eq!(first.space_id, space_id);
     assert!(
         index
-            .claim_next(Duration::from_secs(30), 1)
+            .claim_next(Duration::from_secs(30), PARSER_VERSION)
             .await?
             .is_none()
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn large_text_fanout_is_applied_in_bounded_incremental_runs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-bounded-incremental",
+        "link-index-bounded-incremental@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, root_id) = setup_space(&spaces, owner, "link-index-bounded-incremental").await;
+    let files = FilesRepo::new(db.pool.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let service = LinkIndexService::new(index.clone(), files.clone());
+    let projector = LinkIndexProjector::new(index, files.clone());
+
+    for number in 0..9 {
+        files
+            .insert_text(
+                space_id,
+                root_id,
+                &format!("source-{number}.md"),
+                &text("no links"),
+                owner,
+            )
+            .await?;
+    }
+
+    let runs = drain(&projector).await?;
+    assert!(matches!(
+        runs.as_slice(),
+        [
+            LinkIndexRun::Incremental { events: 8, .. },
+            LinkIndexRun::Incremental { events: 1, .. }
+        ]
+    ));
+    assert_eq!(
+        service.state(owner, space_id).await?.freshness(),
+        LinkIndexFreshness::Current
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn server_encryption_removes_persisted_outgoing_relations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-encrypted-source",
+        "link-index-encrypted-source@example.test",
+    )
+    .await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, root_id) = setup_space(&spaces, owner, "link-index-encrypted-source").await;
+    let files = FilesRepo::new(db.pool.clone());
+    let files_service = FilesService::new(files.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let link_service = LinkIndexService::new(index.clone(), files.clone());
+    let projector = LinkIndexProjector::new(index, files.clone());
+
+    let (target, _) = files
+        .insert_text(space_id, root_id, "target.md", &text("target"), owner)
+        .await?;
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("[private](target.md#sensitive-heading)"),
+            owner,
+        )
+        .await?;
+    drain(&projector).await?;
+    assert_eq!(
+        link_service
+            .node_links(owner, space_id, source.id)
+            .await?
+            .outgoing_count,
+        1
+    );
+
+    files_service
+        .update_text_encryption(
+            AccountKind::User,
+            owner,
+            space_id,
+            UpdateTextEncryption {
+                node_id: source.id,
+                enabled: true,
+            },
+        )
+        .await?;
+    drain(&projector).await?;
+
+    assert_eq!(
+        link_service
+            .node_links(owner, space_id, source.id)
+            .await?
+            .outgoing_count,
+        0
+    );
+    assert_eq!(
+        link_service
+            .node_links(owner, space_id, target.id)
+            .await?
+            .incoming_count,
+        0
+    );
+    let persisted: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM node_link_refs WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(persisted, 0);
 
     db.cleanup().await;
     Ok(())
@@ -225,11 +361,11 @@ async fn rebuild_request_does_not_queue_a_second_active_rebuild()
     let index = LinkIndexRepo::new(db.pool.clone());
     index.request_rebuild(space_id).await?;
     let claim = index
-        .claim_next(Duration::from_secs(30), 1)
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
         .await?
         .expect("queued space is claimed");
     let base_generation = index
-        .begin_rebuild(&claim, 1, Duration::from_secs(30))
+        .begin_rebuild(&claim, PARSER_VERSION, Duration::from_secs(30))
         .await?;
 
     let state = index.request_rebuild(space_id).await?;
@@ -245,7 +381,7 @@ async fn rebuild_request_does_not_queue_a_second_active_rebuild()
     index.finish_rebuild(&claim, base_generation).await?;
     assert!(
         index
-            .claim_next(Duration::from_secs(30), 1)
+            .claim_next(Duration::from_secs(30), PARSER_VERSION)
             .await?
             .is_none()
     );
@@ -271,11 +407,11 @@ async fn rebuild_request_resumes_a_failed_rebuild_immediately()
     let index = LinkIndexRepo::new(db.pool.clone());
     index.request_rebuild(space_id).await?;
     let claim = index
-        .claim_next(Duration::from_secs(30), 1)
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
         .await?
         .expect("queued space is claimed");
     let base_generation = index
-        .begin_rebuild(&claim, 1, Duration::from_secs(30))
+        .begin_rebuild(&claim, PARSER_VERSION, Duration::from_secs(30))
         .await?;
     index.fail_claim(&claim, "retry the rebuild").await?;
 
@@ -295,7 +431,7 @@ async fn rebuild_request_resumes_a_failed_rebuild_immediately()
     assert!(ready_now);
 
     let resumed = index
-        .claim_next(Duration::from_secs(30), 1)
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
         .await?
         .expect("failed rebuild is immediately reclaimable");
     assert_eq!(resumed.rebuild_base_generation, Some(base_generation));
@@ -413,7 +549,7 @@ async fn failed_resumable_rebuild_never_exposes_partial_relations()
             .fetch_one(&db.pool)
             .await?;
     let claim = index
-        .claim_next(Duration::from_secs(30), 1)
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
         .await?
         .expect("resumable rebuild is reclaimable");
     index.fail_claim(&claim, "simulated failure").await?;
@@ -534,17 +670,17 @@ async fn an_expired_claim_cannot_commit_and_the_space_is_reclaimable()
     index.request_rebuild(space_id).await?;
 
     let expired = index
-        .claim_next(Duration::ZERO, 1)
+        .claim_next(Duration::ZERO, PARSER_VERSION)
         .await?
         .expect("queued space is claimed");
     assert!(matches!(
         index
-            .begin_rebuild(&expired, 1, Duration::from_secs(30))
+            .begin_rebuild(&expired, PARSER_VERSION, Duration::from_secs(30))
             .await,
         Err(notegate_core::Error::Conflict(_))
     ));
     let replacement = index
-        .claim_next(Duration::from_secs(30), 1)
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
         .await?
         .expect("expired claim is reclaimable");
     assert_eq!(replacement.space_id, space_id);
@@ -743,7 +879,7 @@ async fn an_older_worker_does_not_downgrade_a_newer_parser_projection()
     drain(&projector).await?;
     sqlx::query(
         "UPDATE space_link_index_states \
-         SET parser_version = 2, status = 'ready', rebuild_requested = false \
+         SET parser_version = 3, status = 'ready', rebuild_requested = false \
          WHERE space_id = $1",
     )
     .bind(space_id)
@@ -762,7 +898,7 @@ async fn an_older_worker_does_not_downgrade_a_newer_parser_projection()
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(parser_version, 2);
+    assert_eq!(parser_version, 3);
 
     db.cleanup().await;
     Ok(())

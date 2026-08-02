@@ -6,14 +6,14 @@ use std::time::Duration;
 use notegate_db::{
     FilesRepo, LinkIndexClaim, LinkIndexRepo, NewLinkReference, QueuedLinkIndexEvent, SourceLinkSet,
 };
-use notegate_model::LinkIndexStatus;
+use notegate_model::{LinkIndexStatus, TextAtRestEncryption};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
 
 use super::markdown;
 
-const PARSER_VERSION: i32 = 1;
+const PARSER_VERSION: i32 = 2;
 const CLAIM_LEASE: Duration = Duration::from_secs(120);
 const EVENT_BATCH_SIZE: i64 = 200;
 const INCREMENTAL_SOURCE_LIMIT: usize = 8;
@@ -100,13 +100,12 @@ impl LinkIndexProjector {
             });
         }
 
-        let impact = EventImpact::from_events(&batch.events);
-        if impact.requires_rebuild() {
+        let Some((impact, event_count)) = EventImpact::bounded_incremental(&batch.events) else {
             self.index.request_claim_rebuild(claim).await?;
             return Ok(LinkIndexRun::RebuildQueued {
                 space_id: claim.space_id,
             });
-        }
+        };
         let source_ids = impact.dirty_sources.into_iter().collect::<Vec<_>>();
         let sources = self.source_link_sets(claim.space_id, &source_ids).await?;
         let rebind_targets = self
@@ -115,12 +114,14 @@ impl LinkIndexProjector {
                 &impact.created_targets.into_iter().collect::<Vec<_>>(),
             )
             .await?;
+        let last_generation_index = event_count
+            .checked_sub(1)
+            .ok_or_else(|| ServiceError::Internal("link index event batch is empty".to_owned()))?;
         let last_generation = batch
             .events
-            .last()
+            .get(last_generation_index)
             .map(|event| event.generation)
             .ok_or_else(|| ServiceError::Internal("link index event batch is empty".to_owned()))?;
-        let event_count = batch.events.len();
         self.index
             .commit_incremental(
                 claim,
@@ -198,11 +199,9 @@ impl LinkIndexProjector {
 
         for source_id in source_ids {
             let references = match (texts.get(source_id), paths.get(source_id)) {
-                (Some(text), Some(path)) => text
-                    .content
-                    .as_deref()
-                    .map(|content| markdown::parse_references(path, content))
-                    .unwrap_or_default(),
+                (Some(text), Some(path)) => {
+                    parse_source_references(path, text.content.as_deref(), text.at_rest_encryption)
+                }
                 _ => Vec::new(),
             };
             for reference in &references {
@@ -261,6 +260,19 @@ impl LinkIndexProjector {
     }
 }
 
+fn parse_source_references(
+    source_path: &str,
+    content: Option<&str>,
+    at_rest_encryption: TextAtRestEncryption,
+) -> Vec<markdown::ParsedReference> {
+    if at_rest_encryption == TextAtRestEncryption::Server {
+        return Vec::new();
+    }
+    content
+        .map(|content| markdown::parse_references(source_path, content))
+        .unwrap_or_default()
+}
+
 #[derive(Default)]
 struct EventImpact {
     dirty_sources: BTreeSet<Uuid>,
@@ -270,53 +282,83 @@ struct EventImpact {
 }
 
 impl EventImpact {
+    fn bounded_incremental(events: &[QueuedLinkIndexEvent]) -> Option<(Self, usize)> {
+        let mut impact = Self::default();
+        let mut event_count = 0;
+
+        for event in events {
+            let next = Self::from_event(event);
+            if next.rebuild {
+                return None;
+            }
+            let additional_sources = next.dirty_sources.difference(&impact.dirty_sources).count();
+            if impact.dirty_sources.len() + additional_sources > INCREMENTAL_SOURCE_LIMIT {
+                break;
+            }
+            impact.merge(next);
+            event_count += 1;
+        }
+
+        Some((impact, event_count))
+    }
+
+    #[cfg(test)]
     fn from_events(events: &[QueuedLinkIndexEvent]) -> Self {
         let mut impact = Self::default();
         for queued in events {
-            let event = &queued.event;
-            let Some(node_id) = event.node_id else {
-                impact.rebuild = true;
-                continue;
-            };
-            match event.op_type.as_str() {
-                "text.create" => {
-                    impact.dirty_sources.insert(node_id);
-                    impact.created_targets.insert(node_id);
-                }
-                "text.write" | "text.append" | "text.patch" | "text.edit" => {
-                    impact.dirty_sources.insert(node_id);
-                }
-                "folder.create" | "file.create" => {
-                    impact.created_targets.insert(node_id);
-                }
-                "metadata.replace" | "metadata.patch" => {}
-                "item.update" => {
-                    if event
-                        .metadata
-                        .get("name_changed")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                    {
-                        impact.rebuild = true;
-                    } else if event
-                        .metadata
-                        .get("text_encryption_changed")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                    {
-                        impact.dirty_sources.insert(node_id);
-                    }
-                }
-                "item.delete" => impact.cleanup_deleted = true,
-                "item.move" | "item.copy" => impact.rebuild = true,
-                _ => impact.rebuild = true,
-            }
+            impact.merge(Self::from_event(queued));
         }
         impact
     }
 
-    fn requires_rebuild(&self) -> bool {
-        self.rebuild || self.dirty_sources.len() > INCREMENTAL_SOURCE_LIMIT
+    fn from_event(queued: &QueuedLinkIndexEvent) -> Self {
+        let mut impact = Self::default();
+        let event = &queued.event;
+        let Some(node_id) = event.node_id else {
+            impact.rebuild = true;
+            return impact;
+        };
+        match event.op_type.as_str() {
+            "text.create" => {
+                impact.dirty_sources.insert(node_id);
+                impact.created_targets.insert(node_id);
+            }
+            "text.write" | "text.append" | "text.patch" | "text.edit" => {
+                impact.dirty_sources.insert(node_id);
+            }
+            "folder.create" | "file.create" => {
+                impact.created_targets.insert(node_id);
+            }
+            "metadata.replace" | "metadata.patch" => {}
+            "item.update" => {
+                if event
+                    .metadata
+                    .get("name_changed")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    impact.rebuild = true;
+                } else if event
+                    .metadata
+                    .get("text_encryption_changed")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    impact.dirty_sources.insert(node_id);
+                }
+            }
+            "item.delete" => impact.cleanup_deleted = true,
+            "item.move" | "item.copy" => impact.rebuild = true,
+            _ => impact.rebuild = true,
+        }
+        impact
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.dirty_sources.extend(other.dirty_sources);
+        self.created_targets.extend(other.created_targets);
+        self.cleanup_deleted |= other.cleanup_deleted;
+        self.rebuild |= other.rebuild;
     }
 }
 
@@ -374,12 +416,37 @@ mod tests {
     }
 
     #[test]
-    fn large_incremental_fanout_requires_a_space_rebuild() {
+    fn large_incremental_fanout_is_split_without_a_space_rebuild() {
         let events = (0..=INCREMENTAL_SOURCE_LIMIT)
             .map(|_| event(1, Uuid::new_v4(), "text.write", json!({})))
             .collect::<Vec<_>>();
 
-        assert!(EventImpact::from_events(&events).requires_rebuild());
+        let (first, first_count) =
+            EventImpact::bounded_incremental(&events).expect("incremental batch");
+        assert_eq!(first_count, INCREMENTAL_SOURCE_LIMIT);
+        assert_eq!(first.dirty_sources.len(), INCREMENTAL_SOURCE_LIMIT);
+        assert!(!first.rebuild);
+
+        let (_, remaining) = events.split_at(first_count);
+        let (second, second_count) =
+            EventImpact::bounded_incremental(remaining).expect("remaining batch");
+        assert_eq!(second_count, 1);
+        assert_eq!(second.dirty_sources.len(), 1);
+        assert!(!second.rebuild);
+    }
+
+    #[test]
+    fn encrypted_sources_do_not_persist_outgoing_references() {
+        let content = "[target](target.md?token=secret)";
+
+        assert!(
+            parse_source_references("/source.md", Some(content), TextAtRestEncryption::Server,)
+                .is_empty()
+        );
+        assert_eq!(
+            parse_source_references("/source.md", Some(content), TextAtRestEncryption::None,).len(),
+            1
+        );
     }
 
     #[test]
