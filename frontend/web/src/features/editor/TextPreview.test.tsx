@@ -371,8 +371,11 @@ describe("TextPreview", () => {
     const { container } = render(<TextPreview name="query.SQL" content={content} />);
 
     await waitFor(() => expect(container.querySelector(".shiki")).toBeInTheDocument());
-    expect(container.querySelector(".shiki")?.textContent).toBe(content);
-    expect(container.querySelector(".shiki")).toHaveAttribute("tabindex", "0");
+    const highlighted = container.querySelector(".shiki");
+    expect(highlighted?.textContent).toBe(content);
+    expect(highlighted).toHaveAttribute("tabindex", "0");
+    expect(highlighted).toHaveClass("github-light-high-contrast", "github-dark-high-contrast");
+    expect(highlighted?.querySelector('[style*="--shiki-light"]')?.getAttribute("style")).toContain("--shiki-dark:");
     expect(container.querySelector(".ng-source-flat")).toBeInTheDocument();
     expect(container.querySelector("pre.ng-code-fallback")).not.toBeInTheDocument();
     expect(screen.queryByRole("tree", { name: "Structured data tree" })).not.toBeInTheDocument();

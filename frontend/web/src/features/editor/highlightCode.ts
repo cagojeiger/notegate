@@ -1,7 +1,7 @@
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
-import githubDarkDimmed from "shiki/themes/github-dark-dimmed.mjs";
-import githubLight from "shiki/themes/github-light.mjs";
+import githubDarkHighContrast from "shiki/themes/github-dark-high-contrast.mjs";
+import githubLightHighContrast from "shiki/themes/github-light-high-contrast.mjs";
 
 const LANGUAGE_LOADERS = {
   go: () => import("shiki/langs/go.mjs"),
@@ -33,7 +33,7 @@ export async function highlightCode(code: string, language: string): Promise<str
   await loadLanguage(highlighter, language);
   return highlighter.codeToHtml(code, {
     lang: language,
-    themes: { light: "github-light", dark: "github-dark-dimmed" },
+    themes: { light: "github-light-high-contrast", dark: "github-dark-high-contrast" },
     defaultColor: false,
     transformers: [{
       pre(element) {
@@ -45,7 +45,7 @@ export async function highlightCode(code: string, language: string): Promise<str
 
 function getHighlighter(): Promise<HighlighterCore> {
   highlighterPromise ??= createHighlighterCore({
-    themes: [githubLight, githubDarkDimmed],
+    themes: [githubLightHighContrast, githubDarkHighContrast],
     langs: [],
     engine: createJavaScriptRegexEngine()
   });
