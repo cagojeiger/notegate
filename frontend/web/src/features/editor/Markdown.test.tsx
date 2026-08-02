@@ -2,16 +2,7 @@ import { render } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { parseMarkdownDocument } from "../../shared/lib/markdownDocument";
 import { Markdown } from "./Markdown";
-
-vi.mock("../../shared/lib/markdownDocument", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../shared/lib/markdownDocument")>();
-  return {
-    ...actual,
-    parseMarkdownDocument: vi.fn(actual.parseMarkdownDocument)
-  };
-});
 
 describe("Markdown", () => {
   it("does not render raw internal image src before the loader runs", () => {
@@ -28,13 +19,21 @@ describe("Markdown", () => {
     expect(loadInternalImage).not.toHaveBeenCalled();
   });
 
-  it("does not parse unchanged content again when its parent rerenders", () => {
-    vi.mocked(parseMarkdownDocument).mockClear();
-    const props = { content: "# Cached preview" };
-    const { rerender } = render(<Markdown {...props} />);
+  it("renders supplied frontmatter as properties before the markdown body", () => {
+    const { container } = render(
+      <Markdown
+        content="# Body"
+        frontmatter={{
+          title: "Note",
+          tags: ["one", "two"]
+        }}
+      />
+    );
 
-    rerender(<Markdown {...props} />);
-
-    expect(parseMarkdownDocument).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".markdown-frontmatter")).toHaveTextContent("title");
+    expect(container.querySelector(".markdown-frontmatter")).toHaveTextContent("Note");
+    expect(container.querySelector(".markdown-frontmatter")).toHaveTextContent("tags");
+    expect(container.querySelector(".markdown-frontmatter")).toHaveTextContent("one, two");
+    expect(container.querySelector("h1")).toHaveTextContent("Body");
   });
 });

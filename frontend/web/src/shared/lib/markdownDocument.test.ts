@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { formatFrontmatterValue, parseMarkdownDocument } from "./markdownDocument";
+import { parseMarkdownDocument } from "./markdownDocument";
+import { formatFrontmatterValue, hasMarkdownFrontmatterCandidate } from "./markdownFrontmatter";
 
 describe("markdownDocument", () => {
   it("separates object frontmatter from the markdown body", () => {
@@ -25,6 +26,11 @@ describe("markdownDocument", () => {
       frontmatter: { title: "Note" },
       body: "Body"
     });
+  });
+
+  it("detects leading BOM-prefixed CRLF frontmatter candidates", () => {
+    expect(hasMarkdownFrontmatterCandidate("\uFEFF---\r\ntitle: Note\r\n---\r\nBody")).toBe(true);
+    expect(hasMarkdownFrontmatterCandidate("# Body\n\n---\nnot frontmatter")).toBe(false);
   });
 
   it("formats nested frontmatter values for display", () => {

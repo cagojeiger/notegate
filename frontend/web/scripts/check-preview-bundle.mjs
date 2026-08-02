@@ -3,13 +3,18 @@ import { gzipSync } from "node:zlib";
 
 const manifestUrl = new URL("../dist/.vite/manifest.json", import.meta.url);
 const manifest = JSON.parse(await readFile(manifestUrl, "utf8"));
-const entryKey = Object.keys(manifest).find((key) =>
+const structuredPreviewKey = Object.keys(manifest).find((key) =>
   key === "src/features/editor/StructuredPreview.tsx" || manifest[key].name === "StructuredPreview"
 );
-const entry = manifest[entryKey];
+const markdownPreviewKey = Object.keys(manifest).find((key) =>
+  key === "src/features/editor/MarkdownPreview.tsx" || manifest[key].name === "MarkdownPreview"
+);
 
-if (!entry?.file) {
+if (!manifest[structuredPreviewKey]?.file) {
   throw new Error("Missing Vite manifest entry: StructuredPreview");
+}
+if (!manifest[markdownPreviewKey]?.file) {
+  throw new Error("Missing Vite manifest entry: MarkdownPreview");
 }
 
 const initialKey = Object.keys(manifest).find((key) => manifest[key].isEntry);
@@ -18,20 +23,29 @@ if (!initialKey) {
 }
 
 const initialFiles = collectStaticJavaScript(initialKey);
-const previewFiles = [...collectStaticJavaScript(entryKey)].filter((file) => !initialFiles.has(file));
-const [initialAssets, previewAssets] = await Promise.all([
+const structuredPreviewFiles = [...collectStaticJavaScript(structuredPreviewKey)].filter((file) => !initialFiles.has(file));
+const markdownPreviewFiles = [...collectStaticJavaScript(markdownPreviewKey)].filter((file) => !initialFiles.has(file));
+const [initialAssets, structuredPreviewAssets, markdownPreviewAssets] = await Promise.all([
   measureAssets(initialFiles),
-  measureAssets(previewFiles)
+  measureAssets(structuredPreviewFiles),
+  measureAssets(markdownPreviewFiles)
 ]);
 const initialGzipBytes = totalGzipBytes(initialAssets);
-const previewGzipBytes = totalGzipBytes(previewAssets);
+const structuredPreviewGzipBytes = totalGzipBytes(structuredPreviewAssets);
+const markdownPreviewGzipBytes = totalGzipBytes(markdownPreviewAssets);
 const maxInitialGzipBytes = 120_000;
-const maxPreviewGzipBytes = 15_000;
+const maxStructuredPreviewGzipBytes = 15_000;
+const maxMarkdownPreviewGzipBytes = 60_000;
 
 printMeasurement("Initial JavaScript", initialGzipBytes, maxInitialGzipBytes, initialAssets);
-printMeasurement("JSON/JSONL preview incremental JavaScript", previewGzipBytes, maxPreviewGzipBytes, previewAssets);
+printMeasurement("JSON/JSONL preview incremental JavaScript", structuredPreviewGzipBytes, maxStructuredPreviewGzipBytes, structuredPreviewAssets);
+printMeasurement("Frontmatter-free Markdown preview incremental JavaScript", markdownPreviewGzipBytes, maxMarkdownPreviewGzipBytes, markdownPreviewAssets);
 
-if (initialGzipBytes > maxInitialGzipBytes || previewGzipBytes > maxPreviewGzipBytes) {
+if (
+  initialGzipBytes > maxInitialGzipBytes ||
+  structuredPreviewGzipBytes > maxStructuredPreviewGzipBytes ||
+  markdownPreviewGzipBytes > maxMarkdownPreviewGzipBytes
+) {
   process.exitCode = 1;
 }
 

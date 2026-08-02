@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 
 import { CodePreview } from "./CodePreview";
 import { PlainTextPreview } from "./PlainTextPreview";
+import { hasMarkdownFrontmatterCandidate } from "../../shared/lib/markdownFrontmatter";
 import type { MarkdownImagePolicy, MarkdownLinkPolicy } from "../../shared/lib/markdownLinks";
 import type { DelimitedPreviewMode } from "./DelimitedPreview";
 import type { MarkdownOutlineIdentity } from "./MarkdownOutlineContext";
@@ -10,6 +11,7 @@ import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((module) => ({ default: module.MarkdownPreview })));
+const MarkdownFrontmatterPreview = lazy(() => import("./MarkdownFrontmatterPreview").then((module) => ({ default: module.MarkdownFrontmatterPreview })));
 const StructuredPreview = lazy(() => import("./StructuredPreview").then((module) => ({ default: module.StructuredPreview })));
 const YamlStructuredPreview = lazy(() => import("./YamlStructuredPreview").then((module) => ({ default: module.YamlStructuredPreview })));
 const TomlStructuredPreview = lazy(() => import("./TomlStructuredPreview").then((module) => ({ default: module.TomlStructuredPreview })));
@@ -19,7 +21,8 @@ export function TextPreview({ name, content, previewIdentity, markdownLinkPolicy
   const format = inferTextFormat(name);
 
   if (format === "markdown") {
-    return <PreviewSuspense><MarkdownPreview content={content} linkPolicy={markdownLinkPolicy} imagePolicy={markdownImagePolicy} outlineIdentity={markdownOutlineIdentity} /></PreviewSuspense>;
+    const Preview = hasMarkdownFrontmatterCandidate(content) ? MarkdownFrontmatterPreview : MarkdownPreview;
+    return <PreviewSuspense><Preview content={content} linkPolicy={markdownLinkPolicy} imagePolicy={markdownImagePolicy} outlineIdentity={markdownOutlineIdentity} /></PreviewSuspense>;
   }
 
   if (format === "json" || format === "jsonl") {

@@ -1,18 +1,18 @@
 import { parse as parseYaml } from "yaml";
 
+import { hasMarkdownFrontmatterCandidate } from "./markdownFrontmatter";
+
 export type MarkdownDocument = {
   frontmatter: Record<string, unknown> | null;
   body: string;
 };
 
 export function parseMarkdownDocument(content: string): MarkdownDocument {
-  const firstLineEnd = content.indexOf("\n");
-  const firstLine = content.slice(0, firstLineEnd === -1 ? content.length : firstLineEnd).replace(/^\uFEFF/, "").replace(/\r$/, "");
-
-  if (!/^---[ \t]*$/.test(firstLine)) {
+  if (!hasMarkdownFrontmatterCandidate(content)) {
     return { frontmatter: null, body: content };
   }
 
+  const firstLineEnd = content.indexOf("\n");
   const frontmatterStart = firstLineEnd === -1 ? content.length : firstLineEnd + 1;
   const closingFence = findClosingFence(content, frontmatterStart);
   if (!closingFence) return { frontmatter: null, body: content };
@@ -26,13 +26,6 @@ export function parseMarkdownDocument(content: string): MarkdownDocument {
   } catch {
     return { frontmatter: null, body: content };
   }
-}
-
-export function formatFrontmatterValue(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return value.map(formatFrontmatterValue).join(", ");
-  if (typeof value === "object") return JSON.stringify(value) ?? String(value);
-  return String(value);
 }
 
 function findClosingFence(content: string, startIndex: number): { start: number; end: number } | null {
