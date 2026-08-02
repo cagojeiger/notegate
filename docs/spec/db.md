@@ -12,6 +12,7 @@ agents
 api_keys
 audit_events
 file_change_events
+mcp_invocations
 spaces
 space_usage
 space_usage_reconcile_jobs
@@ -207,6 +208,25 @@ file_change_events
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록한다. Retention policy는 3 months이며, space 전체 조회와 node별 조회를 위해 별도 index를 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
+`mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. 입력 payload나 결과 본문은 저장하지 않는다.
+
+```text
+mcp_invocations
+  id bigserial pk
+  created_at timestamptz not null default now()
+  owner_user_id uuid not null
+  actor_account_id uuid not null
+  caller_kind text check ('user','agent')
+  tool text not null
+  op text null
+  purpose text null
+  outcome text check ('success','error')
+  error_code text null
+  duration_ms bigint not null check >= 0
+```
+
+`me`만 `purpose=NULL`을 허용하고 나머지 tool은 앞뒤 공백 없는 1..200자를 요구한다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 기존 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
+
 Event history DB 제약:
 
 ```text
@@ -228,6 +248,10 @@ file_change_events_node_time_idx(space_id, node_id, created_at desc, id desc)
 file_change_events_space_id_idx(space_id, id)
 file_change_events_actor_time_idx(actor_account_id, created_at desc, id desc)
 file_change_events_retention_idx(created_at)
+
+mcp_invocations_owner_time_idx(owner_user_id, created_at desc, id desc)
+mcp_invocations_actor_time_idx(actor_account_id, created_at desc, id desc)
+mcp_invocations_retention_idx(created_at)
 ```
 
 ## Space and connection tables

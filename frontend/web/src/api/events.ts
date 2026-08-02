@@ -2,7 +2,8 @@ import type { ApiClient } from "./client";
 import type {
   AuditEventListResponse,
   FileChangeEventListResponse,
-  FileChangeSyncResponse
+  FileChangeSyncResponse,
+  McpInvocationListResponse
 } from "./types";
 
 const DEFAULT_EVENT_LIMIT = 50;
@@ -12,6 +13,12 @@ export function listAuditEvents(client: ApiClient, cursor?: string | null): Prom
   const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
   if (cursor) params.set("cursor", cursor);
   return client.get<AuditEventListResponse>(`/api/v1/me/audit-events?${params}`);
+}
+
+export function listMcpInvocations(client: ApiClient, cursor?: string | null): Promise<McpInvocationListResponse> {
+  const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
+  if (cursor) params.set("cursor", cursor);
+  return client.get<McpInvocationListResponse>(`/api/v1/me/mcp-invocations?${params}`);
 }
 
 export function listFileChangeEvents(

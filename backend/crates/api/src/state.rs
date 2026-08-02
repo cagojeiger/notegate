@@ -6,7 +6,7 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BrowserSessionRepo, ConnectionRepo,
-    FilesRepo, PgPool, SpaceRepo, UsageRepo,
+    FilesRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
 };
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
@@ -60,6 +60,7 @@ pub struct AppState {
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
+    pub(crate) mcp_invocations: McpInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
 }
 
@@ -86,8 +87,12 @@ impl AppState {
             pii_crypto.clone(),
             config.default_user_tier,
         );
-        let account_lifecycle =
-            AccountService::new(account_repo.clone(), AuditEventRepo::new(db.clone()));
+        let mcp_invocations = McpInvocationRepo::new(db.clone());
+        let account_lifecycle = AccountService::new(
+            account_repo.clone(),
+            AuditEventRepo::new(db.clone()),
+            mcp_invocations.clone(),
+        );
         let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents =
@@ -123,6 +128,7 @@ impl AppState {
             usage,
             accounts: account_repo,
             browser_sessions,
+            mcp_invocations,
             metrics: None,
         }
     }

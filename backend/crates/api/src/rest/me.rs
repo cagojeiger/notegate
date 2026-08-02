@@ -10,18 +10,22 @@
 
 use axum::extract::{Extension, Query, State};
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use notegate_model::{Caller, ListAuditEvents};
+use notegate_model::{Caller, ListAuditEvents, ListMcpInvocations};
 use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::auth::set_private_no_store;
 use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
-use crate::rest::dto::{AuditEventListResponse, AuditEventOut};
+use crate::rest::dto::{
+    AuditEventListResponse, AuditEventOut, McpInvocationListResponse, McpInvocationOut,
+};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -29,6 +33,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/me", get(get_me).delete(delete_me))
         .route("/v1/me/usage", get(get_usage))
         .route("/v1/me/audit-events", get(list_audit_events))
+        .route("/v1/me/mcp-invocations", get(list_mcp_invocations))
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +164,53 @@ pub(crate) async fn list_audit_events(
         events,
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/mcp-invocations",
+    tag = "events",
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List current user's MCP invocation history", body = McpInvocationListResponse)),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn list_mcp_invocations(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<ListEventsQuery>,
+) -> Result<Response, ApiError> {
+    let page = state
+        .account_lifecycle
+        .list_mcp_invocations(
+            caller.account.kind,
+            caller.account_id(),
+            ListMcpInvocations {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let actor_ids = page
+        .items
+        .iter()
+        .map(|invocation| invocation.actor_account_id)
+        .collect::<Vec<_>>();
+    let refs = state.accounts.find_account_refs(&actor_ids).await?;
+    let invocations = page
+        .items
+        .iter()
+        .map(|invocation| McpInvocationOut::from_invocation(invocation, &refs))
+        .collect();
+    let mut response = Json(McpInvocationListResponse {
+        invocations,
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
+    })
+    .into_response();
+    set_private_no_store(&mut response);
+    Ok(response)
 }
 
 #[utoipa::path(

@@ -16,6 +16,8 @@ const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
+    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    pub purpose: String,
     /// Operation: spaces/ls/tree/stat/read/changes.
     pub op: String,
     /// Single target in `<space>:/absolute/path` form.
@@ -53,6 +55,8 @@ pub struct ReadInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchInput {
+    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    pub purpose: String,
     /// Operation: find/grep.
     pub op: String,
     /// Scope target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
@@ -85,6 +89,8 @@ pub struct SearchInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriteInput {
+    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    pub purpose: String,
     /// Operation: write/append/patch/edit.
     pub op: String,
     /// Text target in `<space>:/absolute/path` form.
@@ -109,6 +115,8 @@ pub struct WriteInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManageInput {
+    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
     pub op: String,
     /// Single target in `<space>:/absolute/path` form for mkdir/rm.
@@ -131,6 +139,8 @@ pub struct ManageInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileTransferInput {
+    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    pub purpose: String,
     /// Operation: begin_upload/prepare_parts/complete_upload/abort_upload/prepare_download.
     pub op: String,
     /// Path-first target for begin_upload and prepare_download.
@@ -168,6 +178,8 @@ pub struct CompletedPartInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunSequenceInput {
+    /// One short human-readable reason shared by the whole sequence. Maximum 200 characters.
+    pub purpose: String,
     /// Ordered NoteGate commands to execute. Maximum 20.
     pub commands: Vec<SequenceCommand>,
 }
@@ -265,8 +277,9 @@ pub struct SequenceCommand {
 }
 
 impl SequenceCommand {
-    fn into_read_input(self) -> ReadInput {
+    fn into_read_input(self, purpose: String) -> ReadInput {
         ReadInput {
+            purpose,
             op: self.op,
             target: self.target,
             name: self.name,
@@ -281,8 +294,9 @@ impl SequenceCommand {
         }
     }
 
-    fn into_search_input(self) -> Result<SearchInput, ErrorData> {
+    fn into_search_input(self, purpose: String) -> Result<SearchInput, ErrorData> {
         Ok(SearchInput {
+            purpose,
             op: self.op,
             target: required(self.target, "target", "search command")?,
             q: required(self.q, "q", "search command")?,
@@ -296,8 +310,9 @@ impl SequenceCommand {
         })
     }
 
-    fn into_write_input(self) -> Result<WriteInput, ErrorData> {
+    fn into_write_input(self, purpose: String) -> Result<WriteInput, ErrorData> {
         Ok(WriteInput {
+            purpose,
             op: self.op,
             target: required(self.target, "target", "write command")?,
             content: self.content,
@@ -308,8 +323,9 @@ impl SequenceCommand {
         })
     }
 
-    fn into_manage_input(self) -> ManageInput {
+    fn into_manage_input(self, purpose: String) -> ManageInput {
         ManageInput {
+            purpose,
             op: self.op,
             target: self.target,
             source: self.source,
@@ -367,6 +383,7 @@ pub async fn read(
             events::call(
                 state,
                 parts,
+                &input.purpose,
                 required(input.target, "target", "changes")?,
                 input.limit,
                 input.direction,
@@ -559,7 +576,7 @@ pub async fn run_sequence(
     for (index, command) in input.commands.into_iter().enumerate() {
         let tool = command.tool.clone();
         let op = command.op.clone();
-        let result = dispatch_command(state, parts, command).await;
+        let result = dispatch_command(state, parts, command, &input.purpose).await;
         match result {
             Ok(Json(value)) => results.push(json!({
                 "index": index,
@@ -592,6 +609,7 @@ async fn dispatch_command(
     state: &AppState,
     parts: &Parts,
     command: SequenceCommand,
+    purpose: &str,
 ) -> Result<Json<Value>, ErrorData> {
     if command.tool != "read" && command.direction.is_some() {
         return Err(actionable_input_error(
@@ -605,10 +623,38 @@ async fn dispatch_command(
         ));
     }
     match command.tool.as_str() {
-        "read" => read(state, parts, Parameters(command.into_read_input())).await,
-        "search" => search(state, parts, Parameters(command.into_search_input()?)).await,
-        "write" => write(state, parts, Parameters(command.into_write_input()?)).await,
-        "manage" => manage(state, parts, Parameters(command.into_manage_input())).await,
+        "read" => {
+            read(
+                state,
+                parts,
+                Parameters(command.into_read_input(purpose.to_owned())),
+            )
+            .await
+        }
+        "search" => {
+            search(
+                state,
+                parts,
+                Parameters(command.into_search_input(purpose.to_owned())?),
+            )
+            .await
+        }
+        "write" => {
+            write(
+                state,
+                parts,
+                Parameters(command.into_write_input(purpose.to_owned())?),
+            )
+            .await
+        }
+        "manage" => {
+            manage(
+                state,
+                parts,
+                Parameters(command.into_manage_input(purpose.to_owned())),
+            )
+            .await
+        }
         _ => Err(invalid_input_error(
             "invalid tool for run_sequence; allowed values are: read, search, write, manage",
         )),
@@ -665,8 +711,24 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn purpose_is_required_for_direct_and_sequence_calls() {
+        let direct = serde_json::from_value::<SearchInput>(json!({
+            "op": "find",
+            "target": "daily:/",
+            "q": "cache"
+        }));
+        assert!(direct.is_err());
+
+        let sequence = serde_json::from_value::<RunSequenceInput>(json!({
+            "commands": [{"tool": "read", "op": "spaces"}]
+        }));
+        assert!(sequence.is_err());
+    }
+
+    #[test]
     fn sequence_command_rejects_unknown_fields() {
         let error = serde_json::from_value::<RunSequenceInput>(json!({
+            "purpose": "test unknown sequence fields",
             "commands": [{
                 "tool": "read",
                 "op": "spaces",
@@ -681,6 +743,7 @@ mod tests {
     #[test]
     fn sequence_command_uses_direct_command_shape() {
         let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "purpose": "test direct sequence command shape",
             "commands": [{
                 "tool": "manage",
                 "op": "mkdir",
@@ -700,6 +763,7 @@ mod tests {
     #[test]
     fn changes_uses_the_shared_opaque_cursor_with_a_direction() {
         let input = serde_json::from_value::<ReadInput>(json!({
+            "purpose": "test changes pagination",
             "op": "changes",
             "target": "daily:/",
             "direction": "newer",
@@ -715,6 +779,7 @@ mod tests {
     #[test]
     fn changes_fields_on_other_read_ops_name_the_fields_to_remove() {
         let input = serde_json::from_value::<ReadInput>(json!({
+            "purpose": "test changes-only field validation",
             "op": "read",
             "target": "daily:/note.md",
             "direction": "older"
@@ -732,6 +797,7 @@ mod tests {
     #[test]
     fn run_sequence_accepts_a_changes_cursor() {
         let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "purpose": "test changes in a sequence",
             "commands": [{
                 "tool": "read",
                 "op": "changes",

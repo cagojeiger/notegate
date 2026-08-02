@@ -140,6 +140,52 @@ async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+#[tokio::test]
+async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "mcp-purger", "mcp-purger@example.test").await?;
+
+    sqlx::query(
+        "INSERT INTO mcp_invocations \
+         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, outcome, duration_ms) \
+         SELECT now() - interval '91 days', $1, $1, 'user', 'search', 'find', \
+                'expired invocation ' || value, 'success', 1 \
+         FROM generate_series(1, 1001) AS value",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO mcp_invocations \
+         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, outcome, duration_ms) \
+         VALUES (now() - interval '89 days', $1, $1, 'user', 'read', 'read', \
+                 'recent invocation', 'success', 1)",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.mcp_invocations_deleted, 1_000);
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(second.mcp_invocations_deleted, 1);
+
+    let remaining: Vec<String> = sqlx::query_scalar(
+        "SELECT purpose FROM mcp_invocations WHERE owner_user_id = $1 ORDER BY id",
+    )
+    .bind(user)
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(remaining, vec!["recent invocation"]);
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// Seed one live key via the repo, returning its id.
 async fn seed_key(
     repo: &ApiKeyRepo,

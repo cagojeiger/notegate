@@ -31,11 +31,11 @@ use crate::auth::bearer::{
     verify_bearer_mcp,
 };
 use crate::identity::me::MeOutput;
+use crate::mcp::invocation;
 use crate::mcp::tools;
-use crate::observability::observe_mcp_tool;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For a changes input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For a changes input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -74,7 +74,7 @@ impl McpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<Json<MeOutput>, ErrorData> {
-        observe_mcp_tool(self.state.config.metrics_enabled, "me", async {
+        invocation::execute(&self.state, &parts, "me", None, None, async {
             tools::identity::call(&parts)
         })
         .await
@@ -91,10 +91,16 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::ReadInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        observe_mcp_tool(
-            self.state.config.metrics_enabled,
+        let Parameters(input) = params;
+        let op = input.op.clone();
+        let purpose = input.purpose.clone();
+        invocation::execute(
+            &self.state,
+            &parts,
             "read",
-            tools::unified::read(&self.state, &parts, params),
+            Some(&op),
+            Some(&purpose),
+            tools::unified::read(&self.state, &parts, Parameters(input)),
         )
         .await
     }
@@ -110,10 +116,16 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::SearchInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        observe_mcp_tool(
-            self.state.config.metrics_enabled,
+        let Parameters(input) = params;
+        let op = input.op.clone();
+        let purpose = input.purpose.clone();
+        invocation::execute(
+            &self.state,
+            &parts,
             "search",
-            tools::unified::search(&self.state, &parts, params),
+            Some(&op),
+            Some(&purpose),
+            tools::unified::search(&self.state, &parts, Parameters(input)),
         )
         .await
     }
@@ -129,10 +141,16 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::WriteInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        observe_mcp_tool(
-            self.state.config.metrics_enabled,
+        let Parameters(input) = params;
+        let op = input.op.clone();
+        let purpose = input.purpose.clone();
+        invocation::execute(
+            &self.state,
+            &parts,
             "write",
-            tools::unified::write(&self.state, &parts, params),
+            Some(&op),
+            Some(&purpose),
+            tools::unified::write(&self.state, &parts, Parameters(input)),
         )
         .await
     }
@@ -148,10 +166,16 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::ManageInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        observe_mcp_tool(
-            self.state.config.metrics_enabled,
+        let Parameters(input) = params;
+        let op = input.op.clone();
+        let purpose = input.purpose.clone();
+        invocation::execute(
+            &self.state,
+            &parts,
             "manage",
-            tools::unified::manage(&self.state, &parts, params),
+            Some(&op),
+            Some(&purpose),
+            tools::unified::manage(&self.state, &parts, Parameters(input)),
         )
         .await
     }
@@ -168,9 +192,14 @@ impl McpServer {
         params: Parameters<tools::unified::FileTransferInput>,
     ) -> Result<Json<Value>, ErrorData> {
         let Parameters(input) = params;
-        observe_mcp_tool(
-            self.state.config.metrics_enabled,
+        let op = input.op.clone();
+        let purpose = input.purpose.clone();
+        invocation::execute(
+            &self.state,
+            &parts,
             "file_transfer",
+            Some(&op),
+            Some(&purpose),
             tools::transfers::call(&self.state, &parts, input),
         )
         .await
@@ -187,10 +216,13 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::RunSequenceInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        observe_mcp_tool(
-            self.state.config.metrics_enabled,
-            "run_sequence",
-            tools::unified::run_sequence(&self.state, &parts, params),
+        let Parameters(input) = params;
+        let purpose = input.purpose.clone();
+        invocation::execute_sequence(
+            &self.state,
+            &parts,
+            &purpose,
+            tools::unified::run_sequence(&self.state, &parts, Parameters(input)),
         )
         .await
     }
@@ -377,34 +409,41 @@ mod tests {
             ("me", "", ""),
             (
                 "read",
-                "op target name depth limit cursor direction start_line max_lines max_bytes if_none_match_sha256",
-                "op",
+                "purpose op target name depth limit cursor direction start_line max_lines max_bytes if_none_match_sha256",
+                "purpose op",
             ),
             (
                 "search",
-                "op target q kind match lines include exclude limit cursor",
-                "op target q",
+                "purpose op target q kind match lines include exclude limit cursor",
+                "purpose op target q",
             ),
             (
                 "write",
-                "op target content edits create ensure_newline expected_sha256",
-                "op target",
+                "purpose op target content edits create ensure_newline expected_sha256",
+                "purpose op target",
             ),
             (
                 "manage",
-                "op target source destination parents recursive",
-                "op",
+                "purpose op target source destination parents recursive",
+                "purpose op",
             ),
             (
                 "file_transfer",
-                "op target byte_len media_type original_filename encryption_mode encryption_metadata upload_id part_numbers completed_parts",
-                "op",
+                "purpose op target byte_len media_type original_filename encryption_mode encryption_metadata upload_id part_numbers completed_parts",
+                "purpose op",
             ),
-            ("run_sequence", "commands", "commands"),
+            ("run_sequence", "purpose commands", "purpose commands"),
         ] {
             assert_input_properties(&tools, tool_name, properties);
             assert_required_properties(&tools, tool_name, required);
         }
+
+        let me_properties = tools
+            .get("me")
+            .and_then(|tool| tool.input_schema.get("properties"))
+            .and_then(Value::as_object)
+            .expect("me input properties exist");
+        assert!(me_properties.is_empty(), "me must remain input-free");
 
         let read = tools.get("read").expect("read tool exists");
         let properties = read
@@ -422,6 +461,8 @@ mod tests {
     #[test]
     fn server_instructions_describe_all_mcp_categories() {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("except `me`"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("purpose"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("checkpoint_cursor"));

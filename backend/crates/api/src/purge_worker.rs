@@ -39,6 +39,7 @@ async fn run_once(pool: &PgPool) {
                 accounts_anonymized = run.accounts_anonymized,
                 api_keys_deleted = run.api_keys_deleted,
                 browser_sessions_deleted = run.browser_sessions_deleted,
+                mcp_invocations_deleted = run.mcp_invocations_deleted,
                 object_deletions_queued = run.object_deletions_queued,
             );
         }

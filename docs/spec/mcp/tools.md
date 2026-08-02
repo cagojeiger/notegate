@@ -3,6 +3,8 @@
 ## 공통 규칙
 
 - `me`와 `run_sequence`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
+- `me`를 제외한 모든 tool은 호출 이유를 설명하는 `purpose`를 필수로 받는다. 앞뒤 공백 없는 1..200자이며 secret, 본문, 검색 결과를 넣지 않는다.
+- `run_sequence`는 최상위 `purpose` 하나를 모든 command와 후속 `next_action`에 공유한다. `commands[]`에는 `purpose`를 반복하지 않는다.
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
@@ -27,6 +29,7 @@ Read-only tool이다.
 
 ```ts
 type ReadInput = {
+  purpose: string
   op: "spaces" | "ls" | "tree" | "stat" | "read" | "changes"
   target?: string
   name?: string
@@ -86,12 +89,12 @@ Node summary의 `write_locked`는 대상에 직접 설정된 잠금, `effective_
 필수 필드:
 
 ```text
-spaces: op
-ls:     op, target
-tree:   op, target
-stat:   op, target
-read:   op, target
-changes: op, target
+spaces: purpose, op
+ls:     purpose, op, target
+tree:   purpose, op, target
+stat:   purpose, op, target
+read:   purpose, op, target
+changes: purpose, op, target
 ```
 
 ## `search`
@@ -100,6 +103,7 @@ Read-only search tool이다.
 
 ```ts
 type SearchInput = {
+  purpose: string
   op: "find" | "grep"
   target: string
   q: string
@@ -126,8 +130,8 @@ type SearchInput = {
 필수 필드:
 
 ```text
-find: op, target, q
-grep: op, target, q
+find: purpose, op, target, q
+grep: purpose, op, target, q
 ```
 
 Traversal, cursor, memory budget은 [`../search.md`](../search.md)를 따른다.
@@ -138,6 +142,7 @@ Plain Text content를 생성하거나 수정한다. Folder 이동/삭제는 하�
 
 ```ts
 type WriteInput = {
+  purpose: string
   op: "write" | "append" | "patch" | "edit"
   target: string
   content?: string
@@ -157,10 +162,10 @@ type WriteInput = {
 필수 필드:
 
 ```text
-write:  op, target, content
-append: op, target, content
-patch:  op, target, edits
-edit:   op, target, edits
+write:  purpose, op, target, content
+append: purpose, op, target, content
+patch:  purpose, op, target, edits
+edit:   purpose, op, target, edits
 ```
 
 ## `manage`
@@ -169,6 +174,7 @@ edit:   op, target, edits
 
 ```ts
 type ManageInput = {
+  purpose: string
   op: "mkdir" | "mv" | "cp" | "rm"
   target?: string
   source?: string
@@ -186,10 +192,10 @@ type ManageInput = {
 필수 필드:
 
 ```text
-mkdir: op, target
-mv:    op, source, destination
-cp:    op, source, destination
-rm:    op, target
+mkdir: purpose, op, target
+mv:    purpose, op, source, destination
+cp:    purpose, op, source, destination
+rm:    purpose, op, target
 ```
 
 ## `file_transfer`
@@ -198,6 +204,7 @@ rm:    op, target
 
 ```ts
 type FileTransferInput = {
+  purpose: string
   op: "begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload" | "prepare_download"
   target?: string
   byte_len?: number
@@ -220,16 +227,16 @@ type FileTransferInput = {
 필수 필드:
 
 ```text
-begin_upload:     op, target, byte_len
-prepare_parts:    op, upload_id, part_numbers
-complete_upload:  op, upload_id (+ multipart는 completed_parts)
-abort_upload:     op, upload_id
-prepare_download: op, target
+begin_upload:     purpose, op, target, byte_len
+prepare_parts:    purpose, op, upload_id, part_numbers
+complete_upload:  purpose, op, upload_id (+ multipart는 completed_parts)
+abort_upload:     purpose, op, upload_id
+prepare_download: purpose, op, target
 ```
 
 File bytes는 MCP request/response에 포함하지 않는다. Single/multipart PUT의 성공 응답 ETag는 로컬 caller가 수집해 multipart complete에 전달한다. `file_transfer`는 외부 전송 사이에 caller 작업이 필요하므로 `run_sequence` 안에서 실행할 수 없다.
 
-모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하고, `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 `max_concurrency=4` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
+모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하며, 이 input에는 현재 호출과 같은 `purpose`가 포함된다. `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 `max_concurrency=4` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
 
 완료되지 않은 upload는 `begin_upload`, `prepare_parts`, `complete_upload` 중 마지막 활동 이후 2시간이 지나면 비동기 정리 대상이 된다. `begin_upload`는 destination의 write lock을 검사하고 해당 handle의 write-lock 허가를 예약한다. 이후 destination이 잠겨도 기존 upload handle은 완료할 수 있지만 새 `begin_upload`는 거부한다. 완료 시 일반 write permission과 File 생성 invariant는 다시 확인한다. Presigned URL의 5분 만료와 upload 원장의 2시간 무활동 만료는 서로 다른 제한이다.
 
@@ -246,6 +253,7 @@ Write command가 잠금으로 거부되면 MCP error `data`는 `kind=write_locke
 
 ```ts
 type RunSequenceInput = {
+  purpose: string
   commands: SequenceCommand[] // 1..20
 }
 
@@ -283,6 +291,7 @@ type SequenceCommand = {
 Semantics:
 
 - `commands`는 입력 순서대로 실행한다.
+- 최상위 `purpose` 하나를 사용하며 개별 command에는 `purpose`를 넣지 않는다.
 - 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
 - 각 command의 필수 필드는 해당 tool의 필수 필드를 따른다.
 - `SequenceCommand`는 공통 상위 타입이다. 해당 op가 사용하지 않는 known 필드는 실행 입력으로 전달되지 않는다.
