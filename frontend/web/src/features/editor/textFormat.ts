@@ -1,5 +1,6 @@
 export type CodeFormat = "go" | "javascript" | "jsx" | "python" | "rust" | "shellscript" | "sql" | "tsx" | "typescript";
-export type TextFormat = "markdown" | "json" | "jsonl" | "yaml" | "toml" | CodeFormat | "plain";
+export type TabularFormat = "csv" | "tsv";
+export type TextFormat = "markdown" | "json" | "jsonl" | "yaml" | "toml" | TabularFormat | CodeFormat | "plain";
 
 const FORMAT_BY_EXTENSION: Record<string, TextFormat> = {
   md: "markdown",
@@ -9,6 +10,8 @@ const FORMAT_BY_EXTENSION: Record<string, TextFormat> = {
   yaml: "yaml",
   yml: "yaml",
   toml: "toml",
+  csv: "csv",
+  tsv: "tsv",
   go: "go",
   js: "javascript",
   mjs: "javascript",
@@ -44,6 +47,10 @@ export function shikiLangForFormat(format: TextFormat): string {
 
 export function isStructuredFormat(format: TextFormat): format is "json" | "jsonl" | "yaml" | "toml" {
   return format === "json" || format === "jsonl" || format === "yaml" || format === "toml";
+}
+
+export function isTabularFormat(format: TextFormat): format is TabularFormat {
+  return format === "csv" || format === "tsv";
 }
 
 export function isCodeFormat(format: TextFormat): format is CodeFormat {

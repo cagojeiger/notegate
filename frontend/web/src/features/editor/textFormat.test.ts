@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inferTextFormat, isCodeFormat, isStructuredFormat, shikiLangForFormat } from "./textFormat";
+import { inferTextFormat, isCodeFormat, isStructuredFormat, isTabularFormat, shikiLangForFormat } from "./textFormat";
 
 describe("textFormat", () => {
   it("infers known document formats from file names", () => {
@@ -10,6 +10,8 @@ describe("textFormat", () => {
     expect(inferTextFormat("config.yaml")).toBe("yaml");
     expect(inferTextFormat("config.yml")).toBe("yaml");
     expect(inferTextFormat("Cargo.toml")).toBe("toml");
+    expect(inferTextFormat("customers.CSV")).toBe("csv");
+    expect(inferTextFormat("events.tsv")).toBe("tsv");
     expect(inferTextFormat("notes")).toBe("plain");
   });
 
@@ -58,5 +60,8 @@ describe("textFormat", () => {
     expect(isStructuredFormat("sql")).toBe(false);
     expect(isStructuredFormat("python")).toBe(false);
     expect(isStructuredFormat("json")).toBe(true);
+    expect(isTabularFormat("csv")).toBe(true);
+    expect(isTabularFormat("tsv")).toBe(true);
+    expect(isTabularFormat("json")).toBe(false);
   });
 });

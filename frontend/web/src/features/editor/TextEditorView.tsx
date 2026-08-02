@@ -10,8 +10,7 @@ import { EditorGroupHeader } from "./EditorGroupHeader";
 import type { MarkdownOutlineIdentity } from "./MarkdownOutlineContext";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { TextPreview } from "./TextPreview";
-import { inferTextFormat, isStructuredFormat } from "./textFormat";
-import type { StructuredPreviewMode } from "./StructuredPreview";
+import { inferTextFormat, isStructuredFormat, isTabularFormat } from "./textFormat";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 import type { EditorNavigationActions, NodeActions } from "./types";
 import { useMarkdownImageLoader } from "./useFilePreviewQueries";
@@ -21,7 +20,7 @@ import { useTextEditorSession } from "./useTextEditorSession";
 export function TextEditorView({ active, groupId, navigationActions, node, latestNode, qualifiedPath, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const loadMarkdownImage = useMarkdownImageLoader(node);
   const [editorMenu, setEditorMenu] = useState<{ x: number; y: number } | null>(null);
-  const [structuredMode, setStructuredMode] = useState<StructuredPreviewMode>("tree");
+  const [sourceView, setSourceView] = useState(false);
   const [structuredExpansionMode, setStructuredExpansionMode] = useState<StructuredExpansionMode>("expanded");
   const {
     textQuery,
@@ -46,6 +45,10 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   const copySource = mode === "edit" ? draft : content;
   const format = inferTextFormat(node.name);
   const structured = isStructuredFormat(format);
+  const tabular = isTabularFormat(format);
+  const visualPreview = structured || tabular;
+  const sourceOnly = tabular && Boolean(partialText);
+  const showSource = sourceView || sourceOnly;
   const showToast = useUiStore((state) => state.showToast);
   const markdownLinkPolicy = useMemo(
     () => ({
@@ -69,7 +72,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   }), [groupId, node.id, node.space_id]);
 
   useEffect(() => {
-    setStructuredMode("tree");
+    setSourceView(false);
     setStructuredExpansionMode("expanded");
     setEditorMenu(null);
   }, [node.id]);
@@ -93,20 +96,20 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   }
   const titleActions = mode === "preview" && structured && !encrypted ? (
     <>
-      <IconButton label="Expand all" size="sm" onClick={() => setStructuredExpansionMode("expanded")} disabled={structuredMode !== "tree"}>
+      <IconButton label="Expand all" size="sm" onClick={() => setStructuredExpansionMode("expanded")} disabled={showSource}>
         <ChevronsUpDown size={14} />
       </IconButton>
-      <IconButton label="Collapse all" size="sm" onClick={() => setStructuredExpansionMode("collapsed")} disabled={structuredMode !== "tree"}>
+      <IconButton label="Collapse all" size="sm" onClick={() => setStructuredExpansionMode("collapsed")} disabled={showSource}>
         <ChevronsDownUp size={14} />
       </IconButton>
     </>
   ) : null;
   const actions = (
     <>
-      {mode === "preview" && structured && !encrypted ? (
+      {mode === "preview" && visualPreview && !encrypted ? (
         <>
-          <Button size="xs" variant={structuredMode === "tree" ? "primary" : "secondary"} onClick={() => setStructuredMode("tree")}>Tree</Button>
-          <Button size="xs" variant={structuredMode === "source" ? "primary" : "secondary"} onClick={() => setStructuredMode("source")}>Source</Button>
+          <Button size="xs" variant={!showSource ? "primary" : "secondary"} aria-pressed={!showSource} onClick={() => setSourceView(false)} disabled={sourceOnly}>{structured ? "Tree" : "Table"}</Button>
+          <Button size="xs" variant={showSource ? "primary" : "secondary"} aria-pressed={showSource} onClick={() => setSourceView(true)}>Source</Button>
         </>
       ) : null}
       <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
@@ -178,11 +181,13 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
             <TextPreview
               name={node.name}
               content={content}
+              previewIdentity={node.id}
               markdownLinkPolicy={markdownLinkPolicy}
               markdownImagePolicy={markdownImagePolicy}
               markdownOutlineIdentity={markdownOutlineIdentity}
-              structuredMode={structuredMode}
+              structuredMode={showSource ? "source" : "tree"}
               structuredExpansionMode={structuredExpansionMode}
+              tabularMode={showSource ? "source" : "table"}
             />
           )}
         </div>

@@ -4,7 +4,7 @@
 
 - Status: Active
 - Last refreshed: 2026-08-02
-- Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown, structured, and code previews, and operator observability dashboards.
+- Primary product surfaces: Google SSO login, Space Library, desktop-first workbench, settings, file transfer status, Markdown, structured, code, and delimited-table previews, and operator observability dashboards.
 - Evidence reviewed: `docs/ui/*`, `frontend/web/src/design/*`, `frontend/web/src/styles/globals.css`, shared UI primitives, auth and layout components, the 2026-07-23 NoteGate brand asset set, and `deploy/observability/grafana/*`.
 
 ## Brand
@@ -56,7 +56,7 @@
 ## Components
 
 - Existing components to reuse: `Button`, `IconButton`, `Card`, `Field`, `Tabs`, `Modal`, `Markdown`, `ShikiCodeBlock`.
-- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, the workbench Inspector with compact accessible `Details`/`Outline` tabs, read-only SQL/Python code previews, and provisioned Grafana row/panel layouts using native Grafana components.
+- New/changed components: Theme-aware brand mark/lockup, Google sign-in button treatment, branded full-screen status, sortable Space Library cards, Space Inspector controls including usage limits and a secondary usage-check action, the workbench Inspector with compact accessible `Details`/`Outline` tabs, read-only code previews, virtualized CSV/TSV Table/Source previews, and provisioned Grafana row/panel layouts using native Grafana components.
 - Variants and states: Light/dark identity assets; default/hover/focus/disabled Google button; loading/status auth feedback; selected and dragging Space cards; navigation-pinned/unpinned Spaces; User MCP enabled/disabled Spaces; directly locked, inherited lock, and unlocked nodes.
 - Token/component ownership: `theme.css` owns semantic colors. Shared UI owns focus, controls, and repeated visual treatment. Feature components own data and state.
 
@@ -82,7 +82,7 @@
 - Inspector continuity: The preferred `Details`/`Outline` view is remembered for the current workbench session. When Outline is temporarily unavailable, the Inspector shows Details without overwriting that preference. Markdown preview scroll is remembered in memory per editor group and document, so returning through editor Back/Forward restores the last viewed position; a full page reload intentionally starts a new UI session.
 - Loading: Branded but quiet, with visible text and an activity indicator. A pending usage check keeps the current values visible, disables duplicate checks, and reports progress in the Space Inspector.
 - Empty: Explain the next available action without decorative illustration.
-- Error: Pair semantic color with a clear message and recovery action.
+- Error: Pair semantic color with a clear message and recovery action. A delimited table that cannot be parsed safely preserves access to the exact Source instead of presenting misleading cells.
 - Success: Pair icon or text with status color.
 - Disabled: Lower emphasis while retaining readable labels.
 - Offline/slow network: Preserve the existing retryable authentication and upload behavior; do not imply that the session was cleared when it was not.
@@ -97,7 +97,7 @@
 
 - Framework/styling system: React, TypeScript, Tailwind utilities, and CSS custom properties.
 - Design-token constraints: Extend the existing `--ng-*` semantic token layer; do not introduce a second theme system or raw feature-level colors.
-- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available. Markdown Outline uses the rendered preview DOM and never adds a document, metadata, or outline API request. Text code previews reuse fine-grained Shiki grammar imports, add no execution or API request, and fall back to escaped source text.
+- Performance constraints: Serve local optimized SVG/PNG assets; do not add a web-font or icon dependency. The Google CTA follows Google's generated HTML button font stack instead of declaring an unavailable local Google Sans font. PDF preview lazy-loads PDF.js, renders one bounded page at a time, and keeps the current page text layer available. Markdown Outline uses the rendered preview DOM and never adds a document, metadata, or outline API request. Text code previews reuse fine-grained Shiki grammar imports, add no execution or API request, and fall back to escaped source text. CSV/TSV previews reuse the existing text response, lazy-load their parser, virtualize both records and columns, and never pad ragged input into a dense matrix.
 - Authentication constraints: Preserve the current OAuth popup behavior. Agent integrations use `ngk_v2_` keys through `/api/v2` and `/mcp/v2`.
 - Observability constraints: Dashboard variables and Prometheus labels remain bounded; search queries, paths, account/Space/node identifiers, filenames, and content never appear in metrics. Dashboard links preserve the selected time range and shared variables, refresh cadence matches the 15-second scrape interval, and repeated series use stable semantic colors.
 - Test/screenshot expectations: Typecheck, unit tests, production build, contrast checks, light/dark login screenshots, dashboard JSON validation, Prometheus config validation, and a rendered Grafana screenshot.
