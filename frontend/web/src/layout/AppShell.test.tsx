@@ -1,8 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Me, Space } from "../api/types";
+import { useUiStore } from "../stores/uiStore";
 import { makeRestNode, makeSpace } from "../test/fixtures";
 import { AppShell } from "./AppShell";
 
@@ -67,6 +68,10 @@ const privateSpace = makeSpace({
 });
 
 describe("AppShell history", () => {
+  beforeEach(() => {
+    useUiStore.setState(useUiStore.getInitialState(), true);
+  });
+
   it.each([
     ["user", true],
     ["agent", false]
@@ -162,16 +167,12 @@ describe("AppShell history", () => {
     expect(view.container.querySelector("main")).not.toHaveClass("border-y", "border-seam");
   });
 
-  it("wires the docked Inspector to its resizable width", () => {
+  it("reads the docked Inspector width at the local frame boundary", () => {
+    useUiStore.setState({ auxiliaryWidth: 380 });
     mocks.useWorkbenchController.mockReturnValue({
       ...workbench(),
       auxiliaryOpen: true,
-      showAuxiliary: true,
-      auxiliaryWidth: 380,
-      actions: {
-        startAuxiliaryResize: vi.fn(),
-        setAuxiliaryWidth: vi.fn()
-      }
+      showAuxiliary: true
     });
     mocks.useUploadManager.mockReturnValue(uploadManager());
 
@@ -229,8 +230,6 @@ function workbench() {
     expandedFolderIds: new Set<string>(),
     primarySidebarOpen: true,
     auxiliaryOpen: false,
-    primaryWidth: 300,
-    auxiliaryWidth: 320,
     mobileTreeOpen: false,
     mobileAuxOpen: false,
     showAuxiliary: false,

@@ -31,8 +31,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
   const expandedFolderIds = useUiStore((state) => state.expandedFolderIds);
   const primarySidebarOpen = useUiStore((state) => state.primarySidebarOpen);
   const auxiliaryOpen = useUiStore((state) => state.auxiliaryOpen);
-  const primaryWidth = useUiStore((state) => state.primaryWidth);
-  const auxiliaryWidth = useUiStore((state) => state.auxiliaryWidth);
   const mobileTreeOpen = useUiStore((state) => state.mobileTreeOpen);
   const mobileAuxOpen = useUiStore((state) => state.mobileAuxOpen);
   const isMobile = useIsMobile();
@@ -87,8 +85,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
     canCreateSpace: canCreateSpaceForCaller,
     canWriteActiveSpace,
     canManageActiveSpace,
-    primaryWidth,
-    auxiliaryWidth,
     onSignOut
   });
 
@@ -115,8 +111,6 @@ export function useWorkbenchController({ me, onSignOut }: WorkbenchControllerPro
     expandedFolderIds,
     primarySidebarOpen,
     auxiliaryOpen,
-    primaryWidth,
-    auxiliaryWidth,
     mobileTreeOpen,
     mobileAuxOpen,
     showAuxiliary,

@@ -1,9 +1,12 @@
 import type { PointerEventHandler, ReactNode } from "react";
 
+import { usePointerDrag } from "../shared/hooks/usePointerDrag";
 import { WORKBENCH_LAYOUT, type WorkbenchPanelMode } from "../shared/model/workbenchLayout";
 import { ResizeSeparator } from "../shared/ui";
+import { useUiStore } from "../stores/uiStore";
 
-export function PrimarySidebarFrame({ mode, width, children, id }: { mode: WorkbenchPanelMode; width: number; children: ReactNode; id?: string }) {
+export function PrimarySidebarFrame({ mode, children, id }: { mode: WorkbenchPanelMode; children: ReactNode; id?: string }) {
+  const width = useUiStore((state) => state.primaryWidth);
   if (mode === "hidden") return null;
 
   const style = mode === "docked" ? { width } : { width: WORKBENCH_LAYOUT.mobilePrimaryWidthPercent, maxWidth: WORKBENCH_LAYOUT.mobilePrimaryMaxWidth };
@@ -20,31 +23,38 @@ export function PrimarySidebarFrame({ mode, width, children, id }: { mode: Workb
 }
 
 export function PrimarySidebarResizeHandle({
-  visible,
-  value,
-  onPointerDown,
-  onValueChange
+  visible
 }: {
   visible: boolean;
-  value: number;
-  onPointerDown: PointerEventHandler<HTMLDivElement>;
-  onValueChange: (value: number) => void;
 }) {
+  const value = useUiStore((state) => state.primaryWidth);
+  const onValueChange = useUiStore((state) => state.setPrimaryWidth);
+  const onPointerDown = useSidebarResize(value, onValueChange, 1);
+
   return <SidebarResizeHandle visible={visible} value={value} min={WORKBENCH_LAYOUT.minPrimaryWidth} max={WORKBENCH_LAYOUT.maxPrimaryWidth} label="Resize Files sidebar" controls="primary-sidebar-panel" onPointerDown={onPointerDown} onValueChange={onValueChange} />;
 }
 
 export function AuxiliarySidebarResizeHandle({
-  visible,
-  value,
-  onPointerDown,
-  onValueChange
+  visible
 }: {
   visible: boolean;
-  value: number;
-  onPointerDown: PointerEventHandler<HTMLDivElement>;
-  onValueChange: (value: number) => void;
 }) {
+  const value = useUiStore((state) => state.auxiliaryWidth);
+  const onValueChange = useUiStore((state) => state.setAuxiliaryWidth);
+  const onPointerDown = useSidebarResize(value, onValueChange, -1);
+
   return <SidebarResizeHandle visible={visible} value={value} min={WORKBENCH_LAYOUT.minAuxiliaryWidth} max={WORKBENCH_LAYOUT.maxAuxiliaryWidth} label="Resize Inspector" controls="auxiliary-sidebar-panel" overlayBoundary reverseArrowDirection onPointerDown={onPointerDown} onValueChange={onValueChange} />;
+}
+
+function useSidebarResize(value: number, onValueChange: (value: number) => void, direction: 1 | -1): PointerEventHandler<HTMLDivElement> {
+  const startPointerDrag = usePointerDrag();
+
+  return (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = value;
+    startPointerDrag((moveEvent) => onValueChange(startWidth + direction * (moveEvent.clientX - startX)));
+  };
 }
 
 function SidebarResizeHandle({
@@ -90,7 +100,8 @@ function SidebarResizeHandle({
   );
 }
 
-export function AuxiliarySidebarFrame({ mode, width, children, id }: { mode: WorkbenchPanelMode; width: number; children: ReactNode; id?: string }) {
+export function AuxiliarySidebarFrame({ mode, children, id }: { mode: WorkbenchPanelMode; children: ReactNode; id?: string }) {
+  const width = useUiStore((state) => state.auxiliaryWidth);
   if (mode === "hidden") return null;
 
   const style = mode === "docked" ? { width } : undefined;

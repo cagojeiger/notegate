@@ -181,7 +181,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
             </Suspense>
           ) : (
             <>
-              <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode} width={workbench.primaryWidth}>
+              <PrimarySidebarFrame id="primary-sidebar-panel" mode={layout.primaryMode}>
                 <PrimarySidebar
                   activeSpace={workbench.activeSpace}
                   openedNodeId={workbench.activeNode?.id ?? null}
@@ -209,12 +209,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
                 />
               </PrimarySidebarFrame>
-              <PrimarySidebarResizeHandle
-                visible={layout.primaryMode === "docked"}
-                value={workbench.primaryWidth}
-                onPointerDown={actions.startPrimaryResize}
-                onValueChange={actions.setPrimaryWidth}
-              />
+              <PrimarySidebarResizeHandle visible={layout.primaryMode === "docked"} />
               <EditorArea
                 groups={workbench.editorGroups}
                 activeGroupIndex={workbench.activeGroupIndex}
@@ -238,13 +233,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 onDownloadFile={actions.downloadFileNode}
                 canWriteActiveSpace={workbench.canWriteActiveSpace}
               />
-              <AuxiliarySidebarResizeHandle
-                visible={layout.auxiliaryMode === "docked"}
-                value={workbench.auxiliaryWidth}
-                onPointerDown={actions.startAuxiliaryResize}
-                onValueChange={actions.setAuxiliaryWidth}
-              />
-              <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode={layout.auxiliaryMode} width={workbench.auxiliaryWidth}>
+              <AuxiliarySidebarResizeHandle visible={layout.auxiliaryMode === "docked"} />
+              <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode={layout.auxiliaryMode}>
                 <AuxiliarySidebar
                   activeNode={workbench.inspectedNode}
                   activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}
