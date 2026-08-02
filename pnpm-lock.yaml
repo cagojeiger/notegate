@@ -38,6 +38,9 @@ importers:
       mermaid:
         specifier: ^11.15.0
         version: 11.15.0
+      papaparse:
+        specifier: ^5.5.4
+        version: 5.5.4
       pdfjs-dist:
         specifier: 5.4.296
         version: 5.4.296
@@ -96,6 +99,9 @@ importers:
       '@types/node':
         specifier: ^26.0.0
         version: 26.1.1
+      '@types/papaparse':
+        specifier: ^5.5.2
+        version: 5.5.2
       '@types/react':
         specifier: ^18.3.17
         version: 18.3.31
@@ -1222,6 +1228,9 @@ packages:
 
   '@types/node@26.1.1':
     resolution: {integrity: sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==}
+
+  '@types/papaparse@5.5.2':
+    resolution: {integrity: sha512-gFnFp/JMzLHCwRf7tQHrNnfhN4eYBVYYI897CGX4MY1tzY9l2aLkVyx2IlKZ/SAqDbB3I1AOZW5gTMGGsqWliA==}
 
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
@@ -2970,6 +2979,9 @@ packages:
 
   package-manager-detector@1.6.0:
     resolution: {integrity: sha512-61A5ThoTiDG/C8s8UMZwSorAGwMJ0ERVGj2OjoW5pAalsNOg15+iQiPzrLJ4jhZ1HJzmC2PIHT2oEiH3R5fzNA==}
+
+  papaparse@5.5.4:
+    resolution: {integrity: sha512-SwzWD9gl/ElwYLCI0nUja1mFJzjq2D8ziShfNBa7zCHzkOozeOGDwHWQ+tvCzEZcewecWZ5U7kUopDnG+DFYEQ==}
 
   parse-cache-control@1.0.1:
     resolution: {integrity: sha512-60zvsJReQPX5/QP0Kzfd/VrpjScIQ7SHBW6bFCYfEP+fp0Eppr1SHhIO5nd1PjZtvclzSzES9D/p5nFJurwfWg==}
@@ -4916,6 +4928,10 @@ snapshots:
   '@types/node@26.1.1':
     dependencies:
       undici-types: 8.3.0
+
+  '@types/papaparse@5.5.2':
+    dependencies:
+      '@types/node': 26.1.1
 
   '@types/prop-types@15.7.15': {}
 
@@ -7039,6 +7055,8 @@ snapshots:
       netmask: 2.1.1
 
   package-manager-detector@1.6.0: {}
+
+  papaparse@5.5.4: {}
 
   parse-cache-control@1.0.1: {}
 

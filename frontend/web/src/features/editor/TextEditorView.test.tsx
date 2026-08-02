@@ -132,6 +132,40 @@ describe("TextEditorView", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 
+  it("switches CSV previews between table and exact source", async () => {
+    const user = userEvent.setup();
+    const csvNode = { ...node, name: "people.csv", path: "/people.csv" };
+    mockFullText("name,role\nAda,engineer");
+
+    renderTextEditorView({ node: csvNode });
+
+    const tableButton = screen.getByRole("button", { name: "Table" });
+    const sourceButton = screen.getByRole("button", { name: "Source" });
+    expect(tableButton).toHaveAttribute("aria-pressed", "true");
+    expect(sourceButton).toHaveAttribute("aria-pressed", "false");
+    expect(await screen.findByRole("table", { name: "CSV data" })).toBeInTheDocument();
+
+    await user.click(sourceButton);
+
+    expect(sourceButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("region", { name: "CSV source" }).querySelector("pre")?.textContent).toBe("name,role\nAda,engineer");
+    expect(screen.queryByRole("table", { name: "CSV data" })).not.toBeInTheDocument();
+  });
+
+  it("keeps truncated CSV previews in source mode", async () => {
+    const csvNode = { ...node, name: "people.csv", path: "/people.csv" };
+    mockTextDocument({
+      ...partialText,
+      text: { ...partialText.text, content: "name,role\nAda,engineer" }
+    });
+
+    renderTextEditorView({ node: csvNode });
+
+    expect(screen.getByRole("button", { name: "Table" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Source" })).toHaveAttribute("aria-pressed", "true");
+    expect((await screen.findByRole("region", { name: "CSV source" })).querySelector("pre")?.textContent).toBe("name,role\nAda,engineer");
+  });
+
   it("disables editing without write permission", () => {
     mockFullText();
 
