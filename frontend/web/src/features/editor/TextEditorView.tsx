@@ -1,5 +1,5 @@
 import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import type { RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
@@ -50,13 +50,17 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   const sourceOnly = tabular && Boolean(partialText);
   const showSource = sourceView || sourceOnly;
   const showToast = useUiStore((state) => state.showToast);
+  const openMarkdownLinkRef = useRef(onOpenMarkdownLink);
+  useLayoutEffect(() => {
+    openMarkdownLinkRef.current = onOpenMarkdownLink;
+  }, [onOpenMarkdownLink]);
   const markdownLinkPolicy = useMemo(
     () => ({
       sourcePath: node.path,
-      onOpenInternalLink: (path: string) => onOpenMarkdownLink(groupId, node, path),
+      onOpenInternalLink: (path: string) => openMarkdownLinkRef.current(groupId, node, path),
       onInvalidInternalLink: () => showToast("Invalid markdown link")
     }),
-    [groupId, node, onOpenMarkdownLink, showToast]
+    [groupId, node, showToast]
   );
   const markdownImagePolicy = useMemo(
     () => ({

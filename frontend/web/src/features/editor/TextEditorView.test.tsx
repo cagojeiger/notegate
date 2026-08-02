@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReadTextResponse } from "../../api/types";
@@ -24,6 +25,23 @@ const editorQueryMocks = vi.hoisted(() => ({
   useTextDocument: vi.fn<(...args: Parameters<typeof useTextDocument>) => TextDocumentQueryMock>(),
   useSaveTextDocument: vi.fn<(...args: Parameters<typeof useSaveTextDocument>) => SaveTextMutationMock>()
 }));
+
+const markdownRenderMocks = vi.hoisted(() => ({
+  reactMarkdown: vi.fn()
+}));
+
+vi.mock("react-markdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-markdown")>();
+
+  return {
+    ...actual,
+    default: (props: ComponentProps<typeof actual.default>) => {
+      markdownRenderMocks.reactMarkdown();
+      const Actual = actual.default;
+      return <Actual {...props} />;
+    }
+  };
+});
 
 vi.mock("../../shared/lib/clipboard", () => ({
   copyText: vi.fn()
@@ -122,6 +140,7 @@ describe("TextEditorView", () => {
     vi.mocked(useMarkdownImageLoader).mockReturnValue(vi.fn().mockResolvedValue({ status: "error" }));
     vi.mocked(copyText).mockReset();
     vi.mocked(copyText).mockResolvedValue(true);
+    markdownRenderMocks.reactMarkdown.mockReset();
   });
 
   it("disables editing for truncated text reads", () => {
@@ -359,16 +378,28 @@ describe("TextEditorView", () => {
     expect(save).toHaveBeenCalledWith(false);
   });
 
-  it("passes the source group and node when opening markdown links", async () => {
-    const onOpenMarkdownLink = vi.fn();
+  it("does not reparse markdown when only the link callback changes", async () => {
+    const previousOpenMarkdownLink = vi.fn();
+    const currentOpenMarkdownLink = vi.fn();
     const sourceNode = { ...node, path: "/docs/source.md" };
     mockFullText("[Target](./target.md)");
+    const props = makeTextEditorViewProps({
+      groupId: 7,
+      node: sourceNode,
+      onOpenMarkdownLink: previousOpenMarkdownLink
+    });
 
-    renderTextEditorView({ groupId: 7, node: sourceNode, onOpenMarkdownLink });
+    const view = render(<TextEditorView {...props} />);
+    const link = await screen.findByRole("link", { name: "Target" });
+    const renderCount = markdownRenderMocks.reactMarkdown.mock.calls.length;
 
-    fireEvent.click(await screen.findByRole("link", { name: "Target" }));
+    view.rerender(<TextEditorView {...props} onOpenMarkdownLink={currentOpenMarkdownLink} />);
 
-    expect(onOpenMarkdownLink).toHaveBeenCalledWith(7, expect.objectContaining({ id: sourceNode.id, path: sourceNode.path }), "/docs/target.md");
+    expect(markdownRenderMocks.reactMarkdown).toHaveBeenCalledTimes(renderCount);
+    fireEvent.click(link);
+
+    expect(previousOpenMarkdownLink).not.toHaveBeenCalled();
+    expect(currentOpenMarkdownLink).toHaveBeenCalledWith(7, expect.objectContaining({ id: sourceNode.id, path: sourceNode.path }), "/docs/target.md");
   });
 
   it("shows a toast for invalid internal-looking markdown links", async () => {
