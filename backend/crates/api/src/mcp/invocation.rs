@@ -6,6 +6,7 @@ use std::time::Instant;
 use axum::http::request::Parts;
 use notegate_db::NewMcpInvocation;
 use notegate_model::{Caller, CallerIdentity};
+use notegate_service::files::parse_target;
 use rmcp::{ErrorData, Json};
 use serde_json::Value;
 
@@ -21,9 +22,22 @@ pub(crate) async fn execute<T>(
     tool: &'static str,
     op: Option<&str>,
     purpose: Option<&str>,
+    space_name: Option<&str>,
     future: impl Future<Output = Result<T, ErrorData>>,
 ) -> Result<T, ErrorData> {
-    execute_classified(state, parts, tool, op, purpose, future, |_| None).await
+    execute_classified(
+        state,
+        parts,
+        InvocationContext {
+            tool,
+            op,
+            purpose,
+            space_name,
+        },
+        future,
+        |_| None,
+    )
+    .await
 }
 
 pub(crate) async fn execute_sequence(
@@ -35,9 +49,12 @@ pub(crate) async fn execute_sequence(
     execute_classified(
         state,
         parts,
-        "run_sequence",
-        None,
-        Some(purpose),
+        InvocationContext {
+            tool: "run_sequence",
+            op: None,
+            purpose: Some(purpose),
+            space_name: None,
+        },
         future,
         sequence_error_code,
     )
@@ -47,20 +64,21 @@ pub(crate) async fn execute_sequence(
 async fn execute_classified<T>(
     state: &AppState,
     parts: &Parts,
-    tool: &'static str,
-    op: Option<&str>,
-    purpose: Option<&str>,
+    invocation: InvocationContext<'_>,
     future: impl Future<Output = Result<T, ErrorData>>,
     classify_error: impl FnOnce(&T) -> Option<String>,
 ) -> Result<T, ErrorData> {
-    if let Some(purpose) = purpose
+    if let Some(purpose) = invocation.purpose
         && let Err(error) = validate_purpose(purpose)
     {
-        return observe_mcp_tool(state.config.metrics_enabled, tool, async { Err(error) }).await;
+        return observe_mcp_tool(state.config.metrics_enabled, invocation.tool, async {
+            Err(error)
+        })
+        .await;
     }
 
     let started = Instant::now();
-    let result = observe_mcp_tool(state.config.metrics_enabled, tool, future).await;
+    let result = observe_mcp_tool(state.config.metrics_enabled, invocation.tool, future).await;
     let classified_error = result.as_ref().ok().and_then(classify_error);
 
     if let Ok(caller) = caller(parts) {
@@ -68,9 +86,10 @@ async fn execute_classified<T>(
             state,
             caller,
             InvocationRecord {
-                tool,
-                op,
-                purpose,
+                tool: invocation.tool,
+                op: invocation.op,
+                purpose: invocation.purpose,
+                space_name: invocation.space_name,
                 classified_error: classified_error.as_deref(),
                 elapsed_ms: started.elapsed().as_millis(),
             },
@@ -80,6 +99,21 @@ async fn execute_classified<T>(
     }
 
     result
+}
+
+struct InvocationContext<'a> {
+    tool: &'static str,
+    op: Option<&'a str>,
+    purpose: Option<&'a str>,
+    space_name: Option<&'a str>,
+}
+
+/// Extract only the validated Space-name segment from an MCP target.
+/// Paths and malformed targets are intentionally not retained in invocation history.
+pub(crate) fn invocation_space_name(target: Option<&str>) -> Option<String> {
+    target
+        .and_then(|target| parse_target(target).ok())
+        .map(|target| target.space)
 }
 
 fn validate_purpose(purpose: &str) -> Result<(), ErrorData> {
@@ -101,6 +135,7 @@ struct InvocationRecord<'a> {
     tool: &'static str,
     op: Option<&'a str>,
     purpose: Option<&'a str>,
+    space_name: Option<&'a str>,
     classified_error: Option<&'a str>,
     elapsed_ms: u128,
 }
@@ -135,6 +170,7 @@ async fn record<T>(
             tool: invocation.tool,
             op: invocation.op,
             purpose: invocation.purpose,
+            space_name: invocation.space_name,
             outcome,
             error_code: error_code.as_deref(),
             duration_ms,
@@ -204,6 +240,16 @@ mod tests {
     }
 
     #[test]
+    fn invocation_space_name_keeps_only_a_valid_space_segment() {
+        assert_eq!(
+            invocation_space_name(Some("Daily Research:/private/note.md")).as_deref(),
+            Some("Daily Research")
+        );
+        assert_eq!(invocation_space_name(Some("missing-colon")), None);
+        assert_eq!(invocation_space_name(None), None);
+    }
+
+    #[test]
     fn error_code_prefers_structured_application_code() {
         let error = ErrorData::invalid_params(
             "invalid input",
@@ -248,6 +294,7 @@ mod tests {
             "search",
             Some("find"),
             Some("locate cache design notes"),
+            None,
             async { Ok::<_, ErrorData>(()) },
         )
         .await?;
@@ -257,6 +304,7 @@ mod tests {
             "read",
             Some("read"),
             Some("read a missing design note"),
+            None,
             async {
                 Err::<(), _>(invalid_input_error(
                     "the requested design note does not exist",
@@ -266,9 +314,15 @@ mod tests {
         .await
         .expect_err("tool error is returned");
         assert_eq!(recorded_error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        let error = execute(&state, &parts, "read", Some("spaces"), Some(" "), async {
-            Ok::<_, ErrorData>(())
-        })
+        let error = execute(
+            &state,
+            &parts,
+            "read",
+            Some("spaces"),
+            Some(" "),
+            None,
+            async { Ok::<_, ErrorData>(()) },
+        )
         .await
         .expect_err("blank purpose is rejected");
         assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
@@ -354,6 +408,7 @@ mod tests {
             "search",
             Some("grep"),
             Some("search the owner's notes"),
+            None,
             async { Ok::<_, ErrorData>(()) },
         )
         .await?;

@@ -31,9 +31,10 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
                 owner_user_id: owner,
                 actor_account_id: owner,
                 caller_kind: "user",
-                tool: "search",
-                op: Some("grep"),
+                tool: "read",
+                op: Some("changes"),
                 purpose: Some(purpose),
+                space_name: Some("Research"),
                 outcome: "success",
                 error_code: None,
                 duration_ms: 4,
@@ -56,6 +57,7 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     let (status, first) = decode_response(response).await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(first["invocations"][0]["purpose"], "second purpose");
+    assert_eq!(first["invocations"][0]["space_name"], "Research");
     assert_eq!(
         first["invocations"][0]["actor"]["display_name"],
         "REST Test Owner"

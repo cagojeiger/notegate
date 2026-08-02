@@ -156,6 +156,12 @@ function McpInvocationRow({ invocation }: { invocation: McpInvocation }) {
         </div>
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
           <span className="font-mono text-text">{operation}</span>
+          {invocation.space_name ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="truncate" title={invocation.space_name}>Space {invocation.space_name}</span>
+            </>
+          ) : null}
           <span aria-hidden="true">·</span>
           <span className="truncate" title={invocation.actor_account_id}>{actor}</span>
           <span aria-hidden="true">·</span>

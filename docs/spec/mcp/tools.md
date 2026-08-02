@@ -63,6 +63,8 @@ type ReadInput = {
 
 `changes`는 operation filter 없이 Folder/Text/File의 create, content/metadata update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
 
+호출 이력에는 전체 target이나 event payload를 복제하지 않고, `read op=changes`가 조회한 검증된 Space 이름만 `space_name` snapshot으로 남긴다.
+
 새 캐시는 **`changes(limit=1)`에서 `checkpoint_cursor` 저장 → 현재 Space snapshot 구성 → `direction=newer, cursor=<checkpoint_cursor>`로 조회** 순서로 시작한다. 마지막 조회가 snapshot을 읽는 동안 발생한 변경을 회수한다. 응답의 event를 `event_id ASC` 순서대로 모두 적용한 뒤에만 새 `checkpoint_cursor`를 저장한다. `page.has_more=true`이면 `page.next_cursor`로 계속 읽는다. `resync_required=true`이면 cursor 이후의 연속성을 보장할 수 없으므로 현재 Space tree를 다시 만들고 응답의 `checkpoint_cursor`에서 재개한다.
 
 응답은 다른 paginated read/search와 동일하게 `page: {limit, returned, has_more, next_cursor}`를 사용한다. `direction=newer` 응답의 `next_action`은 다음 상태를 구조화한다.

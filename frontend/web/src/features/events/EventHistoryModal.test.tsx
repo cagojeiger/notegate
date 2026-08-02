@@ -108,7 +108,7 @@ describe("EventHistoryModal", () => {
       }
       if (path.includes("/api/v1/me/mcp-invocations")) {
         return jsonResponse({
-          invocations: [mcpInvocation(3, "search", "grep", "Find cache design notes", "success")],
+          invocations: [mcpInvocation(3, "read", "changes", "Review recent changes", "success", "Research")],
           page: { limit: 50, returned: 1, has_more: true, next_cursor: "mcp-cursor-1" }
         });
       }
@@ -122,8 +122,9 @@ describe("EventHistoryModal", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "MCP" }));
-    expect(await screen.findByText("Find cache design notes")).toBeInTheDocument();
-    expect(screen.getByText("search · grep")).toBeInTheDocument();
+    expect(await screen.findByText("Review recent changes")).toBeInTheDocument();
+    expect(screen.getByText("read · changes")).toBeInTheDocument();
+    expect(screen.getByText("Space Research")).toBeInTheDocument();
     expect(screen.getByText("12 ms")).toBeInTheDocument();
     expect(screen.getByText("Success")).toBeInTheDocument();
 
@@ -268,7 +269,8 @@ function mcpInvocation(
   tool: string,
   op: string | null,
   purpose: string | null,
-  outcome: "success" | "error"
+  outcome: "success" | "error",
+  spaceName: string | null = null
 ) {
   return {
     id,
@@ -279,6 +281,7 @@ function mcpInvocation(
     tool,
     op,
     purpose,
+    space_name: spaceName,
     outcome,
     error_code: outcome === "error" ? "tool_error" : null,
     duration_ms: 12

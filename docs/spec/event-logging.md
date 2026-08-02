@@ -52,9 +52,9 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 ## MCP invocation history
 
-`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, success/error, 안정적인 error code, 실행 시간을 저장한다. `me`는 purpose 예외이므로 NULL이다. 다른 tool의 purpose는 1..200자의 짧은 호출 이유다.
+`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, success/error, 안정적인 error code, 실행 시간을 저장한다. `read op=changes`는 어느 Space의 변경 stream을 조회했는지 확인할 수 있도록 검증된 `space_name` snapshot도 저장한다. `me`는 purpose 예외이므로 NULL이다. 다른 tool의 purpose는 1..200자의 짧은 호출 이유다.
 
-전체 tool input, 검색어, target path, Text content, edit, 암호화 metadata, presigned URL, 응답 payload는 저장하지 않는다. Purpose에도 secret, 본문, 검색 결과를 넣지 않는다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다. Retention은 90일이며 아래의 기존 purge worker가 bounded batch로 집행한다.
+전체 tool input, 검색어, target path, Text content, edit, 암호화 metadata, presigned URL, 응답 payload는 저장하지 않는다. `read op=changes`의 `space_name`만 target path에서 분리해 보존하며 path 부분은 저장하지 않는다. Purpose에도 secret, 본문, 검색 결과를 넣지 않는다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다. Retention은 90일이며 아래의 기존 purge worker가 bounded batch로 집행한다.
 
 ## Audit event sources
 
