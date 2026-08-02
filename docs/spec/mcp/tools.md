@@ -6,7 +6,7 @@
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
-- 일반 목록은 `limit`과 opaque `cursor`를 사용한다. `changes`는 같은 opaque cursor를 `before` 또는 `after`에 넣어 방향을 선택한다.
+- 모든 paginated read/search는 `limit`, opaque `cursor`, 응답의 `page.next_cursor`를 사용한다. `changes`만 `direction=older|newer`로 진행 방향을 선택한다.
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
 - MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
@@ -33,8 +33,7 @@ type ReadInput = {
   depth?: number
   limit?: number
   cursor?: string
-  before?: string
-  after?: string
+  direction?: "older" | "newer"
   start_line?: number
   max_lines?: number
   max_bytes?: number
@@ -53,29 +52,29 @@ type ReadInput = {
 
 | 목적 | 입력 | 순서 | 이어서 읽는 값 |
 | --- | --- | --- | --- |
-| 최신 변경 확인 | `before`, `after` 모두 생략 | `event_id DESC` | `page.next.before` |
-| 더 오래된 변경 탐색 | `before=<cursor>` | `event_id DESC` | `page.next.before` |
-| cursor 이후 변경 적용 | `after=<cursor>` | `event_id ASC` | `page.next.after` 또는 `applied_cursor` |
+| 최신 변경 확인 | `direction`과 `cursor` 생략 | `event_id DESC` | `page.next_cursor` |
+| 더 오래된 변경 탐색 | `direction=older`, `cursor=<cursor>` | `event_id DESC` | `page.next_cursor` |
+| cursor 이후 변경 적용 | `direction=newer`, `cursor=<cursor>` | `event_id ASC` | `page.next_cursor` 또는 `checkpoint_cursor` |
 
-`event_id`는 하나의 mutation event 식별자이며 Space 안에서는 큰 값이 더 최신이다. `created_at`은 표시 시각이고 정본 순서는 `event_id`다. `before`와 `after`는 동시에 사용할 수 없다. Changes cursor는 Space에 묶인 opaque 값이므로 내부 event id를 만들거나 다른 Space에 재사용하지 않는다.
+`direction`의 기본값은 `older`이며 `newer`는 checkpoint `cursor`가 필수다. `event_id`는 하나의 mutation event 식별자이며 Space 안에서는 큰 값이 더 최신이다. `created_at`은 표시 시각이고 정본 순서는 `event_id`다. Changes cursor는 Space에 묶인 opaque 값이므로 내부 event id를 만들거나 다른 Space에 재사용하지 않는다.
 
 `changes`는 operation filter 없이 Folder/Text/File의 create, content/metadata update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
 
-새 캐시는 **`changes(limit=1)`에서 `head_cursor` 저장 → 현재 Space snapshot 구성 → 저장한 cursor를 `after`로 조회** 순서로 시작한다. 마지막 조회가 snapshot을 읽는 동안 발생한 변경을 회수한다. 응답의 event를 `event_id ASC` 순서대로 모두 적용한 뒤에만 `applied_cursor`를 저장한다. `page.has_more=true`이면 `page.next.after`로 계속 읽는다. `resync_required=true`이면 cursor 이후의 연속성을 보장할 수 없으므로 현재 Space tree를 다시 만들고 `next_action.new_head_cursor`에서 재개한다.
+새 캐시는 **`changes(limit=1)`에서 `checkpoint_cursor` 저장 → 현재 Space snapshot 구성 → `direction=newer, cursor=<checkpoint_cursor>`로 조회** 순서로 시작한다. 마지막 조회가 snapshot을 읽는 동안 발생한 변경을 회수한다. 응답의 event를 `event_id ASC` 순서대로 모두 적용한 뒤에만 새 `checkpoint_cursor`를 저장한다. `page.has_more=true`이면 `page.next_cursor`로 계속 읽는다. `resync_required=true`이면 cursor 이후의 연속성을 보장할 수 없으므로 현재 Space tree를 다시 만들고 응답의 `checkpoint_cursor`에서 재개한다.
 
-응답은 방향과 무관하게 `page: {limit, returned, has_more, start_cursor, end_cursor, next}`를 사용한다. 최신/과거 조회의 `next`는 `{before}`, 이후 변경 조회의 `next`는 `{after}`다. `after` 응답의 `next_action`은 다음 상태를 구조화한다.
+응답은 다른 paginated read/search와 동일하게 `page: {limit, returned, has_more, next_cursor}`를 사용한다. `direction=newer` 응답의 `next_action`은 다음 상태를 구조화한다.
 
-- `call_tool`: 같은 `limit`과 새 `after` cursor로 다음 page를 호출한다.
-- `store_cursor`: 반환된 event를 모두 적용한 뒤 `applied_cursor`를 저장한다.
-- `resync_required`: 현재 Space snapshot을 다시 구성하고 새 `head_cursor`에서 재개한다.
+- `call_tool`: 같은 `limit`, `direction=newer`, 새 `cursor`로 다음 page를 호출한다.
+- `store_cursor`: 반환된 event를 모두 적용한 뒤 `checkpoint_cursor`를 저장한다.
+- `rebuild_snapshot`: 현재 Space snapshot을 다시 구성하고 새 `checkpoint_cursor`에서 재개한다.
 
 결정적으로 복구할 수 있는 잘못된 입력은 JSON-RPC error의 `data`에 `code`, `recoverable`, `hint`, `next_action`을 반환한다. 같은 입력의 단순 재시도는 성공하지 않으므로 `retryable=false`이며, 호출자는 자연어 message를 분석하지 않고 `code`와 `next_action`으로 수정한다.
 
 | code | 원인 | `next_action.kind` |
 | --- | --- | --- |
-| `changes_direction_conflict` | `before`와 `after` 동시 사용 | `choose_direction` |
-| `changes_cursor_field_invalid` | changes에 일반 `cursor` 사용 | `choose_cursor_field` |
-| `changes_fields_not_allowed` | 다른 op/tool에 `before`/`after` 사용 | `remove_fields` |
+| `changes_direction_invalid` | `older`, `newer`가 아닌 방향 사용 | `choose_value` |
+| `changes_cursor_required` | `direction=newer`에 cursor 누락 | `rebuild_snapshot` |
+| `changes_fields_not_allowed` | 다른 op/tool에 `direction` 사용 | `remove_fields` |
 | `changes_scope_invalid` | Space root가 아닌 target | `replace_field` |
 | `changes_cursor_invalid` | 손상되거나 다른 형식의 cursor | 과거 탐색은 `call_tool`, 이후 변경은 `rebuild_snapshot` |
 | `changes_cursor_scope_mismatch` | 다른 Space cursor | 과거 탐색은 `call_tool`, 이후 변경은 `rebuild_snapshot` |
@@ -272,8 +271,7 @@ type SequenceCommand = {
   depth?: number
   limit?: number
   cursor?: string
-  before?: string
-  after?: string
+  direction?: "older" | "newer"
   start_line?: number
   max_lines?: number
   max_bytes?: number

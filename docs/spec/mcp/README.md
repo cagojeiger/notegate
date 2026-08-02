@@ -22,6 +22,6 @@ run_sequence  ordered command sequence 실행
 
 MCP는 space create/delete/rename, agent 관리, API key 관리를 제공하지 않는다. 이 작업은 REST/dashboard user-only API에서 한다.
 
-변경 기록은 `read op=changes` 하나의 Space-root mutation stream이다. `before`와 `after`를 모두 생략하면 최신 변경을, `before`는 더 오래된 변경을, `after`는 더 새로운 변경을 읽는다. 세 방향은 같은 Space-bound opaque cursor를 사용한다.
+변경 기록은 `read op=changes` 하나의 Space-root mutation stream이다. 다른 paginated read와 동일하게 `cursor`와 `page.next_cursor`를 사용하며, `direction`은 최신에서 과거로 읽는 `older`(기본값) 또는 checkpoint 이후를 적용 순서로 읽는 `newer`다.
 
 정본 tool contract는 [`tools.md`](./tools.md)를 따른다.

@@ -30,15 +30,12 @@ pub struct ReadInput {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor for spaces/ls/tree. Changes uses before/after instead.
+    /// Opaque pagination cursor.
     #[serde(default)]
     pub cursor: Option<String>,
-    /// For `op=changes`, return older events before this opaque cursor.
+    /// For `op=changes`, read older events (default) or newer events.
     #[serde(default)]
-    pub before: Option<String>,
-    /// For `op=changes`, return newer events after this opaque cursor.
-    #[serde(default)]
-    pub after: Option<String>,
+    pub direction: Option<String>,
     /// 1-based first line for `op=read`.
     #[serde(default)]
     pub start_line: Option<i64>,
@@ -242,15 +239,12 @@ pub struct SequenceCommand {
     /// Page size.
     #[serde(default)]
     pub limit: Option<i64>,
-    /// Opaque pagination cursor for paginated reads and searches. Changes uses before/after instead.
+    /// Opaque pagination cursor for paginated reads and searches.
     #[serde(default)]
     pub cursor: Option<String>,
-    /// For `read op=changes`, return older events before this opaque cursor.
+    /// For `read op=changes`, read older events (default) or newer events.
     #[serde(default)]
-    pub before: Option<String>,
-    /// For `read op=changes`, return newer events after this opaque cursor.
-    #[serde(default)]
-    pub after: Option<String>,
+    pub direction: Option<String>,
 
     /// 1-based first line for read.
     #[serde(default)]
@@ -279,8 +273,7 @@ impl SequenceCommand {
             depth: self.depth,
             limit: self.limit,
             cursor: self.cursor,
-            before: self.before,
-            after: self.after,
+            direction: self.direction,
             start_line: self.start_line,
             max_lines: self.max_lines,
             max_bytes: self.max_bytes,
@@ -376,8 +369,8 @@ pub async fn read(
                 parts,
                 required(input.target, "target", "changes")?,
                 input.limit,
-                input.before,
-                input.after,
+                input.direction,
+                input.cursor,
             )
             .await
         }
@@ -390,43 +383,20 @@ pub async fn read(
 
 fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
     if input.op == "changes" {
-        if input.cursor.is_some() {
-            return Err(actionable_input_error(
-                "changes_cursor_field_invalid",
-                "op=changes uses before/after, not cursor",
-                "Move the opaque changes cursor to before for older events or after for newer events.",
-                json!({
-                    "kind": "choose_cursor_field",
-                    "source_field": "cursor",
-                    "choices": [
-                        {"field": "before", "effect": "read older events"},
-                        {"field": "after", "effect": "read newer events"},
-                    ],
-                }),
-            ));
-        }
         return Ok(());
     }
-    if input.before.is_some() || input.after.is_some() {
-        let fields = change_fields(input.before.is_some(), input.after.is_some());
+    if input.direction.is_some() {
         return Err(actionable_input_error(
             "changes_fields_not_allowed",
-            "before/after are only valid for read op=changes",
-            "Remove the listed fields or change op to changes.",
+            "direction is only valid for read op=changes",
+            "Remove direction or change op to changes.",
             json!({
                 "kind": "remove_fields",
-                "fields": fields,
+                "fields": ["direction"],
             }),
         ));
     }
     Ok(())
-}
-
-fn change_fields(before: bool, after: bool) -> Vec<&'static str> {
-    [("before", before), ("after", after)]
-        .into_iter()
-        .filter_map(|(field, present)| present.then_some(field))
-        .collect()
 }
 
 pub async fn search(
@@ -623,15 +593,14 @@ async fn dispatch_command(
     parts: &Parts,
     command: SequenceCommand,
 ) -> Result<Json<Value>, ErrorData> {
-    if command.tool != "read" && (command.before.is_some() || command.after.is_some()) {
-        let fields = change_fields(command.before.is_some(), command.after.is_some());
+    if command.tool != "read" && command.direction.is_some() {
         return Err(actionable_input_error(
             "changes_fields_not_allowed",
-            "before/after are only valid for read op=changes",
-            "Remove the listed fields or use them only with a read changes command.",
+            "direction is only valid for read op=changes",
+            "Remove direction or use it only with a read changes command.",
             json!({
                 "kind": "remove_fields",
-                "fields": fields,
+                "fields": ["direction"],
             }),
         ));
     }
@@ -729,34 +698,18 @@ mod tests {
     }
 
     #[test]
-    fn changes_uses_opaque_before_and_after_cursors() {
+    fn changes_uses_the_shared_opaque_cursor_with_a_direction() {
         let input = serde_json::from_value::<ReadInput>(json!({
             "op": "changes",
             "target": "daily:/",
-            "after": "opaque-change-cursor",
+            "direction": "newer",
+            "cursor": "opaque-change-cursor",
             "limit": 25
         }))
         .expect("valid changes input parses");
 
-        assert_eq!(input.after.as_deref(), Some("opaque-change-cursor"));
-        assert!(input.before.is_none());
-        assert!(input.cursor.is_none());
-    }
-
-    #[test]
-    fn changes_rejects_the_generic_page_cursor() {
-        let input = serde_json::from_value::<ReadInput>(json!({
-            "op": "changes",
-            "target": "daily:/",
-            "cursor": "generic-page-cursor"
-        }))
-        .expect("known fields parse before operation validation");
-        let error = validate_read_change_fields(&input)
-            .expect_err("changes must use its directional cursors");
-
-        let data = error.data.expect("structured recovery data");
-        assert_eq!(data["code"], "changes_cursor_field_invalid");
-        assert_eq!(data["next_action"]["kind"], "choose_cursor_field");
+        assert_eq!(input.direction.as_deref(), Some("newer"));
+        assert_eq!(input.cursor.as_deref(), Some("opaque-change-cursor"));
     }
 
     #[test]
@@ -764,7 +717,7 @@ mod tests {
         let input = serde_json::from_value::<ReadInput>(json!({
             "op": "read",
             "target": "daily:/note.md",
-            "before": "opaque-change-cursor"
+            "direction": "older"
         }))
         .expect("known fields parse before operation validation");
         let error = validate_read_change_fields(&input)
@@ -773,7 +726,7 @@ mod tests {
         let data = error.data.expect("structured recovery data");
         assert_eq!(data["code"], "changes_fields_not_allowed");
         assert_eq!(data["next_action"]["kind"], "remove_fields");
-        assert_eq!(data["next_action"]["fields"], json!(["before"]));
+        assert_eq!(data["next_action"]["fields"], json!(["direction"]));
     }
 
     #[test]
@@ -783,19 +736,14 @@ mod tests {
                 "tool": "read",
                 "op": "changes",
                 "target": "daily:/",
-                "after": "opaque-change-cursor"
+                "direction": "newer",
+                "cursor": "opaque-change-cursor"
             }]
         }))
         .expect("valid changes sequence parses");
 
-        assert_eq!(
-            input
-                .commands
-                .first()
-                .expect("one command")
-                .after
-                .as_deref(),
-            Some("opaque-change-cursor")
-        );
+        let command = input.commands.first().expect("one command");
+        assert_eq!(command.direction.as_deref(), Some("newer"));
+        assert_eq!(command.cursor.as_deref(), Some("opaque-change-cursor"));
     }
 }

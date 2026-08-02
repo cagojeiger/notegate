@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::resolve::{actionable_input_error, caller, resolve_target, service_error};
+use super::support::page_json;
 use crate::file_change::FileChangeImpact;
 use crate::state::AppState;
 
@@ -19,17 +20,17 @@ pub async fn call(
     parts: &Parts,
     target: String,
     limit: Option<i64>,
-    before: Option<String>,
-    after: Option<String>,
+    direction: Option<String>,
+    cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
-    validate_change_request(before.as_deref(), after.as_deref())?;
+    let direction = parse_change_direction(direction.as_deref())?;
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let root_target = format!("{}:/", resolved.name());
     require_space_root(&path, &root_target)?;
 
-    match after {
-        Some(after) => {
+    match direction {
+        ChangeDirection::Newer => {
             newer(
                 state,
                 caller.account_id(),
@@ -37,11 +38,11 @@ pub async fn call(
                 resolved.name(),
                 target,
                 limit,
-                after,
+                require_newer_cursor(cursor, &root_target)?,
             )
             .await
         }
-        None => {
+        ChangeDirection::Older => {
             older(
                 state,
                 caller.account_id(),
@@ -49,29 +50,51 @@ pub async fn call(
                 resolved.name(),
                 &target,
                 limit,
-                before,
+                cursor,
             )
             .await
         }
     }
 }
 
-fn validate_change_request(before: Option<&str>, after: Option<&str>) -> Result<(), ErrorData> {
-    if before.is_some() && after.is_some() {
-        return Err(actionable_input_error(
-            "changes_direction_conflict",
-            "before and after cannot be used together",
-            "Choose one direction: keep before for older events or keep after for newer events.",
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChangeDirection {
+    Older,
+    Newer,
+}
+
+fn parse_change_direction(raw: Option<&str>) -> Result<ChangeDirection, ErrorData> {
+    match raw.unwrap_or("older") {
+        "older" => Ok(ChangeDirection::Older),
+        "newer" => Ok(ChangeDirection::Newer),
+        _ => Err(actionable_input_error(
+            "changes_direction_invalid",
+            "direction must be 'older' or 'newer'",
+            "Choose older for history pagination or newer for checkpoint replay.",
             json!({
-                "kind": "choose_direction",
-                "choices": [
-                    {"keep": "before", "remove": "after", "effect": "read older events"},
-                    {"keep": "after", "remove": "before", "effect": "read newer events"},
-                ],
+                "kind": "choose_value",
+                "field": "direction",
+                "choices": ["older", "newer"],
             }),
-        ));
+        )),
     }
-    Ok(())
+}
+
+fn require_newer_cursor(cursor: Option<String>, target: &str) -> Result<String, ErrorData> {
+    cursor.ok_or_else(|| {
+        actionable_input_error(
+            "changes_cursor_required",
+            "direction=newer requires cursor",
+            "Capture checkpoint_cursor from the current changes page, build the Space snapshot, then replay newer changes from that cursor.",
+            json!({
+                "kind": "rebuild_snapshot",
+                "baseline_call": {
+                    "tool": "read",
+                    "input": {"op": "changes", "target": target, "limit": 1},
+                },
+            }),
+        )
+    })
 }
 
 async fn older(
@@ -81,10 +104,10 @@ async fn older(
     space_name: &str,
     target: &str,
     limit: Option<i64>,
-    before: Option<String>,
+    cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
-    if let Some(before) = before.as_deref() {
-        decode_change_cursor(before, space_id, ChangeCursorDirection::Before, target)?;
+    if let Some(cursor) = cursor.as_deref() {
+        decode_change_cursor(cursor, space_id, ChangeDirection::Older, target)?;
     }
     let page = state
         .files
@@ -93,37 +116,30 @@ async fn older(
             space_id,
             ListFileChangeEventsById {
                 limit,
-                cursor: before.clone(),
+                cursor: cursor.clone(),
             },
         )
         .await
         .map_err(service_error)?;
     let events = page.items.iter().map(event_json).collect::<Vec<_>>();
     let returned = events.len();
-    let start_cursor = page
-        .items
-        .first()
-        .map(|event| encode_change_cursor(space_id, event.id))
-        .transpose()?;
-    let end_cursor = page
-        .items
-        .last()
-        .map(|event| encode_change_cursor(space_id, event.id))
-        .transpose()?;
-    let head_cursor = if before.is_none() {
+    let checkpoint_cursor = if cursor.is_none() {
         Some(
-            start_cursor
-                .clone()
+            page.items
+                .first()
+                .map(|event| encode_change_cursor(space_id, event.id))
+                .transpose()?
                 .unwrap_or(encode_change_cursor(space_id, 0)?),
         )
     } else {
         None
     };
-    let next = page.next_cursor.as_ref().map(|cursor| {
-        json!({
-            "before": cursor,
-        })
-    });
+    let page_json = page_json(
+        page.limit,
+        returned,
+        page.has_more,
+        page.next_cursor.as_deref(),
+    );
 
     Ok(Json(json!({
         "space": space_name,
@@ -132,18 +148,11 @@ async fn older(
             "kind": "space",
             "includes_descendants": true,
         },
-        "direction": if before.is_some() { "before" } else { "latest" },
+        "direction": "older",
         "order": "event_id_desc",
         "events": events,
-        "page": {
-            "limit": page.limit,
-            "returned": returned,
-            "has_more": page.has_more,
-            "start_cursor": start_cursor,
-            "end_cursor": end_cursor,
-            "next": next,
-        },
-        "head_cursor": head_cursor,
+        "page": page_json,
+        "checkpoint_cursor": checkpoint_cursor,
         "resync_required": false,
     })))
 }
@@ -156,10 +165,9 @@ async fn newer(
     space_name: &str,
     target: String,
     limit: Option<i64>,
-    after: String,
+    cursor: String,
 ) -> Result<Json<Value>, ErrorData> {
-    let after_cursor =
-        decode_change_cursor(&after, space_id, ChangeCursorDirection::After, &target)?;
+    let after_cursor = decode_change_cursor(&cursor, space_id, ChangeDirection::Newer, &target)?;
 
     let page = state
         .files
@@ -175,23 +183,8 @@ async fn newer(
         .map_err(service_error)?;
     let events = page.items.iter().map(event_json).collect::<Vec<_>>();
     let continuation_cursor = encode_change_cursor(space_id, page.next_after_id)?;
-    let applied_cursor = (!page.resync_required).then(|| continuation_cursor.clone());
-    let head_cursor = page.resync_required.then(|| continuation_cursor.clone());
-    let start_cursor = page
-        .items
-        .first()
-        .map(|event| encode_change_cursor(space_id, event.id))
-        .transpose()?;
-    let end_cursor = page
-        .items
-        .last()
-        .map(|event| encode_change_cursor(space_id, event.id))
-        .transpose()?;
-    let next = page.has_more.then(|| {
-        json!({
-            "after": continuation_cursor,
-        })
-    });
+    let next_cursor = page.has_more.then_some(continuation_cursor.as_str());
+    let page_json = page_json(page.limit, events.len(), page.has_more, next_cursor);
     let next_action = changes_next_action(
         &target,
         &continuation_cursor,
@@ -199,7 +192,6 @@ async fn newer(
         page.resync_required,
         page.limit,
     );
-    let returned = events.len();
 
     Ok(Json(json!({
         "space": space_name,
@@ -208,19 +200,11 @@ async fn newer(
             "kind": "space",
             "includes_descendants": true,
         },
-        "direction": "after",
+        "direction": "newer",
         "order": "event_id_asc",
         "events": events,
-        "page": {
-            "limit": page.limit,
-            "returned": returned,
-            "has_more": page.has_more,
-            "start_cursor": start_cursor,
-            "end_cursor": end_cursor,
-            "next": next,
-        },
-        "applied_cursor": applied_cursor,
-        "head_cursor": head_cursor,
+        "page": page_json,
+        "checkpoint_cursor": continuation_cursor,
         "resync_required": page.resync_required,
         "next_action": next_action,
     })))
@@ -250,16 +234,10 @@ fn encode_change_cursor(space_id: Uuid, id: i64) -> Result<String, ErrorData> {
     })
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ChangeCursorDirection {
-    Before,
-    After,
-}
-
 fn decode_change_cursor(
     raw: &str,
     space_id: Uuid,
-    direction: ChangeCursorDirection,
+    direction: ChangeDirection,
     target: &str,
 ) -> Result<FileChangeEventIdCursor, ErrorData> {
     let decoded = cursor::decode::<FileChangeEventIdCursor>(raw).map_err(|_error| {
@@ -284,11 +262,11 @@ fn decode_change_cursor(
 fn changes_cursor_error(
     code: &'static str,
     message: &'static str,
-    direction: ChangeCursorDirection,
+    direction: ChangeDirection,
     target: &str,
 ) -> ErrorData {
     let (hint, next_action) = match direction {
-        ChangeCursorDirection::Before => (
+        ChangeDirection::Older => (
             "Discard this cursor and restart from the latest changes for the current Space.",
             json!({
                 "kind": "call_tool",
@@ -296,8 +274,8 @@ fn changes_cursor_error(
                 "input": {"op": "changes", "target": target},
             }),
         ),
-        ChangeCursorDirection::After => (
-            "This cursor cannot continue cache replay. Obtain a new head_cursor and rebuild the current Space snapshot before reading after it.",
+        ChangeDirection::Newer => (
+            "This cursor cannot continue cache replay. Obtain a new checkpoint_cursor and rebuild the current Space snapshot before reading newer changes.",
             json!({
                 "kind": "rebuild_snapshot",
                 "baseline_call": {
@@ -330,36 +308,37 @@ fn event_json(event: &FileChangeEvent) -> Value {
 
 fn changes_next_action(
     target: &str,
-    applied_cursor: &str,
+    checkpoint_cursor: &str,
     has_more: bool,
     resync_required: bool,
     limit: i64,
 ) -> Value {
     if resync_required {
         return json!({
-            "kind": "resync_required",
-            "reason": "The supplied cursor cannot prove continuous replay. Rebuild the current Space state and use new_head_cursor as the new baseline.",
-            "new_head_cursor": applied_cursor,
+            "kind": "rebuild_snapshot",
+            "reason": "The supplied cursor cannot prove continuous replay. Rebuild the current Space state and use checkpoint_cursor as the new baseline.",
+            "cursor": checkpoint_cursor,
         });
     }
     if has_more {
         return json!({
             "kind": "call_tool",
-            "reason": "More changes are available. Apply this page in order, then continue after its applied_cursor.",
+            "reason": "More changes are available. Apply this page in order, then continue from its checkpoint_cursor.",
             "tool": "read",
             "input": {
                 "op": "changes",
                 "target": target,
                 "limit": limit,
-                "after": applied_cursor,
+                "direction": "newer",
+                "cursor": checkpoint_cursor,
             },
         });
     }
 
     json!({
         "kind": "store_cursor",
-        "reason": "All currently available changes were returned. Store applied_cursor after applying them and use it as after later.",
-        "after": applied_cursor,
+        "reason": "All currently available changes were returned. Store checkpoint_cursor after applying them and use it as cursor later.",
+        "cursor": checkpoint_cursor,
     })
 }
 
@@ -376,16 +355,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn changes_accepts_one_direction_at_a_time() {
-        assert!(validate_change_request(None, None).is_ok());
-        assert!(validate_change_request(Some("before"), None).is_ok());
-        assert!(validate_change_request(None, Some("after")).is_ok());
-        let error = validate_change_request(Some("before"), Some("after"))
-            .expect_err("both directions are ambiguous");
+    fn changes_direction_defaults_to_older_and_rejects_unknown_values() {
+        assert_eq!(
+            parse_change_direction(None).expect("default direction"),
+            ChangeDirection::Older
+        );
+        assert_eq!(
+            parse_change_direction(Some("older")).expect("older direction"),
+            ChangeDirection::Older
+        );
+        assert_eq!(
+            parse_change_direction(Some("newer")).expect("newer direction"),
+            ChangeDirection::Newer
+        );
+        let error = parse_change_direction(Some("latest")).expect_err("unknown direction");
         let data = error.data.expect("structured recovery data");
-        assert_eq!(data["code"], "changes_direction_conflict");
+        assert_eq!(data["code"], "changes_direction_invalid");
         assert_eq!(data["recoverable"], true);
-        assert_eq!(data["next_action"]["kind"], "choose_direction");
+        assert_eq!(data["next_action"]["kind"], "choose_value");
+    }
+
+    #[test]
+    fn newer_direction_requires_a_checkpoint_cursor() {
+        let error = require_newer_cursor(None, "daily:/").expect_err("cursor is required");
+        let data = error.data.expect("structured recovery data");
+        assert_eq!(data["code"], "changes_cursor_required");
+        assert_eq!(data["next_action"]["kind"], "rebuild_snapshot");
     }
 
     #[test]
@@ -401,29 +396,29 @@ mod tests {
 
     #[test]
     fn invalid_cursors_describe_direction_specific_recovery() {
-        let before = decode_change_cursor(
+        let older = decode_change_cursor(
             "not-a-cursor",
             Uuid::nil(),
-            ChangeCursorDirection::Before,
+            ChangeDirection::Older,
             "daily:/",
         )
-        .expect_err("invalid before cursor");
-        let before_data = before.data.expect("before recovery data");
-        assert_eq!(before_data["code"], "changes_cursor_invalid");
-        assert_eq!(before_data["next_action"]["kind"], "call_tool");
+        .expect_err("invalid older cursor");
+        let older_data = older.data.expect("older recovery data");
+        assert_eq!(older_data["code"], "changes_cursor_invalid");
+        assert_eq!(older_data["next_action"]["kind"], "call_tool");
 
-        let after = decode_change_cursor(
+        let newer = decode_change_cursor(
             "not-a-cursor",
             Uuid::nil(),
-            ChangeCursorDirection::After,
+            ChangeDirection::Newer,
             "daily:/",
         )
-        .expect_err("invalid after cursor");
-        let after_data = after.data.expect("after recovery data");
-        assert_eq!(after_data["code"], "changes_cursor_invalid");
-        assert_eq!(after_data["next_action"]["kind"], "rebuild_snapshot");
+        .expect_err("invalid newer cursor");
+        let newer_data = newer.data.expect("newer recovery data");
+        assert_eq!(newer_data["code"], "changes_cursor_invalid");
+        assert_eq!(newer_data["next_action"]["kind"], "rebuild_snapshot");
         assert_eq!(
-            after_data["next_action"]["baseline_call"]["input"]["limit"],
+            newer_data["next_action"]["baseline_call"]["input"]["limit"],
             1
         );
     }
@@ -467,21 +462,21 @@ mod tests {
         )
         .await?
         .0;
-        assert_eq!(latest["direction"], "latest");
+        assert_eq!(latest["direction"], "older");
         assert_eq!(latest["order"], "event_id_desc");
         assert_eq!(latest["events"][0]["operation"], "folder.create");
         assert_eq!(latest["page"]["limit"], 1);
         assert_eq!(latest["page"]["returned"], 1);
         assert_eq!(latest["page"]["has_more"], true);
         assert!(latest.get("next_action").is_none());
-        let head_cursor = latest["head_cursor"]
+        let checkpoint_cursor = latest["checkpoint_cursor"]
             .as_str()
             .expect("latest response exposes a cache baseline")
             .to_owned();
         let first_event_id = latest["events"][0]["event_id"]
             .as_i64()
             .expect("latest event id");
-        let before_cursor = latest["page"]["next"]["before"]
+        let older_cursor = latest["page"]["next_cursor"]
             .as_str()
             .expect("older changes cursor")
             .to_owned();
@@ -490,12 +485,12 @@ mod tests {
             &parts,
             "rest-test:/".to_owned(),
             Some(1),
-            Some(before_cursor),
-            None,
+            Some("older".to_owned()),
+            Some(older_cursor),
         )
         .await?
         .0;
-        assert_eq!(older_history["direction"], "before");
+        assert_eq!(older_history["direction"], "older");
         assert!(
             first_event_id
                 > older_history["events"][0]["event_id"]
@@ -534,26 +529,26 @@ mod tests {
             &parts,
             "rest-test:/".to_owned(),
             Some(1),
-            None,
-            Some(head_cursor),
+            Some("newer".to_owned()),
+            Some(checkpoint_cursor),
         )
         .await?
         .0;
-        assert_eq!(first_newer["direction"], "after");
+        assert_eq!(first_newer["direction"], "newer");
         assert_eq!(first_newer["order"], "event_id_asc");
         assert_eq!(first_newer["events"][0]["operation"], "folder.create");
         assert_eq!(first_newer["page"]["limit"], 1);
         assert_eq!(first_newer["page"]["returned"], 1);
         assert_eq!(first_newer["page"]["has_more"], true);
         assert_eq!(first_newer["next_action"]["input"]["limit"], 1);
-        assert!(first_newer["head_cursor"].is_null());
+        assert!(first_newer["checkpoint_cursor"].is_string());
         let first_newer_event_id = first_newer["events"][0]["event_id"]
             .as_i64()
             .expect("newer event id");
         assert!(first_newer_event_id > first_event_id);
-        let applied_cursor = first_newer["applied_cursor"]
+        let checkpoint_cursor = first_newer["checkpoint_cursor"]
             .as_str()
-            .expect("applied cursor")
+            .expect("checkpoint cursor")
             .to_owned();
 
         let second_newer = call(
@@ -561,8 +556,8 @@ mod tests {
             &parts,
             "rest-test:/".to_owned(),
             Some(1),
-            None,
-            Some(applied_cursor),
+            Some("newer".to_owned()),
+            Some(checkpoint_cursor),
         )
         .await?
         .0;
@@ -580,18 +575,17 @@ mod tests {
             &parts,
             "rest-test:/".to_owned(),
             Some(1),
-            None,
+            Some("newer".to_owned()),
             Some(invalid_cursor),
         )
         .await?
         .0;
         assert_eq!(invalid_continuation["events"], json!([]));
         assert_eq!(invalid_continuation["resync_required"], true);
-        assert!(invalid_continuation["applied_cursor"].is_null());
-        assert!(invalid_continuation["head_cursor"].is_string());
+        assert!(invalid_continuation["checkpoint_cursor"].is_string());
         assert_eq!(
             invalid_continuation["next_action"]["kind"],
-            "resync_required"
+            "rebuild_snapshot"
         );
 
         db.cleanup().await;
@@ -634,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_action_uses_the_last_applied_cursor() {
+    fn continuation_action_uses_the_checkpoint_cursor() {
         let action = changes_next_action("daily:/", "opaque-41", true, false, 25);
 
         assert_eq!(action["kind"], "call_tool");
@@ -642,7 +636,8 @@ mod tests {
         assert_eq!(action["input"]["op"], "changes");
         assert_eq!(action["input"]["target"], "daily:/");
         assert_eq!(action["input"]["limit"], 25);
-        assert_eq!(action["input"]["after"], "opaque-41");
+        assert_eq!(action["input"]["direction"], "newer");
+        assert_eq!(action["input"]["cursor"], "opaque-41");
     }
 
     #[test]
@@ -650,15 +645,15 @@ mod tests {
         let action = changes_next_action("daily:/", "opaque-41", false, false, 25);
 
         assert_eq!(action["kind"], "store_cursor");
-        assert_eq!(action["after"], "opaque-41");
+        assert_eq!(action["cursor"], "opaque-41");
     }
 
     #[test]
     fn invalid_cursor_action_requires_a_full_resync() {
         let action = changes_next_action("daily:/", "opaque-99", false, true, 25);
 
-        assert_eq!(action["kind"], "resync_required");
-        assert_eq!(action["new_head_cursor"], "opaque-99");
+        assert_eq!(action["kind"], "rebuild_snapshot");
+        assert_eq!(action["cursor"], "opaque-99");
     }
 
     fn event(operation: &str, metadata: Value) -> FileChangeEvent {

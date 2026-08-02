@@ -35,7 +35,7 @@ use crate::mcp::tools;
 use crate::observability::observe_mcp_tool;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. `read op=changes` reads every mutation in one Space-root event stream. Omit before/after for the latest events, pass page.next.before for older events, or store head_cursor before reading a Space snapshot and later pass it as after to read newer events in application order. Store applied_cursor only after applying every returned event; if resync_required is true, rebuild the Space snapshot. For a changes input error, use data.code and data.next_action to correct the call instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For a changes input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -82,7 +82,7 @@ impl McpServer {
 
     #[tool(
         name = "read",
-        description = "Read NoteGate spaces, nodes, text, and one Space-root mutation stream. Read-only. Use op=spaces/ls/tree/stat/read/changes. For changes, omit before/after for latest events, use before for older events, or use after for newer events. Changes cursors are opaque and Space-bound; before and after are mutually exclusive. Space names are exact and case-sensitive.",
+        description = "Read NoteGate spaces, nodes, text, and one Space-root mutation stream. Read-only. Use op=spaces/ls/tree/stat/read/changes. Every paginated op uses cursor and returns page.next_cursor. Changes direction is older by default or newer for checkpoint replay. Space names are exact and case-sensitive.",
         annotations(title = "Read NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -377,7 +377,7 @@ mod tests {
             ("me", "", ""),
             (
                 "read",
-                "op target name depth limit cursor before after start_line max_lines max_bytes if_none_match_sha256",
+                "op target name depth limit cursor direction start_line max_lines max_bytes if_none_match_sha256",
                 "op",
             ),
             (
@@ -412,8 +412,9 @@ mod tests {
             .get("properties")
             .and_then(Value::as_object)
             .expect("read properties exist");
-        assert!(properties.contains_key("before"));
-        assert!(properties.contains_key("after"));
+        assert!(properties.contains_key("direction"));
+        assert!(!properties.contains_key("before"));
+        assert!(!properties.contains_key("after"));
         assert!(!properties.contains_key("mode"));
         assert!(!properties.contains_key("after_event_id"));
     }
@@ -422,9 +423,8 @@ mod tests {
     fn server_instructions_describe_all_mcp_categories() {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next.before"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("head_cursor"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("applied_cursor"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("checkpoint_cursor"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("data.code"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("data.next_action"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
@@ -456,9 +456,9 @@ mod tests {
             .description
             .as_deref()
             .expect("read description exists");
-        assert!(description.contains("before"));
-        assert!(description.contains("after"));
-        assert!(description.contains("mutually exclusive"));
+        assert!(description.contains("page.next_cursor"));
+        assert!(description.contains("older"));
+        assert!(description.contains("newer"));
     }
 
     fn expected_tool_names() -> BTreeSet<&'static str> {
