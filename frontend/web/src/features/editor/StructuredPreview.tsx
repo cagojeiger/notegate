@@ -1,6 +1,11 @@
 import { useMemo, useRef } from "react";
 
-import { parseStructuredText, type StructuredFormat } from "./structuredData";
+import {
+  parseStructuredText,
+  type JsonStructuredFormat,
+  type StructuredFormat,
+  type StructuredParseResult
+} from "./structuredData";
 import { StructuredTreeView, type StructuredExpansionMode } from "./StructuredTreeView";
 import { ShikiCodeBlock } from "./ShikiCodeBlock";
 import { shikiLangForFormat } from "./textFormat";
@@ -8,9 +13,13 @@ import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow
 
 export type StructuredPreviewMode = "tree" | "source";
 
-export function StructuredPreview({ format, content, mode = "tree", expansionMode = "expanded" }: { format: StructuredFormat; content: string; mode?: StructuredPreviewMode; expansionMode?: StructuredExpansionMode }) {
+export function StructuredPreview({ format, content, mode = "tree", expansionMode = "expanded" }: { format: JsonStructuredFormat; content: string; mode?: StructuredPreviewMode; expansionMode?: StructuredExpansionMode }) {
   const parsed = useMemo(() => parseStructuredText(format, content), [format, content]);
 
+  return <StructuredPreviewLayout format={format} content={content} parsed={parsed} mode={mode} expansionMode={expansionMode} />;
+}
+
+export function StructuredPreviewLayout({ format, content, parsed, mode = "tree", expansionMode = "expanded" }: { format: StructuredFormat; content: string; parsed: StructuredParseResult; mode?: StructuredPreviewMode; expansionMode?: StructuredExpansionMode }) {
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-[52rem] flex-1 flex-col overflow-hidden px-10 py-10">
       {mode === "tree" && parsed.ok ? (
