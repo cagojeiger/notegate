@@ -5,12 +5,14 @@ import { PlainTextPreview } from "./PlainTextPreview";
 import type { MarkdownImagePolicy, MarkdownLinkPolicy } from "../../shared/lib/markdownLinks";
 import type { DelimitedPreviewMode } from "./DelimitedPreview";
 import type { MarkdownOutlineIdentity } from "./MarkdownOutlineContext";
-import { inferTextFormat, isCodeFormat, isStructuredFormat, isTabularFormat } from "./textFormat";
+import { inferTextFormat, isCodeFormat, isTabularFormat } from "./textFormat";
 import type { StructuredPreviewMode } from "./StructuredPreview";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview").then((module) => ({ default: module.MarkdownPreview })));
 const StructuredPreview = lazy(() => import("./StructuredPreview").then((module) => ({ default: module.StructuredPreview })));
+const YamlStructuredPreview = lazy(() => import("./YamlStructuredPreview").then((module) => ({ default: module.YamlStructuredPreview })));
+const TomlStructuredPreview = lazy(() => import("./TomlStructuredPreview").then((module) => ({ default: module.TomlStructuredPreview })));
 const DelimitedPreview = lazy(() => import("./DelimitedPreview").then((module) => ({ default: module.DelimitedPreview })));
 
 export function TextPreview({ name, content, previewIdentity, markdownLinkPolicy, markdownImagePolicy, markdownOutlineIdentity, structuredMode = "tree", structuredExpansionMode = "expanded", tabularMode = "table" }: { name: string; content: string; previewIdentity?: string; markdownLinkPolicy?: MarkdownLinkPolicy; markdownImagePolicy?: MarkdownImagePolicy; markdownOutlineIdentity?: MarkdownOutlineIdentity; structuredMode?: StructuredPreviewMode; structuredExpansionMode?: StructuredExpansionMode; tabularMode?: DelimitedPreviewMode }) {
@@ -20,8 +22,16 @@ export function TextPreview({ name, content, previewIdentity, markdownLinkPolicy
     return <PreviewSuspense><MarkdownPreview content={content} linkPolicy={markdownLinkPolicy} imagePolicy={markdownImagePolicy} outlineIdentity={markdownOutlineIdentity} /></PreviewSuspense>;
   }
 
-  if (isStructuredFormat(format)) {
+  if (format === "json" || format === "jsonl") {
     return <PreviewSuspense><StructuredPreview format={format} content={content} mode={structuredMode} expansionMode={structuredExpansionMode} /></PreviewSuspense>;
+  }
+
+  if (format === "yaml") {
+    return <PreviewSuspense><YamlStructuredPreview content={content} mode={structuredMode} expansionMode={structuredExpansionMode} /></PreviewSuspense>;
+  }
+
+  if (format === "toml") {
+    return <PreviewSuspense><TomlStructuredPreview content={content} mode={structuredMode} expansionMode={structuredExpansionMode} /></PreviewSuspense>;
   }
 
   if (isTabularFormat(format)) {

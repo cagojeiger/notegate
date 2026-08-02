@@ -425,11 +425,34 @@ describe("TextPreview", () => {
     expect(screen.getByText(/port/)).toBeInTheDocument();
   });
 
+  it.each([
+    ["events.jsonl", '{"event":"created"}\n', "event", "created"],
+    ["config.yaml", "server:\n  port: 9191\n", "server", "9191"],
+    ["Cargo.toml", "[server]\nport = 9191\n", "server", "9191"]
+  ])("renders %s through its structured preview", async (name, content, expectedKey, expectedValue) => {
+    render(<TextPreview name={name} content={content} />);
+
+    const tree = await screen.findByRole("tree", { name: "Structured data tree" });
+    expect(tree).toHaveTextContent(expectedKey);
+    expect(tree).toHaveTextContent(expectedValue);
+  });
+
   it("renders structured source when controlled by the parent header", async () => {
     render(<StructuredPreview format="json" content={'{"server":{"port":9191}}'} mode="source" />);
 
     await waitFor(() => expect(screen.getAllByText((_, element) => element?.textContent === '{"server":{"port":9191}}').length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: "Copy code" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["config.yaml", "server:\n  port: 9191\n"],
+    ["Cargo.toml", "[server]\nport = 9191\n"]
+  ])("renders %s source through its lazy parser preview", async (name, content) => {
+    const { container } = render(<TextPreview name={name} content={content} structuredMode="source" />);
+
+    await waitFor(() => expect(container.querySelector(".shiki")).toBeInTheDocument());
+    expect(container.querySelector(".shiki")?.textContent).toBe(content);
+    expect(screen.queryByRole("tree", { name: "Structured data tree" })).not.toBeInTheDocument();
   });
 
   it("shows parse errors for invalid structured text", async () => {

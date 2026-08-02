@@ -9,7 +9,8 @@
     "check:contrast": "node scripts/check-theme-contrast.mjs",
     "export:icons": "bash scripts/export-brand-icons.sh",
     "lint": "eslint src --max-warnings 0",
-    "test:lighthouse": "pnpm build && node scripts/run-lighthouse.mjs",
+    "test:lighthouse": "pnpm test:preview-bundle && node scripts/run-lighthouse.mjs",
+    "test:preview-bundle": "tsc -b && vite build --manifest && node scripts/check-preview-bundle.mjs",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test"

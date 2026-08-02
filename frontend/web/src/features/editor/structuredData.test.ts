@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { parse as parseToml } from "smol-toml";
+import { parse as parseYaml } from "yaml";
 
-import { parseStructuredText } from "./structuredData";
+import { parseStructuredText, parseStructuredTextWith } from "./structuredData";
 
 describe("parseStructuredText", () => {
   it("parses json, yaml, and toml into tree values", () => {
     expect(parseStructuredText("json", '{"ok":true}')).toMatchObject({ ok: true, value: { ok: true } });
-    expect(parseStructuredText("yaml", "root:\n  child: 1\n")).toMatchObject({ ok: true, value: { root: { child: 1 } } });
-    expect(parseStructuredText("toml", "[root]\nchild = 1\n")).toMatchObject({ ok: true, value: { root: { child: 1 } } });
+    expect(parseStructuredTextWith("yaml", "root:\n  child: 1\n", parseYaml)).toMatchObject({ ok: true, value: { root: { child: 1 } } });
+    expect(parseStructuredTextWith("toml", "[root]\nchild = 1\n", parseToml)).toMatchObject({ ok: true, value: { root: { child: 1 } } });
   });
 
   it("wraps jsonl records with source line numbers", () => {
