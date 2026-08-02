@@ -110,6 +110,25 @@ test("opens a recent node with one reveal request and no canonical node request"
   expect(count(requests, `/api/v1/spaces/${space.id}/nodes/text-1`)).toBe(0);
 });
 
+test("loads deferred global dialogs after the production entry renders", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await routeJsonApi(page, (url) => responseFor(url));
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "History" }).click();
+  const history = page.getByRole("dialog", { name: "History" });
+  await expect(history).toBeVisible();
+  await history.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings).toBeVisible();
+  await settings.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Add space" }).click();
+  await expect(page.getByRole("dialog", { name: "New space" })).toBeVisible();
+});
+
 test("refreshes restored editors through one focus-owned Space sync", async ({ page }) => {
   const requests = new Map<string, number>();
   const nodes = [1, 2, 3].map((index) => restoredTextNode(index));
@@ -241,6 +260,12 @@ function responseFor(url: URL) {
     return {
       nodes: [textNode()],
       page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+    };
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/file-change-events`) {
+    return {
+      events: [],
+      page: { limit: 50, returned: 0, has_more: false, next_cursor: null }
     };
   }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/text-1/reveal`) {
