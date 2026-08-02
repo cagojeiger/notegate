@@ -21,10 +21,10 @@ pub const HTTP_CONTROL_PLANE_TIMEOUT_SECS: u64 = 5;
 pub const HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 500;
 /// Maximum short burst accepted by the process-wide HTTP ingress limiter.
 pub const HTTP_INGRESS_RATE_LIMIT_BURST: u32 = 750;
-/// Default sustained rate for each API surface's process-local bucket.
-pub const HTTP_API_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 300;
-/// Default short burst for each API surface's process-local bucket.
-pub const HTTP_API_SURFACE_RATE_LIMIT_BURST: u32 = 450;
+/// Default sustained rate for each HTTP surface's process-local bucket.
+pub const HTTP_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 300;
+/// Default short burst for each HTTP surface's process-local bucket.
+pub const HTTP_SURFACE_RATE_LIMIT_BURST: u32 = 450;
 
 // --- Account, space, and credential limits ---
 

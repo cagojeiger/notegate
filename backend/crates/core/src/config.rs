@@ -15,8 +15,8 @@ use validator::{Validate, ValidationError, ValidationErrors};
 
 use crate::error::{Error, Result};
 use crate::limits::{
-    HTTP_API_SURFACE_RATE_LIMIT_BURST, HTTP_API_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND,
-    HTTP_INGRESS_RATE_LIMIT_BURST, HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND, Limits,
+    HTTP_INGRESS_RATE_LIMIT_BURST, HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND,
+    HTTP_SURFACE_RATE_LIMIT_BURST, HTTP_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND, Limits,
 };
 use crate::tier::UserTier;
 
@@ -106,19 +106,19 @@ pub struct HttpRateLimitsConfig {
 
 impl Default for HttpRateLimitsConfig {
     fn default() -> Self {
-        let api_surface = HttpRateLimitConfig {
-            requests_per_second: HTTP_API_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND,
-            burst: HTTP_API_SURFACE_RATE_LIMIT_BURST,
+        let surface = HttpRateLimitConfig {
+            requests_per_second: HTTP_SURFACE_RATE_LIMIT_REQUESTS_PER_SECOND,
+            burst: HTTP_SURFACE_RATE_LIMIT_BURST,
         };
         Self {
             ingress: HttpRateLimitConfig {
                 requests_per_second: HTTP_INGRESS_RATE_LIMIT_REQUESTS_PER_SECOND,
                 burst: HTTP_INGRESS_RATE_LIMIT_BURST,
             },
-            browser_v1: api_surface,
-            public_v2: api_surface,
-            mcp: api_surface,
-            mcp_v2: api_surface,
+            browser_v1: surface,
+            public_v2: surface,
+            mcp: surface,
+            mcp_v2: surface,
         }
     }
 }
@@ -537,12 +537,7 @@ fn validate_limits(limits: &Limits, errors: &mut ValidationErrors) {
 }
 
 fn validate_http_rate_limits(rate_limits: &HttpRateLimitsConfig, errors: &mut ValidationErrors) {
-    for (requests_field, burst_field, limit) in [
-        (
-            "http_rate_limits.ingress.requests_per_second",
-            "http_rate_limits.ingress.burst",
-            rate_limits.ingress,
-        ),
+    let surfaces = [
         (
             "http_rate_limits.browser_v1.requests_per_second",
             "http_rate_limits.browser_v1.burst",
@@ -563,7 +558,15 @@ fn validate_http_rate_limits(rate_limits: &HttpRateLimitsConfig, errors: &mut Va
             "http_rate_limits.mcp_v2.burst",
             rate_limits.mcp_v2,
         ),
-    ] {
+    ];
+
+    let ingress = [(
+        "http_rate_limits.ingress.requests_per_second",
+        "http_rate_limits.ingress.burst",
+        rate_limits.ingress,
+    )];
+
+    for (requests_field, burst_field, limit) in ingress.iter().chain(surfaces.iter()).copied() {
         if limit.requests_per_second == 0 {
             errors.add(requests_field, ValidationError::new("range"));
         }
@@ -572,28 +575,7 @@ fn validate_http_rate_limits(rate_limits: &HttpRateLimitsConfig, errors: &mut Va
         }
     }
 
-    for (requests_field, burst_field, limit) in [
-        (
-            "http_rate_limits.browser_v1.requests_per_second",
-            "http_rate_limits.browser_v1.burst",
-            rate_limits.browser_v1,
-        ),
-        (
-            "http_rate_limits.public_v2.requests_per_second",
-            "http_rate_limits.public_v2.burst",
-            rate_limits.public_v2,
-        ),
-        (
-            "http_rate_limits.mcp.requests_per_second",
-            "http_rate_limits.mcp.burst",
-            rate_limits.mcp,
-        ),
-        (
-            "http_rate_limits.mcp_v2.requests_per_second",
-            "http_rate_limits.mcp_v2.burst",
-            rate_limits.mcp_v2,
-        ),
-    ] {
+    for (requests_field, burst_field, limit) in surfaces.iter().copied() {
         if limit.requests_per_second > rate_limits.ingress.requests_per_second {
             errors.add(requests_field, ValidationError::new("exceeds_ingress"));
         }
