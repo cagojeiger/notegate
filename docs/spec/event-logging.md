@@ -20,7 +20,7 @@ MCP 호출 자체는 domain mutation stream과 다른 `mcp_invocations`에 기�
 
 두 stream은 성공적으로 commit된 domain mutation의 이력이다. 현재 state의 source of truth는 normalized domain table이다.
 
-Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
+Event 조회는 REST로 제공한다. Audit event는 `GET /api/v1/me/audit-events`, MCP 실행 이력은 `GET /api/v1/me/mcp-invocations`로 조회하고, file change history는 `GET /api/v1/spaces/{space_id}/file-change-events`, UI forward sync는 `GET /api/v1/spaces/{space_id}/file-change-sync`로 조회한다. Read 계약은 `docs/spec/rest/events.md`에 둔다.
 
 ## Common rules
 
@@ -54,7 +54,7 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 `mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, success/error, 안정적인 error code, 실행 시간을 저장한다. `me`는 purpose 예외이므로 NULL이다. 다른 tool의 purpose는 1..200자의 짧은 호출 이유다.
 
-전체 tool input, 검색어, target path, Text content, edit, 암호화 metadata, presigned URL, 응답 payload는 저장하지 않는다. Purpose에도 secret, 본문, 검색 결과를 넣지 않는다. 새 MCP 조회 tool은 제공하지 않으며 retention과 관리 조회 surface는 별도 운영 정책으로 결정한다.
+전체 tool input, 검색어, target path, Text content, edit, 암호화 metadata, presigned URL, 응답 payload는 저장하지 않는다. Purpose에도 secret, 본문, 검색 결과를 넣지 않는다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다. Retention은 별도 운영 정책으로 결정한다.
 
 ## Audit event sources
 

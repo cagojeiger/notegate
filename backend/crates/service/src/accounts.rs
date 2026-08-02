@@ -1,24 +1,31 @@
 //! Account lifecycle operations for the current caller.
 
-use notegate_db::{AccountRepo, AuditEventRepo};
+use notegate_db::{AccountRepo, AuditEventRepo, McpInvocationRepo};
 use notegate_model::account::AccountKind;
-use notegate_model::{AuditEventPage, ListAuditEvents};
+use notegate_model::{AuditEventPage, ListAuditEvents, ListMcpInvocations, McpInvocationPage};
 use uuid::Uuid;
 
 use crate::audit_events::list_audit_event_page;
+use crate::mcp_invocations::list_mcp_invocation_page;
 use crate::{ServiceError, ServiceResult};
 
 #[derive(Debug, Clone)]
 pub struct AccountService {
     store: AccountRepo,
     audit_events: AuditEventRepo,
+    mcp_invocations: McpInvocationRepo,
 }
 
 impl AccountService {
-    pub fn new(store: AccountRepo, audit_events: AuditEventRepo) -> Self {
+    pub fn new(
+        store: AccountRepo,
+        audit_events: AuditEventRepo,
+        mcp_invocations: McpInvocationRepo,
+    ) -> Self {
         Self {
             store,
             audit_events,
+            mcp_invocations,
         }
     }
 
@@ -64,6 +71,17 @@ impl AccountService {
     ) -> ServiceResult<AuditEventPage> {
         require_user(caller_kind)?;
         list_audit_event_page(&self.audit_events, caller_account_id, request).await
+    }
+
+    /// List MCP calls owned by the current user. User callers only.
+    pub async fn list_mcp_invocations(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        request: ListMcpInvocations,
+    ) -> ServiceResult<McpInvocationPage> {
+        require_user(caller_kind)?;
+        list_mcp_invocation_page(&self.mcp_invocations, caller_account_id, request).await
     }
 }
 

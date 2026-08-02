@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use notegate_model::{AccountRef as ModelAccountRef, AuditEvent};
+use notegate_model::{AccountRef as ModelAccountRef, AuditEvent, McpInvocation};
 use notegate_service::files::FileChangeEvent;
 use serde::Serialize;
 use serde_json::Value;
@@ -46,6 +46,49 @@ impl AuditEventOut {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AuditEventListResponse {
     pub events: Vec<AuditEventOut>,
+    pub page: crate::page::Page,
+}
+
+/// MCP invocation history entry returned by `GET /api/v1/me/mcp-invocations`.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct McpInvocationOut {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+    pub actor_account_id: Uuid,
+    pub actor: Option<AccountRef>,
+    pub caller_kind: String,
+    pub tool: String,
+    pub op: Option<String>,
+    pub purpose: Option<String>,
+    pub outcome: String,
+    pub error_code: Option<String>,
+    pub duration_ms: i64,
+}
+
+impl McpInvocationOut {
+    pub(crate) fn from_invocation(
+        invocation: &McpInvocation,
+        refs: &HashMap<Uuid, ModelAccountRef>,
+    ) -> Self {
+        Self {
+            id: invocation.id,
+            created_at: invocation.created_at,
+            actor_account_id: invocation.actor_account_id,
+            actor: refs.get(&invocation.actor_account_id).map(AccountRef::from),
+            caller_kind: invocation.caller_kind.clone(),
+            tool: invocation.tool.clone(),
+            op: invocation.op.clone(),
+            purpose: invocation.purpose.clone(),
+            outcome: invocation.outcome.clone(),
+            error_code: invocation.error_code.clone(),
+            duration_ms: invocation.duration_ms,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct McpInvocationListResponse {
+    pub invocations: Vec<McpInvocationOut>,
     pub page: crate::page::Page,
 }
 

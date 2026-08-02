@@ -34,11 +34,13 @@ describe("EventHistoryModal", () => {
     );
 
     expect(screen.queryByRole("tab", { name: "Audit log" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
 
     await screen.findByText("No changes yet.");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/audit-events"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/mcp-invocations"))).toBe(false);
   });
 
   it("does not call the audit endpoint when the account loses audit access", async () => {
@@ -92,6 +94,46 @@ describe("EventHistoryModal", () => {
 
     expect(await screen.findByText("Deleted a space")).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/v1/me/audit-events?limit=50&cursor=audit-cursor-1");
+  });
+
+  it("shows MCP purposes and loads the next page from the server cursor", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.includes("/api/v1/me/mcp-invocations") && path.includes("cursor=mcp-cursor-1")) {
+        return jsonResponse({
+          invocations: [mcpInvocation(2, "read", "read", "Review the selected note", "error")],
+          page: { limit: 50, returned: 1, has_more: false, next_cursor: null }
+        });
+      }
+      if (path.includes("/api/v1/me/mcp-invocations")) {
+        return jsonResponse({
+          invocations: [mcpInvocation(3, "search", "grep", "Find cache design notes", "success")],
+          page: { limit: 50, returned: 1, has_more: true, next_cursor: "mcp-cursor-1" }
+        });
+      }
+      return jsonResponse({ events: [], page });
+    });
+
+    render(
+      <ApiProvider authCacheKey="browser-session:0">
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: "MCP" }));
+    expect(await screen.findByText("Find cache design notes")).toBeInTheDocument();
+    expect(screen.getByText("search · grep")).toBeInTheDocument();
+    expect(screen.getByText("12 ms")).toBeInTheDocument();
+    expect(screen.getByText("Success")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(await screen.findByText("Review the selected note")).toBeInTheDocument();
+    expect(screen.getByText("Error · tool_error")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
+      "/api/v1/me/mcp-invocations?limit=50&cursor=mcp-cursor-1"
+    );
   });
 
   it("loads the next file-change page from the server cursor", async () => {
@@ -218,5 +260,27 @@ function fileChangeEvent(id: number, op_type: string) {
     actor_account_id: "account-1",
     op_type,
     metadata: {}
+  };
+}
+
+function mcpInvocation(
+  id: number,
+  tool: string,
+  op: string | null,
+  purpose: string | null,
+  outcome: "success" | "error"
+) {
+  return {
+    id,
+    created_at: "2026-07-10T02:12:00Z",
+    actor_account_id: "account-1",
+    actor: { id: "account-1", kind: "user", display_name: "REST Test Owner" },
+    caller_kind: "user",
+    tool,
+    op,
+    purpose,
+    outcome,
+    error_code: outcome === "error" ? "tool_error" : null,
+    duration_ms: 12
   };
 }

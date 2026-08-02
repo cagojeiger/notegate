@@ -11,6 +11,8 @@ pub mod text;
 #[cfg(test)]
 mod file_upload_tests;
 #[cfg(test)]
+mod me_tests;
+#[cfg(test)]
 mod spaces_tests;
 #[cfg(test)]
 pub(crate) mod test_support;

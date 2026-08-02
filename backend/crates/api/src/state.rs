@@ -87,8 +87,12 @@ impl AppState {
             pii_crypto.clone(),
             config.default_user_tier,
         );
-        let account_lifecycle =
-            AccountService::new(account_repo.clone(), AuditEventRepo::new(db.clone()));
+        let mcp_invocations = McpInvocationRepo::new(db.clone());
+        let account_lifecycle = AccountService::new(
+            account_repo.clone(),
+            AuditEventRepo::new(db.clone()),
+            mcp_invocations.clone(),
+        );
         let connections = ConnectionService::new(ConnectionRepo::new(db.clone()));
         let agent_repo = AgentRepo::new(db.clone());
         let agents =
@@ -105,7 +109,6 @@ impl AppState {
             pii_crypto.lookup_key_id(),
             pii_crypto.version(),
         );
-        let mcp_invocations = McpInvocationRepo::new(db.clone());
         Self {
             db,
             config,

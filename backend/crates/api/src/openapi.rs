@@ -72,6 +72,7 @@ pub struct PublicApiDoc;
         rest::me::get_me,
         rest::me::get_usage,
         rest::me::list_audit_events,
+        rest::me::list_mcp_invocations,
         rest::me::delete_me,
         rest::spaces::list,
         rest::spaces::create,
@@ -603,6 +604,12 @@ mod tests {
         );
         assert_query_params(
             &value,
+            "/api/v1/me/mcp-invocations",
+            "get",
+            &["limit", "cursor"],
+        );
+        assert_query_params(
+            &value,
             "/api/v1/agents/{agent_id}/keys",
             "get",
             &["limit", "cursor"],
@@ -806,6 +813,7 @@ mod tests {
         for path in [
             "/api/v1/me",
             "/api/v1/me/audit-events",
+            "/api/v1/me/mcp-invocations",
             "/api/v1/spaces",
             "/api/v1/spaces:reorder",
             "/api/v1/spaces/{space_id}",
@@ -865,6 +873,7 @@ mod tests {
             "DELETE /api/v1/me",
             "GET /api/v1/me",
             "GET /api/v1/me/audit-events",
+            "GET /api/v1/me/mcp-invocations",
             "GET /api/v1/me/usage",
             "GET /api/v1/spaces",
             "GET /api/v1/spaces/{space_id}",

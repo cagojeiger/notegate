@@ -214,6 +214,10 @@ pub const API_KEYS_MAX_LIMIT: i64 = 100;
 pub const AUDIT_EVENTS_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /me/audit-events` page size.
 pub const AUDIT_EVENTS_MAX_LIMIT: i64 = 100;
+/// Default `GET /me/mcp-invocations` page size.
+pub const MCP_INVOCATIONS_DEFAULT_LIMIT: i64 = 50;
+/// Maximum `GET /me/mcp-invocations` page size.
+pub const MCP_INVOCATIONS_MAX_LIMIT: i64 = 100;
 /// Default `GET /spaces/{id}/file-change-events` page size.
 pub const FILE_CHANGE_EVENTS_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /spaces/{id}/file-change-events` page size.

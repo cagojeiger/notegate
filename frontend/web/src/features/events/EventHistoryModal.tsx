@@ -2,7 +2,7 @@ import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query
 import { ChevronRight, History, RefreshCw } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 
-import type { AuditEventListResponse, FileChangeEvent, FileChangeEventListResponse, Space } from "../../api/types";
+import type { AuditEventListResponse, FileChangeEvent, FileChangeEventListResponse, McpInvocation, McpInvocationListResponse, Space } from "../../api/types";
 import { Button, EmptyState, Modal, SelectField, Tabs } from "../../shared/ui";
 import {
   formatActor,
@@ -13,17 +13,19 @@ import {
   formatEventTimeCompact,
   formatFileChangeAction,
   formatFileChangeDetails,
-  formatFileChangeTarget
+  formatFileChangeTarget,
+  shortId
 } from "./eventDisplay";
-import { useAuditEventsQuery, useFileChangeEventsQuery } from "./useEventHistoryQueries";
+import { useAuditEventsQuery, useFileChangeEventsQuery, useMcpInvocationsQuery } from "./useEventHistoryQueries";
 
-type HistoryTab = "audit" | "files";
-type EventListResponse = AuditEventListResponse | FileChangeEventListResponse;
+type HistoryTab = "audit" | "files" | "mcp";
+type EventListResponse = AuditEventListResponse | FileChangeEventListResponse | McpInvocationListResponse;
 type EventHistoryQuery<T extends EventListResponse> = UseInfiniteQueryResult<InfiniteData<T, unknown>, Error>;
 
 const TABS: { id: HistoryTab; label: string }[] = [
   { id: "files", label: "Changes" },
-  { id: "audit", label: "Audit log" }
+  { id: "audit", label: "Audit log" },
+  { id: "mcp", label: "MCP" }
 ];
 
 export function EventHistoryModal({
@@ -38,10 +40,13 @@ export function EventHistoryModal({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<HistoryTab>("files");
-  const tabs = useMemo(() => TABS.filter((item) => item.id !== "audit" || canViewAuditEvents), [canViewAuditEvents]);
+  const tabs = useMemo(
+    () => TABS.filter((item) => item.id === "files" || canViewAuditEvents),
+    [canViewAuditEvents]
+  );
 
   useEffect(() => {
-    if (!canViewAuditEvents && tab === "audit") setTab("files");
+    if (!canViewAuditEvents && tab !== "files") setTab("files");
   }, [canViewAuditEvents, tab]);
 
   return (
@@ -49,6 +54,7 @@ export function EventHistoryModal({
       <Tabs items={tabs} value={tab} onChange={setTab} label="History sections" />
       <div className="min-h-[34rem] max-h-[min(68vh,42rem)] overflow-y-auto pr-1">
         {canViewAuditEvents && tab === "audit" ? <AuditEventsPanel /> : null}
+        {canViewAuditEvents && tab === "mcp" ? <McpInvocationsPanel /> : null}
         {tab === "files" ? <FileChangeEventsPanel spaces={spaces} initialSpaceId={initialSpaceId} /> : null}
       </div>
     </Modal>
@@ -63,7 +69,7 @@ function AuditEventsPanel() {
       <div className="flex justify-end">
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
       </div>
-      <EventQueryState query={query} emptyLabel="No audit events." />
+      <EventQueryState query={query} itemCount={events.length} emptyLabel="No audit events." />
       {events.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
           {events.map((event) => {
@@ -99,6 +105,69 @@ function AuditEventsPanel() {
   );
 }
 
+function McpInvocationsPanel() {
+  const query = useMcpInvocationsQuery();
+  const invocations = useMemo(
+    () => query.data?.pages.flatMap((page) => page.invocations) ?? [],
+    [query.data]
+  );
+  return (
+    <section className="space-y-3">
+      <div className="flex justify-end">
+        <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} />
+      </div>
+      <EventQueryState query={query} itemCount={invocations.length} emptyLabel="No MCP calls." />
+      {invocations.length > 0 ? (
+        <ol className="rounded-lg border border-border bg-surface px-4">
+          {invocations.map((invocation) => (
+            <McpInvocationRow key={invocation.id} invocation={invocation} />
+          ))}
+        </ol>
+      ) : null}
+      <LoadMore query={query} />
+    </section>
+  );
+}
+
+function McpInvocationRow({ invocation }: { invocation: McpInvocation }) {
+  const actor = invocation.actor
+    ? formatActor(invocation.actor, invocation.actor_account_id)
+    : `${invocation.caller_kind === "agent" ? "Agent" : "User"} ${shortId(invocation.actor_account_id)}`;
+  const operation = invocation.op ? `${invocation.tool} · ${invocation.op}` : invocation.tool;
+  const status = invocation.outcome === "success"
+    ? "Success"
+    : `Error${invocation.error_code ? ` · ${invocation.error_code}` : ""}`;
+  const duration = invocation.duration_ms < 1_000
+    ? `${invocation.duration_ms} ms`
+    : `${(invocation.duration_ms / 1_000).toFixed(2)} s`;
+
+  return (
+    <li className="group relative flex gap-3 border-b border-seam py-2 last:border-b-0">
+      <div className="relative flex w-4 shrink-0 justify-center" aria-hidden="true">
+        <span className="absolute bottom-[-0.75rem] top-3 w-px bg-seam group-last:hidden" />
+        <span className={`relative mt-1.5 size-2 rounded-full ring-4 ring-surface ${invocation.outcome === "success" ? "bg-success" : "bg-danger"}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="truncate text-sm font-medium text-text" title={invocation.purpose ?? undefined}>
+            {invocation.purpose ?? "Checked caller identity"}
+          </div>
+          <EventTime value={invocation.created_at} />
+        </div>
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted">
+          <span className="font-mono text-text">{operation}</span>
+          <span aria-hidden="true">·</span>
+          <span className="truncate" title={invocation.actor_account_id}>{actor}</span>
+          <span aria-hidden="true">·</span>
+          <span>{duration}</span>
+          <span aria-hidden="true">·</span>
+          <span className={invocation.outcome === "success" ? "text-success" : "text-danger"}>{status}</span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function FileChangeEventsPanel({
   spaces,
   initialSpaceId
@@ -124,7 +193,7 @@ function FileChangeEventsPanel({
         </SelectField>
         <RefreshButton isFetching={query.isFetching} onRefresh={() => { void query.refetch(); }} disabled={!selectedSpace} />
       </div>
-      {!selectedSpace ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} emptyLabel="No changes yet." />}
+      {!selectedSpace ? <EmptyState>No space selected.</EmptyState> : <EventQueryState query={query} itemCount={events.length} emptyLabel="No changes yet." />}
       {events.length > 0 ? (
         <ol className="rounded-lg border border-border bg-surface px-4">
           {events.map((event) => <FileChangeEventRow key={event.id} event={event} />)}
@@ -213,11 +282,10 @@ function RefreshButton({
   );
 }
 
-function EventQueryState<T extends EventListResponse>({ query, emptyLabel }: { query: EventHistoryQuery<T>; emptyLabel: string }) {
-  const eventCount = query.data?.pages.reduce((count, page) => count + page.events.length, 0) ?? 0;
+function EventQueryState<T extends EventListResponse>({ query, itemCount, emptyLabel }: { query: EventHistoryQuery<T>; itemCount: number; emptyLabel: string }) {
   if (query.isLoading) return <div className="text-sm text-muted">Loading…</div>;
   if (query.isError) return <EmptyState>Could not load history.</EmptyState>;
-  if (eventCount === 0) return <EmptyState>{emptyLabel}</EmptyState>;
+  if (itemCount === 0) return <EmptyState>{emptyLabel}</EmptyState>;
   return null;
 }
 

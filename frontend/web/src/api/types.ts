@@ -260,6 +260,25 @@ export type AuditEventListResponse = {
   page: Page;
 };
 
+export type McpInvocation = {
+  id: number;
+  created_at: string;
+  actor_account_id: string;
+  actor?: AccountRef | null;
+  caller_kind: "user" | "agent";
+  tool: string;
+  op: string | null;
+  purpose: string | null;
+  outcome: "success" | "error";
+  error_code: string | null;
+  duration_ms: number;
+};
+
+export type McpInvocationListResponse = {
+  invocations: McpInvocation[];
+  page: Page;
+};
+
 export type FileChangeEvent = {
   id: number;
   created_at: string;
