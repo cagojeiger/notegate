@@ -112,21 +112,25 @@ impl LinkIndexRepo {
             return current.into_public();
         }
 
+        let resume_rebuild = current.rebuild_base_generation.is_some();
+
         let row = sqlx::query_as::<_, LinkIndexStateRow>(
             "UPDATE space_link_index_states \
-             SET rebuild_requested = true, \
+             SET rebuild_requested = NOT $2, \
                  status = CASE \
-                    WHEN space_link_index_states.status IN ('running', 'rebuilding') \
+                    WHEN space_link_index_states.status = 'running' \
                         THEN space_link_index_states.status \
                     ELSE 'queued' \
                  END, \
                  run_after = now(), \
+                 retry_count = 0, \
                  last_error = NULL, \
                  updated_at = now() \
              WHERE space_id = $1 \
              RETURNING space_id, desired_generation, applied_generation, status, last_indexed_at",
         )
         .bind(space_id)
+        .bind(resume_rebuild)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -289,28 +293,34 @@ impl LinkIndexRepo {
         claim: &LinkIndexClaim,
         sources: &[SourceLinkSet],
         after_node_id: Uuid,
-        lease: Duration,
+        has_more: bool,
+        base_generation: i64,
     ) -> Result<()> {
-        let lease_seconds = duration_seconds(lease)?;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         assert_claim(&mut tx, claim).await?;
         replace_sources(&mut tx, claim.space_id, sources).await?;
-        let updated = sqlx::query(
-            "UPDATE space_link_index_states \
-             SET rebuild_after_node_id = $3, \
-                 claim_until = now() + make_interval(secs => $4), \
-                 updated_at = now() \
-             WHERE space_id = $1 AND claim_token = $2 AND status = 'rebuilding'",
-        )
-        .bind(claim.space_id)
-        .bind(claim.token)
-        .bind(after_node_id)
-        .bind(lease_seconds)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if updated.rows_affected() != 1 {
-            return Err(Error::conflict("link index claim was lost"));
+        if has_more {
+            let updated = sqlx::query(
+                "UPDATE space_link_index_states \
+                 SET rebuild_after_node_id = $3, \
+                     claim_token = NULL, \
+                     claim_until = NULL, \
+                     run_after = now(), \
+                     updated_at = now() \
+                 WHERE space_id = $1 AND claim_token = $2 AND status = 'rebuilding'",
+            )
+            .bind(claim.space_id)
+            .bind(claim.token)
+            .bind(after_node_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+            if updated.rows_affected() != 1 {
+                return Err(Error::conflict("link index claim was lost"));
+            }
+        } else {
+            remove_deleted_sources(&mut tx, claim.space_id).await?;
+            finish_rebuild_update(&mut tx, claim, base_generation).await?;
         }
         tx.commit().await.map_err(map_sqlx_error)
     }
@@ -319,33 +329,7 @@ impl LinkIndexRepo {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         assert_claim(&mut tx, claim).await?;
         remove_deleted_sources(&mut tx, claim.space_id).await?;
-        let updated = sqlx::query(
-            "UPDATE space_link_index_states \
-             SET applied_generation = $3, \
-                 status = CASE \
-                    WHEN rebuild_requested OR desired_generation > $3 THEN 'queued' \
-                    ELSE 'ready' \
-                 END, \
-                 rebuild_base_generation = NULL, \
-                 rebuild_after_node_id = NULL, \
-                 claim_token = NULL, \
-                 claim_until = NULL, \
-                 retry_count = 0, \
-                 run_after = now(), \
-                 last_error = NULL, \
-                 last_indexed_at = now(), \
-                 updated_at = now() \
-             WHERE space_id = $1 AND claim_token = $2",
-        )
-        .bind(claim.space_id)
-        .bind(claim.token)
-        .bind(base_generation)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if updated.rows_affected() != 1 {
-            return Err(Error::conflict("link index claim was lost"));
-        }
+        finish_rebuild_update(&mut tx, claim, base_generation).await?;
         tx.commit().await.map_err(map_sqlx_error)
     }
 
@@ -435,6 +419,41 @@ impl LinkIndexRepo {
         .map_err(map_sqlx_error)?;
         Ok(())
     }
+}
+
+async fn finish_rebuild_update(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    claim: &LinkIndexClaim,
+    base_generation: i64,
+) -> Result<()> {
+    let updated = sqlx::query(
+        "UPDATE space_link_index_states \
+         SET applied_generation = $3, \
+             status = CASE \
+                WHEN rebuild_requested OR desired_generation > $3 THEN 'queued' \
+                ELSE 'ready' \
+             END, \
+             rebuild_base_generation = NULL, \
+             rebuild_after_node_id = NULL, \
+             claim_token = NULL, \
+             claim_until = NULL, \
+             retry_count = 0, \
+             run_after = now(), \
+             last_error = NULL, \
+             last_indexed_at = now(), \
+             updated_at = now() \
+         WHERE space_id = $1 AND claim_token = $2",
+    )
+    .bind(claim.space_id)
+    .bind(claim.token)
+    .bind(base_generation)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    if updated.rows_affected() != 1 {
+        return Err(Error::conflict("link index claim was lost"));
+    }
+    Ok(())
 }
 
 async fn assert_claim(
@@ -596,7 +615,7 @@ struct RebuildRequestStateRow {
 
 impl RebuildRequestStateRow {
     fn is_rebuilding(&self) -> bool {
-        self.status == "rebuilding" || self.rebuild_base_generation.is_some()
+        self.status == "rebuilding"
     }
 
     fn into_public(self) -> Result<SpaceLinkIndexState> {

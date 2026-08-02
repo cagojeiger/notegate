@@ -16,7 +16,8 @@ use super::markdown;
 const PARSER_VERSION: i32 = 1;
 const CLAIM_LEASE: Duration = Duration::from_secs(120);
 const EVENT_BATCH_SIZE: i64 = 200;
-const REBUILD_SOURCE_BATCH_SIZE: i64 = 64;
+const INCREMENTAL_SOURCE_LIMIT: usize = 8;
+const REBUILD_SOURCE_BATCH_SIZE: i64 = 8;
 
 #[derive(Debug, Clone)]
 pub struct LinkIndexProjector {
@@ -28,6 +29,7 @@ pub struct LinkIndexProjector {
 pub enum LinkIndexRun {
     Idle,
     Incremental { space_id: Uuid, events: usize },
+    RebuildProgress { space_id: Uuid, sources: usize },
     Rebuilt { space_id: Uuid },
     RebuildQueued { space_id: Uuid },
 }
@@ -99,8 +101,11 @@ impl LinkIndexProjector {
         }
 
         let impact = EventImpact::from_events(&batch.events);
-        if impact.rebuild {
-            return self.rebuild(claim, true).await;
+        if impact.requires_rebuild() {
+            self.index.request_claim_rebuild(claim).await?;
+            return Ok(LinkIndexRun::RebuildQueued {
+                space_id: claim.space_id,
+            });
         }
         let source_ids = impact.dirty_sources.into_iter().collect::<Vec<_>>();
         let sources = self.source_link_sets(claim.space_id, &source_ids).await?;
@@ -132,7 +137,7 @@ impl LinkIndexProjector {
     }
 
     async fn rebuild(&self, claim: &LinkIndexClaim, restart: bool) -> ServiceResult<LinkIndexRun> {
-        let (base_generation, mut cursor) = if restart || claim.rebuild_base_generation.is_none() {
+        let (base_generation, cursor) = if restart || claim.rebuild_base_generation.is_none() {
             (
                 self.index
                     .begin_rebuild(claim, PARSER_VERSION, CLAIM_LEASE)
@@ -148,32 +153,33 @@ impl LinkIndexProjector {
             )
         };
 
-        loop {
-            let (source_ids, has_more) = self
-                .index
-                .rebuild_source_ids(claim.space_id, cursor, REBUILD_SOURCE_BATCH_SIZE)
-                .await?;
-            if source_ids.is_empty() {
-                self.index.finish_rebuild(claim, base_generation).await?;
-                return Ok(LinkIndexRun::Rebuilt {
-                    space_id: claim.space_id,
-                });
-            }
-            let last_node_id = source_ids
-                .last()
-                .copied()
-                .ok_or_else(|| ServiceError::Internal("link rebuild batch is empty".to_owned()))?;
-            let sources = self.source_link_sets(claim.space_id, &source_ids).await?;
-            self.index
-                .commit_rebuild_batch(claim, &sources, last_node_id, CLAIM_LEASE)
-                .await?;
-            cursor = Some(last_node_id);
-            if !has_more {
-                self.index.finish_rebuild(claim, base_generation).await?;
-                return Ok(LinkIndexRun::Rebuilt {
-                    space_id: claim.space_id,
-                });
-            }
+        let (source_ids, has_more) = self
+            .index
+            .rebuild_source_ids(claim.space_id, cursor, REBUILD_SOURCE_BATCH_SIZE)
+            .await?;
+        if source_ids.is_empty() {
+            self.index.finish_rebuild(claim, base_generation).await?;
+            return Ok(LinkIndexRun::Rebuilt {
+                space_id: claim.space_id,
+            });
+        }
+        let last_node_id = source_ids
+            .last()
+            .copied()
+            .ok_or_else(|| ServiceError::Internal("link rebuild batch is empty".to_owned()))?;
+        let sources = self.source_link_sets(claim.space_id, &source_ids).await?;
+        self.index
+            .commit_rebuild_batch(claim, &sources, last_node_id, has_more, base_generation)
+            .await?;
+        if has_more {
+            Ok(LinkIndexRun::RebuildProgress {
+                space_id: claim.space_id,
+                sources: source_ids.len(),
+            })
+        } else {
+            Ok(LinkIndexRun::Rebuilt {
+                space_id: claim.space_id,
+            })
         }
     }
 
@@ -308,6 +314,10 @@ impl EventImpact {
         }
         impact
     }
+
+    fn requires_rebuild(&self) -> bool {
+        self.rebuild || self.dirty_sources.len() > INCREMENTAL_SOURCE_LIMIT
+    }
 }
 
 #[cfg(test)]
@@ -361,6 +371,15 @@ mod tests {
         ] {
             assert!(EventImpact::from_events(&[event(1, node_id, op_type, metadata)]).rebuild);
         }
+    }
+
+    #[test]
+    fn large_incremental_fanout_requires_a_space_rebuild() {
+        let events = (0..=INCREMENTAL_SOURCE_LIMIT)
+            .map(|_| event(1, Uuid::new_v4(), "text.write", json!({})))
+            .collect::<Vec<_>>();
+
+        assert!(EventImpact::from_events(&events).requires_rebuild());
     }
 
     #[test]

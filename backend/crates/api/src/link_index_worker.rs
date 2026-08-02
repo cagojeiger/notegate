@@ -38,6 +38,15 @@ async fn drain_ready_spaces(projector: &LinkIndexProjector, shutdown: &Cancellat
                     duration_ms = started.elapsed().as_millis(),
                 );
             }
+            Ok(LinkIndexRun::RebuildProgress { space_id, sources }) => {
+                tracing::debug!(
+                    event = "link_index_worker.run",
+                    outcome = "rebuild_progress",
+                    %space_id,
+                    sources,
+                    duration_ms = started.elapsed().as_millis(),
+                );
+            }
             Ok(LinkIndexRun::Rebuilt { space_id }) => {
                 tracing::info!(
                     event = "link_index_worker.run",

@@ -250,6 +250,122 @@ async fn rebuild_request_does_not_queue_a_second_active_rebuild()
 }
 
 #[tokio::test]
+async fn rebuild_request_resumes_a_failed_rebuild_immediately()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-rebuild-resume",
+        "link-index-rebuild-resume@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, _root_id) = setup_space(&spaces, owner, "link-index-rebuild-resume").await;
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let claim = index
+        .claim_next(Duration::from_secs(30), 1)
+        .await?
+        .expect("queued space is claimed");
+    let base_generation = index
+        .begin_rebuild(&claim, 1, Duration::from_secs(30))
+        .await?;
+    index.fail_claim(&claim, "retry the rebuild").await?;
+
+    let state = index.request_rebuild(space_id).await?;
+    assert_eq!(state.status, LinkIndexStatus::Queued);
+    let (saved_base, rebuild_requested, retry_count, ready_now): (Option<i64>, bool, i32, bool) =
+        sqlx::query_as(
+            "SELECT rebuild_base_generation, rebuild_requested, retry_count, run_after <= now() \
+             FROM space_link_index_states WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(saved_base, Some(base_generation));
+    assert!(!rebuild_requested);
+    assert_eq!(retry_count, 0);
+    assert!(ready_now);
+
+    let resumed = index
+        .claim_next(Duration::from_secs(30), 1)
+        .await?
+        .expect("failed rebuild is immediately reclaimable");
+    assert_eq!(resumed.rebuild_base_generation, Some(base_generation));
+    index.finish_rebuild(&resumed, base_generation).await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rebuild_releases_its_claim_after_each_source_batch()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-rebuild-batches",
+        "link-index-rebuild-batches@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, root_id) = setup_space(&spaces, owner, "link-index-rebuild-batches").await;
+    let files = FilesRepo::new(db.pool.clone());
+    let projector = LinkIndexProjector::new(LinkIndexRepo::new(db.pool.clone()), files.clone());
+    for index in 0..9 {
+        files
+            .insert_text(
+                space_id,
+                root_id,
+                &format!("source-{index}.md"),
+                &text("[missing](target.md)"),
+                owner,
+            )
+            .await?;
+    }
+
+    assert!(matches!(
+        projector.process_next().await?,
+        LinkIndexRun::RebuildProgress {
+            space_id: progress_space,
+            sources: 8,
+        } if progress_space == space_id
+    ));
+    let (status, claim_token, cursor): (String, Option<uuid::Uuid>, Option<uuid::Uuid>) =
+        sqlx::query_as(
+            "SELECT status, claim_token, rebuild_after_node_id \
+             FROM space_link_index_states WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(status, "rebuilding");
+    assert!(claim_token.is_none());
+    assert!(cursor.is_some());
+
+    assert!(matches!(
+        projector.process_next().await?,
+        LinkIndexRun::Rebuilt { space_id: rebuilt_space } if rebuilt_space == space_id
+    ));
+    assert!(matches!(
+        projector.process_next().await?,
+        LinkIndexRun::Idle
+    ));
+    let reference_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM node_link_refs WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(reference_count, 9);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_expired_claim_cannot_commit_and_the_space_is_reclaimable()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

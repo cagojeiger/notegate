@@ -69,7 +69,7 @@ Worker는 Space별 상태 row를 lease로 claim한다. 여러 API pod가 동시�
 
 따라서 같은 문서가 연속으로 여러 번 저장되어도 마지막 현재 상태가 투영된다. 투영 교체와 `applied_generation` 전진은 같은 transaction에서 완료한다.
 
-Move, rename, recursive copy처럼 여러 source의 상대 path 또는 여러 target path를 바꾸는 topology 변경은 부분 영향을 추측하지 않고 Space 재인덱싱으로 승격한다. 삭제된 source의 outgoing 참조는 제거한다. 삭제된 target을 가리키는 참조는 삭제하지 않고 `deleted`로 보존한다.
+Move, rename, recursive copy처럼 여러 source의 상대 path 또는 여러 target path를 바꾸는 topology 변경은 부분 영향을 추측하지 않고 Space 재인덱싱으로 승격한다. 한 증분 batch에서 처리할 source가 작업 상한을 넘는 경우에도 참조를 일부 생략하지 않고 Space 재인덱싱으로 승격한다. 삭제된 source의 outgoing 참조는 제거한다. 삭제된 target을 가리키는 참조는 삭제하지 않고 `deleted`로 보존한다.
 
 ## 최종 일관성
 
@@ -83,7 +83,9 @@ applied_generation = 링크 투영이 반영한 위치
 - `applied_generation < desired_generation`이면 결과는 갱신 중일 수 있다.
 - 두 cursor가 같고 상태가 ready이면 같은 event 위치까지 반영되었다.
 - event retention gap, parser version 변경, 안전하게 범위를 계산할 수 없는 topology 변경은 전체 재인덱싱을 요구한다.
-- 실패한 작업은 backoff 후 재시도한다. Lease가 batch 도중 만료되면 projection commit은 거부되고 다른 worker가 Space를 다시 claim한다. source 단위 교체와 Space 재인덱싱은 재실행해도 같은 결과가 되는 멱등 연산이다.
+- 실패한 작업은 backoff 후 재시도한다. 사용자가 실패한 재인덱싱을 다시 요청하면 저장된 cursor를 유지한 채 즉시 재개한다.
+- 전체 재인덱싱은 bounded source batch마다 cursor를 commit하고 claim을 반환한다. Lease가 batch 도중 만료되면 projection commit은 거부되고 다른 worker가 마지막 commit cursor부터 Space를 다시 claim한다.
+- source 단위 교체와 Space 재인덱싱은 재실행해도 같은 결과가 되는 멱등 연산이다.
 
 재인덱싱은 문서 read/write를 막지 않는다. 재구성 중 Node Inspector는 부분 결과를 정상 결과처럼 노출하지 않고 rebuilding 상태를 표시한다.
 
@@ -109,6 +111,7 @@ GET  /api/v1/spaces/{space_id}/nodes/{node_id}/links
 - Node Inspector는 선택한 node의 outgoing, incoming, broken 관계를 bounded 목록과 count로 표시한다.
 - 재인덱싱 요청은 비동기이며 현재 작업 상태를 반환한다.
 - 이미 전체 재인덱싱이 실행 중이면 같은 요청은 추가 재인덱싱을 예약하지 않는다.
+- 실패한 전체 재인덱싱에 대한 요청은 완료된 batch를 버리지 않고 즉시 재개한다.
 - 관계 상태, count, bounded 목록, 표시 path는 하나의 repeatable-read snapshot에서 조회한다.
 
 이번 계약에는 전체 Space 그래프 시각화, 외부 URL health check, AI 의미 관계, 관계 변경 이력, 링크 기반 삭제 차단을 포함하지 않는다.
