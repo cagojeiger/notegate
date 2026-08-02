@@ -18,7 +18,12 @@ export function useFolderChildrenStat(node: RestNode) {
 
 export function useTextDocument(node: RestNode) {
   const client = useApiClient();
-  return useQuery({ queryKey: queryKeys.text(node.space_id, node.id), queryFn: () => readText(client, node.space_id, node.id) });
+  return useQuery({
+    queryKey: queryKeys.text(node.space_id, node.id),
+    queryFn: () => readText(client, node.space_id, node.id),
+    // Active-Space change sync owns focus refresh; reconnect remains a direct fallback.
+    refetchOnWindowFocus: false
+  });
 }
 
 export function useNodeFreshness(node: RestNode) {
@@ -26,6 +31,8 @@ export function useNodeFreshness(node: RestNode) {
   return useQuery({
     queryKey: queryKeys.node(node.space_id, node.id),
     queryFn: () => getNode(client, node.space_id, node.id),
+    // Active-Space change sync owns focus refresh; reconnect remains a direct fallback.
+    refetchOnWindowFocus: false,
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3
   });
 }

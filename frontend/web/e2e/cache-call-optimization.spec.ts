@@ -110,6 +110,89 @@ test("opens a recent node with one reveal request and no canonical node request"
   expect(count(requests, `/api/v1/spaces/${space.id}/nodes/text-1`)).toBe(0);
 });
 
+test("refreshes restored editors through one focus-owned Space sync", async ({ page }) => {
+  const requests = new Map<string, number>();
+  const nodes = [1, 2, 3].map((index) => restoredTextNode(index));
+  const syncPath = `/api/v1/spaces/${space.id}/file-change-sync`;
+  let externalRevision = 1;
+
+  await page.clock.install();
+  await page.addInitScript(({ restoredNodes, spaceId }) => {
+    window.localStorage.setItem("notegate.lastActiveSpaceId", spaceId);
+    window.localStorage.setItem(`notegate.workbench.v1.space.${spaceId}`, JSON.stringify({
+      version: 1,
+      spaceId,
+      updatedAt: Date.now(),
+      activeGroupIndex: 2,
+      groups: restoredNodes.map((node) => ({ node, mode: "preview", back: [], forward: [] }))
+    }));
+  }, { restoredNodes: nodes, spaceId: space.id });
+  await routeJsonApi(page, (url) => {
+    requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
+    if (url.pathname === syncPath) {
+      if (count(requests, syncPath) === 3) {
+        externalRevision = 2;
+        return {
+          changes: [{
+            id: 11,
+            node_id: "text-2",
+            op_type: "text.write",
+            item_kind: "text",
+            affected_parent_ids: [space.root_node_id],
+            parent_scope_known: true,
+            path_changed: false,
+            subtree_changed: false,
+            write_lock_changed: false
+          }],
+          next_after_id: 11,
+          has_more: false,
+          resync_required: false
+        };
+      }
+      return {
+        changes: [],
+        next_after_id: 10,
+        has_more: false,
+        resync_required: false
+      };
+    }
+    return restoredEditorsResponseFor(url, externalRevision);
+  });
+
+  await page.goto("/");
+  await expect(page.locator("[data-editor-group]")).toHaveCount(3);
+  await expect.poll(() => restoredEditorRequestCount(requests)).toBe(6);
+  await expect.poll(() => count(requests, syncPath)).toBe(1);
+  await expect.poll(() => count(requests, "/api/v1/me")).toBe(1);
+  await expect.poll(() => count(requests, "/api/v1/me/usage")).toBe(1);
+  await expect.poll(() => count(requests, "/api/v1/spaces")).toBe(1);
+  await expect.poll(() => count(
+    requests,
+    `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`
+  )).toBe(1);
+  await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes`)).toBe(1);
+
+  const idleBaseline = totalRequests(requests);
+  await leaveAndReturnAfterStale(page);
+
+  await expect.poll(() => count(requests, syncPath)).toBe(2);
+  await expect.poll(() => totalRequests(requests) - idleBaseline).toBe(4);
+  expect(restoredEditorRequestCount(requests)).toBe(6);
+
+  const changedBaseline = totalRequests(requests);
+  await leaveAndReturnAfterStale(page);
+
+  await expect.poll(() => count(requests, syncPath)).toBe(3);
+  await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/nodes/text-2`)).toBe(2);
+  await expect.poll(() => count(requests, `/api/v1/spaces/${space.id}/text/text-2`)).toBe(2);
+  await expect(page.locator("[data-editor-group]").nth(1)).toContainText("Request budget 2 updated");
+  expect(count(requests, `/api/v1/spaces/${space.id}/nodes/text-1`)).toBe(1);
+  expect(count(requests, `/api/v1/spaces/${space.id}/text/text-1`)).toBe(1);
+  expect(count(requests, `/api/v1/spaces/${space.id}/nodes/text-3`)).toBe(1);
+  expect(count(requests, `/api/v1/spaces/${space.id}/text/text-3`)).toBe(1);
+  expect(totalRequests(requests) - changedBaseline).toBe(8);
+});
+
 test("backs off idle usage polling with one owner while the desktop Space Library is open", async ({ page }) => {
   const requests = new Map<string, number>();
   await page.clock.install();
@@ -222,4 +305,107 @@ function textNode(): RestNode {
 
 function count(requests: Map<string, number>, path: string): number {
   return requests.get(path) ?? 0;
+}
+
+async function leaveAndReturnAfterStale(page: import("@playwright/test").Page) {
+  await setPageVisibility(page, "hidden");
+  await page.clock.fastForward(5_001);
+  await setPageVisibility(page, "visible");
+}
+
+async function setPageVisibility(
+  page: import("@playwright/test").Page,
+  visibilityState: "hidden" | "visible"
+) {
+  await page.evaluate(async (nextVisibilityState) => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: nextVisibilityState
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("visibilitychange"));
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+  }, visibilityState);
+}
+
+function totalRequests(requests: Map<string, number>): number {
+  return [...requests.values()].reduce((total, requestCount) => total + requestCount, 0);
+}
+
+function restoredEditorRequestCount(requests: Map<string, number>): number {
+  return [1, 2, 3].reduce((total, index) => (
+    total
+    + count(requests, `/api/v1/spaces/${space.id}/nodes/text-${index}`)
+    + count(requests, `/api/v1/spaces/${space.id}/text/text-${index}`)
+  ), 0);
+}
+
+function restoredEditorsResponseFor(url: URL, externalRevision: number) {
+  if (url.pathname === "/api/v1/me") return me;
+  if (url.pathname === "/api/v1/me/usage") return usageResponse(space);
+  if (url.pathname === "/api/v1/spaces") {
+    return {
+      spaces: [space],
+      page: { limit: 100, returned: 1, has_more: false, next_cursor: null }
+    };
+  }
+
+  const nodes = [1, 2, 3].map((index) => restoredTextNode(
+    index,
+    index === 2 ? externalRevision : 1
+  ));
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes/${space.root_node_id}/children`) {
+    return {
+      parent: { id: space.root_node_id, path: "/" },
+      children: nodes,
+      page: { limit: 100, returned: nodes.length, has_more: false, next_cursor: null }
+    };
+  }
+  if (url.pathname === `/api/v1/spaces/${space.id}/nodes`) {
+    return {
+      nodes,
+      page: { limit: 50, returned: nodes.length, has_more: false, next_cursor: null }
+    };
+  }
+
+  const nodeMatch = url.pathname.match(/\/nodes\/(text-[123])$/);
+  if (nodeMatch) return nodes.find((node) => node.id === nodeMatch[1]);
+  const textMatch = url.pathname.match(/\/text\/(text-[123])$/);
+  if (textMatch) {
+    const node = nodes.find((candidate) => candidate.id === textMatch[1]);
+    if (!node) throw new Error(`Missing restored node: ${textMatch[1]}`);
+    const updated = node.id === "text-2" && externalRevision === 2;
+    const content = `# Request budget ${node.sort_order}${updated ? " updated" : ""}`;
+    return {
+      node: { id: node.id, path: node.path },
+      text: {
+        node_id: node.id,
+        storage_format: "plain",
+        content,
+        content_sha256: node.content_sha256,
+        byte_len: content.length,
+        line_count: 1,
+        start_line: 1,
+        end_line: 1,
+        returned_lines: 1,
+        truncated: false,
+        next_start_line: null,
+        updated_by: me.account,
+        updated_at: node.updated_at
+      }
+    };
+  }
+  throw new Error(`Unhandled restored-editor API request: ${url.pathname}${url.search}`);
+}
+
+function restoredTextNode(index: number, revision = 1): RestNode {
+  return {
+    ...textNode(),
+    id: `text-${index}`,
+    name: `note-${index}.md`,
+    path: `/note-${index}.md`,
+    sort_order: index,
+    content_sha256: `sha-${index}-${revision}`,
+    updated_at: `2026-07-24T00:00:0${revision}Z`
+  };
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import {
   focusManager,
   onlineManager,
@@ -107,6 +107,7 @@ export function useSpaceChangeSync(spaceId: string | null) {
     [client, queryClient]
   );
   const pollingBackoff = useMemo(createSpaceChangePollingBackoff, [spaceId]);
+  const handledSyncErrors = useRef(new Map<string, number>());
   const [, reschedulePolling] = useReducer((revision: number) => revision + 1, 0);
   const resetPolling = useCallback(() => {
     pollingBackoff.reset();
@@ -130,7 +131,7 @@ export function useSpaceChangeSync(spaceId: string | null) {
     };
   }, [resetPolling]);
 
-  useQuery({
+  const syncQuery = useQuery({
     queryKey: spaceId ? queryKeys.spaceChangeSignal(spaceId) : ["sync", "space-change", "none"],
     queryFn: async () => {
       if (!spaceId) throw new Error("No active space");
@@ -147,7 +148,20 @@ export function useSpaceChangeSync(spaceId: string | null) {
     refetchInterval: pageVisible
       ? () => pollingBackoff.currentInterval()
       : false,
-    staleTime: POLLING.spaceChangesMs,
-    notifyOnChangeProps: ["data"]
+    // Opened node and text queries delegate external freshness to this signal.
+    // Match their former focus threshold without attaching one refetch per editor.
+    staleTime: POLLING.spaceChangesFocusFreshMs,
+    notifyOnChangeProps: ["data", "errorUpdatedAt"]
   });
+
+  useEffect(() => {
+    if (!spaceId || syncQuery.errorUpdatedAt === 0) return;
+    if (handledSyncErrors.current.get(spaceId) === syncQuery.errorUpdatedAt) return;
+    handledSyncErrors.current.set(spaceId, syncQuery.errorUpdatedAt);
+    if (!pageVisible) return;
+    // Preserve document freshness when the centralized sync endpoint is down.
+    // This intentionally spends per-document requests only in degraded mode.
+    void queryClient.refetchQueries({ queryKey: queryKeys.nodes(spaceId), type: "active" });
+    void queryClient.refetchQueries({ queryKey: queryKeys.texts(spaceId), type: "active" });
+  }, [pageVisible, queryClient, spaceId, syncQuery.errorUpdatedAt]);
 }
