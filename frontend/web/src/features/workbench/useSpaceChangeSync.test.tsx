@@ -305,6 +305,35 @@ describe("useSpaceChangeSync", () => {
     expect(signalInterval(queryClient, "space-1")).toBe(POLLING.spaceChangesIdleMs[0]);
   });
 
+  it("falls back once for a new sync error without replaying it after recovery", async () => {
+    get
+      .mockRejectedValueOnce(new Error("sync unavailable"))
+      .mockResolvedValueOnce(response(10));
+    const queryClient = createTestQueryClient();
+    const refetchQueries = vi.spyOn(queryClient, "refetchQueries");
+
+    const view = renderHook(() => useSpaceChangeSync("space-1"), {
+      wrapper: createWrapper(queryClient)
+    });
+
+    await waitFor(() => expect(refetchQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.nodes("space-1"),
+      type: "active"
+    }));
+    expect(refetchQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.texts("space-1"),
+      type: "active"
+    });
+
+    pageVisibility.visible = false;
+    view.rerender();
+    pageVisibility.visible = true;
+    view.rerender();
+
+    await waitForSignal(queryClient, 10);
+    expect(refetchQueries).toHaveBeenCalledTimes(2);
+  });
+
   it("serializes sync requests so an older response cannot overwrite a newer token", async () => {
     const first = deferred<ReturnType<typeof response>>();
     get
