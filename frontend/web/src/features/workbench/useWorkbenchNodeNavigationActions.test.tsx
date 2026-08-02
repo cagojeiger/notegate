@@ -229,6 +229,57 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(group.forward.map((entry) => entry.nodeId)).toEqual([targetNode.id]);
   });
 
+  it("opens an indexed link in the original group when focus changes before resolution", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const otherNode = node("other", activeSpace.id, "/other.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    useUiStore.getState().openInNewGroup(otherNode);
+    useUiStore.getState().focusGroup(0);
+    const pending = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result } = renderNavigationActions(activeSpace);
+
+    const openPromise = result.current.openLinkedNode(activeSpace.id, targetNode.id);
+    act(() => {
+      useUiStore.getState().focusGroup(1);
+      pending.resolve({ ancestors: [], target: targetNode });
+    });
+    await act(async () => {
+      await openPromise;
+    });
+
+    const state = useUiStore.getState();
+    expect(state.editorGroups.find((group) => group.id === groupId)?.node?.id).toBe(targetNode.id);
+    expect(state.editorGroups[1].node?.id).toBe(otherNode.id);
+    expect(state.activeGroupIndex).toBe(1);
+  });
+
+  it("does not open a stale indexed link when its original group changes before resolution", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const replacementNode = node("replacement", activeSpace.id, "/replacement.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    const folder = node("folder", activeSpace.id, "/folder", "folder");
+    const groupId = openSourceGroup(activeSpace, sourceNode);
+    const pending = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    mocks.revealNode.mockReturnValue(pending.promise);
+    const { result } = renderNavigationActions(activeSpace);
+
+    const openPromise = result.current.openLinkedNode(activeSpace.id, targetNode.id);
+    act(() => {
+      useUiStore.getState().openInGroup(groupId, replacementNode);
+      pending.resolve({ ancestors: [folder], target: targetNode });
+    });
+    await act(async () => {
+      await openPromise;
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacementNode.id);
+    expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(false);
+  });
+
   it("opens a revealed node in a new editor group without a node request", async () => {
     const activeSpace = space("space-1");
     const current = node("current", activeSpace.id, "/current.md");
