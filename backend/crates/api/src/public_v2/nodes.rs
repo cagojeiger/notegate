@@ -380,7 +380,7 @@ pub(crate) struct CopyNodeBody {
     new_parent_id: Uuid,
     /// Name of the copied root node.
     new_name: String,
-    /// Must be true to copy a non-empty folder subtree.
+    /// Must be true to copy a folder.
     #[schema(default = false)]
     #[serde(default)]
     recursive: bool,

@@ -159,7 +159,7 @@ function readSpaceWorkbench(spaceId: string): PersistedSpaceWorkbench | null {
     }
     return parsed;
   } catch {
-    window.localStorage.removeItem(workbenchSpaceKey(spaceId));
+    clearPersistedSpaceWorkbench(spaceId);
     return null;
   }
 }

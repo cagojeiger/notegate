@@ -142,7 +142,7 @@ for each node candidate in DFS order:
   if include/exclude path filter mismatches:
     continue
   if name matches q with match mode:
-    emit McpNodeSummary
+    emit matched node summary
 ```
 
 Match mode:
@@ -176,7 +176,7 @@ text_objects.storage_format = 'plain'
 - Client-side encrypted Text는 grep 대상이 아니다.
 - 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 grep한다.
 - `grep`은 `nodes.metadata`를 검색하지 않는다.
-- Match된 Text의 실제 내용은 `read op=read`로 조회한다.
+- Match된 Text의 실제 내용은 MCP/CLI에서 `read op=read`, Public V2 REST에서 `GET /api/v2/spaces/{space_id}/text/{node_id}`로 조회한다.
 
 Match mode:
 
@@ -211,7 +211,7 @@ for each plain text candidate in DFS order:
   remaining_grep_scan_budget -= text.byte_len
   match_lines = lines whose content matches q with match mode
   if match_lines is not empty:
-    emit McpGrepSummary
+    emit matched Text node summary
     if line mode is none:
       omit match_lines
     if line mode is first:
