@@ -35,7 +35,7 @@ use crate::mcp::tools;
 use crate::observability::observe_mcp_tool;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. `read op=changes` reads every mutation in one Space-root event stream. Omit before/after for the latest events, pass page.next.before for older events, or store head_cursor before reading a Space snapshot and later pass it as after to read newer events in application order. Store applied_cursor only after applying every returned event; if resync_required is true, rebuild the Space snapshot. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. `read op=changes` reads every mutation in one Space-root event stream. Omit before/after for the latest events, pass page.next.before for older events, or store head_cursor before reading a Space snapshot and later pass it as after to read newer events in application order. Store applied_cursor only after applying every returned event; if resync_required is true, rebuild the Space snapshot. For a changes input error, use data.code and data.next_action to correct the call instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
@@ -425,6 +425,8 @@ mod tests {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next.before"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("head_cursor"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("applied_cursor"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("data.code"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("data.next_action"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("search"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("write"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("manage"));

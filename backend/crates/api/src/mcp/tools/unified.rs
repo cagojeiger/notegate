@@ -391,18 +391,42 @@ pub async fn read(
 fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
     if input.op == "changes" {
         if input.cursor.is_some() {
-            return Err(invalid_input_error(
+            return Err(events::changes_input_error(
+                "changes_cursor_field_invalid",
                 "op=changes uses before/after, not cursor",
+                "Move the opaque changes cursor to before for older events or after for newer events.",
+                json!({
+                    "kind": "choose_cursor_field",
+                    "source_field": "cursor",
+                    "choices": [
+                        {"field": "before", "effect": "read older events"},
+                        {"field": "after", "effect": "read newer events"},
+                    ],
+                }),
             ));
         }
         return Ok(());
     }
     if input.before.is_some() || input.after.is_some() {
-        return Err(invalid_input_error(
+        let fields = change_fields(input.before.is_some(), input.after.is_some());
+        return Err(events::changes_input_error(
+            "changes_fields_not_allowed",
             "before/after are only valid for read op=changes",
+            "Remove the listed fields or change op to changes.",
+            json!({
+                "kind": "remove_fields",
+                "fields": fields,
+            }),
         ));
     }
     Ok(())
+}
+
+fn change_fields(before: bool, after: bool) -> Vec<&'static str> {
+    [("before", before), ("after", after)]
+        .into_iter()
+        .filter_map(|(field, present)| present.then_some(field))
+        .collect()
 }
 
 pub async fn search(
@@ -600,8 +624,15 @@ async fn dispatch_command(
     command: SequenceCommand,
 ) -> Result<Json<Value>, ErrorData> {
     if command.tool != "read" && (command.before.is_some() || command.after.is_some()) {
-        return Err(invalid_input_error(
+        let fields = change_fields(command.before.is_some(), command.after.is_some());
+        return Err(events::changes_input_error(
+            "changes_fields_not_allowed",
             "before/after are only valid for read op=changes",
+            "Remove the listed fields or use them only with a read changes command.",
+            json!({
+                "kind": "remove_fields",
+                "fields": fields,
+            }),
         ));
     }
     match command.tool.as_str() {
@@ -659,7 +690,7 @@ fn invalid_op(tool: &'static str, allowed: &[&str]) -> ErrorData {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::expect_used)]
+    #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
     use super::*;
     use serde_json::json;
@@ -723,7 +754,26 @@ mod tests {
         let error = validate_read_change_fields(&input)
             .expect_err("changes must use its directional cursors");
 
-        assert!(error.message.contains("before/after"));
+        let data = error.data.expect("structured recovery data");
+        assert_eq!(data["code"], "changes_cursor_field_invalid");
+        assert_eq!(data["next_action"]["kind"], "choose_cursor_field");
+    }
+
+    #[test]
+    fn changes_fields_on_other_read_ops_name_the_fields_to_remove() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "op": "read",
+            "target": "daily:/note.md",
+            "before": "opaque-change-cursor"
+        }))
+        .expect("known fields parse before operation validation");
+        let error = validate_read_change_fields(&input)
+            .expect_err("changes fields are rejected outside changes");
+
+        let data = error.data.expect("structured recovery data");
+        assert_eq!(data["code"], "changes_fields_not_allowed");
+        assert_eq!(data["next_action"]["kind"], "remove_fields");
+        assert_eq!(data["next_action"]["fields"], json!(["before"]));
     }
 
     #[test]

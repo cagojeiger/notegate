@@ -68,6 +68,17 @@ type ReadInput = {
 - `store_cursor`: 반환된 event를 모두 적용한 뒤 `applied_cursor`를 저장한다.
 - `resync_required`: 현재 Space snapshot을 다시 구성하고 새 `head_cursor`에서 재개한다.
 
+결정적으로 복구할 수 있는 잘못된 입력은 JSON-RPC error의 `data`에 `code`, `recoverable`, `hint`, `next_action`을 반환한다. 같은 입력의 단순 재시도는 성공하지 않으므로 `retryable=false`이며, 호출자는 자연어 message를 분석하지 않고 `code`와 `next_action`으로 수정한다.
+
+| code | 원인 | `next_action.kind` |
+| --- | --- | --- |
+| `changes_direction_conflict` | `before`와 `after` 동시 사용 | `choose_direction` |
+| `changes_cursor_field_invalid` | changes에 일반 `cursor` 사용 | `choose_cursor_field` |
+| `changes_fields_not_allowed` | 다른 op/tool에 `before`/`after` 사용 | `remove_fields` |
+| `changes_scope_invalid` | Space root가 아닌 target | `replace_field` |
+| `changes_cursor_invalid` | 손상되거나 다른 형식의 cursor | 과거 탐색은 `call_tool`, 이후 변경은 `rebuild_snapshot` |
+| `changes_cursor_scope_mismatch` | 다른 Space cursor | 과거 탐색은 `call_tool`, 이후 변경은 `rebuild_snapshot` |
+
 `events[]`는 `event_id`, `created_at`, `node_id`, `actor_account_id`, `operation`, `metadata`, `item_kind`, `affected_parent_ids`와 `path_changed`, `subtree_changed`, `write_lock_changed` 영향 flag를 반환한다. `parent_scope_known=false`인 이전 event는 정확한 parent 범위를 알 수 없으므로 보수적으로 현재 상태를 다시 조회한다.
 
 Node summary의 `write_locked`는 대상에 직접 설정된 잠금, `effective_write_locked`는 직접 또는 상속 잠금의 적용 여부다. `op=stat`은 현재 쓰기를 막는 직접 잠금 source를 `write_lock_sources[]`의 `node_id`, `name`, `path`로 함께 반환한다.

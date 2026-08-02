@@ -1,5 +1,7 @@
 //! Directional file-change reads for the unified MCP `read` tool.
 
+use std::borrow::Cow;
+
 use axum::http::request::Parts;
 use notegate_service::ServiceError;
 use notegate_service::cursor;
@@ -10,7 +12,7 @@ use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::resolve::{caller, invalid_input_error, resolve_target, service_error};
+use super::resolve::{caller, resolve_target, service_error};
 use crate::file_change::FileChangeImpact;
 use crate::state::AppState;
 
@@ -25,7 +27,8 @@ pub async fn call(
     validate_change_request(before.as_deref(), after.as_deref())?;
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
-    require_space_root(&path)?;
+    let root_target = format!("{}:/", resolved.name());
+    require_space_root(&path, &root_target)?;
 
     match after {
         Some(after) => {
@@ -46,6 +49,7 @@ pub async fn call(
                 caller.account_id(),
                 resolved.space_id(),
                 resolved.name(),
+                &target,
                 limit,
                 before,
             )
@@ -56,11 +60,39 @@ pub async fn call(
 
 fn validate_change_request(before: Option<&str>, after: Option<&str>) -> Result<(), ErrorData> {
     if before.is_some() && after.is_some() {
-        return Err(invalid_input_error(
-            "op=changes accepts either before or after, not both",
+        return Err(changes_input_error(
+            "changes_direction_conflict",
+            "before and after cannot be used together",
+            "Choose one direction: keep before for older events or keep after for newer events.",
+            json!({
+                "kind": "choose_direction",
+                "choices": [
+                    {"keep": "before", "remove": "after", "effect": "read older events"},
+                    {"keep": "after", "remove": "before", "effect": "read newer events"},
+                ],
+            }),
         ));
     }
     Ok(())
+}
+
+pub(crate) fn changes_input_error(
+    code: &'static str,
+    message: impl Into<Cow<'static, str>>,
+    hint: &'static str,
+    next_action: Value,
+) -> ErrorData {
+    ErrorData::invalid_params(
+        message,
+        Some(json!({
+            "kind": "invalid_input",
+            "code": code,
+            "retryable": false,
+            "recoverable": true,
+            "hint": hint,
+            "next_action": next_action,
+        })),
+    )
 }
 
 async fn older(
@@ -68,9 +100,13 @@ async fn older(
     account_id: Uuid,
     space_id: Uuid,
     space_name: &str,
+    target: &str,
     limit: Option<i64>,
     before: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
+    if let Some(before) = before.as_deref() {
+        decode_change_cursor(before, space_id, ChangeCursorDirection::Before, target)?;
+    }
     let page = state
         .files
         .list_file_change_events_by_id(
@@ -143,7 +179,8 @@ async fn newer(
     limit: Option<i64>,
     after: String,
 ) -> Result<Json<Value>, ErrorData> {
-    let after_cursor = decode_change_cursor(&after, space_id)?;
+    let after_cursor =
+        decode_change_cursor(&after, space_id, ChangeCursorDirection::After, &target)?;
 
     let page = state
         .files
@@ -210,12 +247,19 @@ async fn newer(
     })))
 }
 
-fn require_space_root(path: &str) -> Result<(), ErrorData> {
+fn require_space_root(path: &str, root_target: &str) -> Result<(), ErrorData> {
     if path == "/" {
         return Ok(());
     }
-    Err(invalid_input_error(
-        "op=changes requires a Space-root target such as `my-space:/`; node and subtree filters are not supported",
+    Err(changes_input_error(
+        "changes_scope_invalid",
+        "op=changes requires a Space-root target",
+        "Replace target with the resolved Space root; node and subtree filters are not supported.",
+        json!({
+            "kind": "replace_field",
+            "field": "target",
+            "value": root_target,
+        }),
     ))
 }
 
@@ -227,15 +271,64 @@ fn encode_change_cursor(space_id: Uuid, id: i64) -> Result<String, ErrorData> {
     })
 }
 
-fn decode_change_cursor(raw: &str, space_id: Uuid) -> Result<FileChangeEventIdCursor, ErrorData> {
-    let decoded = cursor::decode::<FileChangeEventIdCursor>(raw)
-        .map_err(|_error| invalid_input_error("invalid changes cursor"))?;
+#[derive(Debug, Clone, Copy)]
+enum ChangeCursorDirection {
+    Before,
+    After,
+}
+
+fn decode_change_cursor(
+    raw: &str,
+    space_id: Uuid,
+    direction: ChangeCursorDirection,
+    target: &str,
+) -> Result<FileChangeEventIdCursor, ErrorData> {
+    let decoded = cursor::decode::<FileChangeEventIdCursor>(raw).map_err(|_error| {
+        changes_cursor_error(
+            "changes_cursor_invalid",
+            "invalid changes cursor",
+            direction,
+            target,
+        )
+    })?;
     if decoded.space_id != space_id {
-        return Err(invalid_input_error(
-            "changes cursor does not match this Space scope",
+        return Err(changes_cursor_error(
+            "changes_cursor_scope_mismatch",
+            "changes cursor does not match this Space",
+            direction,
+            target,
         ));
     }
     Ok(decoded)
+}
+
+fn changes_cursor_error(
+    code: &'static str,
+    message: &'static str,
+    direction: ChangeCursorDirection,
+    target: &str,
+) -> ErrorData {
+    let (hint, next_action) = match direction {
+        ChangeCursorDirection::Before => (
+            "Discard this cursor and restart from the latest changes for the current Space.",
+            json!({
+                "kind": "call_tool",
+                "tool": "read",
+                "input": {"op": "changes", "target": target},
+            }),
+        ),
+        ChangeCursorDirection::After => (
+            "This cursor cannot continue cache replay. Obtain a new head_cursor and rebuild the current Space snapshot before reading after it.",
+            json!({
+                "kind": "rebuild_snapshot",
+                "baseline_call": {
+                    "tool": "read",
+                    "input": {"op": "changes", "target": target, "limit": 1},
+                },
+            }),
+        ),
+    };
+    changes_input_error(code, message, hint, next_action)
 }
 
 fn event_json(event: &FileChangeEvent) -> Value {
@@ -310,14 +403,50 @@ mod tests {
         assert!(validate_change_request(None, Some("after")).is_ok());
         let error = validate_change_request(Some("before"), Some("after"))
             .expect_err("both directions are ambiguous");
-        assert!(error.message.contains("not both"));
+        let data = error.data.expect("structured recovery data");
+        assert_eq!(data["code"], "changes_direction_conflict");
+        assert_eq!(data["recoverable"], true);
+        assert_eq!(data["next_action"]["kind"], "choose_direction");
     }
 
     #[test]
     fn changes_requires_a_space_root_path() {
-        assert!(require_space_root("/").is_ok());
-        let error = require_space_root("/folder").expect_err("filtered changes are rejected");
-        assert!(error.message.contains("Space-root"));
+        assert!(require_space_root("/", "daily:/").is_ok());
+        let error =
+            require_space_root("/folder", "daily:/").expect_err("filtered changes are rejected");
+        let data = error.data.expect("structured recovery data");
+        assert_eq!(data["code"], "changes_scope_invalid");
+        assert_eq!(data["next_action"]["field"], "target");
+        assert_eq!(data["next_action"]["value"], "daily:/");
+    }
+
+    #[test]
+    fn invalid_cursors_describe_direction_specific_recovery() {
+        let before = decode_change_cursor(
+            "not-a-cursor",
+            Uuid::nil(),
+            ChangeCursorDirection::Before,
+            "daily:/",
+        )
+        .expect_err("invalid before cursor");
+        let before_data = before.data.expect("before recovery data");
+        assert_eq!(before_data["code"], "changes_cursor_invalid");
+        assert_eq!(before_data["next_action"]["kind"], "call_tool");
+
+        let after = decode_change_cursor(
+            "not-a-cursor",
+            Uuid::nil(),
+            ChangeCursorDirection::After,
+            "daily:/",
+        )
+        .expect_err("invalid after cursor");
+        let after_data = after.data.expect("after recovery data");
+        assert_eq!(after_data["code"], "changes_cursor_invalid");
+        assert_eq!(after_data["next_action"]["kind"], "rebuild_snapshot");
+        assert_eq!(
+            after_data["next_action"]["baseline_call"]["input"]["limit"],
+            1
+        );
     }
 
     #[tokio::test]
