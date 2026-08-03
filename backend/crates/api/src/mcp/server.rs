@@ -122,7 +122,14 @@ impl McpServer {
 
     #[tool(
         name = "me",
-        description = "Show who is calling NoteGate, what this caller can generally do, and the running server version."
+        description = "Show who is calling NoteGate, what this caller can generally do, and the running server version.",
+        annotations(
+            title = "Inspect NoteGate Identity",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     pub async fn me_tool(
         &self,
@@ -879,6 +886,25 @@ mod tests {
         assert!(!properties.contains_key("after"));
         assert!(!properties.contains_key("mode"));
         assert!(!properties.contains_key("after_event_id"));
+    }
+
+    #[test]
+    fn me_tool_annotations_match_its_read_only_behavior() {
+        let me = McpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "me")
+            .expect("me tool exists");
+        let annotations = me.annotations.as_ref().expect("me annotations exist");
+
+        assert_eq!(
+            annotations.title.as_deref(),
+            Some("Inspect NoteGate Identity")
+        );
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.idempotent_hint, Some(true));
+        assert_eq!(annotations.open_world_hint, Some(false));
     }
 
     #[test]
