@@ -1,7 +1,6 @@
 //! Prometheus recorder, scrape endpoint, HTTP RED, and resource utilization metrics.
 
-use std::future::Future;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Extension, State};
@@ -184,18 +183,16 @@ fn describe_metrics() {
     );
 }
 
-pub(crate) async fn observe_mcp_tool<T, E>(
+pub(crate) fn record_mcp_tool_metrics(
     enabled: bool,
     tool: &'static str,
-    future: impl Future<Output = Result<T, E>>,
-) -> Result<T, E> {
+    outcome: &'static str,
+    duration: Duration,
+) {
     if !enabled {
-        return future.await;
+        return;
     }
 
-    let started = Instant::now();
-    let result = future.await;
-    let outcome = if result.is_ok() { "success" } else { "error" };
     metrics::counter!(
         "notegate_mcp_tool_calls",
         "tool" => tool,
@@ -207,8 +204,7 @@ pub(crate) async fn observe_mcp_tool<T, E>(
         "tool" => tool,
         "outcome" => outcome
     )
-    .record(started.elapsed().as_secs_f64());
-    result
+    .record(duration.as_secs_f64());
 }
 
 #[derive(Debug, Clone, Copy, Default)]

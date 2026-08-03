@@ -8,9 +8,11 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::resolve::{
-    caller, invalid_input_error, node_summary, resolve_target, service_error, split_parent_name,
+    caller, invalid_input_error, node_summary, required_input, resolve_target, service_error,
+    split_parent_name,
 };
 use super::unified::FileTransferInput;
+use crate::mcp::contract::{McpAction, ToolCallSpec, ToolCallStep};
 use crate::object_storage::{AGENT_TRANSFER_URL_TTL, CompletedUploadPart, ObjectStorageError};
 use crate::object_upload_flow::{
     BegunTransfer, BegunUpload, PART_UPLOAD_CONCURRENCY_MAX, PART_URL_BATCH_MAX, UploadFlowError,
@@ -24,8 +26,7 @@ pub async fn call(
     parts: &Parts,
     input: FileTransferInput,
 ) -> Result<Json<Value>, ErrorData> {
-    let purpose = input.purpose.clone();
-    let mut response = match input.op.as_str() {
+    match input.op.as_str() {
         "begin_upload" => begin_upload(state, parts, input).await,
         "prepare_parts" => prepare_parts(state, parts, input).await,
         "complete_upload" => complete_upload(state, parts, input).await,
@@ -34,32 +35,6 @@ pub async fn call(
         _ => Err(invalid_input_error(
             "invalid op for file_transfer; allowed values are: begin_upload, prepare_parts, complete_upload, abort_upload, prepare_download",
         )),
-    }?;
-    add_purpose_to_next_action_inputs(&mut response.0, &purpose);
-    Ok(response)
-}
-
-fn add_purpose_to_next_action_inputs(response: &mut Value, purpose: &str) {
-    let Some(next_action) = response
-        .get_mut("next_action")
-        .and_then(Value::as_object_mut)
-    else {
-        return;
-    };
-
-    add_purpose_to_call_tool(next_action, purpose);
-    for key in ["repeat", "then"] {
-        if let Some(action) = next_action.get_mut(key).and_then(Value::as_object_mut) {
-            add_purpose_to_call_tool(action, purpose);
-        }
-    }
-}
-
-fn add_purpose_to_call_tool(action: &mut serde_json::Map<String, Value>, purpose: &str) {
-    if action.contains_key("tool")
-        && let Some(Value::Object(input)) = action.get_mut("input")
-    {
-        input.insert("purpose".to_owned(), Value::String(purpose.to_owned()));
     }
 }
 
@@ -68,6 +43,7 @@ async fn begin_upload(
     parts: &Parts,
     input: FileTransferInput,
 ) -> Result<Json<Value>, ErrorData> {
+    let purpose = input.purpose.clone();
     let caller = caller(parts)?;
     let target = required(input.target, "target", "begin_upload")?;
     let byte_len = input
@@ -106,10 +82,17 @@ async fn begin_upload(
     )
     .await
     .map_err(flow_error)?;
-    Ok(build_begin_upload_response(target, byte_len, begun))
+    Ok(build_begin_upload_response(
+        target, byte_len, begun, &purpose,
+    ))
 }
 
-fn build_begin_upload_response(target: String, byte_len: i64, begun: BegunUpload) -> Json<Value> {
+fn build_begin_upload_response(
+    target: String,
+    byte_len: i64,
+    begun: BegunUpload,
+    purpose: &str,
+) -> Json<Value> {
     let BegunUpload {
         upload_id,
         transfer,
@@ -129,15 +112,15 @@ fn build_begin_upload_response(target: String, byte_len: i64, begun: BegunUpload
                     "part_size": part_size,
                     "part_count": part_count,
                 },
-                "next_action": {
-                    "kind": "call_tool",
-                    "tool": "file_transfer",
-                    "input": {
+                "next_action": McpAction::CallTool {
+                    call: ToolCallSpec::new("file_transfer", json!({
+                        "purpose": purpose,
                         "op": "prepare_parts",
                         "upload_id": upload_id,
                         "part_numbers": first_part_numbers,
-                    },
-                    "instruction": "Request upload URLs for the first part batch.",
+                    })),
+                    reason: None,
+                    instruction: Some("Request upload URLs for the first part batch.".to_owned()),
                 },
             }))
         }
@@ -152,17 +135,14 @@ fn build_begin_upload_response(target: String, byte_len: i64, begun: BegunUpload
                 "content_length": byte_len,
                 "expires_in_seconds": AGENT_TRANSFER_URL_TTL.as_secs(),
             },
-            "next_action": {
-                "kind": "http_upload",
-                "transfer_field": "transfer",
-                "instruction": "PUT the local file using transfer.method, transfer.url, every transfer.headers entry, and the exact transfer.content_length.",
-                "then": {
-                    "tool": "file_transfer",
-                    "input": {
+            "next_action": McpAction::HttpUpload {
+                transfer_field: "transfer".to_owned(),
+                instruction: "PUT the local file using transfer.method, transfer.url, every transfer.headers entry, and the exact transfer.content_length.".to_owned(),
+                then: ToolCallSpec::new("file_transfer", json!({
+                        "purpose": purpose,
                         "op": "complete_upload",
                         "upload_id": upload_id,
-                    },
-                },
+                })),
             },
         })),
     }
@@ -173,6 +153,7 @@ async fn prepare_parts(
     parts: &Parts,
     input: FileTransferInput,
 ) -> Result<Json<Value>, ErrorData> {
+    let purpose = input.purpose.clone();
     let caller = caller(parts)?;
     let upload_id = upload_id(&input)?;
     let part_numbers = input
@@ -194,12 +175,13 @@ async fn prepare_parts(
     )
     .await
     .map_err(flow_error)?;
-    Ok(build_prepare_parts_response(upload_id, transfers))
+    Ok(build_prepare_parts_response(upload_id, transfers, &purpose))
 }
 
 fn build_prepare_parts_response(
     upload_id: Uuid,
     transfers: Vec<UploadPartTransfer>,
+    purpose: &str,
 ) -> Json<Value> {
     let parts = transfers
         .into_iter()
@@ -217,28 +199,28 @@ fn build_prepare_parts_response(
     Json(json!({
         "upload_id": upload_id,
         "parts": parts,
-        "next_action": {
-            "kind": "http_upload_parts",
-            "transfers_field": "parts",
-            "collect_response_header": "etag",
-            "max_concurrency": PART_UPLOAD_CONCURRENCY_MAX,
-            "instruction": "PUT at most 4 parts concurrently using each URL, headers, and exact content_length. Collect every response ETag, retry only failed parts with fresh URLs, request URLs for any remaining parts, then complete with all part_number/etag pairs.",
-            "repeat": {
-                "tool": "file_transfer",
-                "input": {
+        "next_action": McpAction::HttpUploadParts {
+            transfers_field: "parts".to_owned(),
+            collect_response_header: "etag".to_owned(),
+            max_concurrency: PART_UPLOAD_CONCURRENCY_MAX,
+            instruction: "PUT at most 4 parts concurrently using each URL, headers, and exact content_length. Collect every response ETag, retry only failed parts with fresh URLs, request URLs for any remaining parts, then complete with all part_number/etag pairs.".to_owned(),
+            repeat: ToolCallStep {
+                call: ToolCallSpec::new("file_transfer", json!({
+                    "purpose": purpose,
                     "op": "prepare_parts",
                     "upload_id": upload_id,
-                },
-                "when": "parts remain unuploaded or a part URL expired",
-                "requires": "add the needed part_numbers to input",
+                })),
+                when: Some("parts remain unuploaded or a part URL expired".to_owned()),
+                requires: Some("add the needed part_numbers to input".to_owned()),
             },
-            "then": {
-                "tool": "file_transfer",
-                "input": {
+            then: ToolCallStep {
+                call: ToolCallSpec::new("file_transfer", json!({
+                    "purpose": purpose,
                     "op": "complete_upload",
                     "upload_id": upload_id,
-                },
-                "requires": "completed_parts for every part exactly once",
+                })),
+                when: None,
+                requires: Some("completed_parts for every part exactly once".to_owned()),
             },
         },
     }))
@@ -272,9 +254,7 @@ async fn complete_upload(
     Ok(Json(json!({
         "upload_id": upload_id,
         "node": node_summary(&view.node),
-        "next_action": {
-            "kind": "done",
-        },
+        "next_action": McpAction::Done,
     })))
 }
 
@@ -297,9 +277,7 @@ async fn abort_upload(
     Ok(Json(json!({
         "upload_id": upload_id,
         "status": "cleanup_queued",
-        "next_action": {
-            "kind": "done",
-        },
+        "next_action": McpAction::Done,
     })))
 }
 
@@ -357,10 +335,9 @@ async fn prepare_download(
             "expires_in_seconds": AGENT_TRANSFER_URL_TTL.as_secs(),
         },
         "node": node_summary(&file.node),
-        "next_action": {
-            "kind": "http_download",
-            "transfer_field": "transfer",
-            "instruction": "GET transfer.url with every transfer.headers entry and write the response bytes to the intended local file.",
+        "next_action": McpAction::HttpDownload {
+            transfer_field: "transfer".to_owned(),
+            instruction: "GET transfer.url with every transfer.headers entry and write the response bytes to the intended local file.".to_owned(),
         },
     })))
 }
@@ -374,7 +351,7 @@ fn upload_id(input: &FileTransferInput) -> Result<Uuid, ErrorData> {
 }
 
 fn required(value: Option<String>, field: &str, op: &str) -> Result<String, ErrorData> {
-    value.ok_or_else(|| invalid_input_error(format!("op={op} requires {field}")))
+    required_input(value, field, &format!("op={op}"))
 }
 
 fn flow_error(error: UploadFlowError) -> ErrorData {
@@ -422,55 +399,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn purpose_is_added_to_every_follow_up_tool_input() {
-        let mut response = json!({
-            "next_action": {
-                "repeat": {
-                    "tool": "file_transfer",
-                    "input": {"op": "prepare_parts"}
-                },
-                "then": {
-                    "tool": "file_transfer",
-                    "input": {"op": "complete_upload"}
-                }
-            }
-        });
-
-        add_purpose_to_next_action_inputs(&mut response, "finish uploading the report");
-
-        assert_eq!(
-            response["next_action"]["repeat"]["input"]["purpose"],
-            "finish uploading the report"
-        );
-        assert_eq!(
-            response["next_action"]["then"]["input"]["purpose"],
-            "finish uploading the report"
-        );
-    }
-
-    #[test]
-    fn purpose_propagation_does_not_mutate_unrelated_response_objects() {
-        let mut response = json!({
-            "metadata": {
-                "tool": "file_transfer",
-                "input": {"op": "prepare_parts"}
-            },
-            "next_action": {
-                "tool": "file_transfer",
-                "input": {"op": "complete_upload"}
-            }
-        });
-
-        add_purpose_to_next_action_inputs(&mut response, "finish uploading the report");
-
-        assert_eq!(response["metadata"]["input"].get("purpose"), None);
-        assert_eq!(
-            response["next_action"]["input"]["purpose"],
-            "finish uploading the report"
-        );
-    }
-
     fn presigned_put(url: &str, content_type: &str) -> PresignedPut {
         let mut headers = BTreeMap::new();
         headers.insert("content-type".to_owned(), content_type.to_owned());
@@ -493,6 +421,7 @@ mod tests {
                     "application/pdf",
                 )),
             },
+            "finish uploading the report",
         )
         .0;
 
@@ -558,6 +487,12 @@ mod tests {
                 .and_then(Value::as_str),
             Some(upload_id.to_string().as_str())
         );
+        assert_eq!(
+            response
+                .pointer("/next_action/then/input/purpose")
+                .and_then(Value::as_str),
+            Some("finish uploading the report")
+        );
     }
 
     #[test]
@@ -573,6 +508,7 @@ mod tests {
                     part_count: 20,
                 },
             },
+            "finish uploading the archive",
         )
         .0;
         let expected_part_numbers = json!([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
@@ -640,6 +576,7 @@ mod tests {
                     transfer: presigned_put("https://storage.example/part-1", "application/bin"),
                 },
             ],
+            "finish uploading the archive",
         )
         .0;
 
@@ -710,6 +647,18 @@ mod tests {
                 .pointer("/next_action/then/input/upload_id")
                 .and_then(Value::as_str),
             Some(upload_id.to_string().as_str())
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/repeat/input/purpose")
+                .and_then(Value::as_str),
+            Some("finish uploading the archive")
+        );
+        assert_eq!(
+            response
+                .pointer("/next_action/then/input/purpose")
+                .and_then(Value::as_str),
+            Some("finish uploading the archive")
         );
     }
 }

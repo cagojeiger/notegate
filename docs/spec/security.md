@@ -3,7 +3,7 @@
 ## 기본 원칙
 
 - Secret, bearer token, OAuth code, PKCE verifier, API key plaintext, browser session token, OAuth refresh token은 log/error/audit payload에 기록하지 않는다.
-- MCP `purpose`는 호출 이유만 담는 짧은 평문 운영 metadata다. Secret, Text 본문, 검색 결과, presigned URL을 넣지 않으며 invocation history는 전체 tool input/output을 복제하지 않는다. `read op=changes`는 target path를 버리고 검증된 Space 이름 snapshot만 별도 기록한다. Owner user의 browser self-review에만 노출하고 90일 후 bounded purge한다.
+- MCP invocation history는 제품 개선과 실패 분석을 위해 서버에 도달한 `tools/call.params.arguments` 전체를 JSONB로 저장한다. 입력에는 purpose, target, 검색어, Text 본문/edit, 암호화 metadata, sequence command 등이 포함될 수 있으므로 민감한 user content로 취급한다. Bearer token, OAuth code, API key 같은 HTTP 인증 정보와 protocol `_meta`, tool response는 저장하지 않는다. Owner user의 browser self-review에만 노출하고 90일 후 bounded purge한다.
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.

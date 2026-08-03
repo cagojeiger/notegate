@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::EventCursor;
@@ -16,6 +17,7 @@ pub struct McpInvocation {
     pub op: Option<String>,
     pub purpose: Option<String>,
     pub space_name: Option<String>,
+    pub input: Value,
     pub outcome: String,
     pub error_code: Option<String>,
     pub duration_ms: i64,

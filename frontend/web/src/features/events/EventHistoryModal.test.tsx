@@ -127,6 +127,8 @@ describe("EventHistoryModal", () => {
     expect(screen.getByText("Space Research")).toBeInTheDocument();
     expect(screen.getByText("12 ms")).toBeInTheDocument();
     expect(screen.getByText("Success")).toBeInTheDocument();
+    await user.click(screen.getByText("Input"));
+    expect(screen.getByText(/"target": "Research:\/"/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
@@ -282,6 +284,11 @@ function mcpInvocation(
     op,
     purpose,
     space_name: spaceName,
+    input: {
+      purpose,
+      op,
+      ...(spaceName ? { target: `${spaceName}:/` } : {})
+    },
     outcome,
     error_code: outcome === "error" ? "tool_error" : null,
     duration_ms: 12

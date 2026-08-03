@@ -7,8 +7,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{actionable_input_error, invalid_input_error};
+use super::resolve::{actionable_input_error, invalid_input_error, required_input};
 use super::{events, files, search, spaces};
+use crate::mcp::contract::{McpAction, error_json};
 use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
@@ -56,6 +57,10 @@ pub struct ReadInput {
 #[serde(deny_unknown_fields)]
 pub struct SearchInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
     pub purpose: String,
     /// Operation: find/grep.
     pub op: String,
@@ -90,6 +95,10 @@ pub struct SearchInput {
 #[serde(deny_unknown_fields)]
 pub struct WriteInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
     pub purpose: String,
     /// Operation: write/append/patch/edit.
     pub op: String,
@@ -116,6 +125,10 @@ pub struct WriteInput {
 #[serde(deny_unknown_fields)]
 pub struct ManageInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
     pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
     pub op: String,
@@ -407,10 +420,9 @@ fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
             "changes_fields_not_allowed",
             "direction is only valid for read op=changes",
             "Remove direction or change op to changes.",
-            json!({
-                "kind": "remove_fields",
-                "fields": ["direction"],
-            }),
+            McpAction::RemoveFields {
+                fields: vec!["direction".to_owned()],
+            },
         ));
     }
     Ok(())
@@ -616,10 +628,9 @@ async fn dispatch_command(
             "changes_fields_not_allowed",
             "direction is only valid for read op=changes",
             "Remove direction or use it only with a read changes command.",
-            json!({
-                "kind": "remove_fields",
-                "fields": ["direction"],
-            }),
+            McpAction::RemoveFields {
+                fields: vec!["direction".to_owned()],
+            },
         ));
     }
     match command.tool.as_str() {
@@ -661,20 +672,8 @@ async fn dispatch_command(
     }
 }
 
-fn error_json(error: ErrorData) -> Value {
-    json!({
-        "code": error.code.0,
-        "message": error.message,
-        "data": error.data,
-    })
-}
-
 fn required<T>(value: Option<T>, field: &'static str, op: &'static str) -> Result<T, ErrorData> {
-    value.ok_or_else(|| {
-        invalid_input_error(format!(
-            "op={op} requires {field}; retry with field `{field}` set"
-        ))
-    })
+    required_input(value, field, &format!("op={op}"))
 }
 
 fn parse_edits<T>(value: Option<Vec<Value>>, op: &'static str) -> Result<Vec<T>, ErrorData>
@@ -709,6 +708,16 @@ mod tests {
 
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn operation_specific_required_fields_use_the_common_recovery_action() {
+        let error = required::<String>(None, "target", "read").expect_err("target is required");
+        let data = error.data.expect("missing field carries recovery data");
+
+        assert_eq!(data["code"], "required_field_missing");
+        assert_eq!(data["next_action"]["kind"], "add_fields");
+        assert_eq!(data["next_action"]["fields"][0]["field"], "target");
+    }
 
     #[test]
     fn purpose_is_required_for_direct_and_sequence_calls() {

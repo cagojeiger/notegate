@@ -16,11 +16,12 @@ use axum::http::header::WWW_AUTHENTICATE;
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use rmcp::handler::server::tool::Extension;
+use rmcp::handler::server::tool::{Extension, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CacheScope, Implementation, JsonObject, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ServerCapabilities, ServerInfo, SubscriptionFilter,
+    CacheScope, CallToolRequestParams, CallToolResponse, Implementation, JsonObject,
+    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo,
+    SubscriptionFilter,
 };
 use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
@@ -38,11 +39,12 @@ use crate::auth::bearer::{
     verify_bearer_mcp,
 };
 use crate::identity::me::MeOutput;
+use crate::mcp::contract::{McpAction, McpErrorData, RequiredField};
 use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For a changes input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -127,10 +129,7 @@ impl McpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<Json<MeOutput>, ErrorData> {
-        invocation::execute(&self.state, &parts, "me", None, None, None, async {
-            tools::identity::call(&parts)
-        })
-        .await
+        tools::identity::call(&parts)
     }
 
     #[tool(
@@ -144,24 +143,7 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::ReadInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        let Parameters(input) = params;
-        let op = input.op.clone();
-        let purpose = input.purpose.clone();
-        let space_name = if op == "changes" {
-            invocation::invocation_space_name(input.target.as_deref())
-        } else {
-            None
-        };
-        invocation::execute(
-            &self.state,
-            &parts,
-            "read",
-            Some(&op),
-            Some(&purpose),
-            space_name.as_deref(),
-            tools::unified::read(&self.state, &parts, Parameters(input)),
-        )
-        .await
+        tools::unified::read(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -175,19 +157,7 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::SearchInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        let Parameters(input) = params;
-        let op = input.op.clone();
-        let purpose = input.purpose.clone();
-        invocation::execute(
-            &self.state,
-            &parts,
-            "search",
-            Some(&op),
-            Some(&purpose),
-            None,
-            tools::unified::search(&self.state, &parts, Parameters(input)),
-        )
-        .await
+        tools::unified::search(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -201,19 +171,7 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::WriteInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        let Parameters(input) = params;
-        let op = input.op.clone();
-        let purpose = input.purpose.clone();
-        invocation::execute(
-            &self.state,
-            &parts,
-            "write",
-            Some(&op),
-            Some(&purpose),
-            None,
-            tools::unified::write(&self.state, &parts, Parameters(input)),
-        )
-        .await
+        tools::unified::write(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -227,19 +185,7 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::ManageInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        let Parameters(input) = params;
-        let op = input.op.clone();
-        let purpose = input.purpose.clone();
-        invocation::execute(
-            &self.state,
-            &parts,
-            "manage",
-            Some(&op),
-            Some(&purpose),
-            None,
-            tools::unified::manage(&self.state, &parts, Parameters(input)),
-        )
-        .await
+        tools::unified::manage(&self.state, &parts, params).await
     }
 
     #[tool(
@@ -254,18 +200,7 @@ impl McpServer {
         params: Parameters<tools::unified::FileTransferInput>,
     ) -> Result<Json<Value>, ErrorData> {
         let Parameters(input) = params;
-        let op = input.op.clone();
-        let purpose = input.purpose.clone();
-        invocation::execute(
-            &self.state,
-            &parts,
-            "file_transfer",
-            Some(&op),
-            Some(&purpose),
-            None,
-            tools::transfers::call(&self.state, &parts, input),
-        )
-        .await
+        tools::transfers::call(&self.state, &parts, input).await
     }
 
     #[tool(
@@ -279,15 +214,7 @@ impl McpServer {
         Extension(parts): Extension<Parts>,
         params: Parameters<tools::unified::RunSequenceInput>,
     ) -> Result<Json<Value>, ErrorData> {
-        let Parameters(input) = params;
-        let purpose = input.purpose.clone();
-        invocation::execute_sequence(
-            &self.state,
-            &parts,
-            &purpose,
-            tools::unified::run_sequence(&self.state, &parts, Parameters(input)),
-        )
-        .await
+        tools::unified::run_sequence(&self.state, &parts, params).await
     }
 }
 
@@ -295,6 +222,37 @@ impl McpServer {
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
         mcp_server_info()
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let tool = request.name.to_string();
+        let input = Value::Object(request.arguments.clone().unwrap_or_default());
+        let caller = context
+            .extensions
+            .get::<Parts>()
+            .and_then(|parts| parts.extensions.get::<Caller>())
+            .cloned();
+        let router = McpServer::tool_router();
+        let validation_error = router
+            .list_all()
+            .into_iter()
+            .find(|candidate| candidate.name.as_ref() == tool)
+            .and_then(|definition| required_fields_error(&definition.input_schema, &input));
+        let call = async move {
+            if let Some(error) = validation_error {
+                Err(error)
+            } else {
+                router
+                    .call(ToolCallContext::new(self, request, context))
+                    .await
+            }
+        };
+
+        invocation::execute_call(&self.state, caller.as_ref(), &tool, &input, call).await
     }
 
     async fn list_tools(
@@ -315,6 +273,46 @@ impl ServerHandler for McpServer {
     async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
         listen_for_tool_list_changes(context, &self.state.shutdown).await
     }
+}
+
+fn required_fields_error(schema: &JsonObject, input: &Value) -> Option<ErrorData> {
+    let input = input.as_object()?;
+    let properties = schema.get("properties").and_then(Value::as_object);
+    let missing = schema
+        .get("required")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|field| !input.contains_key(*field))
+        .map(|field| RequiredField {
+            field: field.to_owned(),
+            description: properties
+                .and_then(|properties| properties.get(field))
+                .and_then(|property| property.get("description"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return None;
+    }
+
+    let field_names = missing
+        .iter()
+        .map(|field| format!("`{}`", field.field))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(ErrorData::invalid_params(
+        format!("missing required field(s): {field_names}"),
+        Some(
+            McpErrorData::actionable_input(
+                "required_fields_missing",
+                "Add every required field described by next_action.fields and retry the same tool.",
+                McpAction::AddFields { fields: missing },
+            )
+            .into_value(),
+        ),
+    ))
 }
 
 pub async fn user_mcp_handler(State(state): State<AppState>, request: Request<Body>) -> Response {
@@ -441,14 +439,48 @@ mod tests {
     )]
     use super::*;
     use notegate_db::SpaceRepo;
-    use rmcp::model::{ClientInfo, ServerNotification};
+    use rmcp::model::{CallToolResult, ClientInfo, ContentBlock, ServerNotification};
     use rmcp::service::SubscriptionEnd;
     use rmcp::transport::StreamableHttpClientTransport;
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
     use rmcp::{ClientLifecycleMode, ClientServiceExt};
+    use serde_json::json;
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn required_fields_error_uses_the_published_schema_and_action_contract() {
+        let read = McpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "read")
+            .expect("read tool exists");
+
+        let error = required_fields_error(&read.input_schema, &json!({"op": "spaces"}))
+            .expect("purpose is required");
+        let data = error.data.expect("required field error carries data");
+
+        assert_eq!(data["code"], "required_fields_missing");
+        assert_eq!(data["recoverable"], true);
+        assert_eq!(data["next_action"]["kind"], "add_fields");
+        assert_eq!(data["next_action"]["fields"][0]["field"], "purpose");
+        assert!(
+            data["next_action"]["fields"][0]["description"]
+                .as_str()
+                .is_some_and(|description| description.contains("human-readable reason"))
+        );
+        assert!(
+            required_fields_error(
+                &read.input_schema,
+                &json!({
+                    "purpose": "list available spaces",
+                    "op": "spaces"
+                })
+            )
+            .is_none()
+        );
+    }
 
     #[derive(Clone)]
     struct ToolRefreshTestServer {
@@ -509,6 +541,41 @@ mod tests {
                     .with_graceful_shutdown(shutdown.cancelled_owned())
                     .await
                     .expect("serve test MCP server");
+            }
+        });
+        (format!("http://{address}/mcp"), shutdown, server_task)
+    }
+
+    async fn spawn_invocation_test_server(
+        state: AppState,
+        caller: Caller,
+    ) -> (String, CancellationToken, tokio::task::JoinHandle<()>) {
+        let shutdown = CancellationToken::new();
+        let server_state = state.clone();
+        let service: StreamableHttpService<McpServer, NeverSessionManager> =
+            StreamableHttpService::new(
+                move || Ok(McpServer::new(server_state.clone())),
+                Arc::new(NeverSessionManager::default()),
+                StreamableHttpServerConfig::default()
+                    .with_legacy_session_mode(false)
+                    .with_json_response(true),
+            );
+        let router = axum::Router::new()
+            .nest_service("/mcp", service)
+            .layer(axum::Extension(caller));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind invocation test MCP server");
+        let address = listener
+            .local_addr()
+            .expect("invocation test server address");
+        let server_task = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(shutdown.cancelled_owned())
+                    .await
+                    .expect("serve invocation test MCP server");
             }
         });
         (format!("http://{address}/mcp"), shutdown, server_task)
@@ -860,19 +927,25 @@ mod tests {
             .await?;
         let mut parts = axum::http::Request::new(()).into_parts().0;
         parts.extensions.insert(caller.clone());
-        let input = serde_json::from_value(serde_json::json!({
+        let input = serde_json::json!({
             "purpose": "Review recent changes",
             "op": "changes",
             "target": "rest-test:/",
             "limit": 1
-        }))?;
+        });
 
-        McpServer::new(state.clone())
-            .read_tool(Extension(parts), Parameters(input))
-            .await?;
+        let server = McpServer::new(state.clone());
+        let typed_input = serde_json::from_value(input.clone())?;
+        invocation::execute_call(&state, Some(&caller), "read", &input, async {
+            server
+                .read_tool(Extension(parts), Parameters(typed_input))
+                .await
+                .map(|value| CallToolResult::structured(value.0).into())
+        })
+        .await?;
 
-        let row = sqlx::query_as::<_, (String, String, Option<String>)>(
-            "SELECT tool, op, space_name FROM mcp_invocations \
+        let row = sqlx::query_as::<_, (String, String, Option<String>, serde_json::Value)>(
+            "SELECT tool, op, space_name, input FROM mcp_invocations \
              WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
         )
         .bind(caller.account_id())
@@ -881,19 +954,24 @@ mod tests {
         assert_eq!(row.0, "read");
         assert_eq!(row.1, "changes");
         assert_eq!(row.2.as_deref(), Some("rest-test"));
+        assert_eq!(row.3, input);
 
-        let invalid_input = serde_json::from_value(serde_json::json!({
+        let invalid_input = serde_json::json!({
             "purpose": "Review recent changes",
             "op": "changes",
             "target": "rest-test:/not-root"
-        }))?;
+        });
         let mut invalid_parts = axum::http::Request::new(()).into_parts().0;
         invalid_parts.extensions.insert(caller.clone());
-        McpServer::new(state.clone())
-            .read_tool(Extension(invalid_parts), Parameters(invalid_input))
-            .await
-            .err()
-            .expect("changes rejects a non-root target");
+        let typed_invalid_input = serde_json::from_value(invalid_input.clone())?;
+        invocation::execute_call(&state, Some(&caller), "read", &invalid_input, async {
+            server
+                .read_tool(Extension(invalid_parts), Parameters(typed_invalid_input))
+                .await
+                .map(|value| CallToolResult::structured(value.0).into())
+        })
+        .await
+        .expect_err("changes rejects a non-root target");
 
         let failed = sqlx::query_as::<_, (Option<String>, String, Option<String>)>(
             "SELECT space_name, outcome, error_code FROM mcp_invocations \
@@ -906,6 +984,93 @@ mod tests {
         assert_eq!(failed.1, "error");
         assert_eq!(failed.2.as_deref(), Some("changes_scope_invalid"));
 
+        let missing_purpose = serde_json::json!({"op": "spaces"});
+        let malformed =
+            invocation::execute_call(&state, Some(&caller), "read", &missing_purpose, async {
+                Ok(CallToolResult::error(vec![ContentBlock::text(
+                    "failed to deserialize parameters: missing field `purpose`",
+                )])
+                .into())
+            })
+            .await?;
+        assert!(matches!(
+            malformed,
+            CallToolResponse::Complete(ref result) if result.is_error == Some(true)
+        ));
+
+        let malformed_row =
+            sqlx::query_as::<_, (Option<String>, serde_json::Value, String, String)>(
+                "SELECT purpose, input, outcome, error_code FROM mcp_invocations \
+             WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
+            )
+            .bind(caller.account_id())
+            .fetch_one(&state.db)
+            .await?;
+        assert_eq!(malformed_row.0, None);
+        assert_eq!(malformed_row.1, missing_purpose);
+        assert_eq!(malformed_row.2, "error");
+        assert_eq!(malformed_row.3, "invalid_params");
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn tools_call_boundary_records_schema_and_unknown_tool_failures()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, _space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        let (url, shutdown, server_task) =
+            spawn_invocation_test_server(state.clone(), caller.clone()).await;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(url),
+        );
+        let client = ClientInfo::default()
+            .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
+            .await?;
+
+        let missing_purpose = serde_json::json!({"op": "spaces"});
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("read")
+                    .with_arguments(serde_json::from_value(missing_purpose.clone())?),
+            )
+            .await;
+        assert!(result.is_err());
+
+        let unknown_input = serde_json::json!({"purpose": "test unknown tool", "value": 7});
+        let unknown_error = client
+            .call_tool(
+                CallToolRequestParams::new("not_a_tool")
+                    .with_arguments(serde_json::from_value(unknown_input.clone())?),
+            )
+            .await;
+        assert!(unknown_error.is_err());
+
+        let rows =
+            sqlx::query_as::<_, (String, Option<String>, serde_json::Value, String, String)>(
+                "SELECT tool, purpose, input, outcome, error_code FROM mcp_invocations \
+             WHERE actor_account_id = $1 ORDER BY id",
+            )
+            .bind(caller.account_id())
+            .fetch_all(&state.db)
+            .await?;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "read");
+        assert_eq!(rows[0].1, None);
+        assert_eq!(rows[0].2, missing_purpose);
+        assert_eq!(rows[0].3, "error");
+        assert_eq!(rows[0].4, "required_fields_missing");
+        assert_eq!(rows[1].0, "not_a_tool");
+        assert_eq!(rows[1].1.as_deref(), Some("test unknown tool"));
+        assert_eq!(rows[1].2, unknown_input);
+        assert_eq!(rows[1].3, "error");
+
+        stop_tool_refresh_test_server(client, shutdown, server_task).await;
         db.cleanup().await;
         Ok(())
     }

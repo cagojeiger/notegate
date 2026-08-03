@@ -169,6 +169,12 @@ function McpInvocationRow({ invocation }: { invocation: McpInvocation }) {
           <span aria-hidden="true">·</span>
           <span className={invocation.outcome === "success" ? "text-success" : "text-danger"}>{status}</span>
         </div>
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer select-none text-muted hover:text-text">Input</summary>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg p-3 font-mono text-text">
+            {JSON.stringify(invocation.input, null, 2)}
+          </pre>
+        </details>
       </div>
     </li>
   );

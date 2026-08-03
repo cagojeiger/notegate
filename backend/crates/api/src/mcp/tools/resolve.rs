@@ -22,6 +22,7 @@ use notegate_service::files::parse_target;
 use notegate_service::spaces::SpaceView;
 
 use crate::error::write_lock_code;
+use crate::mcp::contract::{McpAction, McpErrorData, RequiredField};
 use crate::state::AppState;
 
 const SPACE_SUGGESTION_LIMIT: i64 = 5;
@@ -239,10 +240,7 @@ fn write_locked_error(scope: WriteLockScope) -> ErrorData {
 }
 
 fn error_meta(kind: &'static str) -> Option<serde_json::Value> {
-    Some(json!({
-        "kind": kind,
-        "code": kind,
-    }))
+    Some(McpErrorData::basic(kind, kind).into_value())
 }
 
 pub fn invalid_input_error(message: impl Into<Cow<'static, str>>) -> ErrorData {
@@ -255,19 +253,30 @@ pub fn actionable_input_error(
     code: &'static str,
     message: impl Into<Cow<'static, str>>,
     hint: &'static str,
-    next_action: serde_json::Value,
+    next_action: McpAction,
 ) -> ErrorData {
     ErrorData::invalid_params(
         message,
-        Some(json!({
-            "kind": "invalid_input",
-            "code": code,
-            "retryable": false,
-            "recoverable": true,
-            "hint": hint,
-            "next_action": next_action,
-        })),
+        Some(McpErrorData::actionable_input(code, hint, next_action).into_value()),
     )
+}
+
+/// Require an operation-specific field that cannot be expressed as globally
+/// required in a unified tool's JSON Schema.
+pub fn required_input<T>(value: Option<T>, field: &str, context: &str) -> Result<T, ErrorData> {
+    value.ok_or_else(|| {
+        actionable_input_error(
+            "required_field_missing",
+            format!("{context} requires {field}; retry with field `{field}` set"),
+            "Add the field described by next_action.fields and retry the same tool.",
+            McpAction::AddFields {
+                fields: vec![RequiredField {
+                    field: field.to_owned(),
+                    description: None,
+                }],
+            },
+        )
+    })
 }
 
 /// Split an absolute path into its parent path and basename.
@@ -567,7 +576,9 @@ mod tests {
             "field_not_allowed",
             "field is not allowed",
             "Remove the field and retry.",
-            json!({"kind": "remove_fields", "fields": ["field"]}),
+            McpAction::RemoveFields {
+                fields: vec!["field".to_owned()],
+            },
         );
 
         assert_eq!(error.code, ErrorCode::INVALID_PARAMS);

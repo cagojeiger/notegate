@@ -3,97 +3,72 @@
 use std::future::Future;
 use std::time::Instant;
 
-use axum::http::request::Parts;
 use notegate_db::NewMcpInvocation;
 use notegate_model::{Caller, CallerIdentity};
 use notegate_service::files::parse_target;
-use rmcp::{ErrorData, Json};
+use rmcp::ErrorData;
+use rmcp::model::{CallToolResponse, CallToolResult};
 use serde_json::Value;
 
-use super::tools::resolve::{caller, invalid_input_error};
-use crate::observability::observe_mcp_tool;
+use super::tools::resolve::invalid_input_error;
+use crate::observability::record_mcp_tool_metrics;
 use crate::state::AppState;
 
 pub(crate) const PURPOSE_MAX_CHARS: usize = 200;
 
-pub(crate) async fn execute<T>(
+pub(crate) async fn execute_call(
     state: &AppState,
-    parts: &Parts,
-    tool: &'static str,
-    op: Option<&str>,
-    purpose: Option<&str>,
-    space_name: Option<&str>,
-    future: impl Future<Output = Result<T, ErrorData>>,
-) -> Result<T, ErrorData> {
-    execute_classified(
-        state,
-        parts,
-        InvocationContext {
-            tool,
-            op,
-            purpose,
-            space_name,
-        },
-        future,
-        |_| None,
-    )
-    .await
-}
-
-pub(crate) async fn execute_sequence(
-    state: &AppState,
-    parts: &Parts,
-    purpose: &str,
-    future: impl Future<Output = Result<Json<Value>, ErrorData>>,
-) -> Result<Json<Value>, ErrorData> {
-    execute_classified(
-        state,
-        parts,
-        InvocationContext {
-            tool: "run_sequence",
-            op: None,
-            purpose: Some(purpose),
-            space_name: None,
-        },
-        future,
-        sequence_error_code,
-    )
-    .await
-}
-
-async fn execute_classified<T>(
-    state: &AppState,
-    parts: &Parts,
-    invocation: InvocationContext<'_>,
-    future: impl Future<Output = Result<T, ErrorData>>,
-    classify_error: impl FnOnce(&T) -> Option<String>,
-) -> Result<T, ErrorData> {
-    if let Some(purpose) = invocation.purpose
-        && let Err(error) = validate_purpose(purpose)
-    {
-        return observe_mcp_tool(state.config.metrics_enabled, invocation.tool, async {
-            Err(error)
-        })
-        .await;
-    }
+    caller: Option<&Caller>,
+    tool: &str,
+    input: &Value,
+    future: impl Future<Output = Result<CallToolResponse, ErrorData>>,
+) -> Result<CallToolResponse, ErrorData> {
+    let op = input.get("op").and_then(Value::as_str);
+    let raw_purpose = if tool == "me" {
+        None
+    } else {
+        input.get("purpose").and_then(Value::as_str)
+    };
+    let purpose_validation = raw_purpose.map(validate_purpose).transpose();
+    let purpose = raw_purpose.filter(|_| purpose_validation.is_ok());
+    let space_name = if tool == "read" && op == Some("changes") {
+        invocation_space_name(input.get("target").and_then(Value::as_str))
+    } else {
+        None
+    };
 
     let started = Instant::now();
-    let result = observe_mcp_tool(state.config.metrics_enabled, invocation.tool, future).await;
-    let classified_error = result.as_ref().ok().and_then(classify_error);
+    let result = match purpose_validation {
+        Ok(_) => future.await,
+        Err(error) => Err(error),
+    };
+    let error_code = call_error_code(tool, &result);
+    let outcome = if error_code.is_some() {
+        "error"
+    } else {
+        "success"
+    };
+    let elapsed = started.elapsed();
+    record_mcp_tool_metrics(
+        state.config.metrics_enabled,
+        metric_tool_name(tool),
+        outcome,
+        elapsed,
+    );
 
-    if let Ok(caller) = caller(parts) {
+    if let Some(caller) = caller {
         record(
             state,
             caller,
             InvocationRecord {
-                tool: invocation.tool,
-                op: invocation.op,
-                purpose: invocation.purpose,
-                space_name: invocation.space_name,
-                classified_error: classified_error.as_deref(),
-                elapsed_ms: started.elapsed().as_millis(),
+                tool,
+                op,
+                purpose,
+                space_name: space_name.as_deref(),
+                input,
+                error_code: error_code.as_deref(),
+                elapsed_ms: elapsed.as_millis(),
             },
-            &result,
         )
         .await;
     }
@@ -101,15 +76,7 @@ async fn execute_classified<T>(
     result
 }
 
-struct InvocationContext<'a> {
-    tool: &'static str,
-    op: Option<&'a str>,
-    purpose: Option<&'a str>,
-    space_name: Option<&'a str>,
-}
-
-/// Extract only the validated Space-name segment from an MCP target.
-/// Paths and malformed targets are intentionally not retained in invocation history.
+/// Extract the validated Space-name segment used by the invocation list summary.
 pub(crate) fn invocation_space_name(target: Option<&str>) -> Option<String> {
     target
         .and_then(|target| parse_target(target).ok())
@@ -132,29 +99,21 @@ fn validate_purpose(purpose: &str) -> Result<(), ErrorData> {
 }
 
 struct InvocationRecord<'a> {
-    tool: &'static str,
+    tool: &'a str,
     op: Option<&'a str>,
     purpose: Option<&'a str>,
     space_name: Option<&'a str>,
-    classified_error: Option<&'a str>,
+    input: &'a Value,
+    error_code: Option<&'a str>,
     elapsed_ms: u128,
 }
 
-async fn record<T>(
-    state: &AppState,
-    caller: &Caller,
-    invocation: InvocationRecord<'_>,
-    result: &Result<T, ErrorData>,
-) {
+async fn record(state: &AppState, caller: &Caller, invocation: InvocationRecord<'_>) {
     let (owner_user_id, caller_kind) = match &caller.identity {
         CallerIdentity::User(_) => (caller.account_id(), "user"),
         CallerIdentity::Agent(agent) => (agent.owner_user_id, "agent"),
     };
-    let error_code = match result {
-        Ok(_) => invocation.classified_error.map(str::to_owned),
-        Err(error) => Some(error_code(error)),
-    };
-    let outcome = if error_code.is_some() {
+    let outcome = if invocation.error_code.is_some() {
         "error"
     } else {
         "success"
@@ -171,8 +130,9 @@ async fn record<T>(
             op: invocation.op,
             purpose: invocation.purpose,
             space_name: invocation.space_name,
+            input: invocation.input,
             outcome,
-            error_code: error_code.as_deref(),
+            error_code: invocation.error_code,
             duration_ms,
         })
         .await
@@ -187,23 +147,61 @@ async fn record<T>(
     }
 }
 
-fn sequence_error_code(result: &Json<Value>) -> Option<String> {
-    if result.0.get("ok").and_then(Value::as_bool) != Some(false) {
+fn call_error_code(tool: &str, result: &Result<CallToolResponse, ErrorData>) -> Option<String> {
+    match result {
+        Err(error) => Some(error_code(error)),
+        Ok(CallToolResponse::Complete(result)) if result.is_error == Some(true) => {
+            Some(tool_result_error_code(result))
+        }
+        Ok(CallToolResponse::Complete(result)) if tool == "run_sequence" => result
+            .structured_content
+            .as_ref()
+            .and_then(sequence_error_code),
+        Ok(_) => None,
+    }
+}
+
+fn tool_result_error_code(result: &CallToolResult) -> String {
+    let argument_error = result
+        .content
+        .first()
+        .and_then(|content| content.as_text())
+        .is_some_and(|text| text.text.starts_with("failed to deserialize parameters:"));
+    if argument_error {
+        "invalid_params".to_owned()
+    } else {
+        "tool_error".to_owned()
+    }
+}
+
+fn sequence_error_code(result: &Value) -> Option<String> {
+    if result.get("ok").and_then(Value::as_bool) != Some(false) {
         return None;
     }
 
     result
-        .0
         .pointer("/error/data/code")
         .and_then(Value::as_str)
         .map(str::to_owned)
         .or_else(|| {
             result
-                .0
                 .pointer("/error/code")
                 .and_then(Value::as_i64)
                 .map(|code| code.to_string())
         })
+}
+
+fn metric_tool_name(tool: &str) -> &'static str {
+    match tool {
+        "me" => "me",
+        "read" => "read",
+        "search" => "search",
+        "write" => "write",
+        "manage" => "manage",
+        "file_transfer" => "file_transfer",
+        "run_sequence" => "run_sequence",
+        _ => "unknown",
+    }
 }
 
 fn error_code(error: &ErrorData) -> String {
@@ -221,6 +219,7 @@ mod tests {
     #![allow(
         clippy::expect_used,
         clippy::indexing_slicing,
+        clippy::panic,
         clippy::unwrap_in_result
     )]
 
@@ -260,87 +259,100 @@ mod tests {
 
     #[test]
     fn sequence_error_code_reads_failed_sequence_results() {
-        let application_error = Json(serde_json::json!({
+        let application_error = serde_json::json!({
             "ok": false,
             "error": {
                 "code": -32602,
                 "data": {"code": "invalid_input"}
             }
-        }));
+        });
         assert_eq!(
             sequence_error_code(&application_error).as_deref(),
             Some("invalid_input")
         );
 
-        let success = Json(serde_json::json!({"ok": true}));
+        let success = serde_json::json!({"ok": true});
         assert_eq!(sequence_error_code(&success), None);
     }
 
     #[tokio::test]
-    async fn execute_records_tool_results_without_payload() -> Result<(), Box<dyn std::error::Error>>
-    {
+    async fn execute_call_records_raw_inputs_and_all_outcomes()
+    -> Result<(), Box<dyn std::error::Error>> {
         let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
             return Ok(());
         };
         let state = crate::rest::test_support::state(&db);
         let (caller, _space_id, _root_id) =
             crate::rest::test_support::caller_and_space(&state).await?;
-        let mut parts = axum::http::Request::new(()).into_parts().0;
-        parts.extensions.insert(caller.clone());
-
-        execute(
-            &state,
-            &parts,
-            "search",
-            Some("find"),
-            Some("locate cache design notes"),
-            None,
-            async { Ok::<_, ErrorData>(()) },
-        )
+        let search_input = serde_json::json!({
+            "purpose": "locate cache design notes",
+            "op": "find",
+            "target": "Research:/",
+            "q": "cache"
+        });
+        execute_call(&state, Some(&caller), "search", &search_input, async {
+            Ok(CallToolResult::structured(serde_json::json!({"items": []})).into())
+        })
         .await?;
-        let recorded_error = execute(
-            &state,
-            &parts,
-            "read",
-            Some("read"),
-            Some("read a missing design note"),
-            None,
-            async {
-                Err::<(), _>(invalid_input_error(
-                    "the requested design note does not exist",
-                ))
-            },
-        )
+        let missing_input = serde_json::json!({
+            "purpose": "read a missing design note",
+            "op": "read",
+            "target": "Research:/missing.md"
+        });
+        let recorded_error = execute_call(&state, Some(&caller), "read", &missing_input, async {
+            Err::<CallToolResponse, _>(invalid_input_error(
+                "the requested design note does not exist",
+            ))
+        })
         .await
         .expect_err("tool error is returned");
         assert_eq!(recorded_error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        let error = execute(
+        let invalid_purpose_input = serde_json::json!({"purpose": " ", "op": "spaces"});
+        let error = execute_call(
             &state,
-            &parts,
+            Some(&caller),
             "read",
-            Some("spaces"),
-            Some(" "),
-            None,
-            async { Ok::<_, ErrorData>(()) },
+            &invalid_purpose_input,
+            async { Ok(CallToolResult::structured(serde_json::json!({"spaces": []})).into()) },
         )
         .await
         .expect_err("blank purpose is rejected");
         assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-        let sequence = execute_sequence(&state, &parts, "run a failing sequence", async {
-            Ok(Json(serde_json::json!({
-                "ok": false,
-                "completed": 0,
-                "failed_index": 0,
-                "results": [],
-                "error": {
-                    "code": -32602,
-                    "message": "invalid input",
-                    "data": {"code": "invalid_input"}
-                }
-            })))
-        })
+        let sequence_input = serde_json::json!({
+            "purpose": "run a failing sequence",
+            "commands": [{"tool": "read", "op": "read", "target": "Research:/missing.md"}]
+        });
+        let sequence = execute_call(
+            &state,
+            Some(&caller),
+            "run_sequence",
+            &sequence_input,
+            async {
+                Ok(CallToolResult::structured(serde_json::json!({
+                    "ok": false,
+                    "completed": 0,
+                    "failed_index": 0,
+                    "results": [],
+                    "error": {
+                        "code": -32602,
+                        "message": "invalid input",
+                        "data": {"code": "invalid_input"}
+                    }
+                }))
+                .into())
+            },
+        )
         .await?;
-        assert_eq!(sequence.0["ok"], false);
+        let CallToolResponse::Complete(sequence) = sequence else {
+            panic!("expected a complete sequence response");
+        };
+        assert_eq!(
+            sequence
+                .structured_content
+                .as_ref()
+                .expect("sequence structured content")["ok"],
+            false
+        );
 
         let rows = sqlx::query_as::<
             _,
@@ -348,29 +360,38 @@ mod tests {
                 String,
                 Option<String>,
                 Option<String>,
+                serde_json::Value,
                 String,
                 Option<String>,
             ),
         >(
-            "SELECT tool, op, purpose, outcome, error_code \
+            "SELECT tool, op, purpose, input, outcome, error_code \
              FROM mcp_invocations WHERE actor_account_id = $1 ORDER BY id",
         )
         .bind(caller.account_id())
         .fetch_all(&state.db)
         .await?;
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 4);
         assert_eq!(rows[0].0, "search");
         assert_eq!(rows[0].1.as_deref(), Some("find"));
         assert_eq!(rows[0].2.as_deref(), Some("locate cache design notes"));
-        assert_eq!(rows[0].3, "success");
-        assert_eq!(rows[0].4, None);
+        assert_eq!(rows[0].3, search_input);
+        assert_eq!(rows[0].4, "success");
+        assert_eq!(rows[0].5, None);
         assert_eq!(rows[1].0, "read");
-        assert_eq!(rows[1].3, "error");
-        assert_eq!(rows[1].4.as_deref(), Some("invalid_input"));
-        assert_eq!(rows[2].0, "run_sequence");
-        assert_eq!(rows[2].2.as_deref(), Some("run a failing sequence"));
-        assert_eq!(rows[2].3, "error");
-        assert_eq!(rows[2].4.as_deref(), Some("invalid_input"));
+        assert_eq!(rows[1].3, missing_input);
+        assert_eq!(rows[1].4, "error");
+        assert_eq!(rows[1].5.as_deref(), Some("invalid_input"));
+        assert_eq!(rows[2].0, "read");
+        assert_eq!(rows[2].2, None);
+        assert_eq!(rows[2].3, invalid_purpose_input);
+        assert_eq!(rows[2].4, "error");
+        assert_eq!(rows[2].5.as_deref(), Some("invalid_input"));
+        assert_eq!(rows[3].0, "run_sequence");
+        assert_eq!(rows[3].2.as_deref(), Some("run a failing sequence"));
+        assert_eq!(rows[3].3, sequence_input);
+        assert_eq!(rows[3].4, "error");
+        assert_eq!(rows[3].5.as_deref(), Some("invalid_input"));
 
         db.cleanup().await;
         Ok(())
@@ -399,18 +420,15 @@ mod tests {
             }),
             channel: notegate_model::Channel::Mcp,
         };
-        let mut parts = axum::http::Request::new(()).into_parts().0;
-        parts.extensions.insert(agent_caller);
-
-        execute(
-            &state,
-            &parts,
-            "search",
-            Some("grep"),
-            Some("search the owner's notes"),
-            None,
-            async { Ok::<_, ErrorData>(()) },
-        )
+        let input = serde_json::json!({
+            "purpose": "search the owner's notes",
+            "op": "grep",
+            "target": "Research:/",
+            "q": "cache"
+        });
+        execute_call(&state, Some(&agent_caller), "search", &input, async {
+            Ok(CallToolResult::structured(serde_json::json!({"items": []})).into())
+        })
         .await?;
 
         let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String)>(

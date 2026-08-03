@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_model::{McpInvocation, McpInvocationCursor};
+use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -19,10 +20,11 @@ pub struct NewMcpInvocation<'a> {
     pub owner_user_id: Uuid,
     pub actor_account_id: Uuid,
     pub caller_kind: &'static str,
-    pub tool: &'static str,
+    pub tool: &'a str,
     pub op: Option<&'a str>,
     pub purpose: Option<&'a str>,
     pub space_name: Option<&'a str>,
+    pub input: &'a Value,
     pub outcome: &'static str,
     pub error_code: Option<&'a str>,
     pub duration_ms: i64,
@@ -36,8 +38,8 @@ impl McpInvocationRepo {
     pub async fn insert(&self, invocation: NewMcpInvocation<'_>) -> Result<()> {
         sqlx::query(
             "INSERT INTO mcp_invocations \
-             (owner_user_id, actor_account_id, caller_kind, tool, op, purpose, space_name, outcome, error_code, duration_ms) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             (owner_user_id, actor_account_id, caller_kind, tool, op, purpose, space_name, input, outcome, error_code, duration_ms) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(invocation.owner_user_id)
         .bind(invocation.actor_account_id)
@@ -46,6 +48,7 @@ impl McpInvocationRepo {
         .bind(invocation.op)
         .bind(invocation.purpose)
         .bind(invocation.space_name)
+        .bind(invocation.input)
         .bind(invocation.outcome)
         .bind(invocation.error_code)
         .bind(invocation.duration_ms)
@@ -88,6 +91,7 @@ struct McpInvocationRow {
     op: Option<String>,
     purpose: Option<String>,
     space_name: Option<String>,
+    input: Value,
     outcome: String,
     error_code: Option<String>,
     duration_ms: i64,
@@ -104,6 +108,7 @@ impl From<McpInvocationRow> for McpInvocation {
             op: row.op,
             purpose: row.purpose,
             space_name: row.space_name,
+            input: row.input,
             outcome: row.outcome,
             error_code: row.error_code,
             duration_ms: row.duration_ms,
@@ -111,4 +116,4 @@ impl From<McpInvocationRow> for McpInvocation {
     }
 }
 
-const MCP_INVOCATION_COLUMNS: &str = "id, created_at, actor_account_id, caller_kind, tool, op, purpose, space_name, outcome, error_code, duration_ms";
+const MCP_INVOCATION_COLUMNS: &str = "id, created_at, actor_account_id, caller_kind, tool, op, purpose, space_name, input, outcome, error_code, duration_ms";
