@@ -76,10 +76,10 @@ for (const viewport of [
 
       const moreActions = page.getByRole("button", { name: "More actions" });
       await moreActions.click();
-      const actionDialog = page.getByRole("dialog", { name: "More actions" });
-      await expect(actionDialog.getByRole("button", { name: "Copy content" })).toBeVisible();
+      const actionMenu = page.getByRole("menu", { name: "Editor actions" });
+      await expect(actionMenu.getByRole("button", { name: "Copy content" })).toBeVisible();
       await page.keyboard.press("Escape");
-      await expect(actionDialog).not.toBeVisible();
+      await expect(actionMenu).not.toBeVisible();
     }
 
     const scrollRegion = page.getByRole("region", { name: "CSV table preview" });
