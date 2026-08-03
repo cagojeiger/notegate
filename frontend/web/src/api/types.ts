@@ -269,6 +269,7 @@ export type McpInvocation = {
   tool: string;
   op: string | null;
   purpose: string | null;
+  space_name: string | null;
   outcome: "success" | "error";
   error_code: string | null;
   duration_ms: number;

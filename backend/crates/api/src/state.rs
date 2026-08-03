@@ -15,6 +15,7 @@ use notegate_service::files::FilesService;
 use notegate_service::search::SearchService;
 use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
+use tokio_util::sync::CancellationToken;
 
 use crate::identity::CallerResolver;
 use crate::object_storage::ObjectStorage;
@@ -62,6 +63,7 @@ pub struct AppState {
     pub browser_sessions: BrowserSessionRepo,
     pub(crate) mcp_invocations: McpInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
+    pub(crate) shutdown: CancellationToken,
 }
 
 impl AppState {
@@ -130,11 +132,17 @@ impl AppState {
             browser_sessions,
             mcp_invocations,
             metrics: None,
+            shutdown: CancellationToken::new(),
         }
     }
 
     pub(crate) fn with_metrics(mut self, metrics: Option<MetricsHandle>) -> Self {
         self.metrics = metrics;
+        self
+    }
+
+    pub(crate) fn with_shutdown_token(mut self, shutdown: CancellationToken) -> Self {
+        self.shutdown = shutdown;
         self
     }
 }

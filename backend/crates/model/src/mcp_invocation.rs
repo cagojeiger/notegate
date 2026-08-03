@@ -15,6 +15,7 @@ pub struct McpInvocation {
     pub tool: String,
     pub op: Option<String>,
     pub purpose: Option<String>,
+    pub space_name: Option<String>,
     pub outcome: String,
     pub error_code: Option<String>,
     pub duration_ms: i64,

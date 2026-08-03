@@ -22,6 +22,12 @@ run_sequence  ordered command sequence 실행
 
 `me`는 입력이 없다. 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수이며, `run_sequence`는 sequence 전체에 하나만 지정한다. 서버는 payload를 복제하지 않고 caller, tool/op, purpose, 결과와 실행 시간만 별도 invocation history에 기록한다.
 
+## Tool 목록 갱신
+
+서버는 MCP `2026-07-28`과 `tools.listChanged=true`를 지원한다. 일반 MCP POST는 세션 없는 JSON request/response를 유지하고, 갱신을 구독한 client의 `subscriptions/listen` 요청만 장기 SSE 응답으로 유지한다.
+
+구독이 성립하면 서버는 최초 `notifications/tools/list_changed`를 전송한다. Client는 이 알림을 받으면 현재 endpoint에 `tools/list`를 다시 호출해 설치 시점 또는 이전 연결에서 보관한 schema와 description을 교체해야 한다. 파드가 종료되면 서버는 활성 구독을 정상 종료하며, client는 새 파드에 연결해 구독을 다시 열어야 한다. `tools/list`의 `ttlMs`는 5분이고 `cacheScope=public`이다. 알림 구독을 지원하지 않는 구형 client는 연결을 다시 만들고 `tools/list`를 재호출해야 한다.
+
 MCP는 space create/delete/rename, agent 관리, API key 관리를 제공하지 않는다. 이 작업은 REST/dashboard user-only API에서 한다.
 
 변경 기록은 `read op=changes` 하나의 Space-root mutation stream이다. 다른 paginated read와 동일하게 `cursor`와 `page.next_cursor`를 사용하며, `direction`은 최신에서 과거로 읽는 `older`(기본값) 또는 checkpoint 이후를 적용 순서로 읽는 `newer`다.

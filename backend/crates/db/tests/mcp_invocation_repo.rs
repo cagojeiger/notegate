@@ -20,17 +20,18 @@ async fn insert_records_only_the_bounded_invocation_summary()
         owner_user_id: owner,
         actor_account_id: owner,
         caller_kind: "user",
-        tool: "search",
-        op: Some("grep"),
-        purpose: Some("find the cache design notes"),
+        tool: "read",
+        op: Some("changes"),
+        purpose: Some("review recent changes"),
+        space_name: Some("Research"),
         outcome: "error",
         error_code: Some("not_found"),
         duration_ms: 17,
     })
     .await?;
 
-    let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String, String, Option<String>, Option<String>, String, Option<String>, i64)>(
-        "SELECT owner_user_id, actor_account_id, caller_kind, tool, op, purpose, outcome, error_code, duration_ms \
+    let row = sqlx::query_as::<_, (uuid::Uuid, uuid::Uuid, String, String, Option<String>, Option<String>, Option<String>, String, Option<String>, i64)>(
+        "SELECT owner_user_id, actor_account_id, caller_kind, tool, op, purpose, space_name, outcome, error_code, duration_ms \
          FROM mcp_invocations ORDER BY id DESC LIMIT 1",
     )
     .fetch_one(&db.pool)
@@ -38,12 +39,13 @@ async fn insert_records_only_the_bounded_invocation_summary()
     assert_eq!(row.0, owner);
     assert_eq!(row.1, owner);
     assert_eq!(row.2, "user");
-    assert_eq!(row.3, "search");
-    assert_eq!(row.4.as_deref(), Some("grep"));
-    assert_eq!(row.5.as_deref(), Some("find the cache design notes"));
-    assert_eq!(row.6, "error");
-    assert_eq!(row.7.as_deref(), Some("not_found"));
-    assert_eq!(row.8, 17);
+    assert_eq!(row.3, "read");
+    assert_eq!(row.4.as_deref(), Some("changes"));
+    assert_eq!(row.5.as_deref(), Some("review recent changes"));
+    assert_eq!(row.6.as_deref(), Some("Research"));
+    assert_eq!(row.7, "error");
+    assert_eq!(row.8.as_deref(), Some("not_found"));
+    assert_eq!(row.9, 17);
 
     db.cleanup().await;
     Ok(())
@@ -64,6 +66,7 @@ async fn me_is_the_only_tool_allowed_without_a_purpose() -> Result<(), Box<dyn s
         tool: "me",
         op: None,
         purpose: None,
+        space_name: None,
         outcome: "success",
         error_code: None,
         duration_ms: 0,
@@ -78,6 +81,7 @@ async fn me_is_the_only_tool_allowed_without_a_purpose() -> Result<(), Box<dyn s
             tool: "search",
             op: Some("find"),
             purpose: None,
+            space_name: None,
             outcome: "success",
             error_code: None,
             duration_ms: 0,
@@ -94,6 +98,7 @@ async fn me_is_the_only_tool_allowed_without_a_purpose() -> Result<(), Box<dyn s
                 tool: "search",
                 op: Some("find"),
                 purpose: Some(padded_purpose),
+                space_name: None,
                 outcome: "success",
                 error_code: None,
                 duration_ms: 0,
@@ -101,6 +106,22 @@ async fn me_is_the_only_tool_allowed_without_a_purpose() -> Result<(), Box<dyn s
             .await;
         assert!(padded_search_purpose.is_err());
     }
+
+    let space_on_non_changes_call = repo
+        .insert(NewMcpInvocation {
+            owner_user_id: owner,
+            actor_account_id: owner,
+            caller_kind: "user",
+            tool: "search",
+            op: Some("find"),
+            purpose: Some("search notes"),
+            space_name: Some("Research"),
+            outcome: "success",
+            error_code: None,
+            duration_ms: 0,
+        })
+        .await;
+    assert!(space_on_non_changes_call.is_err());
 
     db.cleanup().await;
     Ok(())
@@ -124,6 +145,7 @@ async fn list_by_owner_is_newest_first_scoped_and_cursor_paginated()
             tool: "search",
             op: Some("grep"),
             purpose: Some(purpose),
+            space_name: None,
             outcome: "success",
             error_code: None,
             duration_ms: 1,
@@ -137,6 +159,7 @@ async fn list_by_owner_is_newest_first_scoped_and_cursor_paginated()
         tool: "search",
         op: Some("find"),
         purpose: Some("must stay private"),
+        space_name: None,
         outcome: "success",
         error_code: None,
         duration_ms: 1,

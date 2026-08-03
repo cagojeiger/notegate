@@ -59,6 +59,7 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 [dev-dependencies]
 notegate-db = { workspace = true, features = ["test-util"] }
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 sqlx.workspace = true
 
 [lints]

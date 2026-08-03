@@ -38,7 +38,7 @@ User caller만 가능하다. Caller의 `owner_user_id` scope에 속한 `audit_ev
 GET /api/v1/me/mcp-invocations?limit=50&cursor=...
 ```
 
-User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at desc, id desc` 순으로 반환한다. 전체 입력과 응답은 반환하지 않으며, 호출자가 선언한 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간만 제공한다. `me`는 입력 없는 예외이므로 `purpose`가 `null`이다.
+User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at desc, id desc` 순으로 반환한다. 전체 입력과 응답은 반환하지 않으며, 호출자가 선언한 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. `read op=changes`는 검증된 `space_name` snapshot도 반환한다. `me`는 입력 없는 예외이므로 `purpose`가 `null`이다.
 
 ```json
 {
@@ -49,9 +49,10 @@ User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at d
       "actor_account_id": "account-id",
       "actor": {"id": "account-id", "kind": "agent", "display_name": "Codex"},
       "caller_kind": "agent",
-      "tool": "search",
-      "op": "grep",
-      "purpose": "Find the cache design notes",
+      "tool": "read",
+      "op": "changes",
+      "purpose": "Review recent changes",
+      "space_name": "Research",
       "outcome": "success",
       "error_code": null,
       "duration_ms": 17
@@ -63,6 +64,7 @@ User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at d
 
 - 기본 page size는 50, 최대 100이다.
 - `actor`는 현재 조회 가능한 account reference이며, account가 purge되었으면 `null`일 수 있다.
+- `space_name`은 `read op=changes`에서만 값이 있고 다른 호출에서는 `null`이다. 전체 target path는 반환하지 않는다.
 - 이 endpoint는 browser self-review용이다. MCP 조회 tool은 추가하지 않는다.
 
 ## List space file change events

@@ -20,7 +20,7 @@ pub struct ReadInput {
     pub purpose: String,
     /// Operation: spaces/ls/tree/stat/read/changes.
     pub op: String,
-    /// Single target in `<space>:/absolute/path` form.
+    /// Single target in `<space>:/absolute/path` form. `op=changes` requires the Space root `<space>:/`.
     #[serde(default)]
     pub target: Option<String>,
     /// Optional exact, case-sensitive space name filter for `op=spaces`.

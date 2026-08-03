@@ -1,5 +1,7 @@
-//! rmcp 1.7.0 A1 adapter decision:
+//! rmcp 3.1.0 adapter decision:
 //! - Streamable HTTP server is `rmcp::transport::streamable_http_server::StreamableHttpService`.
+//! - MCP 2026-07-28 requests remain stateless. Ordinary calls prefer JSON responses, while
+//!   `subscriptions/listen` stays open as SSE for tool-list change notifications.
 //! - Axum integration is via the tower `Service`/`handle` API; this module wraps it in an axum
 //!   handler so Bearer verification can run before rmcp consumes the body.
 //! - rmcp injects raw `http::request::Parts` into each request's MCP extensions. We insert the
@@ -16,11 +18,16 @@ use axum::http::{HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::tool::Extension;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{Implementation, JsonObject, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CacheScope, Implementation, JsonObject, ListToolsResult, PaginatedRequestParams,
+    ProtocolVersion, ServerCapabilities, ServerInfo, SubscriptionFilter,
+};
+use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use rmcp::{ErrorData, Json, ServerHandler, tool, tool_handler, tool_router};
+use rmcp::{ErrorData, Json, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use notegate_model::{Caller, Channel};
@@ -36,10 +43,11 @@ use crate::mcp::tools;
 use crate::state::AppState;
 
 const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For a changes input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
 ///
-/// Those tools return dynamic JSON objects (`Json<Value>`); rmcp 1.7 cannot
+/// Those tools return dynamic JSON objects (`Json<Value>`); rmcp cannot
 /// derive a valid MCP `outputSchema` from `serde_json::Value` (the spec requires
 /// the schema root to be `type: object`, and `Value`'s schema has no root type),
 /// and it panics at tool-list/call time if we let it try. Supplying this
@@ -49,6 +57,51 @@ fn object_output_schema() -> Arc<JsonObject> {
     let mut schema = JsonObject::new();
     schema.insert("type".to_owned(), Value::String("object".to_owned()));
     Arc::new(schema)
+}
+
+fn mcp_server_info() -> ServerInfo {
+    ServerInfo::new(
+        ServerCapabilities::builder()
+            .enable_tools()
+            .enable_tool_list_changed()
+            .build(),
+    )
+    .with_protocol_version(ProtocolVersion::V_2026_07_28)
+    .with_server_info(
+        Implementation::new("notegate", env!("CARGO_PKG_VERSION")).with_title("NoteGate"),
+    )
+    .with_instructions(MCP_SERVER_INSTRUCTIONS)
+}
+
+fn current_tool_list() -> ListToolsResult {
+    ListToolsResult::with_all_items(McpServer::tool_router().list_all())
+        .with_ttl_ms(MCP_TOOL_LIST_TTL_MS)
+        .with_cache_scope(CacheScope::Public)
+}
+
+fn accepted_tool_subscription(requested: &SubscriptionFilter) -> Option<SubscriptionFilter> {
+    Some(requested.supported_by(&mcp_server_info().capabilities))
+}
+
+async fn listen_for_tool_list_changes(
+    context: SubscriptionContext,
+    shutdown: &CancellationToken,
+) -> Result<(), ErrorData> {
+    if context.accepted().tools_list_changed == Some(true)
+        && let Err(error) = context.sink().notify_tool_list_changed().await
+    {
+        tracing::debug!(
+            event = "mcp.subscription.tools_list_changed_failed",
+            error = %error
+        );
+        return Ok(());
+    }
+
+    tokio::select! {
+        () = context.cancelled() => {}
+        () = shutdown.cancelled() => {}
+    }
+    Ok(())
 }
 
 /// The MCP server handler. Holds a clone of the shared [`AppState`] so each
@@ -74,7 +127,7 @@ impl McpServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<Json<MeOutput>, ErrorData> {
-        invocation::execute(&self.state, &parts, "me", None, None, async {
+        invocation::execute(&self.state, &parts, "me", None, None, None, async {
             tools::identity::call(&parts)
         })
         .await
@@ -82,7 +135,7 @@ impl McpServer {
 
     #[tool(
         name = "read",
-        description = "Read NoteGate spaces, nodes, text, and one Space-root mutation stream. Read-only. Use op=spaces/ls/tree/stat/read/changes. Every paginated op uses cursor and returns page.next_cursor. Changes direction is older by default or newer for checkpoint replay. Space names are exact and case-sensitive.",
+        description = "Read NoteGate spaces, nodes, text, and mutation history. Read-only. Use op=spaces/ls/tree/stat/read/changes. For changes, target a Space root (`<space>:/`); omit direction/cursor for latest events, use direction=older for history pagination, or direction=newer with a stored cursor for checkpoint replay. Every paginated op returns page.next_cursor. Space names are exact and case-sensitive.",
         annotations(title = "Read NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -94,12 +147,18 @@ impl McpServer {
         let Parameters(input) = params;
         let op = input.op.clone();
         let purpose = input.purpose.clone();
+        let space_name = if op == "changes" {
+            invocation::invocation_space_name(input.target.as_deref())
+        } else {
+            None
+        };
         invocation::execute(
             &self.state,
             &parts,
             "read",
             Some(&op),
             Some(&purpose),
+            space_name.as_deref(),
             tools::unified::read(&self.state, &parts, Parameters(input)),
         )
         .await
@@ -125,6 +184,7 @@ impl McpServer {
             "search",
             Some(&op),
             Some(&purpose),
+            None,
             tools::unified::search(&self.state, &parts, Parameters(input)),
         )
         .await
@@ -150,6 +210,7 @@ impl McpServer {
             "write",
             Some(&op),
             Some(&purpose),
+            None,
             tools::unified::write(&self.state, &parts, Parameters(input)),
         )
         .await
@@ -175,6 +236,7 @@ impl McpServer {
             "manage",
             Some(&op),
             Some(&purpose),
+            None,
             tools::unified::manage(&self.state, &parts, Parameters(input)),
         )
         .await
@@ -200,6 +262,7 @@ impl McpServer {
             "file_transfer",
             Some(&op),
             Some(&purpose),
+            None,
             tools::transfers::call(&self.state, &parts, input),
         )
         .await
@@ -231,12 +294,26 @@ impl McpServer {
 #[tool_handler]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_protocol_version(ProtocolVersion::V_2025_03_26)
-            .with_server_info(
-                Implementation::new("notegate", env!("CARGO_PKG_VERSION")).with_title("NoteGate"),
-            )
-            .with_instructions(MCP_SERVER_INSTRUCTIONS)
+        mcp_server_info()
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(current_tool_list())
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        accepted_tool_subscription(requested)
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        listen_for_tool_list_changes(context, &self.state.shutdown).await
     }
 }
 
@@ -271,7 +348,7 @@ async fn serve_mcp(state: AppState, mut request: Request<Body>, caller: Caller) 
     request.extensions_mut().insert(caller);
 
     let config = StreamableHttpServerConfig::default()
-        .with_stateful_mode(false)
+        .with_legacy_session_mode(false)
         .with_json_response(true)
         .with_allowed_hosts(allowed_mcp_hosts(&state));
     let manager = Arc::new(NeverSessionManager::default());
@@ -363,7 +440,227 @@ mod tests {
         clippy::unwrap_in_result
     )]
     use super::*;
+    use notegate_db::SpaceRepo;
+    use rmcp::model::{ClientInfo, ServerNotification};
+    use rmcp::service::SubscriptionEnd;
+    use rmcp::transport::StreamableHttpClientTransport;
+    use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+    use rmcp::{ClientLifecycleMode, ClientServiceExt};
     use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Clone)]
+    struct ToolRefreshTestServer {
+        shutdown: CancellationToken,
+    }
+
+    impl ServerHandler for ToolRefreshTestServer {
+        fn get_info(&self) -> ServerInfo {
+            mcp_server_info()
+        }
+
+        async fn list_tools(
+            &self,
+            _request: Option<PaginatedRequestParams>,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<ListToolsResult, ErrorData> {
+            Ok(current_tool_list())
+        }
+
+        fn accepted_subscription_filter(
+            &self,
+            requested: &SubscriptionFilter,
+        ) -> Option<SubscriptionFilter> {
+            accepted_tool_subscription(requested)
+        }
+
+        async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+            listen_for_tool_list_changes(context, &self.shutdown).await
+        }
+    }
+
+    async fn spawn_tool_refresh_test_server()
+    -> (String, CancellationToken, tokio::task::JoinHandle<()>) {
+        let shutdown = CancellationToken::new();
+        let handler_shutdown = shutdown.clone();
+        let service: StreamableHttpService<ToolRefreshTestServer, NeverSessionManager> =
+            StreamableHttpService::new(
+                move || {
+                    Ok(ToolRefreshTestServer {
+                        shutdown: handler_shutdown.clone(),
+                    })
+                },
+                Arc::new(NeverSessionManager::default()),
+                StreamableHttpServerConfig::default()
+                    .with_legacy_session_mode(false)
+                    .with_json_response(true)
+                    .with_sse_keep_alive(Some(Duration::from_millis(20))),
+            );
+        let router = axum::Router::new().nest_service("/mcp", service);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test MCP server");
+        let address = listener.local_addr().expect("test server address");
+        let server_task = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(shutdown.cancelled_owned())
+                    .await
+                    .expect("serve test MCP server");
+            }
+        });
+        (format!("http://{address}/mcp"), shutdown, server_task)
+    }
+
+    async fn stop_tool_refresh_test_server(
+        client: rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
+        shutdown: CancellationToken,
+        server_task: tokio::task::JoinHandle<()>,
+    ) {
+        client.cancel().await.expect("close MCP client");
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .expect("test server shuts down")
+            .expect("test server task joins");
+    }
+
+    #[test]
+    fn server_advertises_modern_tool_list_refresh() {
+        let info = mcp_server_info();
+        let tools = info
+            .capabilities
+            .tools
+            .as_ref()
+            .expect("tools capability is advertised");
+
+        assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
+        assert_eq!(tools.list_changed, Some(true));
+
+        let requested = SubscriptionFilter::builder().tools_list_changed().build();
+        let accepted = requested.supported_by(&info.capabilities);
+        assert_eq!(accepted.tools_list_changed, Some(true));
+        assert_eq!(accepted.prompts_list_changed, None);
+    }
+
+    #[test]
+    fn tool_list_has_bounded_public_cache_policy() {
+        let result = current_tool_list();
+
+        assert_eq!(result.ttl_ms, Some(MCP_TOOL_LIST_TTL_MS));
+        assert_eq!(result.cache_scope, Some(CacheScope::Public));
+        assert_eq!(result.tools.len(), expected_tool_names().len());
+    }
+
+    #[tokio::test]
+    async fn modern_http_subscription_refreshes_tools_and_stays_open() {
+        let (url, shutdown, server_task) = spawn_tool_refresh_test_server().await;
+
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(url),
+        );
+        let client = ClientInfo::default()
+            .serve_with_lifecycle(
+                transport,
+                ClientLifecycleMode::Discover {
+                    preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+                },
+            )
+            .await
+            .expect("connect modern MCP client");
+
+        let listed = client.list_tools(None).await.expect("list tools");
+        assert_eq!(listed.ttl_ms, Some(MCP_TOOL_LIST_TTL_MS));
+        assert_eq!(listed.cache_scope, Some(CacheScope::Public));
+
+        let mut subscription = client
+            .listen(SubscriptionFilter::builder().tools_list_changed().build())
+            .await
+            .expect("open tool-list subscription");
+        assert!(matches!(
+            subscription
+                .next()
+                .await
+                .expect("read subscription")
+                .expect("receive initial refresh"),
+            ServerNotification::ToolListChangedNotification(_)
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), subscription.next())
+                .await
+                .is_err(),
+            "subscription must remain open after the initial refresh"
+        );
+
+        subscription.cancel().await.expect("cancel subscription");
+        stop_tool_refresh_test_server(client, shutdown, server_task).await;
+    }
+
+    #[tokio::test]
+    async fn server_shutdown_gracefully_closes_active_subscription() {
+        let (url, shutdown, server_task) = spawn_tool_refresh_test_server().await;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(url),
+        );
+        let client = ClientInfo::default()
+            .serve_with_lifecycle(
+                transport,
+                ClientLifecycleMode::Discover {
+                    preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+                },
+            )
+            .await
+            .expect("connect modern MCP client");
+        let mut subscription = client
+            .listen(SubscriptionFilter::builder().tools_list_changed().build())
+            .await
+            .expect("open tool-list subscription");
+        assert!(
+            subscription
+                .next()
+                .await
+                .expect("read initial refresh")
+                .is_some()
+        );
+
+        shutdown.cancel();
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), subscription.next())
+                .await
+                .expect("subscription closes after server shutdown")
+                .expect("read subscription end")
+                .is_none()
+        );
+        assert!(matches!(
+            subscription.end(),
+            Some(SubscriptionEnd::Graceful(_))
+        ));
+        let _ = client.cancel().await;
+        tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .expect("test server shuts down")
+            .expect("test server task joins");
+    }
+
+    #[tokio::test]
+    async fn legacy_initialize_clients_can_still_list_tools() {
+        let (url, shutdown, server_task) = spawn_tool_refresh_test_server().await;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(url),
+        );
+        let client = ClientInfo::default()
+            .serve_with_lifecycle(transport, ClientLifecycleMode::Initialize)
+            .await
+            .expect("connect legacy MCP client");
+
+        let listed = client.list_tools(None).await.expect("legacy tools/list");
+        assert_eq!(listed.tools.len(), expected_tool_names().len());
+
+        stop_tool_refresh_test_server(client, shutdown, server_task).await;
+    }
 
     /// Building the tool router materializes every tool's input/output schema —
     /// the same path rmcp runs when answering `tools/list`. Before the fix, the
@@ -446,12 +743,29 @@ mod tests {
         assert!(me_properties.is_empty(), "me must remain input-free");
 
         let read = tools.get("read").expect("read tool exists");
+        let description = read
+            .description
+            .as_deref()
+            .expect("read description exists");
+        assert!(description.contains("op=spaces/ls/tree/stat/read/changes"));
+        assert!(description.contains("<space>:/"));
+        assert!(description.contains("direction=newer"));
         let properties = read
             .input_schema
             .get("properties")
             .and_then(Value::as_object)
             .expect("read properties exist");
         assert!(properties.contains_key("direction"));
+        assert_eq!(
+            properties["op"].get("description").and_then(Value::as_str),
+            Some("Operation: spaces/ls/tree/stat/read/changes.")
+        );
+        assert!(
+            properties["target"]
+                .get("description")
+                .and_then(Value::as_str)
+                .is_some_and(|description| description.contains("Space root `<space>:/`"))
+        );
         assert!(!properties.contains_key("before"));
         assert!(!properties.contains_key("after"));
         assert!(!properties.contains_key("mode"));
@@ -531,6 +845,69 @@ mod tests {
                 "tool `{tool_name}` input schema missing property `{property}`"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn changes_invocation_records_its_space_name() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller.clone());
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "Review recent changes",
+            "op": "changes",
+            "target": "rest-test:/",
+            "limit": 1
+        }))?;
+
+        McpServer::new(state.clone())
+            .read_tool(Extension(parts), Parameters(input))
+            .await?;
+
+        let row = sqlx::query_as::<_, (String, String, Option<String>)>(
+            "SELECT tool, op, space_name FROM mcp_invocations \
+             WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
+        )
+        .bind(caller.account_id())
+        .fetch_one(&state.db)
+        .await?;
+        assert_eq!(row.0, "read");
+        assert_eq!(row.1, "changes");
+        assert_eq!(row.2.as_deref(), Some("rest-test"));
+
+        let invalid_input = serde_json::from_value(serde_json::json!({
+            "purpose": "Review recent changes",
+            "op": "changes",
+            "target": "rest-test:/not-root"
+        }))?;
+        let mut invalid_parts = axum::http::Request::new(()).into_parts().0;
+        invalid_parts.extensions.insert(caller.clone());
+        McpServer::new(state.clone())
+            .read_tool(Extension(invalid_parts), Parameters(invalid_input))
+            .await
+            .err()
+            .expect("changes rejects a non-root target");
+
+        let failed = sqlx::query_as::<_, (Option<String>, String, Option<String>)>(
+            "SELECT space_name, outcome, error_code FROM mcp_invocations \
+             WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
+        )
+        .bind(caller.account_id())
+        .fetch_one(&state.db)
+        .await?;
+        assert_eq!(failed.0.as_deref(), Some("rest-test"));
+        assert_eq!(failed.1, "error");
+        assert_eq!(failed.2.as_deref(), Some("changes_scope_invalid"));
+
+        db.cleanup().await;
+        Ok(())
     }
 
     fn assert_required_properties(
