@@ -38,7 +38,7 @@ User caller만 가능하다. Caller의 `owner_user_id` scope에 속한 `audit_ev
 GET /api/v1/me/mcp-invocations?limit=50&cursor=...
 ```
 
-User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at desc, id desc` 순으로 반환한다. 호출자가 보낸 원본 arguments JSON인 `input`, 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. 응답 payload는 반환하지 않는다. `read op=changes`는 검증된 `space_name` summary도 반환한다. `me` 또는 입력 검증 실패는 `purpose`가 `null`일 수 있다.
+User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at desc, id desc` 순으로 반환한다. redacted `input`과 `response`, 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. `read op=changes`는 검증된 `space_name` summary도 반환한다. `me` 또는 입력 검증 실패는 `purpose`가 `null`일 수 있고, response logging 도입 이전 행은 `response=null`이다.
 
 ```json
 {
@@ -58,6 +58,20 @@ User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at d
         "op": "changes",
         "target": "Research:/"
       },
+      "response": {
+        "kind": "complete",
+        "is_error": false,
+        "content_blocks_omitted": 1,
+        "result": {
+          "space": "Research",
+          "events": [],
+          "checkpoint_cursor": {
+            "_redacted": true,
+            "category": "opaque_cursor",
+            "value_type": "string"
+          }
+        }
+      },
       "outcome": "success",
       "error_code": null,
       "duration_ms": 17
@@ -69,7 +83,8 @@ User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at d
 
 - 기본 page size는 50, 최대 100이다.
 - `actor`는 현재 조회 가능한 account reference이며, account가 purge되었으면 `null`일 수 있다.
-- `space_name`은 `read op=changes`에서만 값이 있고 다른 호출에서는 `null`이다. 전체 target path 등 원본 입력은 `input`에 포함된다.
+- `space_name`은 `read op=changes`에서만 값이 있고 다른 호출에서는 `null`이다. Target/path 등 허용된 입력 metadata는 `input`에 포함된다.
+- 입력·응답의 본문, 검색어, cursor, credential, PII와 자유 형식 오류 문구는 marker로 대체되며 알 수 없는 field 값은 반환하지 않는다.
 - 이 endpoint는 browser self-review용이다. MCP 조회 tool은 추가하지 않는다.
 
 ## List space file change events

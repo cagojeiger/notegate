@@ -3,7 +3,7 @@
 ## 기본 원칙
 
 - Secret, bearer token, OAuth code, PKCE verifier, API key plaintext, browser session token, OAuth refresh token은 log/error/audit payload에 기록하지 않는다.
-- MCP invocation history는 제품 개선과 실패 분석을 위해 서버에 도달한 `tools/call.params.arguments` 전체를 JSONB로 저장한다. 입력에는 purpose, target, 검색어, Text 본문/edit, 암호화 metadata, sequence command 등이 포함될 수 있으므로 민감한 user content로 취급한다. Bearer token, OAuth code, API key 같은 HTTP 인증 정보와 protocol `_meta`, tool response는 저장하지 않는다. Owner user의 browser self-review에만 노출하고 90일 후 bounded purge한다.
+- MCP invocation history는 제품 개선과 실패 분석을 위해 서버에 도달한 `tools/call`의 redacted 입력·응답 snapshot을 JSONB로 저장한다. 저장 전 tool/op별 allowlist와 redaction policy를 적용하며 Text 본문/edit/diff와 grep 일치 줄, 검색어와 cursor, 원본 파일명과 암호화 metadata, presigned URL/header, ETag, PII, protocol `_meta`, 알 수 없는 field 값은 redaction marker 또는 omission count로 대체한다. MCP wire `content` 복사본은 저장하지 않고 redacted `structured_content`만 사용한다. Owner user의 browser self-review에만 노출하고 90일 후 bounded purge한다.
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.

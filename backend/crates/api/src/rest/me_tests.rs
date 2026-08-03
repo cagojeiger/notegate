@@ -24,8 +24,16 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     let (caller, _, _) = caller_and_space(&state).await?;
     let owner = caller.account_id();
     let input = serde_json::json!({"op": "changes", "target": "Research:/"});
+    let recorded_response = serde_json::json!({
+        "kind": "complete",
+        "is_error": false,
+        "result": {"space": "Research", "events": []}
+    });
 
-    for purpose in ["first purpose", "second purpose"] {
+    for (purpose, response) in [
+        ("first purpose", None),
+        ("second purpose", Some(&recorded_response)),
+    ] {
         state
             .mcp_invocations
             .insert(NewMcpInvocation {
@@ -37,6 +45,7 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
                 purpose: Some(purpose),
                 space_name: Some("Research"),
                 input: &input,
+                response,
                 outcome: "success",
                 error_code: None,
                 duration_ms: 4,
@@ -61,6 +70,7 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     assert_eq!(first["invocations"][0]["purpose"], "second purpose");
     assert_eq!(first["invocations"][0]["space_name"], "Research");
     assert_eq!(first["invocations"][0]["input"], input);
+    assert_eq!(first["invocations"][0]["response"], recorded_response);
     assert_eq!(
         first["invocations"][0]["actor"]["display_name"],
         "REST Test Owner"
@@ -77,6 +87,10 @@ async fn mcp_invocations_returns_only_the_current_users_paginated_history()
     .await?;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(second["invocations"][0]["purpose"], "first purpose");
+    assert_eq!(
+        second["invocations"][0]["response"],
+        serde_json::Value::Null
+    );
     assert_eq!(second["page"]["has_more"], false);
 
     db.cleanup().await;

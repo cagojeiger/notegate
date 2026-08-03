@@ -129,6 +129,9 @@ describe("EventHistoryModal", () => {
     expect(screen.getByText("Success")).toBeInTheDocument();
     await user.click(screen.getByText("Input"));
     expect(screen.getByText(/"target": "Research:\/"/)).toBeInTheDocument();
+    await user.click(screen.getByText("Response"));
+    expect(screen.getByText(/"kind": "complete"/)).toBeInTheDocument();
+    expect(screen.getByText(/"ok": true/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
@@ -137,6 +140,31 @@ describe("EventHistoryModal", () => {
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(
       "/api/v1/me/mcp-invocations?limit=50&cursor=mcp-cursor-1"
     );
+  });
+
+  it("distinguishes legacy MCP calls without a recorded response", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).includes("/api/v1/me/mcp-invocations")) {
+        return jsonResponse({
+          invocations: [mcpInvocation(1, "read", "spaces", "List spaces", "success", null, null)],
+          page
+        });
+      }
+      return jsonResponse({ events: [], page });
+    });
+
+    render(
+      <ApiProvider authCacheKey="browser-session:0">
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    await user.click(screen.getByRole("tab", { name: "MCP" }));
+    await screen.findByText("List spaces");
+    await user.click(screen.getByText("Response"));
+
+    expect(screen.getByText("Not recorded. This call predates response logging.")).toBeInTheDocument();
   });
 
   it("loads the next file-change page from the server cursor", async () => {
@@ -272,7 +300,12 @@ function mcpInvocation(
   op: string | null,
   purpose: string | null,
   outcome: "success" | "error",
-  spaceName: string | null = null
+  spaceName: string | null = null,
+  response: Record<string, unknown> | null = {
+    kind: "complete",
+    is_error: false,
+    result: { ok: true }
+  }
 ) {
   return {
     id,
@@ -289,6 +322,7 @@ function mcpInvocation(
       op,
       ...(spaceName ? { target: `${spaceName}:/` } : {})
     },
+    response,
     outcome,
     error_code: outcome === "error" ? "tool_error" : null,
     duration_ms: 12

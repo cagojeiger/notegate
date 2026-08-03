@@ -175,6 +175,18 @@ function McpInvocationRow({ invocation }: { invocation: McpInvocation }) {
             {JSON.stringify(invocation.input, null, 2)}
           </pre>
         </details>
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer select-none text-muted hover:text-text">Response</summary>
+          {invocation.response ? (
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg p-3 font-mono text-text">
+              {JSON.stringify(invocation.response, null, 2)}
+            </pre>
+          ) : (
+            <p className="mt-2 rounded-md bg-bg p-3 text-muted">
+              Not recorded. This call predates response logging.
+            </p>
+          )}
+        </details>
       </div>
     </li>
   );
