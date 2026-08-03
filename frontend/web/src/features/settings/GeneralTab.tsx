@@ -1,4 +1,4 @@
-import { Github, RotateCcw } from "lucide-react";
+import { ExternalLink, RotateCcw } from "lucide-react";
 
 import { Button, Card, SectionHeader } from "../../shared/ui";
 
@@ -34,7 +34,7 @@ export function GeneralTab({ onResetSavedWorkspace }: { onResetSavedWorkspace: (
             title="Open NoteGate on GitHub"
             className="grid size-8 shrink-0 place-items-center rounded-[10px] text-muted outline-none transition hover:bg-[var(--ng-hover)] hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
           >
-            <Github size={17} />
+            <ExternalLink size={17} />
           </a>
         </Card>
       </section>

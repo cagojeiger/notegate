@@ -1,12 +1,12 @@
 import type { Range } from "@tanstack/react-virtual";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 const TREE_ROW_SIZE = 36;
 
 let visibleStart = 0;
 let visibleLimit = Number.POSITIVE_INFINITY;
 
-export const treeVirtualizerScrollToIndex = vi.fn();
+export const treeVirtualizerScrollToIndex: Mock = vi.fn();
 
 export function resetTreeVirtualizer(limit = Number.POSITIVE_INFINITY) {
   visibleStart = 0;

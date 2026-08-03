@@ -135,8 +135,9 @@ describe("AppShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Open space library" }));
 
-    expect(screen.getByTestId("space-library")).toHaveTextContent("Daily,Private");
-    expect(screen.getByTestId("space-library")).toHaveAttribute("data-usage-polling-enabled", "false");
+    const library = await screen.findByTestId("space-library");
+    expect(library).toHaveTextContent("Daily,Private");
+    expect(library).toHaveAttribute("data-usage-polling-enabled", "false");
     expect(screen.getByText("ready")).toBeInTheDocument();
   });
 

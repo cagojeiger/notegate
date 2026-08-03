@@ -44,7 +44,7 @@ export function AnchoredOverlay({
   estimatedHeight,
   children
 }: {
-  anchorRef: RefObject<HTMLElement>;
+  anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
   id?: string;
