@@ -6,7 +6,6 @@ use std::time::Duration;
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use aws_smithy_http_client::hyper_014::HyperClientBuilder;
 use notegate_core::S3Config;
 use notegate_core::limits::SINGLE_PUT_MAX_BYTES;
 use secrecy::ExposeSecret as _;
@@ -382,17 +381,12 @@ fn client(config: &S3Config, endpoint: &str) -> aws_sdk_s3::Client {
         None,
         "notegate-s3",
     );
-    let mut builder = aws_sdk_s3::Config::builder()
+    let builder = aws_sdk_s3::Config::builder()
         .behavior_version(BehaviorVersion::latest())
         .region(Region::new(config.region.clone()))
         .endpoint_url(endpoint)
         .credentials_provider(credentials)
         .force_path_style(config.force_path_style);
-    if endpoint.starts_with("http://") {
-        let mut connector = hyper_legacy::client::HttpConnector::new();
-        connector.enforce_http(true);
-        builder = builder.http_client(HyperClientBuilder::new().build(connector));
-    }
     aws_sdk_s3::Client::from_conf(builder.build())
 }
 
