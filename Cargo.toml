@@ -74,7 +74,7 @@ moka = { version = "0.12", features = ["future"] }
 aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }
 aliri_oauth2 = { version = "0.10.2", default-features = false, features = ["rsa", "reqwest", "tokio", "rustls-tls"] }
 aliri_clock = "0.1.0"
-jsonwebtoken = "9"
+jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "rust_crypto"] }
 openidconnect = { version = "4.0.1", default-features = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "default-https-client", "rt-tokio"] }
