@@ -12,7 +12,7 @@ Space name은 Unicode를 허용하지만 `target` 파싱을 위해 `:`는 사용
 
 ```text
 me      caller identity/server version 확인
-read    spaces/ls/tree/stat/read/changes
+read    spaces/ls/tree/stat/read/read_many/changes
 search  find/grep
 write   write/append/patch/edit
 manage  mkdir/mv/cp/rm

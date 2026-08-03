@@ -157,6 +157,10 @@ fn call_error_code(tool: &str, result: &Result<CallToolResponse, ErrorData>) -> 
             .structured_content
             .as_ref()
             .and_then(sequence_error_code),
+        Ok(CallToolResponse::Complete(result)) if tool == "read" => result
+            .structured_content
+            .as_ref()
+            .and_then(read_many_error_code),
         Ok(_) => None,
     }
 }
@@ -179,13 +183,27 @@ fn sequence_error_code(result: &Value) -> Option<String> {
         return None;
     }
 
+    result.get("error").and_then(structured_error_code)
+}
+
+fn read_many_error_code(result: &Value) -> Option<String> {
     result
-        .pointer("/error/data/code")
+        .get("items")?
+        .as_array()?
+        .iter()
+        .find(|item| item.get("ok").and_then(Value::as_bool) == Some(false))?
+        .get("error")
+        .and_then(structured_error_code)
+}
+
+fn structured_error_code(error: &Value) -> Option<String> {
+    error
+        .pointer("/data/code")
         .and_then(Value::as_str)
         .map(str::to_owned)
         .or_else(|| {
-            result
-                .pointer("/error/code")
+            error
+                .get("code")
                 .and_then(Value::as_i64)
                 .map(|code| code.to_string())
         })
@@ -273,6 +291,32 @@ mod tests {
 
         let success = serde_json::json!({"ok": true});
         assert_eq!(sequence_error_code(&success), None);
+    }
+
+    #[test]
+    fn read_many_error_code_reads_the_first_failed_item() {
+        let partial_failure = serde_json::json!({
+            "items": [
+                {"index": 0, "ok": true, "result": {}},
+                {
+                    "index": 1,
+                    "ok": false,
+                    "error": {
+                        "code": -32602,
+                        "data": {"code": "not_found"}
+                    }
+                }
+            ]
+        });
+        assert_eq!(
+            read_many_error_code(&partial_failure).as_deref(),
+            Some("not_found")
+        );
+
+        let success = serde_json::json!({
+            "items": [{"index": 0, "ok": true, "result": {}}]
+        });
+        assert_eq!(read_many_error_code(&success), None);
     }
 
     #[tokio::test]
