@@ -24,6 +24,7 @@ use crate::state::AppState;
 /// One exact replacement.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(inline)]
 pub struct PatchEdit {
     /// The exact text to find (must match exactly once).
     pub old_text: String,
@@ -40,6 +41,7 @@ pub struct PatchEdit {
 /// One line-based edit.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(inline)]
 pub struct LineEditInput {
     /// `insert_before_line`, `insert_after_line`, `replace_lines`, or `delete_lines`.
     pub op: String,

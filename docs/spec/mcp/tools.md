@@ -173,17 +173,32 @@ type WriteInput = {
   op: "write" | "append" | "patch" | "edit"
   target: string
   content?: string
-  edits?: unknown[]
+  edits?: Array<PatchEdit | LineEditInput>
   create?: boolean
   ensure_newline?: boolean
   expected_sha256?: string
+}
+
+type PatchEdit = {
+  old_text: string
+  new_text: string
+  mode?: "unique" | "first" | "all"
+  expected_count?: number
+}
+
+type LineEditInput = {
+  op: "insert_before_line" | "insert_after_line" | "replace_lines" | "delete_lines"
+  line?: number
+  start_line?: number
+  end_line?: number
+  content?: string
 }
 ```
 
 - `op=write`: 전체 content replacement다. 없으면 `create=true`가 필요하다.
 - `op=append`: EOF append다. `ensure_newline=true`이면 기존 content가 비어 있지 않고 newline으로 끝나지 않을 때 content 앞에 newline을 넣는다.
-- `op=patch`: string replacement다. edit entry는 `old_text`, `new_text`, optional `mode: "unique"|"first"|"all"`, optional `expected_count`를 가진다.
-- `op=edit`: 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. `content`는 여러 줄을 포함할 수 있다.
+- `op=patch`: `edits[]`에 `PatchEdit`만 받는 string replacement다.
+- `op=edit`: `edits[]`에 `LineEditInput`만 받는 1-based line operation이다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. `content`는 여러 줄을 포함할 수 있다.
 - `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 service layer의 공통 규칙으로 저장 전에 문법 검증한다. 검증은 target path의 file name extension 기준이며 schema validation은 하지 않는다.
 
 필수 필드:
@@ -298,7 +313,7 @@ type SequenceCommand = {
   include?: string[]
   exclude?: string[]
   content?: string
-  edits?: unknown[]
+  edits?: Array<PatchEdit | LineEditInput>
   create?: boolean
   parents?: boolean
   recursive?: boolean

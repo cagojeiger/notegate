@@ -827,6 +827,30 @@ mod tests {
             );
         }
 
+        let write_edits = tools
+            .get("write")
+            .and_then(|tool| tool.input_schema.get("properties"))
+            .and_then(|properties| properties.get("edits"))
+            .expect("write edits schema exists");
+        assert_write_edit_schema(write_edits);
+
+        let sequence_command = tools
+            .get("run_sequence")
+            .and_then(|tool| tool.input_schema.get("properties"))
+            .and_then(|properties| properties.get("commands"))
+            .and_then(|commands| commands.get("items"))
+            .expect("sequence command schema exists");
+        assert_eq!(
+            sequence_command.get("type").and_then(Value::as_str),
+            Some("object"),
+            "sequence commands must be exposed inline instead of as an opaque reference"
+        );
+        assert!(sequence_command.get("$ref").is_none());
+        let sequence_edits = sequence_command
+            .pointer("/properties/edits")
+            .expect("sequence edits schema exists");
+        assert_write_edit_schema(sequence_edits);
+
         let read = tools.get("read").expect("read tool exists");
         let description = read
             .description
@@ -1112,6 +1136,43 @@ mod tests {
                 required.contains(property),
                 "tool `{tool_name}` input schema should require `{property}`"
             );
+        }
+    }
+
+    fn assert_write_edit_schema(schema: &Value) {
+        let items = schema.get("items").expect("edits array items exist");
+        assert_ne!(items, &Value::Bool(true), "edits must not be unconstrained");
+        let variants = items
+            .get("anyOf")
+            .and_then(Value::as_array)
+            .expect("edits items expose patch and line-edit variants");
+        assert_eq!(variants.len(), 2);
+
+        let patch = variants
+            .iter()
+            .find(|variant| variant.pointer("/properties/old_text").is_some())
+            .expect("patch edit schema exists");
+        assert_eq!(patch.get("additionalProperties"), Some(&Value::Bool(false)));
+        assert_schema_requires(patch, &["old_text", "new_text"]);
+
+        let line = variants
+            .iter()
+            .find(|variant| variant.pointer("/properties/op").is_some())
+            .expect("line edit schema exists");
+        assert_eq!(line.get("additionalProperties"), Some(&Value::Bool(false)));
+        assert_schema_requires(line, &["op"]);
+    }
+
+    fn assert_schema_requires(schema: &Value, expected: &[&str]) {
+        let required: BTreeSet<_> = schema
+            .get("required")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        for field in expected {
+            assert!(required.contains(field), "schema should require `{field}`");
         }
     }
 }

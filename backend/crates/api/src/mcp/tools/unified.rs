@@ -14,6 +14,15 @@ use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
 
+/// Public schema for `write.edits`; runtime parsing remains selected by the top-level write op.
+#[allow(dead_code)]
+#[derive(Debug, Clone, JsonSchema)]
+#[schemars(untagged, inline)]
+enum WriteEditEntrySchema {
+    Patch(files::PatchEdit),
+    Line(files::LineEditInput),
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
@@ -109,6 +118,7 @@ pub struct WriteInput {
     pub content: Option<String>,
     /// Patch or line-edit entries for patch/edit.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
     pub edits: Option<Vec<Value>>,
     /// Create missing text for write/append.
     #[serde(default)]
@@ -199,6 +209,7 @@ pub struct RunSequenceInput {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(inline)]
 pub struct SequenceCommand {
     /// Tool category for this command: read/search/write/manage.
     pub tool: String,
@@ -243,6 +254,7 @@ pub struct SequenceCommand {
     pub content: Option<String>,
     /// Patch or line-edit entries for patch/edit.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
     pub edits: Option<Vec<Value>>,
 
     /// Create missing text for write/append.
@@ -747,6 +759,44 @@ mod tests {
         .expect_err("unknown command field should be rejected");
 
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn edit_entries_keep_op_specific_runtime_parsing() {
+        let patch = parse_edits::<files::PatchEdit>(
+            Some(vec![json!({
+                "old_text": "before",
+                "new_text": "after",
+                "mode": "unique",
+                "expected_count": 1
+            })]),
+            "patch",
+        )
+        .expect("patch edit parses");
+        assert_eq!(patch.len(), 1);
+        assert_eq!(patch[0].old_text, "before");
+
+        let line = parse_edits::<files::LineEditInput>(
+            Some(vec![json!({
+                "op": "replace_lines",
+                "start_line": 2,
+                "end_line": 3,
+                "content": "replacement"
+            })]),
+            "edit",
+        )
+        .expect("line edit parses");
+        assert_eq!(line.len(), 1);
+        assert_eq!(line[0].op, "replace_lines");
+
+        let error = parse_edits::<files::PatchEdit>(
+            Some(vec![
+                json!({"op": "delete_lines", "start_line": 2, "end_line": 3}),
+            ]),
+            "patch",
+        )
+        .expect_err("line edit must not parse as a patch edit");
+        assert!(error.message.contains("invalid edit entry for op=patch"));
     }
 
     #[test]
