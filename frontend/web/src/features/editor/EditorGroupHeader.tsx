@@ -14,7 +14,7 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
   }
 
   return (
-    <div onContextMenu={onContextMenu} className={`flex h-12 items-center justify-between border-b px-4 ${active ? "border-[var(--ng-active-border)] bg-[var(--ng-active-surface)]" : "border-seam"}`}>
+    <div onContextMenu={onContextMenu} className={`flex h-12 items-center justify-between border-b px-4 max-md:h-auto max-md:min-h-12 max-md:flex-col max-md:items-stretch max-md:gap-1 max-md:py-2 ${active ? "border-[var(--ng-active-border)] bg-[var(--ng-active-surface)]" : "border-seam"}`}>
       <div className="flex min-w-0 items-center gap-2 text-sm font-semibold">
         {navigationActions ? <div className="flex shrink-0 items-center gap-1">{navigationActions}</div> : null}
         {icon}
@@ -24,7 +24,7 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
           <div className={`flex shrink-0 items-center gap-1 ${qualifiedPath ? "" : "ml-1"}`}>
             {qualifiedPath ? (
               <span title="Copy path">
-                <IconButton label="Copy path" onClick={() => { void copyPath(); }}>
+                <IconButton label="Copy path" size="sm" onClick={() => { void copyPath(); }}>
                   <Link2 size={14} />
                 </IconButton>
               </span>
@@ -33,7 +33,7 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
           </div>
         ) : null}
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 max-md:justify-end">
         {actions}
         {canClose ? <IconButton label="Close editor group" onClick={onClose} size="sm"><X size={15} /></IconButton> : null}
       </div>
