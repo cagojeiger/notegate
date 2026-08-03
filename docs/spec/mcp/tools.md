@@ -46,7 +46,7 @@ type ToolCallSpec = { tool: string; input: object }
 
 ## `me`
 
-Caller identity와 capability를 반환한다. Space 목록은 `read`의 `op=spaces`로 조회한다.
+Caller identity, capability, 실행 중인 `server_version`을 반환한다. Space 목록은 `read`의 `op=spaces`로 조회한다.
 
 ## `read`
 

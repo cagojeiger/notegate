@@ -38,13 +38,12 @@ use crate::auth::bearer::{
     AuthError, auth_error_body, extract_bearer, shared_scoped_challenge_header, status_for_error,
     verify_bearer_mcp,
 };
-use crate::identity::me::MeOutput;
 use crate::mcp::contract::{McpAction, McpErrorData, RequiredField};
 use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller and running server version. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -123,12 +122,12 @@ impl McpServer {
 
     #[tool(
         name = "me",
-        description = "Show who is calling NoteGate and what this caller can generally do."
+        description = "Show who is calling NoteGate, what this caller can generally do, and the running server version."
     )]
     pub async fn me_tool(
         &self,
         Extension(parts): Extension<Parts>,
-    ) -> Result<Json<MeOutput>, ErrorData> {
+    ) -> Result<Json<tools::identity::McpMeOutput>, ErrorData> {
         tools::identity::call(&parts)
     }
 
@@ -604,6 +603,12 @@ mod tests {
             .expect("tools capability is advertised");
 
         assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
+        assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            info.server_info.version,
+            include_str!("../../../../../VERSION").trim(),
+            "the compiled server version must match the release source of truth"
+        );
         assert_eq!(tools.list_changed, Some(true));
 
         let requested = SubscriptionFilter::builder().tools_list_changed().build();
@@ -808,6 +813,19 @@ mod tests {
             .and_then(Value::as_object)
             .expect("me input properties exist");
         assert!(me_properties.is_empty(), "me must remain input-free");
+
+        let me_output_properties = tools
+            .get("me")
+            .and_then(|tool| tool.output_schema.as_ref())
+            .and_then(|schema| schema.get("properties"))
+            .and_then(Value::as_object)
+            .expect("me output properties exist");
+        for property in ["account", "user", "agent", "capabilities", "server_version"] {
+            assert!(
+                me_output_properties.contains_key(property),
+                "me output schema should contain `{property}`"
+            );
+        }
 
         let read = tools.get("read").expect("read tool exists");
         let description = read
