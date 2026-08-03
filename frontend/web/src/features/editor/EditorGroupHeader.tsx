@@ -24,7 +24,7 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
           <div className={`flex shrink-0 items-center gap-1 ${qualifiedPath ? "" : "ml-1"}`}>
             {qualifiedPath ? (
               <span title="Copy path">
-                <IconButton label="Copy path" size="sm" onClick={() => { void copyPath(); }}>
+                <IconButton label="Copy path" onClick={() => { void copyPath(); }}>
                   <Link2 size={14} />
                 </IconButton>
               </span>
