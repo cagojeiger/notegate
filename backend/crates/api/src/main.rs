@@ -86,8 +86,8 @@ async fn main() -> anyhow::Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let jwks_url = format!("{}/keys", config.authgate_url);
-    // The db-backed identity resolver: account_repo resolves users, api_key_repo
-    // resolves key ownership, and agent_repo resolves agent callers.
+    // The db-backed identity resolver: account_repo resolves users, while
+    // api_key_repo resolves API-key ownership and agent callers in one query.
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
     let account_repo = notegate_db::AccountRepo::with_crypto_and_default_user_tier(
         pool.clone(),
