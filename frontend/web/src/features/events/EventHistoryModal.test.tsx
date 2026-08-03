@@ -33,7 +33,7 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    expect(screen.queryByRole("tab", { name: "Audit log" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Audit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
 
@@ -52,7 +52,7 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "Audit log" }));
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
     await screen.findByText("No audit events.");
     fetchMock.mockClear();
 
@@ -88,7 +88,7 @@ describe("EventHistoryModal", () => {
       </ApiProvider>
     );
 
-    await user.click(screen.getByRole("tab", { name: "Audit log" }));
+    await user.click(screen.getByRole("tab", { name: "Audit" }));
     await screen.findByText("Updated a space");
     await user.click(screen.getByRole("button", { name: "Load more" }));
 
