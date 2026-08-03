@@ -47,7 +47,7 @@
 ## Visual language
 
 - Color: Brand ink `#17212b` and paper `#f7f9fb` anchor neutral surfaces. Blue is reserved for links, selection, focus, primary actions, and neutral operational volume. The Markdown Outline uses one subtle surface canvas and a faint reading rail rather than per-heading cards. Green means confirmed health or efficiency; amber means warning; red means failure. Healthy states use colored values instead of large saturated panel backgrounds.
-- Typography: Apple/system sans for UI and reading; system monospace for code, paths, identifiers, and structured data.
+- Typography: Follow VS Code's platform-native split: operating-system UI sans for chrome and reading, and the platform's default monospace for code, paths, identifiers, and structured data. Optional locally installed fonts such as Inter or JetBrains Mono must not take precedence over those platform defaults, and no web font is loaded.
 - Spacing/layout rhythm: 4 px base rhythm; 8–12 px control gaps; 16–24 px component spacing; 48 px aligned workbench body headers; generous Markdown reading padding. The workbench Inspector uses one 48 px `Details`/`Outline` tab header rather than a separate title row. Docked Files and Inspector panels are independently width-adjustable for the current session. Grafana overview cards stay compact, while diagnostic charts receive enough width for readable axes and legends.
 - Shape/radius/elevation: 8–10 px controls, 12–16 px panels, no shadow except floating or modal surfaces. Each panel boundary has one 1 px seam; resize handles may use a wider invisible hit target without adding another default line.
 - Motion: Short color/opacity transitions plus transform-only card reordering; preserve scroll position and respect reduced motion.
