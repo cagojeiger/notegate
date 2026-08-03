@@ -47,11 +47,11 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     let (_gate, caps) = checks::lock_space_with_limits(&mut tx, space_id, caps).await?;
 
     // The moved node must exist and be live; the root cannot be moved.
-    let moved_row = sqlx::query_as::<_, NodeRow>(&format!(
+    let moved_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
          FOR UPDATE"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .fetch_optional(&mut *tx)
@@ -116,10 +116,10 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         checks::require_fanout(&mut tx, space_id, new_parent_id, caps).await?;
     }
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE nodes SET parent_id = $3, name = $4, updated_by_account_id = $5, updated_at = now() \
          WHERE space_id = $1 AND id = $2 RETURNING {NODE_COLUMNS}"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .bind(new_parent_id)

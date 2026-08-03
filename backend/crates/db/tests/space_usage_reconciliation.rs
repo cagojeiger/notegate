@@ -46,7 +46,10 @@ async fn acquire_gate(
     } else {
         "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), $1))"
     };
-    sqlx::query(query).bind(seed).execute(tx).await?;
+    sqlx::query(sqlx::AssertSqlSafe(query))
+        .bind(seed)
+        .execute(tx)
+        .await?;
     Ok(())
 }
 

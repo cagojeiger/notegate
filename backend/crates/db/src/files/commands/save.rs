@@ -53,11 +53,11 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     // Current byte length/hash (for budget delta + optimistic guard); the
     // text row is locked so `expected_sha256` is compared atomically with
     // the following update.
-    let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+    let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
          FOR UPDATE"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .fetch_optional(&mut *tx)
@@ -65,11 +65,11 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .map_err(map_sqlx_error)?
     .ok_or_else(|| Error::not_found("text not found"))?;
 
-    let current_text = sqlx::query_as::<_, TextRow>(&format!(
+    let current_text = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {TEXT_COLUMNS} FROM text_objects \
          WHERE space_id = $1 AND node_id = $2 \
          FOR UPDATE"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .fetch_optional(&mut *tx)
@@ -131,7 +131,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         space_id,
         node_id,
     )?;
-    let doc_row = sqlx::query_as::<_, TextRow>(&format!(
+    let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE text_objects \
          SET storage_format = $3, content_text = $4, encrypted_payload = $5, \
              content_sha256 = $6, byte_len = $7, line_count = $8, \
@@ -139,7 +139,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
              content_enc_key_id = $12, content_enc_version = $13, \
              updated_by_account_id = $14, updated_at = now() \
          WHERE space_id = $1 AND node_id = $2 RETURNING {TEXT_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .bind(stored.storage_format)
@@ -158,10 +158,10 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .await
     .map_err(map_constraint_error)?;
 
-    let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+    let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes SET updated_by_account_id = $3, updated_at = now() \
          WHERE space_id = $1 AND id = $2 RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .bind(updated_by)

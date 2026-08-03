@@ -44,23 +44,23 @@ impl ApiKeyRepo {
         let live = live_key_predicate("");
         let rows = match cursor {
             None => {
-                sqlx::query_as::<_, ApiKeyRow>(&format!(
+                sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {API_KEY_COLUMNS} FROM api_keys \
                      WHERE account_id = $1 AND {live} \
                      ORDER BY created_at DESC, id DESC LIMIT $2"
-                ))
+                )))
                 .bind(account_id)
                 .bind(limit)
                 .fetch_all(&self.pool)
                 .await
             }
             Some(cursor) => {
-                sqlx::query_as::<_, ApiKeyRow>(&format!(
+                sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {API_KEY_COLUMNS} FROM api_keys \
                      WHERE account_id = $1 AND {live} \
                        AND (created_at, id) < ($2, $3) \
                      ORDER BY created_at DESC, id DESC LIMIT $4"
-                ))
+                )))
                 .bind(account_id)
                 .bind(cursor.created_at)
                 .bind(cursor.id)
@@ -75,10 +75,10 @@ impl ApiKeyRepo {
 
     pub async fn find_live_key(&self, account_id: Uuid, key_id: Uuid) -> Result<Option<ApiKey>> {
         let live = live_key_predicate("");
-        let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
+        let row = sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {API_KEY_COLUMNS} FROM api_keys \
              WHERE id = $1 AND account_id = $2 AND {live}"
-        ))
+        )))
         .bind(key_id)
         .bind(account_id)
         .fetch_optional(&self.pool)
@@ -95,7 +95,7 @@ impl ApiKeyRepo {
     ) -> Result<Option<(Account, Agent)>> {
         let live = live_key_predicate("k.");
         let active = active_account_predicate("acc.");
-        let row = sqlx::query_as::<_, LiveAgentCallerRow>(&format!(
+        let row = sqlx::query_as::<_, LiveAgentCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT acc.id AS account_id, acc.kind AS account_kind, \
                     acc.is_active AS account_is_active, \
                     acc.deleted_at AS account_deleted_at, \
@@ -111,7 +111,7 @@ impl ApiKeyRepo {
                AND {live} \
                AND {active} \
                AND acc.kind = 'agent'"
-        ))
+        )))
         .bind(key_id)
         .bind(token_prefix)
         .bind(token_hash)
@@ -123,10 +123,10 @@ impl ApiKeyRepo {
 
     pub async fn count_live_keys(&self, account_id: Uuid) -> Result<usize> {
         let live = live_key_predicate("");
-        let count: i64 = sqlx::query_scalar(&format!(
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM api_keys \
              WHERE account_id = $1 AND {live}"
-        ))
+        )))
         .bind(account_id)
         .fetch_one(&self.pool)
         .await
@@ -142,12 +142,12 @@ impl ApiKeyRepo {
     #[doc(hidden)]
     pub async fn insert_key_unchecked_for_test(&self, args: InsertApiKey<'_>) -> Result<ApiKey> {
         validate_command(args.command)?;
-        let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
+        let row = sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO api_keys \
              (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {API_KEY_COLUMNS}"
-        ))
+        )))
         .bind(args.key_id)
         .bind(args.account_id)
         .bind(args.token_prefix)
@@ -181,11 +181,11 @@ impl ApiKeyRepo {
         lock_active_agent_account(&mut tx, args.account_id).await?;
 
         // Re-count live keys INSIDE the tx using the same predicate as count_live_keys.
-        let live_count: i64 = sqlx::query_scalar(&format!(
+        let live_count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM api_keys \
              WHERE account_id = $1 AND {}",
             live_key_predicate("")
-        ))
+        )))
         .bind(args.account_id)
         .fetch_one(&mut *tx)
         .await
@@ -197,12 +197,12 @@ impl ApiKeyRepo {
             )));
         }
 
-        let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
+        let row = sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO api_keys \
              (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {API_KEY_COLUMNS}"
-        ))
+        )))
         .bind(args.key_id)
         .bind(args.account_id)
         .bind(args.token_prefix)
@@ -246,12 +246,12 @@ impl ApiKeyRepo {
 
         lock_active_agent_account(&mut tx, args.account_id).await?;
 
-        let old_exists: Option<Uuid> = sqlx::query_scalar(&format!(
+        let old_exists: Option<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT id FROM api_keys \
              WHERE id = $1 AND account_id = $2 AND {} \
              FOR UPDATE",
             live_key_predicate("")
-        ))
+        )))
         .bind(old_key_id)
         .bind(args.account_id)
         .fetch_optional(&mut *tx)
@@ -261,11 +261,11 @@ impl ApiKeyRepo {
             return Err(Error::not_found("api key not found"));
         }
 
-        let live_without_old: i64 = sqlx::query_scalar(&format!(
+        let live_without_old: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM api_keys \
              WHERE account_id = $1 AND id <> $2 AND {}",
             live_key_predicate("")
-        ))
+        )))
         .bind(args.account_id)
         .bind(old_key_id)
         .fetch_one(&mut *tx)
@@ -278,12 +278,12 @@ impl ApiKeyRepo {
             )));
         }
 
-        let row = sqlx::query_as::<_, ApiKeyRow>(&format!(
+        let row = sqlx::query_as::<_, ApiKeyRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO api_keys \
              (id, account_id, token_prefix, token_hash, hash_key_id, hash_version, name, scopes, created_by_user_id, expires_at, rotated_from_key_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              RETURNING {API_KEY_COLUMNS}"
-        ))
+        )))
         .bind(args.key_id)
         .bind(args.account_id)
         .bind(args.token_prefix)
@@ -412,9 +412,9 @@ async fn audit_context_for_key_account(
 
 async fn lock_active_agent_account(tx: &mut sqlx::PgConnection, account_id: Uuid) -> Result<()> {
     let active = active_account_predicate("");
-    let exists: Option<Uuid> = sqlx::query_scalar(&format!(
+    let exists: Option<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT id FROM accounts WHERE id = $1 AND kind = 'agent' AND {active} FOR UPDATE"
-    ))
+    )))
     .bind(account_id)
     .fetch_optional(&mut *tx)
     .await
@@ -428,7 +428,7 @@ async fn lock_active_agent_account(tx: &mut sqlx::PgConnection, account_id: Uuid
 /// The single definition of a live API key: not revoked and not yet expired.
 /// `prefix` qualifies the columns (`"k."` inside a join, `""` otherwise).
 /// Account activeness is checked by callers that authenticate or mutate keys.
-fn live_key_predicate(prefix: &str) -> String {
+fn live_key_predicate(prefix: &'static str) -> String {
     format!("{prefix}revoked_at IS NULL AND {prefix}expires_at > now()")
 }
 

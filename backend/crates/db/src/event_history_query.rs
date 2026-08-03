@@ -58,7 +58,7 @@ where
          WHERE {filters} \
          ORDER BY created_at DESC, id DESC LIMIT ${next_param}"
     );
-    let mut query = sqlx::query_as::<_, R>(&sql).bind(required.value);
+    let mut query = sqlx::query_as::<_, R>(sqlx::AssertSqlSafe(sql)).bind(required.value);
     if let Some(optional) = optional {
         query = query.bind(optional.value);
     }
@@ -97,7 +97,7 @@ where
          WHERE {filters} \
          ORDER BY id DESC LIMIT ${next_param}"
     );
-    let mut query = sqlx::query_as::<_, R>(&sql).bind(required.value);
+    let mut query = sqlx::query_as::<_, R>(sqlx::AssertSqlSafe(sql)).bind(required.value);
     if let Some(before_id) = before_id {
         query = query.bind(before_id);
     }

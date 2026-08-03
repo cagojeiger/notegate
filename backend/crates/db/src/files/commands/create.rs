@@ -35,10 +35,10 @@ pub async fn insert_folder(
     space_usage::apply_quota_delta(&mut tx, &locked.gate, UsageDelta::nodes(1), locked.limits)
         .await?;
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, 'folder', $4, $5, $5) RETURNING {NODE_COLUMNS}"
-        ))
+        )))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
@@ -97,10 +97,10 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
     )
     .await?;
 
-    let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+    let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO nodes (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, 'text', $4, $5, $5) RETURNING {NODE_COLUMNS}"
-        ))
+        )))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
@@ -118,14 +118,14 @@ pub async fn insert_text(args: InsertTextArgs<'_>) -> Result<(Node, TextObject)>
         space_id,
         node_row.id,
     )?;
-    let doc_row = sqlx::query_as::<_, TextRow>(&format!(
+    let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO text_objects \
             (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
              at_rest_encryption, content_ciphertext, content_nonce, content_enc_key_id, content_enc_version, \
              created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14) \
          RETURNING {TEXT_COLUMNS}"
-        ))
+        )))
         .bind(node_row.id)
         .bind(space_id)
         .bind(stored.storage_format)

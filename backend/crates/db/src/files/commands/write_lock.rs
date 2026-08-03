@@ -36,11 +36,11 @@ pub async fn update_node_write_lock(
         ));
     }
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes \
          SET write_locked = $3, updated_by_account_id = $4, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(command.node_id)
     .bind(command.enabled)

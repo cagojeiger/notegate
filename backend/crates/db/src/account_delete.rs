@@ -51,12 +51,13 @@ pub(crate) async fn soft_delete_user(
     .await
     .map_err(map_sqlx_error)?;
 
-    let sole_owned: i64 =
-        sqlx::query_scalar(&format!("SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"))
-            .bind(account_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+    let sole_owned: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"
+    )))
+    .bind(account_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)?;
     if sole_owned > 0 {
         return Err(Error::conflict(format!(
             "delete your {sole_owned} owned space(s) before deleting your account"

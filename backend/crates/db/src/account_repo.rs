@@ -243,12 +243,12 @@ impl AccountRepo {
         &self,
         account_id: Uuid,
     ) -> Result<Option<(Account, User)>> {
-        let row = sqlx::query_as::<_, UserCallerRow>(&format!(
+        let row = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_CALLER_COLUMNS} \
              FROM accounts a \
              JOIN users u ON u.id = a.id \
              WHERE a.id = $1"
-        ))
+        )))
         .bind(account_id)
         .fetch_optional(&self.pool)
         .await
@@ -260,12 +260,12 @@ impl AccountRepo {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let rows = sqlx::query_as::<_, AccountRow>(&format!(
+        let rows = sqlx::query_as::<_, AccountRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACCOUNT_COLUMNS} \
              FROM accounts a \
              LEFT JOIN agents ag ON ag.id = a.id \
              WHERE a.id = ANY($1)"
-        ))
+        )))
         .bind(ids)
         .fetch_all(&self.pool)
         .await
@@ -293,12 +293,13 @@ impl AccountRepo {
     /// Count live spaces this account owns. ADR 0004: the account cannot be deleted
     /// until these are deleted.
     pub async fn count_sole_owned_spaces(&self, account_id: Uuid) -> Result<i64> {
-        let count: i64 =
-            sqlx::query_scalar(&format!("SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"))
-                .bind(account_id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) {SOLE_OWNED_SPACES_FROM_WHERE}"
+        )))
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
         Ok(count)
     }
 
@@ -456,20 +457,20 @@ impl AccountRepo {
             }
         };
 
-        let account_row = sqlx::query_as::<_, AccountRow>(&format!(
+        let account_row = sqlx::query_as::<_, AccountRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACCOUNT_COLUMNS} \
              FROM accounts a \
              LEFT JOIN agents ag ON ag.id = a.id \
              WHERE a.id = $1"
-        ))
+        )))
         .bind(account_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
         let account = account_row.into_account(&self.crypto)?;
-        let user_row = sqlx::query_as::<_, UserRow>(&format!(
+        let user_row = sqlx::query_as::<_, UserRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
-        ))
+        )))
         .bind(account_id)
         .fetch_one(&mut *tx)
         .await
@@ -485,12 +486,12 @@ impl AccountRepo {
 
     pub async fn find_user_by_sub(&self, sub: &str) -> Result<Option<(Account, User)>> {
         let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, sub)?;
-        let row = sqlx::query_as::<_, UserCallerRow>(&format!(
+        let row = sqlx::query_as::<_, UserCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_CALLER_COLUMNS} \
              FROM accounts a \
              JOIN users u ON u.id = a.id \
              WHERE u.provider_sub_hash = $1"
-        ))
+        )))
         .bind(&provider_sub_hash)
         .fetch_optional(&self.pool)
         .await
@@ -511,12 +512,12 @@ impl AccountRepo {
     }
 
     async fn fetch_account_row(&self, account_id: Uuid) -> Result<Option<AccountRow>> {
-        sqlx::query_as::<_, AccountRow>(&format!(
+        sqlx::query_as::<_, AccountRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACCOUNT_COLUMNS} \
              FROM accounts a \
              LEFT JOIN agents ag ON ag.id = a.id \
              WHERE a.id = $1"
-        ))
+        )))
         .bind(account_id)
         .fetch_optional(&self.pool)
         .await

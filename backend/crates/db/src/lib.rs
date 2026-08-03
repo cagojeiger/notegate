@@ -80,7 +80,7 @@ pub(crate) fn to_usize(value: i64, label: &str) -> Result<usize> {
 /// `prefix` qualifies the columns (e.g. `"acc."` inside a join, `""` otherwise) so
 /// every account-liveness check across the repos shares one predicate and cannot
 /// drift. Mirrors the Rust-side `notegate_model::account::Account::is_live`.
-pub(crate) fn active_account_predicate(prefix: &str) -> String {
+pub(crate) fn active_account_predicate(prefix: &'static str) -> String {
     format!("{prefix}is_active = true AND {prefix}deleted_at IS NULL")
 }
 

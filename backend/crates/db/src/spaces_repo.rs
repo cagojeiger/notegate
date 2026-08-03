@@ -175,10 +175,10 @@ impl SpaceRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        let row = sqlx::query_as::<_, SpaceRow>(&format!(
+        let row = sqlx::query_as::<_, SpaceRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO spaces (name, owner_user_id, sort_order, navigation_pinned_at) \
              VALUES ($1, $2, $3, now()) RETURNING {SPACE_COLUMNS}"
-        ))
+        )))
         .bind(&command.name)
         .bind(owner_user_id)
         .bind(sort_order)
@@ -194,9 +194,9 @@ impl SpaceRepo {
     }
 
     pub async fn find_space(&self, space_id: Uuid) -> Result<Option<Space>> {
-        let row = sqlx::query_as::<_, SpaceRow>(&format!(
+        let row = sqlx::query_as::<_, SpaceRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {SPACE_COLUMNS} FROM spaces WHERE id = $1 AND deleted_at IS NULL"
-        ))
+        )))
         .bind(space_id)
         .fetch_optional(&self.pool)
         .await
@@ -215,7 +215,7 @@ impl SpaceRepo {
         } else {
             ""
         };
-        let row = sqlx::query_as::<_, SpaceViewRow>(&format!(
+        let row = sqlx::query_as::<_, SpaceViewRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {SPACE_VIEW_BASE_COLUMNS}, \
                     CASE WHEN acc.kind = 'user' THEN 'write'::text ELSE c.permission END AS permission, \
                     root.id AS root_node_id, owner.tier AS owner_tier \
@@ -228,7 +228,7 @@ impl SpaceRepo {
              WHERE acc.id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
                AND ((acc.kind = 'user' AND s.owner_user_id = acc.id {user_mcp_predicate}) \
                     OR (acc.kind = 'agent' AND c.agent_id IS NOT NULL))"
-        ))
+        )))
         .bind(account_id)
         .bind(space_id)
         .fetch_optional(&self.pool)
@@ -265,7 +265,7 @@ impl SpaceRepo {
         } else {
             "s.name = $2"
         };
-        let rows = sqlx::query_as::<_, SpaceViewRow>(&format!(
+        let rows = sqlx::query_as::<_, SpaceViewRow>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM ( \
                  SELECT {USER_SPACE_VIEW_COLUMNS} \
                  FROM accounts acc \
@@ -286,7 +286,7 @@ impl SpaceRepo {
                    AND {name_predicate} \
              ) visible_spaces \
              ORDER BY sort_order, name, id LIMIT $3"
-        ))
+        )))
         .bind(account_id)
         .bind(name)
         .bind(limit)
@@ -357,7 +357,7 @@ impl SpaceRepo {
         );
         let rows = match cursor {
             Some(cursor) => {
-                sqlx::query_as::<_, SpaceViewRow>(&sql)
+                sqlx::query_as::<_, SpaceViewRow>(sqlx::AssertSqlSafe(sql))
                     .bind(account_id)
                     .bind(cursor.sort_order)
                     .bind(&cursor.name)
@@ -367,7 +367,7 @@ impl SpaceRepo {
                     .await
             }
             None => {
-                sqlx::query_as::<_, SpaceViewRow>(&sql)
+                sqlx::query_as::<_, SpaceViewRow>(sqlx::AssertSqlSafe(sql))
                     .bind(account_id)
                     .bind(limit)
                     .fetch_all(&self.pool)
@@ -433,11 +433,11 @@ impl SpaceRepo {
             "space owner user account not found",
         )
         .await?;
-        let current = sqlx::query_as::<_, SpaceRow>(&format!(
+        let current = sqlx::query_as::<_, SpaceRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {SPACE_COLUMNS} FROM spaces \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL \
              FOR UPDATE"
-        ))
+        )))
         .bind(command.space_id)
         .bind(owner_user_id)
         .fetch_optional(&mut *tx)
@@ -483,7 +483,7 @@ impl SpaceRepo {
             return Ok((Space::from(current), owner_tier.features()));
         }
 
-        let row = sqlx::query_as::<_, SpaceRow>(&format!(
+        let row = sqlx::query_as::<_, SpaceRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE spaces \
              SET name = COALESCE($3, name), sort_order = COALESCE($4, sort_order), \
                  navigation_pinned_at = CASE \
@@ -500,7 +500,7 @@ impl SpaceRepo {
                  default_text_encryption_enabled = COALESCE($8, default_text_encryption_enabled), \
                  updated_at = now() \
              WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL RETURNING {SPACE_COLUMNS}"
-        ))
+        )))
         .bind(command.space_id)
         .bind(owner_user_id)
         .bind(command.name.as_deref())

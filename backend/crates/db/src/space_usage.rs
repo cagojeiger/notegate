@@ -105,7 +105,7 @@ pub(crate) async fn try_schema_advisory_lock(
              hashtextextended(current_schema(), $1)\
          )"
     };
-    sqlx::query_scalar(query)
+    sqlx::query_scalar(sqlx::AssertSqlSafe(query))
         .bind(seed)
         .fetch_one(&mut *tx)
         .await
