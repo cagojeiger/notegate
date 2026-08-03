@@ -392,14 +392,17 @@ fn decrypt_with_key_and_aad(
     field: &EncryptedField,
     aad: &[u8],
 ) -> Result<Vec<u8>> {
-    if field.nonce.len() != NONCE_LEN {
-        return Err(Error::internal("invalid encryption nonce"));
-    }
+    let nonce_bytes: [u8; NONCE_LEN] = field
+        .nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_error| Error::internal("invalid encryption nonce"))?;
+    let nonce = Nonce::from(nonce_bytes);
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_error| Error::internal("invalid encryption key"))?;
     cipher
         .decrypt(
-            Nonce::from_slice(&field.nonce),
+            &nonce,
             Payload {
                 msg: field.ciphertext.as_ref(),
                 aad,
