@@ -85,13 +85,15 @@ fn signing_key() -> &'static [u8] {
 }
 
 fn hmac_sha256(key: &[u8], message: &[u8]) -> Result<[u8; HMAC_SHA256_LEN], CursorError> {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).map_err(|_error| CursorError)?;
+    let mut mac =
+        <HmacSha256 as hmac::KeyInit>::new_from_slice(key).map_err(|_error| CursorError)?;
     mac.update(message);
     Ok(mac.finalize().into_bytes().into())
 }
 
 fn verify_hmac_sha256(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), CursorError> {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).map_err(|_error| CursorError)?;
+    let mut mac =
+        <HmacSha256 as hmac::KeyInit>::new_from_slice(key).map_err(|_error| CursorError)?;
     mac.update(message);
     mac.verify_slice(signature).map_err(|_error| CursorError)
 }
@@ -137,5 +139,13 @@ mod tests {
         let tampered = URL_SAFE_NO_PAD.encode(bytes);
         let decoded: Result<(i32, String, Uuid), _> = decode(&tampered);
         assert_eq!(decoded, Err(CursorError));
+    }
+
+    #[test]
+    fn encoded_cursor_matches_v1_fixture() {
+        assert_eq!(
+            encode(&(3_i32, "name".to_owned(), Uuid::nil())).unwrap(),
+            "Af9IjN7fMTLFJUKi64EHvEzDI92mdtNL1lUNsW_dQk3TWzMsIm5hbWUiLCIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDAiXQ"
+        );
     }
 }

@@ -6,7 +6,7 @@
 
 use std::fmt::Write as _;
 
-use aes_gcm::aead::{Aead, AeadCore as _, KeyInit, OsRng as AeadOsRng, Payload};
+use aes_gcm::aead::{Aead, Generate as _, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
@@ -371,7 +371,7 @@ fn encrypt_with_key_and_aad(
 ) -> Result<EncryptedField> {
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_error| Error::internal("invalid encryption key"))?;
-    let nonce = Aes256Gcm::generate_nonce(&mut AeadOsRng);
+    let nonce = Nonce::generate();
     let ciphertext = cipher
         .encrypt(
             &nonce,
@@ -412,7 +412,7 @@ fn decrypt_with_key_and_aad(
 }
 
 fn hmac_hex(key: &[u8; KEY_LEN], value: &str) -> Result<String> {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
+    let mut mac = <HmacSha256 as hmac::KeyInit>::new_from_slice(key)
         .map_err(|_error| Error::internal("invalid HMAC key"))?;
     mac.update(value.as_bytes());
     Ok(hex_lower(&mac.finalize().into_bytes()))
@@ -548,6 +548,36 @@ mod tests {
         assert_ne!(
             crypto.enc_epoch_verify_tag("key-1").unwrap(),
             crypto.lookup_epoch_verify_tag("key-1").unwrap()
+        );
+    }
+
+    #[test]
+    fn legacy_crypto_fixtures_remain_compatible() {
+        let crypto = PiiCrypto::test();
+        let aad = PiiAad::new(
+            PiiFieldKind::AccountDisplayName,
+            "account-1",
+            crypto.enc_key_id(),
+        );
+        let encrypted = EncryptedField {
+            nonce: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            ciphertext: vec![
+                0x0f, 0x72, 0xd7, 0x7c, 0x87, 0x56, 0xec, 0x5d, 0xef, 0x7a, 0x87, 0x22, 0x4c, 0xcd,
+                0x9b, 0x4c, 0xb2, 0xba, 0x82, 0xa2, 0x7b, 0x31, 0xb0, 0x54, 0xb8, 0x5a,
+            ],
+        };
+
+        assert_eq!(
+            crypto.decrypt_pii_string(&aad, &encrypted).unwrap(),
+            "legacy pii"
+        );
+        assert_eq!(
+            crypto.email_hash(" User@Example.Test ").unwrap(),
+            "e4b52262bede9b274119e8e0aae1f64ee15040bcfd642219dcaedd92921748bd"
+        );
+        assert_eq!(
+            hex_lower(crypto.session_signing_key()),
+            "486b9fcbddfc4da8d2b8d642bf73a1d4ccf42e0a449b081ff60a5b983fd25253"
         );
     }
 }
