@@ -9,7 +9,7 @@
 use std::time::{Duration, Instant};
 
 use openidconnect::core::{CoreClient, CoreProviderMetadata};
-use openidconnect::{AuthType, ClientId, IssuerUrl, RedirectUrl};
+use openidconnect::{AuthType, ClientId, HttpRequest, HttpResponse, IssuerUrl, RedirectUrl};
 use tokio::sync::RwLock;
 
 /// How long discovered provider metadata stays fresh. An hour bounds staleness
@@ -38,6 +38,31 @@ pub(crate) struct OidcProvider {
 struct CachedMetadata {
     metadata: CoreProviderMetadata,
     fetched_at: Instant,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OidcHttpError {
+    #[error("OIDC HTTP request failed: {0}")]
+    Request(#[from] reqwest::Error),
+    #[error("OIDC HTTP response could not be built: {0}")]
+    Response(#[from] openidconnect::http::Error),
+}
+
+pub(crate) async fn execute_oidc_request(
+    http: &reqwest::Client,
+    request: HttpRequest,
+) -> Result<HttpResponse, OidcHttpError> {
+    let response = http.execute(reqwest::Request::try_from(request)?).await?;
+    let status = response.status();
+    let version = response.version();
+    let headers = response.headers().clone();
+    let body = response.bytes().await?.to_vec();
+    let mut response = openidconnect::http::Response::builder()
+        .status(status)
+        .version(version)
+        .body(body)?;
+    *response.headers_mut() = headers;
+    Ok(response)
 }
 
 impl OidcProvider {
@@ -94,7 +119,12 @@ impl OidcProvider {
         let issuer = IssuerUrl::new(self.issuer.clone()).map_err(|error| {
             notegate_core::Error::validation(format!("invalid issuer URL: {error}"))
         })?;
-        let metadata = CoreProviderMetadata::discover_async(issuer, &self.http)
+        let http_client = self.http.clone();
+        let http = move |request| {
+            let http_client = http_client.clone();
+            async move { execute_oidc_request(&http_client, request).await }
+        };
+        let metadata = CoreProviderMetadata::discover_async(issuer, &http)
             .await
             .map_err(|error| {
                 notegate_core::Error::internal(format!("openid discovery failed: {error}"))
@@ -107,5 +137,62 @@ impl OidcProvider {
             });
         }
         Ok(metadata)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::Router;
+    use axum::body::Bytes;
+    use axum::http::{HeaderMap, HeaderValue, StatusCode};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::post;
+
+    use super::*;
+
+    async fn echo_oidc_request(headers: HeaderMap, body: Bytes) -> Response {
+        let mut response = (StatusCode::CREATED, body).into_response();
+        if let Some(value) = headers.get("x-oidc-request") {
+            response
+                .headers_mut()
+                .insert("x-oidc-response", value.clone());
+        }
+        response
+    }
+
+    #[tokio::test]
+    async fn reqwest_adapter_preserves_the_oidc_http_contract()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route("/oidc", post(echo_oidc_request)),
+            )
+            .await
+        });
+
+        let request = openidconnect::http::Request::builder()
+            .method("POST")
+            .uri(format!("http://{address}/oidc"))
+            .header("content-type", "application/x-www-form-urlencoded")
+            .header("x-oidc-request", "preserved")
+            .body(b"code=example".to_vec())?;
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+
+        let response = execute_oidc_request(&client, request).await?;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(
+            response.headers().get("x-oidc-response"),
+            Some(&HeaderValue::from_static("preserved"))
+        );
+        assert_eq!(response.body(), b"code=example");
+
+        server.abort();
+        Ok(())
     }
 }
