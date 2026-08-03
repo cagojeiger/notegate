@@ -27,6 +27,7 @@ use rmcp::transport::streamable_http_server::session::never::NeverSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData, Json, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use notegate_model::{Caller, Channel};
@@ -82,7 +83,10 @@ fn accepted_tool_subscription(requested: &SubscriptionFilter) -> Option<Subscrip
     Some(requested.supported_by(&mcp_server_info().capabilities))
 }
 
-async fn listen_for_tool_list_changes(context: SubscriptionContext) -> Result<(), ErrorData> {
+async fn listen_for_tool_list_changes(
+    context: SubscriptionContext,
+    shutdown: &CancellationToken,
+) -> Result<(), ErrorData> {
     if context.accepted().tools_list_changed == Some(true)
         && let Err(error) = context.sink().notify_tool_list_changed().await
     {
@@ -93,7 +97,10 @@ async fn listen_for_tool_list_changes(context: SubscriptionContext) -> Result<()
         return Ok(());
     }
 
-    context.cancelled().await;
+    tokio::select! {
+        () = context.cancelled() => {}
+        () = shutdown.cancelled() => {}
+    }
     Ok(())
 }
 
@@ -306,7 +313,7 @@ impl ServerHandler for McpServer {
     }
 
     async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
-        listen_for_tool_list_changes(context).await
+        listen_for_tool_list_changes(context, &self.state.shutdown).await
     }
 }
 
@@ -435,6 +442,7 @@ mod tests {
     use super::*;
     use notegate_db::SpaceRepo;
     use rmcp::model::{ClientInfo, ServerNotification};
+    use rmcp::service::SubscriptionEnd;
     use rmcp::transport::StreamableHttpClientTransport;
     use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
     use rmcp::{ClientLifecycleMode, ClientServiceExt};
@@ -443,7 +451,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     #[derive(Clone)]
-    struct ToolRefreshTestServer;
+    struct ToolRefreshTestServer {
+        shutdown: CancellationToken,
+    }
 
     impl ServerHandler for ToolRefreshTestServer {
         fn get_info(&self) -> ServerInfo {
@@ -466,22 +476,26 @@ mod tests {
         }
 
         async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
-            listen_for_tool_list_changes(context).await
+            listen_for_tool_list_changes(context, &self.shutdown).await
         }
     }
 
     async fn spawn_tool_refresh_test_server()
     -> (String, CancellationToken, tokio::task::JoinHandle<()>) {
         let shutdown = CancellationToken::new();
+        let handler_shutdown = shutdown.clone();
         let service: StreamableHttpService<ToolRefreshTestServer, NeverSessionManager> =
             StreamableHttpService::new(
-                || Ok(ToolRefreshTestServer),
+                move || {
+                    Ok(ToolRefreshTestServer {
+                        shutdown: handler_shutdown.clone(),
+                    })
+                },
                 Arc::new(NeverSessionManager::default()),
                 StreamableHttpServerConfig::default()
                     .with_legacy_session_mode(false)
                     .with_json_response(true)
-                    .with_sse_keep_alive(Some(Duration::from_millis(20)))
-                    .with_cancellation_token(shutdown.child_token()),
+                    .with_sse_keep_alive(Some(Duration::from_millis(20))),
             );
         let router = axum::Router::new().nest_service("/mcp", service);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -582,6 +596,53 @@ mod tests {
 
         subscription.cancel().await.expect("cancel subscription");
         stop_tool_refresh_test_server(client, shutdown, server_task).await;
+    }
+
+    #[tokio::test]
+    async fn server_shutdown_gracefully_closes_active_subscription() {
+        let (url, shutdown, server_task) = spawn_tool_refresh_test_server().await;
+        let transport = StreamableHttpClientTransport::from_config(
+            StreamableHttpClientTransportConfig::with_uri(url),
+        );
+        let client = ClientInfo::default()
+            .serve_with_lifecycle(
+                transport,
+                ClientLifecycleMode::Discover {
+                    preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+                },
+            )
+            .await
+            .expect("connect modern MCP client");
+        let mut subscription = client
+            .listen(SubscriptionFilter::builder().tools_list_changed().build())
+            .await
+            .expect("open tool-list subscription");
+        assert!(
+            subscription
+                .next()
+                .await
+                .expect("read initial refresh")
+                .is_some()
+        );
+
+        shutdown.cancel();
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), subscription.next())
+                .await
+                .expect("subscription closes after server shutdown")
+                .expect("read subscription end")
+                .is_none()
+        );
+        assert!(matches!(
+            subscription.end(),
+            Some(SubscriptionEnd::Graceful(_))
+        ));
+        let _ = client.cancel().await;
+        tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .expect("test server shuts down")
+            .expect("test server task joins");
     }
 
     #[tokio::test]

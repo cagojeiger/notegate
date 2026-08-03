@@ -108,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
     let config = std::sync::Arc::new(config);
     let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));
+    let application_shutdown_token = CancellationToken::new();
     let state = AppState::new(
         pool.clone(),
         config.clone(),
@@ -117,12 +118,13 @@ async fn main() -> anyhow::Result<()> {
         http,
         pii_crypto,
     )
-    .with_metrics(metrics.clone());
+    .with_metrics(metrics.clone())
+    .with_shutdown_token(application_shutdown_token.clone());
 
     let listener = TcpListener::bind(bind_addr).await?;
     info!(event = "server.listening", addr = %bind_addr);
 
-    let background_shutdown_token = CancellationToken::new();
+    let background_shutdown_token = application_shutdown_token;
     let metrics_upkeep_worker =
         observability::spawn_upkeep(metrics, background_shutdown_token.clone());
     let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
