@@ -24,7 +24,7 @@ type EventHistoryQuery<T extends EventListResponse> = UseInfiniteQueryResult<Inf
 
 const TABS: { id: HistoryTab; label: string }[] = [
   { id: "files", label: "Changes" },
-  { id: "audit", label: "Audit log" },
+  { id: "audit", label: "Audit" },
   { id: "mcp", label: "MCP" }
 ];
 
