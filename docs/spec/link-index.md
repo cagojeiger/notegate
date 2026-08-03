@@ -11,9 +11,7 @@ NoteGate는 같은 Space 안의 Markdown 링크와 이미지 참조를 현재 �
 ![이미지](./assets/diagram.png)
 ```
 
-외부 URL, 현재 문서 anchor, Obsidian wikilink, raw HTML 링크는 저장하지 않는다. Query string이 있거나 path가 유효하지 않은 내부 후보는 invalid 참조로 저장한다. Client-encrypted Text는 서버가 본문을 읽을 수 없으므로 인덱싱하지 않는다.
-
-서버 저장 암호화 Text도 영속 링크 인덱스의 source로 사용하지 않는다. 링크 원문뿐 아니라 본문에서 파생된 source/target 관계도 DB에 평문 metadata로 남기지 않기 위해서다. 다른 일반 Text가 암호화 Text를 가리키는 incoming 관계는 대상 node metadata만 사용하므로 유지한다. 서버 저장 암호화 여부는 `grep` 동작에는 영향을 주지 않는다.
+외부 URL, 현재 문서 anchor, Obsidian wikilink, raw HTML 링크는 저장하지 않는다. Query string이 있거나 path가 유효하지 않은 내부 후보는 invalid 참조로 저장한다. Client-encrypted Text는 서버가 본문을 읽을 수 없으므로 인덱싱하지 않는다. 서버 저장 암호화 Text는 복호화한 현재 본문을 인덱싱하며 `raw_href`, 정규화 경로, source/target 관계는 허용된 평문 metadata로 저장한다.
 
 검색 포함 여부와 링크 인덱싱 여부는 서로 독립적이다.
 

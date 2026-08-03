@@ -20,7 +20,7 @@ use notegate_service::files::{FilesService, UpdateTextEncryption};
 use notegate_service::link_index::{LinkIndexProjector, LinkIndexRun, LinkIndexService};
 use sha2::{Digest, Sha256};
 
-const PARSER_VERSION: i32 = 2;
+const PARSER_VERSION: i32 = 1;
 
 fn text(content: &str) -> StoredContent {
     StoredContent {
@@ -260,7 +260,7 @@ async fn large_text_fanout_is_applied_in_bounded_incremental_runs()
 }
 
 #[tokio::test]
-async fn server_encryption_removes_persisted_outgoing_relations()
+async fn server_encrypted_text_updates_persisted_link_relations()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -283,26 +283,22 @@ async fn server_encryption_removes_persisted_outgoing_relations()
     let link_service = LinkIndexService::new(index.clone(), files.clone());
     let projector = LinkIndexProjector::new(index, files.clone());
 
-    let (target, _) = files
-        .insert_text(space_id, root_id, "target.md", &text("target"), owner)
+    let (first_target, _) = files
+        .insert_text(space_id, root_id, "first.md", &text("first"), owner)
+        .await?;
+    let (second_target, _) = files
+        .insert_text(space_id, root_id, "second.md", &text("second"), owner)
         .await?;
     let (source, _) = files
         .insert_text(
             space_id,
             root_id,
             "source.md",
-            &text("[private](target.md#sensitive-heading)"),
+            &text("[first](first.md)"),
             owner,
         )
         .await?;
     drain(&projector).await?;
-    assert_eq!(
-        link_service
-            .node_links(owner, space_id, source.id)
-            .await?
-            .outgoing_count,
-        1
-    );
 
     files_service
         .update_text_encryption(
@@ -315,30 +311,39 @@ async fn server_encryption_removes_persisted_outgoing_relations()
             },
         )
         .await?;
+    files
+        .save_text_content(
+            space_id,
+            source.id,
+            &text("[second](second.md)"),
+            None,
+            owner,
+            TextMutationKind::Write,
+        )
+        .await?;
     drain(&projector).await?;
 
+    let source_links = link_service.node_links(owner, space_id, source.id).await?;
+    assert_eq!(source_links.outgoing_count, 1);
+    assert_eq!(source_links.outgoing[0].raw_href, "second.md");
     assert_eq!(
-        link_service
-            .node_links(owner, space_id, source.id)
-            .await?
-            .outgoing_count,
-        0
+        source_links.outgoing[0].target_node_id,
+        Some(second_target.id)
     );
     assert_eq!(
         link_service
-            .node_links(owner, space_id, target.id)
+            .node_links(owner, space_id, first_target.id)
             .await?
             .incoming_count,
         0
     );
-    let persisted: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM node_link_refs WHERE space_id = $1 AND source_node_id = $2",
-    )
-    .bind(space_id)
-    .bind(source.id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(persisted, 0);
+    assert_eq!(
+        link_service
+            .node_links(owner, space_id, second_target.id)
+            .await?
+            .incoming_count,
+        1
+    );
 
     db.cleanup().await;
     Ok(())
@@ -879,7 +884,7 @@ async fn an_older_worker_does_not_downgrade_a_newer_parser_projection()
     drain(&projector).await?;
     sqlx::query(
         "UPDATE space_link_index_states \
-         SET parser_version = 3, status = 'ready', rebuild_requested = false \
+         SET parser_version = 2, status = 'ready', rebuild_requested = false \
          WHERE space_id = $1",
     )
     .bind(space_id)
@@ -898,7 +903,7 @@ async fn an_older_worker_does_not_downgrade_a_newer_parser_projection()
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(parser_version, 3);
+    assert_eq!(parser_version, 2);
 
     db.cleanup().await;
     Ok(())

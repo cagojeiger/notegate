@@ -6,14 +6,14 @@ use std::time::Duration;
 use notegate_db::{
     FilesRepo, LinkIndexClaim, LinkIndexRepo, NewLinkReference, QueuedLinkIndexEvent, SourceLinkSet,
 };
-use notegate_model::{LinkIndexStatus, TextAtRestEncryption};
+use notegate_model::LinkIndexStatus;
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
 
 use super::markdown;
 
-const PARSER_VERSION: i32 = 2;
+const PARSER_VERSION: i32 = 1;
 const CLAIM_LEASE: Duration = Duration::from_secs(120);
 const EVENT_BATCH_SIZE: i64 = 200;
 const INCREMENTAL_SOURCE_LIMIT: usize = 8;
@@ -199,9 +199,11 @@ impl LinkIndexProjector {
 
         for source_id in source_ids {
             let references = match (texts.get(source_id), paths.get(source_id)) {
-                (Some(text), Some(path)) => {
-                    parse_source_references(path, text.content.as_deref(), text.at_rest_encryption)
-                }
+                (Some(text), Some(path)) => text
+                    .content
+                    .as_deref()
+                    .map(|content| markdown::parse_references(path, content))
+                    .unwrap_or_default(),
                 _ => Vec::new(),
             };
             for reference in &references {
@@ -258,19 +260,6 @@ impl LinkIndexProjector {
             .filter_map(|node_id| paths.get(node_id).cloned().map(|path| (path, *node_id)))
             .collect())
     }
-}
-
-fn parse_source_references(
-    source_path: &str,
-    content: Option<&str>,
-    at_rest_encryption: TextAtRestEncryption,
-) -> Vec<markdown::ParsedReference> {
-    if at_rest_encryption == TextAtRestEncryption::Server {
-        return Vec::new();
-    }
-    content
-        .map(|content| markdown::parse_references(source_path, content))
-        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -431,20 +420,6 @@ mod tests {
         assert_eq!(second_count, 1);
         assert_eq!(second.dirty_sources.len(), 1);
         assert!(!second.rebuild);
-    }
-
-    #[test]
-    fn encrypted_sources_do_not_persist_outgoing_references() {
-        let content = "[target](target.md?token=secret)";
-
-        assert!(
-            parse_source_references("/source.md", Some(content), TextAtRestEncryption::Server,)
-                .is_empty()
-        );
-        assert_eq!(
-            parse_source_references("/source.md", Some(content), TextAtRestEncryption::None,).len(),
-            1
-        );
     }
 
     #[test]

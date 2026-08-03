@@ -433,7 +433,7 @@ space_link_index_states
   rebuild_requested bool not null default false
   rebuild_base_generation bigint null
   rebuild_after_node_id uuid null
-  parser_version int not null default 2
+  parser_version int not null default 1
   claim_token uuid null
   claim_until timestamptz null
   retry_count int not null default 0
