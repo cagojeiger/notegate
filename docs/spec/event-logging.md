@@ -52,9 +52,13 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 ## MCP invocation history
 
-`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, 원본 `arguments` JSON object인 `input`, success/error, 안정적인 error code, 실행 시간을 저장한다. `read op=changes`는 어느 Space의 변경 stream을 조회했는지 목록에서 바로 확인할 수 있도록 검증된 `space_name` snapshot도 함께 저장한다. `me`는 purpose 예외이므로 NULL이다. 유효한 다른 tool의 purpose는 1..200자의 짧은 호출 이유이며, purpose 또는 argument 검증 실패 행에서는 summary purpose가 NULL일 수 있고 원본 값은 `input`에 남는다.
+이 문서에서 `redaction`은 민감한 원문 값을 제거하거나 redaction marker로 대체하는 처리를 뜻한다. 허용되지 않은 field를 통째로 제외하는 것은 `omission`이다. 일부 문자를 남기는 `masking`과 범위가 모호한 `sanitization`은 이 기능의 용어로 사용하지 않는다.
 
-`input`은 도구별 재구성이나 field redaction 없이 `tools/call.params.arguments`를 그대로 저장한다. 따라서 검색어, target path, Text content/edit, 암호화 metadata, multipart handle/ETag, `run_sequence.commands[]`도 포함될 수 있다. Bearer/OAuth/API key 같은 HTTP 인증 정보, protocol `_meta`, tool response와 presigned response URL은 `arguments` 바깥이므로 저장하지 않는다. `run_sequence`는 하나의 MCP 호출로 한 행을 만들며 전체 commands JSON과 sequence 전체 outcome을 기록하고 내부 command별 행은 만들지 않는다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다. Retention은 90일이며 아래의 기존 purge worker가 bounded batch로 집행한다.
+`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, 정규화된 `tool`과 optional `op`, `purpose`, redacted `input`/`response` JSON object, success/error, 안정적인 error code, 실행 시간을 저장한다. `read op=changes`는 어느 Space의 변경 stream을 조회했는지 목록에서 바로 확인할 수 있도록 검증된 `space_name` snapshot도 함께 저장한다. `me`는 purpose 예외이므로 NULL이다. 유효한 다른 tool의 purpose는 1..200자의 짧은 호출 이유이며, purpose 검증 실패 행에서는 summary purpose가 NULL이고 `input.purpose`는 원문 대신 redaction marker다. Unknown tool/op의 원문은 별도 summary column에 저장하지 않는다.
+
+`input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
+
+`response`는 protocol `ErrorData` 또는 MCP `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. `run_sequence`는 하나의 MCP 호출로 한 행을 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. 이 기능 도입 이전 행은 `response=NULL`이고 기존 input 형식을 유지한 채 90일 retention으로 만료된다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다.
 
 ## Audit event sources
 
@@ -114,7 +118,7 @@ connection.upsert
   created_key_id: uuid
 
 *.revoke
-  reason: sanitized enum/string when already part of the domain model
+  reason: bounded enum/string when already part of the domain model
 
 session.revoke
   reason: "refresh_failed"

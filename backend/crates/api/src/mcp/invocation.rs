@@ -10,6 +10,7 @@ use rmcp::ErrorData;
 use rmcp::model::{CallToolResponse, CallToolResult};
 use serde_json::Value;
 
+use super::invocation_redaction::{redact_input, redact_response};
 use super::tools::resolve::invalid_input_error;
 use crate::observability::record_mcp_tool_metrics;
 use crate::state::AppState;
@@ -23,7 +24,8 @@ pub(crate) async fn execute_call(
     input: &Value,
     future: impl Future<Output = Result<CallToolResponse, ErrorData>>,
 ) -> Result<CallToolResponse, ErrorData> {
-    let op = input.get("op").and_then(Value::as_str);
+    let raw_op = input.get("op").and_then(Value::as_str);
+    let op = canonical_op(tool, raw_op);
     let raw_purpose = if tool == "me" {
         None
     } else {
@@ -57,15 +59,18 @@ pub(crate) async fn execute_call(
     );
 
     if let Some(caller) = caller {
+        let redacted_input = redact_input(tool, input);
+        let redacted_response = redact_response(tool, input, &result);
         record(
             state,
             caller,
             InvocationRecord {
-                tool,
+                tool: canonical_tool(tool),
                 op,
                 purpose,
                 space_name: space_name.as_deref(),
-                input,
+                input: &redacted_input,
+                response: &redacted_response,
                 error_code: error_code.as_deref(),
                 elapsed_ms: elapsed.as_millis(),
             },
@@ -104,6 +109,7 @@ struct InvocationRecord<'a> {
     purpose: Option<&'a str>,
     space_name: Option<&'a str>,
     input: &'a Value,
+    response: &'a Value,
     error_code: Option<&'a str>,
     elapsed_ms: u128,
 }
@@ -131,6 +137,7 @@ async fn record(state: &AppState, caller: &Caller, invocation: InvocationRecord<
             purpose: invocation.purpose,
             space_name: invocation.space_name,
             input: invocation.input,
+            response: Some(invocation.response),
             outcome,
             error_code: invocation.error_code,
             duration_ms,
@@ -201,6 +208,25 @@ fn metric_tool_name(tool: &str) -> &'static str {
         "file_transfer" => "file_transfer",
         "run_sequence" => "run_sequence",
         _ => "unknown",
+    }
+}
+
+fn canonical_tool(tool: &str) -> &'static str {
+    metric_tool_name(tool)
+}
+
+fn canonical_op<'a>(tool: &str, op: Option<&'a str>) -> Option<&'a str> {
+    match (tool, op?) {
+        ("read", op @ ("spaces" | "ls" | "tree" | "stat" | "read" | "changes"))
+        | ("search", op @ ("find" | "grep"))
+        | ("write", op @ ("write" | "append" | "patch" | "edit"))
+        | ("manage", op @ ("mkdir" | "mv" | "cp" | "rm"))
+        | (
+            "file_transfer",
+            op @ ("begin_upload" | "prepare_parts" | "complete_upload" | "abort_upload"
+            | "prepare_download"),
+        ) => Some(op),
+        _ => None,
     }
 }
 
@@ -276,7 +302,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_call_records_raw_inputs_and_all_outcomes()
+    async fn execute_call_records_redacted_inputs_responses_and_all_outcomes()
     -> Result<(), Box<dyn std::error::Error>> {
         let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
             return Ok(());
@@ -288,7 +314,7 @@ mod tests {
             "purpose": "locate cache design notes",
             "op": "find",
             "target": "Research:/",
-            "q": "cache"
+            "q": "SECRET_SEARCH_QUERY"
         });
         execute_call(&state, Some(&caller), "search", &search_input, async {
             Ok(CallToolResult::structured(serde_json::json!({"items": []})).into())
@@ -361,11 +387,12 @@ mod tests {
                 Option<String>,
                 Option<String>,
                 serde_json::Value,
+                serde_json::Value,
                 String,
                 Option<String>,
             ),
         >(
-            "SELECT tool, op, purpose, input, outcome, error_code \
+            "SELECT tool, op, purpose, input, response, outcome, error_code \
              FROM mcp_invocations WHERE actor_account_id = $1 ORDER BY id",
         )
         .bind(caller.account_id())
@@ -375,23 +402,258 @@ mod tests {
         assert_eq!(rows[0].0, "search");
         assert_eq!(rows[0].1.as_deref(), Some("find"));
         assert_eq!(rows[0].2.as_deref(), Some("locate cache design notes"));
-        assert_eq!(rows[0].3, search_input);
-        assert_eq!(rows[0].4, "success");
-        assert_eq!(rows[0].5, None);
+        assert_eq!(rows[0].3["q"]["category"], "search_query");
+        assert_eq!(rows[0].4["result"]["items"], serde_json::json!([]));
+        assert_eq!(rows[0].5, "success");
+        assert_eq!(rows[0].6, None);
+        assert!(!rows[0].3.to_string().contains("SECRET_SEARCH_QUERY"));
         assert_eq!(rows[1].0, "read");
         assert_eq!(rows[1].3, missing_input);
-        assert_eq!(rows[1].4, "error");
-        assert_eq!(rows[1].5.as_deref(), Some("invalid_input"));
+        assert_eq!(rows[1].4["kind"], "error");
+        assert_eq!(rows[1].5, "error");
+        assert_eq!(rows[1].6.as_deref(), Some("invalid_input"));
         assert_eq!(rows[2].0, "read");
         assert_eq!(rows[2].2, None);
-        assert_eq!(rows[2].3, invalid_purpose_input);
-        assert_eq!(rows[2].4, "error");
-        assert_eq!(rows[2].5.as_deref(), Some("invalid_input"));
+        assert_eq!(rows[2].3["purpose"]["category"], "invalid_purpose");
+        assert_eq!(rows[2].4["kind"], "error");
+        assert_eq!(rows[2].5, "error");
+        assert_eq!(rows[2].6.as_deref(), Some("invalid_input"));
         assert_eq!(rows[3].0, "run_sequence");
         assert_eq!(rows[3].2.as_deref(), Some("run a failing sequence"));
         assert_eq!(rows[3].3, sequence_input);
-        assert_eq!(rows[3].4, "error");
-        assert_eq!(rows[3].5.as_deref(), Some("invalid_input"));
+        assert_eq!(rows[3].4["result"]["ok"], false);
+        assert_eq!(rows[3].5, "error");
+        assert_eq!(rows[3].6.as_deref(), Some("invalid_input"));
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn execute_call_persists_redacted_high_risk_payloads()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, _space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+
+        let upload_input = serde_json::json!({
+            "purpose": "prepare upload for a report",
+            "op": "begin_upload",
+            "target": "Research:/report.pdf",
+            "byte_len": 4096,
+            "media_type": "application/pdf",
+            "original_filename": "SECRET_ORIGINAL_FILENAME.pdf",
+            "encryption_metadata": {"wrapped_key": "SECRET_ENCRYPTION_METADATA"}
+        });
+        execute_call(
+            &state,
+            Some(&caller),
+            "file_transfer",
+            &upload_input,
+            async {
+                Ok(CallToolResult::structured(serde_json::json!({
+                    "upload_id": "upload-1",
+                    "target": "Research:/report.pdf",
+                    "transfer": {
+                        "method": "PUT",
+                        "url": "SECRET_UPLOAD_URL",
+                        "headers": {"authorization": "SECRET_UPLOAD_HEADER"},
+                        "expires_in_seconds": 300
+                    },
+                    "next_action": {
+                        "kind": "http_upload",
+                        "instruction": "SECRET_UPLOAD_INSTRUCTION",
+                        "transfer_field": "transfer"
+                    }
+                }))
+                .into())
+            },
+        )
+        .await?;
+
+        let me_input = serde_json::json!({
+            "purpose": "SECRET_ME_PURPOSE",
+            "unexpected": "SECRET_ME_ARGUMENT"
+        });
+        execute_call(&state, Some(&caller), "me", &me_input, async {
+            Ok(CallToolResult::structured(serde_json::json!({
+                "account": {
+                    "id": "account-1",
+                    "kind": "user",
+                    "display_name": "SECRET_DISPLAY_NAME"
+                },
+                "user": {"email": "SECRET_EMAIL"},
+                "capabilities": {"can_create_space": true, "can_manage_agents": true},
+                "server_version": "0.1.50"
+            }))
+            .into())
+        })
+        .await?;
+
+        let sequence_input = serde_json::json!({
+            "purpose": "run a sequence with sensitive nested data",
+            "commands": [
+                {"tool": "search", "op": "grep", "target": "Research:/", "q": "SECRET_SEQUENCE_QUERY"},
+                {"tool": "read", "op": "read", "target": "Research:/secret.md"},
+                {"tool": "write", "op": "patch", "target": "Research:/note.md", "edits": [{
+                    "old_text": "SECRET_SEQUENCE_OLD",
+                    "new_text": "SECRET_SEQUENCE_NEW",
+                    "mode": "unique"
+                }]}
+            ]
+        });
+        execute_call(
+            &state,
+            Some(&caller),
+            "run_sequence",
+            &sequence_input,
+            async {
+                Ok(CallToolResult::structured(serde_json::json!({
+                    "ok": false,
+                    "completed": 2,
+                    "failed_index": 2,
+                    "results": [
+                        {
+                            "index": 0,
+                            "tool": "search",
+                            "op": "grep",
+                            "ok": true,
+                            "result": {
+                                "space": "Research",
+                                "items": [{
+                                    "path": "/secret.md",
+                                    "match_lines": ["1: SECRET_SEQUENCE_MATCH_LINE"]
+                                }],
+                                "page": {"limit": 20, "returned": 1, "has_more": false}
+                            }
+                        },
+                        {
+                            "index": 1,
+                            "tool": "read",
+                            "op": "read",
+                            "ok": true,
+                            "result": {
+                                "space": "Research",
+                                "path": "/secret.md",
+                                "content": "SECRET_SEQUENCE_CONTENT",
+                                "content_sha256": "hash"
+                            }
+                        }
+                    ],
+                    "error": {
+                        "code": -32602,
+                        "message": "SECRET_SEQUENCE_ERROR",
+                        "data": {
+                            "code": "invalid_input",
+                            "recoverable": true,
+                            "next_action": {
+                                "kind": "retry",
+                                "hint": "SECRET_SEQUENCE_HINT",
+                                "input": {
+                                    "tool": "search",
+                                    "op": "grep",
+                                    "target": "Research:/",
+                                    "q": "SECRET_SEQUENCE_RETRY_QUERY"
+                                }
+                            }
+                        }
+                    }
+                }))
+                .into())
+            },
+        )
+        .await?;
+
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                Option<String>,
+                serde_json::Value,
+                serde_json::Value,
+                String,
+                Option<String>,
+            ),
+        >(
+            "SELECT tool, op, input, response, outcome, error_code \
+             FROM mcp_invocations WHERE actor_account_id = $1 ORDER BY id",
+        )
+        .bind(caller.account_id())
+        .fetch_all(&state.db)
+        .await?;
+        assert_eq!(rows.len(), 3);
+
+        let persisted = serde_json::to_string(&rows)?;
+        for secret in [
+            "SECRET_ORIGINAL_FILENAME",
+            "SECRET_ENCRYPTION_METADATA",
+            "SECRET_UPLOAD_URL",
+            "SECRET_UPLOAD_HEADER",
+            "SECRET_UPLOAD_INSTRUCTION",
+            "SECRET_ME_PURPOSE",
+            "SECRET_ME_ARGUMENT",
+            "SECRET_DISPLAY_NAME",
+            "SECRET_EMAIL",
+            "SECRET_SEQUENCE_QUERY",
+            "SECRET_SEQUENCE_OLD",
+            "SECRET_SEQUENCE_NEW",
+            "SECRET_SEQUENCE_MATCH_LINE",
+            "SECRET_SEQUENCE_CONTENT",
+            "SECRET_SEQUENCE_ERROR",
+            "SECRET_SEQUENCE_HINT",
+            "SECRET_SEQUENCE_RETRY_QUERY",
+        ] {
+            assert!(!persisted.contains(secret), "persisted secret: {secret}");
+        }
+
+        assert_eq!(rows[0].0, "file_transfer");
+        assert_eq!(rows[0].1.as_deref(), Some("begin_upload"));
+        assert_eq!(
+            rows[0].2["original_filename"]["category"],
+            "original_filename"
+        );
+        assert_eq!(
+            rows[0].3["result"]["transfer"]["url"]["category"],
+            "presigned_url"
+        );
+        assert_eq!(
+            rows[0].3["result"]["transfer"]["headers"]["category"],
+            "transfer_headers"
+        );
+        assert_eq!(rows[0].4, "success");
+
+        assert_eq!(rows[1].0, "me");
+        assert_eq!(rows[1].2["_omitted_field_count"], 2);
+        assert_eq!(
+            rows[1].3["result"]["account"]["display_name"]["category"],
+            "pii"
+        );
+        assert_eq!(rows[1].3["result"]["user"]["email"]["category"], "pii");
+        assert_eq!(rows[1].4, "success");
+
+        assert_eq!(rows[2].0, "run_sequence");
+        assert_eq!(rows[2].2["commands"][0]["q"]["category"], "search_query");
+        assert_eq!(
+            rows[2].2["commands"][2]["edits"][0]["old_text"]["category"],
+            "document_content"
+        );
+        assert_eq!(
+            rows[2].3["result"]["results"][0]["result"]["items"][0]["match_lines"]["category"],
+            "document_content"
+        );
+        assert_eq!(
+            rows[2].3["result"]["results"][1]["result"]["content"]["category"],
+            "document_content"
+        );
+        assert_eq!(
+            rows[2].3["result"]["error"]["data"]["next_action"]["input"]["q"]["category"],
+            "search_query"
+        );
+        assert_eq!(rows[2].4, "error");
+        assert_eq!(rows[2].5.as_deref(), Some("invalid_input"));
 
         db.cleanup().await;
         Ok(())

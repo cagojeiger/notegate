@@ -1012,8 +1012,17 @@ mod tests {
         })
         .await?;
 
-        let row = sqlx::query_as::<_, (String, String, Option<String>, serde_json::Value)>(
-            "SELECT tool, op, space_name, input FROM mcp_invocations \
+        let row = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                serde_json::Value,
+                serde_json::Value,
+            ),
+        >(
+            "SELECT tool, op, space_name, input, response FROM mcp_invocations \
              WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
         )
         .bind(caller.account_id())
@@ -1023,6 +1032,7 @@ mod tests {
         assert_eq!(row.1, "changes");
         assert_eq!(row.2.as_deref(), Some("rest-test"));
         assert_eq!(row.3, input);
+        assert_eq!(row.4["result"]["space"], "rest-test");
 
         let invalid_input = serde_json::json!({
             "purpose": "Review recent changes",
@@ -1066,18 +1076,29 @@ mod tests {
             CallToolResponse::Complete(ref result) if result.is_error == Some(true)
         ));
 
-        let malformed_row =
-            sqlx::query_as::<_, (Option<String>, serde_json::Value, String, String)>(
-                "SELECT purpose, input, outcome, error_code FROM mcp_invocations \
+        let malformed_row = sqlx::query_as::<
+            _,
+            (
+                Option<String>,
+                serde_json::Value,
+                serde_json::Value,
+                String,
+                String,
+            ),
+        >(
+            "SELECT purpose, input, response, outcome, error_code FROM mcp_invocations \
              WHERE actor_account_id = $1 ORDER BY id DESC LIMIT 1",
-            )
-            .bind(caller.account_id())
-            .fetch_one(&state.db)
-            .await?;
+        )
+        .bind(caller.account_id())
+        .fetch_one(&state.db)
+        .await?;
         assert_eq!(malformed_row.0, None);
         assert_eq!(malformed_row.1, missing_purpose);
-        assert_eq!(malformed_row.2, "error");
-        assert_eq!(malformed_row.3, "invalid_params");
+        assert_eq!(malformed_row.2["kind"], "complete");
+        assert_eq!(malformed_row.2["is_error"], true);
+        assert_eq!(malformed_row.3, "error");
+        assert_eq!(malformed_row.4, "invalid_params");
+        assert!(!malformed_row.2.to_string().contains("missing field"));
 
         db.cleanup().await;
         Ok(())
@@ -1110,7 +1131,10 @@ mod tests {
             .await;
         assert!(result.is_err());
 
-        let unknown_input = serde_json::json!({"purpose": "test unknown tool", "value": 7});
+        let unknown_input = serde_json::json!({
+            "purpose": "test unknown tool",
+            "value": "SECRET_UNKNOWN_ARGUMENT"
+        });
         let unknown_error = client
             .call_tool(
                 CallToolRequestParams::new("not_a_tool")
@@ -1119,24 +1143,40 @@ mod tests {
             .await;
         assert!(unknown_error.is_err());
 
-        let rows =
-            sqlx::query_as::<_, (String, Option<String>, serde_json::Value, String, String)>(
-                "SELECT tool, purpose, input, outcome, error_code FROM mcp_invocations \
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                Option<String>,
+                serde_json::Value,
+                serde_json::Value,
+                String,
+                String,
+            ),
+        >(
+            "SELECT tool, purpose, input, response, outcome, error_code FROM mcp_invocations \
              WHERE actor_account_id = $1 ORDER BY id",
-            )
-            .bind(caller.account_id())
-            .fetch_all(&state.db)
-            .await?;
+        )
+        .bind(caller.account_id())
+        .fetch_all(&state.db)
+        .await?;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].0, "read");
         assert_eq!(rows[0].1, None);
         assert_eq!(rows[0].2, missing_purpose);
-        assert_eq!(rows[0].3, "error");
-        assert_eq!(rows[0].4, "required_fields_missing");
-        assert_eq!(rows[1].0, "not_a_tool");
+        assert_eq!(rows[0].3["kind"], "error");
+        assert_eq!(rows[0].4, "error");
+        assert_eq!(rows[0].5, "required_fields_missing");
+        assert_eq!(rows[1].0, "unknown");
         assert_eq!(rows[1].1.as_deref(), Some("test unknown tool"));
-        assert_eq!(rows[1].2, unknown_input);
-        assert_eq!(rows[1].3, "error");
+        assert_eq!(rows[1].2["purpose"], "test unknown tool");
+        assert_eq!(
+            rows[1].2["_redacted_payload"]["category"],
+            "unrecognized_tool_input"
+        );
+        assert!(!rows[1].2.to_string().contains("SECRET_UNKNOWN_ARGUMENT"));
+        assert_eq!(rows[1].3["kind"], "error");
+        assert_eq!(rows[1].4, "error");
 
         stop_tool_refresh_test_server(client, shutdown, server_task).await;
         db.cleanup().await;

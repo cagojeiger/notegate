@@ -20,7 +20,7 @@ file_transfer  begin_upload/prepare_parts/complete_upload/abort_upload/prepare_d
 run_sequence  ordered command sequence 실행
 ```
 
-`me`는 입력이 없다. 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수이며, `run_sequence`는 sequence 전체에 하나만 지정한다. 서버는 인증된 `tools/call`마다 caller, tool/op, purpose, 원본 arguments JSON, 결과와 실행 시간을 별도 invocation history에 기록한다. 입력 schema나 purpose 검증에 실패한 호출도 기록하며, `run_sequence`는 내부 command별 행이 아니라 전체 sequence 한 행으로 남는다.
+`me`는 입력이 없다. 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수이며, `run_sequence`는 sequence 전체에 하나만 지정한다. 서버는 인증된 `tools/call`마다 caller, tool/op, purpose, redacted 입력·응답 snapshot과 실행 결과/시간을 별도 invocation history에 기록한다. 본문, 검색어/cursor, credential, PII와 자유 형식 오류 문구는 redaction marker로 대체하고 알 수 없는 field는 omission으로 제외한다. 입력 schema나 purpose 검증에 실패한 호출도 안전한 summary로 기록하며, `run_sequence`는 내부 command별 행이 아니라 전체 sequence 한 행으로 남는다.
 
 ## 버전 확인
 
