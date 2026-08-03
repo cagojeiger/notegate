@@ -7,11 +7,21 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{actionable_input_error, invalid_input_error};
+use super::resolve::{actionable_input_error, invalid_input_error, required_input};
 use super::{events, files, search, spaces};
+use crate::mcp::contract::{McpAction, error_json};
 use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
+
+/// Public schema for `write.edits`; runtime parsing remains selected by the top-level write op.
+#[allow(dead_code)]
+#[derive(Debug, Clone, JsonSchema)]
+#[schemars(untagged, inline)]
+enum WriteEditEntrySchema {
+    Patch(files::PatchEdit),
+    Line(files::LineEditInput),
+}
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +66,10 @@ pub struct ReadInput {
 #[serde(deny_unknown_fields)]
 pub struct SearchInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
     pub purpose: String,
     /// Operation: find/grep.
     pub op: String,
@@ -90,6 +104,10 @@ pub struct SearchInput {
 #[serde(deny_unknown_fields)]
 pub struct WriteInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
     pub purpose: String,
     /// Operation: write/append/patch/edit.
     pub op: String,
@@ -100,6 +118,7 @@ pub struct WriteInput {
     pub content: Option<String>,
     /// Patch or line-edit entries for patch/edit.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
     pub edits: Option<Vec<Value>>,
     /// Create missing text for write/append.
     #[serde(default)]
@@ -116,6 +135,10 @@ pub struct WriteInput {
 #[serde(deny_unknown_fields)]
 pub struct ManageInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    #[allow(
+        dead_code,
+        reason = "validated and recorded at the shared tools/call boundary"
+    )]
     pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
     pub op: String,
@@ -186,6 +209,7 @@ pub struct RunSequenceInput {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(inline)]
 pub struct SequenceCommand {
     /// Tool category for this command: read/search/write/manage.
     pub tool: String,
@@ -230,6 +254,7 @@ pub struct SequenceCommand {
     pub content: Option<String>,
     /// Patch or line-edit entries for patch/edit.
     #[serde(default)]
+    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
     pub edits: Option<Vec<Value>>,
 
     /// Create missing text for write/append.
@@ -407,10 +432,9 @@ fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
             "changes_fields_not_allowed",
             "direction is only valid for read op=changes",
             "Remove direction or change op to changes.",
-            json!({
-                "kind": "remove_fields",
-                "fields": ["direction"],
-            }),
+            McpAction::RemoveFields {
+                fields: vec!["direction".to_owned()],
+            },
         ));
     }
     Ok(())
@@ -616,10 +640,9 @@ async fn dispatch_command(
             "changes_fields_not_allowed",
             "direction is only valid for read op=changes",
             "Remove direction or use it only with a read changes command.",
-            json!({
-                "kind": "remove_fields",
-                "fields": ["direction"],
-            }),
+            McpAction::RemoveFields {
+                fields: vec!["direction".to_owned()],
+            },
         ));
     }
     match command.tool.as_str() {
@@ -661,20 +684,8 @@ async fn dispatch_command(
     }
 }
 
-fn error_json(error: ErrorData) -> Value {
-    json!({
-        "code": error.code.0,
-        "message": error.message,
-        "data": error.data,
-    })
-}
-
 fn required<T>(value: Option<T>, field: &'static str, op: &'static str) -> Result<T, ErrorData> {
-    value.ok_or_else(|| {
-        invalid_input_error(format!(
-            "op={op} requires {field}; retry with field `{field}` set"
-        ))
-    })
+    required_input(value, field, &format!("op={op}"))
 }
 
 fn parse_edits<T>(value: Option<Vec<Value>>, op: &'static str) -> Result<Vec<T>, ErrorData>
@@ -711,6 +722,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn operation_specific_required_fields_use_the_common_recovery_action() {
+        let error = required::<String>(None, "target", "read").expect_err("target is required");
+        let data = error.data.expect("missing field carries recovery data");
+
+        assert_eq!(data["code"], "required_field_missing");
+        assert_eq!(data["next_action"]["kind"], "add_fields");
+        assert_eq!(data["next_action"]["fields"][0]["field"], "target");
+    }
+
+    #[test]
     fn purpose_is_required_for_direct_and_sequence_calls() {
         let direct = serde_json::from_value::<SearchInput>(json!({
             "op": "find",
@@ -738,6 +759,44 @@ mod tests {
         .expect_err("unknown command field should be rejected");
 
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn edit_entries_keep_op_specific_runtime_parsing() {
+        let patch = parse_edits::<files::PatchEdit>(
+            Some(vec![json!({
+                "old_text": "before",
+                "new_text": "after",
+                "mode": "unique",
+                "expected_count": 1
+            })]),
+            "patch",
+        )
+        .expect("patch edit parses");
+        assert_eq!(patch.len(), 1);
+        assert_eq!(patch[0].old_text, "before");
+
+        let line = parse_edits::<files::LineEditInput>(
+            Some(vec![json!({
+                "op": "replace_lines",
+                "start_line": 2,
+                "end_line": 3,
+                "content": "replacement"
+            })]),
+            "edit",
+        )
+        .expect("line edit parses");
+        assert_eq!(line.len(), 1);
+        assert_eq!(line[0].op, "replace_lines");
+
+        let error = parse_edits::<files::PatchEdit>(
+            Some(vec![
+                json!({"op": "delete_lines", "start_line": 2, "end_line": 3}),
+            ]),
+            "patch",
+        )
+        .expect_err("line edit must not parse as a patch edit");
+        assert!(error.message.contains("invalid edit entry for op=patch"));
     }
 
     #[test]

@@ -48,13 +48,13 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 이 보장은 operation history가 현재 domain state와 어긋나지 않게 하기 위한 기본 계약이다.
 
-`mcp_invocations`는 domain transaction 밖에서 best-effort로 저장한다. 기록 실패는 이미 수행된 read/mutation 결과를 실패로 바꾸지 않으며 warning log를 남긴다. MCP 입력 schema 검증 전에 거부된 malformed call과 유효하지 않은 `purpose`는 실행 이력에 포함하지 않는다.
+`mcp_invocations`는 domain transaction 밖에서 best-effort로 저장한다. 기록 실패는 이미 수행된 read/mutation 결과를 실패로 바꾸지 않으며 warning log를 남긴다. 인증을 통과해 서버의 `tools/call` handler에 도달한 요청은 tool별 입력 역직렬화 전에 기록 경계를 통과하므로 성공, 업무 오류, `purpose` 오류, tool argument schema 오류, unknown tool을 모두 실행 이력에 포함한다. JSON-RPC `tools/call` 자체로 역직렬화되지 못한 요청, 인증 전에 거부된 요청, client에서 schema 검증으로 차단되어 전송되지 않은 요청은 caller를 확정할 수 없거나 서버에 도달하지 않으므로 포함하지 않는다.
 
 ## MCP invocation history
 
-`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, success/error, 안정적인 error code, 실행 시간을 저장한다. `read op=changes`는 어느 Space의 변경 stream을 조회했는지 확인할 수 있도록 검증된 `space_name` snapshot도 저장한다. `me`는 purpose 예외이므로 NULL이다. 다른 tool의 purpose는 1..200자의 짧은 호출 이유다.
+`mcp_invocations`는 `owner_user_id`, 실제 `actor_account_id`, user/agent 구분, `tool`, optional `op`, `purpose`, 원본 `arguments` JSON object인 `input`, success/error, 안정적인 error code, 실행 시간을 저장한다. `read op=changes`는 어느 Space의 변경 stream을 조회했는지 목록에서 바로 확인할 수 있도록 검증된 `space_name` snapshot도 함께 저장한다. `me`는 purpose 예외이므로 NULL이다. 유효한 다른 tool의 purpose는 1..200자의 짧은 호출 이유이며, purpose 또는 argument 검증 실패 행에서는 summary purpose가 NULL일 수 있고 원본 값은 `input`에 남는다.
 
-전체 tool input, 검색어, target path, Text content, edit, 암호화 metadata, presigned URL, 응답 payload는 저장하지 않는다. `read op=changes`의 `space_name`만 target path에서 분리해 보존하며 path 부분은 저장하지 않는다. Purpose에도 secret, 본문, 검색 결과를 넣지 않는다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다. Retention은 90일이며 아래의 기존 purge worker가 bounded batch로 집행한다.
+`input`은 도구별 재구성이나 field redaction 없이 `tools/call.params.arguments`를 그대로 저장한다. 따라서 검색어, target path, Text content/edit, 암호화 metadata, multipart handle/ETag, `run_sequence.commands[]`도 포함될 수 있다. Bearer/OAuth/API key 같은 HTTP 인증 정보, protocol `_meta`, tool response와 presigned response URL은 `arguments` 바깥이므로 저장하지 않는다. `run_sequence`는 하나의 MCP 호출로 한 행을 만들며 전체 commands JSON과 sequence 전체 outcome을 기록하고 내부 command별 행은 만들지 않는다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다. Retention은 90일이며 아래의 기존 purge worker가 bounded batch로 집행한다.
 
 ## Audit event sources
 

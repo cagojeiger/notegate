@@ -13,6 +13,7 @@ use uuid::Uuid;
 use super::resolve::{actionable_input_error, caller, resolve_target, service_error};
 use super::support::page_json;
 use crate::file_change::FileChangeImpact;
+use crate::mcp::contract::{McpAction, ToolCallSpec};
 use crate::state::AppState;
 
 pub async fn call(
@@ -74,11 +75,10 @@ fn parse_change_direction(raw: Option<&str>) -> Result<ChangeDirection, ErrorDat
             "changes_direction_invalid",
             "direction must be 'older' or 'newer'",
             "Choose older for history pagination or newer for checkpoint replay.",
-            json!({
-                "kind": "choose_value",
-                "field": "direction",
-                "choices": ["older", "newer"],
-            }),
+            McpAction::ChooseValue {
+                field: "direction".to_owned(),
+                choices: vec![json!("older"), json!("newer")],
+            },
         )),
     }
 }
@@ -93,13 +93,14 @@ fn require_newer_cursor(
             "changes_cursor_required",
             "direction=newer requires cursor",
             "Capture checkpoint_cursor from the current changes page, build the Space snapshot, then replay newer changes from that cursor.",
-            json!({
-                "kind": "rebuild_snapshot",
-                "baseline_call": {
-                    "tool": "read",
-                    "input": {"purpose": purpose, "op": "changes", "target": target, "limit": 1},
-                },
-            }),
+            McpAction::RebuildSnapshot {
+                reason: None,
+                cursor: None,
+                baseline_call: Some(ToolCallSpec::new(
+                    "read",
+                    json!({"purpose": purpose, "op": "changes", "target": target, "limit": 1}),
+                )),
+            },
         )
     })
 }
@@ -230,11 +231,10 @@ fn require_space_root(path: &str, root_target: &str) -> Result<(), ErrorData> {
         "changes_scope_invalid",
         "op=changes requires a Space-root target",
         "Replace target with the resolved Space root; node and subtree filters are not supported.",
-        json!({
-            "kind": "replace_field",
-            "field": "target",
-            "value": root_target,
-        }),
+        McpAction::ReplaceField {
+            field: "target".to_owned(),
+            value: json!(root_target),
+        },
     ))
 }
 
@@ -284,21 +284,25 @@ fn changes_cursor_error(
     let (hint, next_action) = match direction {
         ChangeDirection::Older => (
             "Discard this cursor and restart from the latest changes for the current Space.",
-            json!({
-                "kind": "call_tool",
-                "tool": "read",
-                "input": {"purpose": purpose, "op": "changes", "target": target},
-            }),
+            McpAction::CallTool {
+                call: ToolCallSpec::new(
+                    "read",
+                    json!({"purpose": purpose, "op": "changes", "target": target}),
+                ),
+                reason: None,
+                instruction: None,
+            },
         ),
         ChangeDirection::Newer => (
             "This cursor cannot continue cache replay. Obtain a new checkpoint_cursor and rebuild the current Space snapshot before reading newer changes.",
-            json!({
-                "kind": "rebuild_snapshot",
-                "baseline_call": {
-                    "tool": "read",
-                    "input": {"purpose": purpose, "op": "changes", "target": target, "limit": 1},
-                },
-            }),
+            McpAction::RebuildSnapshot {
+                reason: None,
+                cursor: None,
+                baseline_call: Some(ToolCallSpec::new(
+                    "read",
+                    json!({"purpose": purpose, "op": "changes", "target": target, "limit": 1}),
+                )),
+            },
         ),
     };
     actionable_input_error(code, message, hint, next_action)
@@ -329,35 +333,33 @@ fn changes_next_action(
     has_more: bool,
     resync_required: bool,
     limit: i64,
-) -> Value {
+) -> McpAction {
     if resync_required {
-        return json!({
-            "kind": "rebuild_snapshot",
-            "reason": "The supplied cursor cannot prove continuous replay. Rebuild the current Space state and use checkpoint_cursor as the new baseline.",
-            "cursor": checkpoint_cursor,
-        });
+        return McpAction::RebuildSnapshot {
+            reason: Some("The supplied cursor cannot prove continuous replay. Rebuild the current Space state and use checkpoint_cursor as the new baseline.".to_owned()),
+            cursor: Some(checkpoint_cursor.to_owned()),
+            baseline_call: None,
+        };
     }
     if has_more {
-        return json!({
-            "kind": "call_tool",
-            "reason": "More changes are available. Apply this page in order, then continue from its checkpoint_cursor.",
-            "tool": "read",
-            "input": {
+        return McpAction::CallTool {
+            call: ToolCallSpec::new("read", json!({
                 "purpose": purpose,
                 "op": "changes",
                 "target": target,
                 "limit": limit,
                 "direction": "newer",
                 "cursor": checkpoint_cursor,
-            },
-        });
+            })),
+            reason: Some("More changes are available. Apply this page in order, then continue from its checkpoint_cursor.".to_owned()),
+            instruction: None,
+        };
     }
 
-    json!({
-        "kind": "store_cursor",
-        "reason": "All currently available changes were returned. Store checkpoint_cursor after applying them and use it as cursor later.",
-        "cursor": checkpoint_cursor,
-    })
+    McpAction::StoreCursor {
+        reason: "All currently available changes were returned. Store checkpoint_cursor after applying them and use it as cursor later.".to_owned(),
+        cursor: checkpoint_cursor.to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -658,7 +660,14 @@ mod tests {
 
     #[test]
     fn continuation_action_uses_the_checkpoint_cursor() {
-        let action = changes_next_action("daily:/", "opaque-41", TEST_PURPOSE, true, false, 25);
+        let action = json!(changes_next_action(
+            "daily:/",
+            "opaque-41",
+            TEST_PURPOSE,
+            true,
+            false,
+            25
+        ));
 
         assert_eq!(action["kind"], "call_tool");
         assert_eq!(action["tool"], "read");
@@ -672,7 +681,14 @@ mod tests {
 
     #[test]
     fn completed_action_tells_the_caller_to_store_the_cursor() {
-        let action = changes_next_action("daily:/", "opaque-41", TEST_PURPOSE, false, false, 25);
+        let action = json!(changes_next_action(
+            "daily:/",
+            "opaque-41",
+            TEST_PURPOSE,
+            false,
+            false,
+            25
+        ));
 
         assert_eq!(action["kind"], "store_cursor");
         assert_eq!(action["cursor"], "opaque-41");
@@ -680,7 +696,14 @@ mod tests {
 
     #[test]
     fn invalid_cursor_action_requires_a_full_resync() {
-        let action = changes_next_action("daily:/", "opaque-99", TEST_PURPOSE, false, true, 25);
+        let action = json!(changes_next_action(
+            "daily:/",
+            "opaque-99",
+            TEST_PURPOSE,
+            false,
+            true,
+            25
+        ));
 
         assert_eq!(action["kind"], "rebuild_snapshot");
         assert_eq!(action["cursor"], "opaque-99");

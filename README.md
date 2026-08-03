@@ -61,6 +61,10 @@ with linked [search detail](http://localhost:3000/d/notegate-search-detail) and
 
 See the [development guide](docs/development.md) for architecture, configuration, service URLs, and checks.
 
+The source release version is tracked in [`VERSION`](VERSION). MCP clients can
+compare it with the running server's `me.server_version` when diagnosing a stale
+tool catalog.
+
 ## Documentation
 
 - [Product model](docs/adr/0001-ai-native-personal-file-space.md)

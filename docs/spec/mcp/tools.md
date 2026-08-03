@@ -19,9 +19,34 @@
 - Space reconciliation 중 해당 Space의 read tool은 정상 동작하고 mutation tool은 `data.kind=usage_recalculation_in_progress`, `retryable=true`, `retry_after_seconds`를 포함한 JSON-RPC server error를 반환한다. 관리자 전체 재계산도 Space 단위로 순차 진행되므로 같은 규칙이 Space별로 적용된다. 상세 계약은 `../usage-and-quotas.md`를 따른다.
 - Tool handler가 반환하는 MCP error `data`는 공통 분류 `kind`와 안정적인 `code`를 사용한다. 호출자가 자연어 message를 해석하지 않고 입력을 수정할 수 있는 경우에는 `retryable=false`, `recoverable=true`, `hint`, `next_action`을 추가한다.
 
+### 공통 action과 error
+
+성공 응답의 후속 동작과 복구 가능한 error의 `data.next_action`은 같은 tagged action 계약을 사용한다. 호출자는 설명 문구 대신 `kind`로 분기한다.
+
+```ts
+type McpAction =
+  | { kind: "add_fields"; fields: Array<{ field: string; description?: string }> }
+  | { kind: "remove_fields"; fields: string[] }
+  | { kind: "replace_field"; field: string; value: unknown }
+  | { kind: "choose_value"; field: string; choices: unknown[] }
+  | { kind: "call_tool"; tool: string; input: object; reason?: string; instruction?: string }
+  | { kind: "rebuild_snapshot"; reason?: string; cursor?: string; baseline_call?: ToolCallSpec }
+  | { kind: "store_cursor"; reason: string; cursor: string }
+  | { kind: "http_upload"; transfer_field: string; instruction: string; then: ToolCallSpec }
+  | { kind: "http_upload_parts"; /* multipart transfer instructions */ }
+  | { kind: "http_download"; transfer_field: string; instruction: string }
+  | { kind: "done" }
+
+type ToolCallSpec = { tool: string; input: object }
+```
+
+공개 tool schema의 필수 입력이 빠지면 server는 tool handler 실행 전에 `code=required_fields_missing`과 `next_action.kind=add_fields`를 반환한다. 통합 tool의 `op`별 선택 필드가 빠지면 `code=required_field_missing`과 같은 action을 반환한다. `fields[].description`이 있으면 그 설명에 맞는 값을 구성해 같은 tool을 다시 호출한다.
+
+`run_sequence`에서 한 command가 실패하면 `error: {code, message, data}`에 동일한 error data를 넣는다. 따라서 직접 호출과 sequence 내부 호출의 복구 분기가 같다.
+
 ## `me`
 
-Caller identity와 capability를 반환한다. Space 목록은 `read`의 `op=spaces`로 조회한다.
+Caller identity, capability, 실행 중인 `server_version`을 반환한다. Space 목록은 `read`의 `op=spaces`로 조회한다.
 
 ## `read`
 
@@ -63,7 +88,7 @@ type ReadInput = {
 
 `changes`는 operation filter 없이 Folder/Text/File의 create, content/metadata update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
 
-호출 이력에는 전체 target이나 event payload를 복제하지 않고, `read op=changes`가 조회한 검증된 Space 이름만 `space_name` snapshot으로 남긴다.
+호출 이력에는 `tools/call.params.arguments` 원본을 JSON으로 저장한다. 따라서 changes target도 `input`에서 확인할 수 있고, 목록용으로 검증된 Space 이름을 `space_name` summary에 함께 남긴다.
 
 새 캐시는 **`changes(limit=1)`에서 `checkpoint_cursor` 저장 → 현재 Space snapshot 구성 → `direction=newer, cursor=<checkpoint_cursor>`로 조회** 순서로 시작한다. 마지막 조회가 snapshot을 읽는 동안 발생한 변경을 회수한다. 응답의 event를 `event_id ASC` 순서대로 모두 적용한 뒤에만 새 `checkpoint_cursor`를 저장한다. `page.has_more=true`이면 `page.next_cursor`로 계속 읽는다. `resync_required=true`이면 cursor 이후의 연속성을 보장할 수 없으므로 현재 Space tree를 다시 만들고 응답의 `checkpoint_cursor`에서 재개한다.
 
@@ -148,17 +173,32 @@ type WriteInput = {
   op: "write" | "append" | "patch" | "edit"
   target: string
   content?: string
-  edits?: unknown[]
+  edits?: Array<PatchEdit | LineEditInput>
   create?: boolean
   ensure_newline?: boolean
   expected_sha256?: string
+}
+
+type PatchEdit = {
+  old_text: string
+  new_text: string
+  mode?: "unique" | "first" | "all"
+  expected_count?: number
+}
+
+type LineEditInput = {
+  op: "insert_before_line" | "insert_after_line" | "replace_lines" | "delete_lines"
+  line?: number
+  start_line?: number
+  end_line?: number
+  content?: string
 }
 ```
 
 - `op=write`: 전체 content replacement다. 없으면 `create=true`가 필요하다.
 - `op=append`: EOF append다. `ensure_newline=true`이면 기존 content가 비어 있지 않고 newline으로 끝나지 않을 때 content 앞에 newline을 넣는다.
-- `op=patch`: string replacement다. edit entry는 `old_text`, `new_text`, optional `mode: "unique"|"first"|"all"`, optional `expected_count`를 가진다.
-- `op=edit`: 1-based line operation이다. `insert_before_line`, `insert_after_line`, `replace_lines`, `delete_lines`를 지원한다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. `content`는 여러 줄을 포함할 수 있다.
+- `op=patch`: `edits[]`에 `PatchEdit`만 받는 string replacement다.
+- `op=edit`: `edits[]`에 `LineEditInput`만 받는 1-based line operation이다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. `content`는 여러 줄을 포함할 수 있다.
 - `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 service layer의 공통 규칙으로 저장 전에 문법 검증한다. 검증은 target path의 file name extension 기준이며 schema validation은 하지 않는다.
 
 필수 필드:
@@ -273,7 +313,7 @@ type SequenceCommand = {
   include?: string[]
   exclude?: string[]
   content?: string
-  edits?: unknown[]
+  edits?: Array<PatchEdit | LineEditInput>
   create?: boolean
   parents?: boolean
   recursive?: boolean

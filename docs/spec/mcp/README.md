@@ -11,7 +11,7 @@ Space name은 Unicode를 허용하지만 `target` 파싱을 위해 `:`는 사용
 노출되는 tool은 다음 7개다.
 
 ```text
-me      caller identity 확인
+me      caller identity/server version 확인
 read    spaces/ls/tree/stat/read/changes
 search  find/grep
 write   write/append/patch/edit
@@ -20,7 +20,15 @@ file_transfer  begin_upload/prepare_parts/complete_upload/abort_upload/prepare_d
 run_sequence  ordered command sequence 실행
 ```
 
-`me`는 입력이 없다. 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수이며, `run_sequence`는 sequence 전체에 하나만 지정한다. 서버는 payload를 복제하지 않고 caller, tool/op, purpose, 결과와 실행 시간만 별도 invocation history에 기록한다.
+`me`는 입력이 없다. 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수이며, `run_sequence`는 sequence 전체에 하나만 지정한다. 서버는 인증된 `tools/call`마다 caller, tool/op, purpose, 원본 arguments JSON, 결과와 실행 시간을 별도 invocation history에 기록한다. 입력 schema나 purpose 검증에 실패한 호출도 기록하며, `run_sequence`는 내부 command별 행이 아니라 전체 sequence 한 행으로 남는다.
+
+## 버전 확인
+
+- 이 checkout의 source release version은 repository root의 [`VERSION`](../../../VERSION)이 정본이다.
+- 실행 중인 서버 버전은 MCP `initialize` 응답의 `serverInfo.version` 또는 `me.server_version`으로 확인한다.
+- MCP protocol version은 `initialize.protocolVersion`이며 NoteGate release version과 별개다.
+
+문서/소스와 실행 중인 서버가 다른지 조사할 때는 `VERSION`, `me.server_version`, 현재 client에 노출된 tool 이름을 함께 기록한다. 서버 버전은 최신인데 tool 목록이 다르면 client/connector의 schema cache와 구독 상태를 확인한다.
 
 ## Tool 목록 갱신
 

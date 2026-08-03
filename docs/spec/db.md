@@ -208,7 +208,7 @@ file_change_events
 
 `file_change_events`는 space 안의 파일/폴더/문서 변경을 기록한다. Retention policy는 3 months이며, space 전체 조회와 node별 조회를 위해 별도 index를 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
-`mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. 입력 payload나 결과 본문은 저장하지 않는다.
+`mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. `tools/call.params.arguments` 원본 object를 JSONB로 저장하며 결과 payload는 저장하지 않는다.
 
 ```text
 mcp_invocations
@@ -221,12 +221,13 @@ mcp_invocations
   op text null
   purpose text null
   space_name text null
+  input jsonb not null check object
   outcome text check ('success','error')
   error_code text null
   duration_ms bigint not null check >= 0
 ```
 
-`me`만 `purpose=NULL`을 허용하고 나머지 tool은 앞뒤 공백 없는 1..200자를 요구한다. `space_name`은 `read op=changes`에만 허용되는 검증된 Space-name snapshot이며 target path는 저장하지 않는다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 기존 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
+유효한 호출의 `purpose`는 앞뒤 공백 없는 1..200자다. `purpose` 자체가 없거나 잘못된 실패도 기록해야 하므로 DB는 NULL을 허용하고, 원본 값은 `input`에 보존한다. `space_name`은 `read op=changes`에만 허용되는 검증된 Space-name summary다. 전체 target을 포함한 원본은 `input`에서 확인한다. Tool 이름은 unknown tool 실패도 기록할 수 있도록 1..128자 일반 문자열이다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code, `invalid_params`/`tool_error`, 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 기존 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
 
 Event history DB 제약:
 

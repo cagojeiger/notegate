@@ -151,9 +151,9 @@ async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
 
     sqlx::query(
         "INSERT INTO mcp_invocations \
-         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, outcome, duration_ms) \
+         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, input, outcome, duration_ms) \
          SELECT now() - interval '91 days', $1, $1, 'user', 'search', 'find', \
-                'expired invocation ' || value, 'success', 1 \
+                'expired invocation ' || value, '{}'::jsonb, 'success', 1 \
          FROM generate_series(1, 1001) AS value",
     )
     .bind(user)
@@ -161,9 +161,9 @@ async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
     .await?;
     sqlx::query(
         "INSERT INTO mcp_invocations \
-         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, outcome, duration_ms) \
+         (created_at, owner_user_id, actor_account_id, caller_kind, tool, op, purpose, input, outcome, duration_ms) \
          VALUES (now() - interval '89 days', $1, $1, 'user', 'read', 'read', \
-                 'recent invocation', 'success', 1)",
+                 'recent invocation', '{}'::jsonb, 'success', 1)",
     )
     .bind(user)
     .execute(&db.pool)
