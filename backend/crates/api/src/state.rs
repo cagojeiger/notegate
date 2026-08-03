@@ -24,6 +24,7 @@ use crate::observability::MetricsHandle;
 use crate::admission::SearchAdmission;
 use crate::auth::jwt::JwtAuthority;
 use crate::auth::oidc::OidcProvider;
+use crate::metadata_write_behind::MetadataWriteBuffer;
 
 /// Space lifecycle service over the db-backed [`SpaceRepo`].
 pub type Spaces = SpaceService;
@@ -61,6 +62,7 @@ pub struct AppState {
     /// Account lookup for resolving attribution refs in REST output.
     pub accounts: AccountRepo,
     pub browser_sessions: BrowserSessionRepo,
+    pub(crate) metadata_writes: MetadataWriteBuffer,
     pub(crate) mcp_invocations: McpInvocationRepo,
     pub(crate) metrics: Option<MetricsHandle>,
     pub(crate) shutdown: CancellationToken,
@@ -130,6 +132,7 @@ impl AppState {
             usage,
             accounts: account_repo,
             browser_sessions,
+            metadata_writes: MetadataWriteBuffer::default(),
             mcp_invocations,
             metrics: None,
             shutdown: CancellationToken::new(),

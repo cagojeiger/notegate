@@ -32,6 +32,7 @@ use uuid::Uuid;
 
 use crate::mcp::tools::transfers;
 use crate::mcp::tools::unified::{CompletedPartInput, FileTransferInput};
+use crate::metadata_write_behind::flush_for_test;
 
 use crate::rest::test_support::{
     caller_and_space, empty_request, json_request, rest_app, state, state_with_s3,
@@ -238,6 +239,7 @@ async fn verified_raster_images_receive_inline_preview_urls()
     assert_eq!(batch["results"][1]["node_id"], node_id.to_string());
     assert_eq!(batch["results"][1]["media_type"], "image/png");
     assert!(batch["results"][1]["url"].as_str().is_some());
+    assert!(flush_for_test(&state.metadata_writes, db.pool.clone()).await);
     let batch_detected: Option<String> =
         sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
             .bind(node_id)
@@ -256,6 +258,7 @@ async fn verified_raster_images_receive_inline_preview_urls()
     )
     .await?;
     assert_eq!(status, StatusCode::OK);
+    assert!(flush_for_test(&state.metadata_writes, db.pool.clone()).await);
     let detected: Option<String> =
         sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
             .bind(node_id)

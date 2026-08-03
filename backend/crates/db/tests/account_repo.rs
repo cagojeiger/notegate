@@ -33,6 +33,19 @@ async fn upsert_user_creates_and_updates_same_account() -> Result<(), Box<dyn st
     assert_eq!(second.display_name, "Second");
     assert_eq!(first_user.id, second_user.id);
     assert_eq!(second_user.email.as_deref(), Some("second@example.test"));
+    let (by_id, by_id_user) = repo
+        .find_caller_by_account_id(second.id)
+        .await?
+        .ok_or("caller should resolve by account id")?;
+    assert_eq!(by_id.display_name, "Second");
+    assert_eq!(by_id_user.email.as_deref(), Some("second@example.test"));
+    let (by_sub, by_sub_user) = repo
+        .find_user_by_sub("sub-1")
+        .await?
+        .ok_or("caller should resolve by provider subject")?;
+    assert_eq!(by_sub.id, second.id);
+    assert_eq!(by_sub_user.id, second_user.id);
+    assert_eq!(repo.find_user_id_by_sub("sub-1").await?, Some(second.id));
     let op_types = sqlx::query_scalar::<_, String>(
         "SELECT op_type FROM audit_events WHERE owner_user_id = $1 ORDER BY id",
     )

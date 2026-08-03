@@ -79,6 +79,14 @@ async fn inserted_session_can_be_found_by_hash() -> Result<(), Box<dyn std::erro
         )?,
         "refresh-1"
     );
+    let resolved = repo
+        .find_live_caller_by_token(session_id, &token_hash, &crypto)
+        .await?
+        .expect("session caller should be live");
+    assert_eq!(resolved.session_id, session_id);
+    assert_eq!(resolved.account.id, user_id);
+    assert_eq!(resolved.account.display_name, "user-browser-user");
+    assert_eq!(resolved.user.email.as_deref(), Some("browser@example.test"));
     assert_eq!(audit_op_types(&db, user_id).await?, ["session.login"]);
     db.cleanup().await;
     Ok(())

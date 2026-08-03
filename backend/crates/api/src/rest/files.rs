@@ -204,8 +204,9 @@ async fn preview_response(
         Err(error) => error.detected_media_type().map(str::to_owned),
     };
     if let Some(media_type) = detected_media_type {
-        persist_detected_media_type(state, caller.account_id(), space_id, node_id, &media_type)
-            .await;
+        state
+            .metadata_writes
+            .record_media_type(space_id, node_id, media_type, Utc::now());
     }
     let preview = prepared
         .map(|prepared| prepared.preview)
@@ -256,17 +257,11 @@ pub(crate) async fn batch_preview_urls(
         .iter()
         .filter_map(|outcome| outcome.detected_media_type.clone())
         .collect::<Vec<_>>();
-    if let Err(error) = state
-        .files
-        .record_detected_file_media_types(caller.account_id(), space_id, &detected_media_types)
-        .await
-    {
-        tracing::warn!(
-            event = "file.detected_media_types_persist_failed",
-            %space_id,
-            count = detected_media_types.len(),
-            ?error,
-        );
+    let observed_at = Utc::now();
+    for (node_id, media_type) in detected_media_types {
+        state
+            .metadata_writes
+            .record_media_type(space_id, node_id, media_type, observed_at);
     }
     let results = outcomes.into_iter().map(|outcome| outcome.item).collect();
 
@@ -495,27 +490,6 @@ fn batch_outcome(
     BatchPreviewOutcome {
         item,
         detected_media_type,
-    }
-}
-
-async fn persist_detected_media_type(
-    state: &AppState,
-    account_id: Uuid,
-    space_id: Uuid,
-    node_id: Uuid,
-    media_type: &str,
-) {
-    if let Err(error) = state
-        .files
-        .record_detected_file_media_type(account_id, space_id, node_id, media_type)
-        .await
-    {
-        tracing::warn!(
-            event = "file.detected_media_type_persist_failed",
-            %space_id,
-            %node_id,
-            ?error,
-        );
     }
 }
 

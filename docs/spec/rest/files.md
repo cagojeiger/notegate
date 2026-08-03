@@ -63,7 +63,7 @@ Permission: `read`.
 
 `GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Node metadata는 공통 metadata API로 수정한다.
 
-`media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다. 감지가 끝난 File node에는 서버가 계산한 `preview_available`와 `file_preview_kind`도 포함된다. `preview_available`은 기존 image preview 호환 필드이므로 PDF에서는 `false`이고, PDF 가능 여부는 `file_preview_kind: "pdf"`로 표현한다. Inline preview 여부는 client 선언값이 아니라 감지 결과로 결정한다. 기존 파일처럼 아직 감지값이 없으면 첫 preview URL 요청에서 감지하고 기록한다.
+`media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다. 감지가 끝난 File node에는 서버가 계산한 `preview_available`와 `file_preview_kind`도 포함된다. `preview_available`은 기존 image preview 호환 필드이므로 PDF에서는 `false`이고, PDF 가능 여부는 `file_preview_kind: "pdf"`로 표현한다. Inline preview 여부는 client 선언값이 아니라 감지 결과로 결정한다. 기존 파일처럼 아직 감지값이 없으면 첫 preview URL 요청에서 감지한다. 감지값 저장은 요청 응답을 막지 않는 process-local write-behind를 거치므로 같은 요청 직후의 metadata 조회에는 아직 반영되지 않을 수 있다.
 
 ## Download
 
@@ -84,7 +84,7 @@ Permission: `read`.
 
 SVG, PDF, HTML, 알 수 없는 형식, client-encrypted file, 10 MiB 초과 file은 image preview 대상이 아니며 `404`를 반환한다. 원본 download는 형식과 무관하게 기존 `/content` endpoint로 가능하다. Preview URL에는 NoteGate credential이 포함되지 않는다.
 
-Markdown 본문의 여러 image path는 `POST /file-previews:batchResolve`로 한 번에 조회한다. 요청은 중복 없는 정규화 path 1~64개, UTF-8 합계 16 KiB 이하이며 응답 순서는 요청 순서와 같다. 각 결과는 `ready`, `not_found`, `unsupported`, `error` 중 하나이므로 일부 object storage 실패가 전체 요청을 실패시키지 않는다. 서버는 후보 조회 전에 Space read 권한을 한 번 확인하고 path와 file metadata를 고정된 수의 DB query로 읽으며, presigned URL 생성은 최대 4개씩 처리한다. 기존 file의 감지된 media type을 기록할 때는 별도의 read 권한 확인 한 번과 batch write 한 번을 수행한다. 응답은 단일 preview와 동일하게 `Cache-Control: private, no-store`다.
+Markdown 본문의 여러 image path는 `POST /file-previews:batchResolve`로 한 번에 조회한다. 요청은 중복 없는 정규화 path 1~64개, UTF-8 합계 16 KiB 이하이며 응답 순서는 요청 순서와 같다. 각 결과는 `ready`, `not_found`, `unsupported`, `error` 중 하나이므로 일부 object storage 실패가 전체 요청을 실패시키지 않는다. 서버는 후보 조회 전에 Space read 권한을 한 번 확인하고 path와 file metadata를 고정된 수의 DB query로 읽으며, presigned URL 생성은 최대 4개씩 처리한다. 감지된 media type은 단일 preview와 같은 process-local write-behind batch에 합쳐 저장한다. 응답은 단일 preview와 동일하게 `Cache-Control: private, no-store`다.
 
 ## PDF preview
 

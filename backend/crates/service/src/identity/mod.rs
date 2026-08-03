@@ -13,7 +13,7 @@
 //!   revoked, expired, user-owned, or inactive credentials.
 
 use notegate_core::security::PiiCrypto;
-use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo};
+use notegate_db::{AccountRepo, ApiKeyRepo};
 pub use notegate_model::ResolveAttrs;
 use notegate_model::account::AccountKind;
 use notegate_model::{Account, Caller, CallerIdentity, Channel, User};
@@ -49,21 +49,14 @@ impl From<notegate_core::Error> for IdentityError {
 #[derive(Debug, Clone)]
 pub struct Resolver {
     users: AccountRepo,
-    agents: AgentRepo,
     api_keys: ApiKeyRepo,
     crypto: PiiCrypto,
 }
 
 impl Resolver {
-    pub fn new(
-        users: AccountRepo,
-        agents: AgentRepo,
-        api_keys: ApiKeyRepo,
-        crypto: PiiCrypto,
-    ) -> Self {
+    pub fn new(users: AccountRepo, api_keys: ApiKeyRepo, crypto: PiiCrypto) -> Self {
         Self {
             users,
-            agents,
             api_keys,
             crypto,
         }
@@ -73,7 +66,7 @@ impl Resolver {
     /// the caller on the browser channel. Inactive accounts remain rejected.
     pub async fn resolve_browser(&self, attrs: ResolveAttrs) -> Result<Caller, IdentityError> {
         let (account, user) = self.users.upsert_user_by_sub(&attrs).await?;
-        user_caller(account, user, Channel::Browser)
+        caller_from_user(account, user, Channel::Browser)
     }
 
     /// Resolve a db-backed browser session by its owning user id.
@@ -86,7 +79,7 @@ impl Resolver {
         if account.kind != AccountKind::User {
             return Err(IdentityError::Inactive);
         }
-        user_caller(account, user, Channel::Browser)
+        caller_from_user(account, user, Channel::Browser)
     }
 
     /// Resolve an MCP bearer for an already-registered user account.
@@ -104,14 +97,12 @@ impl Resolver {
             return Err(IdentityError::NotRegistered);
         };
         let token_hash = self.crypto.api_key_hash(&key_id.to_string(), secret)?;
-        let account_id = self
+        let resolved = self
             .api_keys
-            .find_live_agent_id_by_key(key_id, &token_prefix, &token_hash)
+            .find_live_agent_by_key(key_id, &token_prefix, &token_hash)
             .await?
             .ok_or(IdentityError::NotRegistered)?;
-
-        let resolved = self.agents.find_active_agent_by_id(account_id).await?;
-        let (account, agent) = resolved.ok_or(IdentityError::NotRegistered)?;
+        let (account, agent) = resolved;
         if account.kind != AccountKind::Agent {
             return Err(IdentityError::Inactive);
         }
@@ -130,12 +121,16 @@ impl Resolver {
     ) -> Result<Caller, IdentityError> {
         let resolved = self.users.find_user_by_sub(sub).await?;
         let (account, user) = resolved.ok_or(IdentityError::NotRegistered)?;
-        user_caller(account, user, channel)
+        caller_from_user(account, user, channel)
     }
 }
 
 /// Build a user caller, rejecting an inactive account.
-fn user_caller(account: Account, user: User, channel: Channel) -> Result<Caller, IdentityError> {
+pub fn caller_from_user(
+    account: Account,
+    user: User,
+    channel: Channel,
+) -> Result<Caller, IdentityError> {
     // A soft-deleted or deactivated account must never authenticate.
     if !account.is_live() {
         return Err(IdentityError::Inactive);
