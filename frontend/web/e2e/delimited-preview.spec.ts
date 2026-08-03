@@ -68,6 +68,20 @@ for (const viewport of [
     }
     await page.getByRole("button", { name: csvNode.name }).first().click();
 
+    if (viewport.mobile) {
+      const header = page.locator("[data-editor-group-header]");
+      const copyPath = page.getByRole("button", { name: "Copy path" });
+      await expect.poll(() => header.evaluate((element) => Math.round(element.getBoundingClientRect().height))).toBe(48);
+      await expect.poll(() => copyPath.evaluate((element) => Math.floor(element.getBoundingClientRect().width))).toBeGreaterThanOrEqual(24);
+
+      const moreActions = page.getByRole("button", { name: "More actions" });
+      await moreActions.click();
+      const actionMenu = page.getByRole("menu", { name: "Editor actions" });
+      await expect(actionMenu.getByRole("button", { name: "Copy content" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(actionMenu).not.toBeVisible();
+    }
+
     const scrollRegion = page.getByRole("region", { name: "CSV table preview" });
     const table = page.getByRole("table", { name: "CSV data" });
     await expect(scrollRegion).toBeVisible();

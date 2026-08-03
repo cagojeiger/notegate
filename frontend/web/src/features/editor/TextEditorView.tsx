@@ -1,14 +1,13 @@
-import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, Move, PanelRightOpen, Pencil, Save, Trash2, Undo2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { ChevronsDownUp, ChevronsUpDown, Copy, FileText, MoreHorizontal, Pencil, Save, Undo2 } from "lucide-react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 
 import type { RestNode } from "../../api/types";
 import { copyText } from "../../shared/lib/clipboard";
-import { Button, Card, IconButton, MenuButton } from "../../shared/ui";
+import { Button, IconButton } from "../../shared/ui";
 import { useUiStore } from "../../stores/uiStore";
 import { canMutateNode } from "../nodes/nodeWriteAccess";
 import { EditorGroupHeader } from "./EditorGroupHeader";
 import type { MarkdownOutlineIdentity } from "./MarkdownOutlineContext";
-import { NodeActionMenu } from "./NodeActionMenu";
 import { TextPreview } from "./TextPreview";
 import { inferTextFormat, isStructuredFormat, isTabularFormat } from "./textFormat";
 import type { StructuredExpansionMode } from "./StructuredTreeView";
@@ -16,6 +15,8 @@ import type { EditorNavigationActions, NodeActions } from "./types";
 import { useMarkdownImageLoader } from "./useFilePreviewQueries";
 import { useResetHorizontalScrollOnGrow } from "./useResetHorizontalScrollOnGrow";
 import { useTextEditorSession } from "./useTextEditorSession";
+
+const EditorContextMenu = lazy(() => import("./EditorContextMenu"));
 
 export function TextEditorView({ active, groupId, navigationActions, node, latestNode, qualifiedPath, mode, canWriteActiveSpace, canOpenInNewGroup, canClose, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onRenameNode, onMoveNode, onDeleteNode }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions?: ReactNode; node: RestNode; latestNode?: RestNode; qualifiedPath: string | null; mode: "preview" | "edit"; canWriteActiveSpace: boolean; canOpenInNewGroup: boolean; canClose: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void }) {
   const loadMarkdownImage = useMarkdownImageLoader(node);
@@ -50,6 +51,7 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
   const sourceOnly = tabular && Boolean(partialText);
   const showSource = sourceView || sourceOnly;
   const showToast = useUiStore((state) => state.showToast);
+  const editorActionsRef = useRef<HTMLDivElement>(null);
   const openMarkdownLinkRef = useRef(onOpenMarkdownLink);
   useLayoutEffect(() => {
     openMarkdownLinkRef.current = onOpenMarkdownLink;
@@ -86,6 +88,12 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
     setEditorMenu({ x: event.clientX, y: event.clientY });
   }
 
+  function openEditorActions() {
+    const bounds = editorActionsRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    setEditorMenu({ x: bounds.right, y: bounds.bottom + 4 });
+  }
+
   async function copyContent() {
     showToast((await copyText(copySource)) ? "Content copied" : "Could not copy content");
   }
@@ -116,9 +124,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Button size="xs" variant={showSource ? "primary" : "secondary"} aria-pressed={showSource} onClick={() => setSourceView(true)}>Source</Button>
         </>
       ) : null}
-      <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
-        <Copy size={15} />
-      </IconButton>
+      <span className="max-md:hidden">
+        <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
+          <Copy size={15} />
+        </IconButton>
+      </span>
       {mode === "edit" ? (
         <>
           <IconButton label="Save" size="sm" onClick={saveDraft} disabled={!canSave}>
@@ -133,12 +143,16 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Pencil size={15} />
         </IconButton>
       )}
-      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={!canMutateNode(node, canWriteActiveSpace)} />
+      <div ref={editorActionsRef}>
+        <IconButton label="More actions" expanded={Boolean(editorMenu)} hasPopup="menu" onClick={openEditorActions}>
+          <MoreHorizontal size={16} />
+        </IconButton>
+      </div>
     </>
   );
   return (
     <>
-      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} qualifiedPath={qualifiedPath} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} />
+      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} qualifiedPath={qualifiedPath} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} collapseSecondaryActions />
       {textQuery.isLoading ? (
         <div className="p-10 text-muted">Loading text…</div>
       ) : textQuery.isError ? (
@@ -197,119 +211,36 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
         </div>
       )}
       {editorMenu ? (
-        <EditorContextMenu
-          menu={editorMenu}
-          node={node}
-          mode={mode}
-          canCopyContent={canCopyContent}
-          canEditText={canEditText}
-          canSave={canSave}
-          canCopyPath={Boolean(qualifiedPath)}
-          canMutateNode={canMutateNode(node, canWriteActiveSpace)}
-          canOpenInNewGroup={canOpenInNewGroup}
-          canCloseGroup={canClose}
-          onClose={() => setEditorMenu(null)}
-          onCopyContent={() => { void copyContent(); }}
-          onEditText={editText}
-          onSaveDraft={saveDraft}
-          onCancelEdit={cancelEdit}
-          onOpenInNewGroup={() => onOpenNodeInNewGroup(node)}
-          onCopyPath={() => { void copyPath(); }}
-          onCloseGroup={onClose}
-          onRenameNode={() => onRenameNode(node)}
-          onMoveNode={() => onMoveNode(node)}
-          onDeleteNode={() => onDeleteNode(node)}
-        />
+        <Suspense fallback={null}>
+          <EditorContextMenu
+            menu={editorMenu}
+            node={node}
+            mode={mode}
+            canCopyContent={canCopyContent}
+            canEditText={canEditText}
+            canSave={canSave}
+            canCopyPath={Boolean(qualifiedPath)}
+            canMutateNode={canMutateNode(node, canWriteActiveSpace)}
+            canOpenInNewGroup={canOpenInNewGroup}
+            canCloseGroup={canClose}
+            showStructuredActions={mode === "preview" && structured && !encrypted}
+            structuredActionsDisabled={showSource}
+            onClose={() => setEditorMenu(null)}
+            onCopyContent={() => { void copyContent(); }}
+            onEditText={editText}
+            onSaveDraft={saveDraft}
+            onCancelEdit={cancelEdit}
+            onOpenInNewGroup={() => onOpenNodeInNewGroup(node)}
+            onCopyPath={() => { void copyPath(); }}
+            onCloseGroup={onClose}
+            onExpandAll={() => setStructuredExpansionMode("expanded")}
+            onCollapseAll={() => setStructuredExpansionMode("collapsed")}
+            onRenameNode={() => onRenameNode(node)}
+            onMoveNode={() => onMoveNode(node)}
+            onDeleteNode={() => onDeleteNode(node)}
+          />
+        </Suspense>
       ) : null}
-    </>
-  );
-}
-
-function EditorContextMenu({
-  menu,
-  node,
-  mode,
-  canCopyContent,
-  canCopyPath,
-  canEditText,
-  canSave,
-  canMutateNode,
-  canOpenInNewGroup,
-  canCloseGroup,
-  onClose,
-  onCopyContent,
-  onEditText,
-  onSaveDraft,
-  onCancelEdit,
-  onOpenInNewGroup,
-  onCopyPath,
-  onCloseGroup,
-  onRenameNode,
-  onMoveNode,
-  onDeleteNode
-}: {
-  menu: { x: number; y: number };
-  node: RestNode;
-  mode: "preview" | "edit";
-  canCopyContent: boolean;
-  canCopyPath: boolean;
-  canEditText: boolean;
-  canSave: boolean;
-  canMutateNode: boolean;
-  canOpenInNewGroup: boolean;
-  canCloseGroup: boolean;
-  onClose: () => void;
-  onCopyContent: () => void;
-  onEditText: () => void;
-  onSaveDraft: () => void;
-  onCancelEdit: () => void;
-  onOpenInNewGroup: () => void;
-  onCopyPath: () => void;
-  onCloseGroup: () => void;
-  onRenameNode: () => void;
-  onMoveNode: () => void;
-  onDeleteNode: () => void;
-}) {
-  const menuWidth = 208;
-  const menuHeight = mode === "edit" ? 332 : 296;
-
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  function run(action: () => void) {
-    action();
-    onClose();
-  }
-
-  const left = Math.max(8, Math.min(menu.x, window.innerWidth - menuWidth - 8));
-  const top = Math.max(8, Math.min(menu.y, window.innerHeight - menuHeight - 8));
-  return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} />
-      <Card className="fixed z-50 w-52 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none" style={{ left, top }} role="menu">
-        <div className="truncate px-3 py-1 text-xs text-muted">{node.name}</div>
-        <MenuButton onClick={() => run(onCopyContent)} disabled={!canCopyContent}><Copy size={14} /> Copy content</MenuButton>
-        {mode === "edit" ? (
-          <>
-            <MenuButton onClick={() => run(onSaveDraft)} disabled={!canSave}><Save size={14} /> Save</MenuButton>
-            <MenuButton onClick={() => run(onCancelEdit)}><Undo2 size={14} /> Cancel edit</MenuButton>
-          </>
-        ) : (
-          <MenuButton onClick={() => run(onEditText)} disabled={!canEditText}><Pencil size={14} /> Edit</MenuButton>
-        )}
-        <MenuButton onClick={() => run(onOpenInNewGroup)} disabled={!canOpenInNewGroup}><PanelRightOpen size={14} /> Open in new group</MenuButton>
-        <MenuButton onClick={() => run(onCopyPath)} disabled={!canCopyPath}><Copy size={14} /> Copy path</MenuButton>
-        {canCloseGroup ? <MenuButton onClick={() => run(onCloseGroup)}><X size={14} /> Close group</MenuButton> : null}
-        <div className="my-1 border-t border-border" />
-        <MenuButton onClick={() => run(onRenameNode)} disabled={!canMutateNode}><Pencil size={14} /> Rename</MenuButton>
-        <MenuButton onClick={() => run(onMoveNode)} disabled={!canMutateNode}><Move size={14} /> Move…</MenuButton>
-        <MenuButton danger onClick={() => run(onDeleteNode)} disabled={!canMutateNode}><Trash2 size={14} /> Delete</MenuButton>
-      </Card>
     </>
   );
 }
