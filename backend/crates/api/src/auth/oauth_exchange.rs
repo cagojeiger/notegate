@@ -5,7 +5,7 @@ use openidconnect::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::auth::oidc::OidcProvider;
+use crate::auth::oidc::{OidcProvider, execute_oidc_request};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UserInfo {
@@ -66,13 +66,18 @@ pub(super) async fn exchange_code_for_userinfo(
     nonce: &str,
 ) -> notegate_core::Result<LoginUserInfo> {
     let client = oidc.client().await?;
+    let http_client = http.clone();
+    let http = move |request| {
+        let http_client = http_client.clone();
+        async move { execute_oidc_request(&http_client, request).await }
+    };
     let token_response = client
         .exchange_code(AuthorizationCode::new(code.to_owned()))
         .map_err(|error| {
             notegate_core::Error::internal(format!("openid token endpoint unavailable: {error}"))
         })?
         .set_pkce_verifier(PkceCodeVerifier::new(verifier.to_owned()))
-        .request_async(http)
+        .request_async(&http)
         .await
         .map_err(|error| {
             notegate_core::Error::internal(format!("openid token exchange failed: {error}"))
@@ -121,7 +126,7 @@ pub(super) async fn exchange_code_for_userinfo(
         .map_err(|error| {
             notegate_core::Error::internal(format!("userinfo endpoint unavailable: {error}"))
         })?
-        .request_async(http)
+        .request_async(&http)
         .await
         .map_err(|error| {
             notegate_core::Error::internal(format!("userinfo request failed: {error}"))
@@ -142,12 +147,17 @@ pub(super) async fn refresh_userinfo(
         .client()
         .await
         .map_err(|error| RefreshUserInfoError::transient(error.to_string()))?;
+    let http_client = http.clone();
+    let http = move |request| {
+        let http_client = http_client.clone();
+        async move { execute_oidc_request(&http_client, request).await }
+    };
     let token_response = client
         .exchange_refresh_token(&RefreshToken::new(refresh_token.to_owned()))
         .map_err(|error| {
             RefreshUserInfoError::transient(format!("openid refresh endpoint unavailable: {error}"))
         })?
-        .request_async(http)
+        .request_async(&http)
         .await
         .map_err(map_refresh_exchange_error)?;
     let rotated_refresh_token = token_response
@@ -161,7 +171,7 @@ pub(super) async fn refresh_userinfo(
                 rotated_refresh_token.clone(),
             )
         })?
-        .request_async(http)
+        .request_async(&http)
         .await
         .map_err(|error| {
             RefreshUserInfoError::transient_after_rotation(
