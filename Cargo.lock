@@ -2552,7 +2552,7 @@ dependencies = [
  "notegate-db",
  "notegate-model",
  "notegate-service",
- "rand 0.8.7",
+ "rand 0.10.2",
  "regex",
  "serde",
  "serde_json",

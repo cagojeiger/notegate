@@ -143,9 +143,8 @@ fn validate_key_command(command: &CreateApiKey) -> ServiceResult<()> {
 }
 
 fn generate_secret() -> String {
-    use rand::RngCore as _;
     let mut bytes = [0_u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
@@ -181,6 +180,14 @@ mod tests {
         assert_eq!(parsed.1, "secret-value");
         assert_eq!(parsed.2, format!("ngk_v2_{key_id}"));
         assert_eq!(token_prefix(key_id), format!("ngk_v2_{key_id}"));
+    }
+
+    #[test]
+    fn generated_secret_preserves_the_256_bit_lowercase_hex_format() {
+        let secret = generate_secret();
+        assert_eq!(secret.len(), 64);
+        assert!(secret.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(secret, secret.to_ascii_lowercase());
     }
 
     #[test]
