@@ -85,7 +85,7 @@ hmac = "0.12"
 hkdf = "0.12"
 base64 = "0.22"
 url = "2"
-axum-extra = { version = "0.10", features = ["cookie"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
 axum-governor = "2.0.2"
 secrecy = { version = "0.10", features = ["serde"] }
 subtle = "2"
