@@ -65,13 +65,13 @@ pub async fn update_node(
         checks::require_node_write(&mut tx, space_id, command.node_id).await?;
     }
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes \
          SET name = COALESCE($3, name), \
              sort_order = COALESCE($4, sort_order), \
              updated_by_account_id = $5, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(command.node_id)
     .bind(command.name.as_deref())
@@ -126,11 +126,11 @@ pub async fn update_node_search_policy(
     }
     checks::require_node_write(&mut tx, space_id, command.node_id).await?;
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes \
          SET search_enabled = $3, updated_by_account_id = $4, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(command.node_id)
     .bind(command.enabled)
@@ -180,10 +180,10 @@ pub async fn update_text_encryption(
         ));
     }
 
-    let current_text = sqlx::query_as::<_, TextRow>(&format!(
+    let current_text = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {TEXT_COLUMNS} FROM text_objects \
          WHERE space_id = $1 AND node_id = $2 FOR UPDATE",
-    ))
+    )))
     .bind(space_id)
     .bind(command.node_id)
     .fetch_optional(&mut *tx)
@@ -209,11 +209,11 @@ pub async fn update_text_encryption(
         }
     }
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes \
          SET updated_by_account_id = $3, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(command.node_id)
     .bind(updated_by)
@@ -320,11 +320,11 @@ pub async fn replace_node_metadata(
     }
     checks::require_node_write(&mut tx, space_id, node_id).await?;
 
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes \
          SET metadata = $3, updated_by_account_id = $4, updated_at = now() \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .bind(metadata)

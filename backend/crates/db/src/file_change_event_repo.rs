@@ -157,11 +157,11 @@ pub(crate) async fn sync_file_change_events(
         });
     }
 
-    let rows = sqlx::query_as::<_, FileChangeEventRow>(&format!(
+    let rows = sqlx::query_as::<_, FileChangeEventRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {FILE_CHANGE_EVENT_COLUMNS} FROM file_change_events \
          WHERE space_id = $1 AND id > $2 \
          ORDER BY id ASC LIMIT $3"
-    ))
+    )))
     .bind(space_id)
     .bind(after_id)
     .bind(limit)

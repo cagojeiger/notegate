@@ -184,10 +184,10 @@ impl AgentRepo {
             .map_err(map_sqlx_error)?
             .get::<Uuid, _>("id");
 
-        let row = sqlx::query_as::<_, AgentRow>(&format!(
+        let row = sqlx::query_as::<_, AgentRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO agents (id, name, owner_user_id) VALUES ($1, $2, $3) \
              RETURNING {AGENT_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(&command.name)
         .bind(owner_user_id)
@@ -203,13 +203,13 @@ impl AgentRepo {
     }
 
     pub async fn list_agents_by_creator(&self, creator_account_id: Uuid) -> Result<Vec<Agent>> {
-        let rows = sqlx::query_as::<_, AgentRow>(&format!(
+        let rows = sqlx::query_as::<_, AgentRow>(sqlx::AssertSqlSafe(format!(
             "SELECT a.{cols} FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
              WHERE a.owner_user_id = $1 AND acc.is_active = true AND acc.deleted_at IS NULL \
              ORDER BY acc.created_at, a.id",
             cols = "id, name, owner_user_id"
-        ))
+        )))
         .bind(creator_account_id)
         .fetch_all(&self.pool)
         .await
@@ -235,13 +235,13 @@ impl AgentRepo {
         agent_id: Uuid,
         creator_account_id: Uuid,
     ) -> Result<Option<Agent>> {
-        let row = sqlx::query_as::<_, AgentRow>(&format!(
+        let row = sqlx::query_as::<_, AgentRow>(sqlx::AssertSqlSafe(format!(
             "SELECT a.{cols} FROM agents a \
              JOIN accounts acc ON acc.id = a.id \
              WHERE a.id = $1 AND a.owner_user_id = $2 \
                AND acc.is_active = true AND acc.deleted_at IS NULL",
             cols = "id, name, owner_user_id"
-        ))
+        )))
         .bind(agent_id)
         .bind(creator_account_id)
         .fetch_optional(&self.pool)
@@ -269,11 +269,11 @@ impl AgentRepo {
         &self,
         agent_id: Uuid,
     ) -> Result<Option<(Account, Agent)>> {
-        let account_row = sqlx::query_as::<_, AccountRow>(&format!(
+        let account_row = sqlx::query_as::<_, AccountRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACCOUNT_COLUMNS} FROM accounts \
              WHERE id = $1 AND kind = 'agent' AND {}",
             active_account_predicate("")
-        ))
+        )))
         .bind(agent_id)
         .fetch_optional(&self.pool)
         .await
@@ -283,9 +283,9 @@ impl AgentRepo {
             return Ok(None);
         };
 
-        let agent_row = sqlx::query_as::<_, AgentRow>(&format!(
+        let agent_row = sqlx::query_as::<_, AgentRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {AGENT_COLUMNS} FROM agents WHERE id = $1"
-        ))
+        )))
         .bind(agent_id)
         .fetch_optional(&self.pool)
         .await

@@ -144,7 +144,7 @@ async fn try_acquire_worker_lock(tx: &mut sqlx::PgConnection) -> Result<bool> {
 /// SELECT columns computing live usage for the Space referenced by `space_ref`.
 /// The single formulation of what counts toward usage; per-space
 /// reconciliation and the full recalculation must not drift apart.
-fn live_usage_columns(space_ref: &str) -> String {
+fn live_usage_columns(space_ref: &'static str) -> String {
     format!(
         "(SELECT count(*) FROM nodes n \
           WHERE n.space_id = {space_ref} AND n.deleted_at IS NULL) AS live_node_count, \
@@ -162,11 +162,14 @@ fn live_usage_columns(space_ref: &str) -> String {
 }
 
 async fn exact_usage(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<UsageCounts> {
-    sqlx::query_as(&format!("SELECT {}", live_usage_columns("$1")))
-        .bind(space_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {}",
+        live_usage_columns("$1")
+    )))
+    .bind(space_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(map_sqlx_error)
 }
 
 #[derive(Debug, Clone, Copy, FromRow, PartialEq, Eq)]

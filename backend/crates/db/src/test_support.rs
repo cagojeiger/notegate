@@ -39,7 +39,7 @@ impl TestDb {
         sqlx::query("SELECT pg_advisory_unlock(hashtextextended('notegate_test_extensions', 0))")
             .execute(&mut admin)
             .await?;
-        sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
             .execute(&mut admin)
             .await?;
         admin.close().await?;
@@ -57,12 +57,15 @@ impl TestDb {
         for migration in crate::MIGRATOR.iter() {
             let schema_migration = migration
                 .sql
+                .as_str()
                 .lines()
                 .filter(|line| !line.trim_start().starts_with("CREATE EXTENSION"))
                 .collect::<Vec<_>>()
                 .join("\n");
             if !schema_migration.trim().is_empty() {
-                sqlx::raw_sql(&schema_migration).execute(&pool).await?;
+                sqlx::raw_sql(sqlx::AssertSqlSafe(schema_migration))
+                    .execute(&pool)
+                    .await?;
             }
         }
         seed_crypto_key_epochs(&pool).await?;
@@ -88,9 +91,12 @@ impl TestDb {
                 return;
             }
         };
-        if let Err(err) = sqlx::query(&format!("DROP SCHEMA IF EXISTS {} CASCADE", self.schema))
-            .execute(&mut admin)
-            .await
+        if let Err(err) = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DROP SCHEMA IF EXISTS {} CASCADE",
+            self.schema
+        )))
+        .execute(&mut admin)
+        .await
         {
             eprintln!("failed to drop temporary schema {}: {err}", self.schema);
         }

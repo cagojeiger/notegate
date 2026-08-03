@@ -122,10 +122,10 @@ pub mod text {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<(Node, TextObject)>> {
-        let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+        let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL AND kind = 'text'"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(pool)
@@ -136,10 +136,10 @@ pub mod text {
             return Ok(None);
         };
 
-        let doc_row = sqlx::query_as::<_, TextRow>(&format!(
+        let doc_row = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {TEXT_COLUMNS} FROM text_objects \
          WHERE space_id = $1 AND node_id = $2"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(pool)
@@ -171,14 +171,14 @@ pub mod text {
             .map(|c| format!("d.{}", c.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(&format!(
+        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {columns} FROM text_objects d \
              JOIN nodes n ON n.id = d.node_id AND n.space_id = d.space_id \
              WHERE d.space_id = $1 \
                AND d.node_id = ANY($2) \
                AND n.deleted_at IS NULL \
                AND n.kind = 'text'"
-        ))
+        )))
         .bind(space_id)
         .bind(node_ids.to_vec())
         .fetch_all(pool)
@@ -216,11 +216,11 @@ pub mod file {
             .map(|c| format!("f.{}", c.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let row: Option<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
+        let row: Option<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {columns} FROM file_objects f \
          JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
          WHERE f.space_id = $1 AND f.node_id = $2 AND n.deleted_at IS NULL"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(pool)
@@ -255,14 +255,14 @@ pub mod file {
             .map(|c| format!("f.{}", c.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
+        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {columns} FROM file_objects f \
              JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
              WHERE f.space_id = $1 \
                AND f.node_id = ANY($2) \
                AND n.deleted_at IS NULL \
                AND n.kind = 'file'"
-        ))
+        )))
         .bind(space_id)
         .bind(node_ids.to_vec())
         .fetch_all(pool)
@@ -292,10 +292,10 @@ pub mod file {
         space_id: Uuid,
         node_id: Uuid,
     ) -> Result<Option<(Node, FileObject)>> {
-        let node_row = sqlx::query_as::<_, NodeRow>(&format!(
+        let node_row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL AND kind = 'file'"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(pool)
@@ -306,9 +306,9 @@ pub mod file {
             return Ok(None);
         };
 
-        let file_row = sqlx::query_as::<_, FileRow>(&format!(
+        let file_row = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {FILE_COLUMNS} FROM file_objects WHERE space_id = $1 AND node_id = $2"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(pool)
@@ -336,14 +336,14 @@ pub mod file {
             .map(|column| format!("f.{}", column.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(&format!(
+        let rows: Vec<FileRow> = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {columns} FROM file_objects f \
              JOIN nodes n ON n.id = f.node_id AND n.space_id = f.space_id \
              WHERE f.space_id = $1 \
                AND f.node_id = ANY($2) \
                AND n.deleted_at IS NULL \
                AND n.kind = 'file'"
-        ))
+        )))
         .bind(space_id)
         .bind(node_ids.to_vec())
         .fetch_all(pool)
@@ -388,10 +388,10 @@ pub mod node {
 
     /// Load a live node by id within a space.
     pub async fn find_node(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Option<Node>> {
-        let row = sqlx::query_as::<_, NodeRow>(&format!(
+        let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_optional(pool)
@@ -409,10 +409,10 @@ pub mod node {
         if node_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(&format!(
+        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes \
              WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NULL"
-        ))
+        )))
         .bind(space_id)
         .bind(node_ids.to_vec())
         .fetch_all(pool)
@@ -479,7 +479,7 @@ pub mod node {
     /// Returns an empty vector when the target is missing or soft-deleted. The
     /// caller can use the result to reveal a node in a lazily loaded tree.
     pub async fn ancestor_chain(pool: &PgPool, space_id: Uuid, node_id: Uuid) -> Result<Vec<Node>> {
-        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(&format!(
+        let rows: Vec<NodeRow> = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "WITH RECURSIVE chain AS ( \
                 SELECT {NODE_COLUMNS}, 0 AS depth \
                 FROM nodes \
@@ -494,7 +494,7 @@ pub mod node {
                 WHERE n.space_id = $1 AND n.deleted_at IS NULL \
             ) \
             SELECT {NODE_COLUMNS} FROM chain ORDER BY depth DESC"
-        ))
+        )))
         .bind(space_id)
         .bind(node_id)
         .fetch_all(pool)
@@ -639,12 +639,12 @@ pub mod node {
         let fetch = limit + 1;
         let rows: Vec<NodeSummaryRow> = match cursor {
             None => {
-                sqlx::query_as::<_, NodeSummaryRow>(&format!(
+                sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
                  WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
                  ORDER BY sort_order, name, id \
                  LIMIT $3"
-                ))
+                )))
                 .bind(space_id)
                 .bind(parent_node_id)
                 .bind(fetch)
@@ -652,13 +652,13 @@ pub mod node {
                 .await
             }
             Some((sort_order, name, id)) => {
-                sqlx::query_as::<_, NodeSummaryRow>(&format!(
+                sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_SUMMARY_COLUMNS} FROM nodes \
                  WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
                    AND (sort_order, name, id) > ($3, $4, $5) \
                  ORDER BY sort_order, name, id \
                  LIMIT $6"
-                ))
+                )))
                 .bind(space_id)
                 .bind(parent_node_id)
                 .bind(sort_order)
@@ -693,12 +693,12 @@ pub mod node {
         let fetch = limit + 1;
         let rows: Vec<NodeRow> = match cursor {
             None => {
-                sqlx::query_as::<_, NodeRow>(&format!(
+                sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_COLUMNS} FROM nodes \
                      WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
                      ORDER BY sort_order, name, id \
                      LIMIT $3"
-                ))
+                )))
                 .bind(space_id)
                 .bind(parent_node_id)
                 .bind(fetch)
@@ -706,13 +706,13 @@ pub mod node {
                 .await
             }
             Some((sort_order, name, id)) => {
-                sqlx::query_as::<_, NodeRow>(&format!(
+                sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {NODE_COLUMNS} FROM nodes \
                      WHERE space_id = $1 AND parent_id = $2 AND deleted_at IS NULL \
                        AND (sort_order, name, id) > ($3, $4, $5) \
                      ORDER BY sort_order, name, id \
                      LIMIT $6"
-                ))
+                )))
                 .bind(space_id)
                 .bind(parent_node_id)
                 .bind(sort_order)
@@ -746,7 +746,7 @@ pub mod node {
             return Ok((HashMap::new(), HashSet::new()));
         }
         let fetch = limit + 1;
-        let rows: Vec<NodeSummaryRow> = sqlx::query_as(&format!(
+        let rows: Vec<NodeSummaryRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT child.* \
                  FROM UNNEST($2::uuid[]) WITH ORDINALITY AS requested(parent_id, position) \
                  CROSS JOIN LATERAL ( \
@@ -758,7 +758,7 @@ pub mod node {
                    LIMIT $3 \
                  ) AS child \
                  ORDER BY requested.position, child.sort_order, child.name, child.id"
-        ))
+        )))
         .bind(space_id)
         .bind(parent_node_ids.to_vec())
         .bind(fetch)
@@ -830,7 +830,7 @@ pub mod node {
              ORDER BY {order_by} \
              LIMIT {limit_placeholder}"
         );
-        let query = sqlx::query_as::<_, NodeSummaryRow>(&sql)
+        let query = sqlx::query_as::<_, NodeSummaryRow>(sqlx::AssertSqlSafe(sql))
             .bind(space_id)
             .bind(kind.as_deref());
 
@@ -896,7 +896,7 @@ pub mod node {
              ORDER BY {order_by} \
              LIMIT {limit_placeholder}"
         );
-        let query = sqlx::query_as::<_, NodeRow>(&sql)
+        let query = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(sql))
             .bind(space_id)
             .bind(kind.as_deref());
         let rows: Vec<NodeRow> = match cursor {
@@ -1185,7 +1185,7 @@ pub mod search {
             .map(|column| format!("n.{}", column.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let rows = sqlx::query_as::<_, ResolvedNodePathRow>(&format!(
+        let rows = sqlx::query_as::<_, ResolvedNodePathRow>(sqlx::AssertSqlSafe(format!(
             "WITH RECURSIVE requested AS ( \
                 SELECT ordinality::bigint AS input_index, input_path, \
                        string_to_array(trim(both '/' from input_path), '/') AS segments \
@@ -1213,7 +1213,7 @@ pub mod search {
             FROM resolved r \
             JOIN nodes n ON n.id = r.node_id AND n.space_id = $1 \
             ORDER BY r.input_index"
-        ))
+        )))
         .bind(space_id)
         .bind(paths.to_vec())
         .fetch_all(pool)
@@ -1256,7 +1256,7 @@ pub mod search {
         after_sort_path: Option<&str>,
         limit: i64,
     ) -> Result<Vec<SearchNodeCandidate>> {
-        let rows: Vec<NodeCandidateRow> = sqlx::query_as(&candidate_cte(
+        let rows: Vec<NodeCandidateRow> = sqlx::query_as(sqlx::AssertSqlSafe(candidate_cte(
             "SELECT id, path, sort_path \
                  FROM subtree \
                  WHERE id <> $2 AND search_enabled = true \
@@ -1269,7 +1269,7 @@ pub mod search {
                  FROM selected s \
                  JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
                  ORDER BY s.sort_path",
-        ))
+        )))
         .bind(space_id)
         .bind(scope_node_id)
         .bind(scope_path)
@@ -1293,7 +1293,7 @@ pub mod search {
         limit: i64,
     ) -> Result<Vec<SearchTextCandidate>> {
         let rows: Vec<TextCandidateRow> = sqlx::query_as(
-            &candidate_cte(
+            sqlx::AssertSqlSafe(candidate_cte(
                 "SELECT s.id, s.path, s.sort_path, \
                         t.content_sha256 AS text_content_sha256, \
                         t.byte_len AS text_byte_len, \
@@ -1315,7 +1315,7 @@ pub mod search {
                  FROM selected s \
                  JOIN nodes n ON n.space_id = $1 AND n.id = s.id \
                  ORDER BY s.sort_path",
-            ),
+            )),
         )
         .bind(space_id)
         .bind(scope_node_id)
@@ -1362,7 +1362,7 @@ pub mod search {
             .map(|column| format!("t.{}", column.trim()))
             .collect::<Vec<_>>()
             .join(", ");
-        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(&format!(
+        let rows: Vec<TextRow> = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
             "WITH requested AS MATERIALIZED ( \
                 SELECT node_id, content_sha256, byte_len, ordinality \
                 FROM unnest($2::uuid[], $3::text[], $4::bigint[]) WITH ORDINALITY \
@@ -1388,7 +1388,7 @@ pub mod search {
               AND t.content_sha256 = s.content_sha256 \
               AND t.byte_len = s.byte_len \
             ORDER BY s.ordinality"
-        ))
+        )))
         .bind(space_id)
         .bind(node_ids)
         .bind(content_sha256s)
@@ -1421,7 +1421,7 @@ pub mod search {
         Ok(texts)
     }
 
-    fn candidate_cte(selected_sql: &str, result_sql: &str) -> String {
+    fn candidate_cte(selected_sql: &'static str, result_sql: &'static str) -> String {
         format!(
             "WITH RECURSIVE subtree AS ( \
                 SELECT id, kind, search_enabled, \

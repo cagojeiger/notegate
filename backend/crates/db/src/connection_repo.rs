@@ -63,7 +63,7 @@ impl ConnectionRepo {
         owner_user_id: Uuid,
     ) -> Result<Vec<SpaceAgentConnection>> {
         require_owned_space(&self.pool, space_id, owner_user_id).await?;
-        let rows = sqlx::query_as::<_, ConnectionRow>(&format!(
+        let rows = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!(
             "SELECT c.{CONNECTION_COLUMNS} \
              FROM space_agent_connections c \
              JOIN spaces s ON s.id = c.space_id AND s.deleted_at IS NULL AND s.owner_user_id = $2 \
@@ -71,7 +71,7 @@ impl ConnectionRepo {
              JOIN accounts acc ON acc.id = a.id AND acc.is_active = true AND acc.deleted_at IS NULL \
              WHERE c.space_id = $1 AND c.disconnected_at IS NULL \
              ORDER BY c.connected_at, c.agent_id"
-        ))
+        )))
         .bind(space_id)
         .bind(owner_user_id)
         .fetch_all(&self.pool)
@@ -91,11 +91,11 @@ impl ConnectionRepo {
         lock_owned_space(&mut tx, command.space_id, connected_by_user_id).await?;
         lock_owned_live_agent(&mut tx, command.agent_id, connected_by_user_id).await?;
 
-        let existing = sqlx::query_as::<_, ConnectionRow>(&format!(
+        let existing = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {CONNECTION_COLUMNS} FROM space_agent_connections \
              WHERE space_id = $1 AND agent_id = $2 \
              FOR UPDATE"
-        ))
+        )))
         .bind(command.space_id)
         .bind(command.agent_id)
         .fetch_optional(&mut *tx)
@@ -157,7 +157,7 @@ impl ConnectionRepo {
             )));
         }
 
-        let row = sqlx::query_as::<_, ConnectionRow>(&format!(
+        let row = sqlx::query_as::<_, ConnectionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO space_agent_connections \
                (space_id, agent_id, permission, connected_by_user_id) \
              VALUES ($1, $2, $3, $4) \
@@ -168,7 +168,7 @@ impl ConnectionRepo {
                  disconnected_at = NULL, \
                  disconnected_by_user_id = NULL \
              RETURNING {CONNECTION_COLUMNS}"
-        ))
+        )))
         .bind(command.space_id)
         .bind(command.agent_id)
         .bind(command.permission.as_str())

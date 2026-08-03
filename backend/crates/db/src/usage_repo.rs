@@ -24,12 +24,12 @@ impl UsageRepo {
 
     pub async fn current_user_usage(&self, user_id: Uuid) -> Result<Option<UserUsageSnapshot>> {
         let active_user = active_account_predicate("acc.");
-        let user = sqlx::query_as::<_, UserUsageRow>(&format!(
+        let user = sqlx::query_as::<_, UserUsageRow>(sqlx::AssertSqlSafe(format!(
             "SELECT u.tier \
              FROM users u \
              JOIN accounts acc ON acc.id = u.id \
              WHERE u.id = $1 AND acc.kind = 'user' AND {active_user}"
-        ))
+        )))
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await

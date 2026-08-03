@@ -88,11 +88,11 @@ fn stored_text_parts<'a>(
 }
 
 async fn lock_live_node(tx: &mut PgConnection, space_id: Uuid, node_id: Uuid) -> Result<NodeRow> {
-    sqlx::query_as::<_, NodeRow>(&format!(
+    sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
          FOR UPDATE"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .fetch_optional(tx)

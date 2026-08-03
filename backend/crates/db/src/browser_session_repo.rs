@@ -36,14 +36,14 @@ impl BrowserSessionRepo {
 
     pub async fn insert_session(&self, args: InsertBrowserSession<'_>) -> Result<BrowserSession> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let row = sqlx::query_as::<_, BrowserSessionRow>(&format!(
+        let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO browser_sessions \
              (id, user_id, token_prefix, token_hash, hash_key_id, hash_version, \
               refresh_token_ciphertext, refresh_token_nonce, refresh_token_enc_key_id, refresh_token_enc_version, \
               validated_until, expires_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
              RETURNING {BROWSER_SESSION_RETURNING_COLUMNS}"
-        ))
+        )))
         .bind(args.session_id)
         .bind(args.user_id)
         .bind(args.token_prefix)
@@ -71,14 +71,14 @@ impl BrowserSessionRepo {
     ) -> Result<Option<BrowserSession>> {
         let live = live_browser_session_predicate("bs.");
         let active = active_account_predicate("acc.");
-        let row = sqlx::query_as::<_, BrowserSessionRow>(&format!(
+        let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {BROWSER_SESSION_SELECT_COLUMNS} \
              FROM browser_sessions bs \
              JOIN accounts acc ON acc.id = bs.user_id \
              WHERE bs.id = $1 AND bs.token_hash = $2 \
                AND {live} \
                AND {active}"
-        ))
+        )))
         .bind(session_id)
         .bind(token_hash)
         .fetch_optional(&self.pool)
@@ -98,7 +98,7 @@ impl BrowserSessionRepo {
     ) -> Result<Option<LiveBrowserSessionCaller>> {
         let live = live_browser_session_predicate("bs.");
         let active = active_account_predicate("a.");
-        let row = sqlx::query_as::<_, LiveBrowserSessionCallerRow>(&format!(
+        let row = sqlx::query_as::<_, LiveBrowserSessionCallerRow>(sqlx::AssertSqlSafe(format!(
             "SELECT bs.id AS session_id, \
                     bs.validated_until AS session_validated_until, \
                     {USER_CALLER_COLUMNS} \
@@ -109,7 +109,7 @@ impl BrowserSessionRepo {
                AND {live} \
                AND {active} \
                AND a.kind = 'user'"
-        ))
+        )))
         .bind(session_id)
         .bind(token_hash)
         .fetch_optional(&self.pool)
@@ -123,11 +123,11 @@ impl BrowserSessionRepo {
         session_id: Uuid,
         token_hash: &str,
     ) -> Result<Option<BrowserSession>> {
-        let row = sqlx::query_as::<_, BrowserSessionRow>(&format!(
+        let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {BROWSER_SESSION_SELECT_COLUMNS} \
              FROM browser_sessions bs \
              WHERE bs.id = $1 AND bs.token_hash = $2"
-        ))
+        )))
         .bind(session_id)
         .bind(token_hash)
         .fetch_optional(&self.pool)
@@ -146,7 +146,7 @@ impl BrowserSessionRepo {
         let active = active_account_predicate("acc.");
         // Longer than the HTTP client timeout so normal refresh requests do not overlap,
         // but a stuck worker can be retried without waiting for the session max TTL.
-        let row = sqlx::query_as::<_, BrowserSessionRow>(&format!(
+        let row = sqlx::query_as::<_, BrowserSessionRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE browser_sessions AS bs \
              SET refresh_started_at = now(), refresh_claim_id = $3, updated_at = now() \
              FROM accounts acc \
@@ -157,7 +157,7 @@ impl BrowserSessionRepo {
                AND {live} \
                AND {active} \
              RETURNING {BROWSER_SESSION_SELECT_COLUMNS}"
-        ))
+        )))
         .bind(session_id)
         .bind(token_hash)
         .bind(refresh_claim_id)

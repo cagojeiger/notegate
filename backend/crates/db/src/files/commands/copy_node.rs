@@ -231,11 +231,11 @@ async fn insert_copied_node(
     source: &CopyNodeRow,
     created_by: Uuid,
 ) -> Result<Node> {
-    let row = sqlx::query_as::<_, NodeRow>(&format!(
+    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO nodes \
              (space_id, parent_id, name, kind, sort_order, metadata, search_enabled, created_by_account_id, updated_by_account_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) RETURNING {NODE_COLUMNS}"
-        ))
+        )))
         .bind(space_id)
         .bind(parent_id)
         .bind(name)
@@ -287,9 +287,9 @@ async fn copy_text(
     new_node_id: Uuid,
     created_by: Uuid,
 ) -> Result<()> {
-    let source = sqlx::query_as::<_, TextRow>(&format!(
+    let source = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {TEXT_COLUMNS} FROM text_objects WHERE space_id = $1 AND node_id = $2"
-    ))
+    )))
     .bind(space_id)
     .bind(source_node_id)
     .fetch_one(&mut *tx)
@@ -325,14 +325,14 @@ async fn copy_text(
         new_node_id,
     )?;
 
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO text_objects \
              (node_id, space_id, storage_format, content_text, encrypted_payload, content_sha256, byte_len, line_count, \
               media_type, encoding, at_rest_encryption, content_ciphertext, content_nonce, \
               content_enc_key_id, content_enc_version, created_by_account_id, updated_by_account_id) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16) \
              RETURNING {TEXT_COLUMNS}"
-        ))
+        )))
         .bind(new_node_id)
         .bind(space_id)
         .bind(stored.storage_format)

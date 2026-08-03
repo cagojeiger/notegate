@@ -142,14 +142,14 @@ pub async fn insert(
         )));
     }
 
-    let row = sqlx::query_as::<_, ObjectUploadRow>(&format!(
+    let row = sqlx::query_as::<_, ObjectUploadRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO object_storage_objects \
          (id, object_key, space_id, parent_node_id, requested_by_account_id, name, \
           declared_byte_len, media_type, original_filename, encryption_mode, encryption_metadata, \
           upload_mode, multipart_upload_id, multipart_part_size, state) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'uploading') \
          RETURNING {UPLOAD_COLUMNS}"
-    ))
+    )))
     .bind(registration.id)
     .bind(&registration.object_key)
     .bind(space_id)
@@ -177,11 +177,11 @@ pub async fn find(
     space_id: Uuid,
     requested_by: Uuid,
 ) -> Result<Option<PendingObjectUpload>> {
-    let row = sqlx::query_as::<_, ObjectUploadRow>(&format!(
+    let row = sqlx::query_as::<_, ObjectUploadRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {UPLOAD_COLUMNS} FROM object_storage_objects \
          WHERE id = $1 AND space_id = $2 AND requested_by_account_id = $3 \
            AND state IN ('uploading','attached')"
-    ))
+    )))
     .bind(id)
     .bind(space_id)
     .bind(requested_by)
@@ -196,11 +196,11 @@ pub async fn find_for_caller(
     id: Uuid,
     requested_by: Uuid,
 ) -> Result<Option<PendingObjectUpload>> {
-    let row = sqlx::query_as::<_, ObjectUploadRow>(&format!(
+    let row = sqlx::query_as::<_, ObjectUploadRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {UPLOAD_COLUMNS} FROM object_storage_objects \
          WHERE id = $1 AND requested_by_account_id = $2 \
            AND state IN ('uploading','attached')"
-    ))
+    )))
     .bind(id)
     .bind(requested_by)
     .fetch_optional(pool)
@@ -255,10 +255,10 @@ pub async fn attach(
     limits: Limits,
 ) -> Result<(Node, FileObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-    let upload = sqlx::query_as::<_, ObjectUploadRow>(&format!(
+    let upload = sqlx::query_as::<_, ObjectUploadRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {UPLOAD_COLUMNS} FROM object_storage_objects \
          WHERE id = $1 AND space_id = $2 AND requested_by_account_id = $3 FOR UPDATE"
-    ))
+    )))
     .bind(id)
     .bind(space_id)
     .bind(requested_by)
@@ -271,17 +271,17 @@ pub async fn attach(
         let node_id = upload
             .node_id
             .ok_or_else(|| Error::internal("attached upload has no node"))?;
-        let node = sqlx::query_as::<_, NodeRow>(&format!(
+        let node = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes WHERE id = $1 AND space_id = $2"
-        ))
+        )))
         .bind(node_id)
         .bind(space_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let file = sqlx::query_as::<_, FileRow>(&format!(
+        let file = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {FILE_COLUMNS} FROM file_objects WHERE node_id = $1 AND space_id = $2"
-        ))
+        )))
         .bind(node_id)
         .bind(space_id)
         .fetch_one(&mut *tx)
@@ -308,11 +308,11 @@ pub async fn attach(
     )
     .await?;
 
-    let node = sqlx::query_as::<_, NodeRow>(&format!(
+    let node = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO nodes \
          (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
          VALUES ($1, $2, $3, 'file', $4, $5, $5) RETURNING {NODE_COLUMNS}"
-    ))
+    )))
     .bind(space_id)
     .bind(parent_id)
     .bind(&upload.name)
@@ -322,13 +322,13 @@ pub async fn attach(
     .await
     .map_err(map_constraint_error)?;
 
-    let file = sqlx::query_as::<_, FileRow>(&format!(
+    let file = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO file_objects \
          (node_id, space_id, object_key, media_type, detected_media_type, byte_len, original_filename, \
           encryption_mode, encryption_metadata) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          RETURNING {FILE_COLUMNS}"
-    ))
+    )))
     .bind(node.id)
     .bind(space_id)
     .bind(&upload.object_key)
