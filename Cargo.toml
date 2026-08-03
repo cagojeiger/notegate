@@ -47,7 +47,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 yaml-rust2 = "0.11"
-toml = "0.8"
+toml = "1.1"
 config = { version = "0.15", default-features = false, features = ["toml"] }
 validator = { version = "0.20", features = ["derive"] }
 
