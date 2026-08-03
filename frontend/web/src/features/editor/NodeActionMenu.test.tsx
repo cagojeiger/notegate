@@ -62,4 +62,27 @@ describe("NodeActionMenu", () => {
     rerenderMenu(false);
     expect(move).toHaveFocus();
   });
+
+  it("keeps supplemental read actions available when mutations are disabled", async () => {
+    const user = userEvent.setup();
+    const copyContent = vi.fn();
+
+    render(
+      <NodeActionMenu
+        onRenameNode={vi.fn()}
+        onMoveNode={vi.fn()}
+        onDeleteNode={vi.fn()}
+        disabled
+        supplementalActions={[{ label: "Copy content", onClick: copyContent }]}
+      />
+    );
+
+    const trigger = screen.getByRole("button", { name: "More actions" });
+    expect(trigger).toBeEnabled();
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "Copy content" }));
+
+    expect(copyContent).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: "More actions" })).not.toBeInTheDocument();
+  });
 });

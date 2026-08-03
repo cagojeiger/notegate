@@ -116,9 +116,11 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Button size="xs" variant={showSource ? "primary" : "secondary"} aria-pressed={showSource} onClick={() => setSourceView(true)}>Source</Button>
         </>
       ) : null}
-      <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
-        <Copy size={15} />
-      </IconButton>
+      <span className="max-md:hidden">
+        <IconButton label="Copy content" size="sm" onClick={() => { void copyContent(); }} disabled={!canCopyContent}>
+          <Copy size={15} />
+        </IconButton>
+      </span>
       {mode === "edit" ? (
         <>
           <IconButton label="Save" size="sm" onClick={saveDraft} disabled={!canSave}>
@@ -133,12 +135,25 @@ export function TextEditorView({ active, groupId, navigationActions, node, lates
           <Pencil size={15} />
         </IconButton>
       )}
-      <NodeActionMenu onRenameNode={() => onRenameNode(node)} onMoveNode={() => onMoveNode(node)} onDeleteNode={() => onDeleteNode(node)} disabled={!canMutateNode(node, canWriteActiveSpace)} />
+      <NodeActionMenu
+        onRenameNode={() => onRenameNode(node)}
+        onMoveNode={() => onMoveNode(node)}
+        onDeleteNode={() => onDeleteNode(node)}
+        disabled={!canMutateNode(node, canWriteActiveSpace)}
+        supplementalActions={[
+          { label: "Copy content", icon: <Copy size={14} />, onClick: () => { void copyContent(); }, disabled: !canCopyContent },
+          ...(mode === "preview" && structured && !encrypted ? [
+            { label: "Expand all", icon: <ChevronsUpDown size={14} />, onClick: () => setStructuredExpansionMode("expanded"), disabled: showSource },
+            { label: "Collapse all", icon: <ChevronsDownUp size={14} />, onClick: () => setStructuredExpansionMode("collapsed"), disabled: showSource }
+          ] : []),
+          ...(canClose ? [{ label: "Close group", icon: <X size={14} />, onClick: onClose }] : [])
+        ]}
+      />
     </>
   );
   return (
     <>
-      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} qualifiedPath={qualifiedPath} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} />
+      <EditorGroupHeader active={active} title={node.name} icon={<FileText size={17} />} navigationActions={navigationActions} qualifiedPath={qualifiedPath} titleActions={titleActions} actions={actions} canClose={canClose} onClose={onClose} onContextMenu={openEditorMenu} dirty={dirty} collapseSecondaryActions />
       {textQuery.isLoading ? (
         <div className="p-10 text-muted">Loading text…</div>
       ) : textQuery.isError ? (

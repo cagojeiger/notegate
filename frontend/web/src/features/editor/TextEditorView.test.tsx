@@ -224,7 +224,13 @@ describe("TextEditorView", () => {
 
     expect(screen.getByRole("button", { name: "Copy content" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "More actions" })).toBeDisabled();
+    const moreActions = screen.getByRole("button", { name: "More actions" });
+    expect(moreActions).toBeEnabled();
+    await userEvent.click(moreActions);
+    const actionDialog = within(screen.getByRole("dialog", { name: "More actions" }));
+    expect(actionDialog.getByRole("button", { name: "Copy content" })).toBeEnabled();
+    expect(actionDialog.getByRole("button", { name: "Rename" })).toBeDisabled();
+    await userEvent.click(actionDialog.getByRole("button", { name: "Copy content" }));
 
     fireEvent.contextMenu(await screen.findByText("Large note"));
     const menu = within(screen.getByRole("menu"));
