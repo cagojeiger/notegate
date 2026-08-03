@@ -753,7 +753,7 @@ mod tests {
 
     use notegate_core::Config;
     use notegate_core::security::PiiCrypto;
-    use notegate_db::{AccountRepo, AgentRepo, ApiKeyRepo, SpaceRepo, test_support::TestDb};
+    use notegate_db::{AccountRepo, ApiKeyRepo, SpaceRepo, test_support::TestDb};
     use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
     use notegate_service::spaces::CreateSpace;
     use rmcp::model::ErrorCode;
@@ -808,12 +808,8 @@ mod tests {
         );
         let api_key_repo =
             ApiKeyRepo::with_lookup_key(pool.clone(), crypto.lookup_key_id(), crypto.version());
-        let resolver = notegate_service::identity::Resolver::new(
-            account_repo,
-            AgentRepo::new(pool.clone()),
-            api_key_repo,
-            crypto.clone(),
-        );
+        let resolver =
+            notegate_service::identity::Resolver::new(account_repo, api_key_repo, crypto.clone());
         let jwt = Arc::new(crate::auth::jwt::JwtAuthority::from_url(
             &config,
             "https://auth.example.test/keys".to_owned(),

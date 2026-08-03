@@ -136,6 +136,59 @@ struct UserRow {
     anonymized_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, FromRow)]
+pub(crate) struct UserCallerRow {
+    account_id: Uuid,
+    account_kind: String,
+    display_name_ciphertext: Option<Vec<u8>>,
+    display_name_nonce: Option<Vec<u8>>,
+    display_name_enc_key_id: Option<String>,
+    display_name_enc_version: Option<i32>,
+    account_is_active: bool,
+    account_deleted_at: Option<DateTime<Utc>>,
+    account_deleted_by: Option<Uuid>,
+    account_created_at: DateTime<Utc>,
+    account_updated_at: DateTime<Utc>,
+    user_id: Uuid,
+    email_ciphertext: Option<Vec<u8>>,
+    email_nonce: Option<Vec<u8>>,
+    email_enc_key_id: Option<String>,
+    email_enc_version: Option<i32>,
+    user_tier: String,
+    user_anonymized_at: Option<DateTime<Utc>>,
+}
+
+impl UserCallerRow {
+    pub(crate) fn into_parts(self, crypto: &PiiCrypto) -> Result<(Account, User)> {
+        let account = AccountRow {
+            id: self.account_id,
+            kind: self.account_kind,
+            display_name_ciphertext: self.display_name_ciphertext,
+            display_name_nonce: self.display_name_nonce,
+            display_name_enc_key_id: self.display_name_enc_key_id,
+            display_name_enc_version: self.display_name_enc_version,
+            is_active: self.account_is_active,
+            deleted_at: self.account_deleted_at,
+            deleted_by: self.account_deleted_by,
+            created_at: self.account_created_at,
+            updated_at: self.account_updated_at,
+            agent_name: None,
+        }
+        .into_account(crypto)?;
+        let user = UserRow {
+            id: self.user_id,
+            email_ciphertext: self.email_ciphertext,
+            email_nonce: self.email_nonce,
+            email_enc_key_id: self.email_enc_key_id,
+            email_enc_version: self.email_enc_version,
+            tier: self.user_tier,
+            anonymized_at: self.user_anonymized_at,
+        }
+        .into_user(crypto)?;
+        Ok((account, user))
+    }
+}
+
 impl UserRow {
     fn into_user(self, crypto: &PiiCrypto) -> Result<User> {
         let email = match self.email_enc_key_id.as_ref() {
@@ -174,30 +227,33 @@ const ACCOUNT_COLUMNS: &str = "a.id, a.kind, a.display_name_ciphertext, a.displa
      ag.name AS agent_name";
 const USER_COLUMNS: &str = "id, email_ciphertext, email_nonce, email_enc_key_id, \
      email_enc_version, tier, anonymized_at";
+pub(crate) const USER_CALLER_COLUMNS: &str = "\
+     a.id AS account_id, a.kind AS account_kind, \
+     a.display_name_ciphertext, a.display_name_nonce, \
+     a.display_name_enc_key_id, a.display_name_enc_version, \
+     a.is_active AS account_is_active, a.deleted_at AS account_deleted_at, \
+     a.deleted_by_account_id AS account_deleted_by, \
+     a.created_at AS account_created_at, a.updated_at AS account_updated_at, \
+     u.id AS user_id, u.email_ciphertext, u.email_nonce, \
+     u.email_enc_key_id, u.email_enc_version, u.tier AS user_tier, \
+     u.anonymized_at AS user_anonymized_at";
 
 impl AccountRepo {
     pub async fn find_caller_by_account_id(
         &self,
         account_id: Uuid,
     ) -> Result<Option<(Account, User)>> {
-        let account_row = self.fetch_account_row(account_id).await?;
-        let Some(account_row) = account_row else {
-            return Ok(None);
-        };
-        let account = account_row.into_account(&self.crypto)?;
-
-        let user_row = sqlx::query_as::<_, UserRow>(&format!(
-            "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
+        let row = sqlx::query_as::<_, UserCallerRow>(&format!(
+            "SELECT {USER_CALLER_COLUMNS} \
+             FROM accounts a \
+             JOIN users u ON u.id = a.id \
+             WHERE a.id = $1"
         ))
         .bind(account_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-
-        match user_row {
-            Some(user_row) => Ok(Some((account, user_row.into_user(&self.crypto)?))),
-            None => Ok(None),
-        }
+        row.map(|row| row.into_parts(&self.crypto)).transpose()
     }
 
     pub async fn find_account_refs(&self, ids: &[Uuid]) -> Result<HashMap<Uuid, AccountRef>> {
@@ -429,11 +485,10 @@ impl AccountRepo {
 
     pub async fn find_user_by_sub(&self, sub: &str) -> Result<Option<(Account, User)>> {
         let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, sub)?;
-        let account_row = sqlx::query_as::<_, AccountRow>(&format!(
-            "SELECT {ACCOUNT_COLUMNS} \
+        let row = sqlx::query_as::<_, UserCallerRow>(&format!(
+            "SELECT {USER_CALLER_COLUMNS} \
              FROM accounts a \
              JOIN users u ON u.id = a.id \
-             LEFT JOIN agents ag ON ag.id = a.id \
              WHERE u.provider_sub_hash = $1"
         ))
         .bind(&provider_sub_hash)
@@ -441,19 +496,18 @@ impl AccountRepo {
         .await
         .map_err(map_sqlx_error)?;
 
-        let Some(account_row) = account_row else {
-            return Ok(None);
-        };
-        let account = account_row.into_account(&self.crypto)?;
-        let user_row = sqlx::query_as::<_, UserRow>(&format!(
-            "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
-        ))
-        .bind(account.id)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        row.map(|row| row.into_parts(&self.crypto)).transpose()
+    }
 
-        Ok(Some((account, user_row.into_user(&self.crypto)?)))
+    /// Resolve only the local user id for subject-equality checks. This avoids
+    /// loading and decrypting caller PII on browser refresh validation paths.
+    pub async fn find_user_id_by_sub(&self, sub: &str) -> Result<Option<Uuid>> {
+        let provider_sub_hash = self.crypto.provider_sub_hash(AUTH_PROVIDER, sub)?;
+        sqlx::query_scalar("SELECT id FROM users WHERE provider_sub_hash = $1")
+            .bind(provider_sub_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)
     }
 
     async fn fetch_account_row(&self, account_id: Uuid) -> Result<Option<AccountRow>> {

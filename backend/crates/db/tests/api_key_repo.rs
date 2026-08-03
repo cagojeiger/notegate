@@ -365,7 +365,7 @@ async fn historical_user_owned_api_key_does_not_authenticate_or_mark_last_used()
         .await?;
 
     let resolved = repo
-        .find_live_agent_id_by_key(key_id, &token_prefix, "hash-user-key")
+        .find_live_agent_by_key(key_id, &token_prefix, "hash-user-key")
         .await?;
     assert_eq!(resolved, None);
 
@@ -794,12 +794,13 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     .await?;
 
     assert_eq!(
-        repo.find_live_agent_id_by_key(key_id, &token_prefix, "hash-agent-key")
-            .await?,
+        repo.find_live_agent_by_key(key_id, &token_prefix, "hash-agent-key")
+            .await?
+            .map(|(account, _agent)| account.id),
         Some(agent_id)
     );
     assert_eq!(
-        repo.find_live_agent_id_by_key(key_id, "ngk_v2_other", "hash-agent-key")
+        repo.find_live_agent_by_key(key_id, "ngk_v2_other", "hash-agent-key")
             .await?,
         None
     );
@@ -812,7 +813,7 @@ async fn live_agent_api_key_resolves_account_and_rejects_inactive_agent()
     .execute(&db.pool)
     .await?;
     assert_eq!(
-        repo.find_live_agent_id_by_key(key_id, &token_prefix, "hash-agent-key")
+        repo.find_live_agent_by_key(key_id, &token_prefix, "hash-agent-key")
             .await?,
         None
     );
@@ -886,12 +887,13 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         .await?;
 
     assert_eq!(
-        repo.find_live_agent_id_by_key(live_id, &agent_api_key_prefix(live_id), "hash-live")
-            .await?,
+        repo.find_live_agent_by_key(live_id, &agent_api_key_prefix(live_id), "hash-live")
+            .await?
+            .map(|(account, _agent)| account.id),
         Some(agent_id)
     );
     assert_eq!(
-        repo.find_live_agent_id_by_key(
+        repo.find_live_agent_by_key(
             revoked_id,
             &agent_api_key_prefix(revoked_id),
             "hash-revoked",
@@ -900,7 +902,7 @@ async fn live_key_lookup_rejects_revoked_and_expired_keys() -> Result<(), Box<dy
         None
     );
     assert_eq!(
-        repo.find_live_agent_id_by_key(
+        repo.find_live_agent_by_key(
             expired_id,
             &agent_api_key_prefix(expired_id),
             "hash-expired",

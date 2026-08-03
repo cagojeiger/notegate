@@ -65,6 +65,10 @@ pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
             Matcher::Full("notegate_text_decryption_duration".to_owned()),
             SEARCH_DURATION_BUCKETS_SECONDS,
         )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_metadata_write_flush_duration".to_owned()),
+            HTTP_DURATION_BUCKETS_SECONDS,
+        )?
         .install_recorder()?;
 
     describe_metrics();
@@ -181,6 +185,45 @@ fn describe_metrics() {
         Unit::Seconds,
         "Server-managed text decryption duration in seconds"
     );
+    metrics::describe_counter!(
+        "notegate_metadata_write_flushes",
+        "Completed metadata write-behind flush attempts by bounded outcome"
+    );
+    metrics::describe_histogram!(
+        "notegate_metadata_write_flush_duration",
+        Unit::Seconds,
+        "Metadata write-behind flush duration in seconds"
+    );
+    metrics::describe_counter!(
+        "notegate_metadata_write_items",
+        "Metadata write-behind items by bounded kind and disposition"
+    );
+}
+
+pub(crate) fn record_metadata_flush(enabled: bool, outcome: &'static str, duration: Duration) {
+    if !enabled {
+        return;
+    }
+    metrics::counter!("notegate_metadata_write_flushes", "outcome" => outcome).increment(1);
+    metrics::histogram!("notegate_metadata_write_flush_duration", "outcome" => outcome)
+        .record(duration.as_secs_f64());
+}
+
+pub(crate) fn record_metadata_items(
+    enabled: bool,
+    kind: &'static str,
+    disposition: &'static str,
+    count: u64,
+) {
+    if !enabled || count == 0 {
+        return;
+    }
+    metrics::counter!(
+        "notegate_metadata_write_items",
+        "kind" => kind,
+        "disposition" => disposition
+    )
+    .increment(count);
 }
 
 pub(crate) fn record_mcp_tool_metrics(
@@ -515,6 +558,11 @@ mod tests {
                 SEARCH_DURATION_BUCKETS_SECONDS,
             )
             .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_metadata_write_flush_duration".to_owned()),
+                HTTP_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
             .build_recorder();
         (MetricsHandle(recorder.handle()), recorder)
     }
@@ -597,6 +645,8 @@ mod tests {
                 "outcome" => "success"
             )
             .record(0.015);
+            record_metadata_flush(true, "success", Duration::from_millis(2));
+            record_metadata_items(true, "api_key", "flushed", 3);
 
             let subscriber = tracing_subscriber::registry().with(InternalMetricsLayer);
             tracing::subscriber::with_default(subscriber, || {
@@ -668,5 +718,10 @@ mod tests {
             body.contains("notegate_text_decrypted_bytes_total{boundary=\"search_body_load\"} 128")
         );
         assert!(body.contains("notegate_text_decryption_duration_seconds_bucket"));
+        assert!(body.contains("notegate_metadata_write_flushes_total{outcome=\"success\"} 1"));
+        assert!(body.contains("notegate_metadata_write_flush_duration_seconds_bucket"));
+        assert!(body.contains(
+            "notegate_metadata_write_items_total{kind=\"api_key\",disposition=\"flushed\"} 3"
+        ));
     }
 }

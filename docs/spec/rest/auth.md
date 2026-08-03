@@ -57,6 +57,8 @@ request with browser session cookie
 
 Browser session absolute lifetime은 30일이다. Local validation lease는 1시간이다. 30일이 지나면 refresh token이 authgate에서 아직 유효하더라도 NoteGate browser session은 재로그인을 요구한다.
 
+Agent API key와 browser session의 `last_used_at`은 인증 결과를 바꾸지 않는 관측 metadata다. 성공한 인증은 process-local write-behind buffer에 사용 시각을 기록하고 DB에는 batch로 반영한다. 같은 credential의 관측값은 가장 최신 시각으로 합치며 DB row write는 기존 값보다 1시간 이상 최신인 경우로 제한한다. 따라서 `last_used_at`은 실시간 접속 상태나 보안 판정에 사용하지 않는다.
+
 ## OAuth metadata
 
 ```http

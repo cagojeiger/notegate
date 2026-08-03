@@ -55,9 +55,28 @@ entry count are process-local Moka estimates and may briefly lag concurrent cach
 maintenance. A disabled cache reports zero capacity, size, and entries.
 
 SQLx does not expose the pool's waiter count through the current shared-pool API.
-NoteGate therefore does not publish a synthetic saturation value. Acquire wait
-duration can be added later if connection acquisition is centralized behind an
-instrumented boundary.
+NoteGate therefore does not publish a synthetic saturation value. Instead,
+`notegate_db_pool_acquire_duration_seconds` measures observed connection acquisition
+waits and `notegate_db_pool_acquire_timeouts_total` counts acquisition timeouts.
+
+## Metadata write-behind metrics
+
+```text
+notegate_metadata_write_flushes_total
+  labels: outcome
+
+notegate_metadata_write_flush_duration_seconds
+  labels: outcome
+
+notegate_metadata_write_items_total
+  labels: kind, disposition
+```
+
+- `outcome` is `success`, `error`, or `timeout`.
+- `kind` is `api_key`, `browser_session`, or `media_type`.
+- `disposition` is `flushed`, `dropped`, or `stranded`. `stranded` means the
+  graceful-shutdown retry budget ended with values still in process memory.
+- IDs, media types, and error text are not metric labels.
 
 ## Cardinality and data policy
 

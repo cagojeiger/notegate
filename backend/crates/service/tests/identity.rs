@@ -42,7 +42,6 @@ async fn insert_key(
 fn resolver(db: &TestDb, crypto: PiiCrypto) -> Resolver {
     Resolver::new(
         AccountRepo::with_crypto(db.pool.clone(), crypto.clone()),
-        AgentRepo::new(db.pool.clone()),
         ApiKeyRepo::with_lookup_key(db.pool.clone(), crypto.lookup_key_id(), crypto.version()),
         crypto,
     )

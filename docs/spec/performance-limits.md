@@ -53,6 +53,22 @@ limit은 ingress/gateway에서 별도로 적용한다.
 요청 중 본문 조회·복호화·matching은 최대 2개만 동시에 실행한다. `/health`, `/ready`는
 rate limit 대상에서 제외한다.
 
+## Best-effort metadata write-behind
+
+API key와 browser session의 `last_used_at`, preview에서 감지한 File media type은 요청 경로에서
+직접 UPDATE하지 않는다. Pod별 process-local buffer의 대기 map은 종류별 최대 10000개의 서로
+다른 key를 보관하고 30초마다 PostgreSQL bulk UPDATE로 비운다. Flush 중에는 분리된 batch와 새
+대기 map이 함께 존재할 수 있어 종류별 최대 20000개 항목이 일시적으로 메모리에 있을 수 있다. 같은 credential은 key 하나로 합치고,
+같은 File은 가장 먼저 관측한 감지값으로 합친다. API key와 browser session의 사용 시각은 pod
+시계가 아니라 PostgreSQL `now()`로 기록하며, 마지막 저장 후 1시간이 지난 row만 실제로 갱신한다.
+
+상한에 도달하면 이미 들어 있는 key의 값은 계속 합치되 새로운 key는 버리고 구조화 warning을
+남긴다. DB flush 실패나 5초 timeout 시 실패 batch를 먼저 보존해 재시도하고, graceful shutdown에서는 HTTP
+요청이 모두 끝난 뒤 최대 3회 최종 flush한다. 종료 후에도 남은 항목은 종류별 개수를 error log와
+metric으로 남긴다. 이 값들은 인증이나 content의 source of truth가
+아닌 best-effort 파생 metadata이므로 pod 강제 종료 시 마지막 flush interval의 관측값은 유실될
+수 있다. Replica 간 buffer 공유나 전달은 하지 않는다.
+
 ## Account and credential limits
 
 System hard max:

@@ -1,9 +1,11 @@
 //! Browser session persistence for server-side OAuth refresh.
 
+use crate::account_repo::{USER_CALLER_COLUMNS, UserCallerRow};
 use crate::{active_account_predicate, audit_events, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
-use notegate_core::security::EncryptedField;
+use notegate_core::security::{EncryptedField, PiiCrypto};
+use notegate_model::{Account, User};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -85,6 +87,37 @@ impl BrowserSessionRepo {
         Ok(row.map(BrowserSession::from))
     }
 
+    /// Resolve a live browser session and its user caller in one database query.
+    /// The common validated-session path selects no refresh-token ciphertext;
+    /// the slow refresh claim retrieves that secret only when it is needed.
+    pub async fn find_live_caller_by_token(
+        &self,
+        session_id: Uuid,
+        token_hash: &str,
+        crypto: &PiiCrypto,
+    ) -> Result<Option<LiveBrowserSessionCaller>> {
+        let live = live_browser_session_predicate("bs.");
+        let active = active_account_predicate("a.");
+        let row = sqlx::query_as::<_, LiveBrowserSessionCallerRow>(&format!(
+            "SELECT bs.id AS session_id, \
+                    bs.validated_until AS session_validated_until, \
+                    {USER_CALLER_COLUMNS} \
+             FROM browser_sessions bs \
+             JOIN accounts a ON a.id = bs.user_id \
+             JOIN users u ON u.id = a.id \
+             WHERE bs.id = $1 AND bs.token_hash = $2 \
+               AND {live} \
+               AND {active} \
+               AND a.kind = 'user'"
+        ))
+        .bind(session_id)
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        row.map(|row| row.into_caller(crypto)).transpose()
+    }
+
     pub async fn find_by_token(
         &self,
         session_id: Uuid,
@@ -132,19 +165,6 @@ impl BrowserSessionRepo {
         .await
         .map_err(map_sqlx_error)?;
         Ok(row.map(BrowserSession::from))
-    }
-
-    pub async fn touch_last_used(&self, session_id: Uuid) -> Result<()> {
-        sqlx::query(
-            "UPDATE browser_sessions SET last_used_at = now(), updated_at = now() \
-             WHERE id = $1 \
-               AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')",
-        )
-        .bind(session_id)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(())
     }
 
     pub async fn mark_refreshed(
@@ -309,6 +329,34 @@ pub struct RotatedRefreshToken<'a> {
     pub refresh_token: &'a EncryptedField,
     pub refresh_token_enc_key_id: &'a str,
     pub refresh_token_enc_version: i32,
+}
+
+#[derive(Debug)]
+pub struct LiveBrowserSessionCaller {
+    pub session_id: Uuid,
+    pub validated_until: DateTime<Utc>,
+    pub account: Account,
+    pub user: User,
+}
+
+#[derive(Debug, FromRow)]
+struct LiveBrowserSessionCallerRow {
+    session_id: Uuid,
+    session_validated_until: DateTime<Utc>,
+    #[sqlx(flatten)]
+    caller: UserCallerRow,
+}
+
+impl LiveBrowserSessionCallerRow {
+    fn into_caller(self, crypto: &PiiCrypto) -> Result<LiveBrowserSessionCaller> {
+        let (account, user) = self.caller.into_parts(crypto)?;
+        Ok(LiveBrowserSessionCaller {
+            session_id: self.session_id,
+            validated_until: self.session_validated_until,
+            account,
+            user,
+        })
+    }
 }
 
 #[derive(Debug, FromRow)]

@@ -5,8 +5,9 @@ use crate::audit_events::{self, ApiKeyOwnerKind, AuditContext};
 use crate::{active_account_predicate, map_sqlx_error};
 use chrono::{DateTime, Utc};
 use notegate_core::{Error, Result, limits};
-use notegate_model::{ApiKey, ApiKeyCursor, CreateApiKey};
-use sqlx::{FromRow, PgPool, Row as _};
+use notegate_model::account::{Account, AccountKind};
+use notegate_model::{Agent, ApiKey, ApiKeyCursor, CreateApiKey};
+use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -86,17 +87,26 @@ impl ApiKeyRepo {
         Ok(row.map(ApiKey::from))
     }
 
-    pub async fn find_live_agent_id_by_key(
+    pub async fn find_live_agent_by_key(
         &self,
         key_id: Uuid,
         token_prefix: &str,
         token_hash: &str,
-    ) -> Result<Option<Uuid>> {
+    ) -> Result<Option<(Account, Agent)>> {
         let live = live_key_predicate("k.");
         let active = active_account_predicate("acc.");
-        let agent_id: Option<Uuid> = sqlx::query(&format!(
-            "SELECT k.account_id FROM api_keys k \
+        let row = sqlx::query_as::<_, LiveAgentCallerRow>(&format!(
+            "SELECT acc.id AS account_id, acc.kind AS account_kind, \
+                    acc.is_active AS account_is_active, \
+                    acc.deleted_at AS account_deleted_at, \
+                    acc.deleted_by_account_id AS account_deleted_by, \
+                    acc.created_at AS account_created_at, \
+                    acc.updated_at AS account_updated_at, \
+                    ag.id AS agent_id, ag.name AS agent_name, \
+                    ag.owner_user_id AS agent_owner_user_id \
+             FROM api_keys k \
              JOIN accounts acc ON acc.id = k.account_id \
+             JOIN agents ag ON ag.id = acc.id \
              WHERE k.id = $1 AND k.token_prefix = $2 AND k.token_hash = $3 \
                AND {live} \
                AND {active} \
@@ -107,23 +117,8 @@ impl ApiKeyRepo {
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)?
-        .map(|row| row.get::<Uuid, _>("account_id"));
-
-        if agent_id.is_some()
-            && let Err(error) = sqlx::query(
-                "UPDATE api_keys SET last_used_at = now() \
-                 WHERE id = $1 \
-                   AND (last_used_at IS NULL OR last_used_at < now() - interval '1 hour')",
-            )
-            .bind(key_id)
-            .execute(&self.pool)
-            .await
-        {
-            tracing::warn!(event = "api_key.last_used_update_failed", %error);
-        }
-
-        Ok(agent_id)
+        .map_err(map_sqlx_error)?;
+        row.map(LiveAgentCallerRow::into_parts).transpose()
     }
 
     pub async fn count_live_keys(&self, account_id: Uuid) -> Result<usize> {
@@ -470,6 +465,44 @@ pub struct InsertApiKey<'a> {
     pub token_hash: &'a str,
     pub created_by: Uuid,
     pub rotated_from_key_id: Option<Uuid>,
+}
+
+#[derive(Debug, FromRow)]
+struct LiveAgentCallerRow {
+    account_id: Uuid,
+    account_kind: String,
+    account_is_active: bool,
+    account_deleted_at: Option<DateTime<Utc>>,
+    account_deleted_by: Option<Uuid>,
+    account_created_at: DateTime<Utc>,
+    account_updated_at: DateTime<Utc>,
+    agent_id: Uuid,
+    agent_name: String,
+    agent_owner_user_id: Uuid,
+}
+
+impl LiveAgentCallerRow {
+    fn into_parts(self) -> Result<(Account, Agent)> {
+        let kind = AccountKind::parse(&self.account_kind).ok_or_else(|| {
+            Error::internal(format!("unknown account kind: {}", self.account_kind))
+        })?;
+        let account = Account {
+            id: self.account_id,
+            kind,
+            display_name: self.agent_name.clone(),
+            is_active: self.account_is_active,
+            deleted_at: self.account_deleted_at,
+            deleted_by: self.account_deleted_by,
+            created_at: self.account_created_at,
+            updated_at: self.account_updated_at,
+        };
+        let agent = Agent {
+            id: self.agent_id,
+            name: self.agent_name,
+            owner_user_id: self.agent_owner_user_id,
+        };
+        Ok((account, agent))
+    }
 }
 
 #[derive(Debug, FromRow)]

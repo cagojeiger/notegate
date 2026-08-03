@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use notegate_core::security::EncryptedField;
 use notegate_db::browser_session_repo::{
-    BrowserSession, InsertBrowserSession, RotatedRefreshToken, format_token, parse_token,
-    token_prefix,
+    BrowserSession, InsertBrowserSession, LiveBrowserSessionCaller, RotatedRefreshToken,
+    format_token, parse_token, token_prefix,
 };
 use notegate_model::Caller;
 use uuid::Uuid;
@@ -50,20 +50,18 @@ pub async fn create_browser_session(
 
 pub async fn verify_browser_session(state: &AppState, token: &str) -> Result<Caller, AuthError> {
     let parsed = parse_browser_session_token(state, token)?;
-    let session = state
+    let resolved = state
         .browser_sessions
-        .find_live_by_token(parsed.session_id, &parsed.token_hash)
+        .find_live_caller_by_token(parsed.session_id, &parsed.token_hash, &state.security)
         .await
         .map_err(|_error| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
 
-    if session.validated_until > Utc::now() {
+    if resolved.validated_until > Utc::now() {
         state
-            .browser_sessions
-            .touch_last_used(session.id)
-            .await
-            .map_err(|_error| AuthError::Internal)?;
-        return resolve_browser_session_user(state, session.user_id).await;
+            .metadata_writes
+            .record_browser_session(resolved.session_id);
+        return caller_from_live_session(resolved);
     }
 
     refresh_browser_session(state, parsed).await
@@ -277,19 +275,17 @@ async fn resolve_after_refresh_claim_miss(
     state: &AppState,
     parsed: ParsedBrowserSessionToken,
 ) -> Result<Caller, AuthError> {
-    let session = state
+    let resolved = state
         .browser_sessions
-        .find_live_by_token(parsed.session_id, &parsed.token_hash)
+        .find_live_caller_by_token(parsed.session_id, &parsed.token_hash, &state.security)
         .await
         .map_err(|_error| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
-    if session.validated_until > Utc::now() {
+    if resolved.validated_until > Utc::now() {
         state
-            .browser_sessions
-            .touch_last_used(session.id)
-            .await
-            .map_err(|_error| AuthError::Internal)?;
-        return resolve_browser_session_user(state, session.user_id).await;
+            .metadata_writes
+            .record_browser_session(resolved.session_id);
+        return caller_from_live_session(resolved);
     }
     Err(AuthError::Unavailable)
 }
@@ -347,10 +343,10 @@ async fn refreshed_sub_matches_session(
 ) -> Result<bool, AuthError> {
     let resolved = state
         .accounts
-        .find_user_by_sub(sub)
+        .find_user_id_by_sub(sub)
         .await
         .map_err(|_error| AuthError::Internal)?;
-    Ok(resolved.is_some_and(|(account, _user)| account.id == user_id))
+    Ok(resolved == Some(user_id))
 }
 
 async fn resolve_browser_session_user(
@@ -362,6 +358,15 @@ async fn resolve_browser_session_user(
         .resolve_browser_session_user(user_id)
         .await
         .map_err(map_identity_error)
+}
+
+fn caller_from_live_session(resolved: LiveBrowserSessionCaller) -> Result<Caller, AuthError> {
+    notegate_service::identity::caller_from_user(
+        resolved.account,
+        resolved.user,
+        notegate_model::Channel::Browser,
+    )
+    .map_err(map_identity_error)
 }
 
 fn parse_browser_session_token(

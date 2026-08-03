@@ -19,6 +19,7 @@ mod file_change;
 mod file_preview;
 mod identity;
 mod mcp;
+mod metadata_write_behind;
 mod object_storage;
 mod object_storage_cleanup_worker;
 mod object_upload_flow;
@@ -85,26 +86,21 @@ async fn main() -> anyhow::Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let jwks_url = format!("{}/keys", config.authgate_url);
-    // The db-backed identity resolver: account_repo resolves users, api_key_repo
-    // resolves key ownership, and agent_repo resolves agent callers.
+    // The db-backed identity resolver: account_repo resolves users, while
+    // api_key_repo resolves API-key ownership and agent callers in one query.
     notegate_service::cursor::configure_signing_key(pii_crypto.session_signing_key())?;
     let account_repo = notegate_db::AccountRepo::with_crypto_and_default_user_tier(
         pool.clone(),
         pii_crypto.clone(),
         config.default_user_tier,
     );
-    let agent_repo = notegate_db::AgentRepo::new(pool.clone());
     let api_key_repo = notegate_db::ApiKeyRepo::with_lookup_key(
         pool.clone(),
         pii_crypto.lookup_key_id(),
         pii_crypto.version(),
     );
-    let resolver = notegate_service::identity::Resolver::new(
-        account_repo,
-        agent_repo,
-        api_key_repo,
-        pii_crypto.clone(),
-    );
+    let resolver =
+        notegate_service::identity::Resolver::new(account_repo, api_key_repo, pii_crypto.clone());
     let config = std::sync::Arc::new(config);
     let jwt = std::sync::Arc::new(auth::jwt::JwtAuthority::from_url(&config, jwks_url));
     let oidc = std::sync::Arc::new(auth::oidc::OidcProvider::new(&config, http.clone()));
@@ -135,6 +131,13 @@ async fn main() -> anyhow::Result<()> {
         state.object_storage.clone(),
         background_shutdown_token.clone(),
     );
+    let metadata_write_shutdown_token = CancellationToken::new();
+    let metadata_write_worker = metadata_write_behind::spawn(
+        state.metadata_writes.clone(),
+        pool.clone(),
+        metadata_write_shutdown_token.clone(),
+        config.metrics_enabled,
+    );
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -158,6 +161,13 @@ async fn main() -> anyhow::Result<()> {
         Some(result) => result,
         None => server.await,
     };
+
+    // No request can add new observations after the HTTP server drains. Stop the
+    // writer afterwards so its final flush includes every completed request.
+    metadata_write_shutdown_token.cancel();
+    if let Err(error) = metadata_write_worker.await {
+        tracing::error!(event = "metadata_write_behind.join_failed", %error);
+    }
 
     if let Err(error) = purge_worker.await {
         tracing::error!(event = "purge_worker.join_failed", %error);

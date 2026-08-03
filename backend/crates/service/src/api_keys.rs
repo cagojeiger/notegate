@@ -156,13 +156,22 @@ pub fn token_prefix(key_id: Uuid) -> String {
     format!("{AGENT_API_KEY_PREFIX}{key_id}")
 }
 
-pub fn parse_token(token: &str) -> Option<(Uuid, &str, String)> {
+fn parse_token_components(token: &str) -> Option<(Uuid, &str)> {
     let rest = token.strip_prefix(AGENT_API_KEY_PREFIX)?;
     let (key_id, secret) = rest.split_once('_')?;
     let key_id = Uuid::parse_str(key_id).ok()?;
     if secret.is_empty() {
         return None;
     }
+    Some((key_id, secret))
+}
+
+pub fn parse_token_id(token: &str) -> Option<Uuid> {
+    parse_token_components(token).map(|(key_id, _)| key_id)
+}
+
+pub fn parse_token(token: &str) -> Option<(Uuid, &str, String)> {
+    let (key_id, secret) = parse_token_components(token)?;
     Some((key_id, secret, format!("{AGENT_API_KEY_PREFIX}{key_id}")))
 }
 
@@ -180,6 +189,7 @@ mod tests {
         assert_eq!(parsed.1, "secret-value");
         assert_eq!(parsed.2, format!("ngk_v2_{key_id}"));
         assert_eq!(token_prefix(key_id), format!("ngk_v2_{key_id}"));
+        assert_eq!(parse_token_id(&token), Some(key_id));
     }
 
     #[test]
