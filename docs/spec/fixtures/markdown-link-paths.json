@@ -6,6 +6,12 @@
     "expected": "/docs/A B.md"
   },
   {
+    "name": "colon inside path segment",
+    "source_path": "/docs/index.md",
+    "href": "./folder/a:b.md",
+    "expected": "/docs/folder/a:b.md"
+  },
+  {
     "name": "root path",
     "source_path": "/docs/index.md",
     "href": "/README.md#overview",
