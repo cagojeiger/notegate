@@ -421,15 +421,13 @@ mod tests {
             .map(|_| event(1, Uuid::new_v4(), "text.write", json!({})))
             .collect::<Vec<_>>();
 
-        let (first, first_count) =
-            EventImpact::bounded_incremental(&events).expect("incremental batch");
+        let (first, first_count) = EventImpact::bounded_incremental(&events).unwrap();
         assert_eq!(first_count, INCREMENTAL_SOURCE_LIMIT);
         assert_eq!(first.dirty_sources.len(), INCREMENTAL_SOURCE_LIMIT);
         assert!(!first.rebuild);
 
         let (_, remaining) = events.split_at(first_count);
-        let (second, second_count) =
-            EventImpact::bounded_incremental(remaining).expect("remaining batch");
+        let (second, second_count) = EventImpact::bounded_incremental(remaining).unwrap();
         assert_eq!(second_count, 1);
         assert_eq!(second.dirty_sources.len(), 1);
         assert!(!second.rebuild);
