@@ -2469,7 +2469,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-governor",
- "base64 0.22.1",
+ "base64 0.23.0",
  "chrono",
  "dotenvy",
  "futures-util",
@@ -2551,7 +2551,7 @@ dependencies = [
 name = "notegate-service"
 version = "0.1.52"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.0",
  "chrono",
  "hmac 0.12.1",
  "metrics",
