@@ -14,21 +14,15 @@ use std::time::Duration;
 
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{FilesRepo, LinkIndexRepo, SpaceRepo, TextMutationKind};
-use notegate_model::files::{StoredContent, WriteTextBody};
+use notegate_model::files::StoredContent;
 use notegate_model::{AccountKind, LinkIndexFreshness, LinkIndexStatus, LinkReferenceStatus};
-use notegate_service::files::{FilesService, UpdateTextEncryption};
+use notegate_service::files::{FilesService, UpdateTextEncryption, content};
 use notegate_service::link_index::{LinkIndexProjector, LinkIndexRun, LinkIndexService};
-use sha2::{Digest, Sha256};
 
 const PARSER_VERSION: i32 = 1;
 
 fn text(content: &str) -> StoredContent {
-    StoredContent {
-        body: WriteTextBody::Plain(content.to_owned()),
-        content_sha256: format!("{:x}", Sha256::digest(content.as_bytes())),
-        byte_len: content.len() as i64,
-        line_count: content.lines().count().max(1) as i32,
-    }
+    content::compute(content).into_stored_plain(content.to_owned())
 }
 
 async fn drain(
