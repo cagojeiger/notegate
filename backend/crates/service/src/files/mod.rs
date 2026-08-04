@@ -20,6 +20,7 @@ mod preview;
 mod read;
 mod view;
 
+pub use format::validate_structured_text;
 pub use notegate_model::files::{
     AppendText, BatchChildrenRequest, BatchChildrenResult, BeginObjectUpload,
     CanonicalChildrenPage, CanonicalNodeListPage, ChildrenCursor, ChildrenPage, ChildrenRequest,

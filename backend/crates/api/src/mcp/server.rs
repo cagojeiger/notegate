@@ -43,7 +43,7 @@ use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller and running server version. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires exactly one top-level `purpose`; `run_sequence` commands inherit it and must not contain `purpose`. Use `me` to inspect the caller and running server version. Use a direct tool for one operation. Prefer `run_sequence` for 2-20 commands whose inputs are known in advance and share one purpose; use separate calls when a later input depends on an earlier result such as a cursor, sha256, or discovered target. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `file_transfer` for direct local file upload/download. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -154,7 +154,7 @@ impl McpServer {
 
     #[tool(
         name = "search",
-        description = "Search NoteGate node names and plain text. Read-only. Use op=find or op=grep. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
+        description = "Search NoteGate node names and plain text. Read-only. Use op=find or op=grep. Results contain summaries and optional line references; use read for full text. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
         annotations(title = "Search NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -182,7 +182,7 @@ impl McpServer {
 
     #[tool(
         name = "manage",
-        description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. MCP cannot create spaces.",
+        description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. Only mkdir with parents=true may target the Space root; every other target, source, or destination must name a node. MCP cannot create spaces.",
         annotations(title = "Manage NoteGate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -211,7 +211,7 @@ impl McpServer {
 
     #[tool(
         name = "run_sequence",
-        description = "Run an ordered command sequence. Each command is committed independently; execution stops on first failure and completed commands are not rolled back.",
+        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and use tool-discriminated flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime reports the first failure in input order; already-started independent reads/searches may finish, and completed mutations are not rolled back.",
         annotations(title = "Run NoteGate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -474,7 +474,7 @@ mod tests {
         assert!(
             data["next_action"]["fields"][0]["description"]
                 .as_str()
-                .is_some_and(|description| description.contains("human-readable reason"))
+                .is_some_and(|description| description.contains("MCP invocation"))
         );
         assert!(
             required_fields_error(
@@ -814,6 +814,23 @@ mod tests {
             assert_required_properties(&tools, tool_name, required);
         }
 
+        let common_purpose_description = "Reason for this MCP invocation. Required once at the top level; maximum 200 characters.";
+        for tool_name in ["read", "search", "write", "manage", "file_transfer"] {
+            assert_eq!(
+                tools[tool_name].input_schema["properties"]["purpose"]["description"],
+                common_purpose_description,
+                "tool `{tool_name}` must expose the shared invocation-purpose contract"
+            );
+        }
+        assert_eq!(
+            tools["run_sequence"].input_schema["properties"]["purpose"]["description"],
+            "Reason for this MCP invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters."
+        );
+        assert_eq!(
+            tools["run_sequence"].input_schema["properties"]["commands"]["description"],
+            "Ordered flat command objects. Each includes tool and op, omits purpose and args; 1..20."
+        );
+
         let me_properties = tools
             .get("me")
             .and_then(|tool| tool.input_schema.get("properties"))
@@ -841,22 +858,118 @@ mod tests {
             .expect("write edits schema exists");
         assert_write_edit_schema(write_edits);
 
-        let sequence_command = tools
+        let sequence_commands = tools
             .get("run_sequence")
             .and_then(|tool| tool.input_schema.get("properties"))
             .and_then(|properties| properties.get("commands"))
-            .and_then(|commands| commands.get("items"))
-            .expect("sequence command schema exists");
-        assert_eq!(
-            sequence_command.get("type").and_then(Value::as_str),
-            Some("object"),
-            "sequence commands must be exposed inline instead of as an opaque reference"
-        );
+            .expect("sequence commands schema exists");
+        assert_eq!(sequence_commands["minItems"], 1);
+        assert_eq!(sequence_commands["maxItems"], 20);
+        let sequence_command = sequence_commands
+            .get("items")
+            .expect("sequence command item schema exists");
         assert!(sequence_command.get("$ref").is_none());
-        let sequence_edits = sequence_command
+        let sequence_variants = sequence_command
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .expect("sequence command exposes tool-discriminated variants");
+        assert_eq!(sequence_variants.len(), 4);
+        let sequence_variants = sequence_variants
+            .iter()
+            .map(|variant| {
+                let properties = variant
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .expect("sequence variant properties exist");
+                assert!(!properties.contains_key("purpose"));
+                assert!(!properties.contains_key("args"));
+                assert_eq!(variant["additionalProperties"], false);
+                let tool = properties["tool"]["const"]
+                    .as_str()
+                    .expect("sequence variant fixes one tool");
+                (tool, variant)
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            sequence_variants.keys().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from(["manage", "read", "search", "write"])
+        );
+        for (tool, operations) in [
+            (
+                "read",
+                json!(["spaces", "ls", "tree", "stat", "read", "changes"]),
+            ),
+            ("search", json!(["find", "grep"])),
+            ("write", json!(["write", "append", "patch", "edit"])),
+            ("manage", json!(["mkdir", "mv", "cp", "rm"])),
+        ] {
+            assert_eq!(
+                sequence_variants[tool]["properties"]["op"]["enum"], operations,
+                "sequence variant must expose only operations for {tool}"
+            );
+        }
+        for tool in ["read", "search", "write", "manage"] {
+            let direct_fields = tools[tool].input_schema["properties"]
+                .as_object()
+                .expect("direct tool properties exist")
+                .keys()
+                .filter(|field| field.as_str() != "purpose")
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            let sequence_fields = sequence_variants[tool]["properties"]
+                .as_object()
+                .expect("sequence variant properties exist")
+                .keys()
+                .filter(|field| field.as_str() != "tool")
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                sequence_fields, direct_fields,
+                "sequence variant must reuse the direct {tool} field vocabulary"
+            );
+        }
+        assert!(sequence_variants["read"]["properties"].get("q").is_none());
+        assert!(
+            sequence_variants["search"]["properties"]
+                .get("content")
+                .is_none()
+        );
+        assert!(
+            sequence_variants["write"]["properties"]
+                .get("source")
+                .is_none()
+        );
+        assert!(
+            sequence_variants["manage"]["properties"]
+                .get("cursor")
+                .is_none()
+        );
+        assert_eq!(
+            sequence_variants["write"]["properties"]["create"]["type"],
+            "boolean"
+        );
+        assert_eq!(
+            sequence_variants["manage"]["properties"]["recursive"]["type"],
+            "boolean"
+        );
+        let sequence_edits = sequence_variants["write"]
             .pointer("/properties/edits")
-            .expect("sequence edits schema exists");
+            .expect("sequence write edits schema exists");
         assert_write_edit_schema(sequence_edits);
+
+        let sequence = tools.get("run_sequence").expect("run_sequence tool exists");
+        let description = sequence
+            .description
+            .as_deref()
+            .expect("run_sequence description exists");
+        assert!(description.contains("Preferred batch tool"));
+        assert!(description.contains("inherit the one top-level purpose"));
+        assert!(description.contains("tool-discriminated flat objects"));
+        assert!(description.contains("without purpose or args"));
+        assert!(description.contains("preflights every command"));
+        assert!(description.contains("runs mv, cp, rm"));
+        assert!(description.contains("first failure in input order"));
+        assert!(description.contains("already-started independent reads/searches may finish"));
 
         let read = tools.get("read").expect("read tool exists");
         let description = read
@@ -866,6 +979,14 @@ mod tests {
         assert!(description.contains("op=spaces/ls/tree/stat/read/changes"));
         assert!(description.contains("<space>:/"));
         assert!(description.contains("direction=newer"));
+
+        let search = tools.get("search").expect("search tool exists");
+        let description = search
+            .description
+            .as_deref()
+            .expect("search description exists");
+        assert!(description.contains("summaries and optional line references"));
+        assert!(description.contains("use read for full text"));
         let properties = read
             .input_schema
             .get("properties")
@@ -911,7 +1032,9 @@ mod tests {
     fn server_instructions_describe_all_mcp_categories() {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("except `me`"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("purpose"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("exactly one top-level `purpose`"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("2-20 commands"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("later input depends"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("checkpoint_cursor"));
@@ -980,6 +1103,231 @@ mod tests {
                 "tool `{tool_name}` input schema missing property `{property}`"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn sequence_preflight_prevents_partial_writes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "prove invalid later changes cannot leave partial writes",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/should-not-exist.md",
+                    "content": "must not be committed",
+                    "create": true
+                },
+                {
+                    "tool": "write",
+                    "op": "patch",
+                    "target": "rest-test:/does-not-matter.md",
+                    "edits": [{
+                        "old_text": "before",
+                        "new_text": "after",
+                        "mode": "latest"
+                    }]
+                },
+                {
+                    "tool": "read",
+                    "op": "changes",
+                    "target": "rest-test:/",
+                    "direction": "newer"
+                }
+            ]
+        }))?;
+
+        let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
+            Ok(_) => panic!("missing changes cursor must fail preflight"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error
+                .data
+                .as_ref()
+                .and_then(|data| data["executed"].as_bool()),
+            Some(false)
+        );
+        let errors = error
+            .data
+            .as_ref()
+            .and_then(|data| data["errors"].as_array())
+            .expect("preflight errors");
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0]["index"], 1);
+        assert_eq!(errors[1]["index"], 2);
+        let stat =
+            tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
+        assert!(stat.is_err(), "the earlier write must not have run");
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sequence_preflight_rejects_invalid_static_write_content_without_partial_writes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "reject invalid structured text before writing",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/should-not-exist.md",
+                    "content": "must not be committed",
+                    "create": true
+                },
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/config.json",
+                    "content": "{\"ok\":}",
+                    "create": true
+                }
+            ]
+        }))?;
+
+        let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
+            Ok(_) => panic!("invalid JSON must fail sequence preflight"),
+            Err(error) => error,
+        };
+        let data = error.data.as_ref().expect("structured preflight data");
+        assert_eq!(data["code"], "sequence_preflight_failed");
+        assert_eq!(data["executed"], false);
+        assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
+        assert_eq!(data["errors"][0]["index"], 1);
+        assert!(
+            data["errors"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("invalid json syntax in config.json"))
+        );
+        let stat =
+            tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
+        assert!(stat.is_err(), "the earlier write must not have run");
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sequence_preflight_rejects_manage_root_targets_without_partial_writes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        let invalid_commands = [
+            serde_json::json!({"tool": "manage", "op": "mkdir", "target": "rest-test:/"}),
+            serde_json::json!({"tool": "manage", "op": "rm", "target": "rest-test:/", "recursive": true}),
+            serde_json::json!({"tool": "manage", "op": "mv", "source": "rest-test:/", "destination": "rest-test:/moved"}),
+            serde_json::json!({"tool": "manage", "op": "mv", "source": "rest-test:/source", "destination": "rest-test:/"}),
+            serde_json::json!({"tool": "manage", "op": "cp", "source": "rest-test:/", "destination": "rest-test:/copied", "recursive": true}),
+            serde_json::json!({"tool": "manage", "op": "cp", "source": "rest-test:/source", "destination": "rest-test:/", "recursive": true}),
+        ];
+
+        for (index, invalid_command) in invalid_commands.into_iter().enumerate() {
+            let created_target = format!("rest-test:/root-preflight-{index}.md");
+            let input = serde_json::from_value(serde_json::json!({
+                "purpose": "reject root manage commands before writing",
+                "commands": [
+                    {
+                        "tool": "write",
+                        "op": "write",
+                        "target": created_target,
+                        "content": "must not be committed",
+                        "create": true
+                    },
+                    invalid_command
+                ]
+            }))?;
+
+            let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await
+            {
+                Ok(_) => panic!("root manage target must fail sequence preflight"),
+                Err(error) => error,
+            };
+            let data = error.data.as_ref().expect("structured preflight data");
+            assert_eq!(data["code"], "sequence_preflight_failed");
+            assert_eq!(data["executed"], false);
+            assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
+            assert_eq!(data["errors"][0]["index"], 1);
+            let stat = tools::files::stat(&state, &parts, created_target).await;
+            assert!(stat.is_err(), "the earlier write must not have run");
+        }
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sequence_parent_stat_observes_a_created_child()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        tools::files::mkdir(&state, &parts, "rest-test:/parent".to_owned(), false).await?;
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "create a child before reading parent metadata",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/parent/child.md",
+                    "content": "child",
+                    "create": true
+                },
+                {
+                    "tool": "read",
+                    "op": "stat",
+                    "target": "rest-test:/parent"
+                }
+            ]
+        }))?;
+
+        let Json(result) = tools::unified::run_sequence(&state, &parts, Parameters(input)).await?;
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["completed"], 2);
+        assert_eq!(result["results"][1]["result"]["node"]["has_children"], true);
+
+        db.cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]

@@ -1,18 +1,29 @@
 //! Unified MCP tools: read/search/write/manage/run_sequence.
 
 use axum::http::request::Parts;
+use notegate_core::validation::validate_space_name;
+use notegate_service::ServiceError;
+use notegate_service::files::{
+    Target, content, parse_target, validate_structured_text,
+    validation::{validate_basename, validate_text_content},
+};
+use notegate_service::search::{validate_find_input, validate_grep_input};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{actionable_input_error, invalid_input_error, required_input};
+use super::resolve::{
+    actionable_input_error, invalid_input_error, required_input, service_error, split_parent_name,
+};
 use super::{events, files, search, spaces};
-use crate::mcp::contract::{McpAction, error_json};
+use crate::mcp::contract::McpAction;
 use crate::state::AppState;
 
-const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
+mod sequence;
+
+pub use sequence::{RunSequenceInput, run_sequence};
 
 /// Public schema for `write.edits`; runtime parsing remains selected by the top-level write op.
 #[allow(dead_code)]
@@ -26,7 +37,7 @@ enum WriteEditEntrySchema {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: spaces/ls/tree/stat/read/changes.
     pub op: String,
@@ -65,7 +76,7 @@ pub struct ReadInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchInput {
-    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     #[allow(
         dead_code,
         reason = "validated and recorded at the shared tools/call boundary"
@@ -103,7 +114,7 @@ pub struct SearchInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WriteInput {
-    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     #[allow(
         dead_code,
         reason = "validated and recorded at the shared tools/call boundary"
@@ -134,7 +145,7 @@ pub struct WriteInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ManageInput {
-    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     #[allow(
         dead_code,
         reason = "validated and recorded at the shared tools/call boundary"
@@ -142,13 +153,13 @@ pub struct ManageInput {
     pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
     pub op: String,
-    /// Single target in `<space>:/absolute/path` form for mkdir/rm.
+    /// Single target in `<space>:/absolute/path` form for mkdir/rm. The Space root is allowed only for mkdir with parents=true.
     #[serde(default)]
     pub target: Option<String>,
-    /// Source target for mv/cp.
+    /// Non-root source target for mv/cp.
     #[serde(default)]
     pub source: Option<String>,
-    /// Destination target for mv/cp.
+    /// Non-root destination target for mv/cp.
     #[serde(default)]
     pub destination: Option<String>,
     /// Create missing parent folders for mkdir.
@@ -162,7 +173,7 @@ pub struct ManageInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FileTransferInput {
-    /// Short human-readable reason for this MCP call. Maximum 200 characters.
+    /// Reason for this MCP invocation. Required once at the top level; maximum 200 characters.
     pub purpose: String,
     /// Operation: begin_upload/prepare_parts/complete_upload/abort_upload/prepare_download.
     pub op: String,
@@ -198,175 +209,12 @@ pub struct CompletedPartInput {
     pub etag: String,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RunSequenceInput {
-    /// One short human-readable reason shared by the whole sequence. Maximum 200 characters.
-    pub purpose: String,
-    /// Ordered NoteGate commands to execute. Maximum 20.
-    pub commands: Vec<SequenceCommand>,
-}
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(inline)]
-pub struct SequenceCommand {
-    /// Tool category for this command: read/search/write/manage.
-    pub tool: String,
-
-    /// Operation to perform within the selected tool.
-    pub op: String,
-
-    /// Single target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
-    #[serde(default)]
-    pub target: Option<String>,
-    /// Source target for `mv` and `cp`.
-    #[serde(default)]
-    pub source: Option<String>,
-    /// Destination target for `mv` and `cp`.
-    #[serde(default)]
-    pub destination: Option<String>,
-
-    /// Optional exact, case-sensitive space name filter for `read op=spaces`.
-    #[serde(default)]
-    pub name: Option<String>,
-    /// Search query for `find` and `grep`. Matching inside the resolved space is case-insensitive.
-    #[serde(default)]
-    pub q: Option<String>,
-    /// Node kind filter: `folder`, `text`, or `file`.
-    #[serde(default)]
-    pub kind: Option<String>,
-    /// Match mode. `find`: contains/regex/glob. `grep`: literal/regex. All modes are case-insensitive.
-    #[serde(default, rename = "match")]
-    pub match_mode: Option<String>,
-    /// Grep line detail: none/first/all.
-    #[serde(default)]
-    pub lines: Option<String>,
-    /// Optional path glob includes.
-    #[serde(default)]
-    pub include: Option<Vec<String>>,
-    /// Optional path glob excludes.
-    #[serde(default)]
-    pub exclude: Option<Vec<String>>,
-
-    /// Text content for write/append.
-    #[serde(default)]
-    pub content: Option<String>,
-    /// Patch or line-edit entries for patch/edit.
-    #[serde(default)]
-    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
-    pub edits: Option<Vec<Value>>,
-
-    /// Create missing text for write/append.
-    #[serde(default)]
-    pub create: bool,
-    /// Create missing parent folders for mkdir.
-    #[serde(default)]
-    pub parents: bool,
-    /// Required for folder cp/rm.
-    #[serde(default)]
-    pub recursive: bool,
-    /// Insert a newline before appended content when needed.
-    #[serde(default)]
-    pub ensure_newline: bool,
-
-    /// Tree/list depth.
-    #[serde(default)]
-    pub depth: Option<i64>,
-    /// Page size.
-    #[serde(default)]
-    pub limit: Option<i64>,
-    /// Opaque pagination cursor for paginated reads and searches.
-    #[serde(default)]
-    pub cursor: Option<String>,
-    /// For `read op=changes`, read older events (default) or newer events.
-    #[serde(default)]
-    pub direction: Option<String>,
-
-    /// 1-based first line for read.
-    #[serde(default)]
-    pub start_line: Option<i64>,
-    /// Maximum lines for read.
-    #[serde(default)]
-    pub max_lines: Option<i64>,
-    /// Maximum bytes for read.
-    #[serde(default)]
-    pub max_bytes: Option<usize>,
-
-    /// Optimistic write guard.
-    #[serde(default)]
-    pub expected_sha256: Option<String>,
-    /// Conditional read guard.
-    #[serde(default)]
-    pub if_none_match_sha256: Option<String>,
-}
-
-impl SequenceCommand {
-    fn into_read_input(self, purpose: String) -> ReadInput {
-        ReadInput {
-            purpose,
-            op: self.op,
-            target: self.target,
-            name: self.name,
-            depth: self.depth,
-            limit: self.limit,
-            cursor: self.cursor,
-            direction: self.direction,
-            start_line: self.start_line,
-            max_lines: self.max_lines,
-            max_bytes: self.max_bytes,
-            if_none_match_sha256: self.if_none_match_sha256,
-        }
-    }
-
-    fn into_search_input(self, purpose: String) -> Result<SearchInput, ErrorData> {
-        Ok(SearchInput {
-            purpose,
-            op: self.op,
-            target: required(self.target, "target", "search command")?,
-            q: required(self.q, "q", "search command")?,
-            kind: self.kind,
-            match_mode: self.match_mode,
-            lines: self.lines,
-            include: self.include,
-            exclude: self.exclude,
-            limit: self.limit,
-            cursor: self.cursor,
-        })
-    }
-
-    fn into_write_input(self, purpose: String) -> Result<WriteInput, ErrorData> {
-        Ok(WriteInput {
-            purpose,
-            op: self.op,
-            target: required(self.target, "target", "write command")?,
-            content: self.content,
-            edits: self.edits,
-            create: self.create,
-            ensure_newline: self.ensure_newline,
-            expected_sha256: self.expected_sha256,
-        })
-    }
-
-    fn into_manage_input(self, purpose: String) -> ManageInput {
-        ManageInput {
-            purpose,
-            op: self.op,
-            target: self.target,
-            source: self.source,
-            destination: self.destination,
-            parents: self.parents,
-            recursive: self.recursive,
-        }
-    }
-}
-
 pub async fn read(
     state: &AppState,
     parts: &Parts,
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    validate_read_change_fields(&input)?;
+    validate_read_operation(&input)?;
     match input.op.as_str() {
         "spaces" => spaces::list(state, parts, input.name, input.limit, input.cursor).await,
         "ls" => {
@@ -440,11 +288,194 @@ fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
     Ok(())
 }
 
+fn validate_read_operation(input: &ReadInput) -> Result<(), ErrorData> {
+    validate_read_change_fields(input)?;
+    match input.op.as_str() {
+        "spaces" => {
+            if let Some(name) = input.name.as_deref() {
+                validate_space_name(name)
+                    .map_err(|error| invalid_input_error(error.to_string()))?;
+            }
+            Ok(())
+        }
+        "ls" | "stat" => {
+            parse_input_target(required_ref(
+                input.target.as_ref(),
+                "target",
+                input.op.as_str(),
+            )?)?;
+            Ok(())
+        }
+        "tree" => {
+            parse_input_target(required_ref(input.target.as_ref(), "target", "tree")?)?;
+            if input.depth.is_some_and(|depth| depth < 1) {
+                return Err(invalid_input_error("depth must be at least 1"));
+            }
+            Ok(())
+        }
+        "read" => {
+            parse_input_target(required_ref(input.target.as_ref(), "target", "read")?)?;
+            if input.max_bytes == Some(0) {
+                return Err(invalid_input_error("max_bytes must be at least 1"));
+            }
+            Ok(())
+        }
+        "changes" => {
+            events::validate_input(
+                required_ref(input.target.as_ref(), "target", "changes")?,
+                input.direction.as_deref(),
+                input.cursor.as_deref(),
+                &input.purpose,
+            )?;
+            Ok(())
+        }
+        _ => Err(invalid_op(
+            "read",
+            &["spaces", "ls", "tree", "stat", "read", "changes"],
+        )),
+    }
+}
+
+fn validate_search_operation(input: &SearchInput) -> Result<(), ErrorData> {
+    match input.op.as_str() {
+        "find" => {
+            parse_input_target(&input.target)?;
+            if let Some(kind) = input.kind.as_deref() {
+                search::parse_kind(kind)?;
+            }
+            let match_mode = search::parse_find_match_mode(input.match_mode.as_deref())?;
+            validate_find_input(
+                &input.q,
+                match_mode,
+                input.include.as_deref().unwrap_or_default(),
+                input.exclude.as_deref().unwrap_or_default(),
+            )
+            .map_err(service_error)?;
+            Ok(())
+        }
+        "grep" => {
+            parse_input_target(&input.target)?;
+            let match_mode = search::parse_grep_match_mode(input.match_mode.as_deref())?;
+            search::parse_grep_line_mode(input.lines.as_deref())?;
+            validate_grep_input(
+                &input.q,
+                match_mode,
+                input.include.as_deref().unwrap_or_default(),
+                input.exclude.as_deref().unwrap_or_default(),
+            )
+            .map_err(service_error)?;
+            Ok(())
+        }
+        _ => Err(invalid_op("search", &["find", "grep"])),
+    }
+}
+
+fn validate_write_operation(input: &WriteInput) -> Result<(), ErrorData> {
+    match input.op.as_str() {
+        "write" | "append" => {
+            required_ref(input.content.as_ref(), "content", input.op.as_str())?;
+            validate_text_target(&input.target)?;
+            Ok(())
+        }
+        "patch" => {
+            let edits = parse_edits::<files::PatchEdit>(input.edits.clone(), "patch")?;
+            files::prepare_patch_edits(&edits)?;
+            validate_text_target(&input.target)?;
+            Ok(())
+        }
+        "edit" => {
+            let edits = parse_edits::<files::LineEditInput>(input.edits.clone(), "edit")?;
+            files::prepare_line_edits(&edits)?;
+            validate_text_target(&input.target)?;
+            Ok(())
+        }
+        _ => Err(invalid_op("write", &["write", "append", "patch", "edit"])),
+    }
+}
+
+fn validate_static_write_content(input: &WriteInput) -> Result<(), ErrorData> {
+    let content = match input.op.as_str() {
+        "write" | "append" => required_ref(input.content.as_ref(), "content", &input.op)?,
+        _ => return Ok(()),
+    };
+    let metrics = content::compute(content);
+    validate_text_content(metrics.byte_len, metrics.line_count)
+        .map_err(ServiceError::from)
+        .map_err(service_error)?;
+
+    if input.op == "write" {
+        let target = parse_input_target(&input.target)?;
+        let (_, name) = split_parent_name(&target.path)?;
+        validate_structured_text(&name, content).map_err(service_error)?;
+    }
+    Ok(())
+}
+
+fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
+    match input.op.as_str() {
+        "mkdir" => {
+            let target =
+                parse_input_target(required_ref(input.target.as_ref(), "target", "mkdir")?)?;
+            if !input.parents {
+                validate_non_root_target(&target)?;
+            }
+            Ok(())
+        }
+        "rm" => {
+            let target = parse_input_target(required_ref(input.target.as_ref(), "target", "rm")?)?;
+            validate_non_root_target(&target)?;
+            Ok(())
+        }
+        "mv" | "cp" => {
+            let source = parse_input_target(required_ref(
+                input.source.as_ref(),
+                "source",
+                input.op.as_str(),
+            )?)?;
+            let destination = parse_input_target(required_ref(
+                input.destination.as_ref(),
+                "destination",
+                input.op.as_str(),
+            )?)?;
+            if source.space != destination.space {
+                return Err(invalid_input_error(
+                    "source and destination must be in the same space",
+                ));
+            }
+            validate_non_root_target(&source)?;
+            validate_non_root_target(&destination)?;
+            Ok(())
+        }
+        _ => Err(invalid_op("manage", &["mkdir", "mv", "cp", "rm"])),
+    }
+}
+
+fn validate_non_root_target(target: &Target) -> Result<(), ErrorData> {
+    split_parent_name(&target.path).map(|_| ())
+}
+
+fn parse_input_target(target: &str) -> Result<Target, ErrorData> {
+    let target = parse_target(target).map_err(|error| invalid_input_error(error.to_string()))?;
+    for segment in target.path.split('/').filter(|segment| !segment.is_empty()) {
+        validate_basename(segment)
+            .map_err(ServiceError::from)
+            .map_err(service_error)?;
+    }
+    Ok(target)
+}
+
+fn validate_text_target(target: &str) -> Result<(), ErrorData> {
+    let target = parse_input_target(target)?;
+    split_parent_name(&target.path)?;
+    Ok(())
+}
+
 pub async fn search(
     state: &AppState,
     parts: &Parts,
     Parameters(input): Parameters<SearchInput>,
 ) -> Result<Json<Value>, ErrorData> {
+    validate_search_operation(&input)?;
     match input.op.as_str() {
         "find" => {
             search::find(
@@ -485,6 +516,7 @@ pub async fn write(
     parts: &Parts,
     Parameters(input): Parameters<WriteInput>,
 ) -> Result<Json<Value>, ErrorData> {
+    validate_write_operation(&input)?;
     match input.op.as_str() {
         "write" => {
             files::write(
@@ -538,6 +570,7 @@ pub async fn manage(
     parts: &Parts,
     Parameters(input): Parameters<ManageInput>,
 ) -> Result<Json<Value>, ErrorData> {
+    validate_manage_operation(&input)?;
     match input.op.as_str() {
         "mkdir" => {
             files::mkdir(
@@ -580,111 +613,15 @@ pub async fn manage(
     }
 }
 
-pub async fn run_sequence(
-    state: &AppState,
-    parts: &Parts,
-    Parameters(input): Parameters<RunSequenceInput>,
-) -> Result<Json<Value>, ErrorData> {
-    if input.commands.is_empty() {
-        return Err(invalid_input_error(
-            "run_sequence requires at least one command",
-        ));
-    }
-    if input.commands.len() > RUN_SEQUENCE_MAX_COMMANDS {
-        return Err(invalid_input_error(format!(
-            "run_sequence accepts at most {RUN_SEQUENCE_MAX_COMMANDS} commands"
-        )));
-    }
-
-    let mut results = Vec::with_capacity(input.commands.len());
-    for (index, command) in input.commands.into_iter().enumerate() {
-        let tool = command.tool.clone();
-        let op = command.op.clone();
-        let result = dispatch_command(state, parts, command, &input.purpose).await;
-        match result {
-            Ok(Json(value)) => results.push(json!({
-                "index": index,
-                "tool": tool,
-                "op": op,
-                "ok": true,
-                "result": value,
-            })),
-            Err(error) => {
-                return Ok(Json(json!({
-                    "ok": false,
-                    "completed": results.len(),
-                    "failed_index": index,
-                    "results": results,
-                    "error": error_json(error),
-                })));
-            }
-        }
-    }
-
-    Ok(Json(json!({
-        "ok": true,
-        "completed": results.len(),
-        "failed_index": null,
-        "results": results,
-    })))
-}
-
-async fn dispatch_command(
-    state: &AppState,
-    parts: &Parts,
-    command: SequenceCommand,
-    purpose: &str,
-) -> Result<Json<Value>, ErrorData> {
-    if command.tool != "read" && command.direction.is_some() {
-        return Err(actionable_input_error(
-            "changes_fields_not_allowed",
-            "direction is only valid for read op=changes",
-            "Remove direction or use it only with a read changes command.",
-            McpAction::RemoveFields {
-                fields: vec!["direction".to_owned()],
-            },
-        ));
-    }
-    match command.tool.as_str() {
-        "read" => {
-            read(
-                state,
-                parts,
-                Parameters(command.into_read_input(purpose.to_owned())),
-            )
-            .await
-        }
-        "search" => {
-            search(
-                state,
-                parts,
-                Parameters(command.into_search_input(purpose.to_owned())?),
-            )
-            .await
-        }
-        "write" => {
-            write(
-                state,
-                parts,
-                Parameters(command.into_write_input(purpose.to_owned())?),
-            )
-            .await
-        }
-        "manage" => {
-            manage(
-                state,
-                parts,
-                Parameters(command.into_manage_input(purpose.to_owned())),
-            )
-            .await
-        }
-        _ => Err(invalid_input_error(
-            "invalid tool for run_sequence; allowed values are: read, search, write, manage",
-        )),
-    }
-}
-
 fn required<T>(value: Option<T>, field: &'static str, op: &'static str) -> Result<T, ErrorData> {
+    required_input(value, field, &format!("op={op}"))
+}
+
+fn required_ref<'a, T>(
+    value: Option<&'a T>,
+    field: &'static str,
+    op: &str,
+) -> Result<&'a T, ErrorData> {
     required_input(value, field, &format!("op={op}"))
 }
 
@@ -708,167 +645,16 @@ where
 }
 
 fn invalid_op(tool: &'static str, allowed: &[&str]) -> ErrorData {
-    invalid_input_error(format!(
-        "invalid op for {tool}; allowed values are: {}",
-        allowed.join(", ")
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used, clippy::indexing_slicing)]
-
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn operation_specific_required_fields_use_the_common_recovery_action() {
-        let error = required::<String>(None, "target", "read").expect_err("target is required");
-        let data = error.data.expect("missing field carries recovery data");
-
-        assert_eq!(data["code"], "required_field_missing");
-        assert_eq!(data["next_action"]["kind"], "add_fields");
-        assert_eq!(data["next_action"]["fields"][0]["field"], "target");
-    }
-
-    #[test]
-    fn purpose_is_required_for_direct_and_sequence_calls() {
-        let direct = serde_json::from_value::<SearchInput>(json!({
-            "op": "find",
-            "target": "daily:/",
-            "q": "cache"
-        }));
-        assert!(direct.is_err());
-
-        let sequence = serde_json::from_value::<RunSequenceInput>(json!({
-            "commands": [{"tool": "read", "op": "spaces"}]
-        }));
-        assert!(sequence.is_err());
-    }
-
-    #[test]
-    fn sequence_command_rejects_unknown_fields() {
-        let error = serde_json::from_value::<RunSequenceInput>(json!({
-            "purpose": "test unknown sequence fields",
-            "commands": [{
-                "tool": "read",
-                "op": "spaces",
-                "unexpected": true
-            }]
-        }))
-        .expect_err("unknown command field should be rejected");
-
-        assert!(error.to_string().contains("unknown field"));
-    }
-
-    #[test]
-    fn edit_entries_keep_op_specific_runtime_parsing() {
-        let patch = parse_edits::<files::PatchEdit>(
-            Some(vec![json!({
-                "old_text": "before",
-                "new_text": "after",
-                "mode": "unique",
-                "expected_count": 1
-            })]),
-            "patch",
-        )
-        .expect("patch edit parses");
-        assert_eq!(patch.len(), 1);
-        assert_eq!(patch[0].old_text, "before");
-
-        let line = parse_edits::<files::LineEditInput>(
-            Some(vec![json!({
-                "op": "replace_lines",
-                "start_line": 2,
-                "end_line": 3,
-                "content": "replacement"
-            })]),
-            "edit",
-        )
-        .expect("line edit parses");
-        assert_eq!(line.len(), 1);
-        assert_eq!(line[0].op, "replace_lines");
-
-        let error = parse_edits::<files::PatchEdit>(
-            Some(vec![
-                json!({"op": "delete_lines", "start_line": 2, "end_line": 3}),
-            ]),
-            "patch",
-        )
-        .expect_err("line edit must not parse as a patch edit");
-        assert!(error.message.contains("invalid edit entry for op=patch"));
-    }
-
-    #[test]
-    fn sequence_command_uses_direct_command_shape() {
-        let input = serde_json::from_value::<RunSequenceInput>(json!({
-            "purpose": "test direct sequence command shape",
-            "commands": [{
-                "tool": "manage",
-                "op": "mkdir",
-                "target": "main:/daily",
-                "parents": true
-            }]
-        }))
-        .expect("valid command sequence parses");
-
-        assert_eq!(input.commands.len(), 1);
-        let command = input.commands.first().expect("one command");
-        assert_eq!(command.tool, "manage");
-        assert_eq!(command.op, "mkdir");
-        assert!(command.parents);
-    }
-
-    #[test]
-    fn changes_uses_the_shared_opaque_cursor_with_a_direction() {
-        let input = serde_json::from_value::<ReadInput>(json!({
-            "purpose": "test changes pagination",
-            "op": "changes",
-            "target": "daily:/",
-            "direction": "newer",
-            "cursor": "opaque-change-cursor",
-            "limit": 25
-        }))
-        .expect("valid changes input parses");
-
-        assert_eq!(input.direction.as_deref(), Some("newer"));
-        assert_eq!(input.cursor.as_deref(), Some("opaque-change-cursor"));
-    }
-
-    #[test]
-    fn changes_fields_on_other_read_ops_name_the_fields_to_remove() {
-        let input = serde_json::from_value::<ReadInput>(json!({
-            "purpose": "test changes-only field validation",
-            "op": "read",
-            "target": "daily:/note.md",
-            "direction": "older"
-        }))
-        .expect("known fields parse before operation validation");
-        let error = validate_read_change_fields(&input)
-            .expect_err("changes fields are rejected outside changes");
-
-        let data = error.data.expect("structured recovery data");
-        assert_eq!(data["code"], "changes_fields_not_allowed");
-        assert_eq!(data["next_action"]["kind"], "remove_fields");
-        assert_eq!(data["next_action"]["fields"], json!(["direction"]));
-    }
-
-    #[test]
-    fn run_sequence_accepts_a_changes_cursor() {
-        let input = serde_json::from_value::<RunSequenceInput>(json!({
-            "purpose": "test changes in a sequence",
-            "commands": [{
-                "tool": "read",
-                "op": "changes",
-                "target": "daily:/",
-                "direction": "newer",
-                "cursor": "opaque-change-cursor"
-            }]
-        }))
-        .expect("valid changes sequence parses");
-
-        let command = input.commands.first().expect("one command");
-        assert_eq!(command.direction.as_deref(), Some("newer"));
-        assert_eq!(command.cursor.as_deref(), Some("opaque-change-cursor"));
-    }
+    actionable_input_error(
+        "invalid_op",
+        format!(
+            "invalid op for {tool}; allowed values are: {}",
+            allowed.join(", ")
+        ),
+        "Choose one of the operation values listed by next_action.choices.",
+        McpAction::ChooseValue {
+            field: "op".to_owned(),
+            choices: allowed.iter().map(|value| json!(value)).collect(),
+        },
+    )
 }

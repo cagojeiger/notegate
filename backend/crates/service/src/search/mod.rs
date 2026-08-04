@@ -27,6 +27,7 @@ mod telemetry;
 mod tree;
 
 use body_cache::SearchBodyCache;
+use matcher::{ContentMatcher, NameMatcher, PathFilters};
 use telemetry::SearchTelemetry;
 
 /// Process-local snapshot of the decrypted search body cache.
@@ -157,6 +158,32 @@ fn validate_query(q: &str) -> ServiceResult<&str> {
         )));
     }
     Ok(trimmed)
+}
+
+/// Validate the request-local portion of a find command without touching the store.
+pub fn validate_find_input(
+    q: &str,
+    match_mode: FindMatchMode,
+    include: &[String],
+    exclude: &[String],
+) -> ServiceResult<()> {
+    let q = validate_query(q)?;
+    NameMatcher::new(q, match_mode)?;
+    PathFilters::new(include, exclude)?;
+    Ok(())
+}
+
+/// Validate the request-local portion of a grep command without touching the store.
+pub fn validate_grep_input(
+    q: &str,
+    match_mode: GrepMatchMode,
+    include: &[String],
+    exclude: &[String],
+) -> ServiceResult<()> {
+    let q = validate_query(q)?;
+    ContentMatcher::new(q, match_mode)?;
+    PathFilters::new(include, exclude)?;
+    Ok(())
 }
 
 fn child_cursor(node: &Node) -> ChildrenCursor {
