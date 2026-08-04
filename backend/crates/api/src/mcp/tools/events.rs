@@ -5,12 +5,15 @@ use notegate_service::ServiceError;
 use notegate_service::cursor;
 use notegate_service::files::{
     FileChangeEvent, FileChangeEventIdCursor, ListFileChangeEventsById, SyncFileChanges,
+    parse_target,
 };
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::resolve::{actionable_input_error, caller, resolve_target, service_error};
+use super::resolve::{
+    actionable_input_error, caller, invalid_input_error, resolve_target, service_error,
+};
 use super::support::page_json;
 use crate::file_change::FileChangeImpact;
 use crate::mcp::contract::{McpAction, ToolCallSpec};
@@ -25,11 +28,10 @@ pub async fn call(
     direction: Option<String>,
     cursor: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
-    let direction = parse_change_direction(direction.as_deref())?;
+    let direction = validate_input(&target, direction.as_deref(), cursor.as_deref(), purpose)?;
     let caller = caller(parts)?;
-    let (resolved, path) = resolve_target(state, caller, &target).await?;
+    let (resolved, _path) = resolve_target(state, caller, &target).await?;
     let root_target = format!("{}:/", resolved.name());
-    require_space_root(&path, &root_target)?;
 
     match direction {
         ChangeDirection::Newer => {
@@ -62,9 +64,25 @@ pub async fn call(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChangeDirection {
+pub(super) enum ChangeDirection {
     Older,
     Newer,
+}
+
+pub(super) fn validate_input(
+    target: &str,
+    direction: Option<&str>,
+    cursor: Option<&str>,
+    purpose: &str,
+) -> Result<ChangeDirection, ErrorData> {
+    let direction = parse_change_direction(direction)?;
+    let target = parse_target(target).map_err(|error| invalid_input_error(error.to_string()))?;
+    let root_target = format!("{}:/", target.space);
+    require_space_root(&target.path, &root_target)?;
+    if direction == ChangeDirection::Newer {
+        require_newer_cursor(cursor.map(str::to_owned), &root_target, purpose)?;
+    }
+    Ok(direction)
 }
 
 fn parse_change_direction(raw: Option<&str>) -> Result<ChangeDirection, ErrorData> {

@@ -588,8 +588,17 @@ fn validate_read_operation(input: &ReadInput) -> Result<(), ErrorData> {
     validate_read_change_fields(input)?;
     match input.op.as_str() {
         "spaces" => Ok(()),
-        "ls" | "tree" | "stat" | "read" | "changes" => {
+        "ls" | "tree" | "stat" | "read" => {
             required_ref(input.target.as_ref(), "target", input.op.as_str())?;
+            Ok(())
+        }
+        "changes" => {
+            events::validate_input(
+                required_ref(input.target.as_ref(), "target", "changes")?,
+                input.direction.as_deref(),
+                input.cursor.as_deref(),
+                &input.purpose,
+            )?;
             Ok(())
         }
         _ => Err(invalid_op(
@@ -1726,6 +1735,59 @@ mod tests {
         assert_eq!(
             data["errors"][1]["next_action"]["fields"][0]["field"],
             "commands[2].destination"
+        );
+    }
+
+    #[test]
+    fn sequence_preflight_rejects_invalid_changes_before_a_prior_write_executes() {
+        let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "purpose": "validate changes before updating a note",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "daily:/created.md",
+                    "content": "created"
+                },
+                {
+                    "tool": "read",
+                    "op": "changes",
+                    "target": "daily:/",
+                    "direction": "latest"
+                },
+                {
+                    "tool": "read",
+                    "op": "changes",
+                    "target": "daily:/",
+                    "direction": "newer"
+                },
+                {
+                    "tool": "read",
+                    "op": "changes",
+                    "target": "daily:/folder"
+                }
+            ]
+        }))
+        .expect("raw commands parse before preflight");
+        let error = prepare_sequence_commands(input.commands, &input.purpose)
+            .expect_err("all invalid changes commands must fail before execution");
+        let data = error.data.expect("structured preflight data");
+
+        assert_eq!(data["executed"], false);
+        assert_eq!(data["errors"].as_array().map(Vec::len), Some(3));
+        assert_eq!(data["errors"][0]["index"], 1);
+        assert_eq!(data["errors"][0]["code"], "changes_direction_invalid");
+        assert_eq!(
+            data["errors"][0]["next_action"]["field"],
+            "commands[1].direction"
+        );
+        assert_eq!(data["errors"][1]["index"], 2);
+        assert_eq!(data["errors"][1]["code"], "changes_cursor_required");
+        assert_eq!(data["errors"][2]["index"], 3);
+        assert_eq!(data["errors"][2]["code"], "changes_scope_invalid");
+        assert_eq!(
+            data["errors"][2]["next_action"]["field"],
+            "commands[3].target"
         );
     }
 

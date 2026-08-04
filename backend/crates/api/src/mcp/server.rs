@@ -1040,7 +1040,7 @@ mod tests {
         let mut parts = axum::http::Request::new(()).into_parts().0;
         parts.extensions.insert(caller);
         let input = serde_json::from_value(serde_json::json!({
-            "purpose": "prove invalid later commands cannot leave partial writes",
+            "purpose": "prove invalid later changes cannot leave partial writes",
             "commands": [
                 {
                     "tool": "write",
@@ -1049,12 +1049,17 @@ mod tests {
                     "content": "must not be committed",
                     "create": true
                 },
-                {"tool": "search", "op": "find", "target": "rest-test:/"}
+                {
+                    "tool": "read",
+                    "op": "changes",
+                    "target": "rest-test:/",
+                    "direction": "newer"
+                }
             ]
         }))?;
 
         let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
-            Ok(_) => panic!("missing q must fail preflight"),
+            Ok(_) => panic!("missing changes cursor must fail preflight"),
             Err(error) => error,
         };
         assert_eq!(
