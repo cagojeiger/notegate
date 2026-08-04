@@ -34,36 +34,159 @@ enum WriteEditEntrySchema {
     Line(files::LineEditInput),
 }
 
+/// Public schema for one run-sequence command. Runtime parsing deliberately stays on the
+/// permissive raw-object path so preflight can aggregate every command error before execution.
 #[allow(dead_code)]
 #[derive(JsonSchema)]
-#[schemars(rename_all = "snake_case", inline)]
-enum SequenceToolSchema {
-    Read,
-    Search,
-    Write,
-    Manage,
+#[serde(tag = "tool", rename_all = "snake_case")]
+#[schemars(inline)]
+enum SequenceCommandSchema {
+    Read(SequenceReadCommandSchema),
+    Search(SequenceSearchCommandSchema),
+    Write(SequenceWriteCommandSchema),
+    Manage(SequenceManageCommandSchema),
 }
 
 #[allow(dead_code)]
 #[derive(JsonSchema)]
 #[schemars(rename_all = "snake_case", inline)]
-enum SequenceOperationSchema {
+enum SequenceReadOperationSchema {
     Spaces,
     Ls,
     Tree,
     Stat,
     Read,
     Changes,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum SequenceSearchOperationSchema {
     Find,
     Grep,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum SequenceWriteOperationSchema {
     Write,
     Append,
     Patch,
     Edit,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[schemars(rename_all = "snake_case", inline)]
+enum SequenceManageOperationSchema {
     Mkdir,
     Mv,
     Cp,
     Rm,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(inline)]
+struct SequenceReadCommandSchema {
+    /// Read operation: spaces/ls/tree/stat/read/changes.
+    op: SequenceReadOperationSchema,
+    /// Target in `<space>:/absolute/path` form when required by the operation.
+    target: Option<String>,
+    /// Optional exact, case-sensitive space name filter for spaces.
+    name: Option<String>,
+    /// Tree depth for tree.
+    depth: Option<i64>,
+    /// Page size.
+    limit: Option<i64>,
+    /// Opaque pagination cursor.
+    cursor: Option<String>,
+    /// Changes direction: older/newer.
+    direction: Option<String>,
+    /// 1-based first line for read.
+    start_line: Option<i64>,
+    /// Maximum lines for read.
+    max_lines: Option<i64>,
+    /// Maximum bytes for read.
+    max_bytes: Option<usize>,
+    /// Conditional read guard.
+    if_none_match_sha256: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(inline)]
+struct SequenceSearchCommandSchema {
+    /// Search operation: find/grep.
+    op: SequenceSearchOperationSchema,
+    /// Scope target in `<space>:/absolute/path` form.
+    target: String,
+    /// Search query.
+    q: String,
+    /// Find node kind filter: folder/text/file.
+    kind: Option<String>,
+    /// Find or grep match mode.
+    #[serde(rename = "match")]
+    match_mode: Option<String>,
+    /// Grep line detail: none/first/all.
+    lines: Option<String>,
+    /// Optional path glob includes.
+    include: Option<Vec<String>>,
+    /// Optional path glob excludes.
+    exclude: Option<Vec<String>>,
+    /// Page size.
+    limit: Option<i64>,
+    /// Opaque pagination cursor.
+    cursor: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(inline)]
+struct SequenceWriteCommandSchema {
+    /// Write operation: write/append/patch/edit.
+    op: SequenceWriteOperationSchema,
+    /// Text target in `<space>:/absolute/path` form.
+    target: String,
+    /// Text content for write/append.
+    content: Option<String>,
+    /// Patch or line-edit entries for patch/edit.
+    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
+    edits: Option<Vec<Value>>,
+    /// Create missing text for write/append.
+    #[serde(default)]
+    create: bool,
+    /// Insert a newline before appended content when needed.
+    #[serde(default)]
+    ensure_newline: bool,
+    /// Optimistic write guard.
+    expected_sha256: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(inline)]
+struct SequenceManageCommandSchema {
+    /// Manage operation: mkdir/mv/cp/rm.
+    op: SequenceManageOperationSchema,
+    /// Target for mkdir/rm.
+    target: Option<String>,
+    /// Source target for mv/cp.
+    source: Option<String>,
+    /// Destination target for mv/cp.
+    destination: Option<String>,
+    /// Create missing parent folders for mkdir.
+    #[serde(default)]
+    parents: bool,
+    /// Required for folder cp/rm.
+    #[serde(default)]
+    recursive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -247,20 +370,17 @@ pub struct RunSequenceInput {
     /// Reason for this MCP invocation. Commands inherit it; maximum 200 characters.
     pub purpose: String,
     /// Ordered NoteGate commands to execute. Maximum 20.
-    #[schemars(with = "Vec<SequenceCommand>")]
+    #[schemars(with = "Vec<SequenceCommandSchema>", length(min = 1, max = 20))]
     pub commands: Vec<Value>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[schemars(inline)]
 pub struct SequenceCommand {
     /// Tool category for this command: read/search/write/manage.
-    #[schemars(with = "SequenceToolSchema")]
     pub tool: String,
 
     /// Operation for the selected tool: read=spaces/ls/tree/stat/read/changes, search=find/grep, write=write/append/patch/edit, manage=mkdir/mv/cp/rm.
-    #[schemars(with = "SequenceOperationSchema")]
     pub op: String,
 
     /// Single target in `<space>:/absolute/path` form. The space name segment is exact and case-sensitive.
@@ -300,7 +420,6 @@ pub struct SequenceCommand {
     pub content: Option<String>,
     /// Patch or line-edit entries for patch/edit.
     #[serde(default)]
-    #[schemars(with = "Option<Vec<WriteEditEntrySchema>>")]
     pub edits: Option<Vec<Value>>,
 
     /// Create missing text for write/append.
@@ -1141,7 +1260,13 @@ fn sequence_preflight_error(issues: Vec<Value>) -> ErrorData {
             errors_field: "errors".to_owned(),
         },
     );
+    data.details.insert("ok".to_owned(), json!(false));
+    data.details.insert("phase".to_owned(), json!("preflight"));
     data.details.insert("executed".to_owned(), json!(false));
+    data.details.insert("completed".to_owned(), json!(0));
+    data.details.insert("failed_index".to_owned(), Value::Null);
+    data.details
+        .insert("results".to_owned(), Value::Array(Vec::new()));
     data.details
         .insert("errors".to_owned(), Value::Array(issues));
     ErrorData::invalid_params(
@@ -1532,6 +1657,8 @@ pub async fn run_sequence(
 
     Ok(Json(json!({
         "ok": true,
+        "phase": "complete",
+        "executed": true,
         "completed": results.len(),
         "failed_index": null,
         "results": results,
@@ -1609,12 +1736,20 @@ fn append_sequence_outcomes(
                 "result": value,
             })),
             Err(error) => {
+                let mut error = error_json(error);
+                if let Some(action) = error.pointer_mut("/data/next_action") {
+                    prefix_sequence_action_fields(action, outcome.index);
+                }
+                let next_action = error.pointer("/data/next_action").cloned();
                 return Some(json!({
                     "ok": false,
+                    "phase": "runtime",
+                    "executed": true,
                     "completed": results.len(),
                     "failed_index": outcome.index,
                     "results": results,
-                    "error": error_json(error),
+                    "error": error,
+                    "next_action": next_action,
                 }));
             }
         }
@@ -1755,7 +1890,12 @@ mod tests {
         let data = error.data.expect("structured preflight data");
 
         assert_eq!(data["code"], "sequence_preflight_failed");
+        assert_eq!(data["ok"], false);
+        assert_eq!(data["phase"], "preflight");
         assert_eq!(data["executed"], false);
+        assert_eq!(data["completed"], 0);
+        assert!(data["failed_index"].is_null());
+        assert_eq!(data["results"], json!([]));
         assert_eq!(data["next_action"]["kind"], "apply_error_actions");
         assert_eq!(data["next_action"]["errors_field"], "errors");
         assert_eq!(data["errors"][0]["code"], "sequence_command_unknown_fields");
@@ -1766,14 +1906,66 @@ mod tests {
     }
 
     #[test]
+    fn sequence_runtime_failure_uses_common_status_fields_and_child_action() {
+        let mut results = vec![json!({
+            "index": 0,
+            "tool": "read",
+            "op": "spaces",
+            "ok": true,
+            "result": {"spaces": []}
+        })];
+        let outcome = SequenceOutcome {
+            index: 1,
+            tool: "read".to_owned(),
+            op: "read".to_owned(),
+            result: Err(actionable_input_error(
+                "required_field_missing",
+                "target is required",
+                "Add target and retry.",
+                McpAction::AddFields {
+                    fields: vec![crate::mcp::contract::RequiredField {
+                        field: "target".to_owned(),
+                        description: None,
+                    }],
+                },
+            )),
+        };
+
+        let response = append_sequence_outcomes(&mut results, vec![outcome])
+            .expect("runtime failure returns a structured sequence result");
+
+        assert_eq!(response["ok"], false);
+        assert_eq!(response["phase"], "runtime");
+        assert_eq!(response["executed"], true);
+        assert_eq!(response["completed"], 1);
+        assert_eq!(response["failed_index"], 1);
+        assert_eq!(response["results"].as_array().map(Vec::len), Some(1));
+        assert_eq!(response["error"]["data"]["code"], "required_field_missing");
+        assert_eq!(
+            response["error"]["data"]["next_action"]["fields"][0]["field"],
+            "commands[1].target"
+        );
+        assert_eq!(response["next_action"]["kind"], "add_fields");
+        assert_eq!(
+            response["next_action"]["fields"][0]["field"],
+            "commands[1].target"
+        );
+    }
+
+    #[test]
     fn sequence_preflight_allowlist_matches_the_public_command_schema() {
-        let schema = json!(schemars::schema_for!(SequenceCommand));
-        let properties = schema["properties"]
-            .as_object()
-            .expect("sequence properties");
-        let schema_fields = properties
-            .keys()
-            .map(String::as_str)
+        let schema = json!(schemars::schema_for!(SequenceCommandSchema));
+        let schema_fields = schema["oneOf"]
+            .as_array()
+            .expect("sequence schema variants")
+            .iter()
+            .flat_map(|variant| {
+                variant["properties"]
+                    .as_object()
+                    .expect("sequence variant properties")
+                    .keys()
+                    .map(String::as_str)
+            })
             .collect::<BTreeSet<_>>();
         let preflight_fields = SEQUENCE_COMMAND_FIELDS
             .iter()

@@ -211,7 +211,7 @@ impl McpServer {
 
     #[tool(
         name = "run_sequence",
-        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and are flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime stops on first failure; completed mutations are not rolled back.",
+        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and use tool-discriminated flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime stops on first failure; completed mutations are not rolled back.",
         annotations(title = "Run NoteGate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -854,38 +854,103 @@ mod tests {
             .expect("write edits schema exists");
         assert_write_edit_schema(write_edits);
 
-        let sequence_command = tools
+        let sequence_commands = tools
             .get("run_sequence")
             .and_then(|tool| tool.input_schema.get("properties"))
             .and_then(|properties| properties.get("commands"))
-            .and_then(|commands| commands.get("items"))
-            .expect("sequence command schema exists");
-        assert_eq!(
-            sequence_command.get("type").and_then(Value::as_str),
-            Some("object"),
-            "sequence commands must be exposed inline instead of as an opaque reference"
-        );
+            .expect("sequence commands schema exists");
+        assert_eq!(sequence_commands["minItems"], 1);
+        assert_eq!(sequence_commands["maxItems"], 20);
+        let sequence_command = sequence_commands
+            .get("items")
+            .expect("sequence command item schema exists");
         assert!(sequence_command.get("$ref").is_none());
-        let sequence_properties = sequence_command
-            .get("properties")
-            .and_then(Value::as_object)
-            .expect("sequence command properties exist");
-        assert!(!sequence_properties.contains_key("purpose"));
-        assert!(!sequence_properties.contains_key("args"));
+        let sequence_variants = sequence_command
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .expect("sequence command exposes tool-discriminated variants");
+        assert_eq!(sequence_variants.len(), 4);
+        let sequence_variants = sequence_variants
+            .iter()
+            .map(|variant| {
+                let properties = variant
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .expect("sequence variant properties exist");
+                assert!(!properties.contains_key("purpose"));
+                assert!(!properties.contains_key("args"));
+                assert_eq!(variant["additionalProperties"], false);
+                let tool = properties["tool"]["const"]
+                    .as_str()
+                    .expect("sequence variant fixes one tool");
+                (tool, variant)
+            })
+            .collect::<BTreeMap<_, _>>();
         assert_eq!(
-            sequence_properties["tool"]["enum"],
-            serde_json::json!(["read", "search", "write", "manage"])
+            sequence_variants.keys().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from(["manage", "read", "search", "write"])
+        );
+        for (tool, operations) in [
+            (
+                "read",
+                json!(["spaces", "ls", "tree", "stat", "read", "changes"]),
+            ),
+            ("search", json!(["find", "grep"])),
+            ("write", json!(["write", "append", "patch", "edit"])),
+            ("manage", json!(["mkdir", "mv", "cp", "rm"])),
+        ] {
+            assert_eq!(
+                sequence_variants[tool]["properties"]["op"]["enum"], operations,
+                "sequence variant must expose only operations for {tool}"
+            );
+        }
+        for tool in ["read", "search", "write", "manage"] {
+            let direct_fields = tools[tool].input_schema["properties"]
+                .as_object()
+                .expect("direct tool properties exist")
+                .keys()
+                .filter(|field| field.as_str() != "purpose")
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            let sequence_fields = sequence_variants[tool]["properties"]
+                .as_object()
+                .expect("sequence variant properties exist")
+                .keys()
+                .filter(|field| field.as_str() != "tool")
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                sequence_fields, direct_fields,
+                "sequence variant must reuse the direct {tool} field vocabulary"
+            );
+        }
+        assert!(sequence_variants["read"]["properties"].get("q").is_none());
+        assert!(
+            sequence_variants["search"]["properties"]
+                .get("content")
+                .is_none()
+        );
+        assert!(
+            sequence_variants["write"]["properties"]
+                .get("source")
+                .is_none()
+        );
+        assert!(
+            sequence_variants["manage"]["properties"]
+                .get("cursor")
+                .is_none()
         );
         assert_eq!(
-            sequence_properties["op"]["enum"],
-            serde_json::json!([
-                "spaces", "ls", "tree", "stat", "read", "changes", "find", "grep", "write",
-                "append", "patch", "edit", "mkdir", "mv", "cp", "rm"
-            ])
+            sequence_variants["write"]["properties"]["create"]["type"],
+            "boolean"
         );
-        let sequence_edits = sequence_command
+        assert_eq!(
+            sequence_variants["manage"]["properties"]["recursive"]["type"],
+            "boolean"
+        );
+        let sequence_edits = sequence_variants["write"]
             .pointer("/properties/edits")
-            .expect("sequence edits schema exists");
+            .expect("sequence write edits schema exists");
         assert_write_edit_schema(sequence_edits);
 
         let sequence = tools.get("run_sequence").expect("run_sequence tool exists");
@@ -895,6 +960,7 @@ mod tests {
             .expect("run_sequence description exists");
         assert!(description.contains("Preferred batch tool"));
         assert!(description.contains("inherit the one top-level purpose"));
+        assert!(description.contains("tool-discriminated flat objects"));
         assert!(description.contains("without purpose or args"));
         assert!(description.contains("preflights every command"));
         assert!(description.contains("runs mv, cp, rm"));

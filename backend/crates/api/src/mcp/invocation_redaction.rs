@@ -46,7 +46,7 @@ direction edited edits_applied effective_write_locked end_line error errors erro
 expected_count expires_in_seconds failed_index features field fields files has_children has_more \
 id includes_descendants index input item_kind items kind limit line_count matches \
 max_concurrency media_type method mode name next_action next_start_line node node_id nodes ok op \
-operation order page parent_node_id_after parent_node_id_before parent_scope_known part_count \
+operation order page parent_node_id_after parent_node_id_before parent_scope_known part_count phase \
 part_number part_numbers part_size parts patched path path_changed permission previous_sha256 \
 purge_after purpose recoverable repeat requires resource result results resync_required \
 retry_after_ms retry_after_seconds retryable returned returned_lines scope search_enabled \
@@ -504,7 +504,9 @@ fn response_fields(tool: &str, op: Option<&str>) -> Option<FieldSet> {
         ("file_transfer", Some("complete_upload")) => Some("upload_id node next_action"),
         ("file_transfer", Some("abort_upload")) => Some("upload_id status next_action"),
         ("file_transfer", Some("prepare_download")) => Some("target transfer node next_action"),
-        ("run_sequence", _) => Some("ok completed failed_index results error"),
+        ("run_sequence", _) => {
+            Some("ok phase executed completed failed_index results error next_action")
+        }
         _ => None,
     }
 }
@@ -804,6 +806,8 @@ mod tests {
         });
         let sequence_result = Ok(CallToolResult::structured(json!({
             "ok": true,
+            "phase": "complete",
+            "executed": true,
             "completed": 1,
             "failed_index": null,
             "results": [{
@@ -836,6 +840,8 @@ mod tests {
             sequence["result"]["results"][0]["result"]["items"][0]["match_lines"]["category"],
             "document_content"
         );
+        assert_eq!(sequence["result"]["phase"], "complete");
+        assert_eq!(sequence["result"]["executed"], true);
         assert!(!direct_text.contains("SECRET_MATCH_LINE"));
         assert!(!sequence_text.contains("SECRET_SEQUENCE_MATCH_LINE"));
     }
@@ -922,6 +928,8 @@ mod tests {
         });
         let result = Ok(CallToolResult::structured(json!({
             "ok": false,
+            "phase": "runtime",
+            "executed": true,
             "completed": 0,
             "failed_index": 0,
             "results": [],
@@ -937,6 +945,11 @@ mod tests {
                         "input": {"q": "SECRET_SEQUENCE_QUERY", "target": "daily:/"}
                     }
                 }
+            },
+            "next_action": {
+                "kind": "retry",
+                "hint": "SECRET_SEQUENCE_HINT",
+                "input": {"q": "SECRET_SEQUENCE_QUERY", "target": "daily:/"}
             }
         }))
         .into());
@@ -946,6 +959,8 @@ mod tests {
 
         assert_eq!(redacted["result"]["error"]["data"]["code"], "invalid_input");
         assert_eq!(redacted["result"]["error"]["data"]["recoverable"], true);
+        assert_eq!(redacted["result"]["phase"], "runtime");
+        assert_eq!(redacted["result"]["executed"], true);
         assert_eq!(
             redacted["result"]["error"]["data"]["next_action"]["input"]["q"]["category"],
             "search_query"
@@ -970,7 +985,12 @@ mod tests {
             Some(json!({
                 "kind": "invalid_input",
                 "code": "sequence_preflight_failed",
+                "ok": false,
+                "phase": "preflight",
                 "executed": false,
+                "completed": 0,
+                "failed_index": null,
+                "results": [],
                 "next_action": {
                     "kind": "apply_error_actions",
                     "errors_field": "errors"
@@ -993,6 +1013,10 @@ mod tests {
         let text = serialized(&redacted);
 
         assert_eq!(redacted["error"]["data"]["executed"], false);
+        assert_eq!(redacted["error"]["data"]["ok"], false);
+        assert_eq!(redacted["error"]["data"]["phase"], "preflight");
+        assert_eq!(redacted["error"]["data"]["completed"], 0);
+        assert!(redacted["error"]["data"]["failed_index"].is_null());
         assert_eq!(
             redacted["error"]["data"]["next_action"]["kind"],
             "apply_error_actions"

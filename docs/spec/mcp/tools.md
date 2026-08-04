@@ -14,7 +14,7 @@
 - MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
 - `run_sequence`의 완료된 mutation은 rollback하지 않는다. `file_transfer`는 sequence에 포함할 수 없다.
-- 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 여러 tool의 필드를 담는 공통 상위 타입이지만, 여기에 없는 필드도 거부한다.
+- 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 `tool`별 branch가 해당 직접 tool의 op와 필드만 노출한다.
 - `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
 - Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
 - Space reconciliation 중 해당 Space의 read tool은 정상 동작하고 mutation tool은 `data.kind=usage_recalculation_in_progress`, `retryable=true`, `retry_after_seconds`를 포함한 JSON-RPC server error를 반환한다. 관리자 전체 재계산도 Space 단위로 순차 진행되므로 같은 규칙이 Space별로 적용된다. 상세 계약은 `../usage-and-quotas.md`를 따른다.
@@ -303,45 +303,22 @@ type RunSequenceInput = {
   commands: SequenceCommand[] // 1..20
 }
 
-type SequenceCommand = {
-  tool: "read" | "search" | "write" | "manage"
-  op: string
-  target?: string
-  source?: string
-  destination?: string
-  name?: string
-  q?: string
-  kind?: "folder" | "text" | "file"
-  match?: string
-  lines?: "none" | "first" | "all"
-  include?: string[]
-  exclude?: string[]
-  content?: string
-  edits?: Array<PatchEdit | LineEditInput>
-  create?: boolean
-  parents?: boolean
-  recursive?: boolean
-  ensure_newline?: boolean
-  depth?: number
-  limit?: number
-  cursor?: string
-  direction?: "older" | "newer"
-  start_line?: number
-  max_lines?: number
-  max_bytes?: number
-  expected_sha256?: string
-  if_none_match_sha256?: string
-}
+type SequenceCommand =
+  | ({ tool: "read" } & Omit<ReadInput, "purpose">)
+  | ({ tool: "search" } & Omit<SearchInput, "purpose">)
+  | ({ tool: "write" } & Omit<WriteInput, "purpose">)
+  | ({ tool: "manage" } & Omit<ManageInput, "purpose">)
 ```
 
 Semantics:
 
-- 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식과 요청만으로 판단 가능한 본문 제한 및 구조화 `write` 문법을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 `code=sequence_preflight_failed`, `executed=false`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
+- 공개 JSON Schema는 `tool`로 구분되는 네 command branch를 제공한다. 각 branch는 해당 직접 tool의 op와 필드만 노출한다.
+- 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식과 요청만으로 판단 가능한 본문 제한 및 구조화 `write` 문법을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 error `data`에 `ok=false`, `phase=preflight`, `executed=false`, `completed=0`, `failed_index=null`, 빈 `results`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
 - command는 `tool`, `op`, operation 필드를 직접 담는 flat object다. 개별 command에 `purpose`를 반복하거나 `args`로 감싸지 않는다.
 - 최상위 `purpose` 하나를 사용하며 개별 command에는 `purpose`를 넣지 않는다.
 - 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
 - 각 command의 필수 필드는 해당 tool의 필수 필드를 따른다.
-- `SequenceCommand`는 공통 상위 타입이다. 해당 op가 사용하지 않는 known 필드는 실행 입력으로 전달되지 않는다.
+- 각 command는 해당 `tool` branch의 스키마를 사용한다. 런타임 preflight는 여러 오류를 한 번에 수집하기 위해 raw command를 받은 뒤 같은 직접 tool 입력으로 변환한다.
 - 독립적인 `read`/`search`는 최대 4개까지 병렬 실행한다. 앞선 mutation과 target 범위가 겹치지 않는 뒤쪽 `read`/`search`도 병렬화하며, exact path/subtree/Space 범위가 겹치면 순서를 보존한다.
 - 검증된 command는 접근 범위와 실행 등급으로 분류한 뒤 명시적인 의존성 그래프를 만든다. 그래프 간선은 정합성 순서만 나타내며 검색 동시 실행 제한은 별도로 적용한다.
 - `mv`, `cp`, `rm`, `mkdir(parents=true)`는 전체 하위 구조에 미치는 범위를 실행 전에 확정할 수 없으므로 structural barrier다. 모든 앞선 command가 끝난 뒤 단독 실행하며 모든 뒤 command는 barrier 완료를 기다린다.
@@ -355,6 +332,8 @@ Semantics:
 ```json
 {
   "ok": false,
+  "phase": "runtime",
+  "executed": true,
   "completed": 2,
   "failed_index": 2,
   "results": [
@@ -365,6 +344,9 @@ Semantics:
     "code": -32602,
     "message": "...",
     "data": { "kind": "invalid_input", "code": "invalid_input" }
-  }
+  },
+  "next_action": null
 }
 ```
+
+Preflight와 runtime 실패는 `ok`, `phase`, `executed`, `completed`, `failed_index`, `results`, `next_action`을 공통 상태 필드로 사용한다. MCP transport는 유지하므로 preflight 실패는 JSON-RPC error `data`에, 실행을 시작한 뒤의 실패는 정상 tool result의 `ok=false` payload에 담긴다. Runtime의 최상위 `next_action`과 `error.data.next_action` 필드 경로는 모두 실패한 `commands[index]` 기준으로 보정된다. 성공 payload는 `phase=complete`, `executed=true`를 사용한다.
