@@ -9,9 +9,10 @@ use rmcp::model::ErrorCode;
 use rmcp::{ErrorData, Json};
 use serde_json::{Value, json};
 
-use super::resolve::{caller, invalid_input_error, node_summary, resolve_target, service_error};
+use super::resolve::{actionable_input_error, caller, node_summary, resolve_target, service_error};
 use super::support::page_json;
 use crate::admission::SearchCapacity;
+use crate::mcp::contract::McpAction;
 use crate::state::AppState;
 
 const SEARCH_BUSY_ERROR_CODE: ErrorCode = ErrorCode(-32002);
@@ -166,24 +167,56 @@ fn search_busy_error(capacity: SearchCapacity) -> ErrorData {
     )
 }
 
-fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
-    NodeKind::parse(value)
-        .ok_or_else(|| invalid_input_error("kind must be 'folder', 'text', or 'file'"))
+pub(super) fn parse_kind(value: &str) -> Result<NodeKind, ErrorData> {
+    NodeKind::parse(value).ok_or_else(|| {
+        invalid_choice(
+            "kind",
+            "kind must be 'folder', 'text', or 'file'",
+            &["folder", "text", "file"],
+        )
+    })
 }
 
-fn parse_find_match_mode(value: Option<&str>) -> Result<FindMatchMode, ErrorData> {
-    FindMatchMode::parse(value.unwrap_or("contains"))
-        .ok_or_else(|| invalid_input_error("match must be 'contains', 'regex', or 'glob'"))
+pub(super) fn parse_find_match_mode(value: Option<&str>) -> Result<FindMatchMode, ErrorData> {
+    FindMatchMode::parse(value.unwrap_or("contains")).ok_or_else(|| {
+        invalid_choice(
+            "match",
+            "match must be 'contains', 'regex', or 'glob'",
+            &["contains", "regex", "glob"],
+        )
+    })
 }
 
-fn parse_grep_match_mode(value: Option<&str>) -> Result<GrepMatchMode, ErrorData> {
-    GrepMatchMode::parse(value.unwrap_or("literal"))
-        .ok_or_else(|| invalid_input_error("match must be 'literal' or 'regex'"))
+pub(super) fn parse_grep_match_mode(value: Option<&str>) -> Result<GrepMatchMode, ErrorData> {
+    GrepMatchMode::parse(value.unwrap_or("literal")).ok_or_else(|| {
+        invalid_choice(
+            "match",
+            "match must be 'literal' or 'regex'",
+            &["literal", "regex"],
+        )
+    })
 }
 
-fn parse_grep_line_mode(value: Option<&str>) -> Result<GrepLineMode, ErrorData> {
-    GrepLineMode::parse(value.unwrap_or("none"))
-        .ok_or_else(|| invalid_input_error("lines must be 'none', 'first', or 'all'"))
+pub(super) fn parse_grep_line_mode(value: Option<&str>) -> Result<GrepLineMode, ErrorData> {
+    GrepLineMode::parse(value.unwrap_or("none")).ok_or_else(|| {
+        invalid_choice(
+            "lines",
+            "lines must be 'none', 'first', or 'all'",
+            &["none", "first", "all"],
+        )
+    })
+}
+
+fn invalid_choice(field: &'static str, message: &'static str, choices: &[&str]) -> ErrorData {
+    actionable_input_error(
+        "invalid_field_value",
+        message,
+        "Choose one of the values listed by next_action.choices and retry.",
+        McpAction::ChooseValue {
+            field: field.to_owned(),
+            choices: choices.iter().map(|value| json!(value)).collect(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -204,7 +237,14 @@ mod tests {
 
         let data = error.data.expect("invalid input error carries metadata");
         assert_eq!(data["kind"], "invalid_input");
-        assert_eq!(data["code"], "invalid_input");
+        assert_eq!(data["code"], "invalid_field_value");
+        assert_eq!(data["next_action"]["kind"], "choose_value");
+        assert!(
+            !data["next_action"]["choices"]
+                .as_array()
+                .expect("choices array")
+                .is_empty()
+        );
     }
 
     #[test]

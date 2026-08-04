@@ -3,8 +3,9 @@
 ## 공통 규칙
 
 - `me`와 `run_sequence`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
-- `me`를 제외한 모든 tool은 호출 이유를 설명하는 `purpose`를 필수로 받는다. 앞뒤 공백 없는 1..200자이며 secret, 본문, 검색 결과를 넣지 않는다.
-- `run_sequence`는 최상위 `purpose` 하나를 모든 command와 후속 `next_action`에 공유한다. `commands[]`에는 `purpose`를 반복하지 않는다.
+- 하나의 MCP 호출은 `me`를 제외하고 최상위 `purpose`를 정확히 하나 받는다. 앞뒤 공백 없는 1..200자이며 secret, 본문, 검색 결과를 넣지 않는다.
+- `run_sequence.commands[]`는 별도 MCP 호출이 아니라 내부 command다. 최상위 호출의 `purpose`를 상속하므로 개별 `purpose`를 넣지 않는다.
+- operation 하나는 직접 tool을 호출한다. 입력이 미리 정해지고 목적이 같은 operation 2..20개는 `run_sequence`를 우선한다. 뒤 입력에 앞 응답의 cursor, sha256, 발견된 target 등이 필요하면 직접 tool을 단계별로 호출한다.
 - 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
@@ -12,7 +13,7 @@
 - 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
 - MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
-- `run_sequence`는 여러 command를 순서대로 실행할 때만 사용한다. rollback은 제공하지 않는다.
+- `run_sequence`의 완료된 mutation은 rollback하지 않는다. `file_transfer`는 sequence에 포함할 수 없다.
 - 모든 입력은 알 수 없는 필드를 거부한다. `run_sequence.commands[]`는 여러 tool의 필드를 담는 공통 상위 타입이지만, 여기에 없는 필드도 거부한다.
 - `target`의 Space name은 exact match이며 대소문자를 구분한다. Space name을 모르면 `read op=spaces`로 목록을 먼저 조회한다.
 - Space name exact match가 실패하면 server는 case-insensitive 후보를 error `data.suggestions`에 넣을 수 있지만, 자동으로 다른 Space로 resolve하지 않는다.
@@ -332,11 +333,17 @@ type SequenceCommand = {
 
 Semantics:
 
-- `commands`는 입력 순서대로 실행한다.
+- 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 `code=sequence_preflight_failed`, `executed=false`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
+- command는 `tool`, `op`, operation 필드를 직접 담는 flat object다. 개별 command에 `purpose`를 반복하거나 `args`로 감싸지 않는다.
 - 최상위 `purpose` 하나를 사용하며 개별 command에는 `purpose`를 넣지 않는다.
 - 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
 - 각 command의 필수 필드는 해당 tool의 필수 필드를 따른다.
 - `SequenceCommand`는 공통 상위 타입이다. 해당 op가 사용하지 않는 known 필드는 실행 입력으로 전달되지 않는다.
+- 독립적인 `read`/`search`는 최대 4개까지 병렬 실행한다. 앞선 mutation과 target 범위가 겹치지 않는 뒤쪽 `read`/`search`도 병렬화하며, exact path/subtree/Space 범위가 겹치면 순서를 보존한다.
+- 검증된 command는 접근 범위와 실행 등급으로 분류한 뒤 명시적인 의존성 그래프를 만든다. 그래프 간선은 정합성 순서만 나타내며 검색 동시 실행 제한은 별도로 적용한다.
+- `mv`, `cp`, `rm`, `mkdir(parents=true)`는 전체 하위 구조에 미치는 범위를 실행 전에 확정할 수 없으므로 structural barrier다. 모든 앞선 command가 끝난 뒤 단독 실행하며 모든 뒤 command는 barrier 완료를 기다린다.
+- `write`/`manage` mutation끼리는 fail-fast 순서를 보존하기 위해 순차 실행한다.
+- 결과는 실제 완료 시점과 관계없이 입력 index 순서로 반환한다.
 - command 하나가 실패하면 즉시 중단한다.
 - 이미 성공한 command는 rollback하지 않는다.
 - `run_sequence` 안에서 `run_sequence`를 다시 호출할 수 없다.

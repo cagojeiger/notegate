@@ -55,6 +55,9 @@ pub enum McpAction {
         field: String,
         choices: Vec<Value>,
     },
+    ApplyErrorActions {
+        errors_field: String,
+    },
     CallTool {
         #[serde(flatten)]
         call: ToolCallSpec,
@@ -196,5 +199,18 @@ mod tests {
         assert_eq!(data["recoverable"], true);
         assert_eq!(data["next_action"]["kind"], "add_fields");
         assert_eq!(data["next_action"]["fields"][0]["field"], "purpose");
+    }
+
+    #[test]
+    fn aggregate_recovery_points_to_nested_error_actions() {
+        assert_eq!(
+            json!(McpAction::ApplyErrorActions {
+                errors_field: "errors".to_owned(),
+            }),
+            json!({
+                "kind": "apply_error_actions",
+                "errors_field": "errors",
+            })
+        );
     }
 }

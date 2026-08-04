@@ -43,7 +43,7 @@ use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller and running server version. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires exactly one top-level `purpose`; `run_sequence` commands inherit it and must not contain `purpose`. Use `me` to inspect the caller and running server version. Use a direct tool for one operation. Prefer `run_sequence` for 2-20 commands whose inputs are known in advance and share one purpose; use separate calls when a later input depends on an earlier result such as a cursor, sha256, or discovered target. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, and `file_transfer` for direct local file upload/download. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -211,7 +211,7 @@ impl McpServer {
 
     #[tool(
         name = "run_sequence",
-        description = "Run an ordered command sequence. Each command is committed independently; execution stops on first failure and completed commands are not rolled back.",
+        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and are flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime stops on first failure; completed mutations are not rolled back.",
         annotations(title = "Run NoteGate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -474,7 +474,7 @@ mod tests {
         assert!(
             data["next_action"]["fields"][0]["description"]
                 .as_str()
-                .is_some_and(|description| description.contains("human-readable reason"))
+                .is_some_and(|description| description.contains("MCP invocation"))
         );
         assert!(
             required_fields_error(
@@ -814,6 +814,19 @@ mod tests {
             assert_required_properties(&tools, tool_name, required);
         }
 
+        let common_purpose_description = "Reason for this MCP invocation. Required once at the top level; maximum 200 characters.";
+        for tool_name in ["read", "search", "write", "manage", "file_transfer"] {
+            assert_eq!(
+                tools[tool_name].input_schema["properties"]["purpose"]["description"],
+                common_purpose_description,
+                "tool `{tool_name}` must expose the shared invocation-purpose contract"
+            );
+        }
+        assert_eq!(
+            tools["run_sequence"].input_schema["properties"]["purpose"]["description"],
+            "Reason for this MCP invocation. Commands inherit it; maximum 200 characters."
+        );
+
         let me_properties = tools
             .get("me")
             .and_then(|tool| tool.input_schema.get("properties"))
@@ -853,10 +866,38 @@ mod tests {
             "sequence commands must be exposed inline instead of as an opaque reference"
         );
         assert!(sequence_command.get("$ref").is_none());
+        let sequence_properties = sequence_command
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("sequence command properties exist");
+        assert!(!sequence_properties.contains_key("purpose"));
+        assert!(!sequence_properties.contains_key("args"));
+        assert_eq!(
+            sequence_properties["tool"]["enum"],
+            serde_json::json!(["read", "search", "write", "manage"])
+        );
+        assert_eq!(
+            sequence_properties["op"]["enum"],
+            serde_json::json!([
+                "spaces", "ls", "tree", "stat", "read", "changes", "find", "grep", "write",
+                "append", "patch", "edit", "mkdir", "mv", "cp", "rm"
+            ])
+        );
         let sequence_edits = sequence_command
             .pointer("/properties/edits")
             .expect("sequence edits schema exists");
         assert_write_edit_schema(sequence_edits);
+
+        let sequence = tools.get("run_sequence").expect("run_sequence tool exists");
+        let description = sequence
+            .description
+            .as_deref()
+            .expect("run_sequence description exists");
+        assert!(description.contains("Preferred batch tool"));
+        assert!(description.contains("inherit the one top-level purpose"));
+        assert!(description.contains("without purpose or args"));
+        assert!(description.contains("preflights every command"));
+        assert!(description.contains("runs mv, cp, rm"));
 
         let read = tools.get("read").expect("read tool exists");
         let description = read
@@ -911,7 +952,9 @@ mod tests {
     fn server_instructions_describe_all_mcp_categories() {
         assert!(MCP_SERVER_INSTRUCTIONS.contains("space"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("except `me`"));
-        assert!(MCP_SERVER_INSTRUCTIONS.contains("purpose"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("exactly one top-level `purpose`"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("2-20 commands"));
+        assert!(MCP_SERVER_INSTRUCTIONS.contains("later input depends"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("read"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("page.next_cursor"));
         assert!(MCP_SERVER_INSTRUCTIONS.contains("checkpoint_cursor"));
@@ -980,6 +1023,53 @@ mod tests {
                 "tool `{tool_name}` input schema missing property `{property}`"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn sequence_preflight_prevents_partial_writes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "prove invalid later commands cannot leave partial writes",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/should-not-exist.md",
+                    "content": "must not be committed",
+                    "create": true
+                },
+                {"tool": "search", "op": "find", "target": "rest-test:/"}
+            ]
+        }))?;
+
+        let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
+            Ok(_) => panic!("missing q must fail preflight"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error
+                .data
+                .as_ref()
+                .and_then(|data| data["executed"].as_bool()),
+            Some(false)
+        );
+        let stat =
+            tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
+        assert!(stat.is_err(), "the earlier write must not have run");
+
+        db.cleanup().await;
+        Ok(())
     }
 
     #[tokio::test]

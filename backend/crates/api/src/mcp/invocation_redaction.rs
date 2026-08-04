@@ -42,7 +42,7 @@ account actor_account_id affected_parent_ids agent appended baseline_call byte_l
 can_create_space can_manage_agents capabilities code collect_response_header completed \
 content_blocks_omitted content_length content_returned content_sha256 copied counts created_at data \
 created_paths default_search_enabled default_text_encryption_enabled deleted depth description \
-direction edited edits_applied effective_write_locked end_line error event_id events \
+direction edited edits_applied effective_write_locked end_line error errors errors_field event_id events executed \
 expected_count expires_in_seconds failed_index features field fields files has_children has_more \
 id includes_descendants index input item_kind items kind limit line_count matches \
 max_concurrency media_type method mode name next_action next_start_line node node_id nodes ok op \
@@ -954,6 +954,61 @@ mod tests {
             "SECRET_SEQUENCE_ERROR",
             "SECRET_SEQUENCE_HINT",
             "SECRET_SEQUENCE_QUERY",
+        ] {
+            assert!(!text.contains(secret));
+        }
+    }
+
+    #[test]
+    fn sequence_preflight_logs_safe_nested_actions_without_error_text() {
+        let input = json!({
+            "purpose": "read notes",
+            "commands": [{"tool": "read", "op": "read", "purpose": "wrong location"}]
+        });
+        let result = Err(ErrorData::invalid_params(
+            "SECRET_PREFLIGHT_MESSAGE",
+            Some(json!({
+                "kind": "invalid_input",
+                "code": "sequence_preflight_failed",
+                "executed": false,
+                "next_action": {
+                    "kind": "apply_error_actions",
+                    "errors_field": "errors"
+                },
+                "errors": [{
+                    "index": 0,
+                    "path": "commands[0]",
+                    "code": "sequence_command_purpose_not_allowed",
+                    "message": "SECRET_NESTED_MESSAGE",
+                    "hint": "SECRET_NESTED_HINT",
+                    "next_action": {
+                        "kind": "remove_fields",
+                        "fields": ["commands[0].purpose"]
+                    }
+                }]
+            })),
+        ));
+
+        let redacted = redact_response("run_sequence", &input, &result);
+        let text = serialized(&redacted);
+
+        assert_eq!(redacted["error"]["data"]["executed"], false);
+        assert_eq!(
+            redacted["error"]["data"]["next_action"]["kind"],
+            "apply_error_actions"
+        );
+        assert_eq!(
+            redacted["error"]["data"]["errors"][0]["code"],
+            "sequence_command_purpose_not_allowed"
+        );
+        assert_eq!(
+            redacted["error"]["data"]["errors"][0]["next_action"]["fields"][0],
+            "commands[0].purpose"
+        );
+        for secret in [
+            "SECRET_PREFLIGHT_MESSAGE",
+            "SECRET_NESTED_MESSAGE",
+            "SECRET_NESTED_HINT",
         ] {
             assert!(!text.contains(secret));
         }
