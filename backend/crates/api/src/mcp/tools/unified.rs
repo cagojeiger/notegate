@@ -185,13 +185,13 @@ pub struct ManageInput {
     pub purpose: String,
     /// Operation: mkdir/mv/cp/rm.
     pub op: String,
-    /// Single target in `<space>:/absolute/path` form for mkdir/rm.
+    /// Single target in `<space>:/absolute/path` form for mkdir/rm. The Space root is allowed only for mkdir with parents=true.
     #[serde(default)]
     pub target: Option<String>,
-    /// Source target for mv/cp.
+    /// Non-root source target for mv/cp.
     #[serde(default)]
     pub source: Option<String>,
-    /// Destination target for mv/cp.
+    /// Non-root destination target for mv/cp.
     #[serde(default)]
     pub destination: Option<String>,
     /// Create missing parent folders for mkdir.
@@ -717,12 +717,17 @@ fn validate_static_write_content(input: &WriteInput) -> Result<(), ErrorData> {
 
 fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
     match input.op.as_str() {
-        "mkdir" | "rm" => {
-            parse_input_target(required_ref(
-                input.target.as_ref(),
-                "target",
-                input.op.as_str(),
-            )?)?;
+        "mkdir" => {
+            let target =
+                parse_input_target(required_ref(input.target.as_ref(), "target", "mkdir")?)?;
+            if !input.parents {
+                validate_non_root_target(&target)?;
+            }
+            Ok(())
+        }
+        "rm" => {
+            let target = parse_input_target(required_ref(input.target.as_ref(), "target", "rm")?)?;
+            validate_non_root_target(&target)?;
             Ok(())
         }
         "mv" | "cp" => {
@@ -741,10 +746,16 @@ fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
                     "source and destination must be in the same space",
                 ));
             }
+            validate_non_root_target(&source)?;
+            validate_non_root_target(&destination)?;
             Ok(())
         }
         _ => Err(invalid_op("manage", &["mkdir", "mv", "cp", "rm"])),
     }
+}
+
+fn validate_non_root_target(target: &Target) -> Result<(), ErrorData> {
+    split_parent_name(&target.path).map(|_| ())
 }
 
 fn parse_input_target(target: &str) -> Result<Target, ErrorData> {
@@ -1949,6 +1960,30 @@ mod tests {
                 "source and destination must be in the same space",
             ),
             (
+                json!({"tool": "manage", "op": "mkdir", "target": "daily:/"}),
+                "path must name a node, not the space root",
+            ),
+            (
+                json!({"tool": "manage", "op": "rm", "target": "daily:/", "recursive": true}),
+                "path must name a node, not the space root",
+            ),
+            (
+                json!({"tool": "manage", "op": "mv", "source": "daily:/", "destination": "daily:/moved"}),
+                "path must name a node, not the space root",
+            ),
+            (
+                json!({"tool": "manage", "op": "mv", "source": "daily:/source", "destination": "daily:/"}),
+                "path must name a node, not the space root",
+            ),
+            (
+                json!({"tool": "manage", "op": "cp", "source": "daily:/", "destination": "daily:/copied", "recursive": true}),
+                "path must name a node, not the space root",
+            ),
+            (
+                json!({"tool": "manage", "op": "cp", "source": "daily:/source", "destination": "daily:/", "recursive": true}),
+                "path must name a node, not the space root",
+            ),
+            (
                 json!({"tool": "read", "op": "tree", "target": "daily:/", "depth": 0}),
                 "depth must be at least 1",
             ),
@@ -1986,6 +2021,22 @@ mod tests {
                 data["errors"][0]["message"]
             );
         }
+    }
+
+    #[test]
+    fn recursive_mkdir_keeps_the_space_root_as_an_idempotent_target() {
+        let commands = prepare_sequence_commands(
+            vec![json!({
+                "tool": "manage",
+                "op": "mkdir",
+                "target": "daily:/",
+                "parents": true
+            })],
+            "keep recursive root mkdir behavior",
+        )
+        .expect("mkdir parents=true may target the existing space root");
+
+        assert_eq!(commands.len(), 1);
     }
 
     #[test]

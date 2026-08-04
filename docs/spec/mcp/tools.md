@@ -233,6 +233,8 @@ type ManageInput = {
 - `op=cp`: `source` node를 `destination`으로 복사한다. Folder copy는 `recursive=true`가 필요하다.
 - `op=rm`: `target` node를 soft-delete한다. Folder delete는 `recursive=true`가 필요하다.
 
+Space root(`<space>:/`)는 `op=mkdir, parents=true`의 idempotent target으로만 허용한다. 그 외 `target`, `source`, `destination`은 반드시 node를 가리켜야 한다.
+
 필수 필드:
 
 ```text

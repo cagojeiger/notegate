@@ -182,7 +182,7 @@ impl McpServer {
 
     #[tool(
         name = "manage",
-        description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. MCP cannot create spaces.",
+        description = "Manage existing-space folder trees and node locations. Use op=mkdir/mv/cp/rm. Only mkdir with parents=true may target the Space root; every other target, source, or destination must name a node. MCP cannot create spaces.",
         annotations(title = "Manage NoteGate", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -1146,6 +1146,63 @@ mod tests {
         let stat =
             tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
         assert!(stat.is_err(), "the earlier write must not have run");
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sequence_preflight_rejects_manage_root_targets_without_partial_writes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        let invalid_commands = [
+            serde_json::json!({"tool": "manage", "op": "mkdir", "target": "rest-test:/"}),
+            serde_json::json!({"tool": "manage", "op": "rm", "target": "rest-test:/", "recursive": true}),
+            serde_json::json!({"tool": "manage", "op": "mv", "source": "rest-test:/", "destination": "rest-test:/moved"}),
+            serde_json::json!({"tool": "manage", "op": "mv", "source": "rest-test:/source", "destination": "rest-test:/"}),
+            serde_json::json!({"tool": "manage", "op": "cp", "source": "rest-test:/", "destination": "rest-test:/copied", "recursive": true}),
+            serde_json::json!({"tool": "manage", "op": "cp", "source": "rest-test:/source", "destination": "rest-test:/", "recursive": true}),
+        ];
+
+        for (index, invalid_command) in invalid_commands.into_iter().enumerate() {
+            let created_target = format!("rest-test:/root-preflight-{index}.md");
+            let input = serde_json::from_value(serde_json::json!({
+                "purpose": "reject root manage commands before writing",
+                "commands": [
+                    {
+                        "tool": "write",
+                        "op": "write",
+                        "target": created_target,
+                        "content": "must not be committed",
+                        "create": true
+                    },
+                    invalid_command
+                ]
+            }))?;
+
+            let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await
+            {
+                Ok(_) => panic!("root manage target must fail sequence preflight"),
+                Err(error) => error,
+            };
+            let data = error.data.as_ref().expect("structured preflight data");
+            assert_eq!(data["code"], "sequence_preflight_failed");
+            assert_eq!(data["executed"], false);
+            assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
+            assert_eq!(data["errors"][0]["index"], 1);
+            let stat = tools::files::stat(&state, &parts, created_target).await;
+            assert!(stat.is_err(), "the earlier write must not have run");
+        }
 
         db.cleanup().await;
         Ok(())
