@@ -526,25 +526,11 @@ impl SequenceCommand {
     }
 }
 
-const SEQUENCE_COMMAND_FIELDS: &[&str] = &[
+const SEQUENCE_READ_COMMAND_FIELDS: &[&str] = &[
     "tool",
     "op",
     "target",
-    "source",
-    "destination",
     "name",
-    "q",
-    "kind",
-    "match",
-    "lines",
-    "include",
-    "exclude",
-    "content",
-    "edits",
-    "create",
-    "parents",
-    "recursive",
-    "ensure_newline",
     "depth",
     "limit",
     "cursor",
@@ -552,8 +538,32 @@ const SEQUENCE_COMMAND_FIELDS: &[&str] = &[
     "start_line",
     "max_lines",
     "max_bytes",
-    "expected_sha256",
     "if_none_match_sha256",
+];
+
+const SEQUENCE_SEARCH_COMMAND_FIELDS: &[&str] = &[
+    "tool", "op", "target", "q", "kind", "match", "lines", "include", "exclude", "limit", "cursor",
+];
+
+const SEQUENCE_WRITE_COMMAND_FIELDS: &[&str] = &[
+    "tool",
+    "op",
+    "target",
+    "content",
+    "edits",
+    "create",
+    "ensure_newline",
+    "expected_sha256",
+];
+
+const SEQUENCE_MANAGE_COMMAND_FIELDS: &[&str] = &[
+    "tool",
+    "op",
+    "target",
+    "source",
+    "destination",
+    "parents",
+    "recursive",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -599,6 +609,27 @@ impl SequenceExecutionClass {
 struct SequenceCommandPlan {
     execution_class: SequenceExecutionClass,
     accesses: Vec<SequenceAccess>,
+}
+
+fn sequence_tool_fields(tool: &str) -> Option<&'static [&'static str]> {
+    match tool {
+        "read" => Some(SEQUENCE_READ_COMMAND_FIELDS),
+        "search" => Some(SEQUENCE_SEARCH_COMMAND_FIELDS),
+        "write" => Some(SEQUENCE_WRITE_COMMAND_FIELDS),
+        "manage" => Some(SEQUENCE_MANAGE_COMMAND_FIELDS),
+        _ => None,
+    }
+}
+
+fn is_sequence_command_field(field: &str) -> bool {
+    [
+        SEQUENCE_READ_COMMAND_FIELDS,
+        SEQUENCE_SEARCH_COMMAND_FIELDS,
+        SEQUENCE_WRITE_COMMAND_FIELDS,
+        SEQUENCE_MANAGE_COMMAND_FIELDS,
+    ]
+    .into_iter()
+    .any(|fields| fields.contains(&field))
 }
 
 #[derive(Debug, Clone)]
@@ -1091,7 +1122,7 @@ fn prepare_sequence_commands(
 
         let unknown_fields = candidate
             .keys()
-            .filter(|field| !SEQUENCE_COMMAND_FIELDS.contains(&field.as_str()))
+            .filter(|field| !is_sequence_command_field(field))
             .cloned()
             .collect::<Vec<_>>();
         if !unknown_fields.is_empty() {
@@ -1131,6 +1162,33 @@ fn prepare_sequence_commands(
                 }),
             ));
             shape_blocked = true;
+        }
+
+        if let Some(tool) = candidate.get("tool").and_then(Value::as_str)
+            && let Some(allowed_fields) = sequence_tool_fields(tool)
+        {
+            let disallowed_fields = candidate
+                .keys()
+                .filter(|field| !allowed_fields.contains(&field.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            if !disallowed_fields.is_empty() {
+                issues.push(sequence_issue(
+                    index,
+                    "sequence_command_fields_not_allowed_for_tool",
+                    format!("run_sequence {tool} command contains fields for another tool"),
+                    "Remove every field listed by next_action.fields, or change tool to match the command shape.",
+                    Some(McpAction::RemoveFields {
+                        fields: disallowed_fields
+                            .iter()
+                            .map(|field| format!("commands[{index}].{field}"))
+                            .collect(),
+                    }),
+                ));
+                for field in disallowed_fields {
+                    candidate.remove(&field);
+                }
+            }
         }
 
         if shape_blocked {
@@ -1183,6 +1241,51 @@ fn flattened_sequence_command(object: &serde_json::Map<String, Value>) -> Option
         flattened.insert(field.clone(), value.clone());
     }
     Some(Value::Object(flattened))
+}
+
+fn validate_sequence_command_count(count: usize) -> Result<(), ErrorData> {
+    if count == 0 {
+        return Err(sequence_preflight_error(vec![sequence_invocation_issue(
+            "sequence_commands_required",
+            "run_sequence requires at least one command",
+            "Add one or more command objects to commands and retry.",
+            Some(McpAction::AddFields {
+                fields: vec![crate::mcp::contract::RequiredField {
+                    field: "commands[0]".to_owned(),
+                    description: Some(
+                        "Add a flat command object containing at least tool and op.".to_owned(),
+                    ),
+                }],
+            }),
+        )]));
+    }
+    if count > RUN_SEQUENCE_MAX_COMMANDS {
+        return Err(sequence_preflight_error(vec![sequence_invocation_issue(
+            "sequence_commands_too_many",
+            format!("run_sequence accepts at most {RUN_SEQUENCE_MAX_COMMANDS} commands"),
+            "Split the request into multiple run_sequence calls of at most 20 commands each.",
+            Some(McpAction::ChooseValue {
+                field: "commands.length".to_owned(),
+                choices: vec![json!(RUN_SEQUENCE_MAX_COMMANDS)],
+            }),
+        )]));
+    }
+    Ok(())
+}
+
+fn sequence_invocation_issue(
+    code: &'static str,
+    message: impl Into<String>,
+    hint: &'static str,
+    next_action: Option<McpAction>,
+) -> Value {
+    json!({
+        "path": "commands",
+        "code": code,
+        "message": message.into(),
+        "hint": hint,
+        "next_action": next_action,
+    })
 }
 
 fn sequence_issue(
@@ -1579,17 +1682,7 @@ pub async fn run_sequence(
     parts: &Parts,
     Parameters(input): Parameters<RunSequenceInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    if input.commands.is_empty() {
-        return Err(invalid_input_error(
-            "run_sequence requires at least one command",
-        ));
-    }
-    if input.commands.len() > RUN_SEQUENCE_MAX_COMMANDS {
-        return Err(invalid_input_error(format!(
-            "run_sequence accepts at most {RUN_SEQUENCE_MAX_COMMANDS} commands"
-        )));
-    }
-
+    validate_sequence_command_count(input.commands.len())?;
     let command_count = input.commands.len();
     let commands = prepare_sequence_commands(input.commands, &input.purpose)?;
     let graph = build_sequence_dependency_graph(&commands);
@@ -1906,6 +1999,93 @@ mod tests {
     }
 
     #[test]
+    fn sequence_command_rejects_fields_from_other_tools() {
+        let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "purpose": "reject fields that belong to another tool branch",
+            "commands": [
+                {"tool": "read", "op": "spaces", "q": "cache"},
+                {"tool": "search", "op": "find", "target": "daily:/", "q": "cache", "content": "ignored"},
+                {"tool": "write", "op": "write", "target": "daily:/note.md", "content": "body", "source": "daily:/old.md"},
+                {"tool": "manage", "op": "mkdir", "target": "daily:/folder", "cursor": "ignored"}
+            ]
+        }))
+        .expect("raw sequence commands parse before preflight");
+        let error = prepare_sequence_commands(input.commands, &input.purpose)
+            .expect_err("tool-specific command fields should be rejected by preflight");
+        let data = error.data.expect("structured preflight data");
+
+        assert_eq!(data["code"], "sequence_preflight_failed");
+        assert_eq!(data["executed"], false);
+        assert_eq!(data["errors"].as_array().map(Vec::len), Some(4));
+        let disallowed_fields = data["errors"]
+            .as_array()
+            .expect("preflight errors")
+            .iter()
+            .map(|error| {
+                assert_eq!(
+                    error["code"],
+                    "sequence_command_fields_not_allowed_for_tool"
+                );
+                error["next_action"]["fields"][0]
+                    .as_str()
+                    .expect("disallowed field")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            disallowed_fields,
+            vec![
+                "commands[0].q",
+                "commands[1].content",
+                "commands[2].source",
+                "commands[3].cursor"
+            ]
+        );
+    }
+
+    #[test]
+    fn sequence_command_count_errors_use_common_preflight_status_fields() {
+        let cases = [
+            (0, "sequence_commands_required", "add_fields", "commands[0]"),
+            (
+                RUN_SEQUENCE_MAX_COMMANDS + 1,
+                "sequence_commands_too_many",
+                "choose_value",
+                "commands.length",
+            ),
+        ];
+
+        for (count, expected_code, expected_action, expected_field) in cases {
+            let error = validate_sequence_command_count(count)
+                .expect_err("invalid command count should fail preflight");
+            let data = error.data.expect("structured preflight data");
+
+            assert_eq!(data["code"], "sequence_preflight_failed");
+            assert_eq!(data["ok"], false);
+            assert_eq!(data["phase"], "preflight");
+            assert_eq!(data["executed"], false);
+            assert_eq!(data["completed"], 0);
+            assert!(data["failed_index"].is_null());
+            assert_eq!(data["results"], json!([]));
+            assert_eq!(data["next_action"]["kind"], "apply_error_actions");
+            assert_eq!(data["next_action"]["errors_field"], "errors");
+            assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
+            assert_eq!(data["errors"][0]["path"], "commands");
+            assert_eq!(data["errors"][0]["code"], expected_code);
+            assert_eq!(data["errors"][0]["next_action"]["kind"], expected_action);
+            let action_field = if expected_action == "add_fields" {
+                &data["errors"][0]["next_action"]["fields"][0]["field"]
+            } else {
+                &data["errors"][0]["next_action"]["field"]
+            };
+            assert_eq!(action_field, expected_field);
+        }
+
+        assert!(validate_sequence_command_count(1).is_ok());
+        assert!(validate_sequence_command_count(RUN_SEQUENCE_MAX_COMMANDS).is_ok());
+    }
+
+    #[test]
     fn sequence_runtime_failure_uses_common_status_fields_and_child_action() {
         let mut results = vec![json!({
             "index": 0,
@@ -1955,24 +2135,29 @@ mod tests {
     #[test]
     fn sequence_preflight_allowlist_matches_the_public_command_schema() {
         let schema = json!(schemars::schema_for!(SequenceCommandSchema));
-        let schema_fields = schema["oneOf"]
+        let variants = schema["oneOf"]
             .as_array()
-            .expect("sequence schema variants")
-            .iter()
-            .flat_map(|variant| {
-                variant["properties"]
-                    .as_object()
-                    .expect("sequence variant properties")
-                    .keys()
-                    .map(String::as_str)
-            })
-            .collect::<BTreeSet<_>>();
-        let preflight_fields = SEQUENCE_COMMAND_FIELDS
-            .iter()
-            .copied()
-            .collect::<BTreeSet<_>>();
+            .expect("sequence schema variants");
 
-        assert_eq!(preflight_fields, schema_fields);
+        for tool in ["read", "search", "write", "manage"] {
+            let variant = variants
+                .iter()
+                .find(|variant| variant["properties"]["tool"]["const"] == tool)
+                .expect("tool schema variant");
+            let schema_fields = variant["properties"]
+                .as_object()
+                .expect("sequence variant properties")
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            let preflight_fields = sequence_tool_fields(tool)
+                .expect("runtime tool field allowlist")
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>();
+
+            assert_eq!(preflight_fields, schema_fields, "field drift for {tool}");
+        }
     }
 
     #[test]
