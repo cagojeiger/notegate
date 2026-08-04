@@ -134,7 +134,7 @@ async fn outgoing_rows(
     node_id: Uuid,
     limit: i64,
 ) -> Result<Vec<LinkReferenceRow>> {
-    sqlx::query_as::<_, LinkReferenceRow>(&format!(
+    sqlx::query_as::<_, LinkReferenceRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {LINK_REFERENCE_COLUMNS} \
          FROM node_link_refs reference \
          JOIN nodes source ON source.id = reference.source_node_id \
@@ -142,7 +142,7 @@ async fn outgoing_rows(
          WHERE reference.space_id = $1 AND reference.source_node_id = $2 \
            AND source.deleted_at IS NULL \
          ORDER BY reference.id LIMIT $3"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .bind(limit)
@@ -157,7 +157,7 @@ async fn incoming_rows(
     node_id: Uuid,
     limit: i64,
 ) -> Result<Vec<LinkReferenceRow>> {
-    sqlx::query_as::<_, LinkReferenceRow>(&format!(
+    sqlx::query_as::<_, LinkReferenceRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {LINK_REFERENCE_COLUMNS} \
          FROM node_link_refs reference \
          JOIN nodes source ON source.id = reference.source_node_id \
@@ -165,7 +165,7 @@ async fn incoming_rows(
          WHERE reference.space_id = $1 AND reference.target_node_id = $2 \
            AND source.deleted_at IS NULL \
          ORDER BY reference.id LIMIT $3"
-    ))
+    )))
     .bind(space_id)
     .bind(node_id)
     .bind(limit)
