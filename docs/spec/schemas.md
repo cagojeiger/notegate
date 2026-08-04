@@ -243,4 +243,20 @@ type McpTextReadResult =
     }
 ```
 
+`read op=read_many`는 이 단건 결과를 바꾸지 않고 항목별 envelope로 감싼다. 입력 순서를 유지하며 한 항목이 실패해도 나머지 항목을 계속 읽는다.
+
+```ts
+type McpTextReadManyResult = {
+  items: Array<
+    | { index: number; target: string; ok: true; result: McpTextReadResult }
+    | {
+        index: number
+        target: string
+        ok: false
+        error: { code: number; message: string; data?: object }
+      }
+  >
+}
+```
+
 MCP는 client-side encrypted Text를 읽지 않는다. Client-side encrypted Text는 REST Text API에서만 저장/조회한다. 서버 관리 방식으로 at-rest 암호화된 plain Text는 일반 plain Text와 같은 shape로 반환한다.

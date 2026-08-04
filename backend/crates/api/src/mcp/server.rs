@@ -43,7 +43,7 @@ use crate::mcp::invocation;
 use crate::mcp::tools;
 use crate::state::AppState;
 
-const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller and running server version. Use `read` for spaces/ls/tree/stat/read/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
+const MCP_SERVER_INSTRUCTIONS: &str = "Every tool call except `me` requires a short `purpose` explaining why it is needed; use one top-level purpose for `run_sequence`. Use `me` to inspect the caller and running server version. Use `read` for spaces/ls/tree/stat/read/read_many/changes, `search` for find/grep, `write` for text write/append/patch/edit, `manage` for mkdir/mv/cp/rm, `file_transfer` for direct local file upload/download, and `run_sequence` only when multiple ordered commands should fail fast. Call `read op=read_many` directly with reads[] to read up to 20 known text targets in input order; each item reports its own success or error, so do not put read_many inside run_sequence. Every paginated read uses limit, cursor, and page.next_cursor. `read op=changes` reads one Space-root mutation stream; direction defaults to older, while direction=newer replays from a stored cursor in application order. Capture checkpoint_cursor before reading a Space snapshot and save each later checkpoint_cursor only after applying every returned event; if resync_required is true, rebuild the snapshot. For any recoverable input error, use data.code and data.next_action instead of parsing the message. Targets are `<space>:/absolute/path`; space names are exact and case-sensitive, so use `read op=spaces` when unsure. Search/list before guessing paths and read/stat before modifying existing text. File bytes never pass through MCP: consume presigned URLs locally without printing or persisting them, and follow each successful file_transfer response's `next_action`. MCP cannot create, delete, or rename spaces.";
 const MCP_TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1_000;
 
 /// A permissive `{"type":"object"}` output schema for the path-first file tools.
@@ -140,7 +140,7 @@ impl McpServer {
 
     #[tool(
         name = "read",
-        description = "Read NoteGate spaces, nodes, text, and mutation history. Read-only. Use op=spaces/ls/tree/stat/read/changes. For changes, target a Space root (`<space>:/`); omit direction/cursor for latest events, use direction=older for history pagination, or direction=newer with a stored cursor for checkpoint replay. Every paginated op returns page.next_cursor. Space names are exact and case-sensitive.",
+        description = "Read NoteGate spaces, nodes, text, and mutation history. Read-only. Use op=spaces/ls/tree/stat/read/read_many/changes. Call read_many directly with reads[] for up to 20 known text targets; input order is preserved and each item reports its own success or error, so do not put it inside run_sequence. For changes, target a Space root (`<space>:/`); omit direction/cursor for latest events, use direction=older for history pagination, or direction=newer with a stored cursor for checkpoint replay. Every paginated op returns page.next_cursor. Space names are exact and case-sensitive.",
         annotations(title = "Read NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -785,7 +785,7 @@ mod tests {
             ("me", "", ""),
             (
                 "read",
-                "purpose op target name depth limit cursor direction start_line max_lines max_bytes if_none_match_sha256",
+                "purpose op target name depth limit cursor direction start_line max_lines max_bytes if_none_match_sha256 reads",
                 "purpose op",
             ),
             (
@@ -857,13 +857,16 @@ mod tests {
             .pointer("/properties/edits")
             .expect("sequence edits schema exists");
         assert_write_edit_schema(sequence_edits);
+        assert!(sequence_command.pointer("/properties/reads").is_none());
 
         let read = tools.get("read").expect("read tool exists");
         let description = read
             .description
             .as_deref()
             .expect("read description exists");
-        assert!(description.contains("op=spaces/ls/tree/stat/read/changes"));
+        assert!(description.contains("op=spaces/ls/tree/stat/read/read_many/changes"));
+        assert!(description.contains("reads[]"));
+        assert!(description.contains("do not put it inside run_sequence"));
         assert!(description.contains("<space>:/"));
         assert!(description.contains("direction=newer"));
         let properties = read
@@ -872,9 +875,10 @@ mod tests {
             .and_then(Value::as_object)
             .expect("read properties exist");
         assert!(properties.contains_key("direction"));
+        assert_read_request_schema(&properties["reads"]);
         assert_eq!(
             properties["op"].get("description").and_then(Value::as_str),
-            Some("Operation: spaces/ls/tree/stat/read/changes.")
+            Some("Operation: spaces/ls/tree/stat/read/read_many/changes.")
         );
         assert!(
             properties["target"]
@@ -905,6 +909,66 @@ mod tests {
         assert_eq!(annotations.destructive_hint, Some(false));
         assert_eq!(annotations.idempotent_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(false));
+    }
+
+    #[tokio::test]
+    async fn read_many_preserves_order_and_isolates_item_errors()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+
+        tools::files::write(
+            &state,
+            &parts,
+            "rest-test:/note.md".to_owned(),
+            "alpha\nbeta\ngamma".to_owned(),
+            true,
+            None,
+        )
+        .await?;
+
+        let input = serde_json::from_value(json!({
+            "purpose": "read known notes together",
+            "op": "read_many",
+            "reads": [
+                {"target": "rest-test:/note.md"},
+                {"target": "rest-test:/missing.md"},
+                {"target": "rest-test:/note.md", "start_line": 1, "max_lines": 1}
+            ]
+        }))?;
+        let result = McpServer::new(state.clone())
+            .read_tool(Extension(parts), Parameters(input))
+            .await?
+            .0;
+        let items = result["items"].as_array().expect("items array");
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0]["index"], 0);
+        assert_eq!(items[0]["target"], "rest-test:/note.md");
+        assert_eq!(items[0]["ok"], true);
+        assert_eq!(items[0]["result"]["content"], "alpha\nbeta\ngamma");
+        assert_eq!(items[1]["index"], 1);
+        assert_eq!(items[1]["target"], "rest-test:/missing.md");
+        assert_eq!(items[1]["ok"], false);
+        assert_eq!(items[1]["error"]["code"], -32602);
+        assert_eq!(items[1]["error"]["data"]["code"], "not_found");
+        assert_eq!(items[2]["index"], 2);
+        assert_eq!(items[2]["ok"], true);
+        assert_eq!(items[2]["result"]["content"], "alpha\n");
+        assert_eq!(items[2]["result"]["truncated"], true);
+        assert_eq!(items[2]["result"]["next_start_line"], 2);
+
+        db.cleanup().await;
+        Ok(())
     }
 
     #[test]
@@ -1227,6 +1291,30 @@ mod tests {
             .expect("line edit schema exists");
         assert_eq!(line.get("additionalProperties"), Some(&Value::Bool(false)));
         assert_schema_requires(line, &["op"]);
+    }
+
+    fn assert_read_request_schema(schema: &Value) {
+        let items = schema.get("items").expect("reads array items exist");
+        assert_eq!(items.get("type").and_then(Value::as_str), Some("object"));
+        assert_eq!(items.get("additionalProperties"), Some(&Value::Bool(false)));
+        assert_schema_requires(items, &["target"]);
+        let properties = items
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("read request properties exist");
+        assert_eq!(
+            properties
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "target",
+                "start_line",
+                "max_lines",
+                "max_bytes",
+                "if_none_match_sha256",
+            ])
+        );
     }
 
     fn assert_schema_requires(schema: &Value, expected: &[&str]) {

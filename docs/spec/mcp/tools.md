@@ -5,7 +5,7 @@
 - `me`와 `run_sequence`를 제외한 모든 tool은 `op`로 세부 동작을 선택한다.
 - `me`를 제외한 모든 tool은 호출 이유를 설명하는 `purpose`를 필수로 받는다. 앞뒤 공백 없는 1..200자이며 secret, 본문, 검색 결과를 넣지 않는다.
 - `run_sequence`는 최상위 `purpose` 하나를 모든 command와 후속 `next_action`에 공유한다. `commands[]`에는 `purpose`를 반복하지 않는다.
-- 단일 대상은 `target: "space:/absolute/path"`를 사용한다.
+- 단일 대상은 `target: "space:/absolute/path"`를 사용한다. 여러 Text를 한 호출로 읽을 때만 `read op=read_many`의 `reads[]`를 사용한다.
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
 - 모든 paginated read/search는 `limit`, opaque `cursor`, 응답의 `page.next_cursor`를 사용한다. `changes`만 `direction=older|newer`로 진행 방향을 선택한다.
@@ -53,9 +53,17 @@ Caller identity, capability, 실행 중인 `server_version`을 반환한다. Spa
 Read-only tool이다.
 
 ```ts
+type ReadRequest = {
+  target: string
+  start_line?: number
+  max_lines?: number
+  max_bytes?: number
+  if_none_match_sha256?: string
+}
+
 type ReadInput = {
   purpose: string
-  op: "spaces" | "ls" | "tree" | "stat" | "read" | "changes"
+  op: "spaces" | "ls" | "tree" | "stat" | "read" | "read_many" | "changes"
   target?: string
   name?: string
   depth?: number
@@ -66,6 +74,7 @@ type ReadInput = {
   max_lines?: number
   max_bytes?: number
   if_none_match_sha256?: string
+  reads?: ReadRequest[]
 }
 ```
 
@@ -74,7 +83,18 @@ type ReadInput = {
 - `op=tree`: `target` folder의 subtree를 DFS pre-order로 반환한다. `depth` 생략 시 5를 사용한다.
 - `op=stat`: Folder/Text/File node summary를 반환한다.
 - `op=read`: plain Text content를 읽는다. line/byte range를 지원한다.
+- `op=read_many`: 이미 알고 있는 plain Text target을 최대 20개까지 입력 순서대로 읽는다. 각 `reads[]` 항목은 `op=read`와 같은 line/byte/hash 옵션을 사용하며, 한 항목의 실패가 다음 항목을 중단하지 않는다.
 - `op=changes`: Space 전체의 mutation change-event stream을 읽는다. 모든 방향에서 같은 `events[]`와 안정적인 `event_id` 체계를 반환한다.
+
+`read_many` 응답은 입력 순서를 유지한다. 성공 항목의 `result`는 기존 `op=read` 응답을 그대로 사용하고, 실패 항목의 `error`는 공통 `{code, message, data}` shape를 사용한다. 한 항목이라도 실패하면 호출 이력과 RED metric에서는 해당 tool call을 실패로 집계한다.
+
+```ts
+type ReadManyItem =
+  | { index: number; target: string; ok: true; result: McpTextReadResult }
+  | { index: number; target: string; ok: false; error: { code: number; message: string; data?: object } }
+
+type ReadManyResult = { items: ReadManyItem[] }
+```
 
 ### `changes` 방향 선택
 
@@ -340,6 +360,7 @@ Semantics:
 - command 하나가 실패하면 즉시 중단한다.
 - 이미 성공한 command는 rollback하지 않는다.
 - `run_sequence` 안에서 `run_sequence`를 다시 호출할 수 없다.
+- 항목별 부분 실패를 반환하는 `read_many`는 `run_sequence`에 넣지 않고 `read` tool로 직접 호출한다.
 - 결과는 성공한 command의 결과와 실패 위치를 반환한다.
 
 ```json

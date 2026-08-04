@@ -13,6 +13,7 @@ use crate::mcp::contract::{McpAction, error_json};
 use crate::state::AppState;
 
 const RUN_SEQUENCE_MAX_COMMANDS: usize = 20;
+const READ_MANY_MAX_REQUESTS: usize = 20;
 
 /// Public schema for `write.edits`; runtime parsing remains selected by the top-level write op.
 #[allow(dead_code)]
@@ -25,10 +26,30 @@ enum WriteEditEntrySchema {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(inline)]
+pub struct ReadRequest {
+    /// Text target in `<space>:/absolute/path` form.
+    pub target: String,
+    /// 1-based first line.
+    #[serde(default)]
+    pub start_line: Option<i64>,
+    /// Maximum lines.
+    #[serde(default)]
+    pub max_lines: Option<i64>,
+    /// Maximum bytes.
+    #[serde(default)]
+    pub max_bytes: Option<usize>,
+    /// Conditional read guard.
+    #[serde(default)]
+    pub if_none_match_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReadInput {
     /// Short human-readable reason for this MCP call. Maximum 200 characters.
     pub purpose: String,
-    /// Operation: spaces/ls/tree/stat/read/changes.
+    /// Operation: spaces/ls/tree/stat/read/read_many/changes.
     pub op: String,
     /// Single target in `<space>:/absolute/path` form. `op=changes` requires the Space root `<space>:/`.
     #[serde(default)]
@@ -60,6 +81,9 @@ pub struct ReadInput {
     /// Conditional read guard.
     #[serde(default)]
     pub if_none_match_sha256: Option<String>,
+    /// Independent text reads for `op=read_many`. Maximum 20.
+    #[serde(default)]
+    pub reads: Option<Vec<ReadRequest>>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -316,6 +340,7 @@ impl SequenceCommand {
             max_lines: self.max_lines,
             max_bytes: self.max_bytes,
             if_none_match_sha256: self.if_none_match_sha256,
+            reads: None,
         }
     }
 
@@ -366,7 +391,7 @@ pub async fn read(
     parts: &Parts,
     Parameters(input): Parameters<ReadInput>,
 ) -> Result<Json<Value>, ErrorData> {
-    validate_read_change_fields(&input)?;
+    validate_read_fields(&input)?;
     match input.op.as_str() {
         "spaces" => spaces::list(state, parts, input.name, input.limit, input.cursor).await,
         "ls" => {
@@ -404,6 +429,9 @@ pub async fn read(
             )
             .await
         }
+        "read_many" => {
+            Ok(read_many(state, parts, required(input.reads, "reads", "read_many")?).await)
+        }
         "changes" => {
             events::call(
                 state,
@@ -418,9 +446,117 @@ pub async fn read(
         }
         _ => Err(invalid_op(
             "read",
-            &["spaces", "ls", "tree", "stat", "read", "changes"],
+            &[
+                "spaces",
+                "ls",
+                "tree",
+                "stat",
+                "read",
+                "read_many",
+                "changes",
+            ],
         )),
     }
+}
+
+async fn read_many(state: &AppState, parts: &Parts, reads: Vec<ReadRequest>) -> Json<Value> {
+    let mut items = Vec::with_capacity(reads.len());
+    for (index, request) in reads.into_iter().enumerate() {
+        let target = request.target;
+        let result = files::read(
+            state,
+            parts,
+            target.clone(),
+            request.start_line,
+            request.max_lines,
+            request.max_bytes,
+            request.if_none_match_sha256,
+        )
+        .await;
+        match result {
+            Ok(Json(result)) => items.push(json!({
+                "index": index,
+                "target": target,
+                "ok": true,
+                "result": result,
+            })),
+            Err(error) => items.push(json!({
+                "index": index,
+                "target": target,
+                "ok": false,
+                "error": error_json(error),
+            })),
+        }
+    }
+    Json(json!({ "items": items }))
+}
+
+fn validate_read_fields(input: &ReadInput) -> Result<(), ErrorData> {
+    validate_read_change_fields(input)?;
+
+    if input.op != "read_many" {
+        if input.reads.is_some() {
+            return Err(actionable_input_error(
+                "read_many_fields_not_allowed",
+                "reads is only valid for read op=read_many",
+                "Remove reads or change op to read_many.",
+                McpAction::RemoveFields {
+                    fields: vec!["reads".to_owned()],
+                },
+            ));
+        }
+        return Ok(());
+    }
+
+    let reads = required_input(input.reads.as_ref(), "reads", "op=read_many")?;
+    if reads.is_empty() {
+        return Err(invalid_input_error(
+            "op=read_many requires at least one read request",
+        ));
+    }
+    if reads.len() > READ_MANY_MAX_REQUESTS {
+        return Err(invalid_input_error(format!(
+            "op=read_many accepts at most {READ_MANY_MAX_REQUESTS} read requests"
+        )));
+    }
+
+    let mut fields = Vec::new();
+    if input.target.is_some() {
+        fields.push("target".to_owned());
+    }
+    if input.name.is_some() {
+        fields.push("name".to_owned());
+    }
+    if input.depth.is_some() {
+        fields.push("depth".to_owned());
+    }
+    if input.limit.is_some() {
+        fields.push("limit".to_owned());
+    }
+    if input.cursor.is_some() {
+        fields.push("cursor".to_owned());
+    }
+    if input.start_line.is_some() {
+        fields.push("start_line".to_owned());
+    }
+    if input.max_lines.is_some() {
+        fields.push("max_lines".to_owned());
+    }
+    if input.max_bytes.is_some() {
+        fields.push("max_bytes".to_owned());
+    }
+    if input.if_none_match_sha256.is_some() {
+        fields.push("if_none_match_sha256".to_owned());
+    }
+    if !fields.is_empty() {
+        return Err(actionable_input_error(
+            "read_many_fields_not_allowed",
+            "op=read_many accepts text read options only inside reads items",
+            "Move each target and its read options into a reads item.",
+            McpAction::RemoveFields { fields },
+        ));
+    }
+    Ok(())
 }
 
 fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
@@ -635,16 +771,7 @@ async fn dispatch_command(
     command: SequenceCommand,
     purpose: &str,
 ) -> Result<Json<Value>, ErrorData> {
-    if command.tool != "read" && command.direction.is_some() {
-        return Err(actionable_input_error(
-            "changes_fields_not_allowed",
-            "direction is only valid for read op=changes",
-            "Remove direction or use it only with a read changes command.",
-            McpAction::RemoveFields {
-                fields: vec!["direction".to_owned()],
-            },
-        ));
-    }
+    validate_sequence_command(&command)?;
     match command.tool.as_str() {
         "read" => {
             read(
@@ -682,6 +809,34 @@ async fn dispatch_command(
             "invalid tool for run_sequence; allowed values are: read, search, write, manage",
         )),
     }
+}
+
+fn validate_sequence_command(command: &SequenceCommand) -> Result<(), ErrorData> {
+    if command.tool == "read" && command.op == "read_many" {
+        return Err(actionable_input_error(
+            "read_many_not_allowed_in_sequence",
+            "read_many is not supported inside run_sequence; call the read tool directly",
+            "Call read op=read_many directly, or choose another read operation for this sequence command.",
+            McpAction::ChooseValue {
+                field: "op".to_owned(),
+                choices: ["spaces", "ls", "tree", "stat", "read", "changes"]
+                    .into_iter()
+                    .map(|value| json!(value))
+                    .collect(),
+            },
+        ));
+    }
+    if command.tool != "read" && command.direction.is_some() {
+        return Err(actionable_input_error(
+            "changes_fields_not_allowed",
+            "direction is only valid for read op=changes",
+            "Remove direction or use it only with a read changes command.",
+            McpAction::RemoveFields {
+                fields: vec!["direction".to_owned()],
+            },
+        ));
+    }
+    Ok(())
 }
 
 fn required<T>(value: Option<T>, field: &'static str, op: &'static str) -> Result<T, ErrorData> {
@@ -854,6 +1009,99 @@ mod tests {
     }
 
     #[test]
+    fn read_many_accepts_ordered_read_requests() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "purpose": "read known notes together",
+            "op": "read_many",
+            "reads": [
+                {"target": "daily:/one.md"},
+                {
+                    "target": "daily:/two.md",
+                    "start_line": 2,
+                    "max_lines": 3,
+                    "max_bytes": 512,
+                    "if_none_match_sha256": "known-sha"
+                }
+            ]
+        }))
+        .expect("valid read_many input parses");
+
+        let reads = input.reads.expect("reads are present");
+        assert_eq!(reads.len(), 2);
+        assert_eq!(reads[0].target, "daily:/one.md");
+        assert_eq!(reads[1].target, "daily:/two.md");
+        assert_eq!(reads[1].start_line, Some(2));
+        assert_eq!(reads[1].max_lines, Some(3));
+        assert_eq!(reads[1].max_bytes, Some(512));
+        assert_eq!(reads[1].if_none_match_sha256.as_deref(), Some("known-sha"));
+    }
+
+    #[test]
+    fn read_many_validates_batch_shape_before_reading() {
+        for (reads, expected_message) in [
+            (json!([]), "requires at least one"),
+            (
+                Value::Array(
+                    (0..=READ_MANY_MAX_REQUESTS)
+                        .map(|index| json!({"target": format!("daily:/{index}.md")}))
+                        .collect(),
+                ),
+                "accepts at most 20",
+            ),
+        ] {
+            let input = serde_json::from_value::<ReadInput>(json!({
+                "purpose": "validate read batch",
+                "op": "read_many",
+                "reads": reads
+            }))
+            .expect("known fields parse before batch validation");
+            let error = validate_read_fields(&input).expect_err("invalid batch is rejected");
+            assert!(error.message.contains(expected_message));
+        }
+    }
+
+    #[test]
+    fn read_many_options_belong_to_each_read_request() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "purpose": "validate read batch fields",
+            "op": "read_many",
+            "target": "daily:/wrong.md",
+            "name": "daily",
+            "depth": 2,
+            "limit": 10,
+            "cursor": "wrong-cursor",
+            "max_lines": 5,
+            "reads": [{"target": "daily:/right.md"}]
+        }))
+        .expect("known fields parse before operation validation");
+        let error = validate_read_fields(&input).expect_err("top-level read fields are rejected");
+        let data = error.data.expect("structured recovery data");
+
+        assert_eq!(data["code"], "read_many_fields_not_allowed");
+        assert_eq!(data["next_action"]["kind"], "remove_fields");
+        assert_eq!(
+            data["next_action"]["fields"],
+            json!(["target", "name", "depth", "limit", "cursor", "max_lines"])
+        );
+    }
+
+    #[test]
+    fn reads_field_is_rejected_by_other_read_operations() {
+        let input = serde_json::from_value::<ReadInput>(json!({
+            "purpose": "validate read fields",
+            "op": "read",
+            "target": "daily:/one.md",
+            "reads": [{"target": "daily:/two.md"}]
+        }))
+        .expect("known fields parse before operation validation");
+        let error = validate_read_fields(&input).expect_err("reads is read_many-only");
+        let data = error.data.expect("structured recovery data");
+
+        assert_eq!(data["code"], "read_many_fields_not_allowed");
+        assert_eq!(data["next_action"]["fields"], json!(["reads"]));
+    }
+
+    #[test]
     fn run_sequence_accepts_a_changes_cursor() {
         let input = serde_json::from_value::<RunSequenceInput>(json!({
             "purpose": "test changes in a sequence",
@@ -870,5 +1118,21 @@ mod tests {
         let command = input.commands.first().expect("one command");
         assert_eq!(command.direction.as_deref(), Some("newer"));
         assert_eq!(command.cursor.as_deref(), Some("opaque-change-cursor"));
+    }
+
+    #[test]
+    fn run_sequence_guides_read_many_to_the_direct_read_tool() {
+        let input = serde_json::from_value::<RunSequenceInput>(json!({
+            "purpose": "validate read_many placement",
+            "commands": [{"tool": "read", "op": "read_many"}]
+        }))
+        .expect("known sequence fields parse");
+        let error = validate_sequence_command(&input.commands[0])
+            .expect_err("read_many is direct-call only");
+        let data = error.data.expect("structured recovery data");
+
+        assert_eq!(data["code"], "read_many_not_allowed_in_sequence");
+        assert_eq!(data["next_action"]["kind"], "choose_value");
+        assert_eq!(data["next_action"]["field"], "op");
     }
 }
