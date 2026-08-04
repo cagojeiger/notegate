@@ -2,14 +2,19 @@
 
 use axum::http::request::Parts;
 use futures_util::{StreamExt, stream};
-use notegate_service::files::parse_target;
+use notegate_core::validation::validate_space_name;
+use notegate_service::ServiceError;
+use notegate_service::files::{Target, parse_target, validation::validate_basename};
+use notegate_service::search::{validate_find_input, validate_grep_input};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::resolve::{actionable_input_error, invalid_input_error, required_input};
+use super::resolve::{
+    actionable_input_error, invalid_input_error, required_input, service_error, split_parent_name,
+};
 use super::{events, files, search, spaces};
 use crate::mcp::contract::{McpAction, McpErrorData, error_json};
 use crate::state::AppState;
@@ -587,9 +592,33 @@ fn validate_read_change_fields(input: &ReadInput) -> Result<(), ErrorData> {
 fn validate_read_operation(input: &ReadInput) -> Result<(), ErrorData> {
     validate_read_change_fields(input)?;
     match input.op.as_str() {
-        "spaces" => Ok(()),
-        "ls" | "tree" | "stat" | "read" => {
-            required_ref(input.target.as_ref(), "target", input.op.as_str())?;
+        "spaces" => {
+            if let Some(name) = input.name.as_deref() {
+                validate_space_name(name)
+                    .map_err(|error| invalid_input_error(error.to_string()))?;
+            }
+            Ok(())
+        }
+        "ls" | "stat" => {
+            parse_input_target(required_ref(
+                input.target.as_ref(),
+                "target",
+                input.op.as_str(),
+            )?)?;
+            Ok(())
+        }
+        "tree" => {
+            parse_input_target(required_ref(input.target.as_ref(), "target", "tree")?)?;
+            if input.depth.is_some_and(|depth| depth < 1) {
+                return Err(invalid_input_error("depth must be at least 1"));
+            }
+            Ok(())
+        }
+        "read" => {
+            parse_input_target(required_ref(input.target.as_ref(), "target", "read")?)?;
+            if input.max_bytes == Some(0) {
+                return Err(invalid_input_error("max_bytes must be at least 1"));
+            }
             Ok(())
         }
         "changes" => {
@@ -611,15 +640,31 @@ fn validate_read_operation(input: &ReadInput) -> Result<(), ErrorData> {
 fn validate_search_operation(input: &SearchInput) -> Result<(), ErrorData> {
     match input.op.as_str() {
         "find" => {
+            parse_input_target(&input.target)?;
             if let Some(kind) = input.kind.as_deref() {
                 search::parse_kind(kind)?;
             }
-            search::parse_find_match_mode(input.match_mode.as_deref())?;
+            let match_mode = search::parse_find_match_mode(input.match_mode.as_deref())?;
+            validate_find_input(
+                &input.q,
+                match_mode,
+                input.include.as_deref().unwrap_or_default(),
+                input.exclude.as_deref().unwrap_or_default(),
+            )
+            .map_err(service_error)?;
             Ok(())
         }
         "grep" => {
-            search::parse_grep_match_mode(input.match_mode.as_deref())?;
+            parse_input_target(&input.target)?;
+            let match_mode = search::parse_grep_match_mode(input.match_mode.as_deref())?;
             search::parse_grep_line_mode(input.lines.as_deref())?;
+            validate_grep_input(
+                &input.q,
+                match_mode,
+                input.include.as_deref().unwrap_or_default(),
+                input.exclude.as_deref().unwrap_or_default(),
+            )
+            .map_err(service_error)?;
             Ok(())
         }
         _ => Err(invalid_op("search", &["find", "grep"])),
@@ -630,14 +675,19 @@ fn validate_write_operation(input: &WriteInput) -> Result<(), ErrorData> {
     match input.op.as_str() {
         "write" | "append" => {
             required_ref(input.content.as_ref(), "content", input.op.as_str())?;
+            validate_text_target(&input.target)?;
             Ok(())
         }
         "patch" => {
-            parse_edits::<files::PatchEdit>(input.edits.clone(), "patch")?;
+            let edits = parse_edits::<files::PatchEdit>(input.edits.clone(), "patch")?;
+            files::prepare_patch_edits(&edits)?;
+            validate_text_target(&input.target)?;
             Ok(())
         }
         "edit" => {
-            parse_edits::<files::LineEditInput>(input.edits.clone(), "edit")?;
+            let edits = parse_edits::<files::LineEditInput>(input.edits.clone(), "edit")?;
+            files::prepare_line_edits(&edits)?;
+            validate_text_target(&input.target)?;
             Ok(())
         }
         _ => Err(invalid_op("write", &["write", "append", "patch", "edit"])),
@@ -647,16 +697,49 @@ fn validate_write_operation(input: &WriteInput) -> Result<(), ErrorData> {
 fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
     match input.op.as_str() {
         "mkdir" | "rm" => {
-            required_ref(input.target.as_ref(), "target", input.op.as_str())?;
+            parse_input_target(required_ref(
+                input.target.as_ref(),
+                "target",
+                input.op.as_str(),
+            )?)?;
             Ok(())
         }
         "mv" | "cp" => {
-            required_ref(input.source.as_ref(), "source", input.op.as_str())?;
-            required_ref(input.destination.as_ref(), "destination", input.op.as_str())?;
+            let source = parse_input_target(required_ref(
+                input.source.as_ref(),
+                "source",
+                input.op.as_str(),
+            )?)?;
+            let destination = parse_input_target(required_ref(
+                input.destination.as_ref(),
+                "destination",
+                input.op.as_str(),
+            )?)?;
+            if source.space != destination.space {
+                return Err(invalid_input_error(
+                    "source and destination must be in the same space",
+                ));
+            }
             Ok(())
         }
         _ => Err(invalid_op("manage", &["mkdir", "mv", "cp", "rm"])),
     }
+}
+
+fn parse_input_target(target: &str) -> Result<Target, ErrorData> {
+    let target = parse_target(target).map_err(|error| invalid_input_error(error.to_string()))?;
+    for segment in target.path.split('/').filter(|segment| !segment.is_empty()) {
+        validate_basename(segment)
+            .map_err(ServiceError::from)
+            .map_err(service_error)?;
+    }
+    Ok(target)
+}
+
+fn validate_text_target(target: &str) -> Result<(), ErrorData> {
+    let target = parse_input_target(target)?;
+    split_parent_name(&target.path)?;
+    Ok(())
 }
 
 pub async fn search(
@@ -1092,10 +1175,18 @@ fn plan_sequence_read(
                 SequenceAccessScope::Subtree,
             )?],
         )),
-        "stat" | "read" => Ok(sequence_command_plan(
+        "stat" => Ok(sequence_command_plan(
             SequenceExecutionClass::PureRead,
             vec![sequence_access(
-                required_ref(input.target.as_ref(), "target", input.op.as_str())?,
+                required_ref(input.target.as_ref(), "target", "stat")?,
+                SequenceAccessMode::Read,
+                SequenceAccessScope::Subtree,
+            )?],
+        )),
+        "read" => Ok(sequence_command_plan(
+            SequenceExecutionClass::PureRead,
+            vec![sequence_access(
+                required_ref(input.target.as_ref(), "target", "read")?,
                 SequenceAccessMode::Read,
                 SequenceAccessScope::Exact,
             )?],
@@ -1236,7 +1327,7 @@ fn sequence_access(
     mode: SequenceAccessMode,
     scope: SequenceAccessScope,
 ) -> Result<SequenceAccess, ErrorData> {
-    let target = parse_target(target).map_err(|error| invalid_input_error(error.to_string()))?;
+    let target = parse_input_target(target)?;
     Ok(SequenceAccess {
         mode,
         scope,
@@ -1792,6 +1883,81 @@ mod tests {
     }
 
     #[test]
+    fn sequence_preflight_rejects_input_only_errors_before_a_prior_write_executes() {
+        let cases = vec![
+            (
+                json!({"tool": "search", "op": "find", "target": "daily:/", "q": ""}),
+                "search query cannot be empty",
+            ),
+            (
+                json!({"tool": "search", "op": "grep", "target": "daily:/", "q": "(", "match": "regex"}),
+                "invalid regex pattern",
+            ),
+            (
+                json!({"tool": "write", "op": "patch", "target": "daily:/note.md", "edits": [{"old_text": "before", "new_text": "after", "mode": "latest"}]}),
+                "mode must be 'unique', 'first', or 'all'",
+            ),
+            (
+                json!({"tool": "write", "op": "patch", "target": "daily:/note.md", "edits": []}),
+                "edits must not be empty",
+            ),
+            (
+                json!({"tool": "write", "op": "edit", "target": "daily:/note.md", "edits": [{"op": "delete_lines"}]}),
+                "start_line is required",
+            ),
+            (
+                json!({"tool": "write", "op": "edit", "target": "daily:/note.md", "edits": [{"op": "delete_lines", "start_line": 3, "end_line": 2}]}),
+                "start_line must be less than or equal to end_line",
+            ),
+            (
+                json!({"tool": "manage", "op": "mv", "source": "daily:/from.md", "destination": "other:/to.md"}),
+                "source and destination must be in the same space",
+            ),
+            (
+                json!({"tool": "manage", "op": "cp", "source": "daily:/from.md", "destination": "other:/to.md"}),
+                "source and destination must be in the same space",
+            ),
+            (
+                json!({"tool": "read", "op": "tree", "target": "daily:/", "depth": 0}),
+                "depth must be at least 1",
+            ),
+            (
+                json!({"tool": "read", "op": "read", "target": "daily:/note.md", "max_bytes": 0}),
+                "max_bytes must be at least 1",
+            ),
+        ];
+
+        for (invalid_command, expected_message) in cases {
+            let error = prepare_sequence_commands(
+                vec![
+                    json!({
+                        "tool": "write",
+                        "op": "write",
+                        "target": "daily:/created.md",
+                        "content": "created",
+                        "create": true
+                    }),
+                    invalid_command,
+                ],
+                "reject request-local errors before writing",
+            )
+            .expect_err("request-local errors must fail sequence preflight");
+            let data = error.data.expect("structured preflight data");
+
+            assert_eq!(data["executed"], false);
+            assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
+            assert_eq!(data["errors"][0]["index"], 1);
+            assert!(
+                data["errors"][0]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(expected_message)),
+                "expected error message containing {expected_message:?}, got {}",
+                data["errors"][0]["message"]
+            );
+        }
+    }
+
+    #[test]
     fn sequence_preflight_collects_recoverable_shape_and_value_errors_in_one_command() {
         let error = prepare_sequence_commands(
             vec![json!({
@@ -2057,6 +2223,28 @@ mod tests {
         assert!(sequence_commands_conflict(&commands[0], &commands[2]));
         assert!(sequence_commands_conflict(&commands[0], &commands[3]));
         assert!(!sequence_commands_conflict(&commands[0], &commands[4]));
+    }
+
+    #[test]
+    fn parent_stat_depends_on_child_creation() {
+        for mutation in [
+            json!({"tool": "manage", "op": "mkdir", "target": "daily:/folder/child"}),
+            json!({"tool": "write", "op": "write", "target": "daily:/folder/child.md", "content": "x", "create": true}),
+        ] {
+            let commands = prepare_sequence_commands(
+                vec![
+                    mutation,
+                    json!({"tool": "read", "op": "stat", "target": "daily:/folder"}),
+                    json!({"tool": "read", "op": "read", "target": "daily:/folder/sibling.md"}),
+                ],
+                "preserve parent metadata after child creation",
+            )
+            .expect("commands pass preflight");
+            let graph = build_sequence_dependency_graph(&commands);
+
+            assert!(graph.depends_on(1, 0));
+            assert!(!graph.depends_on(2, 0));
+        }
     }
 
     #[test]

@@ -5,8 +5,8 @@ use notegate_model::TextStorageFormat;
 use notegate_service::ServiceError;
 use notegate_service::files::{
     AppendText, ChildrenRequest, CopyNode, CreateFolder, DeleteNode, Edit as ServiceEdit, EditText,
-    LineEdit, MoveNode, NodeView, PatchMode, PatchText, ReadText, ReadTextBody, WriteTarget,
-    WriteText, WriteTextBody,
+    LineEdit, MoveNode, NodeView, PatchError, PatchMode, PatchText, ReadText, ReadTextBody,
+    WriteTarget, WriteText, WriteTextBody,
 };
 use notegate_service::search::TreeRequest;
 use rmcp::{ErrorData, Json};
@@ -449,6 +449,7 @@ pub async fn patch(
     edits: Vec<PatchEdit>,
     expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
+    let edits = prepare_patch_edits(&edits)?;
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
@@ -459,18 +460,6 @@ pub async fn patch(
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
-
-    let edits = edits
-        .into_iter()
-        .map(|edit| {
-            Ok(ServiceEdit {
-                old_text: edit.old_text,
-                new_text: edit.new_text,
-                mode: parse_patch_mode(edit.mode.as_deref())?,
-                expected_count: edit.expected_count,
-            })
-        })
-        .collect::<Result<Vec<_>, ErrorData>>()?;
 
     let result = state
         .files
@@ -507,6 +496,7 @@ pub async fn edit(
     edits: Vec<LineEditInput>,
     expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
+    let edits = prepare_line_edits(&edits)?;
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
@@ -517,11 +507,6 @@ pub async fn edit(
         .resolve_path(account_id, space_id, &path)
         .await
         .map_err(service_error)?;
-
-    let edits = edits
-        .into_iter()
-        .map(parse_line_edit)
-        .collect::<Result<Vec<_>, ErrorData>>()?;
 
     let result = state
         .files
@@ -703,6 +688,65 @@ pub async fn rm(
 fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ErrorData> {
     PatchMode::parse(raw.unwrap_or("unique"))
         .ok_or_else(|| invalid_input_error("mode must be 'unique', 'first', or 'all'"))
+}
+
+pub(super) fn prepare_patch_edits(edits: &[PatchEdit]) -> Result<Vec<ServiceEdit>, ErrorData> {
+    if edits.is_empty() {
+        return Err(invalid_input_error("edits must not be empty"));
+    }
+    edits
+        .iter()
+        .map(|edit| {
+            if edit.old_text.is_empty() {
+                return Err(service_error(ServiceError::from(PatchError::EmptyOldText)));
+            }
+            if edit.old_text == edit.new_text {
+                return Err(service_error(ServiceError::from(PatchError::NoOpEdit)));
+            }
+            Ok(ServiceEdit {
+                old_text: edit.old_text.clone(),
+                new_text: edit.new_text.clone(),
+                mode: parse_patch_mode(edit.mode.as_deref())?,
+                expected_count: edit.expected_count,
+            })
+        })
+        .collect()
+}
+
+pub(super) fn prepare_line_edits(edits: &[LineEditInput]) -> Result<Vec<LineEdit>, ErrorData> {
+    if edits.is_empty() {
+        return Err(invalid_input_error("edits must not be empty"));
+    }
+    edits
+        .iter()
+        .cloned()
+        .map(|input| {
+            let edit = parse_line_edit(input)?;
+            let (start, end) = match &edit {
+                LineEdit::InsertBefore { line, .. } | LineEdit::InsertAfter { line, .. } => {
+                    (*line, *line)
+                }
+                LineEdit::ReplaceLines {
+                    start_line,
+                    end_line,
+                    ..
+                }
+                | LineEdit::DeleteLines {
+                    start_line,
+                    end_line,
+                } => (*start_line, *end_line),
+            };
+            if start < 1 || end < 1 {
+                return Err(invalid_input_error("line numbers must be at least 1"));
+            }
+            if start > end {
+                return Err(invalid_input_error(
+                    "start_line must be less than or equal to end_line",
+                ));
+            }
+            Ok(edit)
+        })
+        .collect()
 }
 
 fn parse_line_edit(input: LineEditInput) -> Result<LineEdit, ErrorData> {

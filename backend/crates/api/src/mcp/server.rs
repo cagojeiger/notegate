@@ -1050,6 +1050,16 @@ mod tests {
                     "create": true
                 },
                 {
+                    "tool": "write",
+                    "op": "patch",
+                    "target": "rest-test:/does-not-matter.md",
+                    "edits": [{
+                        "old_text": "before",
+                        "new_text": "after",
+                        "mode": "latest"
+                    }]
+                },
+                {
                     "tool": "read",
                     "op": "changes",
                     "target": "rest-test:/",
@@ -1069,9 +1079,59 @@ mod tests {
                 .and_then(|data| data["executed"].as_bool()),
             Some(false)
         );
+        let errors = error
+            .data
+            .as_ref()
+            .and_then(|data| data["errors"].as_array())
+            .expect("preflight errors");
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0]["index"], 1);
+        assert_eq!(errors[1]["index"], 2);
         let stat =
             tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
         assert!(stat.is_err(), "the earlier write must not have run");
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sequence_parent_stat_observes_a_created_child()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        tools::files::mkdir(&state, &parts, "rest-test:/parent".to_owned(), false).await?;
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "create a child before reading parent metadata",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/parent/child.md",
+                    "content": "child",
+                    "create": true
+                },
+                {
+                    "tool": "read",
+                    "op": "stat",
+                    "target": "rest-test:/parent"
+                }
+            ]
+        }))?;
+
+        let Json(result) = tools::unified::run_sequence(&state, &parts, Parameters(input)).await?;
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["completed"], 2);
+        assert_eq!(result["results"][1]["result"]["node"]["has_children"], true);
 
         db.cleanup().await;
         Ok(())
