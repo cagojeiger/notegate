@@ -1096,6 +1096,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sequence_preflight_rejects_invalid_static_write_content_without_partial_writes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Some(db) = notegate_db::test_support::TestDb::setup().await? else {
+            return Ok(());
+        };
+        let state = crate::rest::test_support::state(&db);
+        let (caller, space_id, _root_id) =
+            crate::rest::test_support::caller_and_space(&state).await?;
+        SpaceRepo::new(state.db.clone())
+            .update_space(space_id, caller.account_id(), None, None, Some(true))
+            .await?;
+        let mut parts = axum::http::Request::new(()).into_parts().0;
+        parts.extensions.insert(caller);
+        let input = serde_json::from_value(serde_json::json!({
+            "purpose": "reject invalid structured text before writing",
+            "commands": [
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/should-not-exist.md",
+                    "content": "must not be committed",
+                    "create": true
+                },
+                {
+                    "tool": "write",
+                    "op": "write",
+                    "target": "rest-test:/config.json",
+                    "content": "{\"ok\":}",
+                    "create": true
+                }
+            ]
+        }))?;
+
+        let error = match tools::unified::run_sequence(&state, &parts, Parameters(input)).await {
+            Ok(_) => panic!("invalid JSON must fail sequence preflight"),
+            Err(error) => error,
+        };
+        let data = error.data.as_ref().expect("structured preflight data");
+        assert_eq!(data["code"], "sequence_preflight_failed");
+        assert_eq!(data["executed"], false);
+        assert_eq!(data["errors"].as_array().map(Vec::len), Some(1));
+        assert_eq!(data["errors"][0]["index"], 1);
+        assert!(
+            data["errors"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("invalid json syntax in config.json"))
+        );
+        let stat =
+            tools::files::stat(&state, &parts, "rest-test:/should-not-exist.md".to_owned()).await;
+        assert!(stat.is_err(), "the earlier write must not have run");
+
+        db.cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn sequence_parent_stat_observes_a_created_child()
     -> Result<(), Box<dyn std::error::Error>> {
         let Some(db) = notegate_db::test_support::TestDb::setup().await? else {

@@ -30,6 +30,7 @@ type McpAction =
   | { kind: "remove_fields"; fields: string[] }
   | { kind: "replace_field"; field: string; value: unknown }
   | { kind: "choose_value"; field: string; choices: unknown[] }
+  | { kind: "apply_error_actions"; errors_field: string }
   | { kind: "call_tool"; tool: string; input: object; reason?: string; instruction?: string }
   | { kind: "rebuild_snapshot"; reason?: string; cursor?: string; baseline_call?: ToolCallSpec }
   | { kind: "store_cursor"; reason: string; cursor: string }
@@ -333,7 +334,7 @@ type SequenceCommand = {
 
 Semantics:
 
-- 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 `code=sequence_preflight_failed`, `executed=false`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
+- 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식과 요청만으로 판단 가능한 본문 제한 및 구조화 `write` 문법을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 `code=sequence_preflight_failed`, `executed=false`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
 - command는 `tool`, `op`, operation 필드를 직접 담는 flat object다. 개별 command에 `purpose`를 반복하거나 `args`로 감싸지 않는다.
 - 최상위 `purpose` 하나를 사용하며 개별 command에는 `purpose`를 넣지 않는다.
 - 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.

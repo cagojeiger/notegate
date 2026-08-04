@@ -4,7 +4,10 @@ use axum::http::request::Parts;
 use futures_util::{StreamExt, stream};
 use notegate_core::validation::validate_space_name;
 use notegate_service::ServiceError;
-use notegate_service::files::{Target, parse_target, validation::validate_basename};
+use notegate_service::files::{
+    Target, content, parse_target, validate_structured_text,
+    validation::{validate_basename, validate_text_content},
+};
 use notegate_service::search::{validate_find_input, validate_grep_input};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ErrorData, Json};
@@ -694,6 +697,24 @@ fn validate_write_operation(input: &WriteInput) -> Result<(), ErrorData> {
     }
 }
 
+fn validate_static_write_content(input: &WriteInput) -> Result<(), ErrorData> {
+    let content = match input.op.as_str() {
+        "write" | "append" => required_ref(input.content.as_ref(), "content", &input.op)?,
+        _ => return Ok(()),
+    };
+    let metrics = content::compute(content);
+    validate_text_content(metrics.byte_len, metrics.line_count)
+        .map_err(ServiceError::from)
+        .map_err(service_error)?;
+
+    if input.op == "write" {
+        let target = parse_input_target(&input.target)?;
+        let (_, name) = split_parent_name(&target.path)?;
+        validate_structured_text(&name, content).map_err(service_error)?;
+    }
+    Ok(())
+}
+
 fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
     match input.op.as_str() {
         "mkdir" | "rm" => {
@@ -1228,6 +1249,7 @@ fn plan_sequence_write(
 ) -> Result<SequenceCommandPlan, ErrorData> {
     let input = command.clone().into_write_input(purpose.to_owned())?;
     validate_write_operation(&input)?;
+    validate_static_write_content(&input)?;
     let execution_class = if matches!(input.op.as_str(), "write" | "append") && input.create {
         SequenceExecutionClass::NamespaceMutation
     } else {
@@ -1884,6 +1906,7 @@ mod tests {
 
     #[test]
     fn sequence_preflight_rejects_input_only_errors_before_a_prior_write_executes() {
+        let oversized_append = "x".repeat(notegate_core::limits::TEXT_MAX_BYTES + 1);
         let cases = vec![
             (
                 json!({"tool": "search", "op": "find", "target": "daily:/", "q": ""}),
@@ -1908,6 +1931,14 @@ mod tests {
             (
                 json!({"tool": "write", "op": "edit", "target": "daily:/note.md", "edits": [{"op": "delete_lines", "start_line": 3, "end_line": 2}]}),
                 "start_line must be less than or equal to end_line",
+            ),
+            (
+                json!({"tool": "write", "op": "write", "target": "daily:/config.json", "content": "{\"ok\":}"}),
+                "invalid json syntax in config.json",
+            ),
+            (
+                json!({"tool": "write", "op": "append", "target": "daily:/note.md", "content": oversized_append}),
+                "text exceeds the maximum",
             ),
             (
                 json!({"tool": "manage", "op": "mv", "source": "daily:/from.md", "destination": "other:/to.md"}),
