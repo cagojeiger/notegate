@@ -165,9 +165,9 @@ struct SequenceManageCommandSchema {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunSequenceInput {
-    /// Reason for this MCP invocation. Commands inherit it; maximum 200 characters.
+    /// Reason for this MCP invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters.
     pub purpose: String,
-    /// Ordered NoteGate commands to execute. Maximum 20.
+    /// Ordered flat command objects. Each includes tool and op, omits purpose and args; 1..20.
     #[schemars(with = "Vec<SequenceCommandSchema>", length(min = 1, max = 20))]
     pub commands: Vec<Value>,
 }
@@ -537,12 +537,18 @@ fn prepare_sequence_commands(
             }
         }
 
-        let missing_fields = ["tool", "op"]
+        let missing_fields = [
+            ("tool", "One of: read, search, write, manage."),
+            (
+                "op",
+                "Allowed values depend on tool: read=spaces/ls/tree/stat/read/changes; search=find/grep; write=write/append/patch/edit; manage=mkdir/mv/cp/rm.",
+            ),
+        ]
             .into_iter()
-            .filter(|field| !candidate.contains_key(*field))
-            .map(|field| crate::mcp::contract::RequiredField {
+            .filter(|(field, _)| !candidate.contains_key(*field))
+            .map(|(field, description)| crate::mcp::contract::RequiredField {
                 field: format!("commands[{index}].{field}"),
-                description: None,
+                description: Some(description.to_owned()),
             })
             .collect::<Vec<_>>();
         if !missing_fields.is_empty() {

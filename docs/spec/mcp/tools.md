@@ -310,6 +310,16 @@ type SequenceCommand =
   | ({ tool: "manage" } & Omit<ManageInput, "purpose">)
 ```
 
+```json
+{
+  "purpose": "Read two known notes",
+  "commands": [
+    { "tool": "read", "op": "read", "target": "daily:/one.md" },
+    { "tool": "read", "op": "read", "target": "daily:/two.md" }
+  ]
+}
+```
+
 Semantics:
 
 - 공개 JSON Schema는 `tool`로 구분되는 네 command branch를 제공한다. 각 branch는 해당 직접 tool의 op와 필드만 노출한다.
@@ -324,7 +334,7 @@ Semantics:
 - `mv`, `cp`, `rm`, `mkdir(parents=true)`는 전체 하위 구조에 미치는 범위를 실행 전에 확정할 수 없으므로 structural barrier다. 모든 앞선 command가 끝난 뒤 단독 실행하며 모든 뒤 command는 barrier 완료를 기다린다.
 - `write`/`manage` mutation끼리는 fail-fast 순서를 보존하기 위해 순차 실행한다.
 - 결과는 실제 완료 시점과 관계없이 입력 index 순서로 반환한다.
-- command 하나가 실패하면 즉시 중단한다.
+- 응답은 입력 순서상 첫 실패를 보고하고 이후 의존 command는 실행하지 않는다. 이미 시작된 독립 `read`/`search`는 완료될 수 있으나 실패 뒤 결과에는 포함하지 않는다.
 - 이미 성공한 command는 rollback하지 않는다.
 - `run_sequence` 안에서 `run_sequence`를 다시 호출할 수 없다.
 - 결과는 성공한 command의 결과와 실패 위치를 반환한다.

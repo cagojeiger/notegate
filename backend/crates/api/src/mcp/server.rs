@@ -154,7 +154,7 @@ impl McpServer {
 
     #[tool(
         name = "search",
-        description = "Search NoteGate node names and plain text. Read-only. Use op=find or op=grep. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
+        description = "Search NoteGate node names and plain text. Read-only. Use op=find or op=grep. Results contain summaries and optional line references; use read for full text. Target space names are exact and case-sensitive; find/grep matching inside a space is case-insensitive.",
         annotations(title = "Search NoteGate", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -211,7 +211,7 @@ impl McpServer {
 
     #[tool(
         name = "run_sequence",
-        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and use tool-discriminated flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime stops on first failure; completed mutations are not rolled back.",
+        description = "Preferred batch tool for 2-20 commands whose inputs are known in advance. Commands inherit the one top-level purpose and use tool-discriminated flat objects without purpose or args. The server preflights every command, runs safe reads/searches concurrently, preserves dependency and mutation order, and runs mv, cp, rm, and mkdir with parents=true alone. Runtime reports the first failure in input order; already-started independent reads/searches may finish, and completed mutations are not rolled back.",
         annotations(title = "Run NoteGate Sequence", read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false),
         output_schema = object_output_schema()
     )]
@@ -824,7 +824,11 @@ mod tests {
         }
         assert_eq!(
             tools["run_sequence"].input_schema["properties"]["purpose"]["description"],
-            "Reason for this MCP invocation. Commands inherit it; maximum 200 characters."
+            "Reason for this MCP invocation. Required once at the top level; commands inherit it and must not include purpose; maximum 200 characters."
+        );
+        assert_eq!(
+            tools["run_sequence"].input_schema["properties"]["commands"]["description"],
+            "Ordered flat command objects. Each includes tool and op, omits purpose and args; 1..20."
         );
 
         let me_properties = tools
@@ -964,6 +968,8 @@ mod tests {
         assert!(description.contains("without purpose or args"));
         assert!(description.contains("preflights every command"));
         assert!(description.contains("runs mv, cp, rm"));
+        assert!(description.contains("first failure in input order"));
+        assert!(description.contains("already-started independent reads/searches may finish"));
 
         let read = tools.get("read").expect("read tool exists");
         let description = read
@@ -973,6 +979,14 @@ mod tests {
         assert!(description.contains("op=spaces/ls/tree/stat/read/changes"));
         assert!(description.contains("<space>:/"));
         assert!(description.contains("direction=newer"));
+
+        let search = tools.get("search").expect("search tool exists");
+        let description = search
+            .description
+            .as_deref()
+            .expect("search description exists");
+        assert!(description.contains("summaries and optional line references"));
+        assert!(description.contains("use read for full text"));
         let properties = read
             .input_schema
             .get("properties")

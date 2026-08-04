@@ -149,6 +149,28 @@ fn sequence_command_count_errors_use_common_preflight_status_fields() {
 }
 
 #[test]
+fn sequence_missing_command_fields_describe_valid_values() {
+    let error = prepare_sequence_commands(vec![json!({})], "repair an incomplete command")
+        .expect_err("tool and op are required");
+    let data = error.data.expect("structured preflight data");
+    let fields = data["errors"][0]["next_action"]["fields"]
+        .as_array()
+        .expect("missing fields action");
+
+    assert_eq!(fields[0]["field"], "commands[0].tool");
+    assert_eq!(
+        fields[0]["description"],
+        "One of: read, search, write, manage."
+    );
+    assert_eq!(fields[1]["field"], "commands[0].op");
+    assert!(
+        fields[1]["description"].as_str().is_some_and(
+            |description| description.contains("read=spaces/ls/tree/stat/read/changes")
+        )
+    );
+}
+
+#[test]
 fn sequence_runtime_failure_uses_common_status_fields_and_child_action() {
     let mut results = vec![json!({
         "index": 0,
