@@ -117,10 +117,10 @@ describe("AuxiliarySidebar", () => {
     });
     renderSidebar({ onOpenLink });
 
-    expect(mocks.useNodeLinkIndexQuery).toHaveBeenLastCalledWith(null);
+    expect(mocks.useNodeLinkIndexQuery).not.toHaveBeenCalled();
     await user.click(screen.getByRole("tab", { name: "Links" }));
-    expect(mocks.useNodeLinkIndexQuery).toHaveBeenLastCalledWith(textNode);
-    expect(screen.getByText("Waiting")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.useNodeLinkIndexQuery).toHaveBeenLastCalledWith(textNode));
+    expect(await screen.findByText("Waiting")).toBeInTheDocument();
     expect(screen.getByText("Missing")).toBeInTheDocument();
     expect(screen.queryByText(/version/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /\/docs\/target\.md/ }));
