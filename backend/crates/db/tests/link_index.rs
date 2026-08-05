@@ -122,6 +122,71 @@ async fn file_changes_enqueue_only_the_required_scope() -> Result<(), Box<dyn st
 }
 
 #[tokio::test]
+async fn database_trigger_enqueues_changes_from_mixed_version_writers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, space_id, root_id) = space_with_root(&db.pool, "link-index-trigger").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let links = LinkIndexRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space_id, root_id, "note.md", &text("before"), account_id)
+        .await?;
+    sqlx::query("DELETE FROM node_link_source_states WHERE space_id = $1")
+        .bind(space_id)
+        .execute(&db.pool)
+        .await?;
+    sqlx::query(
+        "UPDATE node_link_space_reindex_states \
+         SET applied_version = requested_version \
+         WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO file_change_events \
+         (space_id, node_id, actor_account_id, op_type, metadata) \
+         VALUES ($1, $2, $3, 'text.write', '{}'::jsonb)",
+    )
+    .bind(space_id)
+    .bind(node.id)
+    .bind(account_id)
+    .execute(&db.pool)
+    .await?;
+    assert!(links.source_state(space_id, node.id).await?.is_some());
+
+    let space_version_before: i64 = sqlx::query_scalar(
+        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO file_change_events \
+         (space_id, node_id, actor_account_id, op_type, metadata) \
+         VALUES ($1, $2, $3, 'item.update', '{\"name_changed\": true}'::jsonb)",
+    )
+    .bind(space_id)
+    .bind(node.id)
+    .bind(account_id)
+    .execute(&db.pool)
+    .await?;
+    let space_version_after: i64 = sqlx::query_scalar(
+        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(space_version_after, space_version_before + 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn failed_link_enqueue_rolls_back_the_document_change()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

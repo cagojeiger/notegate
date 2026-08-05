@@ -1,7 +1,6 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
 use notegate_model::LinkReferenceKind;
-use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -21,17 +20,20 @@ impl LinkIndexRepo {
     }
 
     pub async fn request_source(&self, space_id: Uuid, source_node_id: Uuid) -> Result<bool> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let requested = enqueue_source(&mut tx, space_id, source_node_id).await?;
-        tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(requested)
+        sqlx::query_scalar("SELECT enqueue_node_link_source($1, $2)")
+            .bind(space_id)
+            .bind(source_node_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx_error)
     }
 
     pub async fn request_space(&self, space_id: Uuid) -> Result<bool> {
-        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let requested = enqueue_space(&mut tx, space_id).await?;
-        tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(requested)
+        sqlx::query_scalar("SELECT enqueue_node_link_space($1)")
+            .bind(space_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx_error)
     }
 
     pub async fn claim_space(&self) -> Result<Option<SpaceLinkClaim>> {
@@ -412,89 +414,6 @@ impl LinkIndexRepo {
     }
 }
 
-pub(crate) async fn enqueue_for_file_change(
-    tx: &mut sqlx::PgConnection,
-    space_id: Uuid,
-    node_id: Option<Uuid>,
-    op_type: &str,
-    metadata: &Value,
-) -> Result<()> {
-    match classify_change(op_type, metadata) {
-        ChangeScope::None => Ok(()),
-        ChangeScope::Source => {
-            if let Some(node_id) = node_id {
-                enqueue_source(tx, space_id, node_id).await?;
-            }
-            Ok(())
-        }
-        ChangeScope::Space => {
-            enqueue_space(tx, space_id).await?;
-            Ok(())
-        }
-    }
-}
-
-async fn enqueue_source(
-    tx: &mut sqlx::PgConnection,
-    space_id: Uuid,
-    source_node_id: Uuid,
-) -> Result<bool> {
-    let rows = sqlx::query(
-        "INSERT INTO node_link_source_states (space_id, source_node_id) \
-         SELECT node.space_id, node.id FROM nodes node \
-         WHERE node.space_id = $1 AND node.id = $2 \
-           AND node.kind = 'text' AND node.deleted_at IS NULL \
-         ON CONFLICT (space_id, source_node_id) DO UPDATE \
-         SET requested_version = node_link_source_states.requested_version + 1, \
-             run_after = now(), last_error = NULL",
-    )
-    .bind(space_id)
-    .bind(source_node_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .rows_affected();
-    Ok(rows > 0)
-}
-
-async fn enqueue_space(tx: &mut sqlx::PgConnection, space_id: Uuid) -> Result<bool> {
-    let rows = sqlx::query(
-        "INSERT INTO node_link_space_reindex_states (space_id) \
-         SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL \
-         ON CONFLICT (space_id) DO UPDATE \
-         SET requested_version = node_link_space_reindex_states.requested_version + 1, \
-             run_after = now(), last_error = NULL",
-    )
-    .bind(space_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(map_sqlx_error)?
-    .rows_affected();
-    Ok(rows > 0)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChangeScope {
-    None,
-    Source,
-    Space,
-}
-
-fn classify_change(op_type: &str, metadata: &Value) -> ChangeScope {
-    match op_type {
-        "text.write" | "text.append" | "text.patch" | "text.edit" => ChangeScope::Source,
-        "metadata.replace" | "metadata.patch" => ChangeScope::None,
-        "item.update" => metadata
-            .get("name_changed")
-            .and_then(Value::as_bool)
-            .filter(|changed| *changed)
-            .map_or(ChangeScope::None, |_| ChangeScope::Space),
-        "folder.create" | "text.create" | "file.create" | "item.move" | "item.copy"
-        | "item.delete" => ChangeScope::Space,
-        _ => ChangeScope::Space,
-    }
-}
-
 #[derive(Debug, Clone, FromRow)]
 pub struct SourceLinkClaim {
     pub space_id: Uuid,
@@ -595,35 +514,4 @@ pub struct SpaceLinkStatus {
     pub space_pending: bool,
     pub space_syncing: bool,
     pub space_error: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn change_classification_keeps_content_local_and_topology_space_wide() {
-        assert_eq!(
-            classify_change("text.write", &json!({})),
-            ChangeScope::Source
-        );
-        assert_eq!(
-            classify_change("item.update", &json!({"name_changed": true})),
-            ChangeScope::Space
-        );
-        assert_eq!(
-            classify_change("item.update", &json!({"name_changed": false})),
-            ChangeScope::None
-        );
-        assert_eq!(
-            classify_change("metadata.patch", &json!({})),
-            ChangeScope::None
-        );
-        assert_eq!(
-            classify_change("item.delete", &json!({})),
-            ChangeScope::Space
-        );
-    }
 }
