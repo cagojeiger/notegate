@@ -66,10 +66,12 @@ Worker는 Space별 상태 row를 lease로 claim한다. 여러 API pod가 동시�
   -> source_node_id 중복 제거
   -> 현재 저장된 최종 본문 읽기
   -> 현재 outgoing 참조 전체 파싱
-  -> source의 기존 참조를 새 결과로 원자 교체
+  -> source의 기존 참조 삭제
+  -> bounded chunk로 새 결과 기록
+  -> 모든 chunk 완료 후 applied_generation 전진
 ```
 
-따라서 같은 문서가 연속으로 여러 번 저장되어도 마지막 현재 상태가 투영된다. 투영 교체와 `applied_generation` 전진은 같은 transaction에서 완료한다.
+따라서 같은 문서가 연속으로 여러 번 저장되어도 worker가 처리할 때 읽은 마지막 현재 상태가 투영된다. 참조 삭제와 각 insert chunk는 claim lease를 검증하고 연장하는 짧은 transaction으로 나눈다. 중간에는 일부 참조만 보일 수 있지만 모든 chunk가 성공하기 전에는 `applied_generation`을 전진시키지 않는다. 실패한 작업은 같은 source의 참조를 다시 삭제한 뒤 최신 본문으로 덮어쓰므로 재시도 후 수렴한다.
 
 Node `revision`은 동기 mutation 충돌을 막는 per-node token이고, `desired_generation`/`applied_generation`은 비동기 Space projection의 진행 상태다. Link worker는 revision event를 재생하지 않고 generation 범위에서 중복 제거한 source의 최신 본문을 읽으므로 두 값은 서로 대체하지 않는다.
 
@@ -89,8 +91,8 @@ applied_generation = 링크 투영이 반영한 위치
 - `uninitialized`는 기존 Space의 최초 전체 인덱싱이 아직 요청되지 않은 상태다. 이 상태에서는 관계 결과를 노출하지 않는다.
 - event retention gap, parser version 변경, 안전하게 범위를 계산할 수 없는 topology 변경은 전체 재인덱싱을 요구한다.
 - 실패한 작업은 backoff 후 재시도한다. 사용자가 실패한 재인덱싱을 다시 요청하면 저장된 cursor를 유지한 채 즉시 재개한다.
-- 전체 재인덱싱은 bounded source batch마다 cursor를 commit하고 claim을 반환한다. Lease가 batch 도중 만료되면 projection commit은 거부되고 다른 worker가 마지막 commit cursor부터 Space를 다시 claim한다.
-- source 단위 교체와 Space 재인덱싱은 재실행해도 같은 결과가 되는 멱등 연산이다.
+- 전체 재인덱싱은 기존 graph를 한 번에 지우지 않고 bounded source batch마다 현재 결과로 덮어쓴 뒤 cursor를 commit하고 claim을 반환한다. Lease가 batch 도중 만료되면 이후 chunk와 cursor commit은 거부되고 다른 worker가 마지막 commit cursor부터 Space를 다시 claim한다.
+- source 재작성 도중 실패하면 부분 결과가 남을 수 있다. 다만 cursor는 전진하지 않으며 다음 재시도가 같은 source를 먼저 지우고 최신 결과를 다시 기록하므로 source 재작성과 Space 재인덱싱은 결과적으로 멱등이다.
 
 재인덱싱은 문서 read/write를 막지 않는다. Node Inspector는 `uninitialized`, `rebuilding`, `failed` 상태에서 부분 관계를 정상 결과처럼 노출하지 않는다. 실패한 재구성을 사용자가 다시 요청해도 완료 전까지 `rebuilding`을 유지한다.
 

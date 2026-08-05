@@ -13,9 +13,14 @@ mod common;
 use std::time::Duration;
 
 use common::{TestDb, insert_user_account, setup_space};
-use notegate_db::{FilesRepo, LinkIndexRepo, SpaceRepo, TextMutationGuard, TextMutationKind};
+use notegate_db::{
+    FilesRepo, LinkIndexRepo, NewLinkReference, SourceLinkSet, SpaceRepo, TextMutationGuard,
+    TextMutationKind,
+};
 use notegate_model::files::StoredContent;
-use notegate_model::{AccountKind, LinkIndexFreshness, LinkIndexStatus, LinkReferenceStatus};
+use notegate_model::{
+    AccountKind, LinkIndexFreshness, LinkIndexStatus, LinkReferenceKind, LinkReferenceStatus,
+};
 use notegate_service::files::{FilesService, UpdateTextEncryption, content};
 use notegate_service::link_index::{LinkIndexProjector, LinkIndexRun, LinkIndexService};
 
@@ -23,6 +28,22 @@ const PARSER_VERSION: i32 = 1;
 
 fn text(content: &str) -> StoredContent {
     content::compute(content).into_stored_plain(content.to_owned())
+}
+
+fn missing_references(count: i32, invalid_last: bool) -> Vec<NewLinkReference> {
+    (0..count)
+        .map(|number| NewLinkReference {
+            kind: LinkReferenceKind::Link,
+            raw_href: format!("missing-{number}.md"),
+            normalized_target_path: Some(format!("/missing-{number}.md")),
+            target_node_id: None,
+            occurrence_count: if invalid_last && number == count - 1 {
+                0
+            } else {
+                1
+            },
+        })
+        .collect()
 }
 
 async fn drain(
@@ -256,6 +277,95 @@ async fn large_text_fanout_is_applied_in_bounded_incremental_runs()
         service.state(owner, space_id).await?.freshness(),
         LinkIndexFreshness::Current
     );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn chunked_source_rewrite_retries_from_delete_and_converges()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-index-chunk-retry",
+        "link-index-chunk-retry@example.test",
+    )
+    .await?;
+    let spaces = SpaceRepo::new(db.pool.clone());
+    let (space_id, root_id) = setup_space(&spaces, owner, "link-index-chunk-retry").await;
+    let files = FilesRepo::new(db.pool.clone());
+    let index = LinkIndexRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(space_id, root_id, "source.md", &text("source"), owner)
+        .await?;
+
+    index.request_rebuild(space_id).await?;
+    let claim = index
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
+        .await?
+        .expect("queued rebuild is claimed");
+    let base_generation = index
+        .begin_rebuild(&claim, PARSER_VERSION, Duration::from_secs(30))
+        .await?;
+    let sources = [SourceLinkSet {
+        source_node_id: source.id,
+        references: missing_references(501, true),
+    }];
+
+    assert!(
+        index
+            .rewrite_sources(&claim, &sources, Duration::from_secs(30))
+            .await
+            .is_err()
+    );
+    let (partial_count, applied_generation): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM node_link_refs WHERE space_id = $1), \
+                applied_generation \
+         FROM space_link_index_states WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(partial_count, 500);
+    assert_eq!(applied_generation, 0);
+
+    index.fail_claim(&claim, "simulated chunk failure").await?;
+    sqlx::query("UPDATE space_link_index_states SET run_after = now() WHERE space_id = $1")
+        .bind(space_id)
+        .execute(&db.pool)
+        .await?;
+    let retry = index
+        .claim_next(Duration::from_secs(30), PARSER_VERSION)
+        .await?
+        .expect("failed rebuild is reclaimed after backoff");
+    assert_ne!(retry.token, claim.token);
+
+    let valid_sources = [SourceLinkSet {
+        source_node_id: source.id,
+        references: missing_references(501, false),
+    }];
+    index
+        .rewrite_sources(&retry, &valid_sources, Duration::from_secs(30))
+        .await?;
+    index
+        .commit_rebuild_batch(&retry, source.id, false, base_generation)
+        .await?;
+
+    let (reference_count, desired_generation, applied_generation, status): (i64, i64, i64, String) =
+        sqlx::query_as(
+            "SELECT (SELECT count(*) FROM node_link_refs WHERE space_id = $1), \
+                    desired_generation, applied_generation, status \
+             FROM space_link_index_states WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .fetch_one(&db.pool)
+        .await?;
+    assert_eq!(reference_count, 501);
+    assert_eq!(applied_generation, desired_generation);
+    assert_eq!(status, "ready");
 
     db.cleanup().await;
     Ok(())

@@ -252,11 +252,6 @@ impl LinkIndexRepo {
         .fetch_one(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1")
-            .bind(claim.space_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(base_generation)
     }
@@ -292,17 +287,58 @@ impl LinkIndexRepo {
         Ok((rows, has_more))
     }
 
-    pub async fn commit_rebuild_batch(
+    pub async fn rewrite_sources(
         &self,
         claim: &LinkIndexClaim,
         sources: &[SourceLinkSet],
+        lease: Duration,
+    ) -> Result<()> {
+        if sources.is_empty() {
+            return Ok(());
+        }
+        let lease_seconds = duration_seconds(lease)?;
+        let source_ids = sources
+            .iter()
+            .map(|source| source.source_node_id)
+            .collect::<Vec<_>>();
+
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        renew_claim(&mut tx, claim, lease_seconds).await?;
+        sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1 AND source_node_id = ANY($2)")
+            .bind(claim.space_id)
+            .bind(source_ids)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+        tx.commit().await.map_err(map_sqlx_error)?;
+
+        let references = sources
+            .iter()
+            .flat_map(|source| {
+                source
+                    .references
+                    .iter()
+                    .map(move |reference| (source.source_node_id, reference))
+            })
+            .collect::<Vec<_>>();
+        for chunk in references.chunks(LINK_INSERT_CHUNK_SIZE) {
+            let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+            renew_claim(&mut tx, claim, lease_seconds).await?;
+            insert_references(&mut tx, claim.space_id, chunk).await?;
+            tx.commit().await.map_err(map_sqlx_error)?;
+        }
+        Ok(())
+    }
+
+    pub async fn commit_rebuild_batch(
+        &self,
+        claim: &LinkIndexClaim,
         after_node_id: Uuid,
         has_more: bool,
         base_generation: i64,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         assert_claim(&mut tx, claim).await?;
-        replace_sources(&mut tx, claim.space_id, sources).await?;
         if has_more {
             let updated = sqlx::query(
                 "UPDATE space_link_index_states \
@@ -340,14 +376,12 @@ impl LinkIndexRepo {
     pub async fn commit_incremental(
         &self,
         claim: &LinkIndexClaim,
-        sources: &[SourceLinkSet],
         rebind_targets: &[(String, Uuid)],
         cleanup_deleted: bool,
         applied_generation: i64,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         assert_claim(&mut tx, claim).await?;
-        replace_sources(&mut tx, claim.space_id, sources).await?;
         if cleanup_deleted {
             remove_deleted_sources(&mut tx, claim.space_id).await?;
         }
@@ -480,54 +514,51 @@ async fn assert_claim(
     Ok(())
 }
 
-async fn replace_sources(
+async fn renew_claim(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    claim: &LinkIndexClaim,
+    lease_seconds: i32,
+) -> Result<()> {
+    let updated = sqlx::query(
+        "UPDATE space_link_index_states \
+         SET claim_until = now() + make_interval(secs => $3), updated_at = now() \
+         WHERE space_id = $1 AND claim_token = $2 AND claim_until > now()",
+    )
+    .bind(claim.space_id)
+    .bind(claim.token)
+    .bind(lease_seconds)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_sqlx_error)?;
+    if updated.rows_affected() != 1 {
+        return Err(Error::conflict("link index claim was lost"));
+    }
+    Ok(())
+}
+
+async fn insert_references(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     space_id: Uuid,
-    sources: &[SourceLinkSet],
+    references: &[(Uuid, &NewLinkReference)],
 ) -> Result<()> {
-    if sources.is_empty() {
-        return Ok(());
-    }
-    let source_ids = sources
-        .iter()
-        .map(|source| source.source_node_id)
-        .collect::<Vec<_>>();
-    sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1 AND source_node_id = ANY($2)")
-        .bind(space_id)
-        .bind(source_ids)
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "INSERT INTO node_link_refs (space_id, source_node_id, target_node_id, \
+         reference_kind, raw_href, normalized_target_path, occurrence_count) ",
+    );
+    builder.push_values(references, |mut row, (source_node_id, reference)| {
+        row.push_bind(space_id)
+            .push_bind(source_node_id)
+            .push_bind(reference.target_node_id)
+            .push_bind(reference.kind.as_str())
+            .push_bind(&reference.raw_href)
+            .push_bind(&reference.normalized_target_path)
+            .push_bind(reference.occurrence_count);
+    });
+    builder
+        .build()
         .execute(&mut **tx)
         .await
         .map_err(map_sqlx_error)?;
-
-    let flattened = sources
-        .iter()
-        .flat_map(|source| {
-            source
-                .references
-                .iter()
-                .map(move |reference| (source.source_node_id, reference))
-        })
-        .collect::<Vec<_>>();
-    for chunk in flattened.chunks(LINK_INSERT_CHUNK_SIZE) {
-        let mut builder = QueryBuilder::<Postgres>::new(
-            "INSERT INTO node_link_refs (space_id, source_node_id, target_node_id, \
-             reference_kind, raw_href, normalized_target_path, occurrence_count) ",
-        );
-        builder.push_values(chunk, |mut row, (source_node_id, reference)| {
-            row.push_bind(space_id)
-                .push_bind(source_node_id)
-                .push_bind(reference.target_node_id)
-                .push_bind(reference.kind.as_str())
-                .push_bind(&reference.raw_href)
-                .push_bind(&reference.normalized_target_path)
-                .push_bind(reference.occurrence_count);
-        });
-        builder
-            .build()
-            .execute(&mut **tx)
-            .await
-            .map_err(map_sqlx_error)?;
-    }
     Ok(())
 }
 

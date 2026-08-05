@@ -92,7 +92,7 @@ impl LinkIndexProjector {
         }
         if batch.events.is_empty() {
             self.index
-                .commit_incremental(claim, &[], &[], false, claim.applied_generation)
+                .commit_incremental(claim, &[], false, claim.applied_generation)
                 .await?;
             return Ok(LinkIndexRun::Incremental {
                 space_id: claim.space_id,
@@ -123,9 +123,11 @@ impl LinkIndexProjector {
             .map(|event| event.generation)
             .ok_or_else(|| ServiceError::Internal("link index event batch is empty".to_owned()))?;
         self.index
+            .rewrite_sources(claim, &sources, CLAIM_LEASE)
+            .await?;
+        self.index
             .commit_incremental(
                 claim,
-                &sources,
                 &rebind_targets,
                 impact.cleanup_deleted,
                 last_generation,
@@ -170,7 +172,10 @@ impl LinkIndexProjector {
             .ok_or_else(|| ServiceError::Internal("link rebuild batch is empty".to_owned()))?;
         let sources = self.source_link_sets(claim.space_id, &source_ids).await?;
         self.index
-            .commit_rebuild_batch(claim, &sources, last_node_id, has_more, base_generation)
+            .rewrite_sources(claim, &sources, CLAIM_LEASE)
+            .await?;
+        self.index
+            .commit_rebuild_batch(claim, last_node_id, has_more, base_generation)
             .await?;
         if has_more {
             Ok(LinkIndexRun::RebuildProgress {
