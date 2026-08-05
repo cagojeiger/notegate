@@ -1,4 +1,4 @@
-import { FileText, List } from "lucide-react";
+import { List } from "lucide-react";
 import { useEffect, useMemo, useRef, type RefObject } from "react";
 
 import type { NodeSummary, Space } from "../../api/types";
@@ -11,10 +11,10 @@ import type { NodeContextHandler } from "./types";
 export function RecentSection({ activeSpace, openedNodeId, inspectedNodeId, density, open, onToggle, onToggleDensity, onOpenNode, onInspectNode, onNodeContextMenu }: { activeSpace: Space; openedNodeId: string | null; inspectedNodeId: string | null; density: "list" | "compact"; open: boolean; onToggle: () => void; onToggleDensity: () => void; onOpenNode: (node: NodeSummary) => void; onInspectNode: (node: NodeSummary) => void; onNodeContextMenu: NodeContextHandler }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   return (
-    <section className="flex min-h-0 min-w-0 flex-col px-3 py-2">
-      <SidebarSectionHeader icon={<FileText size={13} />} label="Recent" open={open} onToggle={onToggle} action={{ label: "Toggle recent density", icon: <List size={13} />, onClick: onToggleDensity }} />
+    <section className="flex min-h-0 min-w-0 flex-col px-3 py-1.5 font-ui">
+      <SidebarSectionHeader label="Recent" open={open} onToggle={onToggle} action={{ label: "Toggle recent density", icon: <List size={13} />, onClick: onToggleDensity }} />
       {open ? (
-        <div ref={scrollRef} data-recent-list className="mt-2 min-h-0 flex-1 overflow-y-auto">
+        <div ref={scrollRef} data-recent-list className="mt-0.5 min-h-0 flex-1 overflow-y-auto">
           <RecentList activeSpace={activeSpace} openedNodeId={openedNodeId} inspectedNodeId={inspectedNodeId} density={density} scrollRef={scrollRef} onOpenNode={onOpenNode} onInspectNode={onInspectNode} onNodeContextMenu={onNodeContextMenu} />
         </div>
       ) : null}
@@ -38,7 +38,7 @@ function RecentList({ activeSpace, openedNodeId, inspectedNodeId, density, scrol
   if (recentQuery.isError) return <EmptyState>Recent is unavailable for this server build.</EmptyState>;
   if (nodes.length === 0) return <div className="text-xs text-muted">No recent items yet.</div>;
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       {nodes.map((node) => (
         <NodeRow
           key={node.id}

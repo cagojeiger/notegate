@@ -1,9 +1,9 @@
-import { ChevronsDownUp, Folder } from "lucide-react";
+import { ChevronsDownUp } from "lucide-react";
 import type { DragEvent, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { NodeSummary, Space } from "../../api/types";
-import { makeRootNode, nodeMetaSuffix } from "./nodeDisplay";
+import { makeRootNode } from "./nodeDisplay";
 import { canMoveNodeToFolder, canMutateNode } from "./nodeWriteAccess";
 import { NodeRow } from "./NodeRow";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
@@ -48,9 +48,8 @@ export function TreeSection({
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   return (
-    <section id="files-section" className="flex min-h-0 min-w-0 flex-col px-3 py-2">
+    <section id="files-section" className="flex min-h-0 min-w-0 flex-col px-3 py-1.5 font-ui">
       <SidebarSectionHeader
-        icon={<Folder size={13} />}
         label="Files"
         open={open}
         onToggle={onToggle}
@@ -180,7 +179,7 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
         ref={scrollRef}
         role="tree"
         aria-label="Files"
-        className="mt-2 min-h-0 flex-1 overflow-y-auto"
+        className="mt-0.5 min-h-0 flex-1 overflow-y-auto"
         onKeyDown={handleTreeKeyDown}
         onFocusCapture={handleTreeFocusCapture}
         onBlurCapture={handleTreeBlurCapture}
@@ -200,7 +199,7 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
               <div
                 key={virtualRow.key}
                 data-tree-index={virtualRow.index}
-                className="absolute left-0 top-0 w-full pb-1"
+                className="absolute left-0 top-0 w-full pb-0.5"
                 style={{ height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }}
               >
                 <VirtualTreeRow
@@ -312,7 +311,7 @@ function VirtualTreeRow({
   canWriteActiveSpace: boolean;
 }) {
   if (row.type === "loading") {
-    return <div role="status" className="flex h-8 items-center py-1 text-xs text-muted" style={{ paddingLeft: `${8 + row.depth * 14}px` }}>Loading…</div>;
+    return <div role="status" className="flex h-8 items-center py-1 text-xs text-muted" style={{ paddingLeft: `${8 + row.depth * 12}px` }}>Loading…</div>;
   }
   if (row.type === "empty") {
     return <div role="status" className="flex h-8 items-center px-2 py-2 text-xs text-muted">No items yet.</div>;
@@ -343,7 +342,6 @@ function VirtualTreeRow({
         inspected={inspectedNodeId === node.id}
         opened={openedNodeId === node.id}
         expanded={node.kind === "folder" && expandedFolderIds.has(node.id)}
-        suffix={nodeMetaSuffix(node)}
         dropTarget={dropFolderId === node.id}
         onToggleFolder={onToggleFolder}
         onInspectNode={onInspectNode}

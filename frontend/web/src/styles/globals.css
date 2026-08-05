@@ -168,6 +168,7 @@ button:not(:disabled):active {
   width: min(100%, 78ch);
   margin-inline: auto;
   color: var(--ng-text);
+  font-family: var(--font-ui);
   font-size: 16px;
   line-height: 1.7;
   word-break: break-word;
@@ -316,7 +317,6 @@ button:not(:disabled):active {
 
 .markdown-frontmatter dt {
   color: var(--ng-muted);
-  font-family: var(--font-mono);
   font-size: 0.86em;
 }
 

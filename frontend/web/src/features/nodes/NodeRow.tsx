@@ -13,7 +13,6 @@ export function NodeRow({
   opened,
   expanded,
   meta,
-  suffix,
   dropTarget,
   onToggleFolder,
   onInspectNode,
@@ -30,7 +29,6 @@ export function NodeRow({
   opened: boolean;
   expanded?: boolean;
   meta?: string;
-  suffix?: string;
   dropTarget?: boolean;
   onToggleFolder?: (nodeId: string) => void;
   onInspectNode: (node: NodeSummary) => void;
@@ -88,11 +86,11 @@ export function NodeRow({
       onTouchMove={clearLongPress}
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
-      className={`group relative flex w-full items-center gap-1 rounded-[9px] py-1.5 pr-2 text-sm transition active:bg-[var(--ng-selection)] active:text-text ${inspected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
-      style={{ paddingLeft: `${8 + depth * 14}px` }}
+      className={`group relative flex w-full items-center gap-1 rounded-[9px] pr-2 font-ui text-sm leading-5 transition active:bg-[var(--ng-selection)] active:text-text ${meta ? "py-0.5" : "py-1"} ${inspected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      style={{ paddingLeft: `${8 + depth * 12}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >
-      {opened ? <span data-active-indicator className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
+      {opened ? <span data-active-indicator className="absolute bottom-1 left-0 top-1 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
       {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={handleToggleFolder}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
       <button
         data-node-open
@@ -116,13 +114,12 @@ export function NodeRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate">{node.name}</span>
-          {meta ? <span className="block truncate text-xs text-faint">{meta}</span> : null}
+          {meta ? <span className="mt-0.5 block truncate text-[11px] leading-4 text-faint">{meta}</span> : null}
         </span>
       </button>
       {node.effective_write_locked ? (
         <span id={lockDescriptionId} className="sr-only">Write locked</span>
       ) : null}
-      {suffix ? <span className="shrink-0 text-[10px] tabular-nums text-faint">{suffix}</span> : null}
     </div>
   );
 }
