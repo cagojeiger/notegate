@@ -15,6 +15,10 @@ vi.mock("../features/editor/useEditorQueries", () => ({
   useFolderChildrenStat: mocks.useFolderChildrenStat
 }));
 
+vi.mock("../features/links/NodeLinksSection", () => ({
+  NodeLinksSection: () => <section>Link relations</section>
+}));
+
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
 
 function renderSidebar(overrides: Partial<SidebarProps> = {}) {
@@ -42,6 +46,7 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
     onSearchEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
+    onOpenLinkedNode: vi.fn(),
     ...overrides
   };
 }
@@ -54,7 +59,7 @@ describe("AuxiliarySidebar", () => {
     });
   });
 
-  it("uses the Details and Outline tabs as the single workbench header", () => {
+  it("uses Details, Outline, and Links as the single workbench header", () => {
     renderSidebar({
       activeNode: null,
       canWriteActiveSpace: false,
@@ -68,7 +73,29 @@ describe("AuxiliarySidebar", () => {
     expect(within(inspector).queryByText("Inspector", { exact: true })).not.toBeInTheDocument();
     expect(tablist.parentElement).toHaveClass("h-12", "border-b", "border-seam");
     expect(tablist).toHaveClass("h-full", "items-end");
+    expect(within(tablist).getAllByRole("tab")).toHaveLength(3);
     expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(within(tablist).getByRole("tab", { name: "Outline" })).toBeDisabled();
+    expect(within(tablist).getByRole("tab", { name: "Links" })).toBeDisabled();
+  });
+
+  it("loads link relations only in the dedicated Links tab", async () => {
+    const user = userEvent.setup();
+    const view = renderSidebar();
+
+    expect(screen.queryByText("Link relations")).not.toBeInTheDocument();
+
+    const linksTab = screen.getByRole("tab", { name: "Links" });
+    await user.click(linksTab);
+
+    expect(linksTab).toHaveAttribute("aria-selected", "true");
+    const linksPanel = screen.getByRole("tabpanel", { name: "Links" });
+    expect(linksPanel).toBeVisible();
+    expect(await within(linksPanel).findByText("Link relations")).toBeVisible();
+
+    view.rerenderSidebar({ activeNode: null });
+    expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Links" })).toBeDisabled();
   });
 
   it("changes search, write lock, and stored-text encryption independently", async () => {

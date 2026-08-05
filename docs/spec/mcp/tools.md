@@ -10,7 +10,7 @@
 - 이동/복사는 `source`와 `destination`을 사용한다.
 - 검색어는 `q`, 본문은 `content`, 수정 목록은 `edits`를 사용한다.
 - 모든 paginated read/search는 `limit`, opaque `cursor`, 응답의 `page.next_cursor`를 사용한다. `changes`만 `direction=older|newer`로 진행 방향을 선택한다.
-- 동시성 guard는 `expected_sha256`, 조건부 읽기는 `if_none_match_sha256`를 사용한다.
+- 기존 node mutation의 동시성 guard는 `expected_revision`이다. Text는 선택적 `expected_sha256`을 추가로 사용할 수 있고 조건부 읽기는 `if_none_match_sha256`를 사용한다.
 - MCP JSON payload는 encrypted Text와 binary File bytes를 운반하지 않는다. File bytes는 `file_transfer`가 발급한 presigned URL로 직접 전송한다.
 - MCP는 space create/delete/rename을 제공하지 않는다.
 - `run_sequence`의 완료된 mutation은 rollback하지 않는다. `file_transfer`는 sequence에 포함할 수 없다.
@@ -178,6 +178,7 @@ type WriteInput = {
   edits?: Array<PatchEdit | LineEditInput>
   create?: boolean
   ensure_newline?: boolean
+  expected_revision?: number
   expected_sha256?: string
 }
 
@@ -201,6 +202,7 @@ type LineEditInput = {
 - `op=append`: EOF append다. `ensure_newline=true`이면 기존 content가 비어 있지 않고 newline으로 끝나지 않을 때 content 앞에 newline을 넣는다.
 - `op=patch`: `edits[]`에 `PatchEdit`만 받는 string replacement다.
 - `op=edit`: `edits[]`에 `LineEditInput`만 받는 1-based line operation이다. insert/replace `content`는 논리적인 줄 내용으로 해석되며 trailing newline이 없어도 줄 경계를 보존한다. `content`는 여러 줄을 포함할 수 있다.
+- 기존 Text의 `write`/`append`와 모든 `patch`/`edit`은 `expected_revision`이 필수다. `create=true`로 새 Text를 만들 때는 생략한다.
 - `.json`, `.jsonl`, `.yaml`, `.yml`, `.toml` Text는 service layer의 공통 규칙으로 저장 전에 문법 검증한다. 검증은 target path의 file name extension 기준이며 schema validation은 하지 않는다.
 
 필수 필드:
@@ -225,6 +227,7 @@ type ManageInput = {
   destination?: string
   parents?: boolean
   recursive?: boolean
+  expected_revision?: number
 }
 ```
 
@@ -232,6 +235,7 @@ type ManageInput = {
 - `op=mv`: `source` node를 `destination`으로 이동/rename한다. 같은 Space 안에서만 가능하다.
 - `op=cp`: `source` node를 `destination`으로 복사한다. Folder copy는 `recursive=true`가 필요하다.
 - `op=rm`: `target` node를 soft-delete한다. Folder delete는 `recursive=true`가 필요하다.
+- `op=mv`, `op=rm`은 source/target의 최신 `expected_revision`이 필수다. `mkdir`, `cp`는 새 node를 만들므로 생략한다.
 
 Space root(`<space>:/`)는 `op=mkdir, parents=true`의 idempotent target으로만 허용한다. 그 외 `target`, `source`, `destination`은 반드시 node를 가리켜야 한다.
 

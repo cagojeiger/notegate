@@ -146,6 +146,8 @@ pub struct NodeOut {
     pub path: String,
     pub sort_order: i32,
     pub search_enabled: bool,
+    /// Monotonic optimistic-concurrency version for this node.
+    pub revision: i64,
     /// Whether this node itself is directly write-locked.
     pub write_locked: bool,
     /// Whether this node is write-locked directly or by an ancestor.
@@ -257,6 +259,7 @@ impl From<&NodeView> for NodeOut {
             path: view.path.clone(),
             sort_order: node.sort_order,
             search_enabled: node.search_enabled,
+            revision: node.revision,
             write_locked: node.write_locked,
             effective_write_locked: !view.write_lock_sources.is_empty(),
             write_lock_sources: view
@@ -303,6 +306,7 @@ pub struct NodeSummaryOut {
     /// Canonical absolute path.
     pub path: String,
     pub has_children: bool,
+    pub revision: i64,
     /// Effective direct-or-inherited write-lock state.
     pub effective_write_locked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -323,6 +327,7 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
             kind: view.node.kind.into(),
             path: view.path.clone(),
             has_children: view.has_children,
+            revision: view.node.revision,
             effective_write_locked: view.effective_write_locked,
             byte_len: view
                 .text
@@ -345,6 +350,7 @@ impl NodeSummaryOut {
             kind: view.node.kind.into(),
             path: view.path.clone(),
             has_children: view.has_children,
+            revision: view.node.revision,
             effective_write_locked: !view.write_lock_sources.is_empty(),
             byte_len: view
                 .text

@@ -1,5 +1,5 @@
 use notegate_core::limits;
-use notegate_db::{MetadataMutationKind, TextMutationKind};
+use notegate_db::{MetadataMutationKind, TextMutationGuard, TextMutationKind};
 use notegate_model::{AccountKind, Caller, NodeKind};
 use serde_json::Value;
 use uuid::Uuid;
@@ -324,6 +324,11 @@ impl FilesService {
 
         match command.target {
             WriteTarget::Existing { node_id } => {
+                let expected_revision = command.expected_revision.ok_or_else(|| {
+                    ServiceError::InvalidInput(
+                        "expected_revision is required for an existing text".to_owned(),
+                    )
+                })?;
                 let (node, text) = self.load_text(space_id, node_id).await?;
                 check_expected_sha(command.expected_sha256.as_deref(), &text.content_sha256)?;
                 validate_stored_text_format(&node.name, &stored)?;
@@ -334,7 +339,10 @@ impl FilesService {
                         space_id,
                         node.id,
                         &stored,
-                        command.expected_sha256.as_deref(),
+                        TextMutationGuard {
+                            revision: expected_revision,
+                            sha256: command.expected_sha256.as_deref(),
+                        },
                         caller_account_id,
                         TextMutationKind::Write,
                     )
@@ -345,10 +353,10 @@ impl FilesService {
                 parent_node_id,
                 name,
             } => {
-                // expected_sha256 cannot match a not-yet-existent text.
-                if command.expected_sha256.is_some() {
+                if command.expected_revision.is_some() || command.expected_sha256.is_some() {
                     return Err(ServiceError::Conflict(
-                        "expected_sha256 was supplied but the text does not exist".to_owned(),
+                        "expected_revision and expected_sha256 must be omitted when creating a text"
+                            .to_owned(),
                     ));
                 }
                 validation::validate_basename(&name)?;
@@ -374,6 +382,11 @@ impl FilesService {
 
         match command.target {
             WriteTarget::Existing { node_id } => {
+                let expected_revision = command.expected_revision.ok_or_else(|| {
+                    ServiceError::InvalidInput(
+                        "expected_revision is required for an existing text".to_owned(),
+                    )
+                })?;
                 let (node, text) = self.load_text(space_id, node_id).await?;
                 let previous_sha256 = text.content_sha256.clone();
                 check_expected_sha(command.expected_sha256.as_deref(), &previous_sha256)?;
@@ -393,7 +406,10 @@ impl FilesService {
                         space_id,
                         node.id,
                         &stored,
-                        Some(&previous_sha256),
+                        TextMutationGuard {
+                            revision: expected_revision,
+                            sha256: Some(&previous_sha256),
+                        },
                         caller_account_id,
                         TextMutationKind::Append,
                     )
@@ -404,9 +420,10 @@ impl FilesService {
                 parent_node_id,
                 name,
             } => {
-                if command.expected_sha256.is_some() {
+                if command.expected_revision.is_some() || command.expected_sha256.is_some() {
                     return Err(ServiceError::Conflict(
-                        "expected_sha256 was supplied but the text does not exist".to_owned(),
+                        "expected_revision and expected_sha256 must be omitted when creating a text"
+                            .to_owned(),
                     ));
                 }
                 self.write_text(
@@ -418,6 +435,7 @@ impl FilesService {
                             name,
                         },
                         body: WriteTextBody::Plain(command.content),
+                        expected_revision: None,
                         expected_sha256: None,
                     },
                 )
@@ -446,7 +464,10 @@ impl FilesService {
             caller_account_id,
             space_id,
             command.node_id,
-            command.expected_sha256.as_deref(),
+            TextMutationGuard {
+                revision: command.expected_revision,
+                sha256: command.expected_sha256.as_deref(),
+            },
             TextMutationKind::Patch,
             |content| apply_edits(content, &command.edits).map_err(Into::into),
         )
@@ -473,7 +494,10 @@ impl FilesService {
             caller_account_id,
             space_id,
             command.node_id,
-            command.expected_sha256.as_deref(),
+            TextMutationGuard {
+                revision: command.expected_revision,
+                sha256: command.expected_sha256.as_deref(),
+            },
             TextMutationKind::Edit,
             |content| apply_line_edits(content, &command.edits).map_err(Into::into),
         )
@@ -485,7 +509,7 @@ impl FilesService {
         caller_account_id: Uuid,
         space_id: Uuid,
         node_id: Uuid,
-        expected_sha256: Option<&str>,
+        guard: TextMutationGuard<'_>,
         mutation_kind: TextMutationKind,
         apply: impl FnOnce(&str) -> ServiceResult<AppliedText>,
     ) -> ServiceResult<PatchResult> {
@@ -493,7 +517,7 @@ impl FilesService {
         let previous_sha256 = text.content_sha256.clone();
 
         // Check the caller's version before matching either edit format.
-        check_expected_sha(expected_sha256, &previous_sha256)?;
+        check_expected_sha(guard.sha256, &previous_sha256)?;
         let plain_content = text.content.as_deref().ok_or_else(|| {
             ServiceError::InvalidInput("text content is not stored as plaintext".to_owned())
         })?;
@@ -505,14 +529,17 @@ impl FilesService {
         validation::validate_text_content(metrics.byte_len, metrics.line_count)?;
 
         let stored = metrics.into_stored_plain(applied.content);
-        let save_guard = expected_sha256.unwrap_or(&previous_sha256);
+        let save_sha256 = guard.sha256.unwrap_or(&previous_sha256);
         let (node, text) = self
             .store
             .save_text_content(
                 space_id,
                 node.id,
                 &stored,
-                Some(save_guard),
+                TextMutationGuard {
+                    revision: guard.revision,
+                    sha256: Some(save_sha256),
+                },
                 caller_account_id,
                 mutation_kind,
             )
@@ -567,6 +594,7 @@ impl FilesService {
         space_id: Uuid,
         node_id: Uuid,
         metadata: Value,
+        expected_revision: i64,
     ) -> ServiceResult<NodeView> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
@@ -578,6 +606,7 @@ impl FilesService {
                 space_id,
                 node_id,
                 &metadata,
+                expected_revision,
                 caller_account_id,
                 MetadataMutationKind::Replace,
             )
@@ -592,6 +621,7 @@ impl FilesService {
         space_id: Uuid,
         node_id: Uuid,
         patch: Value,
+        expected_revision: i64,
     ) -> ServiceResult<NodeView> {
         self.authorize(space_id, caller_account_id, FileCommand::Patch)
             .await?;
@@ -611,6 +641,7 @@ impl FilesService {
                 space_id,
                 node_id,
                 &metadata,
+                expected_revision,
                 caller_account_id,
                 MetadataMutationKind::Patch,
             )
@@ -634,24 +665,11 @@ impl FilesService {
                 "cannot move the root node".to_owned(),
             ));
         }
-        if let Some(expected_parent_id) = command.expected_parent_id
-            && node.parent_id != Some(expected_parent_id)
-        {
-            return Err(ServiceError::Conflict(
-                "expected_parent_id does not match the node's current parent; refresh and retry"
-                    .to_owned(),
-            ));
-        }
-
         let final_name = command
             .new_name
             .clone()
             .unwrap_or_else(|| node.name.clone());
         validation::validate_basename(&final_name)?;
-
-        if node.parent_id == Some(command.new_parent_node_id) && final_name == node.name {
-            return self.node_view(space_id, node).await;
-        }
 
         let moved = self
             .store
@@ -779,7 +797,13 @@ impl FilesService {
         let path = self.path_of(space_id, node.id).await?;
         let purge_after = self
             .store
-            .soft_delete_node(space_id, node.id, caller_account_id, command.recursive)
+            .soft_delete_node(
+                space_id,
+                node.id,
+                caller_account_id,
+                command.recursive,
+                command.expected_revision,
+            )
             .await?;
 
         Ok(DeleteResult {

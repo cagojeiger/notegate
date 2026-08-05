@@ -212,10 +212,13 @@ describe("query invalidation", () => {
       queryKey: queryKeys.childrenFamily("space-1")
     });
     expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.linkIndex("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
       queryKey: queryKeys.nodes("space-1")
     });
     expect(resetQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
     expect(queryClient.getQueryData(pathKey)).toBeUndefined();
     expect(queryClient.getQueryState(canonicalNodeKey)?.isInvalidated).toBe(
       true
@@ -235,6 +238,9 @@ describe("query invalidation", () => {
       delta(12, "text-2", ["parent-1"])
     ]);
 
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkIndex("space-1")
+    });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.node("space-1", "text-1"),
       exact: true
@@ -257,6 +263,21 @@ describe("query invalidation", () => {
     expect(
       queryClient.getQueryData(queryKeys.childrenRevision("space-1"))
     ).toBe(1);
+  });
+
+  it("invalidates link relations for an external file target change", async () => {
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await applyExternalFileChanges(queryClient, "space-1", [{
+      ...delta(11, "file-1", ["root-1"]),
+      op_type: "file.create",
+      item_kind: "file"
+    }]);
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkIndex("space-1")
+    });
   });
 
   it("invalidates descendant node details after an external folder write-lock change", async () => {

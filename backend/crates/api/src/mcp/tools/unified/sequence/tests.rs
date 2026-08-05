@@ -16,6 +16,34 @@ fn operation_specific_required_fields_use_the_common_recovery_action() {
 }
 
 #[test]
+fn revision_guards_fail_sequence_preflight_before_execution() {
+    let input = serde_json::from_value::<RunSequenceInput>(json!({
+        "purpose": "reject stale mutations before sequence execution",
+        "commands": [
+            {"tool": "read", "op": "spaces"},
+            {
+                "tool": "manage",
+                "op": "mv",
+                "source": "daily:/draft.md",
+                "destination": "daily:/published.md"
+            }
+        ]
+    }))
+    .expect("raw sequence commands parse before preflight");
+
+    let error = prepare_sequence_commands(input.commands, &input.purpose)
+        .expect_err("missing revision must fail preflight");
+    let data = error.data.expect("structured preflight data");
+
+    assert_eq!(data["executed"], false);
+    assert_eq!(data["errors"][0]["index"], 1);
+    assert_eq!(
+        data["errors"][0]["next_action"]["fields"][0]["field"],
+        "commands[1].expected_revision"
+    );
+}
+
+#[test]
 fn purpose_is_required_for_direct_and_sequence_calls() {
     let direct = serde_json::from_value::<SearchInput>(json!({
         "op": "find",
@@ -68,7 +96,7 @@ fn sequence_command_rejects_fields_from_other_tools() {
             "commands": [
                 {"tool": "read", "op": "spaces", "q": "cache"},
                 {"tool": "search", "op": "find", "target": "daily:/", "q": "cache", "content": "ignored"},
-                {"tool": "write", "op": "write", "target": "daily:/note.md", "content": "body", "source": "daily:/old.md"},
+                {"tool": "write", "op": "write", "target": "daily:/note.md", "content": "body", "expected_revision": 1, "source": "daily:/old.md"},
                 {"tool": "manage", "op": "mkdir", "target": "daily:/folder", "cursor": "ignored"}
             ]
         }))
@@ -301,7 +329,8 @@ fn sequence_preflight_collects_later_static_errors_before_execution() {
                 "tool": "write",
                 "op": "write",
                 "target": "daily:/created.md",
-                "content": "created"
+                "content": "created",
+                "create": true
             },
             {"tool": "search", "op": "find", "target": "daily:/"},
             {"tool": "manage", "op": "mv", "source": "daily:/from.md"}
@@ -333,7 +362,8 @@ fn sequence_preflight_rejects_invalid_changes_before_a_prior_write_executes() {
                 "tool": "write",
                 "op": "write",
                 "target": "daily:/created.md",
-                "content": "created"
+                "content": "created",
+                "create": true
             },
             {
                 "tool": "read",
@@ -406,11 +436,11 @@ fn sequence_preflight_rejects_input_only_errors_before_a_prior_write_executes() 
             "start_line must be less than or equal to end_line",
         ),
         (
-            json!({"tool": "write", "op": "write", "target": "daily:/config.json", "content": "{\"ok\":}"}),
+            json!({"tool": "write", "op": "write", "target": "daily:/config.json", "content": "{\"ok\":}", "expected_revision": 1}),
             "invalid json syntax in config.json",
         ),
         (
-            json!({"tool": "write", "op": "append", "target": "daily:/note.md", "content": oversized_append}),
+            json!({"tool": "write", "op": "append", "target": "daily:/note.md", "content": oversized_append, "expected_revision": 1}),
             "text exceeds the maximum",
         ),
         (
@@ -751,7 +781,7 @@ fn sequence_access_conflicts_are_path_and_scope_aware() {
     let purpose = "plan safe sequence concurrency";
     let commands = prepare_sequence_commands(
         vec![
-            json!({"tool": "write", "op": "write", "target": "daily:/a/note.md", "content": "x"}),
+            json!({"tool": "write", "op": "write", "target": "daily:/a/note.md", "content": "x", "expected_revision": 1}),
             json!({"tool": "read", "op": "read", "target": "daily:/b/note.md"}),
             json!({"tool": "search", "op": "grep", "target": "daily:/a", "q": "x"}),
             json!({"tool": "read", "op": "changes", "target": "daily:/"}),
@@ -796,13 +826,13 @@ fn sequence_commands_are_classified_before_graph_construction() {
                 json!({"tool": "read", "op": "read", "target": "daily:/note.md"}),
                 json!({"tool": "search", "op": "grep", "target": "daily:/", "q": "cache"}),
                 json!({"tool": "read", "op": "changes", "target": "daily:/"}),
-                json!({"tool": "write", "op": "write", "target": "daily:/note.md", "content": "x"}),
+                json!({"tool": "write", "op": "write", "target": "daily:/note.md", "content": "x", "expected_revision": 1}),
                 json!({"tool": "write", "op": "write", "target": "daily:/new.md", "content": "x", "create": true}),
                 json!({"tool": "manage", "op": "mkdir", "target": "daily:/folder"}),
                 json!({"tool": "manage", "op": "mkdir", "target": "daily:/a/b", "parents": true}),
-                json!({"tool": "manage", "op": "mv", "source": "daily:/a", "destination": "daily:/b"}),
+                json!({"tool": "manage", "op": "mv", "source": "daily:/a", "destination": "daily:/b", "expected_revision": 1}),
                 json!({"tool": "manage", "op": "cp", "source": "daily:/a", "destination": "daily:/b"}),
-                json!({"tool": "manage", "op": "rm", "target": "daily:/a", "recursive": true})
+                json!({"tool": "manage", "op": "rm", "target": "daily:/a", "recursive": true, "expected_revision": 1})
             ],
             "classify sequence execution",
         )
@@ -855,11 +885,11 @@ fn dependency_graph_is_explicit_and_structural_mutations_are_barriers() {
     let commands = prepare_sequence_commands(
             vec![
                 json!({"tool": "read", "op": "read", "target": "daily:/before.md"}),
-                json!({"tool": "write", "op": "write", "target": "daily:/point.md", "content": "x"}),
+                json!({"tool": "write", "op": "write", "target": "daily:/point.md", "content": "x", "expected_revision": 1}),
                 json!({"tool": "read", "op": "read", "target": "daily:/other.md"}),
                 json!({"tool": "manage", "op": "cp", "source": "daily:/source", "destination": "daily:/destination", "recursive": true}),
                 json!({"tool": "read", "op": "read", "target": "other:/after.md"}),
-                json!({"tool": "write", "op": "write", "target": "daily:/last.md", "content": "x"})
+                json!({"tool": "write", "op": "write", "target": "daily:/last.md", "content": "x", "expected_revision": 1})
             ],
             "build a deterministic dependency graph",
         )

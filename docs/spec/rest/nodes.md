@@ -142,20 +142,23 @@ type CreateNodeBody = {
 type UpdateNodeBody = {
   name?: string
   sort_order?: number
+  expected_revision: number
 }
 
 type UpdateNodeSearchPolicyBody = {
   enabled: boolean
+  expected_revision: number
 }
 
 type UpdateNodeWriteLockBody = {
   enabled: boolean
+  expected_revision: number
 }
 
 type MoveNodeBody = {
   new_parent_id: string
   new_name?: string
-  expected_parent_id?: string
+  expected_revision: number
 }
 ```
 
@@ -169,6 +172,7 @@ type MoveNodeBody = {
 - Text 암호화는 Text API의 `PUT /text/{node_id}/encryption`으로 변경한다.
 - Root node는 rename/move/delete할 수 없다.
 - `POST /nodes/{node_id}/move`는 같은 Space 안에서만 parent/name을 변경한다.
+- 기존 node 변경과 삭제는 최신 `RestNode.revision`을 `expected_revision`으로 보내야 한다. 삭제는 query parameter를 사용한다.
 - Folder 삭제는 `recursive=true`가 필요하다.
 - 삭제는 soft delete이며, purge job이 retention 이후 DB metadata를 hard delete할 수 있다. S3 object File은 soft delete transaction에서 즉시 비동기 물리 삭제 대상으로 전환하며 복구를 지원하지 않는다.
 
@@ -213,6 +217,6 @@ Rules:
 Update rules:
 
 - `GET /metadata`는 `{ "metadata": {...} }`를 반환한다.
-- `PUT /metadata`는 `{ "metadata": {...} }`로 metadata 전체를 교체한다.
-- `PATCH /metadata`는 `{ "patch": {...} }`로 JSON Merge Patch 방식 부분 수정을 수행한다.
+- `PUT /metadata`는 `{ "metadata": {...}, "expected_revision": 4 }`로 metadata 전체를 교체한다.
+- `PATCH /metadata`는 `{ "patch": {...}, "expected_revision": 4 }`로 JSON Merge Patch 방식 부분 수정을 수행한다.
 - PATCH에서 `null` 값은 해당 key 삭제를 의미한다.

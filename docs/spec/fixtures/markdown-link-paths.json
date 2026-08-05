@@ -1,0 +1,68 @@
+[
+  {
+    "name": "relative path",
+    "source_path": "/docs/index.md",
+    "href": "./A%20B.md",
+    "expected": "/docs/A B.md"
+  },
+  {
+    "name": "colon inside path segment",
+    "source_path": "/docs/index.md",
+    "href": "./folder/a:b.md",
+    "expected": "/docs/folder/a:b.md"
+  },
+  {
+    "name": "root path",
+    "source_path": "/docs/index.md",
+    "href": "/README.md#overview",
+    "expected": "/README.md"
+  },
+  {
+    "name": "external URL",
+    "source_path": "/docs/index.md",
+    "href": "https://example.com/docs",
+    "expected": "external"
+  },
+  {
+    "name": "same-document anchor",
+    "source_path": "/docs/index.md",
+    "href": "#overview",
+    "expected": "external"
+  },
+  {
+    "name": "query string",
+    "source_path": "/docs/index.md",
+    "href": "./note.md?view=1",
+    "expected": "invalid"
+  },
+  {
+    "name": "encoded slash",
+    "source_path": "/docs/index.md",
+    "href": "./folder%2Fsecret.md",
+    "expected": "invalid"
+  },
+  {
+    "name": "malformed encoding",
+    "source_path": "/docs/index.md",
+    "href": "./bad%path.md",
+    "expected": "invalid"
+  },
+  {
+    "name": "C0 control character",
+    "source_path": "/docs/index.md",
+    "href": "./bad%0Aname.md",
+    "expected": "invalid"
+  },
+  {
+    "name": "C1 control character",
+    "source_path": "/docs/index.md",
+    "href": "./bad%C2%80name.md",
+    "expected": "invalid"
+  },
+  {
+    "name": "path escapes space root",
+    "source_path": "/index.md",
+    "href": "../outside.md",
+    "expected": "invalid"
+  }
+]

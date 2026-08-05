@@ -24,7 +24,7 @@ pub struct MoveNodeArgs<'a> {
     pub node_id: Uuid,
     pub new_parent_id: Uuid,
     pub new_name: Option<&'a str>,
-    pub expected_parent_id: Option<Uuid>,
+    pub expected_revision: i64,
     pub updated_by: Uuid,
     pub caps: Limits,
 }
@@ -38,7 +38,7 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
         node_id,
         new_parent_id,
         new_name,
-        expected_parent_id,
+        expected_revision,
         updated_by,
         caps,
     } = args;
@@ -58,18 +58,12 @@ pub async fn move_node(args: MoveNodeArgs<'_>) -> Result<Node> {
     .await
     .map_err(map_sqlx_error)?
     .ok_or_else(|| Error::not_found("node not found"))?;
+    checks::require_revision(moved_row.revision, expected_revision)?;
     let current_parent_id = moved_row.parent_id;
     let current_name = moved_row.name.clone();
     let moved_kind = moved_row.kind.clone();
     if current_parent_id.is_none() {
         return Err(Error::conflict("cannot move the root node"));
-    }
-    if let Some(expected_parent_id) = expected_parent_id
-        && current_parent_id != Some(expected_parent_id)
-    {
-        return Err(Error::conflict(
-            "expected_parent_id does not match the node's current parent; refresh and retry",
-        ));
     }
     let final_name = new_name.unwrap_or(&current_name);
     if current_parent_id == Some(new_parent_id) && final_name == current_name {

@@ -518,6 +518,7 @@ fn parse_collection_view(view: Option<&str>) -> Result<bool, ApiError> {
 #[cfg(test)]
 mod collection_response_tests {
     use chrono::{TimeZone, Utc};
+    use notegate_service::files::MAX_BATCH_CHILDREN_PARENTS;
 
     use super::*;
 
@@ -529,7 +530,7 @@ mod collection_response_tests {
             .single()
             .ok_or("invalid test timestamp")?;
         let mut results = Vec::new();
-        for parent_index in 0..16_u128 {
+        for parent_index in 0..MAX_BATCH_CHILDREN_PARENTS as u128 {
             let parent_id = Uuid::from_u128(10 + parent_index);
             let children = (0..100_u128)
                 .map(|child_index| NodeSummaryOut {
@@ -538,6 +539,7 @@ mod collection_response_tests {
                     name: "n".repeat(128),
                     kind: "file".to_owned(),
                     path: format!("/{}", "p".repeat(902)),
+                    revision: 1,
                     has_children: false,
                     effective_write_locked: None,
                     byte_len: Some(crate::file_preview::PREVIEW_MAX_BYTES),
@@ -554,6 +556,7 @@ mod collection_response_tests {
                     id: parent_id,
                     path: format!("/{}", "p".repeat(902)),
                     kind: "folder".to_owned(),
+                    revision: 1,
                 }),
                 children,
                 page: Some(Page::new(100, 100, true, Some("c".repeat(256)))),
@@ -691,6 +694,7 @@ pub(crate) async fn create(
                                     name: body.name,
                                 },
                                 body: WriteTextBody::Plain(content),
+                                expected_revision: None,
                                 expected_sha256: None,
                             },
                         )
@@ -730,6 +734,7 @@ pub(crate) async fn create(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct UpdateNodeBody {
+    expected_revision: i64,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -740,12 +745,14 @@ pub(crate) struct UpdateNodeBody {
 #[serde(deny_unknown_fields)]
 pub(crate) struct UpdateNodeSearchPolicyBody {
     enabled: bool,
+    expected_revision: i64,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct UpdateNodeWriteLockBody {
     enabled: bool,
+    expected_revision: i64,
 }
 
 #[utoipa::path(
@@ -772,6 +779,7 @@ pub(crate) async fn update(
                 node_id,
                 name: body.name,
                 sort_order: body.sort_order,
+                expected_revision: body.expected_revision,
             },
         )
         .await?;
@@ -806,6 +814,7 @@ pub(crate) async fn update_search_policy(
             UpdateNodeSearchPolicy {
                 node_id,
                 enabled: body.enabled,
+                expected_revision: body.expected_revision,
             },
         )
         .await?;
@@ -839,6 +848,7 @@ pub(crate) async fn update_write_lock(
             UpdateNodeWriteLock {
                 node_id,
                 enabled: body.enabled,
+                expected_revision: body.expected_revision,
             },
         )
         .await?;
@@ -850,13 +860,20 @@ pub(crate) async fn update_write_lock(
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub(crate) struct MetadataOut {
+    metadata: Value,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub(crate) struct MetadataBody {
     metadata: Value,
+    expected_revision: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub(crate) struct MetadataPatchBody {
     patch: Value,
+    expected_revision: i64,
 }
 
 #[utoipa::path(
@@ -864,19 +881,19 @@ pub(crate) struct MetadataPatchBody {
     path = "/api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    responses((status = 200, description = "Get node metadata", body = MetadataBody)),
+    responses((status = 200, description = "Get node metadata", body = MetadataOut)),
     security(("browser_session" = []))
 )]
 pub(crate) async fn get_metadata(
     State(state): State<AppState>,
     Extension(caller): Extension<Caller>,
     Path((space_id, node_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<MetadataBody>, ApiError> {
+) -> Result<Json<MetadataOut>, ApiError> {
     let metadata = state
         .files
         .read_metadata(caller.account_id(), space_id, node_id)
         .await?;
-    Ok(Json(MetadataBody { metadata }))
+    Ok(Json(MetadataOut { metadata }))
 }
 
 #[utoipa::path(
@@ -896,7 +913,13 @@ pub(crate) async fn replace_metadata(
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
-        .replace_metadata(caller.account_id(), space_id, node_id, body.metadata)
+        .replace_metadata(
+            caller.account_id(),
+            space_id,
+            node_id,
+            body.metadata,
+            body.expected_revision,
+        )
         .await?;
     let refs = state
         .accounts
@@ -922,7 +945,13 @@ pub(crate) async fn patch_metadata(
 ) -> Result<Json<NodeOut>, ApiError> {
     let view = state
         .files
-        .patch_metadata(caller.account_id(), space_id, node_id, body.patch)
+        .patch_metadata(
+            caller.account_id(),
+            space_id,
+            node_id,
+            body.patch,
+            body.expected_revision,
+        )
         .await?;
     let refs = state
         .accounts
@@ -936,10 +965,7 @@ pub(crate) struct MoveNodeBody {
     new_parent_id: Uuid,
     #[serde(default)]
     new_name: Option<String>,
-    /// Optional optimistic guard. When present and it does not match the node's
-    /// current parent, the move is rejected as a conflict.
-    #[serde(default)]
-    expected_parent_id: Option<Uuid>,
+    expected_revision: i64,
 }
 
 #[utoipa::path(
@@ -968,7 +994,7 @@ pub(crate) async fn move_node(
                 node_id,
                 new_parent_node_id: body.new_parent_id,
                 new_name: body.new_name,
-                expected_parent_id: body.expected_parent_id,
+                expected_revision: body.expected_revision,
             },
         )
         .await?;
@@ -983,6 +1009,7 @@ pub(crate) async fn move_node(
 pub(crate) struct DeleteQuery {
     #[serde(default)]
     recursive: bool,
+    expected_revision: i64,
 }
 
 #[utoipa::path(
@@ -993,6 +1020,7 @@ pub(crate) struct DeleteQuery {
         ("space_id" = Uuid, Path),
         ("node_id" = Uuid, Path),
         ("recursive" = Option<bool>, Query, description = "Required to delete folders"),
+        ("expected_revision" = i64, Query, description = "Revision from the latest node read"),
     ),
     responses((status = 204, description = "Delete node")),
     security(("browser_session" = []))
@@ -1011,6 +1039,7 @@ pub(crate) async fn delete(
             DeleteNode {
                 node_id,
                 recursive: query.recursive,
+                expected_revision: query.expected_revision,
             },
         )
         .await?;
@@ -1026,27 +1055,36 @@ mod update_request_tests {
     #[test]
     fn generic_update_rejects_policy_fields() {
         assert!(
-            serde_json::from_value::<UpdateNodeBody>(json!({ "search_enabled": false })).is_err()
+            serde_json::from_value::<UpdateNodeBody>(
+                json!({ "expected_revision": 1, "search_enabled": false })
+            )
+            .is_err()
         );
         assert!(
-            serde_json::from_value::<UpdateNodeBody>(json!({ "text_encryption_enabled": true }))
-                .is_err()
+            serde_json::from_value::<UpdateNodeBody>(
+                json!({ "expected_revision": 1, "text_encryption_enabled": true })
+            )
+            .is_err()
         );
     }
 
     #[test]
     fn write_lock_update_accepts_only_an_explicit_boolean() {
         assert!(
-            serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": true }))
-                .is_ok_and(|body| body.enabled)
-        );
-        assert!(
-            serde_json::from_value::<UpdateNodeWriteLockBody>(json!({ "enabled": "true" }))
-                .is_err()
+            serde_json::from_value::<UpdateNodeWriteLockBody>(
+                json!({ "enabled": true, "expected_revision": 1 })
+            )
+            .is_ok_and(|body| body.enabled && body.expected_revision == 1)
         );
         assert!(
             serde_json::from_value::<UpdateNodeWriteLockBody>(
-                json!({ "enabled": true, "scope": "subtree" })
+                json!({ "enabled": "true", "expected_revision": 1 })
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UpdateNodeWriteLockBody>(
+                json!({ "enabled": true, "expected_revision": 1, "scope": "subtree" })
             )
             .is_err()
         );

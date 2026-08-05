@@ -16,6 +16,11 @@ type NavigationActionsProps = {
   loadCanonicalNode: CanonicalNodeLoader;
 };
 
+type EditorGroupSnapshot = {
+  groupId: number;
+  nodeId: string | null;
+};
+
 export function useWorkbenchNodeNavigationActions({
   activeSpace,
   loadCanonicalNode
@@ -40,6 +45,28 @@ export function useWorkbenchNodeNavigationActions({
 
   async function openNodeInNewGroup(summary: NodeSummary) {
     await openNodeFromSummary(summary, openInNewGroup);
+  }
+
+  async function openLinkedNode(spaceId: string, nodeId: string) {
+    if (activeSpace?.id !== spaceId) return;
+    const sourceGroup = activeGroupSnapshot(spaceId);
+    if (!sourceGroup) return;
+
+    let resolved: { node: RestNode; reveal: NodeRevealResponse | null };
+    try {
+      resolved = await loadNavigationNode(spaceId, nodeId);
+    } catch (error) {
+      showToast(error instanceof ApiError && error.status === 404 ? "Link target not found" : "Could not open link target");
+      return;
+    }
+    if (!isCurrentGroupSnapshot(spaceId, sourceGroup)) return;
+
+    if (resolved.reveal) applyReveal(resolved.reveal);
+    openInGroup(sourceGroup.groupId, resolved.node);
+    closeMobile();
+    if (!resolved.reveal) {
+      showToast("Opened item, but could not reveal it in Files");
+    }
   }
 
   async function openMarkdownLink(groupId: number, sourceNode: RestNode, path: string) {
@@ -122,6 +149,21 @@ export function useWorkbenchNodeNavigationActions({
     else next.delete(groupId);
     navigatingGroupsRef.current = next;
     setNavigatingGroupIds(next);
+  }
+
+  function activeGroupSnapshot(spaceId: string): EditorGroupSnapshot | null {
+    const state = useUiStore.getState();
+    const group = state.editorGroups[state.activeGroupIndex];
+    if (state.activeSpaceId !== spaceId || !group) return null;
+    return { groupId: group.id, nodeId: group.node?.id ?? null };
+  }
+
+  function isCurrentGroupSnapshot(spaceId: string, snapshot: EditorGroupSnapshot): boolean {
+    const state = useUiStore.getState();
+    const group = state.editorGroups.find((candidate) => candidate.id === snapshot.groupId);
+    return state.activeSpaceId === spaceId
+      && group !== undefined
+      && (group.node?.id ?? null) === snapshot.nodeId;
   }
 
   function isCurrentMarkdownLinkSource(spaceId: string, groupId: number, sourceNode: RestNode): boolean {
@@ -236,6 +278,7 @@ export function useWorkbenchNodeNavigationActions({
   return {
     openNode,
     openNodeInNewGroup,
+    openLinkedNode,
     openMarkdownLink,
     navigateEditorGroup,
     navigatingGroupIds

@@ -150,7 +150,7 @@ GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 
 ```text
 restore root and multiple expanded folders with missing cache
--> fetch their first pages in batches of at most 16 parents
+-> fetch their first pages in batches of at most 15 parents
 -> seed each folder's existing children query cache
 
 expand root/folder
@@ -337,7 +337,7 @@ split
 
 ```text
 edit text
--> PUT /text/{node_id} with expected_sha256
+-> PUT /text/{node_id} with expected_revision and optional expected_sha256
 -> success: preview mode + patch cached node representations + refresh text/recent
 -> conflict: show conflict state
 ```

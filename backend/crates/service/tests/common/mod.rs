@@ -73,3 +73,11 @@ pub async fn setup_space(space_repo: &SpaceRepo, owner: Uuid, name: &str) -> (Uu
         .expect("root id present");
     (space.id, root)
 }
+
+#[allow(dead_code)]
+pub async fn node_revision(pool: &PgPool, node_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT revision FROM nodes WHERE id = $1")
+        .bind(node_id)
+        .fetch_one(pool)
+        .await
+}

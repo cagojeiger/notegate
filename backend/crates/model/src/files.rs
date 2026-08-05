@@ -90,6 +90,7 @@ pub enum WriteTextBody {
 pub struct WriteText {
     pub target: WriteTarget,
     pub body: WriteTextBody,
+    pub expected_revision: Option<i64>,
     pub expected_sha256: Option<String>,
 }
 
@@ -97,6 +98,7 @@ pub struct WriteText {
 pub struct AppendText {
     pub target: WriteTarget,
     pub content: String,
+    pub expected_revision: Option<i64>,
     pub expected_sha256: Option<String>,
     pub ensure_newline: bool,
 }
@@ -139,6 +141,7 @@ pub struct Edit {
 pub struct PatchText {
     pub node_id: Uuid,
     pub edits: Vec<Edit>,
+    pub expected_revision: i64,
     pub expected_sha256: Option<String>,
 }
 
@@ -167,6 +170,7 @@ pub enum LineEdit {
 pub struct EditText {
     pub node_id: Uuid,
     pub edits: Vec<LineEdit>,
+    pub expected_revision: i64,
     pub expected_sha256: Option<String>,
 }
 
@@ -175,7 +179,7 @@ pub struct MoveNode {
     pub node_id: Uuid,
     pub new_parent_node_id: Uuid,
     pub new_name: Option<String>,
-    pub expected_parent_id: Option<Uuid>,
+    pub expected_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,24 +187,28 @@ pub struct UpdateNode {
     pub node_id: Uuid,
     pub name: Option<String>,
     pub sort_order: Option<i32>,
+    pub expected_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateNodeSearchPolicy {
     pub node_id: Uuid,
     pub enabled: bool,
+    pub expected_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateNodeWriteLock {
     pub node_id: Uuid,
     pub enabled: bool,
+    pub expected_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateTextEncryption {
     pub node_id: Uuid,
     pub enabled: bool,
+    pub expected_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +230,7 @@ pub struct CopyCounts {
 pub struct DeleteNode {
     pub node_id: Uuid,
     pub recursive: bool,
+    pub expected_revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

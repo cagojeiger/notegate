@@ -23,6 +23,7 @@ pub async fn update_node_write_lock(
 
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
     let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+    checks::require_revision(current.revision, command.expected_revision)?;
     if current.parent_id.is_none() {
         return Err(Error::conflict("cannot change the root node write lock"));
     }

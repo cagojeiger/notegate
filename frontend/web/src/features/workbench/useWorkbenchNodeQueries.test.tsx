@@ -64,7 +64,8 @@ describe("workbench node mutations", () => {
       expect.anything(),
       current.space_id,
       current.id,
-      false
+      false,
+      current.revision
     );
     expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
     expect(onUpdated).toHaveBeenCalledWith(updated);
@@ -93,7 +94,8 @@ describe("workbench node mutations", () => {
       expect.anything(),
       current.space_id,
       current.id,
-      true
+      true,
+      current.revision
     );
     expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
     expect(invalidateQueries).toHaveBeenCalledWith({
@@ -126,7 +128,8 @@ describe("workbench node mutations", () => {
       expect.anything(),
       current.space_id,
       current.id,
-      true
+      true,
+      current.revision
     );
     expect(queryClient.getQueryData(queryKeys.node(current.space_id, current.id))).toEqual(updated);
     expect(invalidateQueries).toHaveBeenCalledWith({
@@ -251,6 +254,13 @@ describe("workbench node mutations", () => {
       await result.current.mutateAsync({ node: folder, recursive: true });
     });
 
+    expect(deleteNode).toHaveBeenCalledWith(
+      expect.anything(),
+      folder.space_id,
+      folder.id,
+      true,
+      folder.revision
+    );
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "image"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "pdf"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1", "image"))).toBeUndefined();
@@ -265,8 +275,11 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.nodes("space-1")
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkIndex("space-1")
+    });
     expect(resetQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {
@@ -281,6 +294,12 @@ describe("workbench node mutations", () => {
       await result.current.mutateAsync({ node: source, parentId: "folder-2" });
     });
 
+    expect(moveNode).toHaveBeenCalledWith(
+      expect.anything(),
+      source.space_id,
+      source.id,
+      { new_parent_id: "folder-2", expected_revision: source.revision }
+    );
     expect(resetQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.recent("space-1"),
       exact: true
@@ -315,10 +334,13 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.childrenFamily("space-1")
     });
     expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.linkIndex("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
       queryKey: queryKeys.nodes("space-1")
     });
     expect(resetQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 });
 

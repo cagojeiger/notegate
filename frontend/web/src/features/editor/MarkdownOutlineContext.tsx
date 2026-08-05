@@ -18,12 +18,12 @@ export type MarkdownOutlineSnapshot = MarkdownOutlineIdentity & {
   navigate: (itemId: string) => void;
 };
 
-export type MarkdownInspectorView = "details" | "outline";
+export type InspectorView = "details" | "outline" | "links";
 
 type MarkdownOutlineContextValue = {
   outlinesByGroup: Readonly<Record<number, MarkdownOutlineSnapshot>>;
-  preferredInspectorView: MarkdownInspectorView;
-  setPreferredInspectorView: (view: MarkdownInspectorView) => void;
+  preferredInspectorView: InspectorView;
+  setPreferredInspectorView: (view: InspectorView) => void;
   publishOutline: (outline: MarkdownOutlineSnapshot) => void;
   clearOutline: (identity: MarkdownOutlineIdentity) => void;
   readScrollPosition: (identity: MarkdownOutlineIdentity) => number | undefined;
@@ -36,7 +36,7 @@ const MarkdownOutlineContext = createContext<MarkdownOutlineContextValue | null>
 
 export function MarkdownOutlineProvider({ children }: { children: ReactNode }) {
   const [outlinesByGroup, setOutlinesByGroup] = useState<Record<number, MarkdownOutlineSnapshot>>({});
-  const [preferredInspectorView, setPreferredInspectorView] = useState<MarkdownInspectorView>("details");
+  const [preferredInspectorView, setPreferredInspectorView] = useState<InspectorView>("details");
   const scrollPositions = useRef(new Map<string, number>());
 
   const publishOutline = useCallback((outline: MarkdownOutlineSnapshot) => {

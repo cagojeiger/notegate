@@ -3,6 +3,7 @@ pub mod connections;
 pub mod dto;
 pub mod file_uploads;
 pub mod files;
+pub mod link_index;
 pub mod me;
 pub mod nodes;
 pub mod spaces;

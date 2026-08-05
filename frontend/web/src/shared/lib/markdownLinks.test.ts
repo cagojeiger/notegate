@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import pathContractCases from "../../../../../docs/spec/fixtures/markdown-link-paths.json";
 import { classifyMarkdownLink, safeMarkdownUrlTransform } from "./markdownLinks";
 
 describe("safeMarkdownUrlTransform", () => {
@@ -34,6 +35,14 @@ describe("safeMarkdownUrlTransform", () => {
 });
 
 describe("classifyMarkdownLink", () => {
+  it("matches the shared backend path contract", () => {
+    for (const testCase of pathContractCases) {
+      const intent = classifyMarkdownLink(testCase.source_path, testCase.href);
+      const actual = intent.kind === "internal" ? intent.path : intent.kind;
+      expect(actual, testCase.name).toBe(testCase.expected);
+    }
+  });
+
   it("classifies only relative and root paths as internal or invalid node path candidates", () => {
     expect(classifyMarkdownLink("/index.md", "./note.md").kind).toBe("internal");
     expect(classifyMarkdownLink("/folder/index.md", "../note.md")).toEqual({ kind: "internal", path: "/note.md" });

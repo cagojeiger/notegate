@@ -8,10 +8,11 @@ export function readText(client: ApiClient, spaceId: string, nodeId: string): Pr
   return client.get<ReadTextResponse>(`/api/v1/spaces/${spaceId}/text/${nodeId}?max_lines=${TEXT_READ_MAX_LINES}&max_bytes=${TEXT_READ_MAX_BYTES}`);
 }
 
-export function replaceText(client: ApiClient, spaceId: string, nodeId: string, content: string, expectedSha256?: string): Promise<TextResponse> {
+export function replaceText(client: ApiClient, spaceId: string, nodeId: string, content: string, expectedRevision: number, expectedSha256?: string): Promise<TextResponse> {
   return client.put<TextResponse>(`/api/v1/spaces/${spaceId}/text/${nodeId}`, {
     storage_format: "plain",
     content,
+    expected_revision: expectedRevision,
     expected_sha256: expectedSha256
   });
 }
@@ -20,10 +21,11 @@ export function updateTextEncryption(
   client: ApiClient,
   spaceId: string,
   nodeId: string,
-  enabled: boolean
+  enabled: boolean,
+  expectedRevision: number
 ): Promise<RestNode> {
   return client.put<RestNode>(
     `/api/v1/spaces/${spaceId}/text/${nodeId}/encryption`,
-    { enabled }
+    { enabled, expected_revision: expectedRevision }
   );
 }

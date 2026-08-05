@@ -1,14 +1,15 @@
 import { ChevronRight, LockKeyhole, Search } from "lucide-react";
-import { useId, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 
 import type { RestNode } from "../api/types";
-import { useMarkdownOutlineContext, type MarkdownInspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
+import { useMarkdownOutlineContext, type InspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
 import { useFolderChildrenStat } from "../features/editor/useEditorQueries";
 import { formatBytes } from "../shared/lib/formatBytes";
 import { Button, MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
 import { WriteLockStatus } from "./WriteLockStatus";
 
 const EMPTY = "—";
+const NodeLinksSection = lazy(() => import("../features/links/NodeLinksSection").then((module) => ({ default: module.NodeLinksSection })));
 
 type AuxiliarySidebarProps = {
   activeNode: RestNode | null;
@@ -25,6 +26,7 @@ type AuxiliarySidebarProps = {
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
+  onOpenLinkedNode: (spaceId: string, nodeId: string) => void;
   onOutlineNavigate?: () => void;
 };
 
@@ -43,9 +45,10 @@ export function AuxiliarySidebar({
   onSearchEnabledChange,
   onWriteLockedChange,
   onTextEncryptionEnabledChange,
+  onOpenLinkedNode,
   onOutlineNavigate
 }: AuxiliarySidebarProps) {
-  const [localPreferredView, setLocalPreferredView] = useState<MarkdownInspectorView>("details");
+  const [localPreferredView, setLocalPreferredView] = useState<InspectorView>("details");
   const panelIdPrefix = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const outlineContext = useMarkdownOutlineContext();
   const preferredView = outlineContext?.preferredInspectorView ?? localPreferredView;
@@ -57,7 +60,10 @@ export function AuxiliarySidebar({
     && outline.spaceId === activeNode.space_id
     && outline.nodeId === activeNode.id
   );
-  const selectedView: MarkdownInspectorView = preferredView === "outline" && outlineAvailable ? "outline" : "details";
+  const selectedView: InspectorView = !activeNode
+    || (preferredView === "outline" && !outlineAvailable)
+    ? "details"
+    : preferredView;
   const metadata = activeNode?.metadata ?? {};
   const clientEncrypted = activeNode?.text_storage_format === "encrypted";
   const serverEncrypted = activeNode?.text_at_rest_encryption === "server";
@@ -70,7 +76,8 @@ export function AuxiliarySidebar({
         <Tabs
           items={[
             { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
-            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable }
+            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable },
+            { id: "links", label: "Links", controls: `${panelIdPrefix}-links`, disabled: !activeNode }
           ]}
           value={selectedView}
           onChange={setPreferredView}
@@ -224,8 +231,33 @@ export function AuxiliarySidebar({
           <OutlinePanel outline={outline} onNavigate={onOutlineNavigate} />
         ) : null}
       </div>
+      <div
+        id={`${panelIdPrefix}-links`}
+        role="tabpanel"
+        aria-labelledby={`${panelIdPrefix}-links-tab`}
+        tabIndex={0}
+        hidden={selectedView !== "links"}
+        className="h-full overflow-y-auto p-3"
+      >
+        {selectedView === "links" ? (
+          <div className="rounded-2xl border border-border bg-surface">
+            <Suspense fallback={<LinkSectionFallback />}>
+              <NodeLinksSection node={activeNode} onOpenLinkedNode={onOpenLinkedNode} />
+            </Suspense>
+          </div>
+        ) : null}
+      </div>
       </div>
     </aside>
+  );
+}
+
+function LinkSectionFallback() {
+  return (
+    <section className="p-4">
+      <SectionHeader title="Links" />
+      <p className="text-xs text-muted">Loading links…</p>
+    </section>
   );
 }
 

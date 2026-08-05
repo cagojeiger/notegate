@@ -6,7 +6,7 @@ import type {
   RestNode,
   Space
 } from "../src/api/types";
-import { routeJsonApi } from "./support/api";
+import { routeWorkbenchJsonApi } from "./support/linkIndex";
 import { usageResponse } from "./support/usage";
 
 const space: Space = {
@@ -34,7 +34,7 @@ test("Recent loads a second page once, deduplicates the boundary, and renders ho
   const recentRequests: string[] = [];
   const hostileName = `"><script>window.__notegateInjected=1</script>.md`;
 
-  await routeJsonApi(page, (url) => {
+  await routeWorkbenchJsonApi(page, (url) => {
     if (isNodesList(url)) {
       recentRequests.push(url.search);
       if (url.searchParams.get("cursor") === "recent-cursor-1") {
@@ -69,7 +69,7 @@ test("revealing a deeply nested recent node restores expanded folders with one b
   let batchRequests = 0;
   let nestedChildrenRequests = 0;
 
-  await routeJsonApi(page, (url, request) => {
+  await routeWorkbenchJsonApi(page, (url, request) => {
     if (request.method() === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
       batchRequests += 1;
       const parentIds = bodyParentIds(request.postData());
@@ -96,7 +96,7 @@ test("a malformed batch response falls back to individual folder queries", async
   let batchRequests = 0;
   const requestedParents = new Set<string>();
 
-  await routeJsonApi(page, (url, request) => {
+  await routeWorkbenchJsonApi(page, (url, request) => {
     if (request.method() === "POST" && url.pathname.endsWith("/nodes:batchListChildren")) {
       batchRequests += 1;
       return { results: [] };
@@ -248,6 +248,7 @@ function node(
     write_locked: false,
     write_lock_sources: [],
     has_children: kind === "folder",
+    revision: 1,
     effective_write_locked: false,
     content_sha256: kind === "text" ? `sha-${id}` : undefined,
     created_by: me.account,

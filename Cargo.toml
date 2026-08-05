@@ -66,6 +66,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 regex = "1"
+percent-encoding = "2"
+pulldown-cmark = { version = "0.13.4", default-features = false }
 infer = { version = "0.22", default-features = false }
 futures-util = "0.3"
 moka = { version = "0.12", features = ["future"] }

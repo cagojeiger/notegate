@@ -137,6 +137,7 @@ async fn connected_agent_write_can_mutate_files() -> Result<(), Box<dyn std::err
                 node_id: folder.node.id,
                 name: Some("renamed".to_owned()),
                 sort_order: None,
+                expected_revision: folder.node.revision,
             },
         )
         .await
@@ -149,6 +150,7 @@ async fn connected_agent_write_can_mutate_files() -> Result<(), Box<dyn std::err
             DeleteNode {
                 node_id: folder.node.id,
                 recursive: true,
+                expected_revision: renamed.node.revision,
             },
         )
         .await

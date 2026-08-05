@@ -302,7 +302,7 @@ async fn subtree_soft_delete_queues_objects_and_purge_preserves_missed_requests(
         .attach_object_upload(upload_id, space_id, account_id, None)
         .await?;
     files
-        .soft_delete_node(space_id, folder.id, account_id, true)
+        .soft_delete_node(space_id, folder.id, account_id, true, folder.revision)
         .await?;
 
     let queued: (String, Option<chrono::DateTime<chrono::Utc>>, Option<Uuid>) = sqlx::query_as(

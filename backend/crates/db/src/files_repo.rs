@@ -45,6 +45,12 @@ pub enum TextMutationKind {
     Edit,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TextMutationGuard<'a> {
+    pub revision: i64,
+    pub sha256: Option<&'a str>,
+}
+
 impl TextMutationKind {
     pub(crate) fn op_type(self) -> &'static str {
         match self {
@@ -573,7 +579,7 @@ impl FilesRepo {
         space_id: Uuid,
         node_id: Uuid,
         content: &StoredContent,
-        expected_sha256: Option<&str>,
+        guard: TextMutationGuard<'_>,
         updated_by: Uuid,
         mutation_kind: TextMutationKind,
     ) -> Result<(Node, TextObject)> {
@@ -583,7 +589,8 @@ impl FilesRepo {
             space_id,
             node_id,
             content,
-            expected_sha256,
+            expected_revision: guard.revision,
+            expected_sha256: guard.sha256,
             updated_by,
             mutation_kind,
             caps: self.limits,
@@ -603,7 +610,7 @@ impl FilesRepo {
             node_id: command.node_id,
             new_parent_id: command.new_parent_node_id,
             new_name: command.new_name.as_deref(),
-            expected_parent_id: command.expected_parent_id,
+            expected_revision: command.expected_revision,
             updated_by,
             caps: self.limits,
         })
@@ -686,6 +693,7 @@ impl FilesRepo {
         space_id: Uuid,
         node_id: Uuid,
         metadata: &Value,
+        expected_revision: i64,
         updated_by: Uuid,
         mutation_kind: MetadataMutationKind,
     ) -> Result<Node> {
@@ -694,6 +702,7 @@ impl FilesRepo {
             space_id,
             node_id,
             metadata,
+            expected_revision,
             updated_by,
             mutation_kind,
         )
@@ -706,9 +715,17 @@ impl FilesRepo {
         node_id: Uuid,
         deleted_by: Uuid,
         recursive: bool,
+        expected_revision: i64,
     ) -> Result<DateTime<Utc>> {
-        commands::delete::soft_delete_node(&self.pool, space_id, node_id, deleted_by, recursive)
-            .await
+        commands::delete::soft_delete_node(
+            &self.pool,
+            space_id,
+            node_id,
+            deleted_by,
+            recursive,
+            expected_revision,
+        )
+        .await
     }
 }
 

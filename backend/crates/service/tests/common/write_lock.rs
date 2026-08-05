@@ -92,7 +92,11 @@ impl Fixture {
             .update_node_write_lock(
                 &self.browser,
                 self.space_id,
-                UpdateNodeWriteLock { node_id, enabled },
+                UpdateNodeWriteLock {
+                    node_id,
+                    enabled,
+                    expected_revision: crate::common::node_revision(&self.db.pool, node_id).await?,
+                },
             )
             .await?;
         Ok(())

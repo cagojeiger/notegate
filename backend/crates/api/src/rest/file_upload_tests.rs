@@ -464,6 +464,13 @@ async fn object_state(db: &TestDb, upload_id: Uuid) -> Result<String, Box<dyn st
     )
 }
 
+async fn node_revision(db: &TestDb, node_id: Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT revision FROM nodes WHERE id = $1")
+        .bind(node_id)
+        .fetch_one(&db.pool)
+        .await
+}
+
 async fn object_get_status(state: &crate::state::AppState, upload_id: Uuid) -> StatusCode {
     let url = state
         .object_storage
@@ -481,7 +488,13 @@ async fn delete_attached_file(
     node_id: Uuid,
 ) -> Result<(), Box<dyn std::error::Error>> {
     FilesRepo::new(db.pool.clone())
-        .soft_delete_node(space_id, node_id, caller.account.id, false)
+        .soft_delete_node(
+            space_id,
+            node_id,
+            caller.account.id,
+            false,
+            node_revision(db, node_id).await?,
+        )
         .await?;
     run_cleanup(db, state).await;
     Ok(())
@@ -601,6 +614,7 @@ async fn write_lock_is_checked_when_upload_is_registered() -> Result<(), Box<dyn
             UpdateNodeWriteLock {
                 node_id: folder_id,
                 enabled: true,
+                expected_revision: node_revision(&db, folder_id).await?,
             },
         )
         .await?;
@@ -634,6 +648,7 @@ async fn write_lock_is_checked_when_upload_is_registered() -> Result<(), Box<dyn
             UpdateNodeWriteLock {
                 node_id: folder_id,
                 enabled: false,
+                expected_revision: node_revision(&db, folder_id).await?,
             },
         )
         .await?;
@@ -647,6 +662,7 @@ async fn write_lock_is_checked_when_upload_is_registered() -> Result<(), Box<dyn
             UpdateNodeWriteLock {
                 node_id: folder_id,
                 enabled: true,
+                expected_revision: node_revision(&db, folder_id).await?,
             },
         )
         .await?;
@@ -676,6 +692,7 @@ async fn write_lock_is_checked_when_upload_is_registered() -> Result<(), Box<dyn
             UpdateNodeWriteLock {
                 node_id: folder_id,
                 enabled: false,
+                expected_revision: node_revision(&db, folder_id).await?,
             },
         )
         .await?;

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import type { Me, Space } from "../src/api/types";
 import { expectNoAccessibilityViolations } from "./support/accessibility";
+import { defaultLinkIndexState } from "./support/linkIndex";
 
 const me: Me = {
   account: { id: "user-1", kind: "user", display_name: "User" },
@@ -264,6 +265,10 @@ async function mockSpaceLibraryApi(page: Page) {
         spaces: [...spaces].sort((left, right) => left.sort_order - right.sort_order),
         page: { limit: 100, returned: spaces.length, has_more: false, next_cursor: null }
       });
+    }
+    const linkIndexMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)\/link-index$/);
+    if (linkIndexMatch && request.method() === "GET") {
+      return respond(route, defaultLinkIndexState(decodeURIComponent(linkIndexMatch[1])));
     }
     if (url.pathname === "/api/v1/spaces:reorder" && request.method() === "POST") {
       const input = request.postDataJSON() as { updates: Array<{ space_id: string; sort_order: number }> };

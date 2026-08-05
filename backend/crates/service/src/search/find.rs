@@ -201,6 +201,7 @@ mod tests {
                 name: path.rsplit('/').next().unwrap().to_owned(),
                 kind,
                 sort_order: 0,
+                revision: 1,
                 metadata: serde_json::Value::Null,
                 search_enabled: true,
                 write_locked: false,

@@ -27,6 +27,7 @@ export function invalidateNodeLists(
   spaceId: string,
   parentIds: Iterable<string | null | undefined>
 ) {
+  invalidateLinkIndex(queryClient, spaceId);
   invalidateRecentNodes(queryClient, spaceId);
   invalidateParentChildren(queryClient, spaceId, parentIds);
 }
@@ -36,6 +37,7 @@ export function invalidateRecentNodes(queryClient: QueryClient, spaceId: string)
 }
 
 export function invalidateFolderSubtree(queryClient: QueryClient, spaceId: string) {
+  invalidateLinkIndex(queryClient, spaceId);
   invalidateRecentNodes(queryClient, spaceId);
   invalidateAllChildren(queryClient, spaceId);
   invalidateNodeDetails(queryClient, spaceId);
@@ -70,6 +72,7 @@ export async function applyExternalFileChanges(
   let descendantWriteLockChanged = false;
 
   invalidateFileChangeEvents(queryClient, spaceId);
+  invalidateLinkIndex(queryClient, spaceId);
 
   for (const change of changes) {
     subtreeChanged ||= change.subtree_changed;
@@ -99,7 +102,7 @@ export async function applyExternalFileChanges(
       });
     }
   }
-  for (const nodeId of textIds) invalidateText(queryClient, spaceId, nodeId);
+  for (const nodeId of textIds) invalidateTextContent(queryClient, spaceId, nodeId);
   for (const nodeId of metadataIds) {
     void queryClient.invalidateQueries({
       queryKey: queryKeys.metadata(spaceId, nodeId),
@@ -145,7 +148,16 @@ export async function invalidateFileSyncFallback(queryClient: QueryClient, space
 }
 
 export function invalidateText(queryClient: QueryClient, spaceId: string, nodeId: string) {
+  invalidateLinkIndex(queryClient, spaceId);
+  invalidateTextContent(queryClient, spaceId, nodeId);
+}
+
+function invalidateTextContent(queryClient: QueryClient, spaceId: string, nodeId: string) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.text(spaceId, nodeId), exact: true });
+}
+
+export function invalidateLinkIndex(queryClient: QueryClient, spaceId: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.linkIndex(spaceId) });
 }
 
 export function removeMarkdownImageQueries(queryClient: QueryClient, spaceId: string) {

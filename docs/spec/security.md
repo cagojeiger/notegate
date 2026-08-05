@@ -79,6 +79,8 @@ Client-side encrypted Text에서 서버는 원문, 비밀번호, 복호화 키�
 
 서버 관리 암호화는 `storage_format='plain'`에만 적용한다. Ciphertext는 Space id, Node id, key id, version을 AEAD AAD로 묶는다. API read, write, patch와 `grep`은 서버에서 복호화한 plain content를 사용한다. Node metadata, `content_sha256`, `byte_len`, `line_count`는 암호화하지 않는다.
 
+영속 링크 인덱스도 서버에서 복호화한 현재 본문을 사용한다. `raw_href`, 정규화 경로, source/target 관계는 허용된 평문 metadata이며 암호화하지 않는다. Client-side encrypted Text는 서버가 원문을 읽을 수 없으므로 링크 인덱싱하지 않는다.
+
 `grep`은 복호화된 plain body를 process-local memory에 제한적으로 캐시할 수 있다. Cache key는 Space/Node/content SHA를 묶고, 기본 capacity는 plaintext byte weight 128 MiB, TTL은 30분, TTI는 5분이다. Cache entry는 외부 저장소나 다른 replica로 전송하지 않으며 process 종료, capacity eviction, TTL/TTI 만료 시 참조에서 제거된다. Rust allocator가 해제된 memory page를 즉시 zeroize하거나 OS에 반환한다는 보장은 없다.
 
 `text_objects.at_rest_encryption`은 서버 관리 암호화의 실제 저장 상태다. 설정을 변경하면 기존 plain Text 본문을 같은 transaction에서 즉시 암호화하거나 복호화한다. Space 기본값은 새 Text 생성 시 초기 저장 상태를 정하며 기존 Text를 바꾸지 않는다.

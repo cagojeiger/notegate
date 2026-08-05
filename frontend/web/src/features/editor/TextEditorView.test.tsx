@@ -62,7 +62,7 @@ const node = makeRestNode({
 });
 
 const partialText = {
-  node: { id: node.id, path: node.path },
+  node: { id: node.id, path: node.path, revision: node.revision },
   text: {
     node_id: node.id,
     storage_format: "plain",

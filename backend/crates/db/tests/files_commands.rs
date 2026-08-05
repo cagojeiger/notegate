@@ -11,7 +11,7 @@ use chrono::{Duration, Utc};
 use common::{TestDb, space_with_root};
 use notegate_core::Error;
 use notegate_core::limits;
-use notegate_db::{FilesRepo, SpaceRepo, TextMutationKind};
+use notegate_db::{FilesRepo, SpaceRepo, TextMutationGuard, TextMutationKind};
 use notegate_model::FileEncryptionMode;
 use notegate_model::files::{
     BeginObjectUpload, CopyNode, CreateFolder, MoveNode, NodeListCursor, NodeListSort,
@@ -170,6 +170,7 @@ async fn rename_move_and_copy_enforce_descendant_path_byte_limit()
                 node_id: renamed.id,
                 name: Some("라".repeat(40)),
                 sort_order: None,
+                expected_revision: renamed.revision,
             },
             account,
         )
@@ -193,7 +194,7 @@ async fn rename_move_and_copy_enforce_descendant_path_byte_limit()
                 node_id: source.id,
                 new_parent_node_id: long_parent_id,
                 new_name: None,
-                expected_parent_id: Some(root_id),
+                expected_revision: source.revision,
             },
             account,
         )
@@ -258,7 +259,7 @@ async fn upload_attach_rechecks_path_after_parent_moves() -> Result<(), Box<dyn 
             node_id: staging.id,
             new_parent_node_id: long_parent_id,
             new_name: None,
-            expected_parent_id: Some(root_id),
+            expected_revision: staging.revision,
         },
         account,
     )
@@ -335,7 +336,10 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
             ws,
             doc_node.id,
             &content(),
-            None,
+            TextMutationGuard {
+                revision: doc_node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         )
@@ -348,7 +352,7 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
                 node_id: folder.id,
                 new_parent_node_id: root,
                 new_name: Some("renamed".to_owned()),
-                expected_parent_id: None,
+                expected_revision: folder.revision,
             },
             account,
         )
@@ -361,12 +365,16 @@ async fn mutations_on_soft_deleted_space_return_not_found() -> Result<(), Box<dy
                 node_id: folder.id,
                 name: Some("renamed".to_owned()),
                 sort_order: None,
+                expected_revision: folder.revision,
             },
             account,
         )
         .await,
     );
-    assert_not_found(repo.soft_delete_node(ws, folder.id, account, false).await);
+    assert_not_found(
+        repo.soft_delete_node(ws, folder.id, account, false, folder.revision)
+            .await,
+    );
 
     db.cleanup().await;
     Ok(())

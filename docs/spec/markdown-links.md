@@ -2,7 +2,7 @@
 
 NoteGate Markdown Text는 활성 Space 안의 node를 가리키는 링크에 대해 보수적인 GitHub 스타일 path 모델을 사용한다.
 
-이 문서는 path 해석 규칙만 정의한다. backlink, Obsidian wikilink, title search, shortest-path lookup, cross-Space linking은 정의하지 않는다.
+이 문서는 path 해석 규칙을 정의한다. 내부 링크 관계 인덱스와 backlink 계약은 `docs/spec/link-index.md`에서 정의한다. Obsidian wikilink, title search, shortest-path lookup, cross-Space linking은 정의하지 않는다.
 
 ## 링크 종류
 

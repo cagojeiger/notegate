@@ -151,11 +151,14 @@ pub(crate) async fn read(
 /// Replaces the complete plain-text content.
 #[schema(example = json!({
     "content": "# Updated document\n",
+    "expected_revision": 3,
     "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }))]
 pub(crate) struct ReplaceBody {
     /// Complete replacement UTF-8 content.
     content: String,
+    /// Revision copied from the latest node response.
+    expected_revision: i64,
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
@@ -193,6 +196,7 @@ pub(crate) async fn replace(
             WriteText {
                 target: WriteTarget::Existing { node_id },
                 body: WriteTextBody::Plain(body.content),
+                expected_revision: Some(body.expected_revision),
                 expected_sha256: Some(current_sha),
             },
         )
@@ -206,6 +210,7 @@ pub(crate) async fn replace(
 #[schema(example = json!({
     "content": "Next entry",
     "ensure_newline": true,
+    "expected_revision": 3,
     "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }))]
 pub(crate) struct AppendBody {
@@ -215,6 +220,8 @@ pub(crate) struct AppendBody {
     #[schema(default = false)]
     #[serde(default)]
     ensure_newline: bool,
+    /// Revision copied from the latest node response.
+    expected_revision: i64,
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
@@ -244,6 +251,7 @@ pub(crate) async fn append(
             AppendText {
                 target: WriteTarget::Existing { node_id },
                 content: body.content,
+                expected_revision: Some(body.expected_revision),
                 expected_sha256: body.expected_sha256,
                 ensure_newline: body.ensure_newline,
             },
@@ -262,11 +270,14 @@ pub(crate) async fn append(
         "mode": "unique",
         "expected_count": 1
     }],
+    "expected_revision": 3,
     "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }))]
 pub(crate) struct PatchBody {
     /// Ordered exact replacements applied as one mutation.
     edits: Vec<PatchEditBody>,
+    /// Revision copied from the latest node response.
+    expected_revision: i64,
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
@@ -341,6 +352,7 @@ pub(crate) async fn patch(
             PatchText {
                 node_id,
                 edits,
+                expected_revision: body.expected_revision,
                 expected_sha256: body.expected_sha256,
             },
         )
@@ -358,11 +370,14 @@ pub(crate) async fn patch(
         "end_line": 4,
         "content": "replacement\n"
     }],
+    "expected_revision": 3,
     "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }))]
 pub(crate) struct LineEditBody {
     /// Ordered line operations applied as one mutation.
     edits: Vec<LineEditItem>,
+    /// Revision copied from the latest node response.
+    expected_revision: i64,
     /// Optional optimistic guard copied from the latest read response.
     #[serde(default)]
     expected_sha256: Option<String>,
@@ -425,6 +440,7 @@ pub(crate) async fn edit(
             EditText {
                 node_id,
                 edits,
+                expected_revision: body.expected_revision,
                 expected_sha256: body.expected_sha256,
             },
         )

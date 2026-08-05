@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { Me, RestNode, Space } from "../src/api/types";
-import { routeJsonApi } from "./support/api";
+import { routeWorkbenchJsonApi } from "./support/linkIndex";
 import { usageResponse } from "./support/usage";
 
 const me: Me = {
@@ -28,6 +28,7 @@ const savedNode: RestNode = {
   write_locked: false,
   write_lock_sources: [],
   has_children: false,
+  revision: 1,
   effective_write_locked: false,
   byte_len: 25,
   line_count: 1,
@@ -101,7 +102,7 @@ test("restores the saved workbench before showing the app and persists panel tog
 });
 
 async function mockApi(page: import("@playwright/test").Page) {
-  await routeJsonApi(page, (url) => responseFor(url));
+  await routeWorkbenchJsonApi(page, (url) => responseFor(url));
 }
 
 function responseFor(url: URL) {

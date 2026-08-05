@@ -26,6 +26,7 @@ pub struct NodeOut {
     pub metadata: Value,
     pub search_enabled: bool,
     pub write_locked: bool,
+    pub revision: i64,
     pub effective_write_locked: bool,
     pub write_lock_sources: Vec<WriteLockSourceOut>,
     pub has_children: bool,
@@ -75,6 +76,7 @@ impl NodeOut {
             metadata: node.metadata.clone(),
             search_enabled: node.search_enabled,
             write_locked: node.write_locked,
+            revision: node.revision,
             effective_write_locked: !view.write_lock_sources.is_empty(),
             write_lock_sources: view
                 .write_lock_sources
@@ -165,6 +167,7 @@ pub struct NodeSummaryOut {
     pub kind: String,
     pub path: String,
     pub has_children: bool,
+    pub revision: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_write_locked: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,6 +191,7 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
             kind: node.kind.as_str().to_owned(),
             path: view.path.clone(),
             has_children: view.has_children,
+            revision: node.revision,
             effective_write_locked: view.effective_write_locked.then_some(true),
             byte_len: view
                 .text
@@ -224,6 +228,7 @@ pub struct NodeRef {
     pub id: Uuid,
     pub path: String,
     pub kind: String,
+    pub revision: i64,
 }
 
 impl From<&NodeView> for NodeRef {
@@ -232,6 +237,7 @@ impl From<&NodeView> for NodeRef {
             id: view.node.id,
             path: view.path.clone(),
             kind: view.node.kind.as_str().to_owned(),
+            revision: view.node.revision,
         }
     }
 }

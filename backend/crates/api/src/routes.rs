@@ -333,6 +333,7 @@ fn rest_api_routes(state: AppState) -> Router<AppState> {
         .merge(crate::rest::text::routes())
         .merge(crate::rest::file_uploads::routes())
         .merge(crate::rest::files::routes())
+        .merge(crate::rest::link_index::routes())
         .merge(crate::rest::connections::routes())
         .merge(crate::rest::agents::routes())
         .fallback(api_not_found)
@@ -357,6 +358,14 @@ async fn ready(State(state): State<AppState>) -> Result<Json<HealthResponse>, Ap
         .map_err(|error| {
             tracing::error!(event = "ready.failed", %error);
             ApiError::internal("database not ready")
+        })?;
+    state
+        .link_index_projector
+        .ensure_compatible()
+        .await
+        .map_err(|error| {
+            tracing::error!(event = "ready.link_index_parser_incompatible", %error);
+            ApiError::internal("link index worker not ready")
         })?;
 
     Ok(Json(HealthResponse { status: "ready" }))

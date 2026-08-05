@@ -37,7 +37,7 @@ vi.mock("./useEditorQueries", () => ({
 const node = makeRestNode({ content_sha256: "sha-1" });
 
 const textResponse = {
-  node: { id: node.id, path: node.path },
+  node: { id: node.id, path: node.path, revision: node.revision },
   text: {
     node_id: node.id,
     storage_format: "plain",
@@ -137,7 +137,7 @@ describe("useTextEditorSession", () => {
   it("ignores a reload that finishes after the editor changes nodes", async () => {
     const nextNode = { ...node, id: "node-2", name: "next.md", path: "/next.md", content_sha256: "sha-b" };
     const nextResponse = {
-      node: { id: nextNode.id, path: nextNode.path },
+      node: { id: nextNode.id, path: nextNode.path, revision: nextNode.revision },
       text: { ...textResponse.text, node_id: nextNode.id, content: "next", content_sha256: "sha-b" }
     } satisfies ReadTextResponse;
     let resolveReload: ((value: { data: ReadTextResponse; isError: boolean }) => void) | undefined;

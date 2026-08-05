@@ -2,9 +2,11 @@ import { Bot, FolderOpen, LockKeyhole, Pin, RefreshCw, Search } from "lucide-rea
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../../api/errors";
+import type { LinkIndexFreshness } from "../../api/linkIndex";
 import type { UpdateSpaceInput } from "../../api/spaces";
 import type { Space } from "../../api/types";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
+import { useLinkIndexStateQuery, useRequestLinkReindexMutation } from "../links/useLinkIndexQueries";
 import { formatBytes } from "../../shared/lib/formatBytes";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { Button, Card, MetaRow, Modal, SectionHeader, SettingToggle } from "../../shared/ui";
@@ -196,6 +198,8 @@ function SpaceInspector({
   usageCheck,
   showHeader = true
 }: SpaceInspectorProps) {
+  const linkIndex = useLinkIndexStateQuery(space?.id ?? null);
+  const requestLinkReindex = useRequestLinkReindexMutation();
   const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
   const isCooldown = usageCheck.error instanceof ApiError && usageCheck.error.kind === "usage_reconciliation_cooldown";
   const checkStatus = usageState === "ready" && usage
@@ -230,6 +234,31 @@ function SpaceInspector({
         </Button>
       )
       : undefined;
+  const linkReindexPending = Boolean(
+    space
+    && (
+      (requestLinkReindex.isPending && requestLinkReindex.variables === space.id)
+      || linkIndex.data?.freshness === "updating"
+      || linkIndex.data?.freshness === "rebuilding"
+    )
+  );
+  const linkIndexUninitialized = linkIndex.data?.freshness === "uninitialized";
+  const linkActionLabel = linkIndexUninitialized ? "Index links" : "Reindex links";
+  const linkAction = space ? (
+    <Button
+      secondary
+      size="sm"
+      onClick={() => {
+        requestLinkReindex.reset();
+        requestLinkReindex.mutate(space.id);
+      }}
+      disabled={space.permission !== "write" || linkReindexPending}
+      aria-label={`${linkActionLabel} in ${space.name}`}
+    >
+      <RefreshCw size={14} className={linkReindexPending ? "animate-spin" : undefined} />
+      {linkReindexPending ? "Indexing…" : linkActionLabel}
+    </Button>
+  ) : undefined;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-panel md:border-l md:border-seam">
@@ -305,6 +334,28 @@ function SpaceInspector({
             </div>
           </section>
           <section className="p-4">
+            <SectionHeader
+              title="Links"
+              help="Indexes internal Markdown links for incoming, outgoing, and broken-link details. Reindexing runs in the background and does not block editing."
+              actions={linkAction}
+            />
+            {!space ? <p className="text-sm text-muted">Select a space to inspect its link index.</p> : null}
+            {space && linkIndex.isLoading ? <p className="text-sm text-muted">Loading link index…</p> : null}
+            {space && linkIndex.isError ? <p className="text-sm text-danger">Could not load the link index.</p> : null}
+            {linkIndex.data ? (
+              <dl className="space-y-2">
+                <MetaRow label="Status" value={formatLinkIndexStatus(linkIndex.data.freshness)} />
+                <MetaRow
+                  label="Last indexed"
+                  value={formatLinkIndexTime(linkIndex.data.last_indexed_at)}
+                />
+              </dl>
+            ) : null}
+            {space && requestLinkReindex.isError && requestLinkReindex.variables === space.id ? (
+              <p className="mt-3 text-xs text-danger" role="alert">Could not queue link reindexing.</p>
+            ) : null}
+          </section>
+          <section className="p-4">
             <SectionHeader title="Usage" actions={usageAction} />
             {!space ? <p className="text-sm text-muted">Select a space to inspect it.</p> : null}
             {space && usageState === "loading" ? <p className="text-sm text-muted">Loading usage…</p> : null}
@@ -358,4 +409,26 @@ function usageState(query: { isLoading: boolean; isError: boolean; data?: Curren
   if (query.isLoading) return "loading";
   if (query.isError) return "error";
   return "ready";
+}
+
+function formatLinkIndexStatus(freshness: LinkIndexFreshness) {
+  switch (freshness) {
+    case "uninitialized": return "Not indexed";
+    case "current": return "Current";
+    case "updating": return "Updating";
+    case "rebuilding": return "Rebuilding";
+    case "failed": return "Update failed";
+  }
+}
+
+function formatLinkIndexTime(value: string | null): string {
+  if (!value) return "Not yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
 }
