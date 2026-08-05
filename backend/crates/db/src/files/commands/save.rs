@@ -25,6 +25,7 @@ pub struct SaveTextContentArgs<'a> {
     pub space_id: Uuid,
     pub node_id: Uuid,
     pub content: &'a StoredContent,
+    pub expected_revision: i64,
     pub expected_sha256: Option<&'a str>,
     pub updated_by: Uuid,
     pub mutation_kind: TextMutationKind,
@@ -40,6 +41,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
         space_id,
         node_id,
         content,
+        expected_revision,
         expected_sha256,
         updated_by,
         mutation_kind,
@@ -64,6 +66,7 @@ pub async fn save_text_content(args: SaveTextContentArgs<'_>) -> Result<(Node, T
     .await
     .map_err(map_sqlx_error)?
     .ok_or_else(|| Error::not_found("text not found"))?;
+    checks::require_revision(node_row.revision, expected_revision)?;
 
     let current_text = sqlx::query_as::<_, TextRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {TEXT_COLUMNS} FROM text_objects \

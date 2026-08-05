@@ -74,6 +74,9 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
             WriteText {
                 target: WriteTarget::Existing { node_id: text_id },
                 body: WriteTextBody::Plain("alpha\n".to_owned()),
+                expected_revision: Some(
+                    crate::common::node_revision(&fixture.db.pool, text_id).await?,
+                ),
                 expected_sha256: None,
             },
         )
@@ -89,6 +92,9 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
                 WriteText {
                     target: WriteTarget::Existing { node_id: text_id },
                     body: WriteTextBody::Plain("blocked".to_owned()),
+                    expected_revision: Some(
+                        crate::common::node_revision(&fixture.db.pool, text_id).await?,
+                    ),
                     expected_sha256: None,
                 },
             )
@@ -104,6 +110,8 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
                     node_id: text_id,
                     name: None,
                     sort_order: Some(2_000),
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -116,6 +124,7 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
                 fixture.space_id,
                 text_id,
                 json!({ "classification": "restricted" }),
+                crate::common::node_revision(&fixture.db.pool, text_id).await?,
             )
             .await,
     );
@@ -129,6 +138,8 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
                 UpdateNodeSearchPolicy {
                     node_id: text_id,
                     enabled: false,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -143,6 +154,8 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
                 UpdateTextEncryption {
                     node_id: text_id,
                     enabled: true,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -156,6 +169,8 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
                 DeleteNode {
                     node_id: text_id,
                     recursive: false,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -183,6 +198,7 @@ async fn locked_descendant_protects_subtree_structure_without_freezing_parent() 
             fixture.space_id,
             folder_id,
             json!({ "classification": "archive" }),
+            crate::common::node_revision(&fixture.db.pool, folder_id).await?,
         )
         .await?;
 
@@ -196,6 +212,8 @@ async fn locked_descendant_protects_subtree_structure_without_freezing_parent() 
                     node_id: folder_id,
                     name: Some("Renamed".to_owned()),
                     sort_order: None,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, folder_id)
+                        .await?,
                 },
             )
             .await,
@@ -210,7 +228,8 @@ async fn locked_descendant_protects_subtree_structure_without_freezing_parent() 
                     node_id: folder_id,
                     new_parent_node_id: destination_id,
                     new_name: None,
-                    expected_parent_id: Some(fixture.root_id),
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, folder_id)
+                        .await?,
                 },
             )
             .await,
@@ -224,6 +243,8 @@ async fn locked_descendant_protects_subtree_structure_without_freezing_parent() 
                 DeleteNode {
                     node_id: folder_id,
                     recursive: true,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, folder_id)
+                        .await?,
                 },
             )
             .await,

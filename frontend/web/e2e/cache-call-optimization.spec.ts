@@ -319,6 +319,7 @@ function textNode(): RestNode {
     write_locked: false,
     write_lock_sources: [],
     has_children: false,
+    revision: 1,
     effective_write_locked: false,
     content_sha256: "sha-1",
     created_by: { id: "user-1", kind: "user", display_name: "User" },

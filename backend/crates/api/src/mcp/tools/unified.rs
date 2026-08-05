@@ -137,7 +137,10 @@ pub struct WriteInput {
     /// Insert a newline before appended content when needed.
     #[serde(default)]
     pub ensure_newline: bool,
-    /// Optimistic write guard.
+    /// Node revision from the latest read. Required for existing texts and omitted for creation.
+    #[serde(default)]
+    pub expected_revision: Option<i64>,
+    /// Optional content-specific optimistic guard.
     #[serde(default)]
     pub expected_sha256: Option<String>,
 }
@@ -168,6 +171,9 @@ pub struct ManageInput {
     /// Required for folder cp/rm.
     #[serde(default)]
     pub recursive: bool,
+    /// Node revision from the latest read. Required for mv and rm.
+    #[serde(default)]
+    pub expected_revision: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -375,18 +381,35 @@ fn validate_write_operation(input: &WriteInput) -> Result<(), ErrorData> {
         "write" | "append" => {
             required_ref(input.content.as_ref(), "content", input.op.as_str())?;
             validate_text_target(&input.target)?;
+            if !input.create {
+                required_ref(
+                    input.expected_revision.as_ref(),
+                    "expected_revision",
+                    input.op.as_str(),
+                )?;
+            }
             Ok(())
         }
         "patch" => {
             let edits = parse_edits::<files::PatchEdit>(input.edits.clone(), "patch")?;
             files::prepare_patch_edits(&edits)?;
             validate_text_target(&input.target)?;
+            required_ref(
+                input.expected_revision.as_ref(),
+                "expected_revision",
+                "patch",
+            )?;
             Ok(())
         }
         "edit" => {
             let edits = parse_edits::<files::LineEditInput>(input.edits.clone(), "edit")?;
             files::prepare_line_edits(&edits)?;
             validate_text_target(&input.target)?;
+            required_ref(
+                input.expected_revision.as_ref(),
+                "expected_revision",
+                "edit",
+            )?;
             Ok(())
         }
         _ => Err(invalid_op("write", &["write", "append", "patch", "edit"])),
@@ -424,6 +447,7 @@ fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
         "rm" => {
             let target = parse_input_target(required_ref(input.target.as_ref(), "target", "rm")?)?;
             validate_non_root_target(&target)?;
+            required_ref(input.expected_revision.as_ref(), "expected_revision", "rm")?;
             Ok(())
         }
         "mv" | "cp" => {
@@ -444,6 +468,9 @@ fn validate_manage_operation(input: &ManageInput) -> Result<(), ErrorData> {
             }
             validate_non_root_target(&source)?;
             validate_non_root_target(&destination)?;
+            if input.op == "mv" {
+                required_ref(input.expected_revision.as_ref(), "expected_revision", "mv")?;
+            }
             Ok(())
         }
         _ => Err(invalid_op("manage", &["mkdir", "mv", "cp", "rm"])),
@@ -525,6 +552,7 @@ pub async fn write(
                 input.target,
                 required(input.content, "content", "write")?,
                 input.create,
+                input.expected_revision,
                 input.expected_sha256,
             )
             .await
@@ -533,11 +561,14 @@ pub async fn write(
             files::append(
                 state,
                 parts,
-                input.target,
-                required(input.content, "content", "append")?,
-                input.create,
-                input.ensure_newline,
-                input.expected_sha256,
+                files::AppendRequest {
+                    target: input.target,
+                    content: required(input.content, "content", "append")?,
+                    create: input.create,
+                    ensure_newline: input.ensure_newline,
+                    expected_revision: input.expected_revision,
+                    expected_sha256: input.expected_sha256,
+                },
             )
             .await
         }
@@ -547,6 +578,7 @@ pub async fn write(
                 parts,
                 input.target,
                 parse_edits(input.edits, "patch")?,
+                required(input.expected_revision, "expected_revision", "patch")?,
                 input.expected_sha256,
             )
             .await
@@ -557,6 +589,7 @@ pub async fn write(
                 parts,
                 input.target,
                 parse_edits(input.edits, "edit")?,
+                required(input.expected_revision, "expected_revision", "edit")?,
                 input.expected_sha256,
             )
             .await
@@ -587,6 +620,7 @@ pub async fn manage(
                 parts,
                 required(input.source, "source", "mv")?,
                 required(input.destination, "destination", "mv")?,
+                required(input.expected_revision, "expected_revision", "mv")?,
             )
             .await
         }
@@ -606,6 +640,7 @@ pub async fn manage(
                 parts,
                 required(input.target, "target", "rm")?,
                 input.recursive,
+                required(input.expected_revision, "expected_revision", "rm")?,
             )
             .await
         }

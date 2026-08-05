@@ -144,6 +144,8 @@ async fn upload_reservation_and_file_deletion_follow_lock_policy() -> TestResult
                 DeleteNode {
                     node_id: file_id,
                     recursive: false,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, file_id)
+                        .await?,
                 },
             )
             .await,

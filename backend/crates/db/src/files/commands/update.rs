@@ -31,6 +31,7 @@ pub async fn update_node(
     checks::lock_space(&mut tx, space_id).await?;
 
     let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+    checks::require_revision(current.revision, command.expected_revision)?;
     let node_kind = current.kind.clone();
     let rename = match (command.name.as_deref(), current.parent_id) {
         (Some(_), None) => return Err(Error::conflict("cannot rename the root node")),
@@ -114,6 +115,7 @@ pub async fn update_node_search_policy(
 
     checks::lock_space(&mut tx, space_id).await?;
     let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+    checks::require_revision(current.revision, command.expected_revision)?;
 
     if current.parent_id.is_none() {
         return Err(Error::conflict(
@@ -174,6 +176,7 @@ pub async fn update_text_encryption(
 
     let locked = checks::lock_space_context(&mut tx, space_id, caps).await?;
     let current = lock_live_node(&mut tx, space_id, command.node_id).await?;
+    checks::require_revision(current.revision, command.expected_revision)?;
     if current.kind != "text" {
         return Err(Error::validation(
             "text encryption applies only to text nodes",
@@ -306,6 +309,7 @@ pub async fn replace_node_metadata(
     space_id: Uuid,
     node_id: Uuid,
     metadata: &Value,
+    expected_revision: i64,
     updated_by: Uuid,
     mutation_kind: MetadataMutationKind,
 ) -> Result<Node> {
@@ -313,6 +317,7 @@ pub async fn replace_node_metadata(
 
     checks::lock_space(&mut tx, space_id).await?;
     let current = lock_live_node(&mut tx, space_id, node_id).await?;
+    checks::require_revision(current.revision, expected_revision)?;
     let node_kind = current.kind.clone();
     if current.metadata == *metadata {
         tx.commit().await.map_err(map_sqlx_error)?;

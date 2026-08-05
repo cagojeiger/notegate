@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/errors";
-import { listChildren } from "../../api/nodes";
+import { getNode, listChildren } from "../../api/nodes";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { ReadTextResponse } from "../../api/types";
@@ -41,6 +41,7 @@ describe("editor queries", () => {
     window.localStorage.clear();
     useUiStore.setState(useUiStore.getInitialState(), true);
     vi.mocked(listChildren).mockReset();
+    vi.mocked(getNode).mockReset();
     vi.mocked(readText).mockReset();
     vi.mocked(replaceText).mockReset();
   });
@@ -106,7 +107,7 @@ describe("editor queries", () => {
       defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } }
     });
     const oldText: ReadTextResponse = {
-      node: { id: node.id, path: node.path },
+      node: { id: node.id, path: node.path, revision: node.revision },
       text: {
         node_id: node.id,
         storage_format: "plain",
@@ -126,7 +127,7 @@ describe("editor queries", () => {
     queryClient.setQueryData(queryKeys.text(node.space_id, node.id), oldText);
     vi.mocked(readText).mockResolvedValue(oldText);
     vi.mocked(replaceText).mockResolvedValue({
-      node: { id: node.id, path: node.path },
+      node: { id: node.id, path: node.path, revision: node.revision + 1 },
       text: {
         node_id: node.id,
         storage_format: "plain",
@@ -164,10 +165,11 @@ describe("editor queries", () => {
       node.space_id,
       node.id,
       draft,
+      node.revision,
       "sha-1"
     );
     expect(queryClient.getQueryData(queryKeys.text(node.space_id, node.id))).toEqual({
-      node: { id: node.id, path: node.path },
+      node: { id: node.id, path: node.path, revision: node.revision + 1 },
       text: {
         node_id: node.id,
         storage_format: "plain",
@@ -199,6 +201,71 @@ describe("editor queries", () => {
     expect(useUiStore.getState().toast).toBe("Saved");
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect(onConflict).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the node revision before an explicit overwrite", async () => {
+    const latestNode = { ...node, revision: node.revision + 3 };
+    vi.mocked(getNode).mockResolvedValue(latestNode);
+    vi.mocked(replaceText).mockResolvedValue({
+      node: { id: node.id, path: node.path, revision: latestNode.revision + 1 },
+      text: {
+        node_id: node.id,
+        storage_format: "plain",
+        content_sha256: "sha-overwrite",
+        byte_len: 7,
+        line_count: 1,
+        updated_by: node.updated_by,
+        updated_at: node.updated_at
+      }
+    });
+    const queryClient = createTestQueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => useSaveTextDocument(node, "replace", "stale-sha", vi.fn(), vi.fn()),
+      { wrapper }
+    );
+
+    act(() => result.current.mutate(true));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getNode).toHaveBeenCalledWith(mockClient, node.space_id, node.id);
+    expect(replaceText).toHaveBeenCalledWith(
+      mockClient,
+      node.space_id,
+      node.id,
+      "replace",
+      latestNode.revision,
+      undefined
+    );
+    expect(queryClient.getQueryData(queryKeys.node(node.space_id, node.id))).toMatchObject({
+      revision: latestNode.revision + 1,
+      content_sha256: "sha-overwrite"
+    });
+  });
+
+  it("invalidates the canonical node after a revision conflict", async () => {
+    vi.mocked(replaceText).mockRejectedValue(new ApiError("stale revision", 409, "conflict"));
+    const queryClient = createTestQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const onConflict = vi.fn();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => useSaveTextDocument(node, "changed", "sha-1", vi.fn(), onConflict),
+      { wrapper }
+    );
+
+    act(() => result.current.mutate(false));
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(onConflict).toHaveBeenCalledTimes(1);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.node(node.space_id, node.id),
+      exact: true
+    });
   });
 
   it("surfaces a write-lock rejection and refreshes the node lock state", async () => {

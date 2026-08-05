@@ -98,6 +98,7 @@ pub struct LiveNode {
     pub kind: String,
     pub name: String,
     pub parent_id: Option<Uuid>,
+    pub revision: i64,
 }
 
 /// Load a live node's identifying fields inside the transaction, or `None`.
@@ -106,8 +107,8 @@ pub async fn live_node(
     space_id: Uuid,
     node_id: Uuid,
 ) -> Result<Option<LiveNode>> {
-    let row: Option<(String, String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT kind, name, parent_id FROM nodes \
+    let row: Option<(String, String, Option<Uuid>, i64)> = sqlx::query_as(
+        "SELECT kind, name, parent_id, revision FROM nodes \
          WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL",
     )
     .bind(space_id)
@@ -115,11 +116,21 @@ pub async fn live_node(
     .fetch_optional(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
-    Ok(row.map(|(kind, name, parent_id)| LiveNode {
+    Ok(row.map(|(kind, name, parent_id, revision)| LiveNode {
         kind,
         name,
         parent_id,
+        revision,
     }))
+}
+
+pub(super) fn require_revision(current: i64, expected: i64) -> Result<()> {
+    if current != expected {
+        return Err(Error::conflict(
+            "expected_revision does not match the current node; read it again",
+        ));
+    }
+    Ok(())
 }
 
 /// Reject a mutation when the target or a live ancestor has a direct write lock.

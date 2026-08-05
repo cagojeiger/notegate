@@ -12,6 +12,7 @@ import type {
 export const MAX_BATCH_CHILDREN_PARENTS = 16;
 
 export type UpdateNodeInput = {
+  expected_revision: number;
   name?: string;
   sort_order?: number;
 };
@@ -124,11 +125,12 @@ export function updateNodeSearchPolicy(
   client: ApiClient,
   spaceId: string,
   nodeId: string,
-  enabled: boolean
+  enabled: boolean,
+  expectedRevision: number
 ): Promise<RestNode> {
   return client.put<RestNode>(
     `/api/v1/spaces/${spaceId}/nodes/${nodeId}/search-policy`,
-    { enabled }
+    { enabled, expected_revision: expectedRevision }
   );
 }
 
@@ -136,11 +138,12 @@ export function updateNodeWriteLock(
   client: ApiClient,
   spaceId: string,
   nodeId: string,
-  enabled: boolean
+  enabled: boolean,
+  expectedRevision: number
 ): Promise<RestNode> {
   return client.put<RestNode>(
     `/api/v1/spaces/${spaceId}/nodes/${nodeId}/write-lock`,
-    { enabled }
+    { enabled, expected_revision: expectedRevision }
   );
 }
 
@@ -148,12 +151,15 @@ export function moveNode(
   client: ApiClient,
   spaceId: string,
   nodeId: string,
-  input: { new_parent_id: string; new_name?: string; expected_parent_id?: string | null }
+  input: { new_parent_id: string; new_name?: string; expected_revision: number }
 ): Promise<RestNode> {
   return client.post<RestNode>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/move`, input);
 }
 
-export function deleteNode(client: ApiClient, spaceId: string, nodeId: string, recursive: boolean): Promise<void> {
-  const params = new URLSearchParams({ recursive: String(recursive) });
+export function deleteNode(client: ApiClient, spaceId: string, nodeId: string, recursive: boolean, expectedRevision: number): Promise<void> {
+  const params = new URLSearchParams({
+    recursive: String(recursive),
+    expected_revision: String(expectedRevision)
+  });
   return client.delete<void>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}?${params}`);
 }

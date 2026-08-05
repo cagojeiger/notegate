@@ -137,7 +137,9 @@ struct SequenceWriteCommandSchema {
     /// Insert a newline before appended content when needed.
     #[serde(default)]
     ensure_newline: bool,
-    /// Optimistic write guard.
+    /// Node revision from the latest read.
+    expected_revision: Option<i64>,
+    /// Optional content-specific optimistic guard.
     expected_sha256: Option<String>,
 }
 
@@ -160,6 +162,8 @@ struct SequenceManageCommandSchema {
     /// Required for folder cp/rm.
     #[serde(default)]
     recursive: bool,
+    /// Node revision from the latest read.
+    expected_revision: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -256,7 +260,10 @@ pub struct SequenceCommand {
     #[serde(default)]
     pub max_bytes: Option<usize>,
 
-    /// Optimistic write guard.
+    /// Node revision from the latest read.
+    #[serde(default)]
+    pub expected_revision: Option<i64>,
+    /// Optional content-specific optimistic guard.
     #[serde(default)]
     pub expected_sha256: Option<String>,
     /// Conditional read guard.
@@ -307,6 +314,7 @@ impl SequenceCommand {
             edits: self.edits,
             create: self.create,
             ensure_newline: self.ensure_newline,
+            expected_revision: self.expected_revision,
             expected_sha256: self.expected_sha256,
         })
     }
@@ -320,6 +328,7 @@ impl SequenceCommand {
             destination: self.destination,
             parents: self.parents,
             recursive: self.recursive,
+            expected_revision: self.expected_revision,
         }
     }
 }
@@ -351,6 +360,7 @@ const SEQUENCE_WRITE_COMMAND_FIELDS: &[&str] = &[
     "edits",
     "create",
     "ensure_newline",
+    "expected_revision",
     "expected_sha256",
 ];
 
@@ -362,6 +372,7 @@ const SEQUENCE_MANAGE_COMMAND_FIELDS: &[&str] = &[
     "destination",
     "parents",
     "recursive",
+    "expected_revision",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

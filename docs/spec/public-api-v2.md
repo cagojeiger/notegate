@@ -41,7 +41,8 @@ Agent가 보내는 `account_id`나 `user_id`는 없다. 서버가 API key에서 
 - `{space_id}`, `{node_id}`, `{upload_id}`는 UUID다.
 - Space 내부 path는 `/`로 시작하는 절대 경로다. 응답 path는 정규화된 canonical path다.
 - `cursor`는 opaque 값이다. 같은 endpoint와 같은 filter에 `next_cursor`를 그대로 전달한다.
-- `expected_sha256`과 `expected_parent_id`는 선택적인 낙관적 동시성 guard다. 불일치하면 `409 conflict`이며 최신 상태를 다시 읽어야 한다.
+- 기존 node를 변경하는 요청은 응답에서 읽은 `revision`을 `expected_revision`으로 보내는 필수 낙관적 동시성 guard를 사용한다. 불일치하면 `409 conflict`이며 최신 상태를 다시 읽어야 한다.
+- Text 변경은 선택적 `expected_sha256`으로 본문 hash도 함께 검증할 수 있다. 이는 node revision과 별도다.
 
 목록 상한은 다음과 같다. 서버는 생략된 값을 기본값으로 바꾸고 최대값보다 큰 값은 최대값으로 제한한다.
 
@@ -102,7 +103,7 @@ Tree의 `depth` 기본값은 2, 최대값은 7이다. 폴더나 Text 생성 본�
 | `POST` | `/api/v2/spaces/{space_id}/text/{node_id}/append` | 평문 뒤에 추가 |
 | `POST` | `/api/v2/spaces/{space_id}/text/{node_id}/edit` | 줄 단위 편집 |
 
-변경 요청은 선택적으로 `expected_sha256`을 받아 낙관적 동시성 제어를 수행한다. Client-encrypted Text는 V2로 읽거나 수정할 수 없다. 서버 관리 at-rest 암호화는 service layer에서 투명하게 처리한다.
+변경 요청은 필수 `expected_revision`과 선택적 `expected_sha256`을 받는다. Client-encrypted Text는 V2로 읽거나 수정할 수 없다. 서버 관리 at-rest 암호화는 service layer에서 투명하게 처리한다.
 
 Text 읽기는 기본 200줄/65,536 bytes, 최대 5,000줄/1,048,576 bytes를 반환한다. `truncated=true`이면 `next_start_line`을 다음 요청의 `start_line`으로 사용한다. `content_sha256`은 현재 page가 아니라 전체 Text의 hash다.
 
@@ -119,6 +120,7 @@ curl --fail-with-body --silent --show-error \
 ```json
 {
   "content": "# Updated document\n",
+  "expected_revision": 4,
   "expected_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }
 ```

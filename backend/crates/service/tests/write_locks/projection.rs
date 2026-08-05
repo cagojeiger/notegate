@@ -21,6 +21,9 @@ async fn inherited_lock_is_reported_without_blocking_reads() -> TestResult {
             WriteText {
                 target: WriteTarget::Existing { node_id: text_id },
                 body: WriteTextBody::Plain("alpha\n".to_owned()),
+                expected_revision: Some(
+                    crate::common::node_revision(&fixture.db.pool, text_id).await?,
+                ),
                 expected_sha256: None,
             },
         )

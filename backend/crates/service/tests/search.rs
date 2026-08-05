@@ -92,7 +92,7 @@ async fn write_doc(
     content: &str,
 ) -> Uuid {
     // touch then write so create-on-existing path is exercised.
-    let node = files
+    let created = files
         .create_text(
             owner,
             ws,
@@ -102,10 +102,8 @@ async fn write_doc(
             },
         )
         .await
-        .expect("touch")
-        .node
-        .node
-        .id;
+        .expect("touch");
+    let node = created.node.node.id;
     files
         .write_text(
             owner,
@@ -113,6 +111,7 @@ async fn write_doc(
             WriteText {
                 target: WriteTarget::Existing { node_id: node },
                 body: WriteTextBody::Plain(content.to_owned()),
+                expected_revision: Some(created.node.node.revision),
                 expected_sha256: None,
             },
         )
@@ -158,6 +157,7 @@ async fn search_policy_excludes_only_the_selected_node() -> Result<(), Box<dyn s
                 UpdateNodeSearchPolicy {
                     node_id,
                     enabled: false,
+                    expected_revision: common::node_revision(&db.pool, node_id).await?,
                 },
             )
             .await?;
@@ -771,6 +771,7 @@ async fn grep_reuses_cached_encrypted_body_until_content_sha_changes()
             WriteText {
                 target: WriteTarget::Existing { node_id },
                 body: WriteTextBody::Plain("replacement marker".to_owned()),
+                expected_revision: Some(common::node_revision(&db.pool, node_id).await?),
                 expected_sha256: None,
             },
         )
@@ -1341,6 +1342,7 @@ hit-{index}
                     "alg": "AES-256-GCM",
                     "ciphertext_b64": "hit-client-encrypted"
                 })),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )

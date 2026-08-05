@@ -248,6 +248,7 @@ function restoreRestNodeForSpace(value: unknown, spaceId: string): RestNode | nu
     effective_write_locked: typeof node.effective_write_locked === "boolean"
       ? node.effective_write_locked
       : writeLocked || writeLockSources.length > 0,
+    revision: typeof node.revision === "number" ? node.revision : 0,
     write_lock_sources: writeLockSources
   } as RestNode;
 }

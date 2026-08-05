@@ -795,12 +795,12 @@ mod tests {
             ),
             (
                 "write",
-                "purpose op target content edits create ensure_newline expected_sha256",
+                "purpose op target content edits create ensure_newline expected_revision expected_sha256",
                 "purpose op target",
             ),
             (
                 "manage",
-                "purpose op target source destination parents recursive",
+                "purpose op target source destination parents recursive expected_revision",
                 "purpose op",
             ),
             (

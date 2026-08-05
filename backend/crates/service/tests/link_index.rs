@@ -13,7 +13,7 @@ mod common;
 use std::time::Duration;
 
 use common::{TestDb, insert_user_account, setup_space};
-use notegate_db::{FilesRepo, LinkIndexRepo, SpaceRepo, TextMutationKind};
+use notegate_db::{FilesRepo, LinkIndexRepo, SpaceRepo, TextMutationGuard, TextMutationKind};
 use notegate_model::files::StoredContent;
 use notegate_model::{AccountKind, LinkIndexFreshness, LinkIndexStatus, LinkReferenceStatus};
 use notegate_service::files::{FilesService, UpdateTextEncryption, content};
@@ -103,26 +103,34 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     let (latest, _) = files
         .insert_text(space_id, root_id, "latest.md", &text("latest"), owner)
         .await?;
-    files
+    let first_rewrite = files
         .save_text_content(
             space_id,
             source.id,
             &text("[obsolete](target.md)"),
-            None,
+            TextMutationGuard {
+                revision: source.revision,
+                sha256: None,
+            },
             owner,
             TextMutationKind::Write,
         )
         .await?;
-    files
+    let second_rewrite = files
         .save_text_content(
             space_id,
             source.id,
             &text("[latest](latest.md)"),
-            None,
+            TextMutationGuard {
+                revision: first_rewrite.0.revision,
+                sha256: None,
+            },
             owner,
             TextMutationKind::Write,
         )
         .await?;
+    assert_eq!(first_rewrite.0.revision, source.revision + 1);
+    assert_eq!(second_rewrite.0.revision, first_rewrite.0.revision + 1);
 
     drain(&projector).await?;
     let rewritten = service.node_links(owner, space_id, source.id).await?;
@@ -138,7 +146,7 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     );
 
     files
-        .soft_delete_node(space_id, latest.id, owner, false)
+        .soft_delete_node(space_id, latest.id, owner, false, latest.revision)
         .await?;
     drain(&projector).await?;
     let deleted_target = service.node_links(owner, space_id, source.id).await?;
@@ -158,7 +166,7 @@ async fn projects_current_links_across_rewrites_deletes_and_recreation()
     assert_eq!(rebound.outgoing[0].target_node_id, Some(replacement.id));
 
     files
-        .soft_delete_node(space_id, source.id, owner, false)
+        .soft_delete_node(space_id, source.id, owner, false, second_rewrite.0.revision)
         .await?;
     drain(&projector).await?;
     assert_eq!(
@@ -294,7 +302,7 @@ async fn server_encrypted_text_updates_persisted_link_relations()
         .await?;
     drain(&projector).await?;
 
-    files_service
+    let encrypted_source = files_service
         .update_text_encryption(
             AccountKind::User,
             owner,
@@ -302,6 +310,7 @@ async fn server_encrypted_text_updates_persisted_link_relations()
             UpdateTextEncryption {
                 node_id: source.id,
                 enabled: true,
+                expected_revision: source.revision,
             },
         )
         .await?;
@@ -310,7 +319,10 @@ async fn server_encrypted_text_updates_persisted_link_relations()
             space_id,
             source.id,
             &text("[second](second.md)"),
-            None,
+            TextMutationGuard {
+                revision: encrypted_source.node.revision,
+                sha256: None,
+            },
             owner,
             TextMutationKind::Write,
         )

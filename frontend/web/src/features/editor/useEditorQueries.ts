@@ -47,14 +47,18 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
     meta: { silentError: true },
     mutationFn: async (force: boolean) => {
       const submittedDraft = draft;
+      const baseNode = force
+        ? await getNode(client, node.space_id, node.id)
+        : node;
       const response = await replaceText(
         client,
         node.space_id,
         node.id,
         submittedDraft,
+        baseNode.revision,
         force ? undefined : sha
       );
-      return { response, submittedDraft };
+      return { response, submittedDraft, baseNode };
     },
     onMutate: async () => {
       setSaveState("saving");
@@ -63,7 +67,7 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
         exact: true
       });
     },
-    onSuccess: ({ response, submittedDraft }) => {
+    onSuccess: ({ response, submittedDraft, baseNode }) => {
       queryClient.setQueryData<ReadTextResponse>(
         queryKeys.text(node.space_id, node.id),
         {
@@ -81,7 +85,9 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
         }
       );
       const updatedNode = {
-        ...node,
+        ...baseNode,
+        path: response.node.path,
+        revision: response.node.revision,
         content_sha256: response.text.content_sha256,
         byte_len: response.text.byte_len,
         line_count: response.text.line_count,
@@ -99,6 +105,10 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
       if (error instanceof ApiError && error.status === 409) {
         onConflict();
         setSaveState("conflict");
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.node(node.space_id, node.id),
+          exact: true
+        });
         return;
       }
       setSaveState("error");

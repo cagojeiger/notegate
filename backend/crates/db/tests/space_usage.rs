@@ -11,7 +11,9 @@ mod common;
 
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
+use notegate_db::{
+    FilesRepo, SpaceUsageRepo, TextMutationGuard, TextMutationKind, UsageReconcileExecution,
+};
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
 };
@@ -81,20 +83,27 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
     attach_file(&repo, space_id, root_id, "asset.bin", 3, account).await?;
     assert_usage(&db.pool, space_id, (4, 5, 3)).await?;
 
+    let first_write = repo
+        .save_text_content(
+            space_id,
+            text_node.id,
+            &text("hello world"),
+            TextMutationGuard {
+                revision: text_node.revision,
+                sha256: None,
+            },
+            account,
+            TextMutationKind::Write,
+        )
+        .await?;
     repo.save_text_content(
         space_id,
         text_node.id,
         &text("hello world"),
-        None,
-        account,
-        TextMutationKind::Write,
-    )
-    .await?;
-    repo.save_text_content(
-        space_id,
-        text_node.id,
-        &text("hello world"),
-        None,
+        TextMutationGuard {
+            revision: first_write.0.revision,
+            sha256: None,
+        },
         account,
         TextMutationKind::Write,
     )
@@ -116,30 +125,32 @@ async fn usage_counter_tracks_file_tree_lifecycle() -> Result<(), Box<dyn std::e
     assert_eq!(counts.nodes, 2);
     assert_usage(&db.pool, space_id, (6, 22, 3)).await?;
 
-    repo.move_node(
-        space_id,
-        &MoveNode {
-            node_id: copied.id,
-            new_parent_node_id: root_id,
-            new_name: Some("docs-archive".to_owned()),
-            expected_parent_id: None,
-        },
-        account,
-    )
-    .await?;
+    let moved = repo
+        .move_node(
+            space_id,
+            &MoveNode {
+                node_id: copied.id,
+                new_parent_node_id: root_id,
+                new_name: Some("docs-archive".to_owned()),
+                expected_revision: copied.revision,
+            },
+            account,
+        )
+        .await?;
     repo.update_node(
         space_id,
         &UpdateNode {
             node_id: copied.id,
             name: None,
             sort_order: Some(2_000),
+            expected_revision: moved.revision,
         },
         account,
     )
     .await?;
     assert_usage(&db.pool, space_id, (6, 22, 3)).await?;
 
-    repo.soft_delete_node(space_id, folder.id, account, true)
+    repo.soft_delete_node(space_id, folder.id, account, true, folder.revision)
         .await?;
     assert_usage(&db.pool, space_id, (4, 11, 3)).await?;
 
@@ -172,7 +183,7 @@ async fn usage_drift_rolls_back_mutation_until_reconciled() -> Result<(), Box<dy
         .await?;
 
     let error = repo
-        .soft_delete_node(space_id, folder.id, account, false)
+        .soft_delete_node(space_id, folder.id, account, false, folder.revision)
         .await
         .expect_err("counter underflow must reject the source mutation");
     assert!(matches!(
@@ -197,7 +208,7 @@ async fn usage_drift_rolls_back_mutation_until_reconciled() -> Result<(), Box<dy
             .await?,
         UsageReconcileExecution::Succeeded { space_id: id, .. } if id == space_id
     ));
-    repo.soft_delete_node(space_id, folder.id, account, false)
+    repo.soft_delete_node(space_id, folder.id, account, false, folder.revision)
         .await?;
     assert_usage(&db.pool, space_id, (1, 0, 0)).await?;
 

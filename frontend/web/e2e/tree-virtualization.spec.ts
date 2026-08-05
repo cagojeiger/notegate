@@ -164,6 +164,7 @@ function fileNode(index: number): RestNode {
     write_locked: false,
     write_lock_sources: [],
     has_children: false,
+    revision: 1,
     effective_write_locked: false,
     byte_len: index,
     media_type: "application/octet-stream",

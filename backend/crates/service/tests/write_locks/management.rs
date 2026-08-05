@@ -30,6 +30,8 @@ async fn lock_management_is_browser_owner_only_and_tier_gated() -> TestResult {
                 UpdateNodeWriteLock {
                     node_id: text_id,
                     enabled: true,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -43,6 +45,8 @@ async fn lock_management_is_browser_owner_only_and_tier_gated() -> TestResult {
                 UpdateNodeWriteLock {
                     node_id: text_id,
                     enabled: true,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -85,6 +89,8 @@ async fn lock_management_is_browser_owner_only_and_tier_gated() -> TestResult {
                 UpdateNodeWriteLock {
                     node_id: text_id,
                     enabled: true,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -99,6 +105,11 @@ async fn lock_management_is_browser_owner_only_and_tier_gated() -> TestResult {
                 UpdateNodeWriteLock {
                     node_id: fixture.root_id,
                     enabled: true,
+                    expected_revision: crate::common::node_revision(
+                        &fixture.db.pool,
+                        fixture.root_id,
+                    )
+                    .await?,
                 },
             )
             .await,
@@ -115,6 +126,9 @@ async fn lock_management_is_browser_owner_only_and_tier_gated() -> TestResult {
                 WriteText {
                     target: WriteTarget::Existing { node_id: text_id },
                     body: WriteTextBody::Plain("agent write".to_owned()),
+                    expected_revision: Some(
+                        crate::common::node_revision(&fixture.db.pool, text_id).await?,
+                    ),
                     expected_sha256: None,
                 },
             )
@@ -134,6 +148,8 @@ async fn lock_management_is_browser_owner_only_and_tier_gated() -> TestResult {
                 UpdateNodeWriteLock {
                     node_id: text_id,
                     enabled: true,
+                    expected_revision: crate::common::node_revision(&fixture.db.pool, text_id)
+                        .await?,
                 },
             )
             .await,
@@ -154,6 +170,7 @@ async fn concurrent_lock_and_write_are_serialized() -> TestResult {
         sqlx::query_scalar("SELECT COALESCE(max(id), 0) FROM file_change_events")
             .fetch_one(&fixture.db.pool)
             .await?;
+    let expected_revision = crate::common::node_revision(&fixture.db.pool, text_id).await?;
 
     let write = fixture.files.write_text(
         fixture.owner,
@@ -161,6 +178,7 @@ async fn concurrent_lock_and_write_are_serialized() -> TestResult {
         WriteText {
             target: WriteTarget::Existing { node_id: text_id },
             body: WriteTextBody::Plain("concurrent write".to_owned()),
+            expected_revision: Some(expected_revision),
             expected_sha256: None,
         },
     );
@@ -170,10 +188,10 @@ async fn concurrent_lock_and_write_are_serialized() -> TestResult {
         UpdateNodeWriteLock {
             node_id: text_id,
             enabled: true,
+            expected_revision,
         },
     );
     let (write_result, lock_result) = tokio::join!(write, lock);
-    lock_result?;
 
     let events: Vec<(String, serde_json::Value)> = sqlx::query_as(
         "SELECT op_type, metadata FROM file_change_events \
@@ -184,30 +202,40 @@ async fn concurrent_lock_and_write_are_serialized() -> TestResult {
     .bind(before_event_id)
     .fetch_all(&fixture.db.pool)
     .await?;
-    let lock_event_index = events
-        .iter()
-        .position(|(_, metadata)| metadata["write_lock_changed"] == true)
-        .expect("write-lock event");
-
-    match write_result {
-        Ok(_) => {
-            let write_event_index = events
-                .iter()
-                .position(|(op_type, _)| op_type == "text.write")
-                .expect("text write event");
-            assert!(write_event_index < lock_event_index);
+    match (write_result, lock_result) {
+        (Ok(_), Err(ServiceError::Conflict(_))) => {
+            assert_eq!(
+                events.iter().filter(|(op, _)| op == "text.write").count(),
+                1
+            );
+            assert!(
+                !fixture
+                    .files
+                    .stat(fixture.owner, fixture.space_id, text_id)
+                    .await?
+                    .node
+                    .write_locked
+            );
         }
-        Err(ServiceError::WriteLocked { .. }) => {}
-        Err(error) => panic!("unexpected write result: {error:?}"),
+        (Err(ServiceError::WriteLocked { .. }), Ok(_)) => {
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|(_, metadata)| metadata["write_lock_changed"] == true)
+                    .count(),
+                1
+            );
+            assert!(
+                fixture
+                    .files
+                    .stat(fixture.owner, fixture.space_id, text_id)
+                    .await?
+                    .node
+                    .write_locked
+            );
+        }
+        (write, lock) => panic!("unexpected race results: write={write:?}, lock={lock:?}"),
     }
-    assert!(
-        fixture
-            .files
-            .stat(fixture.owner, fixture.space_id, text_id)
-            .await?
-            .node
-            .write_locked
-    );
 
     fixture.cleanup().await;
     Ok(())
@@ -220,6 +248,7 @@ async fn space_deletion_remains_an_owner_lifecycle_action() -> TestResult {
     };
     let text_id = fixture.text(fixture.root_id, "locked.md").await?;
     fixture.set_lock(text_id, true).await?;
+    let expected_revision = crate::common::node_revision(&fixture.db.pool, text_id).await?;
 
     SpaceService::new(SpaceRepo::new(fixture.db.pool.clone()))
         .delete(AccountKind::User, fixture.owner, fixture.space_id)
@@ -239,6 +268,7 @@ async fn space_deletion_remains_an_owner_lifecycle_action() -> TestResult {
                 WriteText {
                     target: WriteTarget::Existing { node_id: text_id },
                     body: WriteTextBody::Plain("blocked by deleted space".to_owned()),
+                    expected_revision: Some(expected_revision),
                     expected_sha256: None,
                 },
             )

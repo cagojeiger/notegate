@@ -326,6 +326,7 @@ pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Val
         "kind": view.node.kind.as_str(),
         "has_children": view.has_children,
         "sort_order": view.node.sort_order,
+        "revision": view.node.revision,
         "search_enabled": view.node.search_enabled,
         "write_locked": view.node.write_locked,
         "effective_write_locked": !view.write_lock_sources.is_empty(),

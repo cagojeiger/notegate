@@ -37,6 +37,7 @@ export function makeRootNode(space: Space): RestNode {
     effective_write_locked: false,
     write_lock_sources: [],
     has_children: true,
+    revision: 0,
     created_by: { id: "", kind: "user", display_name: "" },
     updated_by: { id: "", kind: "user", display_name: "" },
     created_at: space.created_at,

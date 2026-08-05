@@ -191,33 +191,41 @@ fn input_policy(tool: &str, op: &str) -> Option<(FieldSet, SensitiveFields, Inpu
             InputSpecial::None,
         ),
         ("write", "write") => (
-            "op target create expected_sha256",
+            "op target create expected_revision expected_sha256",
             CONTENT,
             InputSpecial::None,
         ),
         ("write", "append") => (
-            "op target create ensure_newline expected_sha256",
+            "op target create ensure_newline expected_revision expected_sha256",
             CONTENT,
             InputSpecial::None,
         ),
         ("write", "patch") => (
-            "op target expected_sha256",
+            "op target expected_revision expected_sha256",
             NO_SENSITIVE,
             InputSpecial::PatchEdits,
         ),
         ("write", "edit") => (
-            "op target expected_sha256",
+            "op target expected_revision expected_sha256",
             NO_SENSITIVE,
             InputSpecial::LineEdits,
         ),
         ("manage", "mkdir") => ("op target parents", NO_SENSITIVE, InputSpecial::None),
-        ("manage", "mv") => ("op source destination", NO_SENSITIVE, InputSpecial::None),
+        ("manage", "mv") => (
+            "op source destination expected_revision",
+            NO_SENSITIVE,
+            InputSpecial::None,
+        ),
         ("manage", "cp") => (
             "op source destination recursive",
             NO_SENSITIVE,
             InputSpecial::None,
         ),
-        ("manage", "rm") => ("op target recursive", NO_SENSITIVE, InputSpecial::None),
+        ("manage", "rm") => (
+            "op target recursive expected_revision",
+            NO_SENSITIVE,
+            InputSpecial::None,
+        ),
         ("file_transfer", "begin_upload") => (
             "op target byte_len media_type encryption_mode",
             UPLOAD_METADATA,

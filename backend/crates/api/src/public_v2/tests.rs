@@ -94,6 +94,7 @@ async fn connected_write_agent_can_use_v2_resource_flow() -> Result<(), Box<dyn 
     .await?;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let node_id = created["id"].as_str().expect("created node id");
+    let node_revision = created["revision"].as_i64().expect("created revision");
 
     let (status, read) = get_json(
         app(state.clone(), caller.clone()),
@@ -117,7 +118,7 @@ async fn connected_write_agent_can_use_v2_resource_flow() -> Result<(), Box<dyn 
     let (status, deleted) = empty_request(
         app(state, caller),
         "DELETE",
-        format!("/spaces/{space_id}/nodes/{node_id}"),
+        format!("/spaces/{space_id}/nodes/{node_id}?expected_revision={node_revision}"),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{deleted}");

@@ -82,6 +82,7 @@ async fn file_change_events_list_through_service() -> Result<(), Box<dyn std::er
             WriteText {
                 target: WriteTarget::Existing { node_id: text_id },
                 body: WriteTextBody::Plain("hello".to_owned()),
+                expected_revision: Some(text.node.node.revision),
                 expected_sha256: None,
             },
         )
@@ -280,7 +281,13 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
         "nested": {"keep": true, "remove": true}
     });
     let metadata_updated = files
-        .replace_metadata(owner, ws, projects_id, metadata.clone())
+        .replace_metadata(
+            owner,
+            ws,
+            projects_id,
+            metadata.clone(),
+            projects.node.revision,
+        )
         .await?;
     assert_eq!(metadata_updated.node.metadata, metadata);
 
@@ -297,6 +304,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 "nested": {"remove": null},
                 "tags": ["project"]
             }),
+            metadata_updated.node.revision,
         )
         .await?;
     assert_eq!(metadata_patched.node.metadata["status"], "active");
@@ -339,6 +347,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             WriteText {
                 target: WriteTarget::Existing { node_id: note_id },
                 body: WriteTextBody::Plain("# Title\nalpha beta gamma".to_owned()),
+                expected_revision: Some(touched.node.node.revision),
                 expected_sha256: None,
             },
         )
@@ -387,6 +396,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                     "alg": "AES-256-GCM",
                     "ciphertext_b64": "abc"
                 })),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )
@@ -423,6 +433,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                     mode: PatchMode::Unique,
                     expected_count: None,
                 }],
+                expected_revision: encrypted.node.node.revision,
                 expected_sha256: None,
             },
         )
@@ -570,6 +581,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                     mode: PatchMode::All,
                     expected_count: Some(1),
                 }],
+                expected_revision: written.node.node.revision,
                 expected_sha256: Some(after_write_sha.clone()),
             },
         )
@@ -598,6 +610,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                     end_line: 2,
                     content: "final line".to_owned(),
                 }],
+                expected_revision: patched.node.node.revision,
                 expected_sha256: Some(patched.text.content_sha256.clone()),
             },
         )
@@ -627,7 +640,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
                 node_id: note_id,
                 new_parent_node_id: archive_id,
                 new_name: None,
-                expected_parent_id: None,
+                expected_revision: edited.node.node.revision,
             },
         )
         .await?;
@@ -673,6 +686,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
             DeleteNode {
                 node_id: note_id,
                 recursive: false,
+                expected_revision: moved.node.revision,
             },
         )
         .await?;
@@ -719,6 +733,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     name: "config.json".to_owned(),
                 },
                 body: WriteTextBody::Plain(r#"{"ok":}"#.to_owned()),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )
@@ -740,6 +755,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     name: "settings.json".to_owned(),
                 },
                 body: WriteTextBody::Plain(r#"{"ok":true}"#.to_owned()),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )
@@ -754,6 +770,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     node_id: json_doc.node.node.id,
                 },
                 content: "broken".to_owned(),
+                expected_revision: Some(json_doc.node.node.revision),
                 expected_sha256: Some(json_doc.text.content_sha256.clone()),
                 ensure_newline: false,
             },
@@ -776,6 +793,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     name: "app.toml".to_owned(),
                 },
                 body: WriteTextBody::Plain("[app]\nname = \"ok\"\n".to_owned()),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )
@@ -792,6 +810,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     mode: PatchMode::Unique,
                     expected_count: Some(1),
                 }],
+                expected_revision: toml_doc.node.node.revision,
                 expected_sha256: Some(toml_doc.text.content_sha256.clone()),
             },
         )
@@ -813,6 +832,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     name: "app.yaml".to_owned(),
                 },
                 body: WriteTextBody::Plain("app:\n  name: ok\n".to_owned()),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )
@@ -828,6 +848,7 @@ async fn structured_text_syntax_is_validated_before_save() -> Result<(), Box<dyn
                     end_line: 2,
                     content: "  name: [".to_owned(),
                 }],
+                expected_revision: yaml_doc.node.node.revision,
                 expected_sha256: Some(yaml_doc.text.content_sha256.clone()),
             },
         )
@@ -868,6 +889,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
                     name: "log.md".to_owned(),
                 },
                 content: "first".to_owned(),
+                expected_revision: None,
                 expected_sha256: None,
                 ensure_newline: true,
             },
@@ -891,6 +913,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
                     name: "other.md".to_owned(),
                 },
                 content: "x".to_owned(),
+                expected_revision: None,
                 expected_sha256: Some("deadbeef".to_owned()),
                 ensure_newline: false,
             },
@@ -900,7 +923,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
     assert!(matches!(
         create_guard_err,
         ServiceError::Conflict(message)
-            if message == "expected_sha256 was supplied but the text does not exist"
+            if message == "expected_revision and expected_sha256 must be omitted when creating a text"
     ));
 
     // --- ensure_newline guard: a non-empty body without a trailing newline gets one ---
@@ -911,6 +934,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
             AppendText {
                 target: WriteTarget::Existing { node_id: log_id },
                 content: "second".to_owned(),
+                expected_revision: Some(created.node.node.revision),
                 expected_sha256: Some(created.text.content_sha256.clone()),
                 ensure_newline: true,
             },
@@ -925,6 +949,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
             AppendText {
                 target: WriteTarget::Existing { node_id: log_id },
                 content: "stale".to_owned(),
+                expected_revision: Some(created.node.node.revision),
                 expected_sha256: Some(created.text.content_sha256),
                 ensure_newline: false,
             },
@@ -970,6 +995,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
                     "alg": "AES-256-GCM",
                     "ciphertext_b64": "abc"
                 })),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )
@@ -983,6 +1009,7 @@ async fn append_text_branches() -> Result<(), Box<dyn std::error::Error>> {
                     node_id: encrypted.node.node.id,
                 },
                 content: "plain".to_owned(),
+                expected_revision: Some(encrypted.node.node.revision),
                 expected_sha256: None,
                 ensure_newline: false,
             },
@@ -1013,7 +1040,7 @@ async fn repo_soft_delete_root_is_conflict() -> Result<(), Box<dyn std::error::E
     let (ws, root) = setup_space(&ws_repo, owner, "rootguard").await;
 
     let err = repo
-        .soft_delete_node(ws, root, owner, false)
+        .soft_delete_node(ws, root, owner, false, 1)
         .await
         .expect_err("root delete must be rejected cleanly");
     assert!(
@@ -1138,6 +1165,7 @@ async fn mktext(
                     name: name.to_owned(),
                 },
                 body: WriteTextBody::Plain(body.to_owned()),
+                expected_revision: None,
                 expected_sha256: None,
             },
         )

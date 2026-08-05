@@ -40,6 +40,7 @@ const csvNode: RestNode = {
   write_locked: false,
   write_lock_sources: [],
   has_children: false,
+  revision: 1,
   effective_write_locked: false,
   byte_len: Buffer.byteLength(csvContent),
   line_count: csvContent.split("\n").length,

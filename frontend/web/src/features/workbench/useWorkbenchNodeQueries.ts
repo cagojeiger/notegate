@@ -57,7 +57,7 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
-    mutationFn: ({ node, name }: { node: NodeSummary; name: string }) => updateNode(client, node.space_id, node.id, { name }),
+    mutationFn: ({ node, name }: { node: NodeSummary; name: string }) => updateNode(client, node.space_id, node.id, { name, expected_revision: node.revision }),
     onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
       if (node.kind === "folder") {
@@ -76,7 +76,7 @@ export function useUpdateNodeSearchPolicyMutation(onUpdated: (node: RestNode) =>
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
-      updateNodeSearchPolicy(client, node.space_id, node.id, enabled),
+      updateNodeSearchPolicy(client, node.space_id, node.id, enabled, node.revision),
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
@@ -121,7 +121,7 @@ export function useUpdateNodeWriteLockMutation(onUpdated: (node: RestNode) => vo
   const queryClient = useQueryClient();
   return useMutation(
     createUpdateNodeWriteLockMutationOptions(
-      ({ node, enabled }) => updateNodeWriteLock(client, node.space_id, node.id, enabled),
+      ({ node, enabled }) => updateNodeWriteLock(client, node.space_id, node.id, enabled, node.revision),
       queryClient,
       onUpdated
     )
@@ -146,7 +146,7 @@ export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => v
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ node, enabled }: { node: RestNode; enabled: boolean }) =>
-      updateTextEncryption(client, node.space_id, node.id, enabled),
+      updateTextEncryption(client, node.space_id, node.id, enabled, node.revision),
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
@@ -164,7 +164,7 @@ export function useMoveNodeMutation(
   const queryClient = useQueryClient();
   return useMutation({
     meta: options.silentError ? { silentError: true } : undefined,
-    mutationFn: ({ node, parentId }: { node: NodeSummary; parentId: string }) => moveNode(client, node.space_id, node.id, { new_parent_id: parentId, expected_parent_id: node.parent_id }),
+    mutationFn: ({ node, parentId }: { node: NodeSummary; parentId: string }) => moveNode(client, node.space_id, node.id, { new_parent_id: parentId, expected_revision: node.revision }),
     onSuccess: (node, { node: previousNode }) => {
       updateNodeCaches(queryClient, node, () => node);
       if (node.kind === "folder") {
@@ -183,7 +183,7 @@ export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
-    mutationFn: ({ node, recursive }: { node: NodeSummary; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive).then(() => node),
+    mutationFn: ({ node, recursive }: { node: NodeSummary; recursive: boolean }) => deleteNode(client, node.space_id, node.id, recursive, node.revision).then(() => node),
     onSuccess: async (node, { recursive }) => {
       await removeDeletedNodeQueries(queryClient, node, recursive);
       onDeleted(node);
@@ -201,7 +201,7 @@ export function useReplaceMetadataMutation(onReplaced: (node: RestNode) => void)
   const queryClient = useQueryClient();
   return useMutation({
     meta: { silentError: true },
-    mutationFn: ({ node, metadata }: { node: RestNode; metadata: Record<string, unknown> }) => replaceMetadata(client, node.space_id, node.id, metadata),
+    mutationFn: ({ node, metadata }: { node: RestNode; metadata: Record<string, unknown> }) => replaceMetadata(client, node.space_id, node.id, metadata, node.revision),
     onSuccess: (node) => {
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);

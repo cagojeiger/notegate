@@ -12,7 +12,9 @@ mod common;
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_core::limits::Limits;
-use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
+use notegate_db::{
+    FilesRepo, SpaceUsageRepo, TextMutationGuard, TextMutationKind, UsageReconcileExecution,
+};
 use notegate_model::files::{CopyNode, CreateFolder, StoredContent, WriteTextBody};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -103,7 +105,10 @@ async fn counter_enforces_independent_node_text_and_file_limits() -> TestResult 
             space_id,
             text_node.id,
             &text("hello!"),
-            None,
+            TextMutationGuard {
+                revision: text_node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         )
@@ -115,7 +120,7 @@ async fn counter_enforces_independent_node_text_and_file_limits() -> TestResult 
     ));
     assert_usage(&db.pool, space_id, (4, 5, 2)).await?;
 
-    repo.soft_delete_node(space_id, folder.id, account, false)
+    repo.soft_delete_node(space_id, folder.id, account, false, folder.revision)
         .await?;
     let file_error = attach_file(&repo, space_id, root_id, "blocked.bin", 1, account)
         .await
@@ -296,7 +301,10 @@ async fn concurrent_text_saves_respect_the_boundary() -> TestResult {
             space_id,
             first_node.id,
             &first_text,
-            None,
+            TextMutationGuard {
+                revision: first_node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         ),
@@ -304,7 +312,10 @@ async fn concurrent_text_saves_respect_the_boundary() -> TestResult {
             space_id,
             second_node.id,
             &second_text,
-            None,
+            TextMutationGuard {
+                revision: second_node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         ),
@@ -356,14 +367,17 @@ async fn quota_reducing_mutations_remain_available_above_the_limit() -> TestResu
     );
 
     restricted_repo
-        .soft_delete_node(space_id, folder.id, account, false)
+        .soft_delete_node(space_id, folder.id, account, false, folder.revision)
         .await?;
     restricted_repo
         .save_text_content(
             space_id,
             text_node.id,
             &text("x"),
-            None,
+            TextMutationGuard {
+                revision: text_node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         )

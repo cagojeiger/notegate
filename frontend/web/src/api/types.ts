@@ -60,6 +60,7 @@ export type NodeSummary = {
   kind: NodeKind;
   path: string;
   has_children: boolean;
+  revision: number;
   effective_write_locked: boolean;
   byte_len?: number;
   line_count?: number;
@@ -133,6 +134,7 @@ export type ReadTextResponse = {
   node: {
     id: string;
     path: string;
+    revision: number;
   };
   text:
     | {
@@ -175,6 +177,7 @@ export type TextResponse = {
   node: {
     id: string;
     path: string;
+    revision: number;
   };
   text: {
     node_id: string;

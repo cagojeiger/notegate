@@ -28,6 +28,7 @@ const savedNode: RestNode = {
   write_locked: false,
   write_lock_sources: [],
   has_children: false,
+  revision: 1,
   effective_write_locked: false,
   byte_len: 25,
   line_count: 1,

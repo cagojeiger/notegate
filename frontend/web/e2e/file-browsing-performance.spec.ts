@@ -248,6 +248,7 @@ function node(
     write_locked: false,
     write_lock_sources: [],
     has_children: kind === "folder",
+    revision: 1,
     effective_write_locked: false,
     content_sha256: kind === "text" ? `sha-${id}` : undefined,
     created_by: me.account,

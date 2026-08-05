@@ -41,15 +41,15 @@ type PatchTextMeta = TextMeta & {
 ## Request body examples
 
 ```json
-{"storage_format":"plain","content":"# note\n"}
+{"storage_format":"plain","content":"# note\n","expected_revision":4}
 ```
 
 ```json
-{"storage_format":"encrypted","encrypted_payload":{"version":1,"alg":"AES-256-GCM","ciphertext_b64":"..."}}
+{"storage_format":"encrypted","encrypted_payload":{"version":1,"alg":"AES-256-GCM","ciphertext_b64":"..."},"expected_revision":4}
 ```
 
 ```json
-{"expected_sha256":"...","edits":[{"old_text":"hello","new_text":"hi","mode":"unique","expected_count":1}]}
+{"expected_revision":4,"expected_sha256":"...","edits":[{"old_text":"hello","new_text":"hi","mode":"unique","expected_count":1}]}
 ```
 
 ## GET rules
@@ -70,6 +70,7 @@ type PatchTextMeta = TextMeta & {
 - encrypted payload는 JSON object이며 서버가 복호화하지 않는다.
 - `PUT`은 plain/encrypted 전체 교체를 수행한다.
 - `PATCH`는 plain Text 전용 string replacement 방식이다. 기본 `mode`는 `unique`이며 각 `old_text`는 정확히 한 번만 매칭되어야 한다. `first`와 `all` mode를 명시할 수 있다.
+- 모든 변경 요청은 최신 node의 `expected_revision`을 필수로 보낸다.
 - `expected_count`가 있으면 현재 match 수와 일치해야 한다.
 - `expected_sha256`이 있으면 저장된 content hash와 일치해야 한다.
 - encrypted Text는 patch 대상이 아니다.
@@ -79,6 +80,7 @@ type PatchTextMeta = TextMeta & {
 ```ts
 type UpdateTextEncryptionBody = {
   enabled: boolean
+  expected_revision: number
 }
 ```
 

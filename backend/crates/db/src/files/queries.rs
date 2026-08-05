@@ -497,7 +497,7 @@ pub mod node {
                 WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL \
                 UNION ALL \
                 SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, \
-                       n.search_enabled, n.write_locked, \
+                       n.search_enabled, n.write_locked, n.revision, \
                        n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                        n.purge_after, n.created_at, n.updated_at, n.deleted_at, c.depth + 1 AS depth \
                 FROM nodes n \
@@ -997,6 +997,7 @@ pub mod search {
         metadata: Value,
         search_enabled: bool,
         write_locked: bool,
+        revision: i64,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1017,6 +1018,7 @@ pub mod search {
         metadata: Value,
         search_enabled: bool,
         write_locked: bool,
+        revision: i64,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1040,6 +1042,7 @@ pub mod search {
                 metadata: self.metadata.clone(),
                 search_enabled: self.search_enabled,
                 write_locked: self.write_locked,
+                revision: self.revision,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
                 deleted_by_account_id: self.deleted_by_account_id,
@@ -1070,6 +1073,7 @@ pub mod search {
         metadata: Value,
         search_enabled: bool,
         write_locked: bool,
+        revision: i64,
         created_by_account_id: Uuid,
         updated_by_account_id: Uuid,
         deleted_by_account_id: Option<Uuid>,
@@ -1104,6 +1108,7 @@ pub mod search {
                 metadata: self.metadata,
                 search_enabled: self.search_enabled,
                 write_locked: self.write_locked,
+                revision: self.revision,
                 created_by_account_id: self.created_by_account_id,
                 updated_by_account_id: self.updated_by_account_id,
                 deleted_by_account_id: self.deleted_by_account_id,
@@ -1245,6 +1250,7 @@ pub mod search {
                     metadata: row.metadata,
                     search_enabled: row.search_enabled,
                     write_locked: row.write_locked,
+                    revision: row.revision,
                     created_by_account_id: row.created_by_account_id,
                     updated_by_account_id: row.updated_by_account_id,
                     deleted_by_account_id: row.deleted_by_account_id,
@@ -1274,7 +1280,7 @@ pub mod search {
                    AND ($4::text IS NULL OR sort_path > $4) \
                  ORDER BY sort_path \
                  LIMIT $5",
-            "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
+            "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, n.revision, \
                         n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                         n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path \
                  FROM selected s \
@@ -1319,7 +1325,7 @@ pub mod search {
                    AND ($4::text IS NULL OR s.sort_path > $4) \
                  ORDER BY s.sort_path \
                  LIMIT $5",
-                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, \
+                "SELECT n.id, n.space_id, n.parent_id, n.name, n.kind, n.sort_order, n.metadata, n.search_enabled, n.write_locked, n.revision, \
                         n.created_by_account_id, n.updated_by_account_id, n.deleted_by_account_id, \
                         n.purge_after, n.created_at, n.updated_at, n.deleted_at, s.path, s.sort_path, \
                         s.text_content_sha256, s.text_byte_len, s.text_line_count, s.text_at_rest_encryption \

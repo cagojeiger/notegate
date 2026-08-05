@@ -286,6 +286,7 @@ pub(crate) async fn create(
                                 name: body.name,
                             },
                             body: WriteTextBody::Plain(content),
+                            expected_revision: None,
                             expected_sha256: None,
                         },
                     )
@@ -322,7 +323,7 @@ pub(crate) async fn create(
 #[schema(example = json!({
     "new_parent_id": "22222222-2222-2222-2222-222222222222",
     "new_name": "renamed.md",
-    "expected_parent_id": "11111111-1111-1111-1111-111111111111"
+    "expected_revision": 3
 }))]
 pub(crate) struct MoveNodeBody {
     /// Existing destination folder in the same space.
@@ -330,9 +331,8 @@ pub(crate) struct MoveNodeBody {
     /// New node name. Omit it to preserve the current name.
     #[serde(default)]
     new_name: Option<String>,
-    /// Optional optimistic guard. The move fails if the current parent differs.
-    #[serde(default)]
-    expected_parent_id: Option<Uuid>,
+    /// Revision copied from the latest node response.
+    expected_revision: i64,
 }
 
 #[utoipa::path(
@@ -360,7 +360,7 @@ pub(crate) async fn move_node(
                 node_id,
                 new_parent_node_id: body.new_parent_id,
                 new_name: body.new_name,
-                expected_parent_id: body.expected_parent_id,
+                expected_revision: body.expected_revision,
             },
         )
         .await?;
@@ -444,10 +444,11 @@ pub(crate) async fn copy_node(
     ))
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct DeleteQuery {
     #[serde(default)]
     recursive: bool,
+    expected_revision: i64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -466,6 +467,7 @@ pub(crate) struct DeleteNodeResponse {
         ("space_id" = Uuid, Path),
         ("node_id" = Uuid, Path),
         ("recursive" = Option<bool>, Query, description = "Required for non-empty folders"),
+        ("expected_revision" = i64, Query, description = "Revision from the latest node read"),
     ),
     responses((status = 200, description = "Soft-delete a node", body = DeleteNodeResponse)),
     security(("api_key" = []))
@@ -484,6 +486,7 @@ pub(crate) async fn delete(
             DeleteNode {
                 node_id,
                 recursive: query.recursive,
+                expected_revision: query.expected_revision,
             },
         )
         .await?;

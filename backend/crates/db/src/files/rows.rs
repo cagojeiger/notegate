@@ -25,6 +25,7 @@ pub struct NodeRow {
     pub metadata: Value,
     pub search_enabled: bool,
     pub write_locked: bool,
+    pub revision: i64,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub deleted_by_account_id: Option<Uuid>,
@@ -49,6 +50,7 @@ impl NodeRow {
             metadata: self.metadata,
             search_enabled: self.search_enabled,
             write_locked: self.write_locked,
+            revision: self.revision,
             created_by_account_id: self.created_by_account_id,
             updated_by_account_id: self.updated_by_account_id,
             deleted_by_account_id: self.deleted_by_account_id,
@@ -69,6 +71,7 @@ pub struct NodeSummaryRow {
     pub name: String,
     pub kind: String,
     pub sort_order: i32,
+    pub revision: i64,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -83,6 +86,7 @@ impl NodeSummaryRow {
             name: self.name,
             kind,
             sort_order: self.sort_order,
+            revision: self.revision,
             updated_at: self.updated_at,
         })
     }
@@ -172,11 +176,11 @@ impl TextRow {
 }
 
 /// Selectable columns of `nodes`, in [`NodeRow`] order.
-pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, \
+pub const NODE_COLUMNS: &str = "id, space_id, parent_id, name, kind, sort_order, metadata, search_enabled, write_locked, revision, \
      created_by_account_id, updated_by_account_id, deleted_by_account_id, purge_after, created_at, updated_at, deleted_at";
 
 pub const NODE_SUMMARY_COLUMNS: &str =
-    "id, space_id, parent_id, name, kind, sort_order, updated_at";
+    "id, space_id, parent_id, name, kind, sort_order, revision, updated_at";
 
 /// Selectable columns of `text_objects`, in [`TextRow`] order.
 pub const TEXT_COLUMNS: &str = "node_id, space_id, content_text AS content, encrypted_payload, content_sha256, \

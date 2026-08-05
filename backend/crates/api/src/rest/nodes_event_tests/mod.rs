@@ -55,6 +55,7 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
     .await?;
     assert_eq!(status, StatusCode::CREATED, "{text}");
     let text_id: Uuid = serde_json::from_value(text["id"].clone())?;
+    let mut text_revision = text["revision"].as_i64().expect("text revision");
 
     let upload_id = Uuid::new_v4();
     let files = FilesRepo::new(db.pool.clone());
@@ -86,11 +87,15 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         format!("/v1/spaces/{space_id}/text/{text_id}"),
         json!({
             "storage_format": "plain",
-            "content": "hello world"
+            "content": "hello world",
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{written}");
+    text_revision = written["node"]["revision"]
+        .as_i64()
+        .expect("written revision");
 
     let (status, no_op_write) = json_request(
         rest_app(state.clone(), caller.clone()),
@@ -98,33 +103,43 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         format!("/v1/spaces/{space_id}/text/{text_id}"),
         json!({
             "storage_format": "plain",
-            "content": "hello world"
+            "content": "hello world",
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{no_op_write}");
+    text_revision = no_op_write["node"]["revision"]
+        .as_i64()
+        .expect("no-op write revision");
 
     let (status, metadata) = json_request(
         rest_app(state.clone(), caller.clone()),
         "PUT",
         format!("/v1/spaces/{space_id}/nodes/{text_id}/metadata"),
         json!({
-            "metadata": {"source": "rest-e2e"}
+            "metadata": {"source": "rest-e2e"},
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{metadata}");
+    text_revision = metadata["revision"].as_i64().expect("metadata revision");
 
     let (status, no_op_metadata) = json_request(
         rest_app(state.clone(), caller.clone()),
         "PUT",
         format!("/v1/spaces/{space_id}/nodes/{text_id}/metadata"),
         json!({
-            "metadata": {"source": "rest-e2e"}
+            "metadata": {"source": "rest-e2e"},
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{no_op_metadata}");
+    text_revision = no_op_metadata["revision"]
+        .as_i64()
+        .expect("no-op metadata revision");
 
     let (status, updated) = json_request(
         rest_app(state.clone(), caller.clone()),
@@ -132,11 +147,13 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         format!("/v1/spaces/{space_id}/nodes/{text_id}"),
         json!({
             "name": "renamed.md",
-            "sort_order": 10
+            "sort_order": 10,
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{updated}");
+    text_revision = updated["revision"].as_i64().expect("updated revision");
 
     let (status, no_op_update) = json_request(
         rest_app(state.clone(), caller.clone()),
@@ -144,11 +161,15 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         format!("/v1/spaces/{space_id}/nodes/{text_id}"),
         json!({
             "name": "renamed.md",
-            "sort_order": 10
+            "sort_order": 10,
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{no_op_update}");
+    text_revision = no_op_update["revision"]
+        .as_i64()
+        .expect("no-op update revision");
 
     let (status, moved) = json_request(
         rest_app(state.clone(), caller.clone()),
@@ -156,11 +177,12 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         format!("/v1/spaces/{space_id}/nodes/{text_id}/move"),
         json!({
             "new_parent_id": folder_id,
-            "expected_parent_id": root_id
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{moved}");
+    text_revision = moved["revision"].as_i64().expect("moved revision");
 
     let (status, no_op_move) = json_request(
         rest_app(state.clone(), caller.clone()),
@@ -168,16 +190,19 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
         format!("/v1/spaces/{space_id}/nodes/{text_id}/move"),
         json!({
             "new_parent_id": folder_id,
-            "expected_parent_id": folder_id
+            "expected_revision": text_revision
         }),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{no_op_move}");
+    text_revision = no_op_move["revision"]
+        .as_i64()
+        .expect("no-op move revision");
 
     let (status, deleted) = empty_request(
         rest_app(state.clone(), caller.clone()),
         "DELETE",
-        format!("/v1/spaces/{space_id}/nodes/{text_id}"),
+        format!("/v1/spaces/{space_id}/nodes/{text_id}?expected_revision={text_revision}"),
     )
     .await?;
     assert_eq!(status, StatusCode::NO_CONTENT, "{deleted}");

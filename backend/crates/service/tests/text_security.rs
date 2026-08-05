@@ -44,13 +44,14 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
         )
         .await?;
     let node_id = text.node.node.id;
-    files
+    let written = files
         .write_text(
             owner,
             ws,
             WriteText {
                 target: WriteTarget::Existing { node_id },
                 body: WriteTextBody::Plain("existing plaintext".to_owned()),
+                expected_revision: Some(text.node.node.revision),
                 expected_sha256: None,
             },
         )
@@ -63,6 +64,7 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
             UpdateTextEncryption {
                 node_id,
                 enabled: true,
+                expected_revision: written.node.node.revision,
             },
         )
         .await
@@ -77,7 +79,7 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
         .bind(owner)
         .execute(&db.pool)
         .await?;
-    files
+    let encrypted_node = files
         .update_text_encryption(
             AccountKind::User,
             owner,
@@ -85,6 +87,7 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
             UpdateTextEncryption {
                 node_id,
                 enabled: true,
+                expected_revision: written.node.node.revision,
             },
         )
         .await?;
@@ -112,6 +115,7 @@ async fn text_encryption_toggle_rewrites_existing_content_immediately()
             UpdateTextEncryption {
                 node_id,
                 enabled: false,
+                expected_revision: encrypted_node.node.revision,
             },
         )
         .await?;
@@ -190,6 +194,7 @@ async fn write_agent_cannot_change_node_settings() -> Result<(), Box<dyn std::er
             UpdateNodeSearchPolicy {
                 node_id,
                 enabled: false,
+                expected_revision: text.node.node.revision,
             },
         )
         .await;
@@ -203,12 +208,13 @@ async fn write_agent_cannot_change_node_settings() -> Result<(), Box<dyn std::er
             UpdateTextEncryption {
                 node_id,
                 enabled: true,
+                expected_revision: text.node.node.revision,
             },
         )
         .await;
     assert!(matches!(enable, Err(ServiceError::Forbidden(_))));
 
-    files
+    let encrypted_node = files
         .update_text_encryption(
             AccountKind::User,
             owner,
@@ -216,6 +222,7 @@ async fn write_agent_cannot_change_node_settings() -> Result<(), Box<dyn std::er
             UpdateTextEncryption {
                 node_id,
                 enabled: true,
+                expected_revision: text.node.node.revision,
             },
         )
         .await?;
@@ -228,6 +235,7 @@ async fn write_agent_cannot_change_node_settings() -> Result<(), Box<dyn std::er
             UpdateTextEncryption {
                 node_id,
                 enabled: false,
+                expected_revision: encrypted_node.node.revision,
             },
         )
         .await;
@@ -290,13 +298,14 @@ async fn server_encrypted_text_stays_readable_and_searchable()
         )
         .await?;
     let node_id = encrypted.node.node.id;
-    files
+    let written = files
         .write_text(
             owner,
             ws,
             WriteText {
                 target: WriteTarget::Existing { node_id },
                 body: WriteTextBody::Plain("searchable secret".to_owned()),
+                expected_revision: Some(encrypted.node.node.revision),
                 expected_sha256: None,
             },
         )
@@ -355,7 +364,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
     assert_eq!(grep.items.len(), 1);
     assert_eq!(grep.items[0].node.node.id, node_id);
 
-    files
+    let hidden_node = files
         .update_node_search_policy(
             AccountKind::User,
             owner,
@@ -363,6 +372,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             UpdateNodeSearchPolicy {
                 node_id,
                 enabled: false,
+                expected_revision: written.node.node.revision,
             },
         )
         .await?;
@@ -391,7 +401,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(still_encrypted, "server");
-    files
+    let visible_node = files
         .update_node_search_policy(
             AccountKind::User,
             owner,
@@ -399,6 +409,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             UpdateNodeSearchPolicy {
                 node_id,
                 enabled: true,
+                expected_revision: hidden_node.node.revision,
             },
         )
         .await?;
@@ -449,6 +460,7 @@ async fn server_encrypted_text_stays_readable_and_searchable()
             WriteText {
                 target: WriteTarget::Existing { node_id },
                 body: WriteTextBody::Plain("blocked after downgrade".to_owned()),
+                expected_revision: Some(visible_node.node.revision),
                 expected_sha256: None,
             },
         )

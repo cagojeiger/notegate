@@ -71,6 +71,8 @@ Worker는 Space별 상태 row를 lease로 claim한다. 여러 API pod가 동시�
 
 따라서 같은 문서가 연속으로 여러 번 저장되어도 마지막 현재 상태가 투영된다. 투영 교체와 `applied_generation` 전진은 같은 transaction에서 완료한다.
 
+Node `revision`은 동기 mutation 충돌을 막는 per-node token이고, `desired_generation`/`applied_generation`은 비동기 Space projection의 진행 상태다. Link worker는 revision event를 재생하지 않고 generation 범위에서 중복 제거한 source의 최신 본문을 읽으므로 두 값은 서로 대체하지 않는다.
+
 Move, rename, recursive copy처럼 여러 source의 상대 path 또는 여러 target path를 바꾸는 topology 변경은 부분 영향을 추측하지 않고 Space 재인덱싱으로 승격한다. 일반 변경에서 source 작업 상한을 넘으면 연속 generation prefix를 상한만큼 증분 처리하고 나머지는 다음 claim에서 이어서 처리한다. 참조를 생략하거나 전체 Space 재인덱싱으로 승격하지 않는다. 삭제된 source의 outgoing 참조는 제거한다. 삭제된 target을 가리키는 참조는 삭제하지 않고 `deleted`로 보존한다.
 
 ## 최종 일관성

@@ -46,6 +46,7 @@ pub struct Node {
     pub metadata: Value,
     pub search_enabled: bool,
     pub write_locked: bool,
+    pub revision: i64,
     pub created_by_account_id: Uuid,
     pub updated_by_account_id: Uuid,
     pub deleted_by_account_id: Option<Uuid>,
@@ -65,5 +66,6 @@ pub struct NodeSummary {
     pub name: String,
     pub kind: NodeKind,
     pub sort_order: i32,
+    pub revision: i64,
     pub updated_at: DateTime<Utc>,
 }

@@ -33,6 +33,7 @@ pub async fn soft_delete_node(
     node_id: Uuid,
     deleted_by: Uuid,
     recursive: bool,
+    expected_revision: i64,
 ) -> Result<DateTime<Utc>> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
 
@@ -41,6 +42,7 @@ pub async fn soft_delete_node(
     let node = checks::live_node(&mut tx, space_id, node_id)
         .await?
         .ok_or_else(|| Error::not_found("node not found"))?;
+    checks::require_revision(node.revision, expected_revision)?;
     if node.parent_id.is_none() {
         return Err(Error::conflict("cannot delete the root node"));
     }

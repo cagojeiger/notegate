@@ -149,6 +149,7 @@ pub(crate) async fn read(
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct ReplaceBody {
+    expected_revision: i64,
     #[serde(default = "default_storage_format")]
     storage_format: String,
     #[serde(default)]
@@ -186,6 +187,7 @@ pub(crate) async fn replace(
             WriteText {
                 target: WriteTarget::Existing { node_id },
                 body: write_body(body.storage_format, body.content, body.encrypted_payload)?,
+                expected_revision: Some(body.expected_revision),
                 expected_sha256: body.expected_sha256,
             },
         )
@@ -198,6 +200,7 @@ pub(crate) async fn replace(
 #[serde(deny_unknown_fields)]
 pub(crate) struct UpdateEncryptionBody {
     enabled: bool,
+    expected_revision: i64,
 }
 
 #[utoipa::path(
@@ -224,6 +227,7 @@ pub(crate) async fn update_encryption(
             UpdateTextEncryption {
                 node_id,
                 enabled: body.enabled,
+                expected_revision: body.expected_revision,
             },
         )
         .await?;
@@ -247,6 +251,7 @@ pub(crate) struct Edit {
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct PatchBody {
     edits: Vec<Edit>,
+    expected_revision: i64,
     #[serde(default)]
     expected_sha256: Option<String>,
 }
@@ -324,6 +329,7 @@ pub(crate) async fn patch(
             PatchText {
                 node_id,
                 edits,
+                expected_revision: body.expected_revision,
                 expected_sha256: body.expected_sha256,
             },
         )

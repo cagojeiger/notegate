@@ -342,6 +342,7 @@ nodes
   name text not null
   kind text not null check ('folder','text','file')
   sort_order int not null default 0
+  revision bigint not null default 1 check > 0
   metadata jsonb not null default '{}'
   search_enabled bool not null default true
   write_locked bool not null default false
@@ -358,6 +359,8 @@ nodes
 - Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`, `deleted_at IS NULL`인 node다.
 - Non-root node name은 1~128자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다.
 - 같은 parent 안 live node name은 unique다.
+- `revision`은 node의 의미 있는 저장 상태가 바뀔 때 같은 transaction에서 1씩 증가하는 낙관적 동시성 기준이다. Create는 1에서 시작하며, 값이 동일한 no-op은 증가하지 않는다. 모든 실제 `nodes` UPDATE가 이 규칙을 따르도록 DB trigger가 증가를 보장한다.
+- 기존 node mutation은 읽은 `revision`을 `expected_revision`으로 보내야 한다. 불일치하면 변경하지 않고 conflict를 반환한다. Child 변경은 parent revision을 올리지 않는다.
 - `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다.
 - `search_enabled`는 해당 node만 검색 결과에 포함할지를 나타낸다. Folder 자식에게 상속되지 않는다.
 - `write_locked`는 직접 설정된 쓰기 잠금이다. descendant 상속 상태는 저장하지 않으며 parent chain에서 계산한다.

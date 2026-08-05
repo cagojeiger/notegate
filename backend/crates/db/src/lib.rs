@@ -44,7 +44,7 @@ pub use audit_event_repo::AuditEventRepo;
 pub use browser_session_repo::BrowserSessionRepo;
 pub use connection_repo::ConnectionRepo;
 pub use file_change_event_repo::FileChangeSyncRows;
-pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
+pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationGuard, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use link_index_repo::{
     LinkIndexClaim, LinkIndexEventBatch, LinkIndexRepo, LinkReferenceRecord, NewLinkReference,

@@ -337,7 +337,7 @@ split
 
 ```text
 edit text
--> PUT /text/{node_id} with expected_sha256
+-> PUT /text/{node_id} with expected_revision and optional expected_sha256
 -> success: preview mode + patch cached node representations + refresh text/recent
 -> conflict: show conflict state
 ```

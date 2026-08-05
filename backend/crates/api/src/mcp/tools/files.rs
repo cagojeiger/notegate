@@ -282,6 +282,7 @@ pub async fn read(
             "path": result.node.path,
             "unchanged": true,
             "content_returned": false,
+            "revision": result.node.node.revision,
             "content_sha256": result.content_sha256,
         }),
         ReadTextBody::Encrypted(_) => {
@@ -293,6 +294,7 @@ pub async fn read(
             "space": space,
             "path": result.node.path,
             "content": content.content,
+            "revision": result.node.node.revision,
             "content_sha256": result.content_sha256,
             "byte_len": result.byte_len,
             "line_count": result.line_count,
@@ -354,6 +356,7 @@ pub async fn write(
     target: String,
     content: String,
     create: bool,
+    expected_revision: Option<i64>,
     mut expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
@@ -385,6 +388,7 @@ pub async fn write(
             WriteText {
                 target,
                 body: WriteTextBody::Plain(content),
+                expected_revision,
                 expected_sha256,
             },
         )
@@ -400,15 +404,28 @@ pub async fn write(
     })))
 }
 
+pub struct AppendRequest {
+    pub target: String,
+    pub content: String,
+    pub create: bool,
+    pub ensure_newline: bool,
+    pub expected_revision: Option<i64>,
+    pub expected_sha256: Option<String>,
+}
+
 pub async fn append(
     state: &AppState,
     parts: &Parts,
-    target: String,
-    content: String,
-    create: bool,
-    ensure_newline: bool,
-    expected_sha256: Option<String>,
+    request: AppendRequest,
 ) -> Result<Json<Value>, ErrorData> {
+    let AppendRequest {
+        target,
+        content,
+        create,
+        ensure_newline,
+        expected_revision,
+        expected_sha256,
+    } = request;
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
     let account_id = caller.account_id();
@@ -425,6 +442,7 @@ pub async fn append(
             AppendText {
                 target,
                 content,
+                expected_revision,
                 expected_sha256,
                 ensure_newline,
             },
@@ -447,6 +465,7 @@ pub async fn patch(
     parts: &Parts,
     target: String,
     edits: Vec<PatchEdit>,
+    expected_revision: i64,
     expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let edits = prepare_patch_edits(&edits)?;
@@ -469,6 +488,7 @@ pub async fn patch(
             PatchText {
                 node_id: node.node.id,
                 edits,
+                expected_revision,
                 expected_sha256,
             },
         )
@@ -494,6 +514,7 @@ pub async fn edit(
     parts: &Parts,
     target: String,
     edits: Vec<LineEditInput>,
+    expected_revision: i64,
     expected_sha256: Option<String>,
 ) -> Result<Json<Value>, ErrorData> {
     let edits = prepare_line_edits(&edits)?;
@@ -516,6 +537,7 @@ pub async fn edit(
             EditText {
                 node_id: node.node.id,
                 edits,
+                expected_revision,
                 expected_sha256,
             },
         )
@@ -541,6 +563,7 @@ pub async fn mv(
     parts: &Parts,
     source: String,
     destination: String,
+    expected_revision: i64,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let (source_space, source_path) = resolve_target(state, caller, &source).await?;
@@ -576,7 +599,7 @@ pub async fn mv(
                 node_id: source.node.id,
                 new_parent_node_id: dest_parent.node.id,
                 new_name: Some(new_name),
-                expected_parent_id: None,
+                expected_revision,
             },
         )
         .await
@@ -652,6 +675,7 @@ pub async fn rm(
     parts: &Parts,
     target: String,
     recursive: bool,
+    expected_revision: i64,
 ) -> Result<Json<Value>, ErrorData> {
     let caller = caller(parts)?;
     let (resolved, path) = resolve_target(state, caller, &target).await?;
@@ -672,6 +696,7 @@ pub async fn rm(
             DeleteNode {
                 node_id: node.node.id,
                 recursive,
+                expected_revision,
             },
         )
         .await
@@ -1072,6 +1097,7 @@ mod tests {
             "hello".to_owned(),
             true,
             None,
+            None,
         )
         .await?
         .0;
@@ -1101,6 +1127,7 @@ mod tests {
             "hello".to_owned(),
             false,
             None,
+            None,
         )
         .await
         .err()
@@ -1129,6 +1156,7 @@ mod tests {
             "v1".to_owned(),
             true,
             None,
+            None,
         )
         .await?
         .0;
@@ -1143,6 +1171,7 @@ mod tests {
             format!("{space}:/note.md"),
             "v2-longer".to_owned(),
             false,
+            first["node"]["revision"].as_i64(),
             None,
         )
         .await?
@@ -1164,15 +1193,17 @@ mod tests {
         let state = test_state(db.pool.clone())?;
         let (caller, space, _space_id, _root_id) = caller_with_space(&state).await?;
 
-        write(
+        let written = write(
             &state,
             &parts_for(caller.clone()),
             format!("{space}:/note.md"),
             "hello".to_owned(),
             true,
             None,
+            None,
         )
-        .await?;
+        .await?
+        .0;
 
         let error = write(
             &state,
@@ -1180,6 +1211,7 @@ mod tests {
             format!("{space}:/note.md"),
             "world".to_owned(),
             false,
+            written["node"]["revision"].as_i64(),
             Some("not-the-real-sha".to_owned()),
         )
         .await
@@ -1205,7 +1237,7 @@ mod tests {
 
         // Create an encrypted text node directly through the service, bypassing
         // the Agent plain-text guard that `write()` enforces.
-        state
+        let encrypted = state
             .files
             .write_text(
                 account_id,
@@ -1216,6 +1248,7 @@ mod tests {
                         name: "secret.bin".to_owned(),
                     },
                     body: WriteTextBody::Encrypted(json!({"ct": "opaque"})),
+                    expected_revision: None,
                     expected_sha256: None,
                 },
             )
@@ -1227,6 +1260,7 @@ mod tests {
             format!("{space}:/secret.bin"),
             "hack".to_owned(),
             false,
+            Some(encrypted.node.node.revision),
             None,
         )
         .await
@@ -1257,11 +1291,14 @@ mod tests {
         let created = append(
             &state,
             &parts_for(caller.clone()),
-            format!("{space}:/log.md"),
-            "line1".to_owned(),
-            true,
-            true,
-            None,
+            AppendRequest {
+                target: format!("{space}:/log.md"),
+                content: "line1".to_owned(),
+                create: true,
+                ensure_newline: true,
+                expected_revision: None,
+                expected_sha256: None,
+            },
         )
         .await?
         .0;
@@ -1270,11 +1307,14 @@ mod tests {
         let appended = append(
             &state,
             &parts_for(caller.clone()),
-            format!("{space}:/log.md"),
-            "line2".to_owned(),
-            false,
-            true,
-            None,
+            AppendRequest {
+                target: format!("{space}:/log.md"),
+                content: "line2".to_owned(),
+                create: false,
+                ensure_newline: true,
+                expected_revision: created["node"]["revision"].as_i64(),
+                expected_sha256: None,
+            },
         )
         .await?
         .0;
@@ -1316,6 +1356,7 @@ mod tests {
             format!("{space}:/note.md"),
             "alpha\nbeta\n".to_owned(),
             true,
+            None,
             None,
         )
         .await?

@@ -11,7 +11,7 @@ mod common;
 
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
+use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationGuard, TextMutationKind};
 use notegate_model::FileChangeEventCursor;
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
@@ -42,6 +42,7 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
                 node_id: root_id,
                 name: Some("/".to_owned()),
                 sort_order: None,
+                expected_revision: 1,
             },
             account,
         )
@@ -66,33 +67,41 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
         .insert_text(space_id, root_id, "note.md", &text("hello"), account)
         .await?;
     let (file_node, _) = attach_file(&repo, space_id, root_id, "asset.txt", 5, account).await?;
-    let (_, written_text) = repo
+    let (written_node, written_text) = repo
         .save_text_content(
             space_id,
             node.id,
             &text("hello world"),
-            None,
+            TextMutationGuard {
+                revision: node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         )
         .await?;
-    let (_, no_op_text) = repo
+    let (no_op_node, no_op_text) = repo
         .save_text_content(
             space_id,
             node.id,
             &text("hello world"),
-            None,
+            TextMutationGuard {
+                revision: written_node.revision,
+                sha256: None,
+            },
             account,
             TextMutationKind::Write,
         )
         .await?;
     assert_eq!(no_op_text.updated_at, written_text.updated_at);
+    assert_eq!(no_op_node.revision, written_node.revision);
     let metadata = json!({ "source": "test" });
     let metadata_node = repo
         .replace_node_metadata(
             space_id,
             node.id,
             &metadata,
+            no_op_node.revision,
             account,
             MetadataMutationKind::Replace,
         )
@@ -102,11 +111,13 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
             space_id,
             node.id,
             &metadata,
+            metadata_node.revision,
             account,
             MetadataMutationKind::Replace,
         )
         .await?;
     assert_eq!(no_op_metadata_node.updated_at, metadata_node.updated_at);
+    assert_eq!(no_op_metadata_node.revision, metadata_node.revision);
     let updated_node = repo
         .update_node(
             space_id,
@@ -114,6 +125,7 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
                 node_id: node.id,
                 name: Some("renamed.md".to_owned()),
                 sort_order: Some(10),
+                expected_revision: no_op_metadata_node.revision,
             },
             account,
         )
@@ -125,11 +137,13 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
                 node_id: node.id,
                 name: Some("renamed.md".to_owned()),
                 sort_order: Some(10),
+                expected_revision: updated_node.revision,
             },
             account,
         )
         .await?;
     assert_eq!(no_op_updated_node.updated_at, updated_node.updated_at);
+    assert_eq!(no_op_updated_node.revision, updated_node.revision);
     let moved_node = repo
         .move_node(
             space_id,
@@ -137,7 +151,7 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
                 node_id: node.id,
                 new_parent_node_id: folder.id,
                 new_name: None,
-                expected_parent_id: Some(root_id),
+                expected_revision: no_op_updated_node.revision,
             },
             account,
         )
@@ -149,12 +163,13 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
                 node_id: node.id,
                 new_parent_node_id: folder.id,
                 new_name: None,
-                expected_parent_id: Some(folder.id),
+                expected_revision: moved_node.revision,
             },
             account,
         )
         .await?;
     assert_eq!(no_op_moved_node.updated_at, moved_node.updated_at);
+    assert_eq!(no_op_moved_node.revision, moved_node.revision);
     let (copied_node, _) = repo
         .copy_node(
             space_id,
@@ -167,7 +182,7 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
             account,
         )
         .await?;
-    repo.soft_delete_node(space_id, node.id, account, false)
+    repo.soft_delete_node(space_id, node.id, account, false, no_op_moved_node.revision)
         .await?;
 
     let events = repo

@@ -42,6 +42,7 @@ export function makeNodeSummary(overrides: Partial<NodeSummary> = {}): NodeSumma
     kind: "text",
     path: "/note.md",
     has_children: false,
+    revision: 1,
     effective_write_locked: false,
     updated_at: timestamp,
     ...overrides

@@ -50,6 +50,7 @@ type NodeRef = {
   id: string
   path: string
   kind: NodeKind
+  revision: number
 }
 ```
 
@@ -66,6 +67,7 @@ type RestNode = {
   kind: NodeKind
   path: string
   sort_order: number
+  revision: number
   metadata: object
   search_enabled: boolean
   write_locked: boolean
@@ -130,6 +132,7 @@ type McpNodeSummary = {
   name: string
   kind: NodeKind
   sort_order: number
+  revision: number
   search_enabled: boolean
   has_children: boolean
   created_at: string
@@ -155,6 +158,8 @@ type McpNodeSummary = {
 ```
 
 MCP는 File metadata/stat을 읽지만 File bytes는 전송하지 않는다.
+
+`revision`은 node 전체 mutation의 동시성 token이다. 수정 caller는 가장 최근 read/mutation 응답의 값을 `expected_revision`으로 다시 보낸다. Text의 `content_sha256`은 본문 전용 조건이며 `revision`을 대체하지 않는다.
 
 ## McpGrepSummary
 
