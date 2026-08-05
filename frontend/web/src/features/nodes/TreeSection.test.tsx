@@ -36,6 +36,30 @@ describe("TreeSection", () => {
     expect(new Set(queriedNodeIds())).toEqual(new Set([space.root_node_id]));
   });
 
+  it("keeps duplicate size and line metrics out of the narrow Files tree", async () => {
+    const file = { ...node("large-file", "file"), byte_len: 9.4 * 1024 * 1024 };
+    const text = { ...node("long-document", "text"), line_count: 35 };
+    mocks.useNodeChildrenQuery.mockReturnValue(query([file, text]));
+
+    const view = renderTree(new Set());
+
+    await waitFor(() => expect(view.getByRole("button", { name: file.name })).toBeTruthy());
+    expect(view.queryByText("9.4 MiB")).not.toBeInTheDocument();
+    expect(view.queryByText("35l")).not.toBeInTheDocument();
+  });
+
+  it("uses compact vertical insets around the Files tree", async () => {
+    const file = node("file-1", "file");
+    mocks.useNodeChildrenQuery.mockReturnValue(query([file]));
+
+    const view = renderTree(new Set());
+
+    await waitFor(() => expect(view.getByRole("button", { name: file.name })).toBeTruthy());
+    expect(view.container.querySelector("#files-section")).toHaveClass("py-1.5");
+    expect(view.getByRole("tree", { name: "Files" })).toHaveClass("mt-0.5");
+    expect(view.getByRole("button", { name: "Files" }).querySelectorAll("svg")).toHaveLength(1);
+  });
+
   it("creates child query observers only for expanded folders", async () => {
     const folder = node("folder-1", "folder");
     const child = node("text-1", "text", folder.id);

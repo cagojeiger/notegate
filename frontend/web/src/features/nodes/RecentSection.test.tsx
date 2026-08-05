@@ -89,6 +89,21 @@ describe("RecentSection", () => {
     expect(onInspectNode).toHaveBeenCalledWith(folder);
     expect(onOpenNode).toHaveBeenCalledWith(folder);
   });
+
+  it("uses the shared sidebar typography and compact row rhythm", () => {
+    mocks.useRecentNodesQuery.mockReturnValue(query([
+      page([node("node-1"), node("node-2")], false, null)
+    ]));
+
+    const view = renderRecent();
+
+    expect(view.container.querySelector("section")).toHaveClass("py-1.5", "font-ui");
+    expect(view.container.querySelector("[data-recent-list]")).toHaveClass("mt-0.5");
+    expect(view.container.querySelector("[data-recent-list] > div")).toHaveClass("space-y-0.5");
+    const recentToggle = view.getByRole("button", { name: "Recent" });
+    expect(recentToggle).toHaveClass("font-ui", "text-xs");
+    expect(recentToggle.querySelectorAll("svg")).toHaveLength(1);
+  });
 });
 
 function renderRecent(onOpenNode = vi.fn(), onInspectNode = vi.fn()) {

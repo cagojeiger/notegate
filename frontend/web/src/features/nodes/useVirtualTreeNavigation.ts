@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { findAdjacentNodeRowIndex, type TreeRow } from "./treeProjection";
 import type { TreeKeyboardNavigationRegistrar } from "./types";
 
-const TREE_ROW_SIZE = 36;
+const TREE_ROW_SIZE = 32;
 const TREE_OVERSCAN = 8;
 
 export function useVirtualTreeNavigation({

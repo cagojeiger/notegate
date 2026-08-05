@@ -1,7 +1,7 @@
 import type { Range } from "@tanstack/react-virtual";
 import { vi, type Mock } from "vitest";
 
-const TREE_ROW_SIZE = 36;
+const TREE_ROW_SIZE = 32;
 
 let visibleStart = 0;
 let visibleLimit = Number.POSITIVE_INFINITY;

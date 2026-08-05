@@ -239,13 +239,13 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
     <nav
       aria-label="Document outline"
       tabIndex={0}
-      className="max-h-full overflow-y-auto rounded-xl border border-seam bg-surface p-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+      className="max-h-full overflow-y-auto rounded-xl border border-seam bg-surface p-1.5 font-ui outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
     >
       <ul className="relative space-y-0.5 before:pointer-events-none before:absolute before:inset-y-1 before:left-1 before:w-px before:bg-seam">
         {outline.items.map((item) => {
           const active = item.id === outline.activeItemId;
           return (
-            <li key={item.id} className="relative pl-3">
+            <li key={item.id} className="relative">
               {active ? (
                 <span
                   aria-hidden="true"
@@ -255,15 +255,15 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
               <button
                 type="button"
                 aria-current={active ? "location" : undefined}
-                className={`flex min-h-8 w-full items-center rounded-lg py-1.5 pr-2 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${active ? "bg-[var(--ng-active-surface)] font-medium text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
-                style={{ paddingInlineStart: `${8 + (item.level - baseLevel) * 12}px` }}
+                className={`flex min-h-8 w-full items-start rounded-lg py-1 pr-1.5 text-left text-sm leading-5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${active ? "bg-[var(--ng-active-surface)] font-semibold text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+                style={{ paddingInlineStart: `${12 + (item.level - baseLevel) * 10}px` }}
                 onClick={() => {
                   outline.navigate(item.id);
                   onNavigate?.();
                 }}
                 title={item.label}
               >
-                <span className="truncate">{item.label}</span>
+                <span className="line-clamp-2 break-words">{item.label}</span>
               </button>
             </li>
           );

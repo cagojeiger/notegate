@@ -376,10 +376,14 @@ describe("AuxiliarySidebar", () => {
     expect(outlinePanel).toHaveClass("overflow-hidden", "p-3");
     const outlineNavigation = screen.getByRole("navigation", { name: "Document outline" });
     expect(outlineNavigation).toHaveAttribute("tabindex", "0");
-    expect(outlineNavigation).toHaveClass("max-h-full", "overflow-y-auto");
+    expect(outlineNavigation).toHaveClass("max-h-full", "overflow-y-auto", "p-1.5", "font-ui");
     const currentHeading = within(outlineNavigation).getByRole("button", { name: "개요" });
     const otherHeading = within(outlineNavigation).getByRole("button", { name: "세부 사항" });
     expect(currentHeading).toHaveAttribute("aria-current", "location");
+    expect(currentHeading).toHaveClass("items-start", "py-1", "text-sm", "leading-5", "font-semibold");
+    expect(currentHeading).toHaveStyle({ paddingInlineStart: "12px" });
+    expect(otherHeading).toHaveStyle({ paddingInlineStart: "22px" });
+    expect(currentHeading.querySelector("span")).toHaveClass("line-clamp-2", "break-words");
     expect(currentHeading.closest("li")?.querySelector('[aria-hidden="true"]')).toBeInTheDocument();
     expect(otherHeading).not.toHaveAttribute("aria-current");
     expect(otherHeading.closest("li")?.querySelector('[aria-hidden="true"]')).not.toBeInTheDocument();

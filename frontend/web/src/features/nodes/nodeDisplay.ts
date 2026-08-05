@@ -10,18 +10,6 @@ export function nodeIcon(node: NodeSummary): LucideIcon {
   return File;
 }
 
-export function fmtBytes(bytes = 0): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-}
-
-export function nodeMetaSuffix(node: NodeSummary): string | undefined {
-  if (node.kind === "text" && node.line_count !== undefined) return `${node.line_count}l`;
-  if (node.kind === "file" && node.byte_len !== undefined) return fmtBytes(node.byte_len);
-  return undefined;
-}
-
 export function makeRootNode(space: Space): RestNode {
   return {
     id: space.root_node_id,
