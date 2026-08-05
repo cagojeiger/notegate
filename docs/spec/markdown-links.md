@@ -2,7 +2,7 @@
 
 NoteGate Markdown Text는 활성 Space 안의 node를 가리키는 링크에 대해 보수적인 GitHub 스타일 path 모델을 사용한다.
 
-이 문서는 path 해석 규칙만 정의한다. backlink, Obsidian wikilink, title search, shortest-path lookup, cross-Space linking은 정의하지 않는다.
+이 문서는 path 해석 규칙과 내부 링크 관계 인덱스를 정의한다. Obsidian wikilink, title search, shortest-path lookup, cross-Space linking은 정의하지 않는다.
 
 ## 링크 종류
 
@@ -68,3 +68,34 @@ Markdown image도 같은 path 해석 규칙을 사용한다.
 - `javascript:`, `data:`, `blob:` 등 allowlist에 없는 protocol과 protocol-relative URL(`//example.com/a.png`)은 rendered `src`를 제거하고 image로 load하지 않는다.
 
 Obsidian wikilink embed syntax인 `![[image.png]]`, width syntax인 `![[image.png|300]]`, vault-wide filename lookup, attachment folder 자동 탐색은 이 문서에서 정의하지 않는다.
+
+## 관계 인덱스
+
+NoteGate는 표준 Markdown link와 image의 내부 경로를 문서별 관계로 비동기 인덱싱한다.
+
+```text
+문서 저장 ── 같은 transaction ──> 변경 이벤트 + 문서 인덱싱 요청
+                                      │
+                                      ▼
+                               background worker
+                                      │
+                                      ▼
+                           해당 문서의 outgoing 전체 교체
+```
+
+규칙:
+
+- 관계의 소유 단위는 source 문서다. Worker는 source 문서의 현재 본문을 읽고 기존 outgoing 관계를 새 결과로 전체 교체한다.
+- incoming 관계는 별도로 복제하지 않고 `target_node_id`의 역방향 조회로 구한다.
+- 문서 변경과 인덱싱 요청은 같은 database transaction에 기록한다. 둘 중 하나가 실패하면 문서 변경도 commit하지 않는다.
+- 관계 전체 교체와 해당 요청의 적용 완료 표시는 같은 database transaction에서 처리한다.
+- 같은 문서가 처리 중 다시 변경되면 새 요청이 남는다. 이전 worker가 완료되어도 새 요청은 지워지지 않으며 현재 본문으로 다시 처리된다.
+- Worker claim은 fencing token으로 보호한다. 만료된 worker는 이후 worker가 선점한 결과를 덮어쓸 수 없다.
+- 문서·파일·폴더의 생성, 이름 변경, 이동, 복사, 삭제는 경로 해석 결과에 영향을 주므로 Space 재인덱싱을 요청한다.
+- Space 재인덱싱은 현재 존재하는 모든 text node를 문서별 작업으로 전개한다. 삭제된 source의 관계와 작업 상태는 정리한다.
+- 목적지 node를 찾지 못한 내부 경로도 `target_node_id = null`인 broken 관계로 보존한다. 이후 경로 구조가 바뀌면 재인덱싱으로 다시 resolve한다.
+- Server 저장 암호화 문서는 worker가 복호화해 인덱싱한다. Client 암호화 문서는 서버가 본문을 읽을 수 없으므로 outgoing 관계를 만들지 않는다.
+- Node Inspector에서는 outgoing, incoming, broken 관계와 동기화 상태를 보여준다. 내부 revision 값은 사용자에게 노출하지 않는다.
+- 사용자는 text node를 수동 동기화하거나 Space 전체 재인덱싱을 요청할 수 있다. 요청은 background worker가 처리하며 화면 요청이 완료될 때까지 HTTP 연결을 유지하지 않는다.
+
+관계 인덱스는 결과적 일관성을 사용한다. 문서 저장 직후에는 이전 관계가 잠시 보일 수 있지만, 대기 중인 요청이 모두 처리되면 현재 문서와 일치해야 한다.

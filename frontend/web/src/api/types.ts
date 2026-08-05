@@ -316,3 +316,26 @@ export type FileChangeSyncResponse = {
   has_more: boolean;
   resync_required: boolean;
 };
+
+export type LinkSyncStatus = "up_to_date" | "pending" | "syncing" | "retrying";
+
+export type LinkReference = {
+  node_id: string | null;
+  path: string;
+  kind: "link" | "image";
+  occurrence_count: number;
+};
+
+export type NodeLinkIndexResponse = {
+  status: LinkSyncStatus;
+  last_synced_at: string | null;
+  outgoing: LinkReference[];
+  incoming: LinkReference[];
+};
+
+export type SpaceLinkIndexResponse = {
+  status: LinkSyncStatus;
+  pending_documents: number;
+  retrying_documents: number;
+  last_synced_at: string | null;
+};

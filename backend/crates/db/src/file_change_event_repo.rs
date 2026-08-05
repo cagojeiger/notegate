@@ -4,6 +4,7 @@
 use crate::event_history_query::{
     EventCursorPosition, UuidFilter, list_event_rows, list_event_rows_by_id,
 };
+use crate::link_index_repo;
 use crate::map_sqlx_error;
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
@@ -36,10 +37,18 @@ pub(crate) async fn insert_file_change_event(
     .bind(event.node_id)
     .bind(event.actor_account_id)
     .bind(event.op_type)
-    .bind(event.metadata)
+    .bind(&event.metadata)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;
+    link_index_repo::enqueue_for_file_change(
+        tx,
+        event.space_id,
+        event.node_id,
+        event.op_type,
+        &event.metadata,
+    )
+    .await?;
     Ok(())
 }
 

@@ -8,11 +8,22 @@ import { MarkdownOutlineProvider, useMarkdownOutlineContext, type MarkdownOutlin
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 
 const mocks = vi.hoisted(() => ({
-  useFolderChildrenStat: vi.fn()
+  useFolderChildrenStat: vi.fn(),
+  useNodeLinkIndexQuery: vi.fn(),
+  syncNodeLinkIndex: vi.fn()
 }));
 
 vi.mock("../features/editor/useEditorQueries", () => ({
   useFolderChildrenStat: mocks.useFolderChildrenStat
+}));
+
+vi.mock("../features/links/useLinkIndexQueries", () => ({
+  useNodeLinkIndexQuery: mocks.useNodeLinkIndexQuery,
+  useSyncNodeLinkIndexMutation: () => ({
+    mutate: mocks.syncNodeLinkIndex,
+    isPending: false,
+    isError: false
+  })
 }));
 
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
@@ -42,19 +53,33 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
     onSearchEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
+    onOpenLink: vi.fn(),
     ...overrides
   };
 }
 
 describe("AuxiliarySidebar", () => {
   beforeEach(() => {
+    mocks.useFolderChildrenStat.mockReset();
     mocks.useFolderChildrenStat.mockReturnValue({
       data: undefined,
       isError: false
     });
+    mocks.useNodeLinkIndexQuery.mockReset();
+    mocks.useNodeLinkIndexQuery.mockReturnValue({
+      data: {
+        status: "up_to_date",
+        last_synced_at: "2026-08-05T00:00:00Z",
+        outgoing: [],
+        incoming: []
+      },
+      isLoading: false,
+      isError: false
+    });
+    mocks.syncNodeLinkIndex.mockReset();
   });
 
-  it("uses the Details and Outline tabs as the single workbench header", () => {
+  it("uses Details, Outline, and Links as the single workbench header", () => {
     renderSidebar({
       activeNode: null,
       canWriteActiveSpace: false,
@@ -69,6 +94,39 @@ describe("AuxiliarySidebar", () => {
     expect(tablist.parentElement).toHaveClass("h-12", "border-b", "border-seam");
     expect(tablist).toHaveClass("h-full", "items-end");
     expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(within(tablist).getByRole("tab", { name: "Links" })).toBeDisabled();
+  });
+
+  it("shows outgoing, incoming, and missing targets without exposing index versions", async () => {
+    const user = userEvent.setup();
+    const onOpenLink = vi.fn();
+    mocks.useNodeLinkIndexQuery.mockReturnValue({
+      data: {
+        status: "pending",
+        last_synced_at: null,
+        outgoing: [
+          { node_id: "target", path: "/docs/target.md", kind: "link", occurrence_count: 2 },
+          { node_id: null, path: "/missing.md", kind: "link", occurrence_count: 1 }
+        ],
+        incoming: [
+          { node_id: "source", path: "/docs/source.md", kind: "link", occurrence_count: 1 }
+        ]
+      },
+      isLoading: false,
+      isError: false
+    });
+    renderSidebar({ onOpenLink });
+
+    expect(mocks.useNodeLinkIndexQuery).toHaveBeenLastCalledWith(null);
+    await user.click(screen.getByRole("tab", { name: "Links" }));
+    expect(mocks.useNodeLinkIndexQuery).toHaveBeenLastCalledWith(textNode);
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+    expect(screen.queryByText(/version/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /\/docs\/target\.md/ }));
+    expect(onOpenLink).toHaveBeenCalledWith("target");
+    await user.click(screen.getByRole("button", { name: "Sync now" }));
+    expect(mocks.syncNodeLinkIndex).toHaveBeenCalledWith({ spaceId: textNode.space_id, nodeId: textNode.id });
   });
 
   it("changes search, write lock, and stored-text encryption independently", async () => {

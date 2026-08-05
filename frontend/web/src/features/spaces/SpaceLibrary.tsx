@@ -1,9 +1,11 @@
-import { Bot, FolderOpen, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
+import { Bot, FolderOpen, Link2, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../../api/errors";
 import type { UpdateSpaceInput } from "../../api/spaces";
-import type { Space } from "../../api/types";
+import type { Space, SpaceLinkIndexResponse } from "../../api/types";
+import { formatLinkIndexSyncTime, linkIndexStatusLabel } from "../links/linkIndexPresentation";
+import { useReindexSpaceLinksMutation, useSpaceLinkIndexQuery } from "../links/useLinkIndexQueries";
 import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
@@ -44,6 +46,13 @@ type SpaceInspectorProps = {
   onRetryUsage: () => void;
   onUpdate: (input: UpdateSpaceInput) => void;
   usageCheck: UsageCheckProps;
+  linkIndex: {
+    data: SpaceLinkIndexResponse | undefined;
+    loading: boolean;
+    error: boolean;
+    reindexing: boolean;
+    onReindex: () => void;
+  };
   showHeader?: boolean;
 };
 
@@ -70,6 +79,8 @@ export function SpaceLibrary({
     [usageQuery.data?.spaces]
   );
   const selectedUsage = selectedSpace ? usageBySpaceId.get(selectedSpace.id) : undefined;
+  const linkIndexQuery = useSpaceLinkIndexQuery(selectedSpace?.id ?? null);
+  const reindexLinks = useReindexSpaceLinksMutation();
   const currentUsageState = usageState(usageQuery);
   const updatePending = updateSpace.isPending || updateInspectorSpace.isPending;
   const selectedCheckError = checkUsage.isError
@@ -115,6 +126,16 @@ export function SpaceLibrary({
         if (!selectedSpace) return;
         checkUsage.reset();
         checkUsage.mutate(selectedSpace.id);
+      }
+    },
+    linkIndex: {
+      data: linkIndexQuery.data,
+      loading: linkIndexQuery.isLoading,
+      error: linkIndexQuery.isError || reindexLinks.isError,
+      reindexing: reindexLinks.isPending,
+      onReindex: () => {
+        if (!selectedSpace) return;
+        reindexLinks.mutate(selectedSpace.id);
       }
     }
   };
@@ -194,6 +215,7 @@ function SpaceInspector({
   onRetryUsage,
   onUpdate,
   usageCheck,
+  linkIndex,
   showHeader = true
 }: SpaceInspectorProps) {
   const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
@@ -303,6 +325,41 @@ function SpaceInspector({
                 onChange={(checked) => onUpdate({ default_text_encryption_enabled: checked })}
               />
             </div>
+          </section>
+          <section className="p-4">
+            <SectionHeader
+              title="Links"
+              help="Indexes links between documents so incoming, outgoing, and missing targets can be inspected. Reindex rebuilds this space in the background."
+              actions={space ? (
+                <Button
+                  secondary
+                  size="sm"
+                  onClick={linkIndex.onReindex}
+                  disabled={space.permission !== "write" || linkIndex.reindexing}
+                >
+                  <RefreshCw size={14} className={linkIndex.reindexing ? "animate-spin" : undefined} />
+                  Reindex links
+                </Button>
+              ) : undefined}
+            />
+            {!space ? <p className="text-xs text-muted">Select a space to inspect its link index.</p> : null}
+            {space && linkIndex.loading ? <p className="text-xs text-muted">Loading link index…</p> : null}
+            {space && linkIndex.error ? <p role="alert" className="text-xs text-danger">Could not load the link index.</p> : null}
+            {space && linkIndex.data ? (
+              <div className="space-y-3">
+                <dl className="space-y-2">
+                  <MetaRow label="Status" value={linkIndexStatusLabel(linkIndex.data.status)} />
+                  <MetaRow label="Pending documents" value={`${linkIndex.data.pending_documents.toLocaleString()} documents`} />
+                  <MetaRow label="Last synced" value={formatLinkIndexSyncTime(linkIndex.data.last_synced_at)} />
+                </dl>
+                {linkIndex.data.retrying_documents > 0 ? (
+                  <p className="flex items-center gap-2 text-xs text-warning">
+                    <Link2 size={14} aria-hidden="true" />
+                    Retrying {linkIndex.data.retrying_documents.toLocaleString()} documents.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </section>
           <section className="p-4">
             <SectionHeader title="Usage" actions={usageAction} />

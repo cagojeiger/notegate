@@ -1,9 +1,11 @@
-import { ChevronRight, LockKeyhole, Search } from "lucide-react";
+import { ChevronRight, Image as ImageIcon, Link2, LockKeyhole, RefreshCw, Search, Unlink } from "lucide-react";
 import { useId, useState } from "react";
 
-import type { RestNode } from "../api/types";
+import type { LinkReference, NodeLinkIndexResponse, RestNode } from "../api/types";
 import { useMarkdownOutlineContext, type MarkdownInspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
 import { useFolderChildrenStat } from "../features/editor/useEditorQueries";
+import { formatLinkIndexSyncTime, linkIndexStatusLabel } from "../features/links/linkIndexPresentation";
+import { useNodeLinkIndexQuery, useSyncNodeLinkIndexMutation } from "../features/links/useLinkIndexQueries";
 import { formatBytes } from "../shared/lib/formatBytes";
 import { Button, MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
 import { WriteLockStatus } from "./WriteLockStatus";
@@ -25,6 +27,7 @@ type AuxiliarySidebarProps = {
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
+  onOpenLink: (nodeId: string) => void;
   onOutlineNavigate?: () => void;
 };
 
@@ -43,6 +46,7 @@ export function AuxiliarySidebar({
   onSearchEnabledChange,
   onWriteLockedChange,
   onTextEncryptionEnabledChange,
+  onOpenLink,
   onOutlineNavigate
 }: AuxiliarySidebarProps) {
   const [localPreferredView, setLocalPreferredView] = useState<MarkdownInspectorView>("details");
@@ -57,7 +61,14 @@ export function AuxiliarySidebar({
     && outline.spaceId === activeNode.space_id
     && outline.nodeId === activeNode.id
   );
-  const selectedView: MarkdownInspectorView = preferredView === "outline" && outlineAvailable ? "outline" : "details";
+  const linksAvailable = activeNode !== null;
+  const selectedView: MarkdownInspectorView = preferredView === "outline" && outlineAvailable
+    ? "outline"
+    : preferredView === "links" && linksAvailable
+      ? "links"
+      : "details";
+  const linkIndex = useNodeLinkIndexQuery(selectedView === "links" ? activeNode : null);
+  const syncLinkIndex = useSyncNodeLinkIndexMutation();
   const metadata = activeNode?.metadata ?? {};
   const clientEncrypted = activeNode?.text_storage_format === "encrypted";
   const serverEncrypted = activeNode?.text_at_rest_encryption === "server";
@@ -70,7 +81,8 @@ export function AuxiliarySidebar({
         <Tabs
           items={[
             { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
-            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable }
+            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable },
+            { id: "links", label: "Links", controls: `${panelIdPrefix}-links`, disabled: !linksAvailable }
           ]}
           value={selectedView}
           onChange={setPreferredView}
@@ -224,8 +236,133 @@ export function AuxiliarySidebar({
           <OutlinePanel outline={outline} onNavigate={onOutlineNavigate} />
         ) : null}
       </div>
+      <div
+        id={`${panelIdPrefix}-links`}
+        role="tabpanel"
+        aria-labelledby={`${panelIdPrefix}-links-tab`}
+        tabIndex={0}
+        hidden={selectedView !== "links"}
+        className="h-full overflow-y-auto p-3"
+      >
+        {activeNode ? (
+          <LinksPanel
+            node={activeNode}
+            data={linkIndex.data}
+            loading={linkIndex.isLoading}
+            error={linkIndex.isError || syncLinkIndex.isError}
+            syncing={syncLinkIndex.isPending}
+            canSync={canWriteActiveSpace}
+            onOpen={onOpenLink}
+            onSync={() => syncLinkIndex.mutate({ spaceId: activeNode.space_id, nodeId: activeNode.id })}
+          />
+        ) : null}
+      </div>
       </div>
     </aside>
+  );
+}
+
+function LinksPanel({
+  node,
+  data,
+  loading,
+  error,
+  syncing,
+  canSync,
+  onOpen,
+  onSync
+}: {
+  node: RestNode;
+  data?: NodeLinkIndexResponse;
+  loading: boolean;
+  error: boolean;
+  syncing: boolean;
+  canSync: boolean;
+  onOpen: (nodeId: string) => void;
+  onSync: () => void;
+}) {
+  return (
+    <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
+      <section className="p-4">
+        <SectionHeader
+          title="Link index"
+          actions={node.kind === "text" ? (
+            <Button secondary size="sm" onClick={onSync} disabled={!canSync || syncing}>
+              <RefreshCw size={14} className={syncing ? "animate-spin" : undefined} />
+              Sync now
+            </Button>
+          ) : undefined}
+        />
+        {loading ? <p className="text-xs text-muted">Loading links…</p> : null}
+        {error ? <p role="alert" className="text-xs text-danger">Could not load links.</p> : null}
+        {data ? (
+          <dl className="space-y-2">
+            <MetaRow label="Status" value={linkIndexStatusLabel(data.status)} />
+            <MetaRow label="Last synced" value={formatLinkIndexSyncTime(data.last_synced_at)} />
+          </dl>
+        ) : null}
+      </section>
+      <LinkReferenceSection
+        title="Outgoing"
+        empty="This item does not link to another item."
+        references={data?.outgoing ?? []}
+        onOpen={onOpen}
+      />
+      <LinkReferenceSection
+        title="Incoming"
+        empty="No other item links here."
+        references={data?.incoming ?? []}
+        onOpen={onOpen}
+      />
+    </div>
+  );
+}
+
+function LinkReferenceSection({
+  title,
+  empty,
+  references,
+  onOpen
+}: {
+  title: string;
+  empty: string;
+  references: LinkReference[];
+  onOpen: (nodeId: string) => void;
+}) {
+  return (
+    <section className="p-4">
+      <SectionHeader title={title} actions={<span className="text-xs tabular-nums text-muted">{references.length}</span>} />
+      {references.length === 0 ? <p className="text-xs text-muted">{empty}</p> : (
+        <ul className="space-y-1">
+          {references.map((reference) => {
+            const missing = reference.node_id === null;
+            return (
+              <li key={`${reference.kind}:${reference.path}`}>
+                <button
+                  type="button"
+                  className="flex min-h-9 w-full min-w-0 items-center gap-2 rounded-lg px-2 text-left text-sm hover:bg-[var(--ng-hover)] disabled:cursor-default disabled:hover:bg-transparent"
+                  disabled={missing}
+                  onClick={() => {
+                    if (reference.node_id) onOpen(reference.node_id);
+                  }}
+                >
+                  {missing ? <Unlink size={15} className="shrink-0 text-danger" /> : reference.kind === "image" ? (
+                    <ImageIcon size={15} className="shrink-0 text-muted" />
+                  ) : (
+                    <Link2 size={15} className="shrink-0 text-muted" />
+                  )}
+                  <span className={`min-w-0 flex-1 truncate ${missing ? "text-danger" : "text-text"}`}>{reference.path}</span>
+                  {missing ? <span className="shrink-0 text-xs text-danger">Missing</span> : null}
+                  {reference.occurrence_count > 1 ? (
+                    <span className="shrink-0 text-xs tabular-nums text-muted">×{reference.occurrence_count}</span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
