@@ -205,7 +205,7 @@ export function AuxiliarySidebar({
         aria-labelledby={`${panelIdPrefix}-outline-tab`}
         tabIndex={outlineAvailable && outline?.items.length ? undefined : 0}
         hidden={selectedView !== "outline"}
-        className="h-full min-h-0 overflow-hidden p-3"
+        className="h-full min-h-0 overflow-hidden p-2"
       >
         {outlineAvailable && outline ? (
           <OutlinePanel outline={outline} onNavigate={onOutlineNavigate} />

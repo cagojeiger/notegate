@@ -368,7 +368,7 @@ describe("AuxiliarySidebar", () => {
     const outlinePanel = screen.getByRole("tabpanel", { name: "Outline" });
     expect(outlinePanel).toHaveAttribute("aria-labelledby", expect.stringMatching(/-outline-tab$/));
     expect(outlinePanel).not.toHaveAttribute("tabindex");
-    expect(outlinePanel).toHaveClass("overflow-hidden", "p-3");
+    expect(outlinePanel).toHaveClass("overflow-hidden", "p-2");
     const outlineNavigation = screen.getByRole("navigation", { name: "Document outline" });
     expect(outlineNavigation).toHaveAttribute("tabindex", "0");
     expect(outlineNavigation).toHaveClass("max-h-full", "overflow-y-auto", "p-1.5", "font-ui");
