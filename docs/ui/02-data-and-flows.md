@@ -150,7 +150,7 @@ GET /api/v1/spaces/{space_id}/nodes/{node_id}/reveal
 
 ```text
 restore root and multiple expanded folders with missing cache
--> fetch their first pages in batches of at most 16 parents
+-> fetch their first pages in batches of at most 15 parents
 -> seed each folder's existing children query cache
 
 expand root/folder

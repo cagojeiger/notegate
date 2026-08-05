@@ -518,6 +518,7 @@ fn parse_collection_view(view: Option<&str>) -> Result<bool, ApiError> {
 #[cfg(test)]
 mod collection_response_tests {
     use chrono::{TimeZone, Utc};
+    use notegate_service::files::MAX_BATCH_CHILDREN_PARENTS;
 
     use super::*;
 
@@ -529,7 +530,7 @@ mod collection_response_tests {
             .single()
             .ok_or("invalid test timestamp")?;
         let mut results = Vec::new();
-        for parent_index in 0..16_u128 {
+        for parent_index in 0..MAX_BATCH_CHILDREN_PARENTS as u128 {
             let parent_id = Uuid::from_u128(10 + parent_index);
             let children = (0..100_u128)
                 .map(|child_index| NodeSummaryOut {

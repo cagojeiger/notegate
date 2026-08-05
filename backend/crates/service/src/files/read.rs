@@ -17,7 +17,7 @@ use crate::pagination;
 
 use super::{FilesService, join_path};
 
-pub const MAX_BATCH_CHILDREN_PARENTS: usize = 16;
+pub const MAX_BATCH_CHILDREN_PARENTS: usize = 15;
 
 impl FilesService {
     /// Metadata for a node (`stat`). Requires read permission.

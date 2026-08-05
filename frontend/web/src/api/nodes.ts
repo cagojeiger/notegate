@@ -9,7 +9,7 @@ import type {
   RestNodeListResponse
 } from "./types";
 
-export const MAX_BATCH_CHILDREN_PARENTS = 16;
+export const MAX_BATCH_CHILDREN_PARENTS = 15;
 
 export type UpdateNodeInput = {
   expected_revision: number;
