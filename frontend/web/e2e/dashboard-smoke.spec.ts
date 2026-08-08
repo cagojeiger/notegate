@@ -47,8 +47,12 @@ test("browser session dashboard supports space, text, metadata, and file basics"
     await page.getByRole("button", { name: "Toggle right sidebar" }).click();
   }
   await inspector.getByRole("tab", { name: "Links" }).click();
-  await expect(inspector.getByText(`/${textName}`, { exact: true })).toBeVisible();
-  await expect(inspector.getByText("Up to date", { exact: true })).toBeVisible();
+  const linksPanel = inspector.getByRole("tabpanel", { name: "Links" });
+  await expect(linksPanel.getByRole("region", { name: "Outgoing" })
+    .getByRole("button", { name: `/${textName}` })).toBeVisible();
+  await expect(linksPanel.getByRole("region", { name: "Incoming" })
+    .getByRole("button", { name: `/${textName}` })).toBeVisible();
+  await expect(linksPanel.getByText("Up to date", { exact: true })).toBeVisible();
   await inspector.getByRole("tab", { name: "Details" }).click();
 
   await page.getByRole("button", { name: "Edit metadata" }).click();

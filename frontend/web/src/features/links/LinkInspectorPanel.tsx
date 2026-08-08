@@ -74,7 +74,7 @@ function LinkReferenceSection({
   onOpen: (nodeId: string) => void;
 }) {
   return (
-    <section className="p-4">
+    <section aria-label={title} className="p-4">
       <SectionHeader title={title} actions={<span className="text-xs tabular-nums text-muted">{references.length}</span>} />
       {references.length === 0 ? <p className="text-xs text-muted">{empty}</p> : (
         <ul className="space-y-1">
