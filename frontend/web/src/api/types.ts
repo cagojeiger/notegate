@@ -318,6 +318,7 @@ export type FileChangeSyncResponse = {
 };
 
 export type LinkSyncStatus = "up_to_date" | "pending" | "syncing" | "retrying";
+export type LinkReferenceDirection = "outgoing" | "incoming";
 
 export type LinkReference = {
   node_id: string | null;
@@ -329,8 +330,11 @@ export type LinkReference = {
 export type NodeLinkIndexResponse = {
   status: LinkSyncStatus;
   last_synced_at: string | null;
-  outgoing: LinkReference[];
-  incoming: LinkReference[];
+};
+
+export type LinkReferenceListResponse = {
+  links: LinkReference[];
+  page: Page;
 };
 
 export type SpaceLinkIndexResponse = {

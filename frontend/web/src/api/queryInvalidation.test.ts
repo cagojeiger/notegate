@@ -199,15 +199,23 @@ describe("query invalidation", () => {
     const spaceKey = queryKeys.spaceLinkIndex("space-1");
     const firstNodeKey = queryKeys.nodeLinkIndex("space-1", "node-1");
     const secondNodeKey = queryKeys.nodeLinkIndex("space-1", "node-2");
+    const outgoingKey = queryKeys.nodeLinkReferences(
+      "space-1",
+      "node-1",
+      "outgoing",
+      "up_to_date:2026-08-08T00:00:00Z"
+    );
     queryClient.setQueryData(spaceKey, { status: "up_to_date" });
     queryClient.setQueryData(firstNodeKey, { status: "up_to_date" });
     queryClient.setQueryData(secondNodeKey, { status: "up_to_date" });
+    queryClient.setQueryData(outgoingKey, { pages: [] });
 
     invalidateLinkIndex(queryClient, "space-1");
 
     expect(queryClient.getQueryState(spaceKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(firstNodeKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(secondNodeKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(outgoingKey)?.isInvalidated).toBe(true);
   });
 
   it("invalidates descendant-bearing cache families after a folder path change", () => {

@@ -64,6 +64,15 @@ async fn rest_link_index_rebuilds_relationships_and_enforces_space_access()
             owner.account_id(),
         )
         .await?;
+    let (second_source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source-2.md",
+            &text("[target](target.md)"),
+            owner.account_id(),
+        )
+        .await?;
 
     drain_link_index(&state).await?;
 
@@ -74,21 +83,94 @@ async fn rest_link_index_rebuilds_relationships_and_enforces_space_access()
     .await?;
     assert_eq!(status, StatusCode::OK, "{source_links}");
     assert_eq!(source_links["status"], json!("up_to_date"));
-    assert_eq!(source_links["outgoing"].as_array().map(Vec::len), Some(2));
-    assert_eq!(source_links["outgoing"][0]["path"], json!("/missing.md"));
-    assert_eq!(source_links["outgoing"][0]["node_id"], json!(null));
-    assert_eq!(source_links["outgoing"][1]["path"], json!("/target.md"));
-    assert_eq!(source_links["outgoing"][1]["node_id"], json!(target.id));
+    assert!(source_links.get("outgoing").is_none());
+
+    let (status, first_outgoing_page) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!(
+            "/v1/spaces/{space_id}/nodes/{}/links/outgoing?limit=1",
+            source.id
+        ),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{first_outgoing_page}");
+    assert_eq!(
+        first_outgoing_page["links"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        first_outgoing_page["links"][0]["path"],
+        json!("/missing.md")
+    );
+    assert_eq!(first_outgoing_page["links"][0]["node_id"], json!(null));
+    assert_eq!(first_outgoing_page["page"]["has_more"], json!(true));
+    let outgoing_cursor = first_outgoing_page["page"]["next_cursor"]
+        .as_str()
+        .ok_or("missing outgoing cursor")?;
+    let (status, second_outgoing_page) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!(
+            "/v1/spaces/{space_id}/nodes/{}/links/outgoing?limit=1&cursor={outgoing_cursor}",
+            source.id
+        ),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{second_outgoing_page}");
+    assert_eq!(
+        second_outgoing_page["links"][0]["path"],
+        json!("/target.md")
+    );
+    assert_eq!(
+        second_outgoing_page["links"][0]["node_id"],
+        json!(target.id)
+    );
+    assert_eq!(second_outgoing_page["page"]["has_more"], json!(false));
+
+    let (status, wrong_scope) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!(
+            "/v1/spaces/{space_id}/nodes/{}/links/outgoing?cursor={outgoing_cursor}",
+            target.id
+        ),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{wrong_scope}");
 
     let (status, target_links) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/nodes/{}/links", target.id),
+        format!(
+            "/v1/spaces/{space_id}/nodes/{}/links/incoming?limit=1",
+            target.id
+        ),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{target_links}");
-    assert_eq!(target_links["incoming"].as_array().map(Vec::len), Some(1));
-    assert_eq!(target_links["incoming"][0]["node_id"], json!(source.id));
-    assert_eq!(target_links["incoming"][0]["path"], json!("/source.md"));
+    assert_eq!(target_links["links"].as_array().map(Vec::len), Some(1));
+    assert_eq!(target_links["page"]["has_more"], json!(true));
+    let incoming_cursor = target_links["page"]["next_cursor"]
+        .as_str()
+        .ok_or("missing incoming cursor")?;
+    let (status, next_target_links) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!(
+            "/v1/spaces/{space_id}/nodes/{}/links/incoming?limit=1&cursor={incoming_cursor}",
+            target.id
+        ),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{next_target_links}");
+    let mut incoming_ids = vec![
+        target_links["links"][0]["node_id"].to_string(),
+        next_target_links["links"][0]["node_id"].to_string(),
+    ];
+    incoming_ids.sort();
+    let mut expected_incoming_ids = vec![
+        json!(source.id).to_string(),
+        json!(second_source.id).to_string(),
+    ];
+    expected_incoming_ids.sort();
+    assert_eq!(incoming_ids, expected_incoming_ids);
+    assert_eq!(next_target_links["page"]["has_more"], json!(false));
 
     sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1")
         .bind(space_id)
@@ -112,12 +194,12 @@ async fn rest_link_index_rebuilds_relationships_and_enforces_space_access()
     drain_link_index(&state).await?;
     let (status, rebuilt_source_links) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/nodes/{}/links", source.id),
+        format!("/v1/spaces/{space_id}/nodes/{}/links/outgoing", source.id),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{rebuilt_source_links}");
     assert_eq!(
-        rebuilt_source_links["outgoing"].as_array().map(Vec::len),
+        rebuilt_source_links["links"].as_array().map(Vec::len),
         Some(2)
     );
 
@@ -150,9 +232,16 @@ async fn rest_link_index_rebuilds_relationships_and_enforces_space_access()
     .await?;
     assert_eq!(status, StatusCode::OK, "{updated_target_links}");
     assert_eq!(updated_target_links["status"], json!("up_to_date"));
+    let (status, updated_incoming) = get_json(
+        rest_app(state.clone(), owner.clone()),
+        format!("/v1/spaces/{space_id}/nodes/{}/links/incoming", target.id),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{updated_incoming}");
+    assert_eq!(updated_incoming["links"].as_array().map(Vec::len), Some(1));
     assert_eq!(
-        updated_target_links["incoming"].as_array().map(Vec::len),
-        Some(0)
+        updated_incoming["links"][0]["node_id"],
+        json!(second_source.id)
     );
 
     let (status, queued) = empty_request(
@@ -243,13 +332,12 @@ async fn rest_link_index_converges_after_move_rename_and_delete()
 
     let (status, moved_links) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/nodes/{}/links", source.id),
+        format!("/v1/spaces/{space_id}/nodes/{}/links/outgoing", source.id),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{moved_links}");
-    assert_eq!(moved_links["status"], json!("up_to_date"));
-    assert_eq!(moved_links["outgoing"][0]["path"], json!("/target.md"));
-    assert_eq!(moved_links["outgoing"][0]["node_id"], json!(null));
+    assert_eq!(moved_links["links"][0]["path"], json!("/target.md"));
+    assert_eq!(moved_links["links"][0]["node_id"], json!(null));
 
     files
         .save_text_content(
@@ -264,12 +352,12 @@ async fn rest_link_index_converges_after_move_rename_and_delete()
     drain_link_index(&state).await?;
     let (status, target_links) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/nodes/{}/links", target.id),
+        format!("/v1/spaces/{space_id}/nodes/{}/links/incoming", target.id),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{target_links}");
-    assert_eq!(target_links["incoming"].as_array().map(Vec::len), Some(1));
-    assert_eq!(target_links["incoming"][0]["node_id"], json!(source.id));
+    assert_eq!(target_links["links"].as_array().map(Vec::len), Some(1));
+    assert_eq!(target_links["links"][0]["node_id"], json!(source.id));
 
     files
         .soft_delete_node(space_id, target.id, owner.account_id(), false)
@@ -277,15 +365,15 @@ async fn rest_link_index_converges_after_move_rename_and_delete()
     drain_link_index(&state).await?;
     let (status, deleted_target_links) = get_json(
         rest_app(state.clone(), owner.clone()),
-        format!("/v1/spaces/{space_id}/nodes/{}/links", source.id),
+        format!("/v1/spaces/{space_id}/nodes/{}/links/outgoing", source.id),
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{deleted_target_links}");
     assert_eq!(
-        deleted_target_links["outgoing"][0]["path"],
+        deleted_target_links["links"][0]["path"],
         json!("/archive/renamed.md")
     );
-    assert_eq!(deleted_target_links["outgoing"][0]["node_id"], json!(null));
+    assert_eq!(deleted_target_links["links"][0]["node_id"], json!(null));
 
     files
         .soft_delete_node(space_id, source.id, owner.account_id(), false)

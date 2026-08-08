@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use notegate_core::Result;
-use notegate_model::LinkReferenceKind;
+use notegate_model::{IncomingLinkCursor, LinkReferenceKind, OutgoingLinkCursor};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -221,17 +221,42 @@ impl LinkIndexRepo {
         &self,
         space_id: Uuid,
         source_node_id: Uuid,
+        limit: i64,
+        cursor: Option<&OutgoingLinkCursor>,
     ) -> Result<Vec<StoredLinkReference>> {
-        let rows = sqlx::query_as::<_, StoredLinkReferenceRow>(
-            "SELECT target_node_id, target_path, reference_kind, occurrence_count \
-             FROM node_link_refs \
-             WHERE space_id = $1 AND source_node_id = $2 \
-             ORDER BY target_path, reference_kind",
-        )
-        .bind(space_id)
-        .bind(source_node_id)
-        .fetch_all(&self.pool)
-        .await
+        let rows = match cursor {
+            Some(cursor) => {
+                sqlx::query_as::<_, StoredLinkReferenceRow>(
+                    "SELECT target_node_id, target_path, reference_kind, occurrence_count \
+                     FROM node_link_refs \
+                     WHERE space_id = $1 AND source_node_id = $2 \
+                       AND (reference_kind, target_path) > ($3, $4) \
+                     ORDER BY reference_kind, target_path \
+                     LIMIT $5",
+                )
+                .bind(space_id)
+                .bind(source_node_id)
+                .bind(cursor.kind.as_str())
+                .bind(&cursor.target_path)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query_as::<_, StoredLinkReferenceRow>(
+                    "SELECT target_node_id, target_path, reference_kind, occurrence_count \
+                     FROM node_link_refs \
+                     WHERE space_id = $1 AND source_node_id = $2 \
+                     ORDER BY reference_kind, target_path \
+                     LIMIT $3",
+                )
+                .bind(space_id)
+                .bind(source_node_id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
         .map_err(map_sqlx_error)?;
         rows.into_iter()
             .map(StoredLinkReference::try_from)
@@ -242,17 +267,50 @@ impl LinkIndexRepo {
         &self,
         space_id: Uuid,
         target_node_id: Uuid,
+        limit: i64,
+        cursor: Option<&IncomingLinkCursor>,
     ) -> Result<Vec<IncomingLinkReference>> {
-        let rows = sqlx::query_as::<_, IncomingLinkReferenceRow>(
-            "SELECT source_node_id, reference_kind, occurrence_count \
-             FROM node_link_refs \
-             WHERE space_id = $1 AND target_node_id = $2 \
-             ORDER BY source_node_id, reference_kind",
-        )
-        .bind(space_id)
-        .bind(target_node_id)
-        .fetch_all(&self.pool)
-        .await
+        let rows = match cursor {
+            Some(cursor) => {
+                sqlx::query_as::<_, IncomingLinkReferenceRow>(
+                    "SELECT refs.source_node_id, refs.reference_kind, refs.occurrence_count \
+                     FROM node_link_refs refs \
+                     JOIN nodes source \
+                       ON source.id = refs.source_node_id \
+                      AND source.space_id = refs.space_id \
+                      AND source.deleted_at IS NULL \
+                     WHERE refs.space_id = $1 AND refs.target_node_id = $2 \
+                       AND (refs.source_node_id, refs.reference_kind) > ($3, $4) \
+                     ORDER BY refs.source_node_id, refs.reference_kind \
+                     LIMIT $5",
+                )
+                .bind(space_id)
+                .bind(target_node_id)
+                .bind(cursor.source_node_id)
+                .bind(cursor.kind.as_str())
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+            None => {
+                sqlx::query_as::<_, IncomingLinkReferenceRow>(
+                    "SELECT refs.source_node_id, refs.reference_kind, refs.occurrence_count \
+                     FROM node_link_refs refs \
+                     JOIN nodes source \
+                       ON source.id = refs.source_node_id \
+                      AND source.space_id = refs.space_id \
+                      AND source.deleted_at IS NULL \
+                     WHERE refs.space_id = $1 AND refs.target_node_id = $2 \
+                     ORDER BY refs.source_node_id, refs.reference_kind \
+                     LIMIT $3",
+                )
+                .bind(space_id)
+                .bind(target_node_id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
         .map_err(map_sqlx_error)?;
         rows.into_iter()
             .map(IncomingLinkReference::try_from)

@@ -47,8 +47,36 @@ pub struct LinkReferenceView {
 pub struct NodeLinkIndexView {
     pub status: LinkSyncStatus,
     pub last_synced_at: Option<DateTime<Utc>>,
-    pub outgoing: Vec<LinkReferenceView>,
-    pub incoming: Vec<LinkReferenceView>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListLinkReferences {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutgoingLinkCursor {
+    pub space_id: Uuid,
+    pub source_node_id: Uuid,
+    pub target_path: String,
+    pub kind: LinkReferenceKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncomingLinkCursor {
+    pub space_id: Uuid,
+    pub target_node_id: Uuid,
+    pub source_node_id: Uuid,
+    pub kind: LinkReferenceKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkReferencePage {
+    pub items: Vec<LinkReferenceView>,
+    pub limit: i64,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -27,7 +27,8 @@ pub use file_change_event::{
 };
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
 pub use link_index::{
-    LinkReferenceKind, LinkReferenceView, LinkSyncStatus, NodeLinkIndexView, SpaceLinkIndexView,
+    IncomingLinkCursor, LinkReferenceKind, LinkReferencePage, LinkReferenceView, LinkSyncStatus,
+    ListLinkReferences, NodeLinkIndexView, OutgoingLinkCursor, SpaceLinkIndexView,
 };
 pub use mcp_invocation::{
     ListMcpInvocations, McpInvocation, McpInvocationCursor, McpInvocationPage,

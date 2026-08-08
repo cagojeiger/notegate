@@ -1,7 +1,7 @@
 CREATE TABLE node_link_refs (
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     source_node_id UUID NOT NULL,
-    target_node_id UUID REFERENCES nodes(id) ON DELETE SET NULL,
+    target_node_id UUID,
     target_path TEXT NOT NULL,
     reference_kind TEXT NOT NULL CHECK (reference_kind IN ('link', 'image')),
     occurrence_count INTEGER NOT NULL CHECK (occurrence_count > 0),
@@ -9,11 +9,14 @@ CREATE TABLE node_link_refs (
     FOREIGN KEY (source_node_id, space_id)
         REFERENCES nodes(id, space_id)
         ON DELETE CASCADE,
+    FOREIGN KEY (target_node_id, space_id)
+        REFERENCES nodes(id, space_id)
+        ON DELETE SET NULL (target_node_id),
     CHECK (target_path LIKE '/%' AND octet_length(target_path) <= 4096)
 );
 
 CREATE INDEX node_link_refs_incoming_idx
-    ON node_link_refs (space_id, target_node_id, source_node_id)
+    ON node_link_refs (space_id, target_node_id, source_node_id, reference_kind)
     WHERE target_node_id IS NOT NULL;
 
 CREATE TABLE reconciliation_work_items (

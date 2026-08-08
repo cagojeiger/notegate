@@ -1,17 +1,20 @@
 use std::collections::{BTreeMap, HashMap};
 
+use notegate_core::limits;
 use notegate_db::{
     FilesRepo, LinkIndexRepo, ReconciliationClaim, SpaceLinkStatus, StoredLinkReference,
 };
 use notegate_model::{
-    AccountKind, Caller, Channel, LinkReferenceKind, LinkReferenceView, LinkSyncStatus,
-    NodeLinkIndexView, Permission, SpaceLinkIndexView,
+    AccountKind, Caller, Channel, IncomingLinkCursor, LinkReferenceKind, LinkReferencePage,
+    LinkReferenceView, LinkSyncStatus, ListLinkReferences, NodeLinkIndexView, OutgoingLinkCursor,
+    Permission, SpaceLinkIndexView,
 };
 use percent_encoding::percent_decode_str;
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use uuid::Uuid;
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::pagination::paginate_keyset;
 
 #[derive(Debug, Clone)]
 pub struct LinkIndexService {
@@ -30,17 +33,52 @@ impl LinkIndexService {
         space_id: Uuid,
         node_id: Uuid,
     ) -> ServiceResult<NodeLinkIndexView> {
-        self.require_permission(caller_account_id, space_id, Permission::Read)
+        self.require_visible_node(caller_account_id, space_id, node_id)
             .await?;
-        self.files
-            .find_node(space_id, node_id)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
         let space_state = self.store.space_status(space_id).await?;
-        let outgoing = self
-            .store
-            .outgoing(space_id, node_id)
-            .await?
+
+        Ok(NodeLinkIndexView {
+            status: sync_status(&space_state),
+            last_synced_at: space_state.last_synced_at,
+        })
+    }
+
+    pub async fn outgoing(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+        request: ListLinkReferences,
+    ) -> ServiceResult<LinkReferencePage> {
+        self.require_visible_node(caller_account_id, space_id, node_id)
+            .await?;
+        let (references, limit, has_more, next_cursor) = paginate_keyset(
+            request.limit,
+            limits::LINK_REFERENCES_DEFAULT_LIMIT,
+            limits::LINK_REFERENCES_MAX_LIMIT,
+            request.cursor.as_deref(),
+            |limit, cursor: Option<OutgoingLinkCursor>| async move {
+                if cursor.as_ref().is_some_and(|cursor| {
+                    cursor.space_id != space_id || cursor.source_node_id != node_id
+                }) {
+                    return Err(ServiceError::InvalidInput(
+                        "cursor does not match outgoing links query".to_owned(),
+                    ));
+                }
+                Ok(self
+                    .store
+                    .outgoing(space_id, node_id, limit, cursor.as_ref())
+                    .await?)
+            },
+            |reference| OutgoingLinkCursor {
+                space_id,
+                source_node_id: node_id,
+                target_path: reference.target_path.clone(),
+                kind: reference.kind,
+            },
+        )
+        .await?;
+        let items = references
             .into_iter()
             .map(|reference| LinkReferenceView {
                 node_id: reference.target_node_id,
@@ -49,13 +87,55 @@ impl LinkIndexService {
                 occurrence_count: reference.occurrence_count,
             })
             .collect();
-        let incoming = self.store.incoming(space_id, node_id).await?;
+        Ok(LinkReferencePage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
+        })
+    }
+
+    pub async fn incoming(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+        request: ListLinkReferences,
+    ) -> ServiceResult<LinkReferencePage> {
+        self.require_visible_node(caller_account_id, space_id, node_id)
+            .await?;
+        let (incoming, limit, has_more, next_cursor) = paginate_keyset(
+            request.limit,
+            limits::LINK_REFERENCES_DEFAULT_LIMIT,
+            limits::LINK_REFERENCES_MAX_LIMIT,
+            request.cursor.as_deref(),
+            |limit, cursor: Option<IncomingLinkCursor>| async move {
+                if cursor.as_ref().is_some_and(|cursor| {
+                    cursor.space_id != space_id || cursor.target_node_id != node_id
+                }) {
+                    return Err(ServiceError::InvalidInput(
+                        "cursor does not match incoming links query".to_owned(),
+                    ));
+                }
+                Ok(self
+                    .store
+                    .incoming(space_id, node_id, limit, cursor.as_ref())
+                    .await?)
+            },
+            |reference| IncomingLinkCursor {
+                space_id,
+                target_node_id: node_id,
+                source_node_id: reference.source_node_id,
+                kind: reference.kind,
+            },
+        )
+        .await?;
         let incoming_ids = incoming
             .iter()
             .map(|reference| reference.source_node_id)
             .collect::<Vec<_>>();
         let incoming_paths = self.files.node_paths_many(space_id, &incoming_ids).await?;
-        let mut incoming = incoming
+        let items = incoming
             .into_iter()
             .filter_map(|reference| {
                 incoming_paths
@@ -68,17 +148,11 @@ impl LinkIndexService {
                     })
             })
             .collect::<Vec<_>>();
-        incoming.sort_by(|left, right| {
-            left.path
-                .cmp(&right.path)
-                .then_with(|| left.kind.as_str().cmp(right.kind.as_str()))
-        });
-
-        Ok(NodeLinkIndexView {
-            status: sync_status(&space_state),
-            last_synced_at: space_state.last_synced_at,
-            outgoing,
-            incoming,
+        Ok(LinkReferencePage {
+            items,
+            limit,
+            has_more,
+            next_cursor,
         })
     }
 
@@ -247,6 +321,21 @@ impl LinkIndexService {
                 "write permission is required".to_owned(),
             ));
         }
+        Ok(())
+    }
+
+    async fn require_visible_node(
+        &self,
+        caller_account_id: Uuid,
+        space_id: Uuid,
+        node_id: Uuid,
+    ) -> ServiceResult<()> {
+        self.require_permission(caller_account_id, space_id, Permission::Read)
+            .await?;
+        self.files
+            .find_node(space_id, node_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound("node not found".to_owned()))?;
         Ok(())
     }
 }

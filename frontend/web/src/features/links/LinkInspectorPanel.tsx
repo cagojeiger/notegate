@@ -3,7 +3,11 @@ import { Image as ImageIcon, Link2, RefreshCw, Unlink } from "lucide-react";
 import type { LinkReference, RestNode } from "../../api/types";
 import { Button, MetaRow, SectionHeader } from "../../shared/ui";
 import { formatLinkIndexSyncTime, linkIndexStatusLabel } from "./linkIndexPresentation";
-import { useNodeLinkIndexQuery, useSyncNodeLinkIndexMutation } from "./useLinkIndexQueries";
+import {
+  useNodeLinkIndexQuery,
+  useNodeLinkReferencesQuery,
+  useSyncNodeLinkIndexMutation
+} from "./useLinkIndexQueries";
 
 export function LinkInspectorPanel({
   node,
@@ -17,6 +21,11 @@ export function LinkInspectorPanel({
   const linkIndex = useNodeLinkIndexQuery(node);
   const syncLinkIndex = useSyncNodeLinkIndexMutation();
   const data = linkIndex.data;
+  const snapshot = data ? `${data.status}:${data.last_synced_at ?? "never"}` : null;
+  const outgoing = useNodeLinkReferencesQuery(node, "outgoing", snapshot);
+  const incoming = useNodeLinkReferencesQuery(node, "incoming", snapshot);
+  const outgoingReferences = outgoing.data?.pages.flatMap((page) => page.links) ?? [];
+  const incomingReferences = incoming.data?.pages.flatMap((page) => page.links) ?? [];
 
   return (
     <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
@@ -49,13 +58,23 @@ export function LinkInspectorPanel({
       <LinkReferenceSection
         title="Outgoing"
         empty="This item does not link to another item."
-        references={data?.outgoing ?? []}
+        references={outgoingReferences}
+        isLoading={outgoing.isLoading}
+        isError={outgoing.isError}
+        hasMore={outgoing.hasNextPage}
+        isLoadingMore={outgoing.isFetchingNextPage}
+        onLoadMore={() => { void outgoing.fetchNextPage(); }}
         onOpen={onOpen}
       />
       <LinkReferenceSection
         title="Incoming"
         empty="No other item links here."
-        references={data?.incoming ?? []}
+        references={incomingReferences}
+        isLoading={incoming.isLoading}
+        isError={incoming.isError}
+        hasMore={incoming.hasNextPage}
+        isLoadingMore={incoming.isFetchingNextPage}
+        onLoadMore={() => { void incoming.fetchNextPage(); }}
         onOpen={onOpen}
       />
     </div>
@@ -66,17 +85,33 @@ function LinkReferenceSection({
   title,
   empty,
   references,
+  isLoading,
+  isError,
+  hasMore,
+  isLoadingMore,
+  onLoadMore,
   onOpen
 }: {
   title: string;
   empty: string;
   references: LinkReference[];
+  isLoading: boolean;
+  isError: boolean;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  onLoadMore: () => void;
   onOpen: (nodeId: string) => void;
 }) {
   return (
     <section aria-label={title} className="p-4">
-      <SectionHeader title={title} actions={<span className="text-xs tabular-nums text-muted">{references.length}</span>} />
-      {references.length === 0 ? <p className="text-xs text-muted">{empty}</p> : (
+      <SectionHeader
+        title={title}
+        actions={<span className="text-xs tabular-nums text-muted">{references.length}{hasMore ? "+" : ""}</span>}
+      />
+      {isLoading ? <p className="text-xs text-muted">Loading…</p> : null}
+      {isError ? <p role="alert" className="text-xs text-danger">Could not load {title.toLowerCase()} links.</p> : null}
+      {!isLoading && !isError && references.length === 0 ? <p className="text-xs text-muted">{empty}</p> : null}
+      {references.length > 0 ? (
         <ul className="space-y-1">
           {references.map((reference) => {
             const missing = reference.node_id === null;
@@ -105,7 +140,20 @@ function LinkReferenceSection({
             );
           })}
         </ul>
-      )}
+      ) : null}
+      {hasMore ? (
+        <div className="mt-2 flex justify-center">
+          <Button
+            secondary
+            size="sm"
+            aria-label={`Load more ${title.toLowerCase()} links`}
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

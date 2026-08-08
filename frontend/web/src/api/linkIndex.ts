@@ -1,8 +1,29 @@
 import type { ApiClient } from "./client";
-import type { NodeLinkIndexResponse, SpaceLinkIndexResponse } from "./types";
+import type {
+  LinkReferenceDirection,
+  LinkReferenceListResponse,
+  NodeLinkIndexResponse,
+  SpaceLinkIndexResponse
+} from "./types";
+
+const DEFAULT_LINK_REFERENCE_LIMIT = 50;
 
 export function getNodeLinkIndex(client: ApiClient, spaceId: string, nodeId: string) {
   return client.get<NodeLinkIndexResponse>(`/api/v1/spaces/${spaceId}/nodes/${nodeId}/links`);
+}
+
+export function listNodeLinkReferences(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string,
+  direction: LinkReferenceDirection,
+  cursor?: string | null
+) {
+  const params = new URLSearchParams({ limit: String(DEFAULT_LINK_REFERENCE_LIMIT) });
+  if (cursor) params.set("cursor", cursor);
+  return client.get<LinkReferenceListResponse>(
+    `/api/v1/spaces/${spaceId}/nodes/${nodeId}/links/${direction}?${params}`
+  );
 }
 
 export function syncNodeLinkIndex(client: ApiClient, spaceId: string, nodeId: string) {

@@ -96,9 +96,18 @@ NoteGate는 표준 Markdown link와 image의 내부 경로를 문서별 관계�
 - 목적지 node를 찾지 못한 내부 경로도 `target_node_id = null`인 broken 관계로 보존한다. 이후 경로 구조가 바뀌면 재인덱싱으로 다시 resolve한다.
 - Server 저장 암호화 문서는 worker가 복호화해 인덱싱한다. Client 암호화 문서는 서버가 본문을 읽을 수 없으므로 outgoing 관계를 만들지 않는다.
 - Node Inspector에서는 outgoing, incoming, broken 관계와 동기화 상태를 보여준다. 내부 revision 값은 사용자에게 노출하지 않는다.
+- Outgoing과 incoming 목록은 각각 독립적인 opaque cursor로 page를 이어 읽는다. 한 응답의 page size에는 상한이 있지만 전체 관계 수에는 별도 조회 상한을 두지 않는다.
 - 사용자는 text node를 수동 동기화하거나 Space 전체 재인덱싱을 요청할 수 있다. 요청은 background worker가 처리하며 화면 요청이 완료될 때까지 HTTP 연결을 유지하지 않는다.
 
 관계 인덱스는 결과적 일관성을 사용한다. 문서 저장 직후에는 이전 관계가 잠시 보일 수 있지만, 대기 중인 요청이 모두 처리되면 현재 문서와 일치해야 한다.
+
+Dashboard 조회 경로는 역할별로 분리한다.
+
+```text
+GET /api/v1/spaces/{space_id}/nodes/{node_id}/links           # 동기화 상태
+GET /api/v1/spaces/{space_id}/nodes/{node_id}/links/outgoing  # cursor page
+GET /api/v1/spaces/{space_id}/nodes/{node_id}/links/incoming  # cursor page
+```
 
 ## Worker와 확장
 
@@ -106,6 +115,7 @@ NoteGate는 표준 Markdown link와 image의 내부 경로를 문서별 관계�
 - API와 worker는 database credential과 connection pool을 별도로 운영할 수 있다. 단, 두 connection은 같은 database를 가리켜야 하며 worker pool은 LISTEN 전용 연결과 작업 연결을 위해 최소 2개가 필요하다.
 - Worker는 `NOTEGATE_DATABASE_URL`, `NOTEGATE_DB_MAX_CONNECTIONS`, ENC/LOOKUP root key 설정만 읽는다. AuthGate와 S3 자격증명은 worker에 주입하지 않는다.
 - Migration과 crypto key epoch 초기화는 API 또는 배포 단계가 소유한다. Worker는 시작할 때 schema checksum과 active key epoch를 읽기 전용으로 검증하고, 준비되지 않은 database에는 작업을 시작하지 않는다.
+- 배포는 migration을 적용한 API가 준비된 뒤 worker를 시작하거나 재시작해야 한다. Worker가 먼저 시작해 schema 검증에 실패하면 종료되며, process supervisor가 migration 완료 뒤 다시 시작해야 한다.
 - Commit된 요청은 PostgreSQL `NOTIFY`로 worker를 깨운다. 알림은 작업 원장이 아니며, 유실에 대비해 worker는 5~6분 간격으로 queue를 다시 확인한다.
 - 여러 worker는 `FOR UPDATE SKIP LOCKED`로 한 작업씩 선점한다. Lease가 만료되면 다른 worker가 다시 선점할 수 있고, claim token이 이전 worker의 늦은 완료를 차단한다.
 - KEDA는 read-only database account로 `SELECT reconciliation_backlog('projection')`의 단일 숫자를 조회한다. 이 값은 지금 실행할 수 있거나 실행 중인 미적용 작업 수이며, 재시도 시각이 아직 오지 않은 작업은 제외한다.

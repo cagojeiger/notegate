@@ -404,14 +404,16 @@ file_objects
 node_link_refs
   space_id uuid references spaces(id) on delete cascade
   source_node_id uuid references nodes(id, space_id) on delete cascade
-  target_node_id uuid null references nodes(id) on delete set null
+  target_node_id uuid null
   target_path text not null
   reference_kind text check ('link','image')
   occurrence_count integer not null check > 0
   primary key (space_id, source_node_id, reference_kind, target_path)
+  foreign key (target_node_id, space_id)
+    references nodes(id, space_id) on delete set null (target_node_id)
 ```
 
-`node_link_refs`는 source Text의 outgoing 관계만 저장한다. Incoming 관계는 `target_node_id` index를 역방향 조회한다. 목적지가 없거나 삭제되면 `target_node_id=NULL`과 원래 `target_path`를 유지한다.
+`node_link_refs`는 source Text의 outgoing 관계만 저장한다. Incoming 관계는 `target_node_id` index를 역방향 조회한다. Source와 resolve된 target은 모두 row의 `space_id`와 같아야 한다. 목적지가 없거나 삭제되면 `target_node_id=NULL`과 원래 `target_path`를 유지한다.
 
 ```text
 reconciliation_work_items

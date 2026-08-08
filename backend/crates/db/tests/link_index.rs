@@ -294,7 +294,7 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
             .is_err()
     );
     assert_eq!(
-        links.outgoing(space_id, source.id).await?,
+        links.outgoing(space_id, source.id, 100, None).await?,
         vec![initial.clone()]
     );
     let rolled_back_state = links
@@ -320,7 +320,7 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
             .await?
     );
     assert_eq!(
-        links.outgoing(space_id, source.id).await?,
+        links.outgoing(space_id, source.id, 100, None).await?,
         vec![replacement]
     );
 
@@ -355,6 +355,95 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
         .await?
         .expect("final source state");
     assert_eq!(final_state.requested_version, final_state.applied_version);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn link_targets_must_belong_to_the_same_space() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, first_space_id, first_root_id) =
+        space_with_root(&db.pool, "link-index-first-space").await?;
+    let (_, second_space_id, second_root_id) =
+        space_with_root(&db.pool, "link-index-second-space").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            first_space_id,
+            first_root_id,
+            "source.md",
+            &text("source"),
+            account_id,
+        )
+        .await?;
+    let (same_space_target, _) = files
+        .insert_text(
+            first_space_id,
+            first_root_id,
+            "same-space-target.md",
+            &text("target"),
+            account_id,
+        )
+        .await?;
+    let (other_space_target, _) = files
+        .insert_text(
+            second_space_id,
+            second_root_id,
+            "target.md",
+            &text("target"),
+            account_id,
+        )
+        .await?;
+
+    let result = sqlx::query(
+        "INSERT INTO node_link_refs ( \
+            space_id, source_node_id, target_node_id, target_path, \
+            reference_kind, occurrence_count \
+         ) VALUES ($1, $2, $3, '/target.md', 'link', 1)",
+    )
+    .bind(first_space_id)
+    .bind(source.id)
+    .bind(other_space_target.id)
+    .execute(&db.pool)
+    .await;
+    let error = result.expect_err("cross-space target must violate the foreign key");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|database_error| database_error.code())
+            .as_deref(),
+        Some("23503")
+    );
+
+    sqlx::query(
+        "INSERT INTO node_link_refs ( \
+            space_id, source_node_id, target_node_id, target_path, \
+            reference_kind, occurrence_count \
+         ) VALUES ($1, $2, $3, '/same-space-target.md', 'link', 1)",
+    )
+    .bind(first_space_id)
+    .bind(source.id)
+    .bind(same_space_target.id)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query("DELETE FROM nodes WHERE id = $1 AND space_id = $2")
+        .bind(same_space_target.id)
+        .bind(first_space_id)
+        .execute(&db.pool)
+        .await?;
+    let (stored_space_id, stored_target_id): (uuid::Uuid, Option<uuid::Uuid>) = sqlx::query_as(
+        "SELECT space_id, target_node_id FROM node_link_refs \
+             WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(first_space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(stored_space_id, first_space_id);
+    assert_eq!(stored_target_id, None);
 
     db.cleanup().await;
     Ok(())
