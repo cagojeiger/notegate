@@ -1,11 +1,10 @@
-use notegate_core::Limits;
+use notegate_core::limits::Limits;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{CryptoKeyEpochRepo, FilesRepo, LinkIndexRepo};
 use notegate_service::link_index::LinkIndexService;
 use secrecy::{ExposeSecret, SecretString};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::util::SubscriberInitExt as _;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -55,10 +54,11 @@ struct WorkerConfig {
 impl WorkerConfig {
     fn load() -> anyhow::Result<Self> {
         let database_url = required_env("NOTEGATE_DATABASE_URL")?;
-        let db_max_connections = std::env::var("NOTEGATE_DB_MAX_CONNECTIONS")
-            .map(|value| value.parse::<u32>())
-            .transpose()?
-            .unwrap_or(10);
+        let db_max_connections = match std::env::var("NOTEGATE_DB_MAX_CONNECTIONS") {
+            Ok(value) => value.parse::<u32>()?,
+            Err(std::env::VarError::NotPresent) => 10,
+            Err(error) => return Err(error.into()),
+        };
         let enc_root_key_id = required_env("NOTEGATE_ENC_ROOT_KEY_ID")?;
         let enc_root_secret = SecretString::from(required_env("NOTEGATE_ENC_ROOT_SECRET")?);
         let lookup_root_key_id = required_env("NOTEGATE_LOOKUP_ROOT_KEY_ID")?;
