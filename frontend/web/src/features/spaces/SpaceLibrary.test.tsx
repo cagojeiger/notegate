@@ -13,11 +13,13 @@ const mocks = vi.hoisted(() => ({
   checkUsage: vi.fn(),
   resetUsageCheck: vi.fn(),
   retryUsage: vi.fn(),
+  reindexLinks: vi.fn(),
   reorder: vi.fn(),
   useCheckSpaceUsageMutation: vi.fn(),
   useUsageQuery: vi.fn(),
   useReorderSpacesMutation: vi.fn(),
-  useUpdateSpaceMutation: vi.fn()
+  useUpdateSpaceMutation: vi.fn(),
+  useSpaceLinkIndexQuery: vi.fn()
 }));
 
 vi.mock("./useUsageQueries", () => ({
@@ -28,6 +30,15 @@ vi.mock("./useUsageQueries", () => ({
 vi.mock("./useSpaceQueries", () => ({
   useReorderSpacesMutation: mocks.useReorderSpacesMutation,
   useUpdateSpaceMutation: mocks.useUpdateSpaceMutation
+}));
+
+vi.mock("../links/useLinkIndexQueries", () => ({
+  useSpaceLinkIndexQuery: mocks.useSpaceLinkIndexQuery,
+  useReindexSpaceLinksMutation: () => ({
+    mutate: mocks.reindexLinks,
+    isPending: false,
+    isError: false
+  })
 }));
 
 const spaces: Space[] = [
@@ -92,6 +103,7 @@ describe("SpaceLibrary", () => {
     mocks.checkUsage.mockReset();
     mocks.resetUsageCheck.mockReset();
     mocks.retryUsage.mockReset();
+    mocks.reindexLinks.mockReset();
     mocks.useUpdateSpaceMutation.mockImplementation((options?: { silentError?: boolean }) => ({
       mutate: options?.silentError ? mocks.inspectorMutate : mocks.cardMutate,
       isPending: false,
@@ -128,6 +140,16 @@ describe("SpaceLibrary", () => {
           }
         ]
       }
+    });
+    mocks.useSpaceLinkIndexQuery.mockReturnValue({
+      data: {
+        status: "up_to_date",
+        pending_documents: 0,
+        retrying_documents: 0,
+        last_synced_at: "2026-08-05T00:00:00Z"
+      },
+      isLoading: false,
+      isError: false
     });
   });
 
@@ -253,6 +275,26 @@ describe("SpaceLibrary", () => {
 
     expect(mocks.resetUsageCheck).toHaveBeenCalledTimes(1);
     expect(mocks.checkUsage).toHaveBeenCalledWith("daily");
+  });
+
+  it("shows link index state and queues a selected-space rebuild", async () => {
+    const user = userEvent.setup();
+    mocks.useSpaceLinkIndexQuery.mockReturnValue({
+      data: {
+        status: "pending",
+        pending_documents: 3,
+        retrying_documents: 0,
+        last_synced_at: null
+      },
+      isLoading: false,
+      isError: false
+    });
+    renderLibrary();
+
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+    expect(screen.getByText("3 documents")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reindex links" }));
+    expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
   });
 
   it("retries usage loading from the inspector", async () => {

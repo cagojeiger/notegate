@@ -63,6 +63,24 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(queryClient.getQueryData(queryKeys.node(activeSpace.id, targetNode.id))).toEqual(targetNode);
   });
 
+  it("opens an inspector link through the normal history and reveal flow", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/index.md");
+    const targetNode = node("target", activeSpace.id, "/docs/target.md");
+    openSourceGroup(activeSpace, sourceNode);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openNodeId(targetNode.id);
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(group.node?.id).toBe(targetNode.id);
+    expect(group.back[group.back.length - 1]?.nodeId).toBe(sourceNode.id);
+    expect(mocks.revealNode).toHaveBeenCalledWith(activeSpace.id, targetNode.id);
+  });
+
   it("keeps the current editor state when markdown link resolution fails", async () => {
     const activeSpace = space("space-1");
     const sourceNode = node("source", activeSpace.id, "/index.md");

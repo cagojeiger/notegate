@@ -1,5 +1,5 @@
 import { ChevronRight, LockKeyhole, Search } from "lucide-react";
-import { useId, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 
 import type { RestNode } from "../api/types";
 import { useMarkdownOutlineContext, type MarkdownInspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
@@ -9,6 +9,9 @@ import { Button, MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/u
 import { WriteLockStatus } from "./WriteLockStatus";
 
 const EMPTY = "—";
+const LinkInspectorPanel = lazy(() => import("../features/links/LinkInspectorPanel").then((module) => ({
+  default: module.LinkInspectorPanel
+})));
 
 type AuxiliarySidebarProps = {
   activeNode: RestNode | null;
@@ -25,6 +28,7 @@ type AuxiliarySidebarProps = {
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
+  onOpenLink: (nodeId: string) => void;
   onOutlineNavigate?: () => void;
 };
 
@@ -43,6 +47,7 @@ export function AuxiliarySidebar({
   onSearchEnabledChange,
   onWriteLockedChange,
   onTextEncryptionEnabledChange,
+  onOpenLink,
   onOutlineNavigate
 }: AuxiliarySidebarProps) {
   const [localPreferredView, setLocalPreferredView] = useState<MarkdownInspectorView>("details");
@@ -57,7 +62,12 @@ export function AuxiliarySidebar({
     && outline.spaceId === activeNode.space_id
     && outline.nodeId === activeNode.id
   );
-  const selectedView: MarkdownInspectorView = preferredView === "outline" && outlineAvailable ? "outline" : "details";
+  const linksAvailable = activeNode !== null;
+  const selectedView: MarkdownInspectorView = preferredView === "outline" && outlineAvailable
+    ? "outline"
+    : preferredView === "links" && linksAvailable
+      ? "links"
+      : "details";
   const metadata = activeNode?.metadata ?? {};
   const clientEncrypted = activeNode?.text_storage_format === "encrypted";
   const serverEncrypted = activeNode?.text_at_rest_encryption === "server";
@@ -70,7 +80,8 @@ export function AuxiliarySidebar({
         <Tabs
           items={[
             { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
-            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable }
+            { id: "outline", label: "Outline", controls: `${panelIdPrefix}-outline`, disabled: !outlineAvailable },
+            { id: "links", label: "Links", controls: `${panelIdPrefix}-links`, disabled: !linksAvailable }
           ]}
           value={selectedView}
           onChange={setPreferredView}
@@ -222,6 +233,20 @@ export function AuxiliarySidebar({
       >
         {outlineAvailable && outline ? (
           <OutlinePanel outline={outline} onNavigate={onOutlineNavigate} />
+        ) : null}
+      </div>
+      <div
+        id={`${panelIdPrefix}-links`}
+        role="tabpanel"
+        aria-labelledby={`${panelIdPrefix}-links-tab`}
+        tabIndex={0}
+        hidden={selectedView !== "links"}
+        className="h-full overflow-y-auto p-3"
+      >
+        {activeNode && selectedView === "links" ? (
+          <Suspense fallback={<p className="text-xs text-muted">Preparing links…</p>}>
+            <LinkInspectorPanel node={activeNode} canSync={canWriteActiveSpace} onOpen={onOpenLink} />
+          </Suspense>
         ) : null}
       </div>
       </div>

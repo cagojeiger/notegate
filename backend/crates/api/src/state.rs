@@ -6,12 +6,13 @@ use notegate_core::Config;
 use notegate_core::security::PiiCrypto;
 use notegate_db::{
     AccountRepo, AgentRepo, ApiKeyRepo, AuditEventRepo, BrowserSessionRepo, ConnectionRepo,
-    FilesRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
+    FilesRepo, LinkIndexRepo, McpInvocationRepo, PgPool, SpaceRepo, UsageRepo,
 };
 use notegate_service::accounts::AccountService;
 use notegate_service::agents::AgentService;
 use notegate_service::connections::ConnectionService;
 use notegate_service::files::FilesService;
+use notegate_service::link_index::LinkIndexService;
 use notegate_service::search::SearchService;
 use notegate_service::spaces::SpaceService;
 use notegate_service::usage::UsageService;
@@ -36,6 +37,8 @@ pub type Connections = ConnectionService;
 pub type Agents = AgentService;
 /// File-tree command service over the db-backed [`FilesRepo`].
 pub type Files = FilesService;
+/// Eventually-consistent Markdown relationship index.
+pub type LinkIndex = LinkIndexService;
 /// Search service over the db-backed [`FilesRepo`].
 pub type Search = SearchService;
 /// User-facing account and Space usage service.
@@ -56,6 +59,7 @@ pub struct AppState {
     pub connections: Connections,
     pub agents: Agents,
     pub files: Files,
+    pub link_index: LinkIndex,
     pub search: Search,
     pub(crate) search_admission: SearchAdmission,
     pub usage: Usage,
@@ -105,6 +109,7 @@ impl AppState {
             FilesRepo::with_limits_and_crypto(db.clone(), config.limits, pii_crypto.clone())
                 .with_metrics_enabled(config.metrics_enabled);
         let files = FilesService::new(files_repo.clone());
+        let link_index = LinkIndexService::new(LinkIndexRepo::new(db.clone()), files_repo.clone());
         let search = SearchService::with_body_cache_config(files_repo, config.search_body_cache)
             .with_metrics_enabled(config.metrics_enabled);
         let usage = UsageService::new(UsageRepo::new(db.clone()), config.limits);
@@ -127,6 +132,7 @@ impl AppState {
             connections,
             agents,
             files,
+            link_index,
             search,
             search_admission: SearchAdmission::default(),
             usage,

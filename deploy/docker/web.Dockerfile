@@ -82,8 +82,12 @@ RUN --mount=type=cache,id=notegate-cargo-registry,target=/usr/local/cargo/regist
     --mount=type=cache,id=notegate-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=notegate-sccache,target=/sccache,sharing=locked \
     --mount=type=cache,id=notegate-target-release,target=/app/target,sharing=locked \
-    cargo build --release --locked --bin notegate-api \
-    && cp /app/target/release/notegate-api /usr/local/bin/notegate-api
+    cargo build --release --locked \
+        --bin notegate-api \
+        --bin notegate-reconciliation-worker \
+    && cp /app/target/release/notegate-api /usr/local/bin/notegate-api \
+    && cp /app/target/release/notegate-reconciliation-worker \
+        /usr/local/bin/notegate-reconciliation-worker
 
 # Stage 5: minimal runtime image.
 #
@@ -99,6 +103,8 @@ RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin appuser
 WORKDIR /app
 COPY --from=builder /usr/local/bin/notegate-api /usr/local/bin/notegate-api
+COPY --from=builder /usr/local/bin/notegate-reconciliation-worker \
+    /usr/local/bin/notegate-reconciliation-worker
 COPY --from=web-builder /app/frontend/web/dist /app/web
 
 ENV NOTEGATE_BIND_ADDR=0.0.0.0:9191 \

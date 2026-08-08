@@ -105,6 +105,7 @@ describe("editor queries", () => {
     const queryClient = createTestQueryClient({
       defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY } }
     });
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const oldText: ReadTextResponse = {
       node: { id: node.id, path: node.path },
       text: {
@@ -194,6 +195,9 @@ describe("editor queries", () => {
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent(node.space_id),
       exact: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.spaceLinkIndex(node.space_id)
     });
     expect(useUiStore.getState().saveState).toBe("saved");
     expect(useUiStore.getState().toast).toBe("Saved");

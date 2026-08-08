@@ -265,8 +265,11 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.nodes("space-1")
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.spaceLinkIndex("space-1")
+    });
     expect(resetQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {
@@ -317,8 +320,11 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.nodes("space-1")
     });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.spaceLinkIndex("space-1")
+    });
     expect(resetQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -5,6 +5,7 @@ members = [
     "backend/crates/core",
     "backend/crates/db",
     "backend/crates/model",
+    "backend/crates/reconciliation",
     "backend/crates/service",
 ]
 
@@ -66,6 +67,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 regex = "1"
+pulldown-cmark = { version = "0.13", default-features = false }
+percent-encoding = "2"
 infer = { version = "0.22", default-features = false }
 futures-util = "0.3"
 moka = { version = "0.12", features = ["future"] }

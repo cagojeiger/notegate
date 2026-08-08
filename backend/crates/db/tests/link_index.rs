@@ -1,0 +1,450 @@
+//! Integration tests for eventually consistent link indexing.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_in_result
+)]
+mod common;
+
+use common::{TestDb, space_with_root};
+use notegate_db::{
+    FilesRepo, LinkIndexRepo, MetadataMutationKind, ReconciliationClaim, StoredLinkReference,
+    TextMutationKind,
+};
+use notegate_model::LinkReferenceKind;
+use notegate_model::files::{StoredContent, UpdateNode, WriteTextBody};
+use serde_json::json;
+
+fn text(content: &str) -> StoredContent {
+    StoredContent {
+        body: WriteTextBody::Plain(content.to_owned()),
+        content_sha256: "0".repeat(64),
+        byte_len: content.len() as i64,
+        line_count: content.lines().count().max(1) as i32,
+    }
+}
+
+async fn space_generation(db: &TestDb, space_id: uuid::Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT requested_generation FROM reconciliation_work_items \
+         WHERE queue_name = 'projection' AND work_kind = 'node_link_space' \
+           AND target_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await
+}
+
+async fn claim_source(
+    links: &LinkIndexRepo,
+    source_node_id: uuid::Uuid,
+) -> Result<ReconciliationClaim, Box<dyn std::error::Error>> {
+    for _ in 0..20 {
+        let claim = links.claim_work().await?.ok_or("source work not queued")?;
+        if LinkIndexRepo::is_space_work(&claim) {
+            assert!(links.expand_space(&claim).await?);
+        } else if claim.target_id == source_node_id {
+            return Ok(claim);
+        } else {
+            assert!(links.complete_source(&claim, &[]).await?);
+        }
+    }
+    Err("source work not claimed".into())
+}
+
+#[tokio::test]
+async fn file_changes_enqueue_only_the_required_scope() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, space_id, root_id) = space_with_root(&db.pool, "link-index-scope").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let links = LinkIndexRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space_id, root_id, "note.md", &text("before"), account_id)
+        .await?;
+
+    assert!(links.source_state(space_id, node.id).await?.is_none());
+    let space_version = space_generation(&db, space_id).await?;
+
+    files
+        .save_text_content(
+            space_id,
+            node.id,
+            &text("after"),
+            None,
+            account_id,
+            TextMutationKind::Write,
+        )
+        .await?;
+    let source_state = links
+        .source_state(space_id, node.id)
+        .await?
+        .expect("text write should enqueue its source");
+    assert_eq!(source_state.requested_version, 1);
+
+    files
+        .replace_node_metadata(
+            space_id,
+            node.id,
+            &json!({"owner": "docs"}),
+            account_id,
+            MetadataMutationKind::Replace,
+        )
+        .await?;
+    files
+        .update_node(
+            space_id,
+            &UpdateNode {
+                node_id: node.id,
+                name: None,
+                sort_order: Some(10),
+            },
+            account_id,
+        )
+        .await?;
+    assert_eq!(
+        links
+            .source_state(space_id, node.id)
+            .await?
+            .expect("source state")
+            .requested_version,
+        1,
+        "metadata and display order do not affect links"
+    );
+    let unchanged_space_version = space_generation(&db, space_id).await?;
+    assert_eq!(unchanged_space_version, space_version);
+
+    files
+        .update_node(
+            space_id,
+            &UpdateNode {
+                node_id: node.id,
+                name: Some("renamed.md".to_owned()),
+                sort_order: None,
+            },
+            account_id,
+        )
+        .await?;
+    let renamed_space_version = space_generation(&db, space_id).await?;
+    assert_eq!(renamed_space_version, space_version + 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn database_trigger_enqueues_changes_from_mixed_version_writers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, space_id, root_id) = space_with_root(&db.pool, "link-index-trigger").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let links = LinkIndexRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space_id, root_id, "note.md", &text("before"), account_id)
+        .await?;
+    sqlx::query(
+        "DELETE FROM reconciliation_work_items \
+         WHERE work_kind = 'node_link_source' AND space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE reconciliation_work_items \
+         SET applied_generation = requested_generation \
+         WHERE work_kind = 'node_link_space' AND space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO file_change_events \
+         (space_id, node_id, actor_account_id, op_type, metadata) \
+         VALUES ($1, $2, $3, 'text.write', '{}'::jsonb)",
+    )
+    .bind(space_id)
+    .bind(node.id)
+    .bind(account_id)
+    .execute(&db.pool)
+    .await?;
+    assert!(links.source_state(space_id, node.id).await?.is_some());
+
+    let space_version_before = space_generation(&db, space_id).await?;
+    sqlx::query(
+        "INSERT INTO file_change_events \
+         (space_id, node_id, actor_account_id, op_type, metadata) \
+         VALUES ($1, $2, $3, 'item.update', '{\"name_changed\": true}'::jsonb)",
+    )
+    .bind(space_id)
+    .bind(node.id)
+    .bind(account_id)
+    .execute(&db.pool)
+    .await?;
+    let space_version_after = space_generation(&db, space_id).await?;
+    assert_eq!(space_version_after, space_version_before + 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_link_enqueue_rolls_back_the_document_change()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, space_id, root_id) =
+        space_with_root(&db.pool, "link-index-atomic-change").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let links = LinkIndexRepo::new(db.pool.clone());
+    let (node, _) = files
+        .insert_text(space_id, root_id, "note.md", &text("before"), account_id)
+        .await?;
+    links.request_source(space_id, node.id).await?;
+    sqlx::query(
+        "UPDATE reconciliation_work_items \
+         SET requested_generation = 9223372036854775807 \
+         WHERE work_kind = 'node_link_source' AND space_id = $1 AND target_id = $2",
+    )
+    .bind(space_id)
+    .bind(node.id)
+    .execute(&db.pool)
+    .await?;
+    let event_count_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM file_change_events WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+
+    assert!(
+        files
+            .save_text_content(
+                space_id,
+                node.id,
+                &text("after"),
+                None,
+                account_id,
+                TextMutationKind::Write,
+            )
+            .await
+            .is_err()
+    );
+    let (_, stored) = files
+        .find_text(space_id, node.id)
+        .await?
+        .expect("text should still exist");
+    assert_eq!(stored.content.as_deref(), Some("before"));
+    let event_count_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM file_change_events WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(event_count_after, event_count_before);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_replacement_is_atomic_versioned_and_fenced()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, space_id, root_id) = space_with_root(&db.pool, "link-index-replace").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let links = LinkIndexRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(space_id, root_id, "source.md", &text("source"), account_id)
+        .await?;
+    let (target, _) = files
+        .insert_text(space_id, root_id, "target.md", &text("target"), account_id)
+        .await?;
+
+    links.request_source(space_id, source.id).await?;
+    let initial_claim = claim_source(&links, source.id).await?;
+    let initial = StoredLinkReference {
+        target_node_id: Some(target.id),
+        target_path: "/target.md".to_owned(),
+        kind: LinkReferenceKind::Link,
+        occurrence_count: 1,
+    };
+    assert!(
+        links
+            .complete_source(&initial_claim, std::slice::from_ref(&initial))
+            .await?
+    );
+
+    links.request_source(space_id, source.id).await?;
+    let replacement_claim = claim_source(&links, source.id).await?;
+    let invalid = StoredLinkReference {
+        occurrence_count: 0,
+        ..initial.clone()
+    };
+    assert!(
+        links
+            .complete_source(&replacement_claim, &[invalid])
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        links.outgoing(space_id, source.id, 100, None).await?,
+        vec![initial.clone()]
+    );
+    let rolled_back_state = links
+        .source_state(space_id, source.id)
+        .await?
+        .expect("source state");
+    assert_eq!(
+        rolled_back_state.applied_version,
+        initial_claim.requested_generation
+    );
+    assert_eq!(
+        rolled_back_state.requested_version,
+        replacement_claim.requested_generation
+    );
+
+    let replacement = StoredLinkReference {
+        target_path: "/renamed-target.md".to_owned(),
+        ..initial.clone()
+    };
+    assert!(
+        links
+            .complete_source(&replacement_claim, std::slice::from_ref(&replacement))
+            .await?
+    );
+    assert_eq!(
+        links.outgoing(space_id, source.id, 100, None).await?,
+        vec![replacement]
+    );
+
+    links.request_source(space_id, source.id).await?;
+    let stale_claim = claim_source(&links, source.id).await?;
+    sqlx::query(
+        "UPDATE reconciliation_work_items SET lease_until = now() - INTERVAL '1 second' \
+         WHERE work_kind = 'node_link_source' AND space_id = $1 AND target_id = $2",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .execute(&db.pool)
+    .await?;
+    let current_claim = claim_source(&links, source.id).await?;
+    assert_ne!(stale_claim.claim_token, current_claim.claim_token);
+    assert!(!links.complete_source(&stale_claim, &[]).await?);
+    assert!(links.complete_source(&current_claim, &[]).await?);
+
+    links.request_source(space_id, source.id).await?;
+    let active_claim = claim_source(&links, source.id).await?;
+    links.request_source(space_id, source.id).await?;
+    assert!(links.complete_source(&active_claim, &[]).await?);
+    let pending_state = links
+        .source_state(space_id, source.id)
+        .await?
+        .expect("pending source state");
+    assert!(pending_state.requested_version > pending_state.applied_version);
+    let final_claim = claim_source(&links, source.id).await?;
+    assert!(links.complete_source(&final_claim, &[]).await?);
+    let final_state = links
+        .source_state(space_id, source.id)
+        .await?
+        .expect("final source state");
+    assert_eq!(final_state.requested_version, final_state.applied_version);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn link_targets_must_belong_to_the_same_space() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account_id, first_space_id, first_root_id) =
+        space_with_root(&db.pool, "link-index-first-space").await?;
+    let (_, second_space_id, second_root_id) =
+        space_with_root(&db.pool, "link-index-second-space").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            first_space_id,
+            first_root_id,
+            "source.md",
+            &text("source"),
+            account_id,
+        )
+        .await?;
+    let (same_space_target, _) = files
+        .insert_text(
+            first_space_id,
+            first_root_id,
+            "same-space-target.md",
+            &text("target"),
+            account_id,
+        )
+        .await?;
+    let (other_space_target, _) = files
+        .insert_text(
+            second_space_id,
+            second_root_id,
+            "target.md",
+            &text("target"),
+            account_id,
+        )
+        .await?;
+
+    let result = sqlx::query(
+        "INSERT INTO node_link_refs ( \
+            space_id, source_node_id, target_node_id, target_path, \
+            reference_kind, occurrence_count \
+         ) VALUES ($1, $2, $3, '/target.md', 'link', 1)",
+    )
+    .bind(first_space_id)
+    .bind(source.id)
+    .bind(other_space_target.id)
+    .execute(&db.pool)
+    .await;
+    let error = result.expect_err("cross-space target must violate the foreign key");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|database_error| database_error.code())
+            .as_deref(),
+        Some("23503")
+    );
+
+    sqlx::query(
+        "INSERT INTO node_link_refs ( \
+            space_id, source_node_id, target_node_id, target_path, \
+            reference_kind, occurrence_count \
+         ) VALUES ($1, $2, $3, '/same-space-target.md', 'link', 1)",
+    )
+    .bind(first_space_id)
+    .bind(source.id)
+    .bind(same_space_target.id)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query("DELETE FROM nodes WHERE id = $1 AND space_id = $2")
+        .bind(same_space_target.id)
+        .bind(first_space_id)
+        .execute(&db.pool)
+        .await?;
+    let (stored_space_id, stored_target_id): (uuid::Uuid, Option<uuid::Uuid>) = sqlx::query_as(
+        "SELECT space_id, target_node_id FROM node_link_refs \
+             WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(first_space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(stored_space_id, first_space_id);
+    assert_eq!(stored_target_id, None);
+
+    db.cleanup().await;
+    Ok(())
+}

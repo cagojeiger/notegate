@@ -18,7 +18,7 @@ export type MarkdownOutlineSnapshot = MarkdownOutlineIdentity & {
   navigate: (itemId: string) => void;
 };
 
-export type MarkdownInspectorView = "details" | "outline";
+export type MarkdownInspectorView = "details" | "outline" | "links";
 
 type MarkdownOutlineContextValue = {
   outlinesByGroup: Readonly<Record<number, MarkdownOutlineSnapshot>>;
