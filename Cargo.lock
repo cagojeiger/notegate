@@ -2565,6 +2565,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "notegate-reconciliation"
+version = "0.1.55"
+dependencies = [
+ "anyhow",
+ "dotenvy",
+ "notegate-core",
+ "notegate-db",
+ "notegate-service",
+ "secrecy",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "notegate-service"
 version = "0.1.55"
 dependencies = [

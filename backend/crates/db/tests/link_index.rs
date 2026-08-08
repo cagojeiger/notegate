@@ -10,7 +10,8 @@ mod common;
 
 use common::{TestDb, space_with_root};
 use notegate_db::{
-    FilesRepo, LinkIndexRepo, MetadataMutationKind, StoredLinkReference, TextMutationKind,
+    FilesRepo, LinkIndexRepo, MetadataMutationKind, ReconciliationClaim, StoredLinkReference,
+    TextMutationKind,
 };
 use notegate_model::LinkReferenceKind;
 use notegate_model::files::{StoredContent, UpdateNode, WriteTextBody};
@@ -23,6 +24,34 @@ fn text(content: &str) -> StoredContent {
         byte_len: content.len() as i64,
         line_count: content.lines().count().max(1) as i32,
     }
+}
+
+async fn space_generation(db: &TestDb, space_id: uuid::Uuid) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT requested_generation FROM reconciliation_work_items \
+         WHERE queue_name = 'projection' AND work_kind = 'node_link_space' \
+           AND target_id = $1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await
+}
+
+async fn claim_source(
+    links: &LinkIndexRepo,
+    source_node_id: uuid::Uuid,
+) -> Result<ReconciliationClaim, Box<dyn std::error::Error>> {
+    for _ in 0..20 {
+        let claim = links.claim_work().await?.ok_or("source work not queued")?;
+        if LinkIndexRepo::is_space_work(&claim) {
+            assert!(links.expand_space(&claim).await?);
+        } else if claim.target_id == source_node_id {
+            return Ok(claim);
+        } else {
+            assert!(links.complete_source(&claim, &[]).await?);
+        }
+    }
+    Err("source work not claimed".into())
 }
 
 #[tokio::test]
@@ -38,12 +67,7 @@ async fn file_changes_enqueue_only_the_required_scope() -> Result<(), Box<dyn st
         .await?;
 
     assert!(links.source_state(space_id, node.id).await?.is_none());
-    let space_version: i64 = sqlx::query_scalar(
-        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let space_version = space_generation(&db, space_id).await?;
 
     files
         .save_text_content(
@@ -90,12 +114,7 @@ async fn file_changes_enqueue_only_the_required_scope() -> Result<(), Box<dyn st
         1,
         "metadata and display order do not affect links"
     );
-    let unchanged_space_version: i64 = sqlx::query_scalar(
-        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let unchanged_space_version = space_generation(&db, space_id).await?;
     assert_eq!(unchanged_space_version, space_version);
 
     files
@@ -109,12 +128,7 @@ async fn file_changes_enqueue_only_the_required_scope() -> Result<(), Box<dyn st
             account_id,
         )
         .await?;
-    let renamed_space_version: i64 = sqlx::query_scalar(
-        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let renamed_space_version = space_generation(&db, space_id).await?;
     assert_eq!(renamed_space_version, space_version + 1);
 
     db.cleanup().await;
@@ -133,14 +147,17 @@ async fn database_trigger_enqueues_changes_from_mixed_version_writers()
     let (node, _) = files
         .insert_text(space_id, root_id, "note.md", &text("before"), account_id)
         .await?;
-    sqlx::query("DELETE FROM node_link_source_states WHERE space_id = $1")
-        .bind(space_id)
-        .execute(&db.pool)
-        .await?;
     sqlx::query(
-        "UPDATE node_link_space_reindex_states \
-         SET applied_version = requested_version \
-         WHERE space_id = $1",
+        "DELETE FROM reconciliation_work_items \
+         WHERE work_kind = 'node_link_source' AND space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE reconciliation_work_items \
+         SET applied_generation = requested_generation \
+         WHERE work_kind = 'node_link_space' AND space_id = $1",
     )
     .bind(space_id)
     .execute(&db.pool)
@@ -158,12 +175,7 @@ async fn database_trigger_enqueues_changes_from_mixed_version_writers()
     .await?;
     assert!(links.source_state(space_id, node.id).await?.is_some());
 
-    let space_version_before: i64 = sqlx::query_scalar(
-        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let space_version_before = space_generation(&db, space_id).await?;
     sqlx::query(
         "INSERT INTO file_change_events \
          (space_id, node_id, actor_account_id, op_type, metadata) \
@@ -174,12 +186,7 @@ async fn database_trigger_enqueues_changes_from_mixed_version_writers()
     .bind(account_id)
     .execute(&db.pool)
     .await?;
-    let space_version_after: i64 = sqlx::query_scalar(
-        "SELECT requested_version FROM node_link_space_reindex_states WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let space_version_after = space_generation(&db, space_id).await?;
     assert_eq!(space_version_after, space_version_before + 1);
 
     db.cleanup().await;
@@ -201,8 +208,9 @@ async fn failed_link_enqueue_rolls_back_the_document_change()
         .await?;
     links.request_source(space_id, node.id).await?;
     sqlx::query(
-        "UPDATE node_link_source_states SET requested_version = 9223372036854775807 \
-         WHERE space_id = $1 AND source_node_id = $2",
+        "UPDATE reconciliation_work_items \
+         SET requested_generation = 9223372036854775807 \
+         WHERE work_kind = 'node_link_source' AND space_id = $1 AND target_id = $2",
     )
     .bind(space_id)
     .bind(node.id)
@@ -260,7 +268,7 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
         .await?;
 
     links.request_source(space_id, source.id).await?;
-    let initial_claim = links.claim_source().await?.expect("initial claim");
+    let initial_claim = claim_source(&links, source.id).await?;
     let initial = StoredLinkReference {
         target_node_id: Some(target.id),
         target_path: "/target.md".to_owned(),
@@ -274,7 +282,7 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
     );
 
     links.request_source(space_id, source.id).await?;
-    let replacement_claim = links.claim_source().await?.expect("replacement claim");
+    let replacement_claim = claim_source(&links, source.id).await?;
     let invalid = StoredLinkReference {
         occurrence_count: 0,
         ..initial.clone()
@@ -295,11 +303,11 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
         .expect("source state");
     assert_eq!(
         rolled_back_state.applied_version,
-        initial_claim.requested_version
+        initial_claim.requested_generation
     );
     assert_eq!(
         rolled_back_state.requested_version,
-        replacement_claim.requested_version
+        replacement_claim.requested_generation
     );
 
     let replacement = StoredLinkReference {
@@ -317,25 +325,22 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
     );
 
     links.request_source(space_id, source.id).await?;
-    let stale_claim = links.claim_source().await?.expect("stale claim");
+    let stale_claim = claim_source(&links, source.id).await?;
     sqlx::query(
-        "UPDATE node_link_source_states SET claim_until = now() - INTERVAL '1 second' \
-         WHERE space_id = $1 AND source_node_id = $2",
+        "UPDATE reconciliation_work_items SET lease_until = now() - INTERVAL '1 second' \
+         WHERE work_kind = 'node_link_source' AND space_id = $1 AND target_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
     .execute(&db.pool)
     .await?;
-    let current_claim = links
-        .claim_source()
-        .await?
-        .expect("replacement worker claim");
+    let current_claim = claim_source(&links, source.id).await?;
     assert_ne!(stale_claim.claim_token, current_claim.claim_token);
     assert!(!links.complete_source(&stale_claim, &[]).await?);
     assert!(links.complete_source(&current_claim, &[]).await?);
 
     links.request_source(space_id, source.id).await?;
-    let active_claim = links.claim_source().await?.expect("active claim");
+    let active_claim = claim_source(&links, source.id).await?;
     links.request_source(space_id, source.id).await?;
     assert!(links.complete_source(&active_claim, &[]).await?);
     let pending_state = links
@@ -343,7 +348,7 @@ async fn source_replacement_is_atomic_versioned_and_fenced()
         .await?
         .expect("pending source state");
     assert!(pending_state.requested_version > pending_state.applied_version);
-    let final_claim = links.claim_source().await?.expect("final claim");
+    let final_claim = claim_source(&links, source.id).await?;
     assert!(links.complete_source(&final_claim, &[]).await?);
     let final_state = links
         .source_state(space_id, source.id)

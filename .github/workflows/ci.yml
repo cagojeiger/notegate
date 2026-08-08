@@ -239,9 +239,17 @@ jobs:
       - name: Start application
         run: |
           mkdir -p browser-e2e
+          cargo run --quiet --package notegate-reconciliation \
+            --bin notegate-reconciliation-worker >browser-e2e/reconciliation.log 2>&1 &
+          worker_pid=$!
+          echo "$worker_pid" >browser-e2e/reconciliation.pid
           cargo run --quiet --package notegate-api --bin notegate-api >browser-e2e/api.log 2>&1 &
           pnpm --filter web dev --host 127.0.0.1 >browser-e2e/web.log 2>&1 &
           for _ in $(seq 1 60); do
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              cat browser-e2e/reconciliation.log
+              exit 1
+            fi
             if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null && \
                curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
               exit 0
@@ -249,6 +257,7 @@ jobs:
             sleep 1
           done
           cat browser-e2e/api.log
+          cat browser-e2e/reconciliation.log
           cat browser-e2e/web.log
           exit 1
 
@@ -291,7 +300,11 @@ jobs:
       - name: Test browser workflow
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
-        run: pnpm --filter web test:e2e
+        run: |
+          worker_pid=$(cat browser-e2e/reconciliation.pid)
+          kill -0 "$worker_pid"
+          pnpm --filter web test:e2e
+          kill -0 "$worker_pid"
 
       - name: Test Lighthouse budgets
         run: pnpm --filter web test:lighthouse

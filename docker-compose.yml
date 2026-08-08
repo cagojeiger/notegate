@@ -90,6 +90,30 @@ services:
     stop_grace_period: 90s
     restart: unless-stopped
 
+  reconciliation-worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+    environment:
+      NOTEGATE_DATABASE_URL: postgres://notegate:notegate@postgres:5432/notegate
+      NOTEGATE_DB_MAX_CONNECTIONS: ${NOTEGATE_DB_MAX_CONNECTIONS:-10}
+      NOTEGATE_ENC_ROOT_KEY_ID: ${NOTEGATE_ENC_ROOT_KEY_ID}
+      NOTEGATE_ENC_ROOT_SECRET: ${NOTEGATE_ENC_ROOT_SECRET}
+      NOTEGATE_LOOKUP_ROOT_KEY_ID: ${NOTEGATE_LOOKUP_ROOT_KEY_ID}
+      NOTEGATE_LOOKUP_ROOT_SECRET: ${NOTEGATE_LOOKUP_ROOT_SECRET}
+      RUST_LOG: ${RUST_LOG:-notegate_reconciliation=info,notegate_db=info}
+    entrypoint: ["/usr/local/bin/notegate-reconciliation-worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 90s
+    restart: unless-stopped
+
   proxy:
     image: nginx:1.27-alpine
     ports:

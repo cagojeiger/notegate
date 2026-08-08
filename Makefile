@@ -13,7 +13,7 @@ clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 build:
-	cargo build --release --bin notegate-api
+	cargo build --release --bin notegate-api --bin notegate-reconciliation-worker
 
 frontend-check:
 	pnpm audit --prod --audit-level moderate
@@ -40,7 +40,7 @@ up:
 	docker compose up --build -d --remove-orphans
 
 logs:
-	docker compose logs -f web proxy minio prometheus grafana
+	docker compose logs -f web reconciliation-worker proxy minio prometheus grafana
 
 curl-meta:
 	curl -fsS http://localhost:9191/health

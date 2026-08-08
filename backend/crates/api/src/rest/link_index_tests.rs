@@ -94,10 +94,13 @@ async fn rest_link_index_rebuilds_relationships_and_enforces_space_access()
         .bind(space_id)
         .execute(&state.db)
         .await?;
-    sqlx::query("DELETE FROM node_link_source_states WHERE space_id = $1")
-        .bind(space_id)
-        .execute(&state.db)
-        .await?;
+    sqlx::query(
+        "DELETE FROM reconciliation_work_items \
+         WHERE work_kind = 'node_link_source' AND space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&state.db)
+    .await?;
     let (status, queued) = empty_request(
         rest_app(state.clone(), owner.clone()),
         "POST",
@@ -296,7 +299,8 @@ async fn rest_link_index_converges_after_move_rename_and_delete()
     .fetch_one(&state.db)
     .await?;
     let remaining_state: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM node_link_source_states WHERE space_id = $1 AND source_node_id = $2",
+        "SELECT count(*) FROM reconciliation_work_items \
+         WHERE work_kind = 'node_link_source' AND space_id = $1 AND target_id = $2",
     )
     .bind(space_id)
     .bind(source.id)

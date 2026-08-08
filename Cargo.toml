@@ -5,6 +5,7 @@ members = [
     "backend/crates/core",
     "backend/crates/db",
     "backend/crates/model",
+    "backend/crates/reconciliation",
     "backend/crates/service",
 ]
 

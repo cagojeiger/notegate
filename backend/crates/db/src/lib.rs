@@ -28,6 +28,7 @@ pub mod metadata_write_repo;
 pub mod object_storage_repo;
 pub mod postgres_pool;
 pub mod purge_repo;
+pub mod reconciliation_repo;
 mod space_permission;
 mod space_usage;
 pub mod space_usage_repo;
@@ -47,14 +48,14 @@ pub use file_change_event_repo::FileChangeSyncRows;
 pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use link_index_repo::{
-    IncomingLinkReference, LinkIndexRepo, LinkSourceState, SourceLinkClaim, SpaceLinkClaim,
-    SpaceLinkStatus, StoredLinkReference,
+    IncomingLinkReference, LinkIndexRepo, LinkSourceState, SpaceLinkStatus, StoredLinkReference,
 };
 pub use mcp_invocation_repo::{McpInvocationRepo, NewMcpInvocation};
 pub use metadata_write_repo::{MediaTypeObservation, MetadataWriteRepo};
 pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};
-pub use postgres_pool::connect;
+pub use postgres_pool::{connect, connect_with};
 pub use purge_repo::{PurgeRepo, PurgeRun};
+pub use reconciliation_repo::{ReconciliationClaim, ReconciliationRepo};
 pub use space_usage_repo::{SpaceUsageRepo, UsageCounts, UsageReconcileExecution};
 pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;
@@ -100,12 +101,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
         .map_err(|e| Error::internal(format!("migration failed: {e}")))
 }
 
-/// Verify the database is usable by the API process.
+/// Verify that the database schema matches the current binary.
 ///
-/// This checks connectivity, embedded migration checksums, and the critical
-/// usage schema. Startup already runs migrations; readiness repeats a cheap
-/// validation so load balancers do not route traffic to a process connected to
-/// the wrong, reset, or structurally damaged database.
+/// API readiness and worker startup share this read-only check. Migration
+/// application remains owned by API startup or a deployment migration job.
 pub async fn check_readiness(pool: &PgPool) -> Result<()> {
     sqlx::query("SELECT 1")
         .execute(pool)

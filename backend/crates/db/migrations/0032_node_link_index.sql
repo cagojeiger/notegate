@@ -16,61 +16,91 @@ CREATE INDEX node_link_refs_incoming_idx
     ON node_link_refs (space_id, target_node_id, source_node_id)
     WHERE target_node_id IS NOT NULL;
 
-CREATE TABLE node_link_source_states (
+CREATE TABLE reconciliation_work_items (
+    queue_name TEXT NOT NULL,
+    work_kind TEXT NOT NULL,
     space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
-    source_node_id UUID NOT NULL,
-    requested_version BIGINT NOT NULL DEFAULT 1 CHECK (requested_version > 0),
-    applied_version BIGINT NOT NULL DEFAULT 0 CHECK (applied_version >= 0),
+    target_id UUID NOT NULL,
+    requested_generation BIGINT NOT NULL DEFAULT 1 CHECK (requested_generation > 0),
+    applied_generation BIGINT NOT NULL DEFAULT 0 CHECK (applied_generation >= 0),
+    claimed_generation BIGINT,
     run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
     claim_token UUID,
-    claim_until TIMESTAMPTZ,
+    lease_until TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     last_error TEXT,
-    last_synced_at TIMESTAMPTZ,
-    PRIMARY KEY (space_id, source_node_id),
-    FOREIGN KEY (source_node_id, space_id)
-        REFERENCES nodes(id, space_id)
-        ON DELETE CASCADE,
-    CHECK (applied_version <= requested_version),
-    CHECK ((claim_token IS NULL) = (claim_until IS NULL))
+    last_completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (queue_name, work_kind, target_id),
+    CHECK (octet_length(queue_name) BETWEEN 1 AND 128),
+    CHECK (octet_length(work_kind) BETWEEN 1 AND 128),
+    CHECK (applied_generation <= requested_generation),
+    CHECK (
+        claimed_generation IS NULL OR (
+            claimed_generation > applied_generation
+            AND claimed_generation <= requested_generation
+        )
+    ),
+    CHECK (
+        (claimed_generation IS NULL AND claim_token IS NULL AND lease_until IS NULL)
+        OR
+        (claimed_generation IS NOT NULL AND claim_token IS NOT NULL AND lease_until IS NOT NULL)
+    )
 );
 
-CREATE INDEX node_link_source_states_ready_idx
-    ON node_link_source_states (run_after, source_node_id)
-    WHERE requested_version > applied_version;
+CREATE INDEX reconciliation_work_items_ready_idx
+    ON reconciliation_work_items (queue_name, run_after, created_at, target_id)
+    WHERE requested_generation > applied_generation;
 
-CREATE TABLE node_link_space_reindex_states (
-    space_id UUID PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
-    requested_version BIGINT NOT NULL DEFAULT 1 CHECK (requested_version > 0),
-    applied_version BIGINT NOT NULL DEFAULT 0 CHECK (applied_version >= 0),
-    run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
-    claim_token UUID,
-    claim_until TIMESTAMPTZ,
-    last_error TEXT,
-    CHECK (applied_version <= requested_version),
-    CHECK ((claim_token IS NULL) = (claim_until IS NULL))
-);
+CREATE FUNCTION reconciliation_backlog(TEXT)
+RETURNS BIGINT
+LANGUAGE SQL
+STABLE
+AS $$
+    SELECT count(*)::BIGINT
+    FROM reconciliation_work_items
+    WHERE queue_name = $1
+      AND requested_generation > applied_generation
+      AND (run_after <= now() OR lease_until > now());
+$$;
 
-CREATE INDEX node_link_space_reindex_states_ready_idx
-    ON node_link_space_reindex_states (run_after, space_id)
-    WHERE requested_version > applied_version;
+CREATE FUNCTION enqueue_reconciliation_work(TEXT, TEXT, UUID, UUID)
+RETURNS BOOLEAN
+LANGUAGE SQL
+AS $$
+    WITH requested AS (
+        INSERT INTO reconciliation_work_items (
+            queue_name, work_kind, space_id, target_id
+        ) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (queue_name, work_kind, target_id) DO UPDATE
+        SET space_id = EXCLUDED.space_id,
+            requested_generation = reconciliation_work_items.requested_generation + 1,
+            run_after = now(),
+            attempt_count = 0,
+            last_error = NULL,
+            updated_at = now()
+        RETURNING queue_name
+    ), notified AS (
+        SELECT pg_notify('notegate_reconciliation', queue_name)
+        FROM requested
+    )
+    SELECT EXISTS (SELECT 1 FROM notified);
+$$;
 
 CREATE FUNCTION enqueue_node_link_source(UUID, UUID)
 RETURNS BOOLEAN
 LANGUAGE SQL
 AS $$
     WITH requested AS (
-        INSERT INTO node_link_source_states (space_id, source_node_id)
-        SELECT node.space_id, node.id
+        SELECT enqueue_reconciliation_work(
+            'projection', 'node_link_source', node.space_id, node.id
+        )
         FROM nodes node
         WHERE node.space_id = $1
           AND node.id = $2
           AND node.kind = 'text'
           AND node.deleted_at IS NULL
-        ON CONFLICT (space_id, source_node_id) DO UPDATE
-        SET requested_version = node_link_source_states.requested_version + 1,
-            run_after = now(),
-            last_error = NULL
-        RETURNING 1
     )
     SELECT EXISTS (SELECT 1 FROM requested);
 $$;
@@ -80,13 +110,11 @@ RETURNS BOOLEAN
 LANGUAGE SQL
 AS $$
     WITH requested AS (
-        INSERT INTO node_link_space_reindex_states (space_id)
-        SELECT id FROM spaces WHERE id = $1 AND deleted_at IS NULL
-        ON CONFLICT (space_id) DO UPDATE
-        SET requested_version = node_link_space_reindex_states.requested_version + 1,
-            run_after = now(),
-            last_error = NULL
-        RETURNING 1
+        SELECT enqueue_reconciliation_work(
+            'projection', 'node_link_space', id, id
+        )
+        FROM spaces
+        WHERE id = $1 AND deleted_at IS NULL
     )
     SELECT EXISTS (SELECT 1 FROM requested);
 $$;
@@ -117,5 +145,6 @@ AFTER INSERT ON file_change_events
 FOR EACH ROW
 EXECUTE FUNCTION enqueue_node_link_index_for_file_change();
 
-INSERT INTO node_link_space_reindex_states (space_id)
-SELECT id FROM spaces WHERE deleted_at IS NULL;
+SELECT enqueue_node_link_space(id)
+FROM spaces
+WHERE deleted_at IS NULL;

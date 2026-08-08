@@ -38,9 +38,18 @@ test("browser session dashboard supports space, text, metadata, and file basics"
   await expect(page.locator("body")).toContainText(textName);
 
   await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page.locator("textarea").fill(`# ${textName}\n\nCreated by web smoke e2e.\n`);
+  await page.locator("textarea").fill(`# ${textName}\n\nCreated by web smoke e2e.\n\n[Self](${textName})\n`);
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Created by web smoke e2e.")).toBeVisible();
+
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  if (!await inspector.isVisible()) {
+    await page.getByRole("button", { name: "Toggle right sidebar" }).click();
+  }
+  await inspector.getByRole("tab", { name: "Links" }).click();
+  await expect(inspector.getByText(`/${textName}`, { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Up to date", { exact: true })).toBeVisible();
+  await inspector.getByRole("tab", { name: "Details" }).click();
 
   await page.getByRole("button", { name: "Edit metadata" }).click();
   await page.getByLabel("Metadata JSON").fill(JSON.stringify({ source: "web-e2e", suffix }));

@@ -400,6 +400,39 @@ file_objects
 
 `File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. NoteGate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
 
+```text
+node_link_refs
+  space_id uuid references spaces(id) on delete cascade
+  source_node_id uuid references nodes(id, space_id) on delete cascade
+  target_node_id uuid null references nodes(id) on delete set null
+  target_path text not null
+  reference_kind text check ('link','image')
+  occurrence_count integer not null check > 0
+  primary key (space_id, source_node_id, reference_kind, target_path)
+```
+
+`node_link_refs`는 source Text의 outgoing 관계만 저장한다. Incoming 관계는 `target_node_id` index를 역방향 조회한다. 목적지가 없거나 삭제되면 `target_node_id=NULL`과 원래 `target_path`를 유지한다.
+
+```text
+reconciliation_work_items
+  queue_name text
+  work_kind text
+  space_id uuid references spaces(id) on delete cascade
+  target_id uuid
+  requested_generation bigint
+  applied_generation bigint
+  claimed_generation bigint null
+  run_after timestamptz
+  claim_token uuid null
+  lease_until timestamptz null
+  attempt_count integer
+  last_error text null
+  last_completed_at timestamptz null
+  primary key (queue_name, work_kind, target_id)
+```
+
+`reconciliation_work_items`는 동일 대상의 반복 요청을 generation 하나로 합치는 desired-state queue다. `requested_generation > applied_generation`이면 아직 처리할 변경이 남아 있다. 작업 결과와 `applied_generation` 갱신은 같은 transaction이고, claim token이 일치하는 worker만 완료할 수 있다. 이 테이블은 원본 변경과 같은 database에 있어야 한다.
+
 Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 
 ```text

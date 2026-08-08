@@ -18,7 +18,6 @@ mod error;
 mod file_change;
 mod file_preview;
 mod identity;
-mod link_index_worker;
 mod mcp;
 mod metadata_write_behind;
 mod object_storage;
@@ -132,8 +131,6 @@ async fn main() -> anyhow::Result<()> {
         state.object_storage.clone(),
         background_shutdown_token.clone(),
     );
-    let link_index_worker =
-        link_index_worker::spawn(state.link_index.clone(), background_shutdown_token.clone());
     let metadata_write_shutdown_token = CancellationToken::new();
     let metadata_write_worker = metadata_write_behind::spawn(
         state.metadata_writes.clone(),
@@ -180,9 +177,6 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Err(error) = object_storage_cleanup_worker.await {
         tracing::error!(event = "object_storage_cleanup_worker.join_failed", %error);
-    }
-    if let Err(error) = link_index_worker.await {
-        tracing::error!(event = "link_index_worker.join_failed", %error);
     }
     if let Some(metrics_upkeep_worker) = metrics_upkeep_worker
         && let Err(error) = metrics_upkeep_worker.await

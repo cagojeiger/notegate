@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use notegate_db::{
-    FilesRepo, LinkIndexRepo, SourceLinkClaim, SpaceLinkStatus, StoredLinkReference,
+    FilesRepo, LinkIndexRepo, ReconciliationClaim, SpaceLinkStatus, StoredLinkReference,
 };
 use notegate_model::{
     AccountKind, Caller, Channel, LinkReferenceKind, LinkReferenceView, LinkSyncStatus,
@@ -124,14 +124,17 @@ impl LinkIndexService {
     }
 
     pub async fn execute_next(&self) -> notegate_core::Result<LinkIndexExecution> {
-        if let Some(claim) = self.store.claim_space().await? {
+        let Some(claim) = self.store.claim_work().await? else {
+            return Ok(LinkIndexExecution::Idle);
+        };
+        if LinkIndexRepo::is_space_work(&claim) {
             return match self.store.expand_space(&claim).await {
                 Ok(true) => Ok(LinkIndexExecution::SpaceExpanded {
                     space_id: claim.space_id,
                 }),
                 Ok(false) => Ok(LinkIndexExecution::ClaimLost),
                 Err(error) => {
-                    self.store.fail_space(&claim, &error.to_string()).await?;
+                    self.store.fail_work(&claim, &error.to_string()).await?;
                     Ok(LinkIndexExecution::Failed {
                         space_id: claim.space_id,
                         source_node_id: None,
@@ -140,17 +143,22 @@ impl LinkIndexService {
                 }
             };
         }
-
-        let Some(claim) = self.store.claim_source().await? else {
-            return Ok(LinkIndexExecution::Idle);
-        };
+        if !LinkIndexRepo::is_source_work(&claim) {
+            let error = format!("unsupported projection work kind: {}", claim.work_kind);
+            self.store.fail_work(&claim, &error).await?;
+            return Ok(LinkIndexExecution::Failed {
+                space_id: claim.space_id,
+                source_node_id: None,
+                error,
+            });
+        }
         match self.execute_source(&claim).await {
             Ok(execution) => Ok(execution),
             Err(error) => {
-                self.store.fail_source(&claim, &error.to_string()).await?;
+                self.store.fail_work(&claim, &error.to_string()).await?;
                 Ok(LinkIndexExecution::Failed {
                     space_id: claim.space_id,
-                    source_node_id: Some(claim.source_node_id),
+                    source_node_id: Some(claim.target_id),
                     error: error.to_string(),
                 })
             }
@@ -159,13 +167,13 @@ impl LinkIndexService {
 
     async fn execute_source(
         &self,
-        claim: &SourceLinkClaim,
+        claim: &ReconciliationClaim,
     ) -> notegate_core::Result<LinkIndexExecution> {
         let Some(references) = self.references_for_source(claim).await? else {
             return Ok(match self.store.discard_source(claim).await? {
                 true => LinkIndexExecution::SourceDiscarded {
                     space_id: claim.space_id,
-                    source_node_id: claim.source_node_id,
+                    source_node_id: claim.target_id,
                 },
                 false => LinkIndexExecution::ClaimLost,
             });
@@ -174,7 +182,7 @@ impl LinkIndexService {
             match self.store.complete_source(claim, &references).await? {
                 true => LinkIndexExecution::SourceIndexed {
                     space_id: claim.space_id,
-                    source_node_id: claim.source_node_id,
+                    source_node_id: claim.target_id,
                     reference_count: references.len(),
                 },
                 false => LinkIndexExecution::ClaimLost,
@@ -184,18 +192,18 @@ impl LinkIndexService {
 
     async fn references_for_source(
         &self,
-        claim: &SourceLinkClaim,
+        claim: &ReconciliationClaim,
     ) -> notegate_core::Result<Option<Vec<StoredLinkReference>>> {
         let Some((_, text)) = self
             .files
-            .find_text(claim.space_id, claim.source_node_id)
+            .find_text(claim.space_id, claim.target_id)
             .await?
         else {
             return Ok(None);
         };
         let source_path = self
             .files
-            .node_path(claim.space_id, claim.source_node_id)
+            .node_path(claim.space_id, claim.target_id)
             .await?
             .ok_or_else(|| notegate_core::Error::not_found("text not found"))?;
         let parsed = parse_internal_references(&source_path, text.content.as_deref().unwrap_or(""));

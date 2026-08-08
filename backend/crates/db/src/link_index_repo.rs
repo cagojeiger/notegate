@@ -4,19 +4,26 @@ use notegate_model::LinkReferenceKind;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::map_sqlx_error;
+use crate::{ReconciliationClaim, ReconciliationRepo, map_sqlx_error};
 
-const CLAIM_LEASE: &str = "2 minutes";
-const RETRY_DELAY: &str = "30 seconds";
+const PROJECTION_QUEUE: &str = "projection";
+const SOURCE_WORK_KIND: &str = "node_link_source";
+const SPACE_WORK_KIND: &str = "node_link_space";
+const CLAIM_LEASE: std::time::Duration = std::time::Duration::from_secs(120);
+const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone)]
 pub struct LinkIndexRepo {
     pool: PgPool,
+    work: ReconciliationRepo,
 }
 
 impl LinkIndexRepo {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            work: ReconciliationRepo::new(pool.clone()),
+            pool,
+        }
     }
 
     pub async fn request_source(&self, space_id: Uuid, source_node_id: Uuid) -> Result<bool> {
@@ -36,46 +43,13 @@ impl LinkIndexRepo {
             .map_err(map_sqlx_error)
     }
 
-    pub async fn claim_space(&self) -> Result<Option<SpaceLinkClaim>> {
-        let token = Uuid::new_v4();
-        sqlx::query_as(
-            "WITH candidate AS ( \
-                SELECT state.space_id, state.requested_version \
-                FROM node_link_space_reindex_states state \
-                JOIN spaces space ON space.id = state.space_id AND space.deleted_at IS NULL \
-                WHERE state.requested_version > state.applied_version \
-                  AND state.run_after <= now() \
-                  AND (state.claim_until IS NULL OR state.claim_until <= now()) \
-                ORDER BY state.run_after, state.space_id \
-                LIMIT 1 FOR UPDATE OF state SKIP LOCKED \
-             ) \
-             UPDATE node_link_space_reindex_states state \
-             SET claim_token = $1, claim_until = now() + $2::interval \
-             FROM candidate \
-             WHERE state.space_id = candidate.space_id \
-             RETURNING state.space_id, candidate.requested_version, state.claim_token",
-        )
-        .bind(token)
-        .bind(CLAIM_LEASE)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)
+    pub async fn claim_work(&self) -> Result<Option<ReconciliationClaim>> {
+        self.work.claim_one(PROJECTION_QUEUE, CLAIM_LEASE).await
     }
 
-    pub async fn expand_space(&self, claim: &SpaceLinkClaim) -> Result<bool> {
+    pub async fn expand_space(&self, claim: &ReconciliationClaim) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let owns_claim = sqlx::query_scalar(
-            "SELECT true FROM node_link_space_reindex_states \
-             WHERE space_id = $1 AND claim_token = $2 \
-             FOR UPDATE",
-        )
-        .bind(claim.space_id)
-        .bind(claim.claim_token)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-        .unwrap_or(false);
-        if !owns_claim {
+        if !self.work.owns_claim_in(&mut tx, claim).await? {
             tx.rollback().await.map_err(map_sqlx_error)?;
             return Ok(false);
         }
@@ -96,12 +70,14 @@ impl LinkIndexRepo {
         .await
         .map_err(map_sqlx_error)?;
         sqlx::query(
-            "DELETE FROM node_link_source_states state \
-             WHERE state.space_id = $1 \
+            "DELETE FROM reconciliation_work_items work \
+             WHERE work.queue_name = 'projection' \
+               AND work.work_kind = 'node_link_source' \
+               AND work.space_id = $1 \
                AND NOT EXISTS ( \
                    SELECT 1 FROM nodes node \
-                   WHERE node.space_id = state.space_id \
-                     AND node.id = state.source_node_id \
+                   WHERE node.space_id = work.space_id \
+                     AND node.id = work.target_id \
                      AND node.kind = 'text' \
                      AND node.deleted_at IS NULL \
                )",
@@ -111,104 +87,51 @@ impl LinkIndexRepo {
         .await
         .map_err(map_sqlx_error)?;
         sqlx::query(
-            "INSERT INTO node_link_source_states (space_id, source_node_id) \
-             SELECT space_id, id FROM nodes \
-             WHERE space_id = $1 AND kind = 'text' AND deleted_at IS NULL \
-             ON CONFLICT (space_id, source_node_id) DO UPDATE \
-             SET requested_version = node_link_source_states.requested_version + 1, \
-                 run_after = now(), last_error = NULL",
+            "SELECT enqueue_reconciliation_work( \
+                 'projection', 'node_link_source', space_id, id \
+             ) \
+             FROM nodes \
+             WHERE space_id = $1 AND kind = 'text' AND deleted_at IS NULL",
         )
         .bind(claim.space_id)
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        sqlx::query(
-            "UPDATE node_link_space_reindex_states \
-             SET applied_version = $3, claim_token = NULL, claim_until = NULL, \
-                 last_error = NULL \
-             WHERE space_id = $1 AND claim_token = $2",
-        )
-        .bind(claim.space_id)
-        .bind(claim.claim_token)
-        .bind(claim.requested_version)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
+        if !ReconciliationRepo::complete_in(&mut tx, claim).await? {
+            tx.rollback().await.map_err(map_sqlx_error)?;
+            return Ok(false);
+        }
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(true)
     }
 
-    pub async fn fail_space(&self, claim: &SpaceLinkClaim, error: &str) -> Result<()> {
-        sqlx::query(
-            "UPDATE node_link_space_reindex_states \
-             SET claim_token = NULL, claim_until = NULL, \
-                 run_after = now() + $3::interval, last_error = $4 \
-             WHERE space_id = $1 AND claim_token = $2",
-        )
-        .bind(claim.space_id)
-        .bind(claim.claim_token)
-        .bind(RETRY_DELAY)
-        .bind(error)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(())
+    pub fn is_space_work(claim: &ReconciliationClaim) -> bool {
+        claim.work_kind == SPACE_WORK_KIND
     }
 
-    pub async fn claim_source(&self) -> Result<Option<SourceLinkClaim>> {
-        let token = Uuid::new_v4();
-        sqlx::query_as(
-            "WITH candidate AS ( \
-                SELECT state.space_id, state.source_node_id, state.requested_version \
-                FROM node_link_source_states state \
-                JOIN spaces space ON space.id = state.space_id AND space.deleted_at IS NULL \
-                WHERE state.requested_version > state.applied_version \
-                  AND state.run_after <= now() \
-                  AND (state.claim_until IS NULL OR state.claim_until <= now()) \
-                ORDER BY state.run_after, state.source_node_id \
-                LIMIT 1 FOR UPDATE OF state SKIP LOCKED \
-             ) \
-             UPDATE node_link_source_states state \
-             SET claim_token = $1, claim_until = now() + $2::interval \
-             FROM candidate \
-             WHERE state.space_id = candidate.space_id \
-               AND state.source_node_id = candidate.source_node_id \
-             RETURNING state.space_id, state.source_node_id, \
-                       candidate.requested_version, state.claim_token",
-        )
-        .bind(token)
-        .bind(CLAIM_LEASE)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)
+    pub fn is_source_work(claim: &ReconciliationClaim) -> bool {
+        claim.work_kind == SOURCE_WORK_KIND
+    }
+
+    pub async fn fail_work(&self, claim: &ReconciliationClaim, error: &str) -> Result<()> {
+        self.work.fail(claim, RETRY_DELAY, error).await?;
+        Ok(())
     }
 
     pub async fn complete_source(
         &self,
-        claim: &SourceLinkClaim,
+        claim: &ReconciliationClaim,
         references: &[StoredLinkReference],
     ) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let owns_claim = sqlx::query_scalar(
-            "SELECT true FROM node_link_source_states \
-             WHERE space_id = $1 AND source_node_id = $2 AND claim_token = $3 \
-             FOR UPDATE",
-        )
-        .bind(claim.space_id)
-        .bind(claim.source_node_id)
-        .bind(claim.claim_token)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-        .unwrap_or(false);
-        if !owns_claim {
+        if !self.work.owns_claim_in(&mut tx, claim).await? {
             tx.rollback().await.map_err(map_sqlx_error)?;
             return Ok(false);
         }
 
         sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1 AND source_node_id = $2")
             .bind(claim.space_id)
-            .bind(claim.source_node_id)
+            .bind(claim.target_id)
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
@@ -240,7 +163,7 @@ impl LinkIndexRepo {
                       AS input(kind, path, target_id, count)",
             )
             .bind(claim.space_id)
-            .bind(claim.source_node_id)
+            .bind(claim.target_id)
             .bind(kinds)
             .bind(paths)
             .bind(target_ids)
@@ -250,64 +173,27 @@ impl LinkIndexRepo {
             .map_err(map_sqlx_error)?;
         }
 
-        sqlx::query(
-            "UPDATE node_link_source_states \
-             SET applied_version = $4, claim_token = NULL, claim_until = NULL, \
-                 last_error = NULL, last_synced_at = now() \
-             WHERE space_id = $1 AND source_node_id = $2 AND claim_token = $3",
-        )
-        .bind(claim.space_id)
-        .bind(claim.source_node_id)
-        .bind(claim.claim_token)
-        .bind(claim.requested_version)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
+        if !ReconciliationRepo::complete_in(&mut tx, claim).await? {
+            tx.rollback().await.map_err(map_sqlx_error)?;
+            return Ok(false);
+        }
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(true)
     }
 
-    pub async fn discard_source(&self, claim: &SourceLinkClaim) -> Result<bool> {
+    pub async fn discard_source(&self, claim: &ReconciliationClaim) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let deleted = sqlx::query(
-            "DELETE FROM node_link_source_states \
-             WHERE space_id = $1 AND source_node_id = $2 AND claim_token = $3",
-        )
-        .bind(claim.space_id)
-        .bind(claim.source_node_id)
-        .bind(claim.claim_token)
-        .execute(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?
-        .rows_affected();
-        if deleted > 0 {
+        let deleted = self.work.delete_in(&mut tx, claim).await?;
+        if deleted {
             sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1 AND source_node_id = $2")
                 .bind(claim.space_id)
-                .bind(claim.source_node_id)
+                .bind(claim.target_id)
                 .execute(&mut *tx)
                 .await
                 .map_err(map_sqlx_error)?;
         }
         tx.commit().await.map_err(map_sqlx_error)?;
-        Ok(deleted > 0)
-    }
-
-    pub async fn fail_source(&self, claim: &SourceLinkClaim, error: &str) -> Result<()> {
-        sqlx::query(
-            "UPDATE node_link_source_states \
-             SET claim_token = NULL, claim_until = NULL, \
-                 run_after = now() + $4::interval, last_error = $5 \
-             WHERE space_id = $1 AND source_node_id = $2 AND claim_token = $3",
-        )
-        .bind(claim.space_id)
-        .bind(claim.source_node_id)
-        .bind(claim.claim_token)
-        .bind(RETRY_DELAY)
-        .bind(error)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(())
+        Ok(deleted)
     }
 
     pub async fn source_state(
@@ -316,9 +202,13 @@ impl LinkIndexRepo {
         source_node_id: Uuid,
     ) -> Result<Option<LinkSourceState>> {
         sqlx::query_as(
-            "SELECT requested_version, applied_version, claim_until, last_error, last_synced_at \
-             FROM node_link_source_states \
-             WHERE space_id = $1 AND source_node_id = $2",
+            "SELECT requested_generation AS requested_version, \
+                    applied_generation AS applied_version, \
+                    lease_until AS claim_until, last_error, \
+                    last_completed_at AS last_synced_at \
+             FROM reconciliation_work_items \
+             WHERE queue_name = 'projection' AND work_kind = 'node_link_source' \
+               AND space_id = $1 AND target_id = $2",
         )
         .bind(space_id)
         .bind(source_node_id)
@@ -374,37 +264,43 @@ impl LinkIndexRepo {
             "SELECT \
                 count(*) FILTER ( \
                     WHERE node.id IS NOT NULL \
-                      AND (source.source_node_id IS NULL \
-                       OR source.requested_version > source.applied_version \
+                      AND (source.target_id IS NULL \
+                       OR source.requested_generation > source.applied_generation \
                       ) \
                 )::bigint AS pending_documents, \
                 count(*) FILTER ( \
                     WHERE node.id IS NOT NULL \
-                      AND source.requested_version > source.applied_version \
+                      AND source.requested_generation > source.applied_generation \
                       AND source.last_error IS NOT NULL \
                 )::bigint AS retrying_documents, \
                 count(*) FILTER ( \
                     WHERE node.id IS NOT NULL \
-                      AND source.requested_version > source.applied_version \
-                      AND source.claim_until > now() \
+                      AND source.requested_generation > source.applied_generation \
+                      AND source.lease_until > now() \
                 )::bigint AS syncing_documents, \
-                max(source.last_synced_at) AS last_synced_at, \
-                COALESCE(space_state.requested_version > space_state.applied_version, false) \
+                max(source.last_completed_at) AS last_synced_at, \
+                COALESCE( \
+                    space_state.requested_generation > space_state.applied_generation, false \
+                ) \
                     AS space_pending, \
-                COALESCE(space_state.claim_until > now(), false) AS space_syncing, \
+                COALESCE(space_state.lease_until > now(), false) AS space_syncing, \
                 space_state.last_error AS space_error \
              FROM spaces space \
              LEFT JOIN nodes node \
                ON node.space_id = space.id \
               AND node.kind = 'text' \
               AND node.deleted_at IS NULL \
-             LEFT JOIN node_link_source_states source \
-               ON source.space_id = space.id AND source.source_node_id = node.id \
-             LEFT JOIN node_link_space_reindex_states space_state \
-               ON space_state.space_id = space.id \
+             LEFT JOIN reconciliation_work_items source \
+               ON source.queue_name = 'projection' \
+              AND source.work_kind = 'node_link_source' \
+              AND source.space_id = space.id AND source.target_id = node.id \
+             LEFT JOIN reconciliation_work_items space_state \
+               ON space_state.queue_name = 'projection' \
+              AND space_state.work_kind = 'node_link_space' \
+              AND space_state.space_id = space.id AND space_state.target_id = space.id \
              WHERE space.id = $1 AND space.deleted_at IS NULL \
-             GROUP BY space_state.requested_version, space_state.applied_version, \
-                      space_state.claim_until, space_state.last_error",
+             GROUP BY space_state.requested_generation, space_state.applied_generation, \
+                      space_state.lease_until, space_state.last_error",
         )
         .bind(space_id)
         .fetch_optional(&self.pool)
@@ -412,21 +308,6 @@ impl LinkIndexRepo {
         .map_err(map_sqlx_error)
         .map(|status| status.unwrap_or_default())
     }
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub struct SourceLinkClaim {
-    pub space_id: Uuid,
-    pub source_node_id: Uuid,
-    pub requested_version: i64,
-    pub claim_token: Uuid,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub struct SpaceLinkClaim {
-    pub space_id: Uuid,
-    pub requested_version: i64,
-    pub claim_token: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
