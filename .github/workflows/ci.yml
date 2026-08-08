@@ -239,11 +239,12 @@ jobs:
       - name: Start application
         run: |
           mkdir -p browser-e2e
-          cargo run --quiet --package notegate-reconciliation \
-            --bin notegate-reconciliation-worker >browser-e2e/reconciliation.log 2>&1 &
+          cargo build --quiet --package notegate-api \
+            --package notegate-reconciliation --bins
+          target/debug/notegate-reconciliation-worker >browser-e2e/reconciliation.log 2>&1 &
           worker_pid=$!
           echo "$worker_pid" >browser-e2e/reconciliation.pid
-          cargo run --quiet --package notegate-api --bin notegate-api >browser-e2e/api.log 2>&1 &
+          target/debug/notegate-api >browser-e2e/api.log 2>&1 &
           pnpm --filter web dev --host 127.0.0.1 >browser-e2e/web.log 2>&1 &
           for _ in $(seq 1 60); do
             if ! kill -0 "$worker_pid" 2>/dev/null; then
