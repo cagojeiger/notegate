@@ -49,7 +49,7 @@ impl LinkIndexRepo {
 
     pub async fn expand_space(&self, claim: &ReconciliationClaim) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        if !self.work.owns_claim_in(&mut tx, claim).await? {
+        if !ReconciliationRepo::owns_claim_in(&mut tx, claim).await? {
             tx.rollback().await.map_err(map_sqlx_error)?;
             return Ok(false);
         }
@@ -124,7 +124,7 @@ impl LinkIndexRepo {
         references: &[StoredLinkReference],
     ) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        if !self.work.owns_claim_in(&mut tx, claim).await? {
+        if !ReconciliationRepo::owns_claim_in(&mut tx, claim).await? {
             tx.rollback().await.map_err(map_sqlx_error)?;
             return Ok(false);
         }
@@ -183,7 +183,7 @@ impl LinkIndexRepo {
 
     pub async fn discard_source(&self, claim: &ReconciliationClaim) -> Result<bool> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let deleted = self.work.delete_in(&mut tx, claim).await?;
+        let deleted = ReconciliationRepo::delete_in(&mut tx, claim).await?;
         if deleted {
             sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1 AND source_node_id = $2")
                 .bind(claim.space_id)
