@@ -2496,6 +2496,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "notegate-core",
  "notegate-db",
+ "notegate-jobs",
  "notegate-model",
  "notegate-service",
  "openidconnect",
@@ -2544,11 +2545,29 @@ dependencies = [
  "chrono",
  "notegate-core",
  "notegate-db",
+ "notegate-jobs",
  "notegate-model",
  "secrecy",
  "serde_json",
  "sqlx",
  "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "notegate-jobs"
+version = "0.1.55"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "metrics",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]

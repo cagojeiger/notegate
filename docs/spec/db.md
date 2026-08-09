@@ -15,6 +15,8 @@ file_change_events
 mcp_invocations
 spaces
 space_usage
+background_jobs
+background_job_attempts
 space_usage_reconcile_jobs
 space_usage_reconcile_executions
 space_agent_connections
@@ -290,29 +292,38 @@ space_usage
 `space_usage`는 일반 쿼터 검사와 Usage 조회를 위한 authoritative counter를 보관한다. Root node는 `live_node_count`에 포함한다. Space 생성은 root node와 usage row를 같은 transaction에서 만든다. File-tree 변경은 예상 delta를 검증하고 source row와 counter를 같은 transaction에서 갱신한다. 정확한 계산과 복구 기준은 `usage-and-quotas.md`를 따른다.
 
 ```text
-space_usage_reconcile_jobs
+background_jobs
   job_id uuid pk
-  space_id uuid unique references spaces(id) on delete cascade
-  requested_at timestamptz not null
-  run_after timestamptz not null
-  retry_count integer not null default 0 check >= 0
+  job_kind text not null
+  payload jsonb not null
+  status text check ('queued','running','succeeded','dead')
+  available_at timestamptz not null
+  attempt_count integer not null
+  failure_count integer not null
+  max_attempts integer not null
+  claim_token uuid null
+  claimed_by text null
+  lease_until timestamptz null
+  last_error_code text null
+  last_error_message text null
+  created_at / updated_at timestamptz not null
+  completed_at timestamptz null
+
+background_job_attempts
+  job_id uuid references background_jobs(job_id) on delete cascade
+  attempt_number integer
+  claim_token uuid unique
+  worker_id text
+  started_at timestamptz
+  finished_at timestamptz null
+  outcome text null
+  error_code / error_message text null
+  primary key (job_id, attempt_number)
 ```
 
-`space_usage_reconcile_jobs`는 수동 요청으로 생성된 활성 작업만 보관한다. `space_id` unique 제약으로 같은 Space의 중복 작업을 막는다. 성공 또는 취소 시 행을 삭제하고, 지연 또는 실패 시 `run_after`를 갱신한다. 전체 재계산은 기존 job을 성공 execution으로 마감한 뒤 삭제한다. `retry_count`는 실패에만 증가한다.
+`background_jobs`는 지연 가능한 내부 작업의 원장이다. `queued`와 `running`은 `completed_at=NULL`, terminal 상태는 claim 정보가 없고 `completed_at`이 있어야 한다. 각 claim은 append-only attempt 한 개를 만들며 defer, lease 만료, timeout, panic, 취소, retryable/permanent failure를 구분한다. `attempt_count`는 전체 실행 이력이고 `failure_count`만 재시도 한도를 소비한다. Queue의 전달 보장은 at-least-once이고 terminal 행은 90일 뒤 bounded batch로 삭제한다. 상세 상태 전이는 `background-jobs.md`를 따른다.
 
-```text
-space_usage_reconcile_executions
-  execution_id uuid pk
-  job_id uuid not null
-  space_id uuid not null
-  started_at timestamptz not null
-  finished_at timestamptz not null
-  outcome text check ('succeeded','deferred','failed','cancelled')
-  error_message text null
-  metadata jsonb not null default '{}'
-```
-
-`space_usage_reconcile_executions`는 worker 처리 1회를 append-only로 기록한다. Job은 완료 후 삭제하므로 `job_id`에 FK를 두지 않는다. 실패한 execution만 `error_message`를 가지며, 3개월이 지난 행은 worker가 정리한다.
+`space_usage_reconcile_jobs`와 `space_usage_reconcile_executions`는 단계적 배포 중 이전 process를 위한 호환 테이블이다. 새 API background runtime은 이 테이블을 작업 원장이나 실행 이력으로 읽지 않는다. 호환 기간의 legacy job insert는 trigger가 `background_jobs`로 복제한다.
 
 ```text
 space_agent_connections

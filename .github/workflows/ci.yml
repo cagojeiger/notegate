@@ -2,7 +2,6 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -86,13 +85,13 @@ jobs:
             minio/mc:RELEASE.2025-08-13T08-35-41Z /config/init.sh
 
       - name: Check
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
   web:
     name: Web
@@ -226,7 +225,7 @@ jobs:
       - name: Seed test identities
         id: seed_test_identity
         run: |
-          output=$(cargo run --quiet --package notegate-api --example seed_user)
+          output=$(cargo run --locked --quiet --package notegate-api --example seed_user)
           agent_api_key=$(printf '%s\n' "$output" | sed -n 's/^AGENT_API_KEY=//p')
           session=$(printf '%s\n' "$output" | sed -n 's/^BROWSER_SESSION=//p')
           test -n "$agent_api_key"
@@ -239,9 +238,16 @@ jobs:
       - name: Start application
         run: |
           mkdir -p browser-e2e
-          cargo run --quiet --package notegate-api --bin notegate-api >browser-e2e/api.log 2>&1 &
+          cargo build --locked --quiet --package notegate-api --bins
+          target/debug/notegate-api >browser-e2e/api.log 2>&1 &
+          api_pid=$!
+          echo "$api_pid" >browser-e2e/api.pid
           pnpm --filter web dev --host 127.0.0.1 >browser-e2e/web.log 2>&1 &
           for _ in $(seq 1 60); do
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              cat browser-e2e/api.log
+              exit 1
+            fi
             if curl --fail --silent http://127.0.0.1:9191/ready >/dev/null && \
                curl --fail --silent http://127.0.0.1:5173/ >/dev/null; then
               exit 0
@@ -291,7 +297,11 @@ jobs:
       - name: Test browser workflow
         env:
           NOTEGATE_WEB_E2E_BROWSER_SESSION: ${{ steps.seed_test_identity.outputs.browser_session }}
-        run: pnpm --filter web test:e2e
+        run: |
+          api_pid=$(cat browser-e2e/api.pid)
+          kill -0 "$api_pid"
+          pnpm --filter web test:e2e
+          kill -0 "$api_pid"
 
       - name: Test Lighthouse budgets
         run: pnpm --filter web test:lighthouse

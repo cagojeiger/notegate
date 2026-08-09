@@ -12,7 +12,7 @@ mod common;
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
 use notegate_core::limits::Limits;
-use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
+use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileResult};
 use notegate_model::files::{CopyNode, CreateFolder, StoredContent, WriteTextBody};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -423,11 +423,9 @@ async fn missing_counter_rolls_back_mutation_and_reconciliation_repairs_it() -> 
     );
 
     let usage_repo = SpaceUsageRepo::new(db.pool.clone());
-    assert_eq!(usage_repo.enqueue_all_live_spaces().await?, 1);
     assert!(matches!(
-        usage_repo.execute_next_reconciliation().await?,
-        UsageReconcileExecution::Succeeded { space_id: repaired, previous: None, .. }
-            if repaired == space_id
+        usage_repo.reconcile_space(space_id).await?,
+        UsageReconcileResult::Reconciled { previous: None, .. }
     ));
     repo.insert_folder(
         space_id,

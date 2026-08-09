@@ -93,7 +93,12 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
     assert_eq!(queued["status"], json!("queued"));
     let job_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM space_usage_reconcile_jobs WHERE space_id = $1)",
+        "SELECT EXISTS ( \
+             SELECT 1 FROM background_jobs \
+             WHERE job_kind = 'space_usage_reconcile' \
+               AND payload ->> 'space_id' = $1::text \
+               AND status IN ('queued', 'running') \
+         )",
     )
     .bind(space_id)
     .fetch_one(&db.pool)

@@ -3,10 +3,12 @@
 use chrono::{DateTime, Duration, Utc};
 use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result};
+use notegate_jobs::{JobQueue, NewJob};
+use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::{active_account_predicate, map_sqlx_error, to_usize};
+use crate::{SPACE_USAGE_JOB_KIND, active_account_predicate, map_sqlx_error, to_usize};
 
 const MANUAL_RECONCILE_COOLDOWN_SECONDS: i64 = 60 * 60;
 const REQUEST_LOCK_TIMEOUT: &str = "1s";
@@ -41,7 +43,10 @@ impl UsageRepo {
         let rows = sqlx::query_as::<_, SpaceUsageRow>(
             "SELECT s.id, s.name, su.live_node_count, su.live_text_bytes, su.live_file_bytes, \
                     EXISTS ( \
-                        SELECT 1 FROM space_usage_reconcile_jobs j WHERE j.space_id = s.id \
+                        SELECT 1 FROM background_jobs job \
+                        WHERE job.job_kind = 'space_usage_reconcile' \
+                          AND job.status IN ('queued', 'running') \
+                          AND job.payload ->> 'space_id' = s.id::text \
                     ) AS reconciliation_pending \
              FROM spaces s \
              LEFT JOIN space_usage su ON su.space_id = s.id \
@@ -92,7 +97,10 @@ impl UsageRepo {
         let state = sqlx::query_as::<_, ReconcileRequestRow>(
             "SELECT su.reconciled_at, now() AS requested_at, \
                     EXISTS ( \
-                        SELECT 1 FROM space_usage_reconcile_jobs j WHERE j.space_id = su.space_id \
+                        SELECT 1 FROM background_jobs job \
+                        WHERE job.job_kind = 'space_usage_reconcile' \
+                          AND job.status IN ('queued', 'running') \
+                          AND job.payload ->> 'space_id' = su.space_id::text \
                     ) AS pending \
              FROM space_usage su WHERE su.space_id = $1 FOR UPDATE",
         )
@@ -116,11 +124,12 @@ impl UsageRepo {
             return Ok(outcome);
         }
 
-        sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
-            .bind(space_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+        JobQueue::enqueue_in(
+            &mut tx,
+            &NewJob::new(SPACE_USAGE_JOB_KIND, json!({ "space_id": space_id })),
+        )
+        .await
+        .map_err(|error| Error::internal(error.to_string()))?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(UsageReconciliationOutcome::Queued)
     }

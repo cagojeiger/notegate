@@ -59,8 +59,9 @@ Local endpoints:
 - Grafana login: `admin` / `notegate-local` by default
 
 The application default for `NOTEGATE_METRICS_ENABLED` is `false`. Docker
-Compose enables it for this stack through
-`COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults to `true`.
+Compose enables it for every web process through `COMPOSE_NOTEGATE_METRICS_ENABLED`,
+which defaults to `true`. HTTP and background-job metrics share the same `/metrics`
+endpoint.
 
 ## Kubernetes delivery
 

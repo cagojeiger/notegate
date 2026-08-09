@@ -11,6 +11,7 @@ pub mod tier;
 pub mod validation;
 
 pub use config::{
-    Config, HttpRateLimitConfig, HttpRateLimitsConfig, S3Config, SearchBodyCacheConfig,
+    BackgroundJobsConfig, Config, HttpRateLimitConfig, HttpRateLimitsConfig, S3Config,
+    SearchBodyCacheConfig,
 };
 pub use error::{Error, Result, WriteLockScope};

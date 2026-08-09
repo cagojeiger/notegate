@@ -11,7 +11,7 @@ mod common;
 
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileExecution};
+use notegate_db::{FilesRepo, SpaceUsageRepo, TextMutationKind, UsageReconcileResult};
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
 };
@@ -187,15 +187,11 @@ async fn usage_drift_rolls_back_mutation_until_reconciled() -> Result<(), Box<dy
             .await?;
     assert!(folder_is_live);
 
-    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
-        .bind(space_id)
-        .execute(&db.pool)
-        .await?;
     assert!(matches!(
         SpaceUsageRepo::new(db.pool.clone())
-            .execute_next_reconciliation()
+            .reconcile_space(space_id)
             .await?,
-        UsageReconcileExecution::Succeeded { space_id: id, .. } if id == space_id
+        UsageReconcileResult::Reconciled { .. }
     ));
     repo.soft_delete_node(space_id, folder.id, account, false)
         .await?;

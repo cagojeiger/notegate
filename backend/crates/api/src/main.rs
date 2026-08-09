@@ -14,6 +14,7 @@ use tracing_subscriber::{EnvFilter, Layer as _, util::SubscriberInitExt as _};
 mod admission;
 mod agent_text;
 mod auth;
+mod background_jobs;
 mod error;
 mod file_change;
 mod file_preview;
@@ -33,7 +34,6 @@ mod rest;
 mod routes;
 mod state;
 mod usage_bootstrap;
-mod usage_reconcile_worker;
 
 use state::AppState;
 
@@ -121,11 +121,11 @@ async fn main() -> anyhow::Result<()> {
     info!(event = "server.listening", addr = %bind_addr);
 
     let background_shutdown_token = application_shutdown_token;
+    let mut background_job_runtime =
+        background_jobs::spawn(&state, background_shutdown_token.clone())?;
     let metrics_upkeep_worker =
         observability::spawn_upkeep(metrics, background_shutdown_token.clone());
     let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
-    let usage_reconcile_worker =
-        usage_reconcile_worker::spawn(pool.clone(), background_shutdown_token.clone());
     let object_storage_cleanup_worker = object_storage_cleanup_worker::spawn(
         pool.clone(),
         state.object_storage.clone(),
@@ -148,18 +148,34 @@ async fn main() -> anyhow::Result<()> {
     };
     tokio::pin!(server);
 
-    let server_result: Option<io::Result<()>> = tokio::select! {
-        result = &mut server => Some(result),
-        () = signals.wait() => None,
+    enum StopReason {
+        Http(io::Result<()>),
+        Signal,
+        Background(anyhow::Error),
+    }
+
+    let stop_reason = tokio::select! {
+        result = &mut server => StopReason::Http(result),
+        () = signals.wait() => StopReason::Signal,
+        error = background_job_runtime.wait_for_critical_exit() => {
+            tracing::error!(event = "background_jobs.critical_task_exited", %error);
+            StopReason::Background(error)
+        },
     };
 
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
     background_shutdown_token.cancel();
 
-    let server_result = match server_result {
-        Some(result) => result,
-        None => server.await,
+    let server_result = match stop_reason {
+        StopReason::Http(result) => result.map_err(anyhow::Error::from),
+        StopReason::Signal => server.await.map_err(anyhow::Error::from),
+        StopReason::Background(background_error) => {
+            if let Err(error) = server.await {
+                tracing::error!(event = "server.graceful_shutdown_failed", %error);
+            }
+            Err(background_error)
+        }
     };
 
     // No request can add new observations after the HTTP server drains. Stop the
@@ -172,24 +188,22 @@ async fn main() -> anyhow::Result<()> {
     if let Err(error) = purge_worker.await {
         tracing::error!(event = "purge_worker.join_failed", %error);
     }
-    if let Err(error) = usage_reconcile_worker.await {
-        tracing::error!(event = "usage_reconcile_worker.join_failed", %error);
-    }
     if let Err(error) = object_storage_cleanup_worker.await {
         tracing::error!(event = "object_storage_cleanup_worker.join_failed", %error);
     }
+    background_job_runtime.join().await;
     if let Some(metrics_upkeep_worker) = metrics_upkeep_worker
         && let Err(error) = metrics_upkeep_worker.await
     {
         tracing::error!(event = "metrics_upkeep_worker.join_failed", %error);
     }
 
-    // Workers finish their current in-flight work before returning. Close the
-    // pool only after every worker has joined so no background query is interrupted.
+    // Background tasks record cancellation or finish their final flush before
+    // returning. Close the pool only after every task has joined.
     pool.close().await;
     info!(event = "shutdown.complete");
 
-    server_result.map_err(anyhow::Error::from)
+    server_result
 }
 
 struct ShutdownSignals {
