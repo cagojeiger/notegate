@@ -1,4 +1,4 @@
-import type { FilePreviewKind } from "./types";
+import type { FilePreviewKind, LinkReferenceDirection } from "./types";
 
 export const queryKeys = {
   me: ["me"] as const,
@@ -26,6 +26,13 @@ export const queryKeys = {
   recent: (spaceId: string) => ["spaces", spaceId, "recent"] as const,
   nodes: (spaceId: string) => ["spaces", spaceId, "nodes"] as const,
   node: (spaceId: string, nodeId: string) => ["spaces", spaceId, "nodes", nodeId] as const,
+  spaceLinkIndex: (spaceId: string) => ["spaces", spaceId, "link-index"] as const,
+  nodeLinkReferencesFamily: (spaceId: string, nodeId: string) => (
+    ["spaces", spaceId, "link-index", "nodes", nodeId] as const
+  ),
+  nodeLinkReferences: (spaceId: string, nodeId: string, direction: LinkReferenceDirection, snapshot: string) => (
+    ["spaces", spaceId, "link-index", "nodes", nodeId, direction, snapshot] as const
+  ),
   texts: (spaceId: string) => ["spaces", spaceId, "text"] as const,
   text: (spaceId: string, nodeId: string) => ["spaces", spaceId, "text", nodeId] as const,
   metadataFamily: (spaceId: string) => ["spaces", spaceId, "metadata"] as const,

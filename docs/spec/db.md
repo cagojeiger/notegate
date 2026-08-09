@@ -23,6 +23,9 @@ space_agent_connections
 nodes
 text_objects
 file_objects
+node_link_refs
+node_link_source_states
+node_link_space_states
 object_storage_objects
 ```
 
@@ -415,6 +418,38 @@ file_objects
 ```
 
 `File` metadata는 `file_objects`에 저장하고 실제 bytes는 S3 호환 저장소에 저장한다. NoteGate는 외부에 노출하지 않는 `object_key`만 저장한다. `media_type`은 client 선언값이고 `detected_media_type`은 object bytes에서 감지한 값이다. `NULL`은 아직 감지하지 못한 상태다.
+
+```text
+node_link_refs
+  space_id uuid references spaces(id) on delete cascade
+  source_node_id uuid references nodes(id, space_id) on delete cascade
+  target_node_id uuid null
+  target_path text not null
+  reference_kind text check ('link','image')
+  occurrence_count integer not null check > 0
+  primary key (space_id, source_node_id, reference_kind, target_path)
+  foreign key (target_node_id, space_id)
+    references nodes(id, space_id) on delete set null (target_node_id)
+```
+
+`node_link_refs`는 source Text의 outgoing 관계만 저장한다. Incoming 관계는 `target_node_id` index를 역방향 조회한다. Source와 resolve된 target은 모두 row의 `space_id`와 같아야 한다. 목적지가 없거나 삭제되면 `target_node_id=NULL`과 원래 `target_path`를 유지한다.
+
+```text
+node_link_source_states
+  space_id uuid
+  source_node_id uuid
+  source_content_sha256 text
+  source_path text
+  parser_version integer
+  projected_at timestamptz
+  primary key (space_id, source_node_id)
+
+node_link_space_states
+  space_id uuid pk references spaces(id) on delete cascade
+  expanded_at timestamptz
+```
+
+`node_link_source_states`는 마지막으로 완성된 source 본문 hash, path, parser version과 projection 시각을 기록한다. 실제 관계 교체 transaction은 현재 background job claim을 먼저 잠그고 본문 hash와 path를 다시 확인한다. 구조 변경은 영향받는 source만 다시 등록한다. `node_link_space_states`는 복구용 Space 전체 작업이 live Text와 삭제 source tombstone을 source 작업으로 전개한 마지막 시각을 기록한다. 두 시각은 각각 `projected_at`과 `expanded_at`으로 구분하며 전체 동기화 완료 시각을 의미하지 않는다. Impact와 Space 작업은 관계 table을 직접 변경하지 않으며, 동일 scope의 fresh 작업은 queue의 partial unique index로 병합한다. 이 상태는 사용자에게 내부 revision으로 노출하지 않는다.
 
 Space content quota는 `space_usage.live_text_bytes`와 `space_usage.live_file_bytes`로 독립 검사한다. Text는 `text_objects.byte_len`, File은 `file_objects.byte_len`을 사용한다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다.
 

@@ -268,6 +268,15 @@ function responseFor(url: URL) {
       page: { limit: 50, returned: 0, has_more: false, next_cursor: null }
     };
   }
+  if (url.pathname === `/api/v1/spaces/${space.id}/link-index`) {
+    return {
+      status: "up_to_date",
+      outdated_documents: 0,
+      retrying_documents: 0,
+      failed_documents: 0,
+      latest_index_update_at: "2026-07-24T00:00:00Z"
+    };
+  }
   if (url.pathname === `/api/v1/spaces/${space.id}/nodes/text-1/reveal`) {
     return { ancestors: [], target: textNode() };
   }

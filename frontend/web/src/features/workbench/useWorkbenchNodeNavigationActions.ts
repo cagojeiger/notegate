@@ -42,6 +42,21 @@ export function useWorkbenchNodeNavigationActions({
     await openNodeFromSummary(summary, openInNewGroup);
   }
 
+  async function openNodeId(nodeId: string) {
+    if (!activeSpace) return;
+    const spaceId = activeSpace.id;
+    try {
+      const { node, reveal } = await loadNavigationNode(spaceId, nodeId);
+      if (node.space_id !== spaceId || useUiStore.getState().activeSpaceId !== spaceId) return;
+      if (reveal) applyReveal(reveal);
+      openInActiveGroup(node);
+      closeMobile();
+      if (!reveal) showToast("Opened item, but could not reveal it in Files");
+    } catch (error) {
+      showToast(error instanceof ApiError && error.status === 404 ? "Link target not found" : "Could not open link target");
+    }
+  }
+
   async function openMarkdownLink(groupId: number, sourceNode: RestNode, path: string) {
     if (
       !activeSpace
@@ -57,7 +72,6 @@ export function useWorkbenchNodeNavigationActions({
       showToast(error instanceof ApiError && error.status === 404 ? "Link target not found" : "Could not open link target");
       return;
     }
-
     if (node.space_id !== spaceId) {
       showToast("Could not open link target");
       return;
@@ -236,6 +250,7 @@ export function useWorkbenchNodeNavigationActions({
   return {
     openNode,
     openNodeInNewGroup,
+    openNodeId,
     openMarkdownLink,
     navigateEditorGroup,
     navigatingGroupIds

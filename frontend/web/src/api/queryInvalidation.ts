@@ -29,6 +29,7 @@ export function invalidateNodeLists(
 ) {
   invalidateRecentNodes(queryClient, spaceId);
   invalidateParentChildren(queryClient, spaceId, parentIds);
+  invalidateLinkIndex(queryClient, spaceId);
 }
 
 export function invalidateRecentNodes(queryClient: QueryClient, spaceId: string) {
@@ -40,6 +41,7 @@ export function invalidateFolderSubtree(queryClient: QueryClient, spaceId: strin
   invalidateAllChildren(queryClient, spaceId);
   invalidateNodeDetails(queryClient, spaceId);
   removeMarkdownImageQueries(queryClient, spaceId);
+  invalidateLinkIndex(queryClient, spaceId);
 }
 
 export function invalidateWriteLockState(queryClient: QueryClient, spaceId: string) {
@@ -133,6 +135,7 @@ export async function applyExternalFileChanges(
   if (pathChanged) {
     removeMarkdownImageQueries(queryClient, spaceId);
   }
+  if (pathChanged || textIds.size > 0) invalidateLinkIndex(queryClient, spaceId);
 }
 
 export async function invalidateFileSyncFallback(queryClient: QueryClient, spaceId: string) {
@@ -146,6 +149,10 @@ export async function invalidateFileSyncFallback(queryClient: QueryClient, space
 
 export function invalidateText(queryClient: QueryClient, spaceId: string, nodeId: string) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.text(spaceId, nodeId), exact: true });
+}
+
+export function invalidateLinkIndex(queryClient: QueryClient, spaceId: string) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.spaceLinkIndex(spaceId) });
 }
 
 export function removeMarkdownImageQueries(queryClient: QueryClient, spaceId: string) {
@@ -181,6 +188,7 @@ export function removeDeletedNodeQueries(
     queryKeys.text(node.space_id, node.id),
     queryKeys.file(node.space_id, node.id),
     queryKeys.metadata(node.space_id, node.id),
+    queryKeys.nodeLinkReferencesFamily(node.space_id, node.id),
     queryKeys.markdownImagePreview(node.space_id, node.path),
     previewQueryKey
   ]);

@@ -328,6 +328,7 @@ async fn oauth_metadata_not_found() -> StatusCode {
 fn rest_api_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(crate::rest::me::routes())
+        .merge(crate::rest::link_index::routes())
         .merge(crate::rest::spaces::routes())
         .merge(crate::rest::nodes::routes())
         .merge(crate::rest::text::routes())

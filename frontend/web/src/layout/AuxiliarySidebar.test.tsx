@@ -3,16 +3,32 @@ import userEvent from "@testing-library/user-event";
 import { useEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { LinkReference, LinkReferenceDirection } from "../api/types";
 import { makeRestNode } from "../test/fixtures";
 import { MarkdownOutlineProvider, useMarkdownOutlineContext, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
 import { AuxiliarySidebar } from "./AuxiliarySidebar";
 
 const mocks = vi.hoisted(() => ({
-  useFolderChildrenStat: vi.fn()
+  useFolderChildrenStat: vi.fn(),
+  useSpaceLinkIndexQuery: vi.fn(),
+  useNodeLinkReferencesQuery: vi.fn(),
+  fetchMoreOutgoing: vi.fn(),
+  fetchMoreIncoming: vi.fn(),
+  syncNodeLinkIndex: vi.fn()
 }));
 
 vi.mock("../features/editor/useEditorQueries", () => ({
   useFolderChildrenStat: mocks.useFolderChildrenStat
+}));
+
+vi.mock("../features/links/useLinkIndexQueries", () => ({
+  useSpaceLinkIndexQuery: mocks.useSpaceLinkIndexQuery,
+  useNodeLinkReferencesQuery: mocks.useNodeLinkReferencesQuery,
+  useSyncNodeLinkIndexMutation: () => ({
+    mutate: mocks.syncNodeLinkIndex,
+    isPending: false,
+    isError: false
+  })
 }));
 
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
@@ -42,19 +58,59 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
     onSearchEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
+    onOpenLink: vi.fn(),
     ...overrides
+  };
+}
+
+function linkReferencesQuery(
+  links: LinkReference[],
+  options: { hasNextPage?: boolean; fetchNextPage?: () => void } = {}
+) {
+  return {
+    data: {
+      pages: [{
+        links,
+        page: {
+          limit: 50,
+          returned: links.length,
+          has_more: options.hasNextPage ?? false,
+          next_cursor: options.hasNextPage ? "next" : null
+        }
+      }]
+    },
+    isLoading: false,
+    isError: false,
+    hasNextPage: options.hasNextPage ?? false,
+    isFetchingNextPage: false,
+    fetchNextPage: options.fetchNextPage ?? vi.fn()
   };
 }
 
 describe("AuxiliarySidebar", () => {
   beforeEach(() => {
+    mocks.useFolderChildrenStat.mockReset();
     mocks.useFolderChildrenStat.mockReturnValue({
       data: undefined,
       isError: false
     });
+    mocks.useSpaceLinkIndexQuery.mockReset();
+    mocks.useSpaceLinkIndexQuery.mockReturnValue({
+      data: {
+        status: "up_to_date",
+        latest_index_update_at: "2026-08-05T00:00:00Z"
+      },
+      isLoading: false,
+      isError: false
+    });
+    mocks.useNodeLinkReferencesQuery.mockReset();
+    mocks.useNodeLinkReferencesQuery.mockReturnValue(linkReferencesQuery([]));
+    mocks.fetchMoreOutgoing.mockReset();
+    mocks.fetchMoreIncoming.mockReset();
+    mocks.syncNodeLinkIndex.mockReset();
   });
 
-  it("uses the Details and Outline tabs as the single workbench header", () => {
+  it("uses Details, Outline, and Links as the single workbench header", () => {
     renderSidebar({
       activeNode: null,
       canWriteActiveSpace: false,
@@ -69,6 +125,49 @@ describe("AuxiliarySidebar", () => {
     expect(tablist.parentElement).toHaveClass("h-12", "border-b", "border-seam");
     expect(tablist).toHaveClass("h-full", "items-end");
     expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(within(tablist).getByRole("tab", { name: "Links" })).toBeDisabled();
+  });
+
+  it("shows outgoing, incoming, and missing targets without exposing index versions", async () => {
+    const user = userEvent.setup();
+    const onOpenLink = vi.fn();
+    mocks.useSpaceLinkIndexQuery.mockReturnValue({
+      data: {
+        status: "pending",
+        latest_index_update_at: null
+      },
+      isLoading: false,
+      isError: false
+    });
+    mocks.useNodeLinkReferencesQuery.mockImplementation((_node: unknown, direction: LinkReferenceDirection) => (
+      direction === "outgoing"
+        ? linkReferencesQuery([
+          { node_id: "target", path: "/docs/target.md", kind: "link", occurrence_count: 2 },
+          { node_id: null, path: "/missing.md", kind: "link", occurrence_count: 1 }
+        ], { hasNextPage: true, fetchNextPage: mocks.fetchMoreOutgoing })
+        : linkReferencesQuery([
+          { node_id: "source", path: "/docs/source.md", kind: "link", occurrence_count: 1 }
+        ], { fetchNextPage: mocks.fetchMoreIncoming })
+    ));
+    renderSidebar({ onOpenLink });
+
+    expect(mocks.useSpaceLinkIndexQuery).not.toHaveBeenCalled();
+    expect(mocks.useNodeLinkReferencesQuery).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: "Links" }));
+    await waitFor(() => (
+      expect(mocks.useSpaceLinkIndexQuery).toHaveBeenLastCalledWith(textNode.space_id)
+    ));
+    expect(mocks.useNodeLinkReferencesQuery).toHaveBeenCalledWith(textNode, "outgoing", "pending:never");
+    expect(mocks.useNodeLinkReferencesQuery).toHaveBeenCalledWith(textNode, "incoming", "pending:never");
+    expect(await screen.findByText("Waiting")).toBeInTheDocument();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+    expect(screen.queryByText(/version/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /\/docs\/target\.md/ }));
+    expect(onOpenLink).toHaveBeenCalledWith("target");
+    await user.click(screen.getByRole("button", { name: "Sync now" }));
+    expect(mocks.syncNodeLinkIndex).toHaveBeenCalledWith({ spaceId: textNode.space_id, nodeId: textNode.id });
+    await user.click(screen.getByRole("button", { name: "Load more outgoing links" }));
+    expect(mocks.fetchMoreOutgoing).toHaveBeenCalledOnce();
   });
 
   it("changes search, write lock, and stored-text encryption independently", async () => {

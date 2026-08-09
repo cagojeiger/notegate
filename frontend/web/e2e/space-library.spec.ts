@@ -274,6 +274,15 @@ async function mockSpaceLibraryApi(page: Page) {
       });
       return route.fulfill({ status: 204 });
     }
+    if (/^\/api\/v1\/spaces\/[^/]+\/link-index$/.test(url.pathname) && request.method() === "GET") {
+      return respond(route, {
+        status: "up_to_date",
+        outdated_documents: 0,
+        retrying_documents: 0,
+        failed_documents: 0,
+        latest_index_update_at: "2026-07-25T00:00:00Z"
+      });
+    }
     const spaceMatch = url.pathname.match(/^\/api\/v1\/spaces\/([^/]+)$/);
     if (spaceMatch && request.method() === "PATCH") {
       patchCount += 1;

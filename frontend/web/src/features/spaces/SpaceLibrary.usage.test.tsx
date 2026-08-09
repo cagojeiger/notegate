@@ -14,6 +14,25 @@ vi.mock("./useSpaceQueries", () => ({
   useUpdateSpaceMutation: () => ({ isError: false, isPending: false, mutate: vi.fn() })
 }));
 
+vi.mock("../links/useLinkIndexQueries", () => ({
+  useSpaceLinkIndexQuery: () => ({
+    data: {
+      status: "up_to_date",
+      outdated_documents: 0,
+      retrying_documents: 0,
+      failed_documents: 0,
+      latest_index_update_at: "2026-08-05T00:00:00Z"
+    },
+    isLoading: false,
+    isError: false
+  }),
+  useReindexSpaceLinksMutation: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false
+  })
+}));
+
 const space: Space = makeSpace({
   id: "space-1",
   name: "Personal",

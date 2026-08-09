@@ -9,6 +9,7 @@ pub mod event_history;
 pub mod file_change_event;
 pub mod files;
 pub mod identity;
+pub mod link_index;
 pub mod mcp_invocation;
 pub mod node;
 pub mod search;
@@ -30,6 +31,10 @@ pub use file_change_event::{
     FileChangeSyncPage, ListFileChangeEvents, ListFileChangeEventsById, SyncFileChanges,
 };
 pub use identity::{Caller, CallerIdentity, Channel, ResolveAttrs};
+pub use link_index::{
+    IncomingLinkCursor, LinkReferenceKind, LinkReferencePage, LinkReferenceView, LinkSyncStatus,
+    ListLinkReferences, OutgoingLinkCursor, SpaceLinkIndexView,
+};
 pub use mcp_invocation::{
     ListMcpInvocations, McpInvocation, McpInvocationCursor, McpInvocationPage,
 };

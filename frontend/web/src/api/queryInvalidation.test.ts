@@ -6,6 +6,7 @@ import {
   applyExternalFileChanges,
   invalidateAgentsList,
   invalidateFolderSubtree,
+  invalidateLinkIndex,
   invalidateNodeLists,
   invalidateRecentNodes,
   invalidateSpaceResources,
@@ -193,6 +194,24 @@ describe("query invalidation", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces", "space-1"] });
   });
 
+  it("invalidates the shared space summary and cached link pages together", () => {
+    const queryClient = createTestQueryClient();
+    const spaceKey = queryKeys.spaceLinkIndex("space-1");
+    const outgoingKey = queryKeys.nodeLinkReferences(
+      "space-1",
+      "node-1",
+      "outgoing",
+      "up_to_date:2026-08-08T00:00:00Z"
+    );
+    queryClient.setQueryData(spaceKey, { status: "up_to_date" });
+    queryClient.setQueryData(outgoingKey, { pages: [] });
+
+    invalidateLinkIndex(queryClient, "space-1");
+
+    expect(queryClient.getQueryState(spaceKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(outgoingKey)?.isInvalidated).toBe(true);
+  });
+
   it("invalidates descendant-bearing cache families after a folder path change", () => {
     const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
@@ -214,8 +233,11 @@ describe("query invalidation", () => {
     expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.nodes("space-1")
     });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.spaceLinkIndex("space-1")
+    });
     expect(resetQueries).toHaveBeenCalledTimes(2);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
     expect(queryClient.getQueryData(pathKey)).toBeUndefined();
     expect(queryClient.getQueryState(canonicalNodeKey)?.isInvalidated).toBe(
       true
@@ -242,6 +264,9 @@ describe("query invalidation", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.node("space-1", "text-2"),
       exact: true
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.spaceLinkIndex("space-1")
     });
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),

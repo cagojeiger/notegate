@@ -35,7 +35,7 @@ backend/crates/jobs/                 package: notegate-jobs
 
 backend/crates/api/src/background_jobs/
   mod.rs                             API process의 runtime과 handler 등록
-  handlers.rs                        Usage 업무 adapter
+  handlers.rs                        Usage와 Link 업무 adapter
 
 backend/crates/db/                   schema, repository, transaction
 backend/crates/service/              authorization과 업무 흐름
@@ -167,7 +167,7 @@ background_job_attempts
 - Handler가 명시한 `retry_after`는 더 일찍 실행되지 않도록 +0~20% jitter를 적용한다.
 - 한 작업은 기본 8회, 최대 100회의 실행 attempt를 허용한다. 성공하지 못한 claim은 defer, retryable failure, timeout, panic, 취소, lease 만료 여부와 관계없이 같은 실행 한도를 소비한다. 마지막 attempt에서 완료하지 못한 작업과 permanent failure는 `dead`가 되며 자동으로 다시 활성화되지 않는다.
 - `failure_count`는 오류로 끝난 실행을 관측하기 위한 값이다. 실행 상한은 `attempt_count`와 `max_attempts`가 결정하므로 정상적인 자원 경합을 나타내는 defer도 무한히 반복되지 않는다.
-- Queue의 `dead`는 실행 이력이며 도메인 상태와 동일하지 않다. 도메인은 필요하면 별도의 상태를 관리한다.
+- Queue의 `dead`는 실행 이력이며 도메인 상태와 동일하지 않다. Link index는 현재 projection이 오래됐고 활성 복구 작업도 없을 때만 `failed`로 표시한다. 실행 시각을 기다리는 활성 재시도 작업만 `retrying`으로 표시한다.
 - Worker는 다음 delayed 작업 시각 또는 safety poll 중 이른 시점에 깨어난다. Safety poll 기본값은 10분이고 매 주기에 ±10% jitter를 적용한다.
 - Worker에 빈 실행 슬롯이 남은 비포화 claim 주기는 최소 25ms 뒤에 다시 확인해, ready row가 일시적으로 잠겼을 때 발생할 수 있는 zero-delay polling loop를 막는다.
 - LISTEN 재연결은 10초 기준 ±20% jitter를 적용한다.
@@ -182,11 +182,22 @@ background_job_attempts
 
 ```text
 space_usage_reconcile  # Space 사용량 전체 재계산
+node_link_impact       # 구조 변경의 영향 source만 선별
+node_link_space        # 복구용 Space 전체 작업 전개
+node_link_source       # 한 Text의 outgoing 관계 전체 교체
 ```
 
 ## 도메인 책임
 
 Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다. 같은 작업이 반복되어도 결과가 같다. 기존 Space별 reconciliation gate를 사용하므로 같은 Space의 mutation과 정확한 재계산이 겹치지 않는다.
+
+Link source handler는 payload에서 결과를 전달받지 않고 현재 Text와 경로를 다시 읽는다. 파싱 결과를 저장하기 직전에 content hash와 source path를 다시 확인하고, 둘 중 하나라도 바뀌었으면 stale 결과를 버린다. 타깃 경로는 최종 Space 잠금 transaction 안에서 현재 트리를 기준으로 해석하고, 해당 source의 outgoing 관계를 같은 transaction에서 전체 교체한다. 링크 도메인은 같은 source 또는 Space의 fresh queued 요청을 하나로 병합하지만, 실행 중 다시 들어온 요청은 후속 작업으로 남긴다.
+
+Link impact handler는 변경 subtree의 text, 기존 target node id로 찾은 backlink source, 새 path와 일치하는 broken-link source만 source 작업으로 집합 등록한다. 구조 변경은 이 경로를 사용한다.
+
+Link Space handler는 live Text와 관계 상태가 남은 삭제 source마다 source 작업을 집합 등록한다. migration 및 새 Space 초기화, parser version 변경, 수동 재인덱싱, 복구를 위한 전체 경로다. Impact와 Space handler는 관계 table을 직접 변경하지 않는다.
+
+같은 scope의 fresh link 요청은 partial unique index로 병합한다. 등록과 fan-out은 Space row를 잠그지 않으므로 foreground file-tree mutation을 직렬화하지 않는다. Source의 최종 관계 교체만 짧은 transaction에서 Space snapshot과 claim fence를 함께 확인한다.
 
 ## 실행과 확장
 
@@ -236,6 +247,6 @@ History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `h
 
 - `notegate-jobs` unit test는 handler 등록, 잘못 저장된 payload, configuration, retry delay, panic, timeout, shutdown 결과를 검증한다.
 - PostgreSQL integration test는 transaction enqueue, 동시 claim, attempt 기록, heartbeat, 다중 reconciler lease recovery, fencing, terminal 전이와 retention을 검증한다.
-- Usage test는 반복 실행해도 같은 정확한 counter가 생성되는 업무 멱등성을 검증한다.
+- Usage와 Link test는 반복 실행, stale 결과 폐기, 전체 교체와 재구성 같은 업무 멱등성을 각 도메인 경계에서 검증한다.
 - Browser E2E는 queue consumer가 포함된 API process와 dashboard를 실행해 사용자 흐름을 검증한다.
 - Queue test는 handler 업무 정확성을 대신하지 않고, handler test도 queue의 전달 보장을 다시 구현하지 않는다.

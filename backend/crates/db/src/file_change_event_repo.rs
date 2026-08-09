@@ -36,7 +36,7 @@ pub(crate) async fn insert_file_change_event(
     .bind(event.node_id)
     .bind(event.actor_account_id)
     .bind(event.op_type)
-    .bind(event.metadata)
+    .bind(&event.metadata)
     .execute(&mut *tx)
     .await
     .map_err(map_sqlx_error)?;

@@ -23,6 +23,7 @@ mod file_change_events;
 pub mod files;
 pub mod files_repo;
 pub mod key_epoch_repo;
+pub mod link_index_repo;
 pub mod mcp_invocation_repo;
 pub mod metadata_write_repo;
 pub mod object_storage_repo;
@@ -47,6 +48,12 @@ pub use connection_repo::ConnectionRepo;
 pub use file_change_event_repo::FileChangeSyncRows;
 pub use files_repo::{FilesRepo, MetadataMutationKind, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
+pub use link_index_repo::{
+    IncomingLinkReference, LINK_IMPACT_JOB_KIND, LINK_PARSER_VERSION, LINK_SOURCE_JOB_KIND,
+    LINK_SPACE_JOB_KIND, LinkExpansion, LinkImpactJob, LinkImpactPayload, LinkIndexRepo,
+    LinkSourceCommit, LinkSourceDiscard, LinkSourceJob, LinkSourcePayload, LinkSpaceJob,
+    LinkSpacePayload, NewLinkReference, SpaceLinkStatus, StoredLinkReference,
+};
 pub use mcp_invocation_repo::{McpInvocationRepo, NewMcpInvocation};
 pub use metadata_write_repo::{MediaTypeObservation, MetadataWriteRepo};
 pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};

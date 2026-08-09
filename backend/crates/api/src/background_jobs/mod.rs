@@ -1,7 +1,9 @@
 mod handlers;
 
-use handlers::UsageHandler;
-use notegate_db::{SpaceUsageReconcileJob, SpaceUsageRepo};
+use handlers::{LinkImpactHandler, LinkSourceHandler, LinkSpaceHandler, UsageHandler};
+use notegate_db::{
+    LinkImpactJob, LinkSourceJob, LinkSpaceJob, SpaceUsageReconcileJob, SpaceUsageRepo,
+};
 use notegate_jobs::{
     JobQueue, JobQueueResult, JobRegistry, QueueReconciler, QueueReconcilerConfig, Worker,
     WorkerConfig,
@@ -22,9 +24,13 @@ pub(crate) fn spawn(
     shutdown: CancellationToken,
 ) -> JobQueueResult<BackgroundJobs> {
     let queue = JobQueue::new(state.db.clone());
-    let handlers = JobRegistry::new().register::<SpaceUsageReconcileJob>(UsageHandler::new(
-        SpaceUsageRepo::new(state.db.clone()),
-    ))?;
+    let handlers = JobRegistry::new()
+        .register::<SpaceUsageReconcileJob>(UsageHandler::new(SpaceUsageRepo::new(
+            state.db.clone(),
+        )))?
+        .register::<LinkImpactJob>(LinkImpactHandler::new(state.link_index.clone()))?
+        .register::<LinkSpaceJob>(LinkSpaceHandler::new(state.link_index.clone()))?
+        .register::<LinkSourceJob>(LinkSourceHandler::new(state.link_index.clone()))?;
     let job_kinds = handlers.job_kinds();
     let worker = Worker::new(
         queue.clone(),
