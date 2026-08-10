@@ -476,7 +476,7 @@ async fn recover_expired_in(
     limit: i64,
 ) -> JobQueueResult<RecoverySummary> {
     let expired = sqlx::query_as::<_, ExpiredClaim>(
-        "SELECT job_id, job_kind, claim_token, attempt_count, failure_count, max_attempts \
+        "SELECT job_id, job_kind, claim_token, attempt_count, max_attempts \
              FROM background_jobs \
              WHERE status = 'running' AND lease_until <= now() \
              ORDER BY lease_until, job_id \
@@ -667,7 +667,6 @@ struct ExpiredClaim {
     job_kind: String,
     claim_token: Uuid,
     attempt_count: i32,
-    failure_count: i32,
     max_attempts: i32,
 }
 
