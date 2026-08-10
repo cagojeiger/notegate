@@ -70,6 +70,7 @@ tool catalog.
 - [Product model](docs/adr/0001-ai-native-personal-file-space.md)
 - [Agent and permission model](docs/adr/0002-user-managed-agents-and-space-connections.md)
 - [MCP tools](docs/spec/mcp/README.md)
+- [Background jobs](docs/spec/background-jobs.md)
 - [UI design source of truth](DESIGN.md)
 - [Security model](docs/spec/security.md)
 

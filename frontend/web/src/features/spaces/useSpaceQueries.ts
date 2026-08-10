@@ -56,6 +56,7 @@ export function createSpaceMutationOptions(
         return { ...current, spaces, page: { ...current.page, returned: spaces.length } };
       });
       invalidateSpacesList(queryClient);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       invalidateAuditEvents(queryClient);
       onCreated(space);
     }

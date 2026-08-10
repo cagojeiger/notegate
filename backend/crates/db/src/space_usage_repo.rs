@@ -3,15 +3,29 @@
 mod reconciliation;
 
 use notegate_core::{Error, Result};
+use notegate_jobs::JobSpec;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::{map_sqlx_error, space_usage};
+use crate::map_sqlx_error;
 
-pub use reconciliation::UsageReconcileExecution;
+pub use reconciliation::UsageReconcileResult;
 
-const RECONCILE_ADVISORY_LOCK_SEED: i64 = 0x4e47_5553_4147_4501;
 const LOCK_TIMEOUT: &str = "5s";
+pub const SPACE_USAGE_JOB_KIND: &str = "space_usage_reconcile";
+
+pub struct SpaceUsageReconcileJob;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpaceUsagePayload {
+    pub space_id: Uuid,
+}
+
+impl JobSpec for SpaceUsageReconcileJob {
+    const KIND: &'static str = SPACE_USAGE_JOB_KIND;
+    type Payload = SpaceUsagePayload;
+}
 
 #[derive(Debug, Clone)]
 pub struct SpaceUsageRepo {
@@ -36,13 +50,7 @@ impl SpaceUsageRepo {
                         SELECT 1 FROM pg_class c \
                         JOIN pg_namespace n ON n.oid = c.relnamespace \
                         WHERE n.nspname = current_schema() \
-                          AND c.relname = 'space_usage_reconcile_jobs' AND c.relkind = 'r' \
-                    ) \
-                    AND EXISTS ( \
-                        SELECT 1 FROM pg_class c \
-                        JOIN pg_namespace n ON n.oid = c.relnamespace \
-                        WHERE n.nspname = current_schema() \
-                          AND c.relname = 'space_usage_reconcile_executions' AND c.relkind = 'r' \
+                          AND c.relname = 'background_jobs' AND c.relkind = 'r' \
                     ) \
                     AND EXISTS ( \
                         SELECT 1 FROM pg_trigger t \
@@ -98,29 +106,24 @@ impl SpaceUsageRepo {
         exact_usage(&mut connection, space_id).await
     }
 
-    /// Queue reconciliation for every live Space (operator full recalculation).
-    /// Existing jobs become runnable immediately so a deferred or failed Space
-    /// is retried now. Each Space is then reconciled one at a time, so no
-    /// global write pause is needed.
-    pub async fn enqueue_all_live_spaces(&self) -> Result<u64> {
-        let result = sqlx::query(
-            "INSERT INTO space_usage_reconcile_jobs (space_id) \
-             SELECT id FROM spaces WHERE deleted_at IS NULL \
-             ON CONFLICT (space_id) DO UPDATE SET run_after = now()",
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(result.rows_affected())
-    }
-
-    /// Return whether any reconciliation job is still queued, including jobs
-    /// deferred to a future `run_after` time.
-    pub async fn has_pending_reconciliations(&self) -> Result<bool> {
-        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM space_usage_reconcile_jobs)")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_sqlx_error)
+    /// Explicit operator repair. Background requests use the generic queue;
+    /// this synchronous path returns only after every live Space was visited.
+    pub async fn reconcile_all_live_spaces(&self) -> Result<u64> {
+        let space_ids: Vec<Uuid> =
+            sqlx::query_scalar("SELECT id FROM spaces WHERE deleted_at IS NULL ORDER BY id")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
+        for space_id in &space_ids {
+            match self.reconcile_space(*space_id).await? {
+                UsageReconcileResult::Reconciled { .. } | UsageReconcileResult::Deleted => {}
+                UsageReconcileResult::Busy => {
+                    return Err(Error::usage_recalculation_in_progress(2));
+                }
+            }
+        }
+        u64::try_from(space_ids.len())
+            .map_err(|_error| Error::internal("live Space count is too large"))
     }
 }
 
@@ -135,10 +138,6 @@ async fn configure_transaction(tx: &mut sqlx::PgConnection, statement_timeout: &
     .await
     .map_err(map_sqlx_error)?;
     Ok(())
-}
-
-async fn try_acquire_worker_lock(tx: &mut sqlx::PgConnection) -> Result<bool> {
-    space_usage::try_schema_advisory_lock(tx, RECONCILE_ADVISORY_LOCK_SEED, false).await
 }
 
 /// SELECT columns computing live usage for the Space referenced by `space_ref`.

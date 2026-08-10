@@ -1,5 +1,6 @@
 //! Prometheus recorder, scrape endpoint, HTTP RED, and resource utilization metrics.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -9,6 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use metrics::{Gauge, Unit};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use notegate_jobs::JobQueue;
 use notegate_service::search::SearchBodyCacheStats;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -25,6 +27,8 @@ const SEARCH_DURATION_BUCKETS_SECONDS: &[f64] = &[
     0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
 ];
 const UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
+const BACKGROUND_JOB_METRICS_INTERVAL: Duration = Duration::from_secs(15);
+const BACKGROUND_JOB_STATES: &[&str] = &["ready", "delayed", "running", "lease_expired", "dead"];
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
 #[derive(Clone)]
@@ -198,6 +202,32 @@ fn describe_metrics() {
         "notegate_metadata_write_items",
         "Metadata write-behind items by bounded kind and disposition"
     );
+    metrics::describe_gauge!(
+        "notegate_background_jobs",
+        "Durable background jobs by bounded kind and state"
+    );
+    metrics::describe_gauge!(
+        "notegate_background_job_oldest_ready_age",
+        Unit::Seconds,
+        "Age of the oldest ready background job"
+    );
+    metrics::describe_gauge!(
+        "notegate_background_jobs_in_flight",
+        "Background job handlers currently running in this process"
+    );
+    metrics::describe_counter!(
+        "notegate_background_job_attempts",
+        "Completed background job attempts by kind and outcome"
+    );
+    metrics::describe_counter!(
+        "notegate_background_job_transitions",
+        "Background job maintenance transitions"
+    );
+    metrics::describe_histogram!(
+        "notegate_background_job_duration",
+        Unit::Seconds,
+        "Background job handler duration"
+    );
 }
 
 pub(crate) fn record_metadata_flush(enabled: bool, outcome: &'static str, duration: Duration) {
@@ -362,6 +392,67 @@ pub(crate) fn spawn_upkeep(
             .await;
         })
     })
+}
+
+pub(crate) fn spawn_background_job_metrics(
+    enabled: bool,
+    queue: JobQueue,
+    job_kinds: Vec<String>,
+    shutdown: CancellationToken,
+) -> Option<JoinHandle<()>> {
+    if !enabled {
+        return None;
+    }
+    let job_kinds = Arc::new(job_kinds);
+    Some(tokio::spawn(async move {
+        crate::periodic_worker::run(BACKGROUND_JOB_METRICS_INTERVAL, shutdown, move || {
+            let queue = queue.clone();
+            let job_kinds = job_kinds.clone();
+            async move {
+                if let Err(error) = refresh_background_job_metrics(&queue, &job_kinds).await {
+                    tracing::error!(event = "background_jobs.metrics_refresh_failed", %error);
+                }
+            }
+        })
+        .await;
+    }))
+}
+
+async fn refresh_background_job_metrics(
+    queue: &JobQueue,
+    job_kinds: &[String],
+) -> notegate_jobs::JobQueueResult<()> {
+    let snapshot = queue.snapshot(job_kinds).await?;
+    for kind in job_kinds {
+        for state in BACKGROUND_JOB_STATES {
+            metrics::gauge!(
+                "notegate_background_jobs",
+                "kind" => kind.clone(),
+                "state" => *state,
+            )
+            .set(0.0);
+        }
+    }
+    for count in snapshot.states {
+        metrics::gauge!(
+            "notegate_background_jobs",
+            "kind" => count.kind,
+            "state" => count.state,
+        )
+        .set(count.count as f64);
+    }
+    let age = snapshot
+        .oldest_ready_at
+        .map(|available_at| {
+            chrono::Utc::now()
+                .signed_duration_since(available_at)
+                .num_milliseconds()
+                .max(0) as f64
+                / 1_000.0
+        })
+        .unwrap_or(0.0);
+    metrics::gauge!("notegate_background_job_oldest_ready_age").set(age);
+    Ok(())
 }
 
 pub(crate) fn routes(metrics: MetricsHandle) -> Router<AppState> {

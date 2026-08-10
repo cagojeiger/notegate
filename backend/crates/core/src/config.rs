@@ -27,6 +27,7 @@ const DEFAULT_BROWSER_SESSION_TTL_SECS: u64 = 3600;
 const DEFAULT_BROWSER_SESSION_MAX_TTL_SECS: u64 = 30 * 86_400;
 const DEFAULT_OPENAPI_ENABLED: bool = false;
 const DEFAULT_METRICS_ENABLED: bool = false;
+const DEFAULT_BACKGROUND_JOB_CONCURRENCY: usize = 4;
 const DEFAULT_SEARCH_BODY_CACHE_MAX_CAPACITY_BYTES: u64 = 128 * 1024 * 1024;
 const DEFAULT_SEARCH_BODY_CACHE_TTL_SECS: u64 = 30 * 60;
 const DEFAULT_SEARCH_BODY_CACHE_TTI_SECS: u64 = 5 * 60;
@@ -74,6 +75,21 @@ impl Default for SearchBodyCacheConfig {
             max_capacity_bytes: default_search_body_cache_max_capacity_bytes(),
             ttl: default_search_body_cache_ttl(),
             tti: default_search_body_cache_tti(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BackgroundJobsConfig {
+    #[serde(default = "default_background_job_concurrency")]
+    pub concurrency: usize,
+}
+
+impl Default for BackgroundJobsConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: default_background_job_concurrency(),
         }
     }
 }
@@ -133,6 +149,9 @@ pub struct Config {
     pub database_url: String,
     /// Max connections in the sqlx pool.
     pub db_max_connections: u32,
+    /// In-process durable background job consumer.
+    #[serde(default)]
+    pub background_jobs: BackgroundJobsConfig,
     /// Base URL for authgate, with trailing slash trimmed.
     pub authgate_url: String,
     /// Public URL for notegate as seen by browsers/MCP clients, with trailing slash trimmed.
@@ -216,6 +235,7 @@ impl Validate for Config {
         if !(1..=256).contains(&self.db_max_connections) {
             errors.add("db_max_connections", ValidationError::new("range"));
         }
+        validate_background_jobs(self, &mut errors);
         if validate_http_url_value(&self.authgate_url).is_err() {
             errors.add("authgate_url", ValidationError::new("http_url"));
         }
@@ -462,6 +482,10 @@ fn default_search_body_cache_tti() -> Duration {
     Duration::from_secs(DEFAULT_SEARCH_BODY_CACHE_TTI_SECS)
 }
 
+fn default_background_job_concurrency() -> usize {
+    DEFAULT_BACKGROUND_JOB_CONCURRENCY
+}
+
 fn user_tier_from_str<'de, D>(deserializer: D) -> std::result::Result<UserTier, D::Error>
 where
     D: Deserializer<'de>,
@@ -599,6 +623,22 @@ fn validate_search_body_cache(cache: &SearchBodyCacheConfig, errors: &mut Valida
     }
 }
 
+fn validate_background_jobs(config: &Config, errors: &mut ValidationErrors) {
+    if !(1..=64).contains(&config.background_jobs.concurrency) {
+        errors.add("background_jobs.concurrency", ValidationError::new("range"));
+        return;
+    }
+    let required_connections = u32::try_from(config.background_jobs.concurrency)
+        .unwrap_or(u32::MAX)
+        .saturating_add(2);
+    if config.db_max_connections < required_connections {
+        errors.add(
+            "db_max_connections",
+            ValidationError::new("background_job_headroom"),
+        );
+    }
+}
+
 fn validate_secret_min_32(value: &SecretString) -> std::result::Result<(), ValidationError> {
     if value.expose_secret().len() >= 32 {
         Ok(())
@@ -673,7 +713,8 @@ mod tests {
     use crate::tier::UserTier;
 
     use super::{
-        Config, HttpRateLimitConfig, HttpRateLimitsConfig, SearchBodyCacheConfig, load_from_sources,
+        BackgroundJobsConfig, Config, HttpRateLimitConfig, HttpRateLimitsConfig,
+        SearchBodyCacheConfig, load_from_sources,
     };
 
     fn valid_config() -> Config {
@@ -681,6 +722,7 @@ mod tests {
             bind_addr: SocketAddr::from(([127, 0, 0, 1], 9191)),
             database_url: "postgres://example".to_owned(),
             db_max_connections: 10,
+            background_jobs: BackgroundJobsConfig::default(),
             authgate_url: "https://auth.test".to_owned(),
             notegate_public_url: "http://localhost:9191".to_owned(),
             oauth_client_id: "notegate-web".to_owned(),
@@ -798,6 +840,7 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_BACKGROUND_JOBS__CONCURRENCY", "5"),
                 ("NOTEGATE_METRICS_ENABLED", "true"),
                 ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
                 ("NOTEGATE_S3__ENDPOINT", "https://s3.internal.env/"),
@@ -815,6 +858,7 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert_eq!(config.background_jobs.concurrency, 5);
         assert!(config.metrics_enabled);
         assert_eq!(config.oauth_client_id, "notegate-web");
         assert_eq!(config.mcp_oauth_client_id, "notegate-mcp");
@@ -991,6 +1035,15 @@ mod tests {
     fn validate_rejects_out_of_range_values() {
         let mut config = valid_config();
         config.db_max_connections = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.background_jobs.concurrency = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.db_max_connections = 5;
+        config.background_jobs.concurrency = 4;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();

@@ -6,6 +6,7 @@
 notegate/
 ├─ backend/crates/
 │  ├─ api/                     # Axum server, REST/MCP/auth/static web serving
+│  ├─ jobs/                    # PostgreSQL job queue and worker runtime
 │  ├─ service/                 # Business logic and command semantics
 │  ├─ db/                      # sqlx pool, repositories, and migrations
 │  ├─ model/                   # Shared domain types
@@ -33,7 +34,7 @@ cp .env.example .env
 make dev-infra
 ```
 
-Run the API and dashboard in separate terminals:
+API process는 HTTP server와 background job runtime을 함께 실행한다. API와 dashboard를 별도 terminal에서 실행한다.
 
 ```sh
 cargo run --bin notegate-api
@@ -67,6 +68,7 @@ make up
 The stack exposes NoteGate through the proxy at `http://localhost:9191`. It also
 starts PostgreSQL, MinIO, Prometheus, Grafana, and an initialization job that creates
 the local bucket and its least-privilege application account.
+Compose는 `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`를 각 API replica에 전달한다.
 
 Local observability endpoints:
 
@@ -93,8 +95,8 @@ the default 15-second refresh matches the Prometheus scrape interval.
 The application-level metrics default remains disabled. Docker Compose intentionally
 sets `NOTEGATE_METRICS_ENABLED` from `COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults
 to `true` for this local stack. Prometheus discovers both scaled `web` replicas through
-Docker DNS and scrapes each process-local `/metrics` endpoint. Change the local ports
-or Grafana credentials in `.env`.
+Docker DNS and scrapes HTTP and background-job metrics from each process-local
+`/metrics` endpoint. Change the local ports or Grafana credentials in `.env`.
 
 Verify the three endpoints after `make up`:
 

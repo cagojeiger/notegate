@@ -71,6 +71,7 @@ fn test_config() -> Arc<Config> {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
         database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
         db_max_connections: 1,
+        background_jobs: notegate_core::BackgroundJobsConfig::default(),
         authgate_url: "https://auth.example.test".to_owned(),
         notegate_public_url: "http://localhost:9191".to_owned(),
         oauth_client_id: "notegate-web".to_owned(),

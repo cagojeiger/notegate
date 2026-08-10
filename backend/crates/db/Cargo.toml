@@ -12,8 +12,10 @@ test-util = ["notegate-core/test-util"]
 
 [dependencies]
 notegate-core.workspace = true
+notegate-jobs.workspace = true
 notegate-model.workspace = true
 sqlx.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 uuid.workspace = true
@@ -22,6 +24,7 @@ chrono.workspace = true
 [dev-dependencies]
 notegate-db = { path = ".", features = ["test-util"] }
 tokio.workspace = true
+tokio-util.workspace = true
 secrecy.workspace = true
 
 [lints]

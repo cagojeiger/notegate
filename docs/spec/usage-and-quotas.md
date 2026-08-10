@@ -39,7 +39,7 @@ Usage는 역대 누적량이 아니라 현재 live 상태다. 생성은 사용�
 
 ## Space usage counter
 
-비용이 큰 Space usage는 `space_usage`에 저장한다. Reconciliation 요청과 실행 이력은 별도 테이블에 둔다.
+비용이 큰 Space usage는 `space_usage`에 저장한다. Reconciliation 요청과 실행 이력은 범용 background job queue에 둔다.
 
 ```text
 space_usage
@@ -49,22 +49,9 @@ space_usage
   live_file_bytes
   reconciled_at
 
-space_usage_reconcile_jobs
-  job_id
-  space_id
-  requested_at
-  run_after
-  retry_count
-
-space_usage_reconcile_executions
-  execution_id
-  job_id
-  space_id
-  started_at
-  finished_at
-  outcome
-  error_message
-  metadata
+background_jobs
+  job_kind = 'space_usage_reconcile'
+  payload = {"space_id": ...}
 ```
 
 Space 생성은 root node와 `space_usage(nodes=1, text_bytes=0, file_bytes=0)`를 같은 transaction에서 만든다. 이후 counter도 원본 변경과 같은 transaction에서 갱신한다. 원본 테이블은 reconciliation 기준이고 counter는 일반 쿼터 검사와 Usage 조회에 사용한다. Event log는 Usage 계산에 사용하지 않는다.
@@ -109,33 +96,31 @@ acquire shared Space reconciliation gate
 
 ## Reconciliation worker
 
-정기 자동 재계산은 하지 않는다. Worker는 수동 요청 또는 operator 전체 재계산으로 생성된 job만 처리한다. DB 전체에서 활성 worker는 하나이며, job 하나를 transaction 하나로 실행한다. Tick마다 ready job이 남지 않을 때까지 연속으로 실행한다.
+정기 자동 재계산은 하지 않는다. API background runtime은 수동 요청으로 등록된 `space_usage_reconcile` job만 처리한다. 여러 API replica가 서로 다른 job을 병렬 처리할 수 있지만, 기존 Space별 reconciliation gate가 같은 Space의 재계산과 mutation을 직렬화한다.
 
 ```text
-worker tick
-  -> select oldest job where run_after <= now()
+worker claim
+  -> select ready job with FOR UPDATE SKIP LOCKED
   -> try exclusive Space reconciliation gate
-  -> defer job for 5 minutes when the gate is busy
+  -> retry after 5 seconds when the gate is busy
   -> lock the Space and space_usage
   -> COUNT/SUM live Text/File source rows
   -> upsert counters (a missing counter row is recreated)
   -> set reconciled_at = now()
-  -> append succeeded execution
-  -> delete job
   -> commit
-  -> repeat until no ready job remains
+  -> mark queue attempt succeeded
 ```
 
-- Worker는 transaction-scoped advisory lock으로 하나만 활성화한다.
-- 같은 Space에는 활성 job을 하나만 허용한다.
-- Deleted Space의 job은 취소하고 `cancelled` execution을 기록한다.
+- Queue는 중복 job을 허용하지만 정확한 재계산은 멱등이다. 수동 요청 경로는 동일 Space의 활성 job을 검사해 사용자 중복 요청을 차단한다.
+- Deleted Space의 job은 성공으로 종료한다.
 - File-tree mutation은 shared gate, reconciler는 exclusive gate를 사용한다. Shared gate 획득에 실패한 mutation은 DB connection을 점유하며 기다리지 않고 임시 오류를 반환한다.
 - 재계산 중 해당 Space의 read는 허용하고 mutation만 일시적으로 거부한다. 다른 Space는 영향받지 않는다.
-- Space gate가 busy이면 `deferred` execution을 기록하고 `run_after`를 5분 뒤로 옮긴다. `retry_count`는 증가시키지 않는다.
-- 실행 실패는 savepoint까지 rollback한 뒤 `failed` execution과 error를 같은 worker transaction에 기록한다. `retry_count`를 증가시키고 5분 뒤 재시도한다.
-- 성공, 지연, 실패, 취소 execution은 append-only로 기록한다. Worker lock을 획득한 프로세스가 transaction timeout 안에서 3개월이 지난 행을 정리한다.
+- Space gate가 busy이거나 실행이 실패하면 queue attempt를 닫고 재시도한다. 최대 attempt를 소진하면 `dead`가 된다.
+- 성공과 실패 attempt는 `background_job_attempts`에 기록하고 terminal job과 함께 90일 동안 보관한다.
 - Space별 재계산 statement timeout은 30초, row lock timeout은 5초다.
-- 프로세스 종료 시 현재 reconciliation transaction만 commit 또는 rollback까지 완료하고, queue에 남은 job은 시작하지 않는다. 대기 job은 다음 worker가 이어서 처리한다. Worker 종료 후 DB pool을 닫고, 배포 환경의 강제 종료 유예시간은 HTTP와 현재 transaction drain을 포함하도록 90초 이상으로 설정한다.
+- 프로세스 종료 시 실행 중 handler를 취소하고 해당 attempt를 즉시 재시도 가능 상태로 돌린다. 비정상 종료로 상태 전이를 못 하면 lease recovery가 이어서 처리한다.
+
+Queue 공통 계약은 `background-jobs.md`를 따른다.
 
 ## Manual reconciliation
 
@@ -159,7 +144,7 @@ notegate-api --recalculate-usage
 
 저장소에서 실행할 때는 `cargo run -p notegate-api -- --recalculate-usage`를 사용한다.
 
-명령은 모든 live Space의 reconciliation job을 한 번에 등록한 뒤(`ON CONFLICT`로 기존 job은 즉시 실행 가능하게만 갱신) queue가 빌 때까지 job을 하나씩 실행한다. Space 하나를 재계산하는 동안 그 Space의 mutation만 잠시 거부되고, 나머지 Space와 read는 영향받지 않으므로 서비스 운영 중에도 실행할 수 있다. 다른 worker가 lock을 쥐고 있으면 1초 간격으로 최대 30번 재시도한다. Ready job이 없어도 deferred/failed job이 queue에 남아 있으면 성공으로 처리하지 않는다. Busy로 지연되거나 실패한 Space가 있으면 오류로 종료하고 background worker가 이어서 재시도한다. 누락된 counter row는 job 실행이 다시 생성한다.
+명령은 현재 live Space를 ID 순서로 조회하고 같은 정확한 재계산 함수를 동기적으로 실행한다. Space 하나를 재계산하는 동안 그 Space의 mutation만 잠시 거부되고, 나머지 Space와 read는 영향받지 않는다. 다른 worker가 해당 Space gate를 쥐고 있거나 한 Space라도 실패하면 명령은 오류로 종료한다. 누락된 counter row는 재계산이 다시 생성한다. 이 operator 경로는 background job을 만들거나 queue가 비기를 기다리지 않는다.
 
 ## Maintenance error
 

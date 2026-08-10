@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 notegate-core.workspace = true
 notegate-db.workspace = true
+notegate-jobs.workspace = true
 notegate-model.workspace = true
 notegate-service.workspace = true
 

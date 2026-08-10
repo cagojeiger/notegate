@@ -4,6 +4,7 @@ members = [
     "backend/crates/api",
     "backend/crates/core",
     "backend/crates/db",
+    "backend/crates/jobs",
     "backend/crates/model",
     "backend/crates/service",
 ]
@@ -19,6 +20,7 @@ repository = "https://github.com/cagojeiger/notegate"
 # Internal crates
 notegate-core = { path = "backend/crates/core" }
 notegate-db = { path = "backend/crates/db" }
+notegate-jobs = { path = "backend/crates/jobs" }
 notegate-model = { path = "backend/crates/model" }
 notegate-service = { path = "backend/crates/service" }
 

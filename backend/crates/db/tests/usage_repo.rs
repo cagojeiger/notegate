@@ -81,7 +81,10 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
 
     let queued: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
-             SELECT 1 FROM space_usage_reconcile_jobs WHERE space_id = $1 \
+             SELECT 1 FROM background_jobs \
+             WHERE job_kind = 'space_usage_reconcile' \
+               AND payload ->> 'space_id' = $1::text \
+               AND status IN ('queued', 'running') \
          )",
     )
     .bind(space_id)
