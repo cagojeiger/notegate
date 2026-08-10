@@ -80,7 +80,7 @@ impl JobQueue {
             "SELECT job_id, job_kind, payload, attempt_count, failure_count, max_attempts, created_at \
              FROM background_jobs \
              WHERE status = 'queued' AND available_at <= now() \
-               AND failure_count < max_attempts \
+               AND attempt_count < max_attempts \
                AND job_kind = ANY($2) \
              ORDER BY available_at, created_at, job_id \
              LIMIT $1 FOR UPDATE SKIP LOCKED",
@@ -188,33 +188,56 @@ impl JobQueue {
         claim: &ClaimedJob,
         reason: &str,
         retry_delay: Duration,
-    ) -> JobQueueResult<bool> {
+    ) -> JobQueueResult<DeferTransition> {
         let mut tx = self.pool.begin().await?;
         if !Self::owns_claim_in(&mut tx, &claim.fence()).await? {
             tx.commit().await?;
-            return Ok(false);
+            return Ok(DeferTransition::ClaimLost);
         }
         let reason = bounded_error_code(reason);
         finish_attempt(&mut tx, claim, "deferred", Some(&reason), None).await?;
-        sqlx::query(
-            "UPDATE background_jobs \
-             SET status = 'queued', available_at = now() + make_interval(secs => $3), \
-                 claim_token = NULL, claimed_by = NULL, lease_until = NULL, \
-                 completed_at = NULL, updated_at = now() \
-             WHERE job_id = $1 AND claim_token = $2",
-        )
-        .bind(claim.job_id)
-        .bind(claim.claim_token)
-        .bind(retry_delay.as_secs_f64())
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query("SELECT pg_notify($1, $2)")
-            .bind(BACKGROUND_JOB_NOTIFY_CHANNEL)
-            .bind(&claim.kind)
+        let exhausted = attempts_exhausted(claim.attempt, claim.max_attempts);
+        if exhausted {
+            sqlx::query(
+                "UPDATE background_jobs \
+                 SET status = 'dead', claim_token = NULL, claimed_by = NULL, \
+                     lease_until = NULL, last_error_code = $3, \
+                     last_error_message = 'job deferred on its final attempt', \
+                     completed_at = now(), updated_at = now() \
+                 WHERE job_id = $1 AND claim_token = $2",
+            )
+            .bind(claim.job_id)
+            .bind(claim.claim_token)
+            .bind(&reason)
             .execute(&mut *tx)
             .await?;
+        } else {
+            sqlx::query(
+                "UPDATE background_jobs \
+                 SET status = 'queued', available_at = now() + make_interval(secs => $3), \
+                     claim_token = NULL, claimed_by = NULL, lease_until = NULL, \
+                     last_error_code = $4, last_error_message = NULL, \
+                     completed_at = NULL, updated_at = now() \
+                 WHERE job_id = $1 AND claim_token = $2",
+            )
+            .bind(claim.job_id)
+            .bind(claim.claim_token)
+            .bind(retry_delay.as_secs_f64())
+            .bind(&reason)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query("SELECT pg_notify($1, $2)")
+                .bind(BACKGROUND_JOB_NOTIFY_CHANNEL)
+                .bind(&claim.kind)
+                .execute(&mut *tx)
+                .await?;
+        }
         tx.commit().await?;
-        Ok(true)
+        Ok(if exhausted {
+            DeferTransition::Dead
+        } else {
+            DeferTransition::Deferred
+        })
     }
 
     pub async fn fail(
@@ -231,8 +254,7 @@ impl JobQueue {
         }
         let code = bounded_error_code(&failure.code);
         let message = bounded(&failure.message, MAX_ERROR_MESSAGE_BYTES);
-        let failure_count = claim.failure_count.saturating_add(1);
-        let terminal = failure_is_terminal(failure.class, failure_count, claim.max_attempts);
+        let terminal = failure_is_terminal(failure.class, claim.attempt, claim.max_attempts);
         finish_attempt(
             &mut tx,
             claim,
@@ -368,7 +390,7 @@ impl JobQueue {
                          ) \
                     END \
              FROM background_jobs \
-             WHERE status = 'queued' AND failure_count < max_attempts \
+             WHERE status = 'queued' AND attempt_count < max_attempts \
                AND job_kind = ANY($1)",
         )
         .bind(job_kinds)
@@ -454,7 +476,7 @@ async fn recover_expired_in(
     limit: i64,
 ) -> JobQueueResult<RecoverySummary> {
     let expired = sqlx::query_as::<_, ExpiredClaim>(
-        "SELECT job_id, job_kind, claim_token, failure_count, max_attempts \
+        "SELECT job_id, job_kind, claim_token, attempt_count, failure_count, max_attempts \
              FROM background_jobs \
              WHERE status = 'running' AND lease_until <= now() \
              ORDER BY lease_until, job_id \
@@ -475,8 +497,7 @@ async fn recover_expired_in(
         .bind(claim.claim_token)
         .execute(&mut *connection)
         .await?;
-        let failure_count = claim.failure_count.saturating_add(1);
-        if attempts_exhausted(failure_count, claim.max_attempts) {
+        if attempts_exhausted(claim.attempt_count, claim.max_attempts) {
             sqlx::query(
                 "UPDATE background_jobs job \
                      SET status = 'dead', failure_count = job.failure_count + 1, \
@@ -554,6 +575,13 @@ pub enum FailureTransition {
     ClaimLost,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeferTransition {
+    Deferred,
+    Dead,
+    ClaimLost,
+}
+
 async fn finish_attempt(
     connection: &mut PgConnection,
     claim: &ClaimedJob,
@@ -586,12 +614,12 @@ fn validate_new_job(job: &NewJob) -> JobQueueResult<()> {
     Ok(())
 }
 
-fn failure_is_terminal(class: JobFailureClass, failure_count: i32, max_attempts: i32) -> bool {
-    class == JobFailureClass::Permanent || attempts_exhausted(failure_count, max_attempts)
+fn failure_is_terminal(class: JobFailureClass, attempt_count: i32, max_attempts: i32) -> bool {
+    class == JobFailureClass::Permanent || attempts_exhausted(attempt_count, max_attempts)
 }
 
-fn attempts_exhausted(failure_count: i32, max_attempts: i32) -> bool {
-    failure_count >= max_attempts
+fn attempts_exhausted(attempt_count: i32, max_attempts: i32) -> bool {
+    attempt_count >= max_attempts
 }
 
 pub(crate) fn validate_job_kind(kind: &str) -> JobQueueResult<()> {
@@ -638,6 +666,7 @@ struct ExpiredClaim {
     job_id: Uuid,
     job_kind: String,
     claim_token: Uuid,
+    attempt_count: i32,
     failure_count: i32,
     max_attempts: i32,
 }

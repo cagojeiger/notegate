@@ -18,14 +18,15 @@ CREATE TABLE background_jobs (
     completed_at TIMESTAMPTZ,
     CHECK (octet_length(job_kind) BETWEEN 1 AND 128),
     CHECK (octet_length(payload::text) <= 65536),
-    CHECK (failure_count <= max_attempts),
+    CHECK (failure_count <= attempt_count),
+    CHECK (attempt_count <= max_attempts),
     CHECK (claimed_by IS NULL OR octet_length(claimed_by) BETWEEN 1 AND 256),
     CHECK (last_error_code IS NULL OR octet_length(last_error_code) BETWEEN 1 AND 128),
     CHECK (last_error_message IS NULL OR octet_length(last_error_message) <= 4096),
     CHECK (
         (status = 'queued'
             AND claim_token IS NULL AND claimed_by IS NULL AND lease_until IS NULL
-            AND completed_at IS NULL AND failure_count < max_attempts)
+            AND completed_at IS NULL AND attempt_count < max_attempts)
         OR
         (status = 'running'
             AND claim_token IS NOT NULL AND claimed_by IS NOT NULL AND lease_until IS NOT NULL

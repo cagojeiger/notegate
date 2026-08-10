@@ -14,10 +14,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use common::TestDb;
+use common::{TestDb, space_with_root};
 use notegate_jobs::{
-    AttemptOutcome, ClaimedJob, FailureTransition, JobDisposition, JobFailure, JobHandler,
-    JobQueue, NewJob, QueueReconciler, QueueReconcilerConfig, Worker, WorkerConfig,
+    AttemptOutcome, ClaimedJob, DeferTransition, FailureTransition, JobDisposition, JobFailure,
+    JobHandler, JobQueue, NewJob, QueueReconciler, QueueReconcilerConfig, Worker, WorkerConfig,
 };
 use serde_json::json;
 use sqlx::PgPool;
@@ -221,6 +221,56 @@ async fn enqueue_participates_in_the_callers_transaction() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
+async fn background_jobs_migration_backfills_and_mirrors_legacy_usage_jobs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup_before(32).await? else {
+        return Ok(());
+    };
+    let (_, backfilled_space_id, _) = space_with_root(&db.pool, "jobs-backfill").await?;
+    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id, retry_count) VALUES ($1, 3)")
+        .bind(backfilled_space_id)
+        .execute(&db.pool)
+        .await?;
+
+    db.apply_migration(32).await?;
+
+    let backfilled: (String, String, i32, i32, i32) = sqlx::query_as(
+        "SELECT job_kind, payload ->> 'space_id', attempt_count, failure_count, max_attempts \
+         FROM background_jobs WHERE payload ->> 'space_id' = $1",
+    )
+    .bind(backfilled_space_id.to_string())
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        backfilled,
+        (
+            "space_usage_reconcile".to_owned(),
+            backfilled_space_id.to_string(),
+            3,
+            3,
+            8,
+        )
+    );
+
+    let (_, mirrored_space_id, _) = space_with_root(&db.pool, "jobs-mirror").await?;
+    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
+        .bind(mirrored_space_id)
+        .execute(&db.pool)
+        .await?;
+    let mirrored: (String, i32, i32) = sqlx::query_as(
+        "SELECT status, attempt_count, failure_count \
+         FROM background_jobs WHERE payload ->> 'space_id' = $1",
+    )
+    .bind(mirrored_space_id.to_string())
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(mirrored, ("queued".to_owned(), 0, 0));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn concurrent_workers_claim_distinct_supported_jobs() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(db) = TestDb::setup().await? else {
@@ -295,8 +345,7 @@ async fn success_closes_the_claim_and_attempt() -> Result<(), Box<dyn std::error
 }
 
 #[tokio::test]
-async fn deferral_preserves_retry_budget_and_attempt_history()
--> Result<(), Box<dyn std::error::Error>> {
+async fn deferral_stops_at_the_shared_attempt_limit() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -304,15 +353,16 @@ async fn deferral_preserves_retry_budget_and_attempt_history()
     let enqueued = queue.enqueue(&job("defer").max_attempts(2)).await?;
     let kinds = vec!["defer".to_owned()];
 
-    for _ in 0..3 {
-        let claim = queue
-            .claim_many("worker", &kinds, Duration::from_secs(30), 1)
-            .await?
-            .into_iter()
-            .next()
-            .expect("deferred claim");
-        assert!(queue.defer(&claim, "resource_busy", Duration::ZERO).await?);
-    }
+    let first = queue
+        .claim_many("worker", &kinds, Duration::from_secs(30), 1)
+        .await?
+        .into_iter()
+        .next()
+        .expect("first claim");
+    assert_eq!(
+        queue.defer(&first, "resource_busy", Duration::ZERO).await?,
+        DeferTransition::Deferred
+    );
 
     let queued: (String, i32, i32, i64) = sqlx::query_as(
         "SELECT status, attempt_count, failure_count, \
@@ -323,7 +373,7 @@ async fn deferral_preserves_retry_budget_and_attempt_history()
     .bind(enqueued.job_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(queued, ("queued".to_owned(), 3, 0, 3));
+    assert_eq!(queued, ("queued".to_owned(), 1, 0, 1));
 
     let final_claim = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
@@ -331,17 +381,32 @@ async fn deferral_preserves_retry_budget_and_attempt_history()
         .into_iter()
         .next()
         .expect("final claim");
-    assert!(queue.succeed(&final_claim).await?);
+    assert_eq!(
+        queue
+            .defer(&final_claim, "resource_busy", Duration::ZERO)
+            .await?,
+        DeferTransition::Dead
+    );
 
-    let completed: (String, i32, i32, i64) = sqlx::query_as(
+    let completed: (String, i32, i32, i64, Option<String>) = sqlx::query_as(
         "SELECT status, attempt_count, failure_count, \
-                (SELECT count(*) FROM background_job_attempts WHERE job_id = $1) \
+                (SELECT count(*) FROM background_job_attempts WHERE job_id = $1), \
+                last_error_code \
          FROM background_jobs WHERE job_id = $1",
     )
     .bind(enqueued.job_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(completed, ("succeeded".to_owned(), 4, 0, 4));
+    assert_eq!(
+        completed,
+        ("dead".to_owned(), 2, 0, 2, Some("resource_busy".to_owned()),)
+    );
+    assert!(
+        queue
+            .claim_many("worker", &kinds, Duration::from_secs(30), 1)
+            .await?
+            .is_empty()
+    );
 
     db.cleanup().await;
     Ok(())

@@ -66,8 +66,9 @@ enqueue
   ▼
 queued ── claim ──▶ running ── success ──▶ succeeded
   ▲                    │
-  │                    ├─ expected contention / defer ──▶ queued
-  │                    │        └─ failure budget unchanged
+  │                    ├─ expected contention / defer
+  │                    │        ├─ attempts remaining ──▶ queued
+  │                    │        └─ attempts exhausted ──▶ dead
   │                    │
   │                    ├─ retryable error / timeout / panic / shutdown
   │                    │        └─ attempts remaining ──▶ queued
@@ -113,7 +114,8 @@ background_job_attempts
 - Handler timeout은 kind별로 정한다.
 - 자동 재시도는 5초에서 시작해 최대 15분까지 증가하는 exponential backoff와 ±10% jitter를 사용한다.
 - Handler가 명시한 `retry_after`는 더 일찍 실행되지 않도록 +0~20% jitter를 적용한다.
-- 한 작업은 기본 8회, 최대 100회의 실패를 허용한다. 정상적인 자원 경합을 나타내는 defer는 attempt 이력에는 남지만 failure budget을 소비하지 않는다. 실패 한도를 소진한 작업과 permanent failure는 `dead`가 되며 자동으로 다시 활성화되지 않는다.
+- 한 작업은 기본 8회, 최대 100회의 실행 attempt를 허용한다. 성공하지 못한 claim은 defer, retryable failure, timeout, panic, 취소, lease 만료 여부와 관계없이 같은 실행 한도를 소비한다. 마지막 attempt에서 완료하지 못한 작업과 permanent failure는 `dead`가 되며 자동으로 다시 활성화되지 않는다.
+- `failure_count`는 오류로 끝난 실행을 관측하기 위한 값이다. 실행 상한은 `attempt_count`와 `max_attempts`가 결정하므로 정상적인 자원 경합을 나타내는 defer도 무한히 반복되지 않는다.
 - Queue의 `dead`는 실행 이력이며 도메인 상태와 동일하지 않다. 도메인은 필요하면 별도의 상태를 관리한다.
 - Worker는 다음 delayed 작업 시각 또는 safety poll 중 이른 시점에 깨어난다. Safety poll 기본값은 10분이고 매 주기에 ±10% jitter를 적용한다.
 - Worker에 빈 실행 슬롯이 남은 비포화 claim 주기는 최소 25ms 뒤에 다시 확인해, ready row가 일시적으로 잠겼을 때 발생할 수 있는 zero-delay polling loop를 막는다.

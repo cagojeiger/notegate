@@ -12,7 +12,7 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::queue::{FailureTransition, validate_job_kind};
+use crate::queue::{DeferTransition, FailureTransition, validate_job_kind};
 use crate::schedule::{Jitter, between, job_entropy};
 use crate::{
     AttemptOutcome, ClaimedJob, JobDisposition, JobFailure, JobQueue, JobQueueError, JobQueueResult,
@@ -398,8 +398,9 @@ async fn finish_claim(
         } => {
             let retry_delay = explicit_retry_delay(claim, retry_after);
             match queue.defer(claim, reason, retry_delay).await {
-                Ok(true) => record_attempt(claim, "deferred"),
-                Ok(false) => record_attempt(claim, "claim_lost"),
+                Ok(DeferTransition::Deferred) => record_attempt(claim, "deferred"),
+                Ok(DeferTransition::Dead) => record_attempt(claim, "dead"),
+                Ok(DeferTransition::ClaimLost) => record_attempt(claim, "claim_lost"),
                 Err(error) => tracing::error!(
                     event = "background_jobs.defer_transition_failed",
                     job_kind = claim.kind,

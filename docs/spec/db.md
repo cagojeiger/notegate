@@ -321,7 +321,7 @@ background_job_attempts
   primary key (job_id, attempt_number)
 ```
 
-`background_jobs`는 지연 가능한 내부 작업의 원장이다. `queued`와 `running`은 `completed_at=NULL`, terminal 상태는 claim 정보가 없고 `completed_at`이 있어야 한다. 각 claim은 append-only attempt 한 개를 만들며 defer, lease 만료, timeout, panic, 취소, retryable/permanent failure를 구분한다. `attempt_count`는 전체 실행 이력이고 `failure_count`만 재시도 한도를 소비한다. Queue의 전달 보장은 at-least-once이고 terminal 행은 90일 뒤 bounded batch로 삭제한다. 상세 상태 전이는 `background-jobs.md`를 따른다.
+`background_jobs`는 지연 가능한 내부 작업의 원장이다. `queued`와 `running`은 `completed_at=NULL`, terminal 상태는 claim 정보가 없고 `completed_at`이 있어야 한다. 각 claim은 append-only attempt 한 개를 만들며 defer, lease 만료, timeout, panic, 취소, retryable/permanent failure를 구분한다. `attempt_count`는 실행 상한을 소비하는 전체 실행 이력이고 `failure_count`는 오류 관측값이다. Queue의 전달 보장은 at-least-once이고 terminal 행은 90일 뒤 bounded batch로 삭제한다. 상세 상태 전이는 `background-jobs.md`를 따른다.
 
 `space_usage_reconcile_jobs`와 `space_usage_reconcile_executions`는 단계적 배포 중 이전 process를 위한 호환 테이블이다. 새 API background runtime은 이 테이블을 작업 원장이나 실행 이력으로 읽지 않는다. 호환 기간의 legacy job insert는 trigger가 `background_jobs`로 복제한다.
 
