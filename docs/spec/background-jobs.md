@@ -8,6 +8,7 @@ NoteGate의 지연 가능한 내부 작업은 PostgreSQL 기반 범용 queue를 
 - 작업 등록과 원본 변경은 같은 PostgreSQL transaction에 넣을 수 있다. 원본만 저장되거나 작업만 등록되는 상태를 허용하지 않는다.
 - 여러 worker는 `FOR UPDATE SKIP LOCKED`로 서로 다른 작업을 선점한다.
 - 실행 중인 작업에는 lease와 claim token이 있다. Lease가 만료되면 다른 worker가 재선점할 수 있고, 이전 claim token으로는 완료 또는 실패 상태를 기록할 수 없다.
+- 코드에서 등록하는 작업은 `JobSpec`이 kind와 payload type을 결합한다. 생산자는 `NewJob<J>`, 소비자는 `JobHandler<J>`를 사용하므로 서로 다른 payload를 연결하면 compile되지 않는다.
 - Queue는 동일 payload의 중복 등록을 제거하지 않는다. Handler는 같은 작업이 반복 실행되어도 최종 상태가 같아야 한다. 도메인은 필요할 때 의미가 같은 fresh queued 요청만 병합할 수 있다.
 - `NOTIFY`는 worker를 빠르게 깨우는 신호일 뿐 작업 원장이 아니다. LISTEN 연결에 실패하거나 알림을 놓쳐도 consumer와 safety poll은 DB의 준비된 작업을 계속 확인한다.
 - PostgreSQL `NOTIFY`는 모든 listener에 전달되는 broadcast다. 수신 직후 각 worker는 이미 버퍼에 쌓인 알림을 함께 소진하고 최대 50ms의 짧은 wake spread를 적용한다. 실제 중복 선점은 `FOR UPDATE SKIP LOCKED`가 막는다.
@@ -15,7 +16,7 @@ NoteGate의 지연 가능한 내부 작업은 PostgreSQL 기반 범용 queue를 
 Queue가 보장하지 않는 것:
 
 - exactly-once 실행
-- job kind별 payload schema
+- 직접 SQL 또는 이전 binary가 저장한 JSON payload와 현재 payload type의 호환성
 - 도메인 결과의 stale 여부
 - 서로 다른 작업 사이의 실행 순서
 - 사용자별 또는 Space별 동시성 정책
@@ -27,6 +28,7 @@ Queue 상태 머신과 NoteGate 업무 처리는 crate와 application 조립 경
 ```text
 backend/crates/jobs/                 package: notegate-jobs
   model.rs                           job, claim, failure model
+  handler.rs                         typed handler contract와 runtime registry
   queue.rs                           enqueue, claim, heartbeat, state transition
   worker.rs                          concurrency, lease, retry, timeout runtime
   reconciler.rs                      lease recovery와 terminal history 정리
@@ -53,7 +55,8 @@ notegate-api background runtime
 
 - `notegate-jobs`는 Usage, Link, Space 같은 업무 개념과 payload schema를 알지 않는다.
 - API의 `background_jobs` 모듈은 handler를 조립하는 실행 경계이며 업무 규칙을 다시 구현하지 않는다.
-- Handler는 payload를 업무 입력으로 변환하고 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
+- Registry는 저장된 JSON을 `JobSpec::Payload`로 한 번 변환한다. 변환할 수 없는 payload는 handler를 호출하지 않고 permanent failure로 종료한다.
+- Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
 - 멱등성, stale 판정, 업무 결과 transaction은 handler가 호출하는 db/service 계층이 소유한다.
 - Queue schema와 migration은 기존 database schema 소유권에 따라 `notegate-db`가 관리한다.
 - API process는 HTTP server, queue consumer, queue reconciler를 함께 실행하고 하나의 `PgPool`을 공유한다.
@@ -179,7 +182,7 @@ Queue 상태와 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은
 
 ## 검증 경계
 
-- `notegate-jobs` unit test는 configuration, retry delay, panic, timeout, shutdown 결과를 검증한다.
+- `notegate-jobs` unit test는 handler 등록, 잘못 저장된 payload, configuration, retry delay, panic, timeout, shutdown 결과를 검증한다.
 - PostgreSQL integration test는 transaction enqueue, 동시 claim, attempt 기록, heartbeat, 다중 reconciler lease recovery, fencing, terminal 전이와 retention을 검증한다.
 - Usage test는 반복 실행해도 같은 정확한 counter가 생성되는 업무 멱등성을 검증한다.
 - Browser E2E는 queue consumer가 포함된 API process와 dashboard를 실행해 사용자 흐름을 검증한다.
