@@ -51,7 +51,8 @@ pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};
 pub use postgres_pool::connect;
 pub use purge_repo::{PurgeRepo, PurgeRun};
 pub use space_usage_repo::{
-    SPACE_USAGE_JOB_KIND, SpaceUsageRepo, UsageCounts, UsageReconcileResult,
+    SPACE_USAGE_JOB_KIND, SpaceUsagePayload, SpaceUsageReconcileJob, SpaceUsageRepo, UsageCounts,
+    UsageReconcileResult,
 };
 pub use spaces_repo::SpaceRepo;
 pub use sqlx::PgPool;

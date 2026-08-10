@@ -1,11 +1,9 @@
 mod handlers;
 
-use std::sync::Arc;
-
 use handlers::UsageHandler;
-use notegate_db::SpaceUsageRepo;
+use notegate_db::{SpaceUsageReconcileJob, SpaceUsageRepo};
 use notegate_jobs::{
-    JobHandler, JobQueue, JobQueueResult, QueueReconciler, QueueReconcilerConfig, Worker,
+    JobQueue, JobQueueResult, JobRegistry, QueueReconciler, QueueReconcilerConfig, Worker,
     WorkerConfig,
 };
 use tokio::task::JoinHandle;
@@ -24,13 +22,10 @@ pub(crate) fn spawn(
     shutdown: CancellationToken,
 ) -> JobQueueResult<BackgroundJobs> {
     let queue = JobQueue::new(state.db.clone());
-    let handlers: Vec<Arc<dyn JobHandler>> = vec![Arc::new(UsageHandler::new(
+    let handlers = JobRegistry::new().register::<SpaceUsageReconcileJob>(UsageHandler::new(
         SpaceUsageRepo::new(state.db.clone()),
-    ))];
-    let job_kinds = handlers
-        .iter()
-        .map(|handler| handler.kind().to_owned())
-        .collect::<Vec<_>>();
+    ))?;
+    let job_kinds = handlers.job_kinds();
     let worker = Worker::new(
         queue.clone(),
         handlers,

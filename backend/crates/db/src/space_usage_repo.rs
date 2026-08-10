@@ -3,6 +3,8 @@
 mod reconciliation;
 
 use notegate_core::{Error, Result};
+use notegate_jobs::JobSpec;
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
@@ -12,6 +14,18 @@ pub use reconciliation::UsageReconcileResult;
 
 const LOCK_TIMEOUT: &str = "5s";
 pub const SPACE_USAGE_JOB_KIND: &str = "space_usage_reconcile";
+
+pub struct SpaceUsageReconcileJob;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpaceUsagePayload {
+    pub space_id: Uuid,
+}
+
+impl JobSpec for SpaceUsageReconcileJob {
+    const KIND: &'static str = SPACE_USAGE_JOB_KIND;
+    type Payload = SpaceUsagePayload;
+}
 
 #[derive(Debug, Clone)]
 pub struct SpaceUsageRepo {

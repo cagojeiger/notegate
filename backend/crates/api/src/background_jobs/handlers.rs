@@ -2,10 +2,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use notegate_db::{SPACE_USAGE_JOB_KIND, SpaceUsageRepo, UsageReconcileResult};
+use notegate_db::{
+    SpaceUsagePayload, SpaceUsageReconcileJob, SpaceUsageRepo, UsageReconcileResult,
+};
 use notegate_jobs::{ClaimedJob, JobDisposition, JobFailure, JobHandler};
-use serde::Deserialize;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub(crate) struct UsageHandler {
@@ -18,21 +18,17 @@ impl UsageHandler {
     }
 }
 
-impl JobHandler for UsageHandler {
-    fn kind(&self) -> &'static str {
-        SPACE_USAGE_JOB_KIND
-    }
-
+impl JobHandler<SpaceUsageReconcileJob> for UsageHandler {
     fn timeout(&self) -> Duration {
         Duration::from_secs(60)
     }
 
     fn handle<'a>(
         &'a self,
-        job: &'a ClaimedJob,
+        _job: &'a ClaimedJob,
+        payload: SpaceUsagePayload,
     ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
         Box::pin(async move {
-            let payload = decode_payload::<SpacePayload>(job)?;
             match self
                 .usage
                 .reconcile_space(payload.space_id)
@@ -67,50 +63,6 @@ impl JobHandler for UsageHandler {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct SpacePayload {
-    space_id: Uuid,
-}
-
-fn decode_payload<T>(job: &ClaimedJob) -> Result<T, JobFailure>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_value(job.payload.clone()).map_err(|error| {
-        JobFailure::permanent(
-            "invalid_job_payload",
-            format!("invalid {} payload: {error}", job.kind),
-        )
-    })
-}
-
 fn retryable_domain_error(error: notegate_core::Error) -> JobFailure {
     JobFailure::retryable("domain_error", error.to_string())
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used, clippy::unwrap_used)]
-mod tests {
-    use chrono::Utc;
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn payload_decoder_rejects_missing_identifiers_permanently() {
-        let job = ClaimedJob {
-            job_id: Uuid::new_v4(),
-            kind: SPACE_USAGE_JOB_KIND.to_owned(),
-            payload: json!({}),
-            attempt: 1,
-            failure_count: 0,
-            max_attempts: 8,
-            claim_token: Uuid::new_v4(),
-            created_at: Utc::now(),
-        };
-
-        let failure = decode_payload::<SpacePayload>(&job).expect_err("payload must fail");
-        assert_eq!(failure.class, notegate_jobs::JobFailureClass::Permanent);
-        assert_eq!(failure.code, "invalid_job_payload");
-    }
 }

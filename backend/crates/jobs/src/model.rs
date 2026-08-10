@@ -1,24 +1,31 @@
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
-pub struct NewJob {
-    pub kind: String,
-    pub payload: Value,
-    pub available_at: Option<DateTime<Utc>>,
-    pub max_attempts: i32,
+pub trait JobSpec: Send + Sync + 'static {
+    const KIND: &'static str;
+    type Payload: Serialize + DeserializeOwned + Send + Sync + 'static;
 }
 
-impl NewJob {
-    pub fn new(kind: impl Into<String>, payload: Value) -> Self {
+pub struct NewJob<J: JobSpec> {
+    pub payload: J::Payload,
+    pub available_at: Option<DateTime<Utc>>,
+    pub max_attempts: i32,
+    job: PhantomData<fn() -> J>,
+}
+
+impl<J: JobSpec> NewJob<J> {
+    pub fn new(payload: J::Payload) -> Self {
         Self {
-            kind: kind.into(),
             payload,
             available_at: None,
             max_attempts: 8,
+            job: PhantomData,
         }
     }
 

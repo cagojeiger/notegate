@@ -4,11 +4,12 @@ use chrono::{DateTime, Duration, Utc};
 use notegate_core::tier::UserTier;
 use notegate_core::{Error, Result};
 use notegate_jobs::{JobQueue, NewJob};
-use serde_json::json;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
-use crate::{SPACE_USAGE_JOB_KIND, active_account_predicate, map_sqlx_error, to_usize};
+use crate::{
+    SpaceUsagePayload, SpaceUsageReconcileJob, active_account_predicate, map_sqlx_error, to_usize,
+};
 
 const MANUAL_RECONCILE_COOLDOWN_SECONDS: i64 = 60 * 60;
 const REQUEST_LOCK_TIMEOUT: &str = "1s";
@@ -126,7 +127,7 @@ impl UsageRepo {
 
         JobQueue::enqueue_in(
             &mut tx,
-            &NewJob::new(SPACE_USAGE_JOB_KIND, json!({ "space_id": space_id })),
+            &NewJob::<SpaceUsageReconcileJob>::new(SpaceUsagePayload { space_id }),
         )
         .await
         .map_err(|error| Error::internal(error.to_string()))?;

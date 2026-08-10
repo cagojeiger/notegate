@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,10 +9,12 @@ use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::queue::{DeferTransition, FailureTransition, validate_job_kind};
+use crate::handler::{ErasedJobHandler, HandlerMap};
+use crate::queue::{DeferTransition, FailureTransition};
 use crate::schedule::{Jitter, between, job_entropy};
 use crate::{
-    AttemptOutcome, ClaimedJob, JobDisposition, JobFailure, JobQueue, JobQueueError, JobQueueResult,
+    AttemptOutcome, ClaimedJob, JobDisposition, JobFailure, JobQueue, JobQueueError,
+    JobQueueResult, JobRegistry,
 };
 
 const LISTENER_RETRY: Duration = Duration::from_secs(10);
@@ -24,15 +23,6 @@ const NOTIFY_WAKE_SPREAD: Duration = Duration::from_millis(50);
 const SAFETY_POLL_JITTER_PERCENT: u32 = 10;
 const LISTENER_RETRY_JITTER_PERCENT: u32 = 20;
 const EXPLICIT_RETRY_JITTER_PERCENT: u32 = 20;
-
-pub trait JobHandler: Send + Sync + 'static {
-    fn kind(&self) -> &'static str;
-    fn timeout(&self) -> Duration;
-    fn handle<'a>(
-        &'a self,
-        job: &'a ClaimedJob,
-    ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>>;
-}
 
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
@@ -57,7 +47,7 @@ impl Default for WorkerConfig {
 
 pub struct Worker {
     queue: JobQueue,
-    handlers: Arc<HashMap<&'static str, Arc<dyn JobHandler>>>,
+    handlers: Arc<HandlerMap>,
     job_kinds: Arc<Vec<String>>,
     config: WorkerConfig,
     worker_id: String,
@@ -66,7 +56,7 @@ pub struct Worker {
 impl Worker {
     pub fn new(
         queue: JobQueue,
-        handlers: Vec<Arc<dyn JobHandler>>,
+        handlers: JobRegistry,
         config: WorkerConfig,
         worker_id: impl Into<String>,
     ) -> JobQueueResult<Self> {
@@ -77,34 +67,15 @@ impl Worker {
                 "worker id must contain between 1 and 256 bytes".to_owned(),
             ));
         }
-        let mut registry = HashMap::new();
-        for handler in handlers {
-            let kind = handler.kind();
-            validate_job_kind(kind)?;
-            if handler.timeout().is_zero() {
-                return Err(JobQueueError::InvalidConfiguration(format!(
-                    "background job handler {kind} must have a positive timeout"
-                )));
-            }
-            if registry.insert(kind, handler).is_some() {
-                return Err(JobQueueError::InvalidConfiguration(
-                    "duplicate background job handler kind".to_owned(),
-                ));
-            }
-        }
-        if registry.is_empty() {
+        if handlers.is_empty() {
             return Err(JobQueueError::InvalidConfiguration(
                 "at least one background job handler is required".to_owned(),
             ));
         }
-        let mut job_kinds = registry
-            .keys()
-            .map(|kind| (*kind).to_owned())
-            .collect::<Vec<_>>();
-        job_kinds.sort_unstable();
+        let job_kinds = handlers.job_kinds();
         Ok(Self {
             queue,
-            handlers: Arc::new(registry),
+            handlers: Arc::new(handlers.into_handlers()),
             job_kinds: Arc::new(job_kinds),
             config,
             worker_id,
@@ -248,7 +219,7 @@ fn log_task_result(result: Option<Result<(), JoinError>>) {
 
 async fn execute_claim(
     queue: JobQueue,
-    handlers: Arc<HashMap<&'static str, Arc<dyn JobHandler>>>,
+    handlers: Arc<HandlerMap>,
     config: WorkerConfig,
     claim: ClaimedJob,
     shutdown: CancellationToken,
@@ -284,7 +255,7 @@ async fn execute_claim(
 
 async fn run_handler(
     queue: &JobQueue,
-    handler: &dyn JobHandler,
+    handler: &dyn ErasedJobHandler,
     claim: &ClaimedJob,
     config: &WorkerConfig,
     shutdown: &CancellationToken,
@@ -501,11 +472,15 @@ enum HandlerOutcome {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
     use std::task::{Context, Poll};
 
+    use serde::{Deserialize, Serialize};
     use sqlx::postgres::PgPoolOptions;
 
     use super::*;
+    use crate::{JobHandler, JobSpec};
 
     struct PanicHandler;
 
@@ -515,6 +490,33 @@ mod tests {
 
     struct PanicFuture;
 
+    macro_rules! job_spec {
+        ($name:ident, $kind:literal, $payload:ty) => {
+            struct $name;
+
+            impl JobSpec for $name {
+                const KIND: &'static str = $kind;
+                type Payload = $payload;
+            }
+        };
+    }
+
+    job_spec!(PanicJob, "panic", serde_json::Value);
+    job_spec!(
+        ConstructionPanicJob,
+        "construction-panic",
+        serde_json::Value
+    );
+    job_spec!(DeferredJob, "deferred", serde_json::Value);
+    job_spec!(PendingJob, "pending", serde_json::Value);
+
+    #[derive(Serialize, Deserialize)]
+    struct RequiredPayload {
+        subject_id: Uuid,
+    }
+
+    job_spec!(RequiredPayloadJob, "required-payload", RequiredPayload);
+
     impl Future for PanicFuture {
         type Output = Result<JobDisposition, JobFailure>;
 
@@ -523,11 +525,7 @@ mod tests {
         }
     }
 
-    impl JobHandler for PanicHandler {
-        fn kind(&self) -> &'static str {
-            "panic"
-        }
-
+    impl JobHandler<PanicJob> for PanicHandler {
         fn timeout(&self) -> Duration {
             Duration::from_secs(30)
         }
@@ -535,16 +533,13 @@ mod tests {
         fn handle<'a>(
             &'a self,
             _job: &'a ClaimedJob,
+            _payload: serde_json::Value,
         ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
             Box::pin(PanicFuture)
         }
     }
 
-    impl JobHandler for ConstructionPanicHandler {
-        fn kind(&self) -> &'static str {
-            "construction-panic"
-        }
-
+    impl JobHandler<ConstructionPanicJob> for ConstructionPanicHandler {
         fn timeout(&self) -> Duration {
             Duration::from_secs(30)
         }
@@ -552,16 +547,13 @@ mod tests {
         fn handle<'a>(
             &'a self,
             _job: &'a ClaimedJob,
+            _payload: serde_json::Value,
         ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
             panic!("handler construction panic")
         }
     }
 
-    impl JobHandler for DeferredHandler {
-        fn kind(&self) -> &'static str {
-            "deferred"
-        }
-
+    impl JobHandler<DeferredJob> for DeferredHandler {
         fn timeout(&self) -> Duration {
             Duration::from_secs(30)
         }
@@ -569,6 +561,7 @@ mod tests {
         fn handle<'a>(
             &'a self,
             _job: &'a ClaimedJob,
+            _payload: serde_json::Value,
         ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
             Box::pin(async {
                 Ok(JobDisposition::Defer {
@@ -583,11 +576,7 @@ mod tests {
         timeout: Duration,
     }
 
-    impl JobHandler for PendingHandler {
-        fn kind(&self) -> &'static str {
-            "pending"
-        }
-
+    impl JobHandler<PendingJob> for PendingHandler {
         fn timeout(&self) -> Duration {
             self.timeout
         }
@@ -595,6 +584,7 @@ mod tests {
         fn handle<'a>(
             &'a self,
             _job: &'a ClaimedJob,
+            _payload: serde_json::Value,
         ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
             Box::pin(std::future::pending())
         }
@@ -618,6 +608,18 @@ mod tests {
             claim_token: Uuid::new_v4(),
             created_at: chrono::Utc::now(),
         }
+    }
+
+    fn typed_handler<J, H>(handler: H) -> Arc<dyn ErasedJobHandler>
+    where
+        J: JobSpec,
+        H: JobHandler<J>,
+    {
+        let mut handlers = JobRegistry::new()
+            .register::<J>(handler)
+            .expect("handler registration")
+            .into_handlers();
+        handlers.remove(J::KIND).expect("registered handler")
     }
 
     #[test]
@@ -670,14 +672,16 @@ mod tests {
         assert!(matches!(error, Err(JobQueueError::InvalidConfiguration(_))));
     }
 
-    #[tokio::test]
-    async fn worker_rejects_invalid_handler_kinds() {
+    #[test]
+    fn registry_rejects_invalid_handler_kinds() {
+        struct InvalidJob;
         struct InvalidHandler;
-        impl JobHandler for InvalidHandler {
-            fn kind(&self) -> &'static str {
-                ""
-            }
+        impl JobSpec for InvalidJob {
+            const KIND: &'static str = "";
+            type Payload = serde_json::Value;
+        }
 
+        impl JobHandler<InvalidJob> for InvalidHandler {
             fn timeout(&self) -> Duration {
                 Duration::from_secs(1)
             }
@@ -685,34 +689,38 @@ mod tests {
             fn handle<'a>(
                 &'a self,
                 _job: &'a ClaimedJob,
+                _payload: serde_json::Value,
             ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>>
             {
                 Box::pin(async { Ok(JobDisposition::Complete) })
             }
         }
 
-        let result = Worker::new(
-            disconnected_queue(),
-            vec![Arc::new(InvalidHandler)],
-            WorkerConfig::default(),
-            "worker",
-        );
+        let result = JobRegistry::new().register::<InvalidJob>(InvalidHandler);
         assert!(matches!(
             result,
             Err(JobQueueError::InvalidConfiguration(_))
         ));
     }
 
-    #[tokio::test]
-    async fn worker_rejects_zero_handler_timeouts() {
-        let result = Worker::new(
-            disconnected_queue(),
-            vec![Arc::new(PendingHandler {
-                timeout: Duration::ZERO,
-            })],
-            WorkerConfig::default(),
-            "worker",
-        );
+    #[test]
+    fn registry_rejects_zero_handler_timeouts() {
+        let result = JobRegistry::new().register::<PendingJob>(PendingHandler {
+            timeout: Duration::ZERO,
+        });
+        assert!(matches!(
+            result,
+            Err(JobQueueError::InvalidConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_job_kinds() {
+        let registry = JobRegistry::new()
+            .register::<DeferredJob>(DeferredHandler)
+            .expect("first handler registration");
+        let result = registry.register::<DeferredJob>(DeferredHandler);
+
         assert!(matches!(
             result,
             Err(JobQueueError::InvalidConfiguration(_))
@@ -722,9 +730,10 @@ mod tests {
     #[tokio::test]
     async fn handler_panics_become_retryable_failures() {
         let claim = claim("panic");
+        let handler = typed_handler::<PanicJob, _>(PanicHandler);
         let outcome = run_handler(
             &disconnected_queue(),
-            &PanicHandler,
+            handler.as_ref(),
             &claim,
             &WorkerConfig::default(),
             &CancellationToken::new(),
@@ -743,9 +752,10 @@ mod tests {
     #[tokio::test]
     async fn handler_construction_panics_become_retryable_failures() {
         let claim = claim("construction-panic");
+        let handler = typed_handler::<ConstructionPanicJob, _>(ConstructionPanicHandler);
         let outcome = run_handler(
             &disconnected_queue(),
-            &ConstructionPanicHandler,
+            handler.as_ref(),
             &claim,
             &WorkerConfig::default(),
             &CancellationToken::new(),
@@ -764,9 +774,10 @@ mod tests {
     #[tokio::test]
     async fn handler_deferrals_remain_distinct_from_failures() {
         let claim = claim("deferred");
+        let handler = typed_handler::<DeferredJob, _>(DeferredHandler);
         let outcome = run_handler(
             &disconnected_queue(),
-            &DeferredHandler,
+            handler.as_ref(),
             &claim,
             &WorkerConfig::default(),
             &CancellationToken::new(),
@@ -787,11 +798,12 @@ mod tests {
     #[tokio::test]
     async fn handler_timeouts_become_retryable_failures() {
         let claim = claim("pending");
+        let handler = typed_handler::<PendingJob, _>(PendingHandler {
+            timeout: Duration::from_millis(1),
+        });
         let outcome = run_handler(
             &disconnected_queue(),
-            &PendingHandler {
-                timeout: Duration::from_millis(1),
-            },
+            handler.as_ref(),
             &claim,
             &WorkerConfig::default(),
             &CancellationToken::new(),
@@ -812,11 +824,12 @@ mod tests {
         let shutdown = CancellationToken::new();
         shutdown.cancel();
         let claim = claim("pending");
+        let handler = typed_handler::<PendingJob, _>(PendingHandler {
+            timeout: Duration::from_secs(30),
+        });
         let outcome = run_handler(
             &disconnected_queue(),
-            &PendingHandler {
-                timeout: Duration::from_secs(30),
-            },
+            handler.as_ref(),
             &claim,
             &WorkerConfig::default(),
             &shutdown,
@@ -830,5 +843,42 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn malformed_persisted_payloads_fail_permanently() {
+        struct CompleteHandler;
+
+        impl JobHandler<RequiredPayloadJob> for CompleteHandler {
+            fn timeout(&self) -> Duration {
+                Duration::from_secs(1)
+            }
+
+            fn handle<'a>(
+                &'a self,
+                _job: &'a ClaimedJob,
+                _payload: RequiredPayload,
+            ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>>
+            {
+                Box::pin(async { Ok(JobDisposition::Complete) })
+            }
+        }
+
+        let claim = claim(RequiredPayloadJob::KIND);
+        let handler = typed_handler::<RequiredPayloadJob, _>(CompleteHandler);
+        let outcome = run_handler(
+            &disconnected_queue(),
+            handler.as_ref(),
+            &claim,
+            &WorkerConfig::default(),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        let HandlerOutcome::Failed { failure, outcome } = outcome else {
+            panic!("expected malformed payload to fail");
+        };
+        assert_eq!(outcome, AttemptOutcome::PermanentError);
+        assert_eq!(failure.code, "invalid_job_payload");
     }
 }

@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     AttemptOutcome, ClaimFence, ClaimedJob, EnqueuedJob, JobFailure, JobFailureClass,
-    JobQueueError, JobQueueResult, JobQueueSnapshot, JobStateCount, NewJob, RecoverySummary,
+    JobQueueError, JobQueueResult, JobQueueSnapshot, JobSpec, JobStateCount, NewJob,
+    RecoverySummary,
 };
 
 pub const BACKGROUND_JOB_NOTIFY_CHANNEL: &str = "notegate_background_jobs";
@@ -32,19 +33,20 @@ impl JobQueue {
         Ok(listener)
     }
 
-    pub async fn enqueue(&self, job: &NewJob) -> JobQueueResult<EnqueuedJob> {
+    pub async fn enqueue<J: JobSpec>(&self, job: &NewJob<J>) -> JobQueueResult<EnqueuedJob> {
         let mut connection = self.pool.acquire().await?;
         Self::enqueue_in(&mut connection, job).await
     }
 
-    pub async fn enqueue_in(
+    pub async fn enqueue_in<J: JobSpec>(
         connection: &mut PgConnection,
-        job: &NewJob,
+        job: &NewJob<J>,
     ) -> JobQueueResult<EnqueuedJob> {
         validate_new_job(job)?;
+        let payload = serde_json::to_value(&job.payload)?;
         let job_id = sqlx::query_scalar("SELECT enqueue_background_job($1, $2, $3, $4)")
-            .bind(&job.kind)
-            .bind(&job.payload)
+            .bind(J::KIND)
+            .bind(payload)
             .bind(job.available_at)
             .bind(job.max_attempts)
             .fetch_one(connection)
@@ -604,8 +606,8 @@ async fn finish_attempt(
     Ok(())
 }
 
-fn validate_new_job(job: &NewJob) -> JobQueueResult<()> {
-    validate_job_kind(&job.kind)?;
+fn validate_new_job<J: JobSpec>(job: &NewJob<J>) -> JobQueueResult<()> {
+    validate_job_kind(J::KIND)?;
     if !(1..=100).contains(&job.max_attempts) {
         return Err(JobQueueError::InvalidConfiguration(
             "max attempts must be between 1 and 100".to_owned(),
@@ -681,6 +683,13 @@ struct StateCountRow {
 mod tests {
     use super::*;
 
+    struct TestJob;
+
+    impl JobSpec for TestJob {
+        const KIND: &'static str = "test";
+        type Payload = Value;
+    }
+
     #[test]
     fn bounded_error_text_preserves_utf8_boundaries() {
         assert_eq!(bounded("가나다", 4), "가");
@@ -689,7 +698,7 @@ mod tests {
 
     #[test]
     fn new_job_validation_rejects_invalid_attempt_limits() {
-        let error = validate_new_job(&NewJob::new("test", Value::Null).max_attempts(0));
+        let error = validate_new_job(&NewJob::<TestJob>::new(Value::Null).max_attempts(0));
         assert!(matches!(error, Err(JobQueueError::InvalidConfiguration(_))));
     }
 

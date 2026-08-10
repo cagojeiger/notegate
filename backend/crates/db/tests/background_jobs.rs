@@ -17,9 +17,10 @@ use std::time::Duration;
 use common::{TestDb, space_with_root};
 use notegate_jobs::{
     AttemptOutcome, ClaimedJob, DeferTransition, FailureTransition, JobDisposition, JobFailure,
-    JobHandler, JobQueue, NewJob, QueueReconciler, QueueReconcilerConfig, Worker, WorkerConfig,
+    JobHandler, JobQueue, JobRegistry, JobSpec, NewJob, QueueReconciler, QueueReconcilerConfig,
+    Worker, WorkerConfig,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use tokio::sync::{Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -30,11 +31,34 @@ struct BlockingHandler {
     runs: Arc<AtomicUsize>,
 }
 
-impl JobHandler for BlockingHandler {
-    fn kind(&self) -> &'static str {
-        "worker-runtime"
-    }
+macro_rules! job_spec {
+    ($name:ident, $kind:literal) => {
+        struct $name;
 
+        impl JobSpec for $name {
+            const KIND: &'static str = $kind;
+            type Payload = Value;
+        }
+    };
+}
+
+job_spec!(WorkerRuntimeJob, "worker-runtime");
+job_spec!(TransactionalJob, "transactional");
+job_spec!(SupportedJob, "supported");
+job_spec!(OtherJob, "other");
+job_spec!(SuccessJob, "success");
+job_spec!(DeferJob, "defer");
+job_spec!(RetryJob, "retry");
+job_spec!(PermanentJob, "permanent");
+job_spec!(LeaseJob, "lease");
+job_spec!(ReconcilerRaceJob, "reconciler-race");
+job_spec!(DelayedJob, "delayed");
+job_spec!(LeaseDeadJob, "lease-dead");
+job_spec!(ExpiredRunningJob, "expired-running");
+job_spec!(SnapshotJob, "snapshot");
+job_spec!(RetentionJob, "retention");
+
+impl JobHandler<WorkerRuntimeJob> for BlockingHandler {
     fn timeout(&self) -> Duration {
         Duration::from_secs(30)
     }
@@ -42,6 +66,7 @@ impl JobHandler for BlockingHandler {
     fn handle<'a>(
         &'a self,
         _job: &'a ClaimedJob,
+        _payload: Value,
     ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
         Box::pin(async move {
             self.runs.fetch_add(1, Ordering::SeqCst);
@@ -89,8 +114,15 @@ async fn wait_for_status(
     Ok(())
 }
 
-fn job(kind: &str) -> NewJob {
-    NewJob::new(kind, json!({ "subject_id": uuid::Uuid::new_v4() }))
+fn job<J>() -> NewJob<J>
+where
+    J: JobSpec<Payload = Value>,
+{
+    NewJob::<J>::new(json!({ "subject_id": uuid::Uuid::new_v4() }))
+}
+
+fn kinds<J: JobSpec>() -> Vec<String> {
+    vec![J::KIND.to_owned()]
 }
 
 #[tokio::test]
@@ -102,14 +134,14 @@ async fn worker_runtime_heartbeats_and_completes_a_job() -> Result<(), Box<dyn s
     let started = Arc::new(Notify::new());
     let release = Arc::new(Semaphore::new(0));
     let runs = Arc::new(AtomicUsize::new(0));
-    let handler = Arc::new(BlockingHandler {
+    let handler = BlockingHandler {
         started: started.clone(),
         release: release.clone(),
         runs: runs.clone(),
-    });
-    let handlers: Vec<Arc<dyn JobHandler>> = vec![handler];
+    };
+    let handlers = JobRegistry::new().register::<WorkerRuntimeJob>(handler)?;
     let worker = Worker::new(queue.clone(), handlers, worker_config(), "runtime-test")?;
-    let enqueued = queue.enqueue(&job("worker-runtime")).await?;
+    let enqueued = queue.enqueue(&job::<WorkerRuntimeJob>()).await?;
     let shutdown = CancellationToken::new();
     let run_shutdown = shutdown.clone();
     let worker_task = tokio::spawn(async move { worker.run(run_shutdown).await });
@@ -153,15 +185,15 @@ async fn worker_fills_free_capacity_while_another_job_is_running()
     let started = Arc::new(Notify::new());
     let release = Arc::new(Semaphore::new(0));
     let runs = Arc::new(AtomicUsize::new(0));
-    let handlers: Vec<Arc<dyn JobHandler>> = vec![Arc::new(BlockingHandler {
+    let handlers = JobRegistry::new().register::<WorkerRuntimeJob>(BlockingHandler {
         started: started.clone(),
         release: release.clone(),
         runs: runs.clone(),
-    })];
+    })?;
     let mut config = worker_config();
     config.concurrency = 2;
     let worker = Worker::new(queue.clone(), handlers, config, "capacity-test")?;
-    let first = queue.enqueue(&job("worker-runtime")).await?;
+    let first = queue.enqueue(&job::<WorkerRuntimeJob>()).await?;
     let shutdown = CancellationToken::new();
     let run_shutdown = shutdown.clone();
     let worker_task = tokio::spawn(async move { worker.run(run_shutdown).await });
@@ -169,7 +201,7 @@ async fn worker_fills_free_capacity_while_another_job_is_running()
     tokio::time::timeout(Duration::from_secs(5), started.notified())
         .await
         .map_err(|_| std::io::Error::other("worker did not start the first job"))?;
-    let second = queue.enqueue(&job("worker-runtime")).await?;
+    let second = queue.enqueue(&job::<WorkerRuntimeJob>()).await?;
     tokio::time::timeout(Duration::from_secs(5), async {
         while runs.load(Ordering::SeqCst) < 2 {
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -199,7 +231,7 @@ async fn enqueue_participates_in_the_callers_transaction() -> Result<(), Box<dyn
     };
 
     let mut rollback = db.pool.begin().await?;
-    JobQueue::enqueue_in(&mut rollback, &job("transactional")).await?;
+    JobQueue::enqueue_in(&mut rollback, &job::<TransactionalJob>()).await?;
     rollback.rollback().await?;
     let after_rollback: i64 =
         sqlx::query_scalar("SELECT count(*) FROM background_jobs WHERE job_kind = 'transactional'")
@@ -208,7 +240,7 @@ async fn enqueue_participates_in_the_callers_transaction() -> Result<(), Box<dyn
     assert_eq!(after_rollback, 0);
 
     let mut commit = db.pool.begin().await?;
-    JobQueue::enqueue_in(&mut commit, &job("transactional")).await?;
+    JobQueue::enqueue_in(&mut commit, &job::<TransactionalJob>()).await?;
     commit.commit().await?;
     let after_commit: i64 =
         sqlx::query_scalar("SELECT count(*) FROM background_jobs WHERE job_kind = 'transactional'")
@@ -277,10 +309,10 @@ async fn concurrent_workers_claim_distinct_supported_jobs() -> Result<(), Box<dy
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    queue.enqueue(&job("supported")).await?;
-    queue.enqueue(&job("supported")).await?;
-    queue.enqueue(&job("other")).await?;
-    let kinds = vec!["supported".to_owned()];
+    queue.enqueue(&job::<SupportedJob>()).await?;
+    queue.enqueue(&job::<SupportedJob>()).await?;
+    queue.enqueue(&job::<OtherJob>()).await?;
+    let kinds = kinds::<SupportedJob>();
 
     let left = queue.clone();
     let right = queue.clone();
@@ -291,8 +323,8 @@ async fn concurrent_workers_claim_distinct_supported_jobs() -> Result<(), Box<dy
     let left = left?.into_iter().next().expect("left claim");
     let right = right?.into_iter().next().expect("right claim");
     assert_ne!(left.job_id, right.job_id);
-    assert_eq!(left.kind, "supported");
-    assert_eq!(right.kind, "supported");
+    assert_eq!(left.kind, SupportedJob::KIND);
+    assert_eq!(right.kind, SupportedJob::KIND);
 
     let other_status: String =
         sqlx::query_scalar("SELECT status FROM background_jobs WHERE job_kind = 'other'")
@@ -310,8 +342,8 @@ async fn success_closes_the_claim_and_attempt() -> Result<(), Box<dyn std::error
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job("success")).await?;
-    let kinds = vec!["success".to_owned()];
+    let enqueued = queue.enqueue(&job::<SuccessJob>()).await?;
+    let kinds = kinds::<SuccessJob>();
     let claim = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -350,8 +382,8 @@ async fn deferral_stops_at_the_shared_attempt_limit() -> Result<(), Box<dyn std:
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job("defer").max_attempts(2)).await?;
-    let kinds = vec!["defer".to_owned()];
+    let enqueued = queue.enqueue(&job::<DeferJob>().max_attempts(2)).await?;
+    let kinds = kinds::<DeferJob>();
 
     let first = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
@@ -419,8 +451,8 @@ async fn retryable_failure_requeues_then_exhausts_attempts()
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job("retry").max_attempts(2)).await?;
-    let kinds = vec!["retry".to_owned()];
+    let enqueued = queue.enqueue(&job::<RetryJob>().max_attempts(2)).await?;
+    let kinds = kinds::<RetryJob>();
     let failure = JobFailure::retryable("temporary", "try again");
 
     let first = queue
@@ -484,8 +516,8 @@ async fn permanent_failure_does_not_retry() -> Result<(), Box<dyn std::error::Er
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job("permanent")).await?;
-    let kinds = vec!["permanent".to_owned()];
+    let enqueued = queue.enqueue(&job::<PermanentJob>()).await?;
+    let kinds = kinds::<PermanentJob>();
     let claim = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -528,8 +560,8 @@ async fn expired_lease_is_recovered_and_fences_the_old_claim()
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    queue.enqueue(&job("lease")).await?;
-    let kinds = vec!["lease".to_owned()];
+    queue.enqueue(&job::<LeaseJob>()).await?;
+    let kinds = kinds::<LeaseJob>();
     let stale = queue
         .claim_many("stale", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -624,8 +656,8 @@ async fn concurrent_reconcilers_do_not_duplicate_lease_recovery()
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job("reconciler-race")).await?;
-    let kinds = vec!["reconciler-race".to_owned()];
+    let enqueued = queue.enqueue(&job::<ReconcilerRaceJob>()).await?;
+    let kinds = kinds::<ReconcilerRaceJob>();
     let claim = queue
         .claim_many("stale-worker", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -739,9 +771,9 @@ async fn delayed_job_is_not_claimed_early() -> Result<(), Box<dyn std::error::Er
     };
     let queue = JobQueue::new(db.pool.clone());
     queue
-        .enqueue(&job("delayed").available_at(chrono::Utc::now() + chrono::Duration::hours(1)))
+        .enqueue(&job::<DelayedJob>().available_at(chrono::Utc::now() + chrono::Duration::hours(1)))
         .await?;
-    let kinds = vec!["delayed".to_owned()];
+    let kinds = kinds::<DelayedJob>();
 
     assert!(
         queue
@@ -760,8 +792,10 @@ async fn expired_final_lease_moves_the_job_to_dead() -> Result<(), Box<dyn std::
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job("lease-dead").max_attempts(1)).await?;
-    let kinds = vec!["lease-dead".to_owned()];
+    let enqueued = queue
+        .enqueue(&job::<LeaseDeadJob>().max_attempts(1))
+        .await?;
+    let kinds = kinds::<LeaseDeadJob>();
     let claim = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -804,8 +838,8 @@ async fn consumer_wake_delay_ignores_expired_running_jobs() -> Result<(), Box<dy
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    queue.enqueue(&job("expired-running")).await?;
-    let kinds = vec!["expired-running".to_owned()];
+    queue.enqueue(&job::<ExpiredRunningJob>()).await?;
+    let kinds = kinds::<ExpiredRunningJob>();
     let claim = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -858,9 +892,9 @@ async fn operational_snapshot_does_not_scan_succeeded_history()
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    queue.enqueue(&job("snapshot")).await?;
-    queue.enqueue(&job("snapshot")).await?;
-    let kinds = vec!["snapshot".to_owned()];
+    queue.enqueue(&job::<SnapshotJob>()).await?;
+    queue.enqueue(&job::<SnapshotJob>()).await?;
+    let kinds = kinds::<SnapshotJob>();
     let claim = queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -886,9 +920,9 @@ async fn retention_purge_removes_only_old_terminal_jobs() -> Result<(), Box<dyn 
         return Ok(());
     };
     let queue = JobQueue::new(db.pool.clone());
-    let old = queue.enqueue(&job("retention")).await?;
-    let current = queue.enqueue(&job("retention")).await?;
-    let kinds = vec!["retention".to_owned()];
+    let old = queue.enqueue(&job::<RetentionJob>()).await?;
+    let current = queue.enqueue(&job::<RetentionJob>()).await?;
+    let kinds = kinds::<RetentionJob>();
     for claim in queue
         .claim_many("worker", &kinds, Duration::from_secs(30), 2)
         .await?
