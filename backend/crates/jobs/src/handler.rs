@@ -29,7 +29,7 @@ pub(crate) type HandlerMap = HashMap<&'static str, Arc<dyn ErasedJobHandler>>;
 
 struct TypedJobHandler<J, H> {
     handler: H,
-    job: PhantomData<fn() -> J>,
+    _job: PhantomData<fn() -> J>,
 }
 
 impl<J, H> ErasedJobHandler for TypedJobHandler<J, H>
@@ -79,7 +79,7 @@ impl JobRegistry {
         }
         let handler = Arc::new(TypedJobHandler::<J, _> {
             handler,
-            job: PhantomData,
+            _job: PhantomData,
         });
         if self.handlers.insert(J::KIND, handler).is_some() {
             return Err(JobQueueError::InvalidConfiguration(format!(

@@ -16,7 +16,7 @@ pub struct NewJob<J: JobSpec> {
     pub payload: J::Payload,
     pub available_at: Option<DateTime<Utc>>,
     pub max_attempts: i32,
-    job: PhantomData<fn() -> J>,
+    _job: PhantomData<fn() -> J>,
 }
 
 impl<J: JobSpec> NewJob<J> {
@@ -25,7 +25,7 @@ impl<J: JobSpec> NewJob<J> {
             payload,
             available_at: None,
             max_attempts: 8,
-            job: PhantomData,
+            _job: PhantomData,
         }
     }
 
