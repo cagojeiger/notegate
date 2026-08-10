@@ -48,6 +48,7 @@ describe("createSpaceMutationOptions", () => {
       queryKey: queryKeys.spaces,
       exact: true
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.usage });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: queryKeys.auditEvents });
   });
 
