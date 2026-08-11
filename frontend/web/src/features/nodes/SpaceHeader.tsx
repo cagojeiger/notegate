@@ -1,10 +1,8 @@
-import { MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { FilePlus, FolderPlus, Mic, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { Space } from "../../api/types";
 import { Card, IconButton, MenuButton } from "../../shared/ui";
 import { useRefreshSpace } from "./useNodeQueries";
-
-const CreateMenu = lazy(() => import("./CreateMenu"));
 
 export function SpaceHeader({ activeSpace, canWriteActiveSpace, canManageActiveSpace, onCreateFolder, onCreateText, onRecordAudio, onFileSelected, onRenameSpace, onDeleteSpace }: { activeSpace: Space | null; canWriteActiveSpace: boolean; canManageActiveSpace: boolean; onCreateFolder: () => void; onCreateText: () => void; onRecordAudio: () => void; onFileSelected: (file: File | null) => void; onRenameSpace: () => void; onDeleteSpace: () => void }) {
   const refreshSpace = useRefreshSpace();
@@ -22,11 +20,7 @@ export function SpaceHeader({ activeSpace, canWriteActiveSpace, canManageActiveS
         <IconButton label="Create" onClick={() => setCreateOpen((open) => !open)} disabled={!canWriteActiveSpace}><Plus size={15} /></IconButton>
         <IconButton label="Manage space" onClick={() => setManageOpen((open) => !open)} disabled={!canManageActiveSpace}><MoreHorizontal size={15} /></IconButton>
       </div>
-      {createOpen && canWriteActiveSpace ? (
-        <Suspense fallback={null}>
-          <CreateMenu onCreateFolder={onCreateFolder} onCreateText={onCreateText} onRecordAudio={onRecordAudio} onFileSelected={onFileSelected} onClose={() => setCreateOpen(false)} />
-        </Suspense>
-      ) : null}
+      {createOpen && canWriteActiveSpace ? <CreateMenu onCreateFolder={onCreateFolder} onCreateText={onCreateText} onRecordAudio={onRecordAudio} onFileSelected={onFileSelected} onClose={() => setCreateOpen(false)} /> : null}
       {manageOpen && canManageActiveSpace ? <SpaceMenu onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} onClose={() => setManageOpen(false)} /> : null}
     </div>
   );
@@ -44,6 +38,36 @@ function useMenuDismiss(onClose: () => void) {
 
 function MenuBackdrop({ onClose }: { onClose: () => void }) {
   return <div className="fixed inset-0 z-10" onClick={onClose} onContextMenu={(event) => { event.preventDefault(); onClose(); }} aria-hidden="true" />;
+}
+
+function CreateMenu({ onCreateFolder, onCreateText, onRecordAudio, onFileSelected, onClose }: { onCreateFolder: () => void; onCreateText: () => void; onRecordAudio: () => void; onFileSelected: (file: File | null) => void; onClose: () => void }) {
+  useMenuDismiss(onClose);
+  function run(action: () => void) {
+    action();
+    onClose();
+  }
+
+  return (
+    <>
+      <MenuBackdrop onClose={onClose} />
+      <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
+        <MenuButton onClick={() => run(onCreateFolder)}><FolderPlus size={14} /> New folder</MenuButton>
+        <MenuButton onClick={() => run(onCreateText)}><FilePlus size={14} /> New document</MenuButton>
+        <MenuButton onClick={() => run(onRecordAudio)}><Mic size={14} /> Record audio</MenuButton>
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-muted hover:bg-panel hover:text-text">
+          <Upload size={14} /> Upload file
+          <input
+            className="hidden"
+            type="file"
+            onChange={(event) => {
+              onFileSelected(event.target.files?.[0] ?? null);
+              onClose();
+            }}
+          />
+        </label>
+      </Card>
+    </>
+  );
 }
 
 function SpaceMenu({ onRenameSpace, onDeleteSpace, onClose }: { onRenameSpace: () => void; onDeleteSpace: () => void; onClose: () => void }) {

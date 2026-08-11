@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -25,7 +25,7 @@ const activeSpace: Space = {
 };
 
 describe("SpaceHeader", () => {
-  it("loads the create menu on demand and starts audio recording", async () => {
+  it("opens the create menu and starts audio recording", async () => {
     const user = userEvent.setup();
     const onRecordAudio = vi.fn();
 
@@ -43,8 +43,8 @@ describe("SpaceHeader", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "Create" }));
-    await user.click(await screen.findByRole("button", { name: "Record audio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByRole("button", { name: "Record audio" }));
 
     expect(onRecordAudio).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "Record audio" })).not.toBeInTheDocument();
