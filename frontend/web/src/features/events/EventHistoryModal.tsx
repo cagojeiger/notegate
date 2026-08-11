@@ -9,6 +9,7 @@ import {
   formatAuditAction,
   formatAuditDetail,
   formatAuditTarget,
+  formatDurationBetween,
   formatEventTime,
   formatEventTimeCompact,
   formatFileChangeAction,
@@ -91,6 +92,10 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
   const detail = useBackgroundJobQuery(job.id, open);
   const currentJob = detail.data?.job ?? job;
   const presentation = jobPresentation(currentJob);
+  const attempts = detail.data?.attempts ?? [];
+  const totalDuration = currentJob.completed_at
+    ? formatDurationBetween(currentJob.created_at, currentJob.completed_at)
+    : null;
   const attemptsId = useId();
   const toggleLabel = `${open ? "Hide" : "Show"} attempts for ${jobLabel(currentJob.kind)}`;
 
@@ -109,6 +114,7 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
               <span className={presentation.text}>{presentation.label}</span>
               <span aria-hidden="true">·</span>
               <span>{currentJob.attempt_count} {currentJob.attempt_count === 1 ? "attempt" : "attempts"}</span>
+              {totalDuration ? <><span aria-hidden="true">·</span><span>{totalDuration} total</span></> : null}
               {currentJob.last_error_code ? <><span aria-hidden="true">·</span><span className="font-mono text-danger">{currentJob.last_error_code}</span></> : null}
             </div>
           </div>
@@ -131,20 +137,34 @@ function BackgroundJobRow({ job }: { job: BackgroundJob }) {
           <div id={attemptsId} className="mt-3 border-t border-seam pt-3 text-xs">
             {detail.isLoading ? <p className="text-muted">Loading attempts…</p> : null}
             {detail.isError ? <p className="text-danger">Could not load attempts.</p> : null}
-            {detail.data && detail.data.attempts.length === 0 ? <p className="text-muted">Waiting for the first attempt.</p> : null}
-            {detail.data && detail.data.attempts.length > 0 ? (
+            {detail.data && attempts.length === 0 ? <p className="text-muted">Waiting for the first attempt.</p> : null}
+            {attempts.length > 0 ? (
               <ol className="space-y-2">
-                {detail.data.attempts.map((attempt) => (
-                  <li key={attempt.attempt_number} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-md bg-bg px-3 py-2">
-                    <span className="font-medium text-text">Attempt {attempt.attempt_number}</span>
-                    <span className="text-muted">{attempt.outcome ? formatAttemptOutcome(attempt.outcome) : "Running"}</span>
-                    <div className="flex flex-col items-end text-muted">
-                      <LifecycleTime label="Started" value={attempt.started_at} />
-                      {attempt.finished_at ? <LifecycleTime label="Finished" value={attempt.finished_at} /> : null}
-                    </div>
-                    {attempt.error_code ? <span className="font-mono text-danger">{attempt.error_code}</span> : null}
-                  </li>
-                ))}
+                {attempts.map((attempt) => {
+                  const previousAttempt = attempts.find(
+                    (candidate) => candidate.attempt_number === attempt.attempt_number - 1
+                  );
+                  const queuedAt = previousAttempt?.finished_at ?? (attempt.attempt_number === 1 ? currentJob.created_at : null);
+                  const queueDuration = queuedAt ? formatDurationBetween(queuedAt, attempt.started_at) : null;
+                  const runDuration = attempt.finished_at
+                    ? formatDurationBetween(attempt.started_at, attempt.finished_at)
+                    : null;
+                  return (
+                    <li key={attempt.attempt_number} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-md bg-bg px-3 py-2">
+                      <span className="font-medium text-text">Attempt {attempt.attempt_number}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 text-muted">
+                        <span>{attempt.outcome ? formatAttemptOutcome(attempt.outcome) : "Running"}</span>
+                        {queueDuration ? <><span aria-hidden="true">·</span><span>Queue {queueDuration}</span></> : null}
+                        {runDuration ? <><span aria-hidden="true">·</span><span>Run {runDuration}</span></> : null}
+                      </div>
+                      <div className="flex flex-col items-end text-muted">
+                        <LifecycleTime label="Started" value={attempt.started_at} />
+                        {attempt.finished_at ? <LifecycleTime label="Finished" value={attempt.finished_at} /> : null}
+                      </div>
+                      {attempt.error_code ? <span className="font-mono text-danger">{attempt.error_code}</span> : null}
+                    </li>
+                  );
+                })}
               </ol>
             ) : null}
           </div>

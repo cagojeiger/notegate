@@ -170,7 +170,10 @@ describe("EventHistoryModal", () => {
   it("shows queue jobs and loads attempt history only when expanded", async () => {
     const user = userEvent.setup();
     const job = backgroundJob("job-1", "running");
-    const finishedJob = backgroundJob("job-1", "succeeded");
+    const finishedJob = {
+      ...backgroundJob("job-1", "succeeded"),
+      completed_at: "2026-07-10T02:12:00.039Z"
+    };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const path = String(input);
       if (path.endsWith("/api/v1/me/jobs/job-1")) {
@@ -178,8 +181,8 @@ describe("EventHistoryModal", () => {
           job: finishedJob,
           attempts: [{
             attempt_number: 1,
-            started_at: "2026-07-10T02:12:01Z",
-            finished_at: "2026-07-10T02:12:02Z",
+            started_at: "2026-07-10T02:12:00.028Z",
+            finished_at: "2026-07-10T02:12:00.039Z",
             outcome: "succeeded",
             error_code: null
           }]
@@ -209,6 +212,9 @@ describe("EventHistoryModal", () => {
 
     expect(await screen.findByText("Attempt 1")).toBeInTheDocument();
     expect(screen.getByText("Succeeded")).toBeInTheDocument();
+    expect(screen.getByText("39 ms total")).toBeInTheDocument();
+    expect(screen.getByText("Queue 28 ms")).toBeInTheDocument();
+    expect(screen.getByText("Run 11 ms")).toBeInTheDocument();
     expect(screen.getByLabelText(/^Started /)).toBeInTheDocument();
     expect(screen.getAllByLabelText(/^Finished /)).toHaveLength(2);
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/v1/me/jobs/job-1"))).toBe(true);
