@@ -296,6 +296,11 @@ background_jobs
   job_id uuid pk
   job_kind text not null
   payload jsonb not null
+  history_visibility text check ('hidden','visible')
+  history_owner_account_id uuid null
+  context_kind text null
+  context_id uuid null
+  context_label text null
   status text check ('queued','running','succeeded','dead')
   available_at timestamptz not null
   attempt_count integer not null

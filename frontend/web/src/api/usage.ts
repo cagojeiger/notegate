@@ -19,8 +19,9 @@ export type CurrentUserUsage = {
   spaces: SpaceUsage[];
 };
 
-type ReconciliationQueuedResponse = {
+export type ReconciliationQueuedResponse = {
   status: "queued";
+  job_id: string;
 };
 
 export function getCurrentUserUsage(client: ApiClient): Promise<CurrentUserUsage> {

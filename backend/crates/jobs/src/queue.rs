@@ -16,6 +16,8 @@ pub const BACKGROUND_JOB_NOTIFY_CHANNEL: &str = "notegate_background_jobs";
 
 const MAX_ERROR_CODE_BYTES: usize = 128;
 const MAX_ERROR_MESSAGE_BYTES: usize = 4096;
+const MAX_CONTEXT_KIND_BYTES: usize = 64;
+const MAX_CONTEXT_LABEL_BYTES: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct JobQueue {
@@ -44,13 +46,23 @@ impl JobQueue {
     ) -> JobQueueResult<EnqueuedJob> {
         validate_new_job(job)?;
         let payload = serde_json::to_value(&job.payload)?;
-        let job_id = sqlx::query_scalar("SELECT enqueue_background_job($1, $2, $3, $4)")
-            .bind(J::KIND)
-            .bind(payload)
-            .bind(job.available_at)
-            .bind(job.max_attempts)
-            .fetch_one(connection)
-            .await?;
+        let job_id =
+            sqlx::query_scalar("SELECT enqueue_background_job($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+                .bind(J::KIND)
+                .bind(payload)
+                .bind(job.available_at)
+                .bind(job.max_attempts)
+                .bind(job.history_visibility.as_str())
+                .bind(job.history_owner_account_id)
+                .bind(job.history_context.as_ref().map(|context| &context.kind))
+                .bind(job.history_context.as_ref().and_then(|context| context.id))
+                .bind(
+                    job.history_context
+                        .as_ref()
+                        .and_then(|context| context.label.as_deref()),
+                )
+                .fetch_one(connection)
+                .await?;
         Ok(EnqueuedJob { job_id })
     }
 
@@ -613,6 +625,22 @@ fn validate_new_job<J: JobSpec>(job: &NewJob<J>) -> JobQueueResult<()> {
             "max attempts must be between 1 and 100".to_owned(),
         ));
     }
+    if let Some(context) = &job.history_context {
+        if context.kind.is_empty() || context.kind.len() > MAX_CONTEXT_KIND_BYTES {
+            return Err(JobQueueError::InvalidConfiguration(
+                "history context kind must contain between 1 and 64 bytes".to_owned(),
+            ));
+        }
+        if context
+            .label
+            .as_ref()
+            .is_some_and(|label| label.is_empty() || label.len() > MAX_CONTEXT_LABEL_BYTES)
+        {
+            return Err(JobQueueError::InvalidConfiguration(
+                "history context label must contain between 1 and 256 bytes".to_owned(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -682,6 +710,7 @@ struct StateCountRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::JobHistoryContext;
 
     struct TestJob;
 
@@ -700,6 +729,45 @@ mod tests {
     fn new_job_validation_rejects_invalid_attempt_limits() {
         let error = validate_new_job(&NewJob::<TestJob>::new(Value::Null).max_attempts(0));
         assert!(matches!(error, Err(JobQueueError::InvalidConfiguration(_))));
+    }
+
+    #[test]
+    fn new_jobs_are_hidden_until_explicitly_recorded_in_history() {
+        let owner_account_id = Uuid::new_v4();
+        let context_id = Uuid::new_v4();
+        let hidden = NewJob::<TestJob>::new(Value::Null);
+        assert_eq!(hidden.history_visibility.as_str(), "hidden");
+        assert_eq!(hidden.history_owner_account_id, None);
+        assert_eq!(hidden.history_context, None);
+
+        let context = JobHistoryContext::new("space")
+            .id(context_id)
+            .label("Research");
+        let visible = NewJob::<TestJob>::new(Value::Null)
+            .record_in_history(owner_account_id, Some(context.clone()));
+        assert_eq!(visible.history_visibility.as_str(), "visible");
+        assert_eq!(visible.history_owner_account_id, Some(owner_account_id));
+        assert_eq!(visible.history_context, Some(context));
+    }
+
+    #[test]
+    fn new_job_validation_rejects_invalid_history_context() {
+        let owner_account_id = Uuid::new_v4();
+        let empty_kind = NewJob::<TestJob>::new(Value::Null)
+            .record_in_history(owner_account_id, Some(JobHistoryContext::new("")));
+        assert!(matches!(
+            validate_new_job(&empty_kind),
+            Err(JobQueueError::InvalidConfiguration(_))
+        ));
+
+        let empty_label = NewJob::<TestJob>::new(Value::Null).record_in_history(
+            owner_account_id,
+            Some(JobHistoryContext::new("space").label("")),
+        );
+        assert!(matches!(
+            validate_new_job(&empty_label),
+            Err(JobQueueError::InvalidConfiguration(_))
+        ));
     }
 
     #[test]

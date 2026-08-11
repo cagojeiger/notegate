@@ -15,7 +15,7 @@ describe("usage api", () => {
 
   it("requests a usage check for one space", async () => {
     const client = createMockApiClient();
-    client.post.mockResolvedValue({ status: "queued" });
+    client.post.mockResolvedValue({ status: "queued", job_id: "job-1" });
 
     await requestSpaceUsageCheck(client, "space-1");
 

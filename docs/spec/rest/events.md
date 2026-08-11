@@ -87,6 +87,21 @@ User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at d
 - 입력·응답의 본문, 검색어, cursor, credential, PII와 자유 형식 오류 문구는 marker로 대체되며 알 수 없는 field 값은 반환하지 않는다.
 - 이 endpoint는 browser self-review용이다. MCP 조회 tool은 추가하지 않는다.
 
+## List my background jobs
+
+```http
+GET /api/v1/me/jobs?limit=50&cursor=...
+GET /api/v1/me/jobs/{job_id}
+```
+
+User caller만 가능하다. 공통 queue envelope에서 `history_visibility=visible`, `history_owner_account_id=caller`로 등록된 job을 종류와 관계없이 `created_at desc, job_id desc` 순으로 반환한다. 목록은 상태와 안정적인 error code를 제공하고, 단건 조회는 attempt 이력을 함께 반환한다. 표시 문맥이 없는 job은 `context_kind`, `context_id`, `context_label`이 `null`이다.
+
+- 기본 page size는 50, 최대 100이다.
+- `queued`와 `running`이 활성 상태이며 UI는 활성 작업이 있을 때만 목록을 polling한다.
+- Job은 `created_at`을 queued 시각, `completed_at`을 terminal 완료 시각으로 표시한다. 개별 attempt는 `started_at`과 `finished_at`으로 실제 실행 구간을 표시한다.
+- `claimed_by`, `worker_id`, claim token, payload, 자유 형식 error message는 응답하지 않는다.
+- purge, object cleanup, metadata write-behind, metrics upkeep, queue reconciler처럼 queue 밖에서 실행되는 운영 task는 이 이력에 포함하지 않는다.
+
 ## List space file change events
 
 ```http

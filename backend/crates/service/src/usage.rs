@@ -55,7 +55,7 @@ impl UsageService {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageReconciliationOutcome {
-    Queued,
+    Queued { job_id: Uuid },
     AlreadyQueued,
     Cooldown,
 }
@@ -63,7 +63,7 @@ pub enum UsageReconciliationOutcome {
 impl From<DbUsageReconciliationOutcome> for UsageReconciliationOutcome {
     fn from(outcome: DbUsageReconciliationOutcome) -> Self {
         match outcome {
-            DbUsageReconciliationOutcome::Queued => Self::Queued,
+            DbUsageReconciliationOutcome::Queued { job_id } => Self::Queued { job_id },
             DbUsageReconciliationOutcome::AlreadyQueued => Self::AlreadyQueued,
             DbUsageReconciliationOutcome::Cooldown => Self::Cooldown,
         }

@@ -141,7 +141,7 @@ Text/File 한도는 서로 독립이므로 StatusBar에서 합산 비율을 만�
 - 대상 space와 folder path, 진행률, 상태를 보여준다.
 - 진행 중 항목은 취소할 수 있고 실패 항목은 재시도하거나 닫을 수 있다.
 - 완료 항목은 잠시 표시한 뒤 자동으로 제거한다.
-- History는 완료된 Changes와 Audit만 담당한다.
+- History는 Changes, Audit, MCP, queue Jobs 이력을 담당한다. Jobs는 활성 작업이 있을 때만 자동 갱신한다.
 
 ## 반응형
 

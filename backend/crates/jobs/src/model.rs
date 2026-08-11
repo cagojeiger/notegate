@@ -16,7 +16,53 @@ pub struct NewJob<J: JobSpec> {
     pub payload: J::Payload,
     pub available_at: Option<DateTime<Utc>>,
     pub max_attempts: i32,
+    pub(crate) history_visibility: JobHistoryVisibility,
+    pub(crate) history_owner_account_id: Option<Uuid>,
+    pub(crate) history_context: Option<JobHistoryContext>,
     _job: PhantomData<fn() -> J>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JobHistoryVisibility {
+    Hidden,
+    Visible,
+}
+
+impl JobHistoryVisibility {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Visible => "visible",
+        }
+    }
+}
+
+/// Optional display context attached to an account-scoped job history entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobHistoryContext {
+    pub kind: String,
+    pub id: Option<Uuid>,
+    pub label: Option<String>,
+}
+
+impl JobHistoryContext {
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            id: None,
+            label: None,
+        }
+    }
+
+    pub fn id(mut self, id: Uuid) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
 }
 
 impl<J: JobSpec> NewJob<J> {
@@ -25,6 +71,9 @@ impl<J: JobSpec> NewJob<J> {
             payload,
             available_at: None,
             max_attempts: 8,
+            history_visibility: JobHistoryVisibility::Hidden,
+            history_owner_account_id: None,
+            history_context: None,
             _job: PhantomData,
         }
     }
@@ -36,6 +85,18 @@ impl<J: JobSpec> NewJob<J> {
 
     pub fn max_attempts(mut self, max_attempts: i32) -> Self {
         self.max_attempts = max_attempts;
+        self
+    }
+
+    /// Record this job in the owning account's history.
+    pub fn record_in_history(
+        mut self,
+        owner_account_id: Uuid,
+        context: Option<JobHistoryContext>,
+    ) -> Self {
+        self.history_visibility = JobHistoryVisibility::Visible;
+        self.history_owner_account_id = Some(owner_account_id);
+        self.history_context = context;
         self
     }
 }

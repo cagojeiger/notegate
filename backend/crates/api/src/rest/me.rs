@@ -8,12 +8,12 @@
 //! `DELETE` is the user account teardown endpoint. It is intentionally REST-only:
 //! MCP remains a file/space tool surface and does not expose account deletion.
 
-use axum::extract::{Extension, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use notegate_model::{Caller, ListAuditEvents, ListMcpInvocations};
+use notegate_model::{Caller, ListAuditEvents, ListBackgroundJobs, ListMcpInvocations};
 use notegate_service::usage::{CurrentUserUsage, QuotaUsage};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -24,7 +24,8 @@ use crate::error::ApiError;
 use crate::identity::me::{MeOutput, build_me};
 use crate::page::Page;
 use crate::rest::dto::{
-    AuditEventListResponse, AuditEventOut, McpInvocationListResponse, McpInvocationOut,
+    AuditEventListResponse, AuditEventOut, BackgroundJobDetailResponse, BackgroundJobListResponse,
+    BackgroundJobOut, McpInvocationListResponse, McpInvocationOut,
 };
 use crate::state::AppState;
 
@@ -34,6 +35,8 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/me/usage", get(get_usage))
         .route("/v1/me/audit-events", get(list_audit_events))
         .route("/v1/me/mcp-invocations", get(list_mcp_invocations))
+        .route("/v1/me/jobs", get(list_background_jobs))
+        .route("/v1/me/jobs/{job_id}", get(get_background_job))
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,6 +212,68 @@ pub(crate) async fn list_mcp_invocations(
         page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
     })
     .into_response();
+    set_private_no_store(&mut response);
+    Ok(response)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/jobs",
+    tag = "events",
+    params(
+        ("limit" = Option<i64>, Query, description = "Page size"),
+        ("cursor" = Option<String>, Query, description = "Opaque pagination cursor"),
+    ),
+    responses((status = 200, description = "List current user's background job history", body = BackgroundJobListResponse)),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn list_background_jobs(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(query): Query<ListEventsQuery>,
+) -> Result<Response, ApiError> {
+    let page = state
+        .account_lifecycle
+        .list_background_jobs(
+            caller.account.kind,
+            caller.account_id(),
+            ListBackgroundJobs {
+                limit: query.limit,
+                cursor: query.cursor,
+            },
+        )
+        .await?;
+    let jobs = page.items.iter().map(BackgroundJobOut::from).collect();
+    let mut response = Json(BackgroundJobListResponse {
+        jobs,
+        page: Page::from_items(page.limit, &page.items, page.has_more, page.next_cursor),
+    })
+    .into_response();
+    set_private_no_store(&mut response);
+    Ok(response)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/jobs/{job_id}",
+    tag = "events",
+    params(("job_id" = Uuid, Path, description = "Background job id")),
+    responses(
+        (status = 200, description = "Get a background job and its attempts", body = BackgroundJobDetailResponse),
+        (status = 404, description = "Background job not found", body = crate::error::ErrorResponse),
+    ),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn get_background_job(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path(job_id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let detail = state
+        .account_lifecycle
+        .get_background_job(caller.account.kind, caller.account_id(), job_id)
+        .await?;
+    let mut response = Json(BackgroundJobDetailResponse::from(&detail)).into_response();
     set_private_no_store(&mut response);
     Ok(response)
 }

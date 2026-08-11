@@ -167,6 +167,53 @@ describe("EventHistoryModal", () => {
     expect(screen.getByText("Not recorded. This call predates response logging.")).toBeInTheDocument();
   });
 
+  it("shows queue jobs and loads attempt history only when expanded", async () => {
+    const user = userEvent.setup();
+    const job = backgroundJob("job-1", "running");
+    const finishedJob = backgroundJob("job-1", "succeeded");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const path = String(input);
+      if (path.endsWith("/api/v1/me/jobs/job-1")) {
+        return jsonResponse({
+          job: finishedJob,
+          attempts: [{
+            attempt_number: 1,
+            started_at: "2026-07-10T02:12:01Z",
+            finished_at: "2026-07-10T02:12:02Z",
+            outcome: "succeeded",
+            error_code: null
+          }]
+        });
+      }
+      if (path.includes("/api/v1/me/jobs?")) {
+        return jsonResponse({ jobs: [job], page: { ...page, returned: 1 } });
+      }
+      return jsonResponse({ events: [], page });
+    });
+
+    render(
+      <ApiProvider authCacheKey="browser-session:0">
+        <EventHistoryModal spaces={[space]} initialSpaceId={space.id} canViewAuditEvents onClose={vi.fn()} />
+      </ApiProvider>
+    );
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/v1/me/jobs"))).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "Jobs" }));
+    expect(await screen.findByText("Usage recalculation")).toBeInTheDocument();
+    expect(screen.getByText("Running…")).toBeInTheDocument();
+    expect(screen.getByText("Space Research")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Queued /)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/v1/me/jobs/job-1"))).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Show attempts for Usage recalculation" }));
+
+    expect(await screen.findByText("Attempt 1")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Started /)).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/^Finished /)).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/v1/me/jobs/job-1"))).toBe(true);
+  });
+
   it("loads the next file-change page from the server cursor", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
@@ -326,5 +373,23 @@ function mcpInvocation(
     outcome,
     error_code: outcome === "error" ? "tool_error" : null,
     duration_ms: 12
+  };
+}
+
+function backgroundJob(id: string, status: "queued" | "running" | "succeeded" | "dead") {
+  return {
+    id,
+    kind: "space_usage_reconcile",
+    status,
+    context_kind: "space",
+    context_id: secondSpace.id,
+    context_label: secondSpace.name,
+    attempt_count: status === "queued" ? 0 : 1,
+    failure_count: 0,
+    max_attempts: 8,
+    last_error_code: null,
+    created_at: "2026-07-10T02:12:00Z",
+    updated_at: "2026-07-10T02:12:01Z",
+    completed_at: status === "succeeded" || status === "dead" ? "2026-07-10T02:12:02Z" : null
   };
 }

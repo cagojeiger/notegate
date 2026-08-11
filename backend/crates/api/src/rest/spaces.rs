@@ -77,6 +77,7 @@ pub(crate) struct ReorderItem {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ReconciliationQueuedResponse {
     status: &'static str,
+    job_id: Uuid,
 }
 
 #[utoipa::path(
@@ -259,9 +260,12 @@ pub(crate) async fn request_usage_reconciliation(
         .request_space_reconciliation(caller.account.kind, caller.account_id(), space_id)
         .await?;
     match outcome {
-        UsageReconciliationOutcome::Queued => Ok((
+        UsageReconciliationOutcome::Queued { job_id } => Ok((
             StatusCode::ACCEPTED,
-            Json(ReconciliationQueuedResponse { status: "queued" }),
+            Json(ReconciliationQueuedResponse {
+                status: "queued",
+                job_id,
+            }),
         )),
         UsageReconciliationOutcome::AlreadyQueued => Err(ApiError::usage_reconciliation_pending()),
         UsageReconciliationOutcome::Cooldown => Err(ApiError::usage_reconciliation_cooldown()),
