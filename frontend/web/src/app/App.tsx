@@ -1,15 +1,15 @@
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError } from "../api/errors";
 import type { Me } from "../api/types";
 import { LoginGate } from "../auth/LoginGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
-import { UploadProvider } from "../features/uploads/UploadProvider";
-import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 import { useUiStore } from "../stores/uiStore";
+
+const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
 export function App() {
   const [sessionRevision, setSessionRevision] = useState(0);
@@ -83,9 +83,9 @@ function AuthBoundary({
   }
 
   return (
-    <UploadProvider>
-      <AppShell me={authViewState.me} onSignOut={onSessionChanged} />
-    </UploadProvider>
+    <Suspense fallback={<FullScreenStatus label="Loading workspace" />}>
+      <AuthenticatedWorkspace me={authViewState.me} onSignOut={onSessionChanged} />
+    </Suspense>
   );
 }
 

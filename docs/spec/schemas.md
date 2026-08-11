@@ -89,6 +89,7 @@ type RestNode = {
   detected_media_type?: string
   preview_available?: boolean
   file_preview_kind?: "image" | "pdf"
+  file_media_kind?: "image" | "pdf" | "audio" | "other"
   original_filename?: string
   encryption_mode?: "none" | "client"
   encryption_metadata?: object

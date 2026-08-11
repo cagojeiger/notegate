@@ -18,7 +18,7 @@ export function UploadProgressDock() {
   return (
     <section
       aria-label="File uploads"
-      className="z-20 shrink-0 border-t border-seam bg-surface text-text md:fixed md:bottom-10 md:right-3 md:w-96 md:overflow-hidden md:rounded-lg md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
+      className="pointer-events-auto shrink-0 border-t border-seam bg-surface text-text md:overflow-hidden md:rounded-lg md:border md:border-border md:shadow-[var(--ng-focus-shadow)]"
     >
       <button
         type="button"

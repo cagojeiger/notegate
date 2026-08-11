@@ -92,13 +92,13 @@ async fn object_upload_attach_is_idempotent_and_updates_usage_and_history()
     );
 
     let (node, file) = repo
-        .attach_object_upload(upload_id, space_id, account_id, None)
+        .attach_object_upload(upload_id, space_id, account_id, None, None)
         .await?;
     assert_eq!(file.object_key, object_key);
     assert_eq!(file.byte_len, byte_len);
 
     let (retried_node, retried_file) = repo
-        .attach_object_upload(upload_id, space_id, account_id, None)
+        .attach_object_upload(upload_id, space_id, account_id, None, None)
         .await?;
     assert_eq!(retried_node.id, node.id);
     assert_eq!(retried_file, file);
@@ -299,7 +299,7 @@ async fn subtree_soft_delete_queues_objects_and_purge_preserves_missed_requests(
         )
         .await?;
     let (node, _) = files
-        .attach_object_upload(upload_id, space_id, account_id, None)
+        .attach_object_upload(upload_id, space_id, account_id, None, None)
         .await?;
     files
         .soft_delete_node(space_id, folder.id, account_id, true)
@@ -377,7 +377,7 @@ async fn space_soft_delete_queues_all_attached_objects() -> Result<(), Box<dyn s
         )
         .await?;
     files
-        .attach_object_upload(upload_id, space_id, account_id, None)
+        .attach_object_upload(upload_id, space_id, account_id, None, None)
         .await?;
 
     SpaceRepo::new(db.pool.clone())

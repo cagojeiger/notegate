@@ -89,4 +89,25 @@ describe("MobileSpaceBar", () => {
     expect(view.container.querySelectorAll("[data-active-indicator]")).toHaveLength(1);
   });
 
+  it("disables destination changes while navigation is locked", () => {
+    render(
+      <MobileSpaceBar
+        spaces={spaces}
+        activeSpace={spaces[0]}
+        canCreateSpace={false}
+        navigationLocked
+        onSelectSpace={vi.fn()}
+        onCreateSpace={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onOpenHistory={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Open space library" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Daily" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "History" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
+  });
+
 });

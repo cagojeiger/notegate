@@ -388,6 +388,11 @@ describe("filePreviewKindForNode", () => {
   it("does not preview encrypted or known unsupported files", () => {
     expect(filePreviewKindForNode(fileNode({ encryption_mode: "client" }))).toBeNull();
     expect(filePreviewKindForNode(fileNode({ preview_available: false }))).toBeNull();
+    expect(filePreviewKindForNode(fileNode({
+      media_type: "audio/webm",
+      file_media_kind: "audio",
+      preview_available: undefined
+    }))).toBeNull();
   });
 });
 

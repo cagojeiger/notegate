@@ -265,7 +265,7 @@ async fn upload_attach_rechecks_path_after_parent_moves() -> Result<(), Box<dyn 
     .await?;
 
     assert_path_too_long(
-        repo.attach_object_upload(upload_id, space_id, account, None)
+        repo.attach_object_upload(upload_id, space_id, account, None, None)
             .await,
     );
     let attached: i64 =

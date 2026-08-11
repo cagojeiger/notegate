@@ -112,6 +112,7 @@ pub(crate) struct UploadPartOut {
 #[derive(Debug, Default, Deserialize, ToSchema)]
 pub(crate) struct CompleteUploadBody {
     completed_parts: Option<Vec<CompletedPartBody>>,
+    node_metadata: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -223,18 +224,27 @@ pub(crate) async fn complete(
         .files
         .object_upload(caller.account_id(), space_id, upload_id)
         .await?;
-    let completed_parts = body
-        .and_then(|Json(body)| body.completed_parts)
-        .map(|parts| {
-            parts
-                .into_iter()
-                .map(|part| CompletedUploadPart {
-                    part_number: part.part_number,
-                    etag: part.etag,
-                })
-                .collect()
-        });
-    let view = complete_upload(&state, caller.account_id(), upload, completed_parts).await?;
+    let CompleteUploadBody {
+        completed_parts,
+        node_metadata,
+    } = body.map(|Json(body)| body).unwrap_or_default();
+    let completed_parts = completed_parts.map(|parts| {
+        parts
+            .into_iter()
+            .map(|part| CompletedUploadPart {
+                part_number: part.part_number,
+                etag: part.etag,
+            })
+            .collect()
+    });
+    let view = complete_upload(
+        &state,
+        caller.account_id(),
+        upload,
+        completed_parts,
+        node_metadata,
+    )
+    .await?;
     let refs = state
         .accounts
         .find_account_refs(&attribution_ids([&view.node]))
@@ -316,6 +326,26 @@ mod tests {
                 Ok(expected)
             );
         }
+    }
+
+    #[test]
+    fn complete_body_accepts_optional_node_metadata() -> Result<(), serde_json::Error> {
+        let body: CompleteUploadBody = serde_json::from_value(json!({
+            "node_metadata": {
+                "type": "audio_recording",
+                "recording": { "profile_id": "notegate-meeting-llm-v1" }
+            }
+        }))?;
+
+        assert_eq!(
+            body.node_metadata,
+            Some(json!({
+                "type": "audio_recording",
+                "recording": { "profile_id": "notegate-meeting-llm-v1" }
+            }))
+        );
+        assert!(body.completed_parts.is_none());
+        Ok(())
     }
 
     #[test]

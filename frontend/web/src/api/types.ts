@@ -45,6 +45,7 @@ export type Space = {
 
 export type NodeKind = "folder" | "text" | "file";
 export type FilePreviewKind = "image" | "pdf";
+export type FileMediaKind = "image" | "pdf" | "audio" | "other";
 
 export type AccountRef = {
   id: string;
@@ -65,6 +66,7 @@ export type NodeSummary = {
   line_count?: number;
   preview_available?: boolean;
   file_preview_kind?: FilePreviewKind;
+  file_media_kind?: FileMediaKind;
   updated_at: string;
 };
 
@@ -196,6 +198,8 @@ export type FilePreviewUrlResponse = {
   media_type: string;
   expires_at: string;
 };
+
+export type AudioPreviewUrlResponse = FilePreviewUrlResponse;
 
 export type BatchFilePreviewItem = {
   path: string;

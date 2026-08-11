@@ -14,20 +14,18 @@ import { queryKeys } from "../../api/queryKeys";
 
 export type UploadTaskStatus = "queued" | "preparing" | "uploading" | "finalizing" | "failed" | "completed";
 
-export type UploadTask = FileUploadInput & {
-  id: string;
-  spaceId: string;
-  spaceName: string;
-  destinationPath: string;
-  status: UploadTaskStatus;
-  uploadedBytes: number;
-  error: string | null;
-};
-
 export type StartUploadInput = FileUploadInput & {
   spaceId: string;
   spaceName: string;
   destinationPath: string;
+  nodeMetadata?: Record<string, unknown>;
+};
+
+export type UploadTask = StartUploadInput & {
+  id: string;
+  status: UploadTaskStatus;
+  uploadedBytes: number;
+  error: string | null;
 };
 
 type UploadState = {
@@ -86,7 +84,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         if (controller.signal.aborted) throw canceledError();
 
         updateTask(taskId, (task) => ({ ...task, status: "finalizing", uploadedBytes: input.file.size }));
-        return await completeFileUpload(client, input.spaceId, upload.upload_id, completedParts);
+        return await completeFileUpload(
+          client,
+          input.spaceId,
+          upload.upload_id,
+          completedParts,
+          input.nodeMetadata
+        );
       } catch (error) {
         // Cleanup runs in the background so the task can settle immediately.
         // Abandoned uploads also expire server-side.

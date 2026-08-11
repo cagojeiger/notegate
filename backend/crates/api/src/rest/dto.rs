@@ -169,7 +169,7 @@ mod tests {
     };
     use serde_json::json;
 
-    use crate::file_preview::FilePreviewKind;
+    use crate::file_preview::{FileMediaKind, FilePreviewKind};
 
     use super::*;
 
@@ -246,6 +246,7 @@ mod tests {
         assert!(out.encryption_metadata.is_none());
         assert!(out.preview_available.is_none());
         assert!(out.file_preview_kind.is_none());
+        assert!(out.file_media_kind.is_none());
     }
 
     #[test]
@@ -266,6 +267,7 @@ mod tests {
         assert!(out.encryption_metadata.is_none());
         assert!(out.preview_available.is_none());
         assert!(out.file_preview_kind.is_none());
+        assert!(out.file_media_kind.is_none());
     }
 
     #[test]
@@ -314,6 +316,35 @@ mod tests {
     }
 
     #[test]
+    fn node_summary_out_exposes_audio_media_kind() {
+        let node = base_node(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.media_type = "audio/webm;codecs=opus".to_owned();
+        stats.detected_media_type = Some("video/webm".to_owned());
+        let view = NodeSummaryView {
+            node: NodeSummary {
+                id: node.id,
+                space_id: node.space_id,
+                parent_id: node.parent_id,
+                name: node.name,
+                kind: node.kind,
+                sort_order: node.sort_order,
+                updated_at: node.updated_at,
+            },
+            path: "/recording.webm".to_owned(),
+            has_children: false,
+            effective_write_locked: false,
+            text: None,
+            file: Some(stats),
+        };
+
+        let out = NodeSummaryOut::from(&view);
+
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Audio));
+    }
+
+    #[test]
     fn node_out_from_view_file_derives_fields_from_file_stats() {
         let mut view = base_view(NodeKind::File);
         view.file = Some(file_stats());
@@ -329,6 +360,7 @@ mod tests {
         assert_eq!(out.detected_media_type, Some("image/png".to_owned()));
         assert_eq!(out.preview_available, Some(false));
         assert_eq!(out.file_preview_kind, None);
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Image));
         assert_eq!(out.original_filename, Some("photo.png".to_owned()));
         assert_eq!(out.encryption_mode, Some("client".to_owned()));
         assert_eq!(out.encryption_metadata, Some(json!({"iv": "abc"})));
@@ -349,6 +381,7 @@ mod tests {
         assert_eq!(out.encryption_mode, Some("none".to_owned()));
         assert_eq!(out.preview_available, Some(true));
         assert_eq!(out.file_preview_kind, Some(FilePreviewKind::Image));
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Image));
     }
 
     #[test]
@@ -394,6 +427,22 @@ mod tests {
 
         assert_eq!(out.preview_available, Some(false));
         assert_eq!(out.file_preview_kind, Some(FilePreviewKind::Pdf));
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Pdf));
+    }
+
+    #[test]
+    fn node_out_exposes_audio_media_kind_for_browser_recording() {
+        let mut view = base_view(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.media_type = "audio/webm;codecs=opus".to_owned();
+        stats.detected_media_type = Some("video/webm".to_owned());
+        view.file = Some(stats);
+
+        let out = NodeOut::from_view(&view, &HashMap::new());
+
+        assert_eq!(out.file_preview_kind, None);
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Audio));
     }
 
     #[test]

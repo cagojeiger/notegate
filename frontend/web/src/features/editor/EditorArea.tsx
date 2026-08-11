@@ -33,12 +33,13 @@ type EditorAreaProps = NodeActions & {
   onSetGroupMode: (index: number, mode: "preview" | "edit") => void;
   onCreateFolder: () => void;
   onCreateText: () => void;
+  onRecordAudio: () => void;
   onFileSelected: (file: File | null) => void;
   onDownloadFile: (node: NodeSummary) => void;
   canWriteActiveSpace: boolean;
 } & EditorNavigationActions;
 
-export function EditorArea({ groups, activeGroupIndex, presentation = "split", visibleGroupCount = groups.length, activeSpace, canWriteActiveSpace, onFocusGroup, onNavigateEditorGroup, navigatingGroupIds, onOpenNode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
+export function EditorArea({ groups, activeGroupIndex, presentation = "split", visibleGroupCount = groups.length, activeSpace, canWriteActiveSpace, onFocusGroup, onNavigateEditorGroup, navigatingGroupIds, onOpenNode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCloseGroup, onSetGroupMode, onCreateFolder, onCreateText, onRecordAudio, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode }: EditorAreaProps) {
   const multiple = groups.length > 1;
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number; node: RestNode; groupIndex: number } | null>(null);
   const visibleRange = editorGroupVisibleRange(groups.length, activeGroupIndex, visibleGroupCount);
@@ -72,6 +73,7 @@ export function EditorArea({ groups, activeGroupIndex, presentation = "split", v
               onOpenMarkdownLink={onOpenMarkdownLink}
               onCreateFolder={onCreateFolder}
               onCreateText={onCreateText}
+              onRecordAudio={onRecordAudio}
               onFileSelected={onFileSelected}
               onDownloadFile={onDownloadFile}
               onRenameNode={onRenameNode}
@@ -116,12 +118,12 @@ function editorGroupVisibleRange(totalGroups: number, activeIndex: number, visib
   return { start, end: start + count };
 }
 
-function GroupBody({ active, groupId, navigationActions, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions: ReactNode; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onFileSelected: (file: File | null) => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
+function GroupBody({ active, groupId, navigationActions, node, mode, activeSpace, canWriteActiveSpace, canClose, canOpenInNewGroup, onClose, onSetMode, onOpenNodeInNewGroup, onOpenMarkdownLink, onCreateFolder, onCreateText, onRecordAudio, onFileSelected, onDownloadFile, onRenameNode, onMoveNode, onDeleteNode, onHeaderContextMenu }: NodeActions & EditorNavigationActions & { active: boolean; groupId: number; navigationActions: ReactNode; node: RestNode | null; mode: "preview" | "edit"; activeSpace: Space | null; canWriteActiveSpace: boolean; canClose: boolean; canOpenInNewGroup: boolean; onClose: () => void; onSetMode: (mode: "preview" | "edit") => void; onCreateFolder: () => void; onCreateText: () => void; onRecordAudio: () => void; onFileSelected: (file: File | null) => void; onDownloadFile: (node: NodeSummary) => void; onHeaderContextMenu: (node: RestNode, event: MouseEvent) => void }) {
   if (!node) {
     return (
       <>
         <EditorGroupHeader title="Choose from Files" navigationActions={navigationActions} canClose={canClose} onClose={onClose} active={active} />
-        <EmptyEditor activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} />
+        <EmptyEditor activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onRecordAudio={onRecordAudio} onFileSelected={onFileSelected} />
       </>
     );
   }

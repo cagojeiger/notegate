@@ -508,10 +508,18 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     files
         .record_registered_object_upload(&registration, owner, ws, &upload)
         .await?;
+    let recording_metadata = json!({
+        "type": "audio_recording",
+        "recording": {
+            "profile_id": "notegate-meeting-llm-v1",
+            "actual": { "sample_rate": 48000 }
+        }
+    });
     let uploaded = files
-        .complete_object_upload(owner, ws, upload_id, None)
+        .complete_object_upload(owner, ws, upload_id, None, Some(&recording_metadata))
         .await?;
     assert_eq!(uploaded.node.path, "/projects/diagram.bin");
+    assert_eq!(uploaded.node.node.metadata, recording_metadata);
     assert_eq!(uploaded.file.byte_len, 11);
 
     let page = files
@@ -1178,7 +1186,7 @@ async fn batch_preview_candidates_preserve_path_order_and_partial_results()
         .record_registered_object_upload(&registration, owner, ws, &upload)
         .await?;
     let uploaded = files
-        .complete_object_upload(owner, ws, upload_id, Some("image/png"))
+        .complete_object_upload(owner, ws, upload_id, Some("image/png"), None)
         .await?;
 
     let candidates = files
@@ -1348,7 +1356,7 @@ async fn detected_preview_media_types_are_recorded_in_one_batch_write()
             .record_registered_object_upload(&registration, owner, ws, &upload)
             .await?;
         let uploaded = files
-            .complete_object_upload(owner, ws, upload_id, None)
+            .complete_object_upload(owner, ws, upload_id, None, None)
             .await?;
         detections.push((uploaded.node.node.id, media_type.to_owned()));
     }

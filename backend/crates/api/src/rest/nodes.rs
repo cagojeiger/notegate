@@ -544,6 +544,7 @@ mod collection_response_tests {
                     line_count: None,
                     preview_available: Some(true),
                     file_preview_kind: Some(crate::file_preview::FilePreviewKind::Image),
+                    file_media_kind: None,
                     updated_at,
                 })
                 .collect();

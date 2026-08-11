@@ -309,7 +309,7 @@ pub(crate) async fn complete(
                 })
                 .collect()
         });
-    let view = complete_upload(&state, caller.account_id(), upload, completed_parts).await?;
+    let view = complete_upload(&state, caller.account_id(), upload, completed_parts, None).await?;
     Ok((
         StatusCode::CREATED,
         Json(FileResponse {

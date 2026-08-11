@@ -4,7 +4,12 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestQueryClient } from "../../test/queryClient";
-import { UploadProvider, useUploadActions, useUploadManager } from "./UploadProvider";
+import {
+  type StartUploadInput,
+  UploadProvider,
+  useUploadActions,
+  useUploadManager
+} from "./UploadProvider";
 
 const mocks = vi.hoisted(() => ({
   abortFileUpload: vi.fn(),
@@ -59,7 +64,13 @@ describe("UploadProvider", () => {
     await act(async () => { transfer.resolve(); });
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
 
-    expect(mocks.completeFileUpload).toHaveBeenCalledWith(expect.anything(), "space-1", "server-upload-1", undefined);
+    expect(mocks.completeFileUpload).toHaveBeenCalledWith(
+      expect.anything(),
+      "space-1",
+      "server-upload-1",
+      undefined,
+      undefined
+    );
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: ["spaces", "space-1", "recent"],
       exact: true
@@ -68,6 +79,23 @@ describe("UploadProvider", () => {
       queryKey: ["spaces", "space-1", "children", "parent-1"]
     });
     expect(resetQueries).toHaveBeenCalledTimes(2);
+  });
+
+  it("attaches optional node metadata when completing an upload", async () => {
+    mocks.transferFile.mockResolvedValue(undefined);
+    const { result } = renderUploadManager();
+    const nodeMetadata = { type: "audio_recording" };
+
+    act(() => { result.current.startUpload(input({ nodeMetadata })); });
+    await waitFor(() => expect(result.current.tasks[0]?.status).toBe("completed"));
+
+    expect(mocks.completeFileUpload).toHaveBeenCalledWith(
+      expect.anything(),
+      "space-1",
+      "server-upload-1",
+      undefined,
+      nodeMetadata
+    );
   });
 
   it("removes a transfer when the user cancels it", async () => {
@@ -226,7 +254,7 @@ function uploadWrapper(queryClient: QueryClient) {
   );
 }
 
-function input(overrides: Partial<ReturnType<typeof inputBase>> = {}) {
+function input(overrides: Partial<StartUploadInput> = {}): StartUploadInput {
   return { ...inputBase(), ...overrides };
 }
 

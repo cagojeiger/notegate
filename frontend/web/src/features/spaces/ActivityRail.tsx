@@ -19,6 +19,7 @@ type ActivityRailProps = {
   activeSpace: Space | null;
   canCreateSpace: boolean;
   canManageSpaces: boolean;
+  navigationLocked?: boolean;
   onSelectSpace: (space: Space) => void;
   onReorderSpaces: (spaces: Space[]) => void;
   onCreateSpace: () => void;
@@ -30,7 +31,7 @@ type ActivityRailProps = {
   onOpenSettings: () => void;
 };
 
-export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: ActivityRailProps) {
+export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpaces, navigationLocked = false, onSelectSpace, onReorderSpaces, onCreateSpace, onRenameSpace, onDeleteSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: ActivityRailProps) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; space: Space } | null>(null);
@@ -51,8 +52,9 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
           {libraryActive ? <span data-active-indicator className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
           <button
             type="button"
+            disabled={navigationLocked}
             onClick={onOpenLibrary}
-            className={`grid size-9 place-items-center rounded-xl transition active:bg-[var(--ng-selection)] ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+            className={`grid size-9 place-items-center rounded-xl transition active:bg-[var(--ng-selection)] disabled:cursor-not-allowed disabled:opacity-45 ${libraryActive ? "bg-[var(--ng-selection)] text-primary" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
             aria-label="Open space library"
             aria-pressed={libraryActive}
             aria-current={libraryActive ? "page" : undefined}
@@ -74,6 +76,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
               draggable={canReorder}
               onContextMenu={(event) => {
                 event.preventDefault();
+                if (navigationLocked) return;
                 setMenu({ x: event.clientX, y: event.clientY, space });
               }}
               onDragStart={(event) => {
@@ -106,7 +109,7 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
             >
               {dropBefore ? <span className="absolute left-2 right-2 -top-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}
               {active ? <span data-active-indicator className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
-              <button type="button" onClick={() => onSelectSpace(space)} aria-label={space.name} aria-current={active ? "page" : undefined} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
+              <button type="button" disabled={navigationLocked} onClick={() => onSelectSpace(space)} aria-label={space.name} aria-current={active ? "page" : undefined} title={`${space.name}${canReorder ? " · drag to reorder" : ""}`} className={`grid size-9 place-items-center rounded-xl text-sm font-semibold transition active:bg-[var(--ng-selection)] disabled:cursor-not-allowed disabled:opacity-45 ${active ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}>
                 {space.name.slice(0, 1).toUpperCase()}
               </button>
               {dropAfter ? <span className="absolute left-2 right-2 -bottom-1 h-0.5 rounded-full bg-primary shadow-[0_0_0_1px_var(--ng-bg)]" aria-hidden="true" /> : null}
@@ -120,10 +123,10 @@ export function ActivityRail({ spaces, activeSpace, canCreateSpace, canManageSpa
         ) : null}
       </div>
       <div className="space-y-1 border-t border-seam p-2">
-        <button onClick={onOpenHistory} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="History" title="History">
+        <button disabled={navigationLocked} onClick={onOpenHistory} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="History" title="History">
           <History size={16} />
         </button>
-        <button onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text" aria-label="Settings">
+        <button disabled={navigationLocked} onClick={onOpenSettings} className="grid size-9 place-items-center rounded-xl text-muted transition hover:bg-[var(--ng-hover)] hover:text-text disabled:cursor-not-allowed disabled:opacity-45" aria-label="Settings">
           <Settings size={16} />
         </button>
       </div>

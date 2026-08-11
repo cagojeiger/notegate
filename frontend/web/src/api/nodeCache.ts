@@ -118,6 +118,7 @@ function toNodeSummary(node: CachedNodeReference): NodeSummary {
     line_count: node.line_count,
     preview_available: node.preview_available,
     file_preview_kind: node.file_preview_kind,
+    file_media_kind: node.file_media_kind,
     updated_at: node.updated_at
   };
 }

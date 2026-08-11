@@ -1,6 +1,7 @@
 import type { ApiClient } from "./client";
 import { ApiError } from "./errors";
 import type {
+  AudioPreviewUrlResponse,
   BatchFilePreviewResponse,
   BeginFileUploadResponse,
   CompletedFileUploadPart,
@@ -89,10 +90,16 @@ export async function completeFileUpload(
   client: ApiClient,
   spaceId: string,
   uploadId: string,
-  completedParts?: CompletedFileUploadPart[]
+  completedParts?: CompletedFileUploadPart[],
+  nodeMetadata?: Record<string, unknown>
 ): Promise<FileResponse> {
   const completePath = `/api/v1/spaces/${spaceId}/file-uploads/${uploadId}/complete`;
-  const body = completedParts === undefined ? undefined : { completed_parts: completedParts };
+  const body = completedParts === undefined && nodeMetadata === undefined
+    ? undefined
+    : {
+        ...(completedParts === undefined ? {} : { completed_parts: completedParts }),
+        ...(nodeMetadata === undefined ? {} : { node_metadata: nodeMetadata })
+      };
   const complete = () => body === undefined
     ? client.post<FileResponse>(completePath)
     : client.post<FileResponse>(completePath, body);
@@ -116,6 +123,16 @@ export function getFilePreviewUrl(
 ): Promise<FilePreviewUrlResponse> {
   const suffix = kind === "pdf" ? "pdf-preview-url" : "preview-url";
   return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/${suffix}`);
+}
+
+export function getAudioPreviewUrl(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string
+): Promise<AudioPreviewUrlResponse> {
+  return client.get<AudioPreviewUrlResponse>(
+    `/api/v1/spaces/${spaceId}/files/${nodeId}/audio-preview-url`
+  );
 }
 
 export function batchResolveFilePreviews(

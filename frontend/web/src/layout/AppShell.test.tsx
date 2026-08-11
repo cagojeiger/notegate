@@ -9,6 +9,7 @@ import { AppShell } from "./AppShell";
 
 const mocks = vi.hoisted(() => ({
   useWorkbenchController: vi.fn(),
+  recordingState: { status: "idle" },
   useUploadManager: vi.fn(),
   useUsageQuery: vi.fn(() => ({ data: undefined }))
 }));
@@ -21,12 +22,28 @@ vi.mock("../features/uploads/UploadProvider", () => ({
   useUploadManager: mocks.useUploadManager
 }));
 
+vi.mock("../features/recording/RecordingDock", () => ({
+  RecordingDock: () => <div data-testid="recording-dock" />
+}));
+
+vi.mock("../features/recording/AudioRecordingContext", () => ({
+  useAudioRecordingState: () => mocks.recordingState
+}));
+
 vi.mock("../features/spaces/useUsageQueries", () => ({
   useUsageQuery: mocks.useUsageQuery
 }));
 
-vi.mock("../features/editor/EditorArea", () => ({ EditorArea: () => null }));
-vi.mock("../features/nodes/PrimarySidebar", () => ({ PrimarySidebar: () => null }));
+vi.mock("../features/editor/EditorArea", () => ({
+  EditorArea: ({ canWriteActiveSpace }: { canWriteActiveSpace: boolean }) => (
+    <div data-testid="editor-area" data-can-write={String(canWriteActiveSpace)} />
+  )
+}));
+vi.mock("../features/nodes/PrimarySidebar", () => ({
+  PrimarySidebar: ({ canWriteActiveSpace }: { canWriteActiveSpace: boolean }) => (
+    <div data-testid="primary-sidebar" data-can-write={String(canWriteActiveSpace)} />
+  )
+}));
 vi.mock("../features/spaces/MobileSpaceBar", () => ({ MobileSpaceBar: () => null }));
 vi.mock("../features/spaces/SpaceLibrary", () => ({
   SpaceLibrary: ({ spaces, usagePollingEnabled }: { spaces: Space[]; usagePollingEnabled: boolean }) => (
@@ -76,6 +93,7 @@ const privateSpace = makeSpace({
 describe("AppShell", () => {
   beforeEach(() => {
     useUiStore.setState(useUiStore.getInitialState(), true);
+    mocks.recordingState = { status: "idle" };
   });
 
   it.each([
@@ -95,6 +113,31 @@ describe("AppShell", () => {
     expect(modal).toHaveAttribute("data-space-count", "1");
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
   });
+
+  it.each(["recording", "paused"] as const)(
+    "keeps reading surfaces available but disables changes while %s",
+    async (status) => {
+      const user = userEvent.setup();
+      mocks.recordingState = { status };
+      mocks.useWorkbenchController.mockReturnValue(workbench());
+      mocks.useUploadManager.mockReturnValue(uploadManager());
+
+      render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+
+      expect(screen.getByTestId("primary-sidebar")).toHaveAttribute("data-can-write", "false");
+      expect(screen.getByTestId("editor-area")).toHaveAttribute("data-can-write", "false");
+      expect(await screen.findByTestId("recording-dock")).toBeInTheDocument();
+      expect(screen.getByTestId("transfer-dock-stack")).toHaveClass(
+        "md:fixed",
+        "md:bottom-10",
+        "md:right-3",
+        "md:w-96",
+        "md:flex-col"
+      );
+      await user.click(screen.getByRole("button", { name: "History" }));
+      expect(screen.queryByTestId("history-modal")).not.toBeInTheDocument();
+    }
+  );
 
   it("loads settings when the deferred modal is opened", async () => {
     mocks.useWorkbenchController.mockReturnValue({ ...workbench(), settingsOpen: true });

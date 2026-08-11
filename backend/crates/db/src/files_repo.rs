@@ -528,6 +528,7 @@ impl FilesRepo {
         space_id: Uuid,
         requested_by: Uuid,
         detected_media_type: Option<&str>,
+        node_metadata: Option<&Value>,
     ) -> Result<(Node, FileObject)> {
         crate::files::object_uploads::attach(
             &self.pool,
@@ -535,6 +536,7 @@ impl FilesRepo {
             space_id,
             requested_by,
             detected_media_type,
+            node_metadata,
             self.limits,
         )
         .await

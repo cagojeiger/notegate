@@ -38,5 +38,8 @@ export const queryKeys = {
   filePreviewNode: (spaceId: string, nodeId: string) => ["file-preview-urls", spaceId, nodeId] as const,
   filePreviewUrl: (spaceId: string, nodeId: string, kind: FilePreviewKind) => (
     ["file-preview-urls", spaceId, nodeId, kind] as const
+  ),
+  audioPreviewUrl: (spaceId: string, nodeId: string) => (
+    ["file-preview-urls", spaceId, nodeId, "audio"] as const
   )
 };

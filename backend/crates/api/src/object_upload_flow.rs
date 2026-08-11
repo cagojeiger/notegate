@@ -6,7 +6,8 @@ use std::time::Duration;
 use notegate_model::files::{
     BeginObjectUpload, ObjectUploadMode, ObjectUploadRegistration, PendingObjectUpload,
 };
-use notegate_service::ServiceError;
+use notegate_service::{ServiceError, files::validation};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::object_storage::{
@@ -233,7 +234,11 @@ pub async fn complete_upload(
     account_id: Uuid,
     upload: PendingObjectUpload,
     completed_parts: Option<Vec<CompletedUploadPart>>,
+    node_metadata: Option<Value>,
 ) -> Result<notegate_model::files::FileView, UploadFlowError> {
+    if let Some(metadata) = node_metadata.as_ref() {
+        validation::validate_metadata(metadata).map_err(ServiceError::from)?;
+    }
     if upload.node_id.is_none() {
         if upload.upload_mode == ObjectUploadMode::Multipart {
             let completed = validate_completed_parts(&upload, completed_parts)?;
@@ -314,6 +319,7 @@ pub async fn complete_upload(
             upload.space_id,
             upload.id,
             detected_media_type.as_deref(),
+            node_metadata.as_ref(),
         )
         .await?;
     tracing::info!(

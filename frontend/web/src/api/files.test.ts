@@ -7,6 +7,7 @@ import {
   beginFileUpload,
   completeFileUpload,
   filePreviewStaleTime,
+  getAudioPreviewUrl,
   getFilePreviewUrl,
   transferFile
 } from "./files";
@@ -238,6 +239,19 @@ describe("files api", () => {
     );
   });
 
+  it("sends node metadata when completing", async () => {
+    const api = createMockApiClient();
+    api.post.mockResolvedValue({ node: { id: "node-1" } });
+    const metadata = { type: "audio_recording" };
+
+    await completeFileUpload(api, "space-1", "upload-1", undefined, metadata);
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/spaces/space-1/file-uploads/upload-1/complete",
+      { node_metadata: metadata }
+    );
+  });
+
   it("does not retry completion after a permanent API failure", async () => {
     const api = createMockApiClient();
     api.post.mockRejectedValue(new ApiError("conflict", 409, "conflict"));
@@ -272,6 +286,21 @@ describe("files api", () => {
 
     await expect(getFilePreviewUrl(api, "space-1", "file-1", "pdf")).resolves.toEqual(response);
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/pdf-preview-url");
+  });
+
+  it("requests the dedicated audio preview URL", async () => {
+    const response = {
+      url: "https://objects.test/audio",
+      media_type: "audio/webm",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const api = createMockApiClient();
+    api.get.mockResolvedValue(response);
+
+    await expect(getAudioPreviewUrl(api, "space-1", "file-1")).resolves.toEqual(response);
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/spaces/space-1/files/file-1/audio-preview-url"
+    );
   });
 
   it("resolves ordered file previews in one request", async () => {
