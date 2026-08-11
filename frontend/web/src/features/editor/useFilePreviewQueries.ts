@@ -87,7 +87,11 @@ export function useMarkdownImageLoader(sourceNode: RestNode) {
 }
 
 export function filePreviewKindForNode(node: RestNode): FilePreviewKind | null {
-  if (node.kind !== "file" || node.encryption_mode === "client") return null;
+  if (
+    node.kind !== "file"
+    || node.encryption_mode === "client"
+    || node.file_media_kind === "audio"
+  ) return null;
   if (node.file_preview_kind) return node.file_preview_kind;
   if (node.preview_available === true) return "image";
   if (node.preview_available === false) return null;

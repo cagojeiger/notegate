@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::file_preview::{
-    PREVIEW_URL_TTL_SECONDS, detect_object_media_type, is_preview_size_allowed,
-    is_previewable_image_type, is_previewable_pdf_type,
+    PREVIEW_URL_TTL_SECONDS, audio_preview_media_type, detect_object_media_type,
+    is_preview_size_allowed, is_previewable_image_type, is_previewable_pdf_type,
 };
 use crate::rest::dto::{NodeOut, attribution_ids};
 use crate::state::AppState;
@@ -39,6 +39,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/v1/spaces/{space_id}/files/{node_id}/pdf-preview-url",
             get(pdf_preview_url),
+        )
+        .route(
+            "/v1/spaces/{space_id}/files/{node_id}/audio-preview-url",
+            get(audio_preview_url),
         )
         .route(
             "/v1/spaces/{space_id}/file-previews:batchResolve",
@@ -187,6 +191,25 @@ pub(crate) async fn pdf_preview_url(
     preview_response(&state, &caller, space_id, node_id, PreviewPolicy::Pdf).await
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces/{space_id}/files/{node_id}/audio-preview-url",
+    tag = "files",
+    params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
+    responses(
+        (status = 200, description = "Short-lived inline URL for server-verified audio", body = FilePreviewUrlResponse),
+        (status = 404, description = "File has no supported audio preview")
+    ),
+    security(("browser_session" = []))
+)]
+pub(crate) async fn audio_preview_url(
+    State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Path((space_id, node_id)): Path<(Uuid, Uuid)>,
+) -> Result<Response, ApiError> {
+    preview_response(&state, &caller, space_id, node_id, PreviewPolicy::Audio).await
+}
+
 async fn preview_response(
     state: &AppState,
     caller: &Caller,
@@ -310,13 +333,31 @@ struct BatchPreviewOutcome {
 enum PreviewPolicy {
     Image,
     Pdf,
+    Audio,
 }
 
 impl PreviewPolicy {
-    fn allows(self, media_type: &str) -> bool {
+    fn response_media_type(
+        self,
+        declared_media_type: &str,
+        detected_media_type: &str,
+    ) -> Option<String> {
         match self {
-            Self::Image => is_previewable_image_type(media_type),
-            Self::Pdf => is_previewable_pdf_type(media_type),
+            Self::Image if is_previewable_image_type(detected_media_type) => {
+                Some(detected_media_type.to_owned())
+            }
+            Self::Pdf if is_previewable_pdf_type(detected_media_type) => {
+                Some(detected_media_type.to_owned())
+            }
+            Self::Audio => audio_preview_media_type(declared_media_type, detected_media_type),
+            _ => None,
+        }
+    }
+
+    fn allows_size(self, byte_len: i64) -> bool {
+        match self {
+            Self::Image | Self::Pdf => is_preview_size_allowed(byte_len),
+            Self::Audio => byte_len > 0,
         }
     }
 
@@ -324,6 +365,7 @@ impl PreviewPolicy {
         match self {
             Self::Image => "file preview is not available",
             Self::Pdf => "pdf preview is not available",
+            Self::Audio => "audio preview is not available",
         }
     }
 }
@@ -333,8 +375,7 @@ async fn prepare_preview(
     file: &FileObject,
     policy: PreviewPolicy,
 ) -> Result<PreparedPreview, PreviewPreparationError> {
-    if file.encryption_mode == FileEncryptionMode::Client || !is_preview_size_allowed(file.byte_len)
-    {
+    if file.encryption_mode != FileEncryptionMode::None || !policy.allows_size(file.byte_len) {
         return Err(PreviewPreparationError::Unsupported {
             detected_media_type: None,
         });
@@ -360,11 +401,11 @@ async fn prepare_preview(
             (media_type.clone(), Some(media_type))
         }
     };
-    if !policy.allows(&media_type) {
+    let Some(media_type) = policy.response_media_type(&file.media_type, &media_type) else {
         return Err(PreviewPreparationError::Unsupported {
             detected_media_type,
         });
-    }
+    };
 
     let ttl = std::time::Duration::from_secs(PREVIEW_URL_TTL_SECONDS as u64);
     let url = state
@@ -521,5 +562,12 @@ mod tests {
         };
 
         assert_eq!(error.detected_media_type(), Some("image/png"));
+    }
+
+    #[test]
+    fn audio_preview_is_not_subject_to_the_image_and_pdf_size_cap() {
+        assert!(PreviewPolicy::Audio.allows_size(crate::file_preview::PREVIEW_MAX_BYTES + 1));
+        assert!(!PreviewPolicy::Audio.allows_size(0));
+        assert!(!PreviewPolicy::Image.allows_size(crate::file_preview::PREVIEW_MAX_BYTES + 1));
     }
 }

@@ -23,7 +23,7 @@ vi.mock("../features/uploads/UploadProvider", () => ({
 }));
 
 vi.mock("../features/recording/RecordingDock", () => ({
-  RecordingDock: () => null
+  RecordingDock: () => <div data-testid="recording-dock" />
 }));
 
 vi.mock("../features/recording/AudioRecordingContext", () => ({
@@ -114,19 +114,30 @@ describe("AppShell", () => {
     expect(modal).toHaveAttribute("data-can-view-audit", String(canViewAudit));
   });
 
-  it("keeps reading surfaces available but disables changes while recording", async () => {
-    const user = userEvent.setup();
-    mocks.recordingState = { status: "recording" };
-    mocks.useWorkbenchController.mockReturnValue(workbench());
-    mocks.useUploadManager.mockReturnValue(uploadManager());
+  it.each(["recording", "paused"] as const)(
+    "keeps reading surfaces available but disables changes while %s",
+    async (status) => {
+      const user = userEvent.setup();
+      mocks.recordingState = { status };
+      mocks.useWorkbenchController.mockReturnValue(workbench());
+      mocks.useUploadManager.mockReturnValue(uploadManager());
 
-    render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
+      render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
 
-    expect(screen.getByTestId("primary-sidebar")).toHaveAttribute("data-can-write", "false");
-    expect(screen.getByTestId("editor-area")).toHaveAttribute("data-can-write", "false");
-    await user.click(screen.getByRole("button", { name: "History" }));
-    expect(screen.queryByTestId("history-modal")).not.toBeInTheDocument();
-  });
+      expect(screen.getByTestId("primary-sidebar")).toHaveAttribute("data-can-write", "false");
+      expect(screen.getByTestId("editor-area")).toHaveAttribute("data-can-write", "false");
+      expect(await screen.findByTestId("recording-dock")).toBeInTheDocument();
+      expect(screen.getByTestId("transfer-dock-stack")).toHaveClass(
+        "md:fixed",
+        "md:bottom-10",
+        "md:right-3",
+        "md:w-96",
+        "md:flex-col"
+      );
+      await user.click(screen.getByRole("button", { name: "History" }));
+      expect(screen.queryByTestId("history-modal")).not.toBeInTheDocument();
+    }
+  );
 
   it("loads settings when the deferred modal is opened", async () => {
     mocks.useWorkbenchController.mockReturnValue({ ...workbench(), settingsOpen: true });

@@ -1,6 +1,7 @@
 import type { ApiClient } from "./client";
 import { ApiError } from "./errors";
 import type {
+  AudioPreviewUrlResponse,
   BatchFilePreviewResponse,
   BeginFileUploadResponse,
   CompletedFileUploadPart,
@@ -122,6 +123,16 @@ export function getFilePreviewUrl(
 ): Promise<FilePreviewUrlResponse> {
   const suffix = kind === "pdf" ? "pdf-preview-url" : "preview-url";
   return client.get<FilePreviewUrlResponse>(`/api/v1/spaces/${spaceId}/files/${nodeId}/${suffix}`);
+}
+
+export function getAudioPreviewUrl(
+  client: ApiClient,
+  spaceId: string,
+  nodeId: string
+): Promise<AudioPreviewUrlResponse> {
+  return client.get<AudioPreviewUrlResponse>(
+    `/api/v1/spaces/${spaceId}/files/${nodeId}/audio-preview-url`
+  );
 }
 
 export function batchResolveFilePreviews(

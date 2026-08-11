@@ -239,6 +239,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 onSetGroupMode={actions.setGroupMode}
                 onCreateFolder={() => actions.promptCreateNode("folder")}
                 onCreateText={() => actions.promptCreateNode("text")}
+                onRecordAudio={actions.recordAudio}
                 onFileSelected={actions.handleFileSelected}
                 onRenameNode={actions.promptRenameNode}
                 onMoveNode={actions.promptMoveNode}
@@ -272,8 +273,13 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         </main>
       </div>
       <div className="shrink-0">
-        {recordingActive ? <Suspense fallback={null}><RecordingDock /></Suspense> : null}
-        <UploadProgressDock />
+        <div
+          data-testid="transfer-dock-stack"
+          className="z-20 shrink-0 md:pointer-events-none md:fixed md:bottom-10 md:right-3 md:flex md:w-96 md:flex-col md:gap-2"
+        >
+          {recordingActive ? <Suspense fallback={null}><RecordingDock /></Suspense> : null}
+          <UploadProgressDock />
+        </div>
         <MobileSpaceBar
           spaces={railSpaces}
           activeSpace={workbench.activeSpace}

@@ -182,6 +182,8 @@ pub struct NodeSummaryOut {
     pub preview_available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_preview_kind: Option<FilePreviewKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_media_kind: Option<FileMediaKind>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -219,6 +221,11 @@ impl From<&NodeSummaryView> for NodeSummaryOut {
                     file.detected_media_type.as_deref(),
                 )
             }),
+            file_media_kind: view
+                .file
+                .as_ref()
+                .map(|file| file_media_kind(&file.media_type, file.detected_media_type.as_deref()))
+                .filter(|kind| *kind == FileMediaKind::Audio),
             updated_at: node.updated_at,
         }
     }

@@ -88,6 +88,11 @@ export function AudioRecordingProvider({ children }: { children: ReactNode }) {
     setState({
       status: "requesting",
       startedAt: null,
+      activeSegmentStartedAt: null,
+      activePauseStartedAt: null,
+      recordedDurationMs: 0,
+      pausedDurationMs: 0,
+      segmentCount: 0,
       filename: null,
       destinationPath: destination.destinationPath
     });
@@ -114,6 +119,14 @@ export function AudioRecordingProvider({ children }: { children: ReactNode }) {
 
   const stopRecording = useCallback(() => {
     runtimeRef.current?.stop();
+  }, []);
+
+  const pauseRecording = useCallback(() => {
+    runtimeRef.current?.pause();
+  }, []);
+
+  const resumeRecording = useCallback(() => {
+    runtimeRef.current?.resume();
   }, []);
 
   const discardRecording = useCallback(() => {
@@ -145,7 +158,9 @@ export function AudioRecordingProvider({ children }: { children: ReactNode }) {
     }
 
     recordingUploadActiveRef.current = uploadNeedsWakeLock;
-    const captureNeedsWakeLock = state.status === "recording" || state.status === "stopping";
+    const captureNeedsWakeLock = state.status === "recording"
+      || state.status === "paused"
+      || state.status === "stopping";
     if (captureNeedsWakeLock || uploadNeedsWakeLock) {
       void acquireWakeLock();
     } else {
@@ -159,6 +174,7 @@ export function AudioRecordingProvider({ children }: { children: ReactNode }) {
         document.visibilityState === "visible"
         && (
           stateRef.current.status === "recording"
+          || stateRef.current.status === "paused"
           || stateRef.current.status === "stopping"
           || recordingUploadActiveRef.current
         )
@@ -190,9 +206,11 @@ export function AudioRecordingProvider({ children }: { children: ReactNode }) {
 
   const actions = useMemo<RecordingActions>(() => ({
     startRecording,
+    pauseRecording,
+    resumeRecording,
     stopRecording,
     discardRecording
-  }), [discardRecording, startRecording, stopRecording]);
+  }), [discardRecording, pauseRecording, resumeRecording, startRecording, stopRecording]);
 
   return <AudioRecordingContextProvider actions={actions} signal={signal} state={state}>{children}</AudioRecordingContextProvider>;
 }

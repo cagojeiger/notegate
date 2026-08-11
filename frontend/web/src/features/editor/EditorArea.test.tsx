@@ -46,6 +46,7 @@ function renderEditorArea(overrides: Partial<Parameters<typeof EditorArea>[0]> =
       onSetGroupMode={vi.fn()}
       onCreateFolder={vi.fn()}
       onCreateText={vi.fn()}
+      onRecordAudio={vi.fn()}
       onFileSelected={vi.fn()}
       onDownloadFile={vi.fn()}
       onRenameNode={vi.fn()}
@@ -89,6 +90,21 @@ describe("EditorArea", () => {
     for (const group of container.querySelectorAll("[data-editor-group]")) {
       expect(group).toHaveClass("min-h-0", "overflow-hidden");
     }
+  });
+
+  it("starts root audio recording from a writable empty editor", () => {
+    const onRecordAudio = vi.fn();
+    renderEditorArea({
+      groups: [{ id: 0, node: null, mode: "preview", back: [], forward: [] }],
+      activeGroupIndex: 0,
+      activeSpace: makeSpace(),
+      canWriteActiveSpace: true,
+      onRecordAudio
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Record audio" }));
+
+    expect(onRecordAudio).toHaveBeenCalledOnce();
   });
 
   it("downloads files from the editor header", () => {

@@ -358,6 +358,145 @@ async fn pdf_bytes_use_the_dedicated_preview_url() -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+#[tokio::test]
+async fn browser_audio_receives_a_range_capable_inline_preview_url()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(s3) = test_s3_config() else {
+        return Ok(());
+    };
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let state = state_with_s3(&db, s3);
+    let (caller, space_id, root_id) = caller_and_space(&state).await?;
+    let mut bytes = vec![0_u8; 300];
+    bytes[..4].copy_from_slice(&[0x1a, 0x45, 0xdf, 0xa3]);
+    bytes[16..23].copy_from_slice(b"\x42\x82\x84webm");
+    let upload = begin_upload_with_media_type(
+        &state,
+        &caller,
+        space_id,
+        root_id,
+        "recording.webm",
+        bytes.len(),
+        "audio/webm;codecs=opus",
+    )
+    .await?;
+    put_upload(&upload, &bytes).await?.error_for_status()?;
+
+    let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    assert_eq!(status, StatusCode::CREATED, "{completed}");
+    assert_eq!(completed["node"]["detected_media_type"], "video/webm");
+    assert_eq!(completed["node"]["file_media_kind"], "audio");
+    let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
+
+    let audio_preview_response = rest_app(state.clone(), caller.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/v1/spaces/{space_id}/files/{node_id}/audio-preview-url"
+                ))
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(audio_preview_response.status(), StatusCode::OK);
+    assert_eq!(
+        audio_preview_response.headers().get(CACHE_CONTROL),
+        Some(&axum::http::HeaderValue::from_static("private, no-store"))
+    );
+    let preview: Value =
+        serde_json::from_slice(&to_bytes(audio_preview_response.into_body(), usize::MAX).await?)?;
+    assert_eq!(preview["media_type"], "audio/webm");
+
+    let response = reqwest::Client::new()
+        .get(preview["url"].as_str().ok_or("audio preview url")?)
+        .header(reqwest::header::RANGE, "bytes=0-15")
+        .send()
+        .await?;
+    assert_eq!(
+        response.status().as_u16(),
+        StatusCode::PARTIAL_CONTENT.as_u16()
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("audio/webm")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|value| value.to_str().ok()),
+        Some("inline")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok()),
+        Some("bytes 0-15/300")
+    );
+    assert_eq!(response.bytes().await?.as_ref(), &bytes[..16]);
+
+    sqlx::query("UPDATE file_objects SET byte_len = $2 WHERE node_id = $1")
+        .bind(node_id)
+        .bind(crate::file_preview::PREVIEW_MAX_BYTES + 1)
+        .execute(&db.pool)
+        .await?;
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/audio-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    sqlx::query(
+        "UPDATE file_objects SET byte_len = $2, media_type = 'video/webm' WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .bind(bytes.len() as i64)
+    .execute(&db.pool)
+    .await?;
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/audio-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    sqlx::query(
+        "UPDATE file_objects SET media_type = 'audio/webm', encryption_mode = 'client', \
+         encryption_metadata = '{}'::jsonb, detected_media_type = NULL \
+         WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/audio-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    sqlx::query(
+        "UPDATE file_objects SET encryption_mode = 'none', encryption_metadata = NULL, \
+         detected_media_type = 'video/webm' \
+         WHERE node_id = $1",
+    )
+    .bind(node_id)
+    .execute(&db.pool)
+    .await?;
+    delete_attached_file(&db, &state, &caller, space_id, node_id).await?;
+    db.cleanup().await;
+    Ok(())
+}
+
 async fn put_upload(
     upload: &BegunUpload,
     bytes: &[u8],

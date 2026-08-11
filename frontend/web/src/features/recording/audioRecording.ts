@@ -3,6 +3,21 @@ export type RecordingSupport = {
   reason: string | null;
 };
 
+export type RecordingSegmentTiming = {
+  index: number;
+  wallStartOffsetMs: number;
+  wallEndOffsetMs: number;
+  mediaStartOffsetMs: number;
+  mediaEndOffsetMs: number;
+};
+
+export type RecordingTimeline = {
+  startedAt: number;
+  wallDurationMs: number;
+  recordedDurationMs: number;
+  segments: RecordingSegmentTiming[];
+};
+
 export const RECORDING_PROFILE_ID = "notegate-meeting-llm-v1";
 export const RECORDING_FORMAT = {
   mimeType: "audio/webm;codecs=opus",
@@ -15,6 +30,8 @@ export const MICROPHONE_CAPTURE_DEFAULTS = {
   noiseSuppression: { ideal: false },
   autoGainControl: { ideal: false }
 } as const satisfies MediaTrackConstraints;
+
+const MAX_METADATA_SEGMENTS = 64;
 
 export function recordingSupport(): RecordingSupport {
   if (!window.isSecureContext) {
@@ -53,8 +70,12 @@ export function recordingSupport(): RecordingSupport {
 export function recordingNodeMetadata(
   settings: MediaTrackSettings,
   actualMimeType: string,
-  actualAudioBitsPerSecond: number
+  actualAudioBitsPerSecond: number,
+  timeline: RecordingTimeline
 ): Record<string, unknown> {
+  const wallDurationMs = milliseconds(timeline.wallDurationMs);
+  const recordedDurationMs = Math.min(wallDurationMs, milliseconds(timeline.recordedDurationMs));
+  const segments = boundedSegments(timeline.segments);
   return {
     type: "audio_recording",
     recording: {
@@ -77,8 +98,25 @@ export function recordingNodeMetadata(
         echo_cancellation: settings.echoCancellation,
         noise_suppression: settings.noiseSuppression,
         auto_gain_control: settings.autoGainControl
-      })
-    }
+        })
+    },
+    recording_timeline: {
+      started_at: new Date(timeline.startedAt).toISOString(),
+      ended_at: new Date(timeline.startedAt + wallDurationMs).toISOString(),
+      wall_duration_ms: wallDurationMs,
+      recorded_duration_ms: recordedDurationMs,
+      paused_duration_ms: wallDurationMs - recordedDurationMs,
+      segment_count: timeline.segments.length,
+      segments_included_count: segments.length,
+      segments_omitted_count: timeline.segments.length - segments.length
+    },
+    recording_segments: segments.map((segment) => ({
+      index: segment.index,
+      wall_start_offset_ms: milliseconds(segment.wallStartOffsetMs),
+      wall_end_offset_ms: milliseconds(segment.wallEndOffsetMs),
+      media_start_offset_ms: milliseconds(segment.mediaStartOffsetMs),
+      media_end_offset_ms: milliseconds(segment.mediaEndOffsetMs)
+    }))
   };
 }
 
@@ -106,4 +144,17 @@ function twoDigits(value: number): string {
 
 function definedValues(values: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+}
+
+function boundedSegments(segments: RecordingSegmentTiming[]): RecordingSegmentTiming[] {
+  if (segments.length <= MAX_METADATA_SEGMENTS) return segments;
+  const headCount = MAX_METADATA_SEGMENTS / 2;
+  return [
+    ...segments.slice(0, headCount),
+    ...segments.slice(-headCount)
+  ];
+}
+
+function milliseconds(value: number): number {
+  return Math.max(0, Math.round(value));
 }

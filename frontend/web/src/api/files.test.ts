@@ -7,6 +7,7 @@ import {
   beginFileUpload,
   completeFileUpload,
   filePreviewStaleTime,
+  getAudioPreviewUrl,
   getFilePreviewUrl,
   transferFile
 } from "./files";
@@ -285,6 +286,21 @@ describe("files api", () => {
 
     await expect(getFilePreviewUrl(api, "space-1", "file-1", "pdf")).resolves.toEqual(response);
     expect(api.get).toHaveBeenCalledWith("/api/v1/spaces/space-1/files/file-1/pdf-preview-url");
+  });
+
+  it("requests the dedicated audio preview URL", async () => {
+    const response = {
+      url: "https://objects.test/audio",
+      media_type: "audio/webm",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const api = createMockApiClient();
+    api.get.mockResolvedValue(response);
+
+    await expect(getAudioPreviewUrl(api, "space-1", "file-1")).resolves.toEqual(response);
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/spaces/space-1/files/file-1/audio-preview-url"
+    );
   });
 
   it("resolves ordered file previews in one request", async () => {

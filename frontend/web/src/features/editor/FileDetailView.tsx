@@ -4,12 +4,16 @@ import { AudioLines } from "lucide-react";
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
 import { Card, MetaRow } from "../../shared/ui";
+import { canPreviewAudio, useAudioPreviewUrl } from "./useAudioPreviewQuery";
 import { filePreviewKindForNode, useFilePreviewUrl } from "./useFilePreviewQueries";
 
 const PdfPreview = lazy(() => import("./PdfPreview").then((module) => ({ default: module.PdfPreview })));
 
 export function FileDetailView({ node }: { node: RestNode }) {
-  const preview = useFilePreviewUrl(node);
+  const filePreview = useFilePreviewUrl(node);
+  const audioPreview = useAudioPreviewUrl(node);
+  const isAudioFile = node.kind === "file" && node.file_media_kind === "audio";
+  const preview = isAudioFile ? audioPreview : filePreview;
   const previewKind = filePreviewKindForNode(node);
   const [previewRecovery, setPreviewRecovery] = useState<{
     nodeId: string;
@@ -20,12 +24,14 @@ export function FileDetailView({ node }: { node: RestNode }) {
     ? previewRecovery
     : { nodeId: node.id, retried: false, failedUrl: null };
   const isPdfPreview = previewKind === "pdf";
-  const previewUrl = previewKind === null ? undefined : preview.data?.url;
+  const previewUrl = isAudioFile
+    ? preview.data?.url
+    : previewKind === null ? undefined : preview.data?.url;
   const previewFailed = Boolean(previewUrl && previewUrl === currentRecovery.failedUrl);
   const previewRequestFailed = !previewUrl
     && preview.isError
-    && !(preview.error instanceof ApiError && preview.error.status === 404);
-  const previewFailureLabel = isPdfPreview ? "PDF" : "Image";
+    && (isAudioFile || !(preview.error instanceof ApiError && preview.error.status === 404));
+  const previewFailureLabel = isAudioFile ? "Audio" : isPdfPreview ? "PDF" : "Image";
 
   function handlePreviewError() {
     if (!previewUrl) return;
@@ -57,7 +63,7 @@ export function FileDetailView({ node }: { node: RestNode }) {
     );
   }
 
-  if (previewUrl && !previewFailed) {
+  if (!isAudioFile && previewUrl && !previewFailed) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
         <img
@@ -87,7 +93,30 @@ export function FileDetailView({ node }: { node: RestNode }) {
           </div>
         ) : null}
         <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{node.name}</h1>
-        {previewFailed || previewRequestFailed ? <p className="mt-8 text-sm text-muted">{previewFailureLabel} cannot be displayed</p> : null}
+        {isAudioFile && previewUrl && !previewFailed ? (
+          <div className="mt-8 rounded-2xl border border-border bg-surface p-4">
+            <audio
+              key={previewUrl}
+              className="w-full"
+              src={previewUrl}
+              controls
+              preload="metadata"
+              aria-label={`Play ${node.name}`}
+              onError={handlePreviewError}
+            />
+          </div>
+        ) : null}
+        {isAudioFile && preview.isLoading ? <p className="mt-8 text-sm text-muted" role="status">Preparing audio…</p> : null}
+        {previewFailed || previewRequestFailed ? (
+          <p className="mt-8 text-sm text-muted">
+            {isAudioFile
+              ? "Audio cannot be played. Download the file to open it locally."
+              : `${previewFailureLabel} cannot be displayed`}
+          </p>
+        ) : null}
+        {isAudioFile && !canPreviewAudio(node) ? (
+          <p className="mt-8 text-sm text-muted">Audio playback is unavailable for this file. Download it to open it locally.</p>
+        ) : null}
         <Card className="mt-8">
           <dl className="space-y-3">
             <MetaRow label="Media type" value={node.media_type ?? "unknown"} />

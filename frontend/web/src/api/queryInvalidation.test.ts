@@ -394,7 +394,8 @@ describe("query invalidation", () => {
       queryKeys.metadata("space-1", "file-1"),
       queryKeys.markdownImagePreview("space-1", "/file-1"),
       queryKeys.filePreviewUrl("space-1", "file-1", "image"),
-      queryKeys.filePreviewUrl("space-1", "file-1", "pdf")
+      queryKeys.filePreviewUrl("space-1", "file-1", "pdf"),
+      queryKeys.audioPreviewUrl("space-1", "file-1")
     ];
     deletedKeys.forEach((queryKey) => queryClient.setQueryData(queryKey, { cached: true }));
     const unrelatedPreviewKey = queryKeys.filePreviewUrl("space-1", "file-2", "image");
@@ -411,13 +412,17 @@ describe("query invalidation", () => {
     const deletedSpaceNode = queryKeys.node("space-1", "file-1");
     const otherSpaceNode = queryKeys.node("space-2", "file-2");
     const deletedSpacePreview = queryKeys.filePreviewUrl("space-1", "file-1", "image");
+    const deletedSpaceAudio = queryKeys.audioPreviewUrl("space-1", "file-1");
     const otherSpacePreview = queryKeys.filePreviewUrl("space-2", "file-2", "image");
+    const otherSpaceAudio = queryKeys.audioPreviewUrl("space-2", "file-2");
     const deletedMarkdownPreview = queryKeys.markdownImagePreview("space-1", "/image.png");
     const otherMarkdownPreview = queryKeys.markdownImagePreview("space-2", "/image.png");
     queryClient.setQueryData(deletedSpaceNode, { cached: true });
     queryClient.setQueryData(otherSpaceNode, { cached: true });
     queryClient.setQueryData(deletedSpacePreview, { cached: true });
+    queryClient.setQueryData(deletedSpaceAudio, { cached: true });
     queryClient.setQueryData(otherSpacePreview, { cached: true });
+    queryClient.setQueryData(otherSpaceAudio, { cached: true });
     queryClient.setQueryData(deletedMarkdownPreview, { status: "ready" });
     queryClient.setQueryData(otherMarkdownPreview, { status: "ready" });
 
@@ -425,9 +430,11 @@ describe("query invalidation", () => {
 
     expect(queryClient.getQueryData(deletedSpaceNode)).toBeUndefined();
     expect(queryClient.getQueryData(deletedSpacePreview)).toBeUndefined();
+    expect(queryClient.getQueryData(deletedSpaceAudio)).toBeUndefined();
     expect(queryClient.getQueryData(deletedMarkdownPreview)).toBeUndefined();
     expect(queryClient.getQueryData(otherSpaceNode)).toEqual({ cached: true });
     expect(queryClient.getQueryData(otherSpacePreview)).toEqual({ cached: true });
+    expect(queryClient.getQueryData(otherSpaceAudio)).toEqual({ cached: true });
     expect(queryClient.getQueryData(otherMarkdownPreview)).toEqual({ status: "ready" });
   });
 });

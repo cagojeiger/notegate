@@ -199,6 +199,8 @@ export type FilePreviewUrlResponse = {
   expires_at: string;
 };
 
+export type AudioPreviewUrlResponse = FilePreviewUrlResponse;
+
 export type BatchFilePreviewItem = {
   path: string;
   status: "ready" | "not_found" | "unsupported" | "error";

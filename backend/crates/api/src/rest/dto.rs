@@ -316,6 +316,35 @@ mod tests {
     }
 
     #[test]
+    fn node_summary_out_exposes_audio_media_kind() {
+        let node = base_node(NodeKind::File);
+        let mut stats = file_stats();
+        stats.encryption_mode = FileEncryptionMode::None;
+        stats.media_type = "audio/webm;codecs=opus".to_owned();
+        stats.detected_media_type = Some("video/webm".to_owned());
+        let view = NodeSummaryView {
+            node: NodeSummary {
+                id: node.id,
+                space_id: node.space_id,
+                parent_id: node.parent_id,
+                name: node.name,
+                kind: node.kind,
+                sort_order: node.sort_order,
+                updated_at: node.updated_at,
+            },
+            path: "/recording.webm".to_owned(),
+            has_children: false,
+            effective_write_locked: false,
+            text: None,
+            file: Some(stats),
+        };
+
+        let out = NodeSummaryOut::from(&view);
+
+        assert_eq!(out.file_media_kind, Some(FileMediaKind::Audio));
+    }
+
+    #[test]
     fn node_out_from_view_file_derives_fields_from_file_stats() {
         let mut view = base_view(NodeKind::File);
         view.file = Some(file_stats());

@@ -22,6 +22,7 @@ vi.mock("../uploads/UploadProvider", () => ({
 
 describe("AudioRecordingProvider", () => {
   beforeEach(() => {
+    MockMediaRecorder.instances = [];
     useUiStore.setState(useUiStore.getInitialState(), true);
     mocks.tasks = [];
     mocks.startUpload.mockReset().mockReturnValue("upload-recording");
@@ -117,6 +118,54 @@ describe("AudioRecordingProvider", () => {
     expect(useUiStore.getState().toast).toBe("Recording saved");
   });
 
+  it("keeps the same capture session and wake lock across pause and resume", async () => {
+    const { result } = renderHook(() => ({
+      actions: useAudioRecordingActions(),
+      state: useAudioRecordingState()
+    }), { wrapper });
+
+    await act(async () => {
+      await result.current.actions.startRecording({
+        spaceId: "space-1",
+        spaceName: "Meetings",
+        parentNodeId: "folder-1",
+        destinationPath: "/Meetings"
+      });
+    });
+
+    const recorder = MockMediaRecorder.instances[0];
+    act(() => result.current.actions.pauseRecording());
+
+    expect(result.current.state.status).toBe("paused");
+    expect(recorder.pauseCalls).toBe(1);
+    expect(mocks.releaseWakeLock).not.toHaveBeenCalled();
+
+    act(() => result.current.actions.resumeRecording());
+
+    expect(result.current.state.status).toBe("recording");
+    expect(recorder.resumeCalls).toBe(1);
+    expect(mocks.getUserMedia).toHaveBeenCalledOnce();
+    expect(mocks.releaseWakeLock).not.toHaveBeenCalled();
+
+    act(() => result.current.actions.pauseRecording());
+    act(() => result.current.actions.stopRecording());
+
+    await waitFor(() => expect(mocks.startUpload).toHaveBeenCalledOnce());
+    expect(mocks.startUpload).toHaveBeenCalledWith(expect.objectContaining({
+      nodeMetadata: expect.objectContaining({
+        recording_timeline: expect.objectContaining({
+          segment_count: 2,
+          segments_included_count: 2,
+          segments_omitted_count: 0
+        }),
+        recording_segments: expect.arrayContaining([
+          expect.objectContaining({ index: 0 }),
+          expect.objectContaining({ index: 1 })
+        ])
+      })
+    }));
+  });
+
   it("allows the next recording while the previous file is uploading", async () => {
     const { result } = renderHook(() => ({
       actions: useAudioRecordingActions(),
@@ -171,6 +220,8 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 class MockMediaRecorder extends EventTarget {
+  static instances: MockMediaRecorder[] = [];
+
   static isTypeSupported(mimeType: string) {
     return mimeType === "audio/webm;codecs=opus";
   }
@@ -178,15 +229,32 @@ class MockMediaRecorder extends EventTarget {
   readonly mimeType: string;
   readonly audioBitsPerSecond: number;
   state: RecordingState = "inactive";
+  pauseCalls = 0;
+  resumeCalls = 0;
 
   constructor(_stream: MediaStream, options?: MediaRecorderOptions) {
     super();
     this.mimeType = options?.mimeType ?? "audio/webm";
     this.audioBitsPerSecond = options?.audioBitsPerSecond ?? 0;
+    MockMediaRecorder.instances.push(this);
   }
 
   start() {
     this.state = "recording";
+  }
+
+  pause() {
+    if (this.state !== "recording") return;
+    this.pauseCalls += 1;
+    this.state = "paused";
+    this.dispatchEvent(new Event("pause"));
+  }
+
+  resume() {
+    if (this.state !== "paused") return;
+    this.resumeCalls += 1;
+    this.state = "recording";
+    this.dispatchEvent(new Event("resume"));
   }
 
   stop() {

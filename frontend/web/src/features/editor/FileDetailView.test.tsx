@@ -5,6 +5,7 @@ import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
 import { makeRestNode } from "../../test/fixtures";
 import { FileDetailView } from "./FileDetailView";
+import type { useAudioPreviewUrl } from "./useAudioPreviewQuery";
 import type { useFilePreviewUrl } from "./useFilePreviewQueries";
 
 type FilePreviewQuery = ReturnType<typeof useFilePreviewUrl>;
@@ -24,10 +25,20 @@ const filePreviewQueryMocks = vi.hoisted(() => ({
     (...args: Parameters<typeof useFilePreviewUrl>) => FilePreviewQueryMock
   >()
 }));
+const audioPreviewQueryMocks = vi.hoisted(() => ({
+  useAudioPreviewUrl: vi.fn<
+    (...args: Parameters<typeof useAudioPreviewUrl>) => FilePreviewQueryMock
+  >()
+}));
 
 vi.mock("./useFilePreviewQueries", async (importOriginal) => ({
   ...await importOriginal<typeof import("./useFilePreviewQueries")>(),
   useFilePreviewUrl: filePreviewQueryMocks.useFilePreviewUrl
+}));
+
+vi.mock("./useAudioPreviewQuery", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./useAudioPreviewQuery")>(),
+  useAudioPreviewUrl: audioPreviewQueryMocks.useAudioPreviewUrl
 }));
 
 vi.mock("./PdfPreview", () => ({
@@ -39,6 +50,7 @@ vi.mock("./PdfPreview", () => ({
 describe("FileDetailView", () => {
   beforeEach(() => {
     filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery());
+    audioPreviewQueryMocks.useAudioPreviewUrl.mockReturnValue(previewQuery());
   });
 
   it("renders a verified image from its preview URL", () => {
@@ -73,7 +85,14 @@ describe("FileDetailView", () => {
     expect(screen.getByText("application/pdf")).toBeInTheDocument();
   });
 
-  it("labels audio files as recordings", () => {
+  it("plays verified audio from a short-lived URL without buffering it into a Blob", () => {
+    audioPreviewQueryMocks.useAudioPreviewUrl.mockReturnValue(previewQuery({
+      data: {
+        url: "https://storage.example/meeting.m4a",
+        media_type: "audio/mp4",
+        expires_at: "2026-06-13T00:15:00Z"
+      }
+    }));
     render(<FileDetailView node={fileNode({
       name: "meeting.m4a",
       path: "/meeting.m4a",
@@ -85,6 +104,38 @@ describe("FileDetailView", () => {
 
     expect(screen.getByText("Audio recording")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "meeting.m4a" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute(
+      "src",
+      "https://storage.example/meeting.m4a"
+    );
+    expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute("preload", "metadata");
+    expect(screen.getByLabelText("Play meeting.m4a")).toHaveAttribute("controls");
+  });
+
+  it("keeps a failed audio URL hidden when its single refresh cannot replace it", async () => {
+    const previewData = {
+      url: "https://storage.example/broken.webm",
+      media_type: "audio/webm",
+      expires_at: "2026-06-13T00:15:00Z"
+    };
+    const refetch = vi.fn().mockResolvedValue({ isSuccess: true, data: previewData });
+    audioPreviewQueryMocks.useAudioPreviewUrl.mockReturnValue(previewQuery({
+      data: previewData,
+      refetch
+    }));
+    render(<FileDetailView node={fileNode({
+      name: "meeting.webm",
+      path: "/meeting.webm",
+      media_type: "audio/webm",
+      preview_available: false,
+      file_media_kind: "audio"
+    })} />);
+
+    fireEvent.error(screen.getByLabelText("Play meeting.webm"));
+    await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByLabelText("Play meeting.webm")).not.toBeInTheDocument();
+    expect(screen.getByText(/Audio cannot be played/)).toBeInTheDocument();
   });
 
   it("renders a verified PDF from its preview URL", async () => {
