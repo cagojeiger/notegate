@@ -6,6 +6,8 @@ import {
   formatAuditAction,
   formatAuditDetail,
   formatAuditTarget,
+  formatDuration,
+  formatDurationBetween,
   formatEventTimeCompact,
   formatFileChangeAction,
   formatFileChangeDetails,
@@ -63,6 +65,23 @@ describe("eventDisplay", () => {
   it("formats a compact time for narrow history rows", () => {
     expect(formatEventTimeCompact("invalid")).toBe("invalid");
     expect(formatEventTimeCompact("2026-07-13T00:05:00Z")).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it("formats elapsed durations at readable unit boundaries", () => {
+    expect(formatDuration(39.4)).toBe("39 ms");
+    expect(formatDuration(999.6)).toBe("1 s");
+    expect(formatDuration(1_250)).toBe("1.3 s");
+    expect(formatDuration(18_400)).toBe("18 s");
+    expect(formatDuration(59_600)).toBe("1m");
+    expect(formatDuration(134_000)).toBe("2m 14s");
+    expect(formatDuration(3_580_000)).toBe("59m 40s");
+    expect(formatDuration(4_080_000)).toBe("1h 8m");
+  });
+
+  it("derives durations only from valid ordered timestamps", () => {
+    expect(formatDurationBetween("2026-07-10T02:12:00.000Z", "2026-07-10T02:12:00.039Z")).toBe("39 ms");
+    expect(formatDurationBetween("invalid", "2026-07-10T02:12:00.039Z")).toBeNull();
+    expect(formatDurationBetween("2026-07-10T02:12:01Z", "2026-07-10T02:12:00Z")).toBeNull();
   });
 
   it("formats create and edit metadata as readable details", () => {

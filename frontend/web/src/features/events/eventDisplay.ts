@@ -79,6 +79,35 @@ export function formatEventTimeCompact(value: string): string {
   }).format(date);
 }
 
+export function formatDuration(milliseconds: number): string {
+  const roundedMilliseconds = Math.max(0, Math.round(milliseconds));
+  if (roundedMilliseconds < 1_000) return `${roundedMilliseconds} ms`;
+  if (roundedMilliseconds < 10_000) {
+    return `${(roundedMilliseconds / 1_000).toFixed(1).replace(/\.0$/, "")} s`;
+  }
+
+  const totalSeconds = Math.round(roundedMilliseconds / 1_000);
+  if (totalSeconds < 60) return `${totalSeconds} s`;
+
+  if (totalSeconds < 3_600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  }
+
+  const totalMinutes = Math.round(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+export function formatDurationBetween(start: string, end: string): string | null {
+  const startTime = new Date(start).getTime();
+  const endTime = new Date(end).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return null;
+  return formatDuration(endTime - startTime);
+}
+
 export function shortId(value: string | null | undefined): string {
   if (!value) return "—";
   return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`;
