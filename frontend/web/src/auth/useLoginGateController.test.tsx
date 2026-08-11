@@ -12,6 +12,21 @@ function dispatchLoginComplete(origin: string, source: MessageEventSource | null
 }
 
 describe("useLoginGateController", () => {
+  it("delegates login to an injected runtime flow", async () => {
+    const loginFlow = { start: vi.fn().mockResolvedValue(undefined) };
+    const onSessionAuthenticated = vi.fn().mockResolvedValue(true);
+    const { result } = renderHook(() => useLoginGateController({
+      loginFlow,
+      onSessionAuthenticated
+    }));
+
+    await act(async () => result.current.startLogin());
+
+    expect(loginFlow.start).toHaveBeenCalledOnce();
+    expect(onSessionAuthenticated).toHaveBeenCalledOnce();
+    expect(result.current.loginHref).toBeNull();
+  });
+
   it("accepts login completion only from the current origin", async () => {
     const onSessionAuthenticated = vi.fn().mockResolvedValue(true);
     const { result } = renderHook(() => useLoginGateController({

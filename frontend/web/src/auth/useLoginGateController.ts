@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { LoginFlow } from "./loginFlow";
+
 export type LoginGateControllerProps = {
+  loginFlow?: LoginFlow;
   onSessionAuthenticated: () => Promise<boolean>;
 };
 
@@ -8,7 +11,7 @@ export function loginUrl(): string {
   return "/auth/login";
 }
 
-export function useLoginGateController({ onSessionAuthenticated }: LoginGateControllerProps) {
+export function useLoginGateController({ loginFlow, onSessionAuthenticated }: LoginGateControllerProps) {
   const [loginHint, setLoginHint] = useState<string | null>(null);
   const popupCheckRef = useRef<number | null>(null);
   const loginPopupRef = useRef<Window | null>(null);
@@ -58,7 +61,19 @@ export function useLoginGateController({ onSessionAuthenticated }: LoginGateCont
     }, 700);
   }
 
-  function startLogin() {
+  async function startLogin() {
+    if (loginFlow) {
+      setLoginHint("Complete login in the system authentication window.");
+      try {
+        await loginFlow.start();
+        const authenticated = await checkSession();
+        if (!authenticated) setLoginHint("Login completed, but NoteGate could not verify the session.");
+      } catch {
+        setLoginHint("Login was not completed. Try again.");
+      }
+      return;
+    }
+
     // Open straight to the login URL in the click handler. Opening a blank window
     // first and redirecting it is what aggressive popup blockers target most, so a
     // direct navigation is the most blocker-tolerant form.
@@ -75,7 +90,7 @@ export function useLoginGateController({ onSessionAuthenticated }: LoginGateCont
 
   return {
     loginHint,
-    loginHref: loginUrl(),
+    loginHref: loginFlow ? null : loginUrl(),
     startLogin,
     beginPolling
   };

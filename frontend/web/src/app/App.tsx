@@ -10,8 +10,9 @@ import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
 import { Button } from "../shared/ui";
 import { useUiStore } from "../stores/uiStore";
+import { browserAppRuntime, type AppRuntime } from "./runtime";
 
-export function App() {
+export function App({ runtime = browserAppRuntime }: { runtime?: AppRuntime }) {
   const [sessionRevision, setSessionRevision] = useState(0);
   const showToast = useUiStore((state) => state.showToast);
 
@@ -24,11 +25,13 @@ export function App() {
   return (
     <ApiProvider
       authCacheKey={authCacheKey}
+      createClient={runtime.createApiClient}
       onUnauthorized={refreshSession}
       onMutationError={showToast}
     >
       <AuthBoundary
         sessionRevision={sessionRevision}
+        loginFlow={runtime.loginFlow}
         onSessionChanged={refreshSession}
       />
     </ApiProvider>
@@ -37,9 +40,11 @@ export function App() {
 
 function AuthBoundary({
   sessionRevision,
+  loginFlow,
   onSessionChanged
 }: {
   sessionRevision: number;
+  loginFlow?: AppRuntime["loginFlow"];
   onSessionChanged: () => void;
 }) {
   const meQuery = useSessionQuery(sessionRevision);
@@ -71,6 +76,7 @@ function AuthBoundary({
   if (authViewState.kind === "login") {
     return (
       <LoginGate
+        loginFlow={loginFlow}
         onSessionAuthenticated={async () => {
           const result = await meQuery.refetch();
           if (result.isSuccess) {

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import type { ApiClient } from "../api/client";
 
 vi.mock("../layout/AppShell", () => ({
   AppShell: ({ onSignOut }: { onSignOut: () => void }) => <button onClick={onSignOut}>Mock sign out</button>
@@ -36,6 +37,22 @@ describe("App auth boundary", () => {
     );
     const [, init] = fetchMock.mock.calls[0];
     expect((init?.headers as Headers).has("authorization")).toBe(false);
+  });
+
+  it("uses an injected runtime client without changing the application shell", async () => {
+    const client: ApiClient = {
+      get: vi.fn().mockResolvedValue(meResponse()),
+      post: vi.fn(),
+      put: vi.fn(),
+      patch: vi.fn(),
+      delete: vi.fn(),
+      download: vi.fn()
+    };
+
+    render(<App runtime={{ createApiClient: () => client }} />);
+
+    await screen.findByText("Mock sign out");
+    expect(client.get).toHaveBeenCalledWith("/api/v1/me");
   });
 
   it("shows the login gate when the browser session is missing", async () => {

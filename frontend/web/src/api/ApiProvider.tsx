@@ -8,6 +8,7 @@ const ApiClientContext = createContext<ApiClient | null>(null);
 
 type ApiProviderProps = {
   authCacheKey: string;
+  createClient?: () => ApiClient;
   // Called when any request returns 401 so the app can re-check the browser
   // session and return to the login gate instead of silently failing.
   onUnauthorized?: () => void;
@@ -15,8 +16,8 @@ type ApiProviderProps = {
   children: ReactNode;
 };
 
-export function ApiProvider({ authCacheKey, onUnauthorized, onMutationError, children }: ApiProviderProps) {
-  const client = useMemo(() => createApiClient(), []);
+export function ApiProvider({ authCacheKey, createClient = createApiClient, onUnauthorized, onMutationError, children }: ApiProviderProps) {
+  const client = useMemo(() => createClient(), [createClient]);
   const onUnauthorizedRef = useRef(onUnauthorized);
   const onMutationErrorRef = useRef(onMutationError);
   onUnauthorizedRef.current = onUnauthorized;
