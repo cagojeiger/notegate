@@ -180,7 +180,7 @@ async fn copy_rejects_a_folder_containing_a_file() -> Result<(), Box<dyn std::er
         .await?;
     state
         .files
-        .complete_object_upload(caller.account_id(), space_id, upload_id, None)
+        .complete_object_upload(caller.account_id(), space_id, upload_id, None, None)
         .await?;
 
     let (status, conflict) = json_request(

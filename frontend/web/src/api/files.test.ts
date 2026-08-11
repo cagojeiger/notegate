@@ -238,6 +238,19 @@ describe("files api", () => {
     );
   });
 
+  it("sends node metadata when completing", async () => {
+    const api = createMockApiClient();
+    api.post.mockResolvedValue({ node: { id: "node-1" } });
+    const metadata = { type: "audio_recording" };
+
+    await completeFileUpload(api, "space-1", "upload-1", undefined, metadata);
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/spaces/space-1/file-uploads/upload-1/complete",
+      { node_metadata: metadata }
+    );
+  });
+
   it("does not retry completion after a permanent API failure", async () => {
     const api = createMockApiClient();
     api.post.mockRejectedValue(new ApiError("conflict", 409, "conflict"));

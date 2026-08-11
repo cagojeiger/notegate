@@ -223,6 +223,37 @@ select file
 - 완료 항목은 잠시 표시한 뒤 제거한다. 완료 기록의 정본은 Changes event다.
 - 완료 시 현재 editor를 file node로 이동하지 않는다.
 
+### Record audio
+
+```text
+Create > Record audio
+-> verify secure context + getUserMedia + WebM/Opus MediaRecorder + browser lock manager
+-> acquire the same-origin notegate:audio-recording lock without waiting
+   -> unavailable: report another NoteGate tab is recording and do not request microphone permission
+-> request microphone permission
+-> request 48 kHz mono capture with echo cancellation, noise suppression, and AGC disabled
+-> record WebM/Opus at 64 kbps
+-> target the active Space root with YYYY-MM-DD-HHmmss-record.webm
+-> record 5-second chunks in memory
+-> Stop & save
+-> create one File with requested/actual capture metadata and use the existing upload queue
+-> release Screen Wake Lock after upload completes or fails
+```
+
+규칙:
+
+- browser 이름/버전을 추정하지 않고 `getUserMedia`, `MediaRecorder.isTypeSupported("audio/webm;codecs=opus")`, `navigator.locks`, `navigator.wakeLock`을 runtime에 검사한다. 고정 format을 지원하지 않으면 다른 codec으로 조용히 변경하지 않고 녹음을 막는다.
+- 48 kHz와 mono, 음성 가공 비활성화는 `ideal` capture constraint다. 장치/OS/browser가 선택한 실제 `sampleRate`, `sampleSize`, `channelCount`, echo cancellation, noise suppression, AGC와 recorder MIME/bitrate는 `notegate-meeting-llm-v1` profile metadata로 File Node 생성 시 함께 저장한다. Privacy/fingerprinting surface인 device ID, group ID, device label은 저장하지 않는다.
+- WebM/Opus File은 최초 보존본이지만 raw/lossless audio는 아니다. LLM별 downmix/resample은 후처리에서 파생본으로 만들고 보존본을 대체하지 않는다.
+- 녹음 중에는 `RecordingDock`을 `UploadProgressDock` 바로 위에 표시한다. 실제 microphone level은 최대 15 fps로 표시하며 녹음 상태의 유일한 신호로 사용하지 않는다.
+- 녹음 중에는 현재 Space의 Files 탐색, 문서 열기/스크롤, Outline, 검색, 복사를 유지하고 create/edit/move/delete와 Space/Settings 전환을 막는다.
+- `Stop & save`가 File을 upload queue에 넣으면 `RecordingDock`을 즉시 닫고 일반 작업 상태로 돌아간다. 기존 upload와 녹음 File은 같은 최대 2개 병렬 queue를 사용하므로 이전 녹음이 전송되는 동안 다음 녹음을 시작할 수 있다.
+- 녹음 시작부터 NoteGate upload 종료까지 Screen Wake Lock을 요청한다. Wake Lock은 보조 기능이므로 OS가 거부하거나 해제해도 녹음 자체는 계속된다.
+- 문서가 다시 visible 상태가 되면 진행 중인 녹음/upload의 Wake Lock을 다시 요청한다.
+- 브라우저 background upload는 보장하지 않으므로 upload 완료 전에는 NoteGate를 foreground에 유지해야 한다. 서버가 upload 완료를 확인한 뒤의 후처리는 화면 상태와 무관하다.
+- 초기 구현은 녹음 chunk를 memory에 보관한다. tab 새로고침, 종료, browser/OS 강제 종료 시 저장 전 녹음은 복구하지 않는다.
+- 표준 근거는 [MediaStream Recording](https://www.w3.org/TR/mediastream-recording/), [Web Locks](https://www.w3.org/TR/web-locks/), [Screen Wake Lock](https://www.w3.org/TR/screen-wake-lock/)이다. iOS/iPadOS Home Screen Web App의 Screen Wake Lock은 [Safari 18.4](https://webkit.org/blog/16574/webkit-features-in-safari-18-4/)부터 지원된다.
+
 ### Download file
 
 - 파일 다운로드는 브라우저 기본 다운로드 관리자를 사용한다.

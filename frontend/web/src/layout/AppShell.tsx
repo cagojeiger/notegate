@@ -7,6 +7,8 @@ import { MarkdownOutlineProvider } from "../features/editor/MarkdownOutlineConte
 import { useUsageQuery } from "../features/spaces/useUsageQueries";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
+import { RecordingDock } from "../features/recording/RecordingDock";
+import { useAudioRecordingState } from "../features/recording/AudioRecordingProvider";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { mergeVisibleSpaceOrder } from "../features/spaces/spaceReorder";
@@ -53,9 +55,13 @@ function WorkspaceStatusBar({
 
 export function AppShell({ me, onSignOut }: AppShellProps) {
   const workbench = useWorkbenchController({ me, onSignOut });
+  const recording = useAudioRecordingState();
   const [historyScope, setHistoryScope] = useState<HistoryScope | null>(null);
   const [surface, setSurface] = useState<AppSurface>("workbench");
   const { actions } = workbench;
+  const recordingActive = recording.status !== "idle";
+  const canWriteWorkbench = workbench.canWriteActiveSpace && !recordingActive;
+  const canManageWorkbench = workbench.canManageActiveSpace && !recordingActive;
   const libraryAvailable = me.account.kind === "user";
   const libraryOpen = libraryAvailable && surface === "library";
   const statusUsageEnabled = me.account.kind === "user" && !workbench.isMobile;
@@ -87,18 +93,22 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     }
   };
   const openSettings = () => {
+    if (recordingActive) return;
     closeMobilePanels();
     actions.setSettingsOpen(true);
   };
   const openLibrary = () => {
+    if (recordingActive) return;
     closeMobilePanels();
     setSurface("library");
   };
   const selectWorkbenchSpace = (space: Parameters<typeof actions.selectSpace>[0]) => {
+    if (recordingActive) return;
     actions.selectSpace(space);
     setSurface("workbench");
   };
   const reorderRailSpaces = (orderedSpaces: Parameters<typeof actions.reorderSpaces>[0]) => {
+    if (recordingActive) return;
     actions.reorderSpaces(
       me.account.kind === "user"
         ? mergeVisibleSpaceOrder(workbench.spaces, orderedSpaces)
@@ -106,6 +116,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
     );
   };
   const openHistory = () => {
+    if (recordingActive) return;
     closeMobilePanels();
     setHistoryScope({ initialSpaceId: workbench.activeSpace?.id ?? null });
   };
@@ -152,11 +163,12 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         <ActivityRail
           spaces={railSpaces}
           activeSpace={workbench.activeSpace}
-          canCreateSpace={workbench.canCreateSpace}
-          canManageSpaces={workbench.canCreateSpace}
+          canCreateSpace={workbench.canCreateSpace && !recordingActive}
+          canManageSpaces={workbench.canCreateSpace && !recordingActive}
+          navigationLocked={recordingActive}
           onSelectSpace={selectWorkbenchSpace}
           onReorderSpaces={reorderRailSpaces}
-          onCreateSpace={actions.promptCreateSpace}
+          onCreateSpace={recordingActive ? () => undefined : actions.promptCreateSpace}
           onRenameSpace={actions.promptRenameSpace}
           onDeleteSpace={actions.confirmDeleteSpace}
           onOpenLibrary={libraryAvailable ? openLibrary : undefined}
@@ -193,6 +205,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   onOpenNodeInNewGroup={(node) => { void openNodeInNewGroup(node); }}
                   onCreateFolder={() => actions.promptCreateNode("folder")}
                   onCreateText={() => actions.promptCreateNode("text")}
+                  onRecordAudio={actions.recordAudio}
                   onFileSelected={actions.handleFileSelected}
                   onRenameSpace={actions.promptRenameSpace}
                   onDeleteSpace={actions.confirmDeleteSpace}
@@ -204,8 +217,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   onCollapseTree={actions.collapseTree}
                   onCreateInFolder={actions.promptCreateInFolder}
                   onUploadInFolder={actions.uploadInFolder}
-                  canWriteActiveSpace={workbench.canWriteActiveSpace}
-                  canManageActiveSpace={workbench.canManageActiveSpace}
+                  canWriteActiveSpace={canWriteWorkbench}
+                  canManageActiveSpace={canManageWorkbench}
                   canOpenInNewGroup={workbench.editorGroups.length < MAX_EDITOR_GROUPS}
                 />
               </PrimarySidebarFrame>
@@ -231,7 +244,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                 onMoveNode={actions.promptMoveNode}
                 onDeleteNode={actions.confirmDeleteNode}
                 onDownloadFile={actions.downloadFileNode}
-                canWriteActiveSpace={workbench.canWriteActiveSpace}
+                canWriteActiveSpace={canWriteWorkbench}
               />
               <AuxiliarySidebarResizeHandle visible={layout.auxiliaryMode === "docked"} />
               <AuxiliarySidebarFrame id="auxiliary-sidebar-panel" mode={layout.auxiliaryMode}>
@@ -239,8 +252,8 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   activeNode={workbench.inspectedNode}
                   activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}
                   loadingNode={workbench.inspectorNodeLoading}
-                  canWriteActiveSpace={workbench.canWriteActiveSpace}
-                  canManageActiveSpace={workbench.canManageActiveSpace}
+                  canWriteActiveSpace={canWriteWorkbench}
+                  canManageActiveSpace={canManageWorkbench}
                   textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}
                   writeLockAvailable={workbench.activeSpace?.features.write_lock ?? false}
                   searchPolicyPending={actions.nodeSearchPolicyPending}
@@ -259,13 +272,15 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         </main>
       </div>
       <div className="shrink-0">
+        <RecordingDock />
         <UploadProgressDock />
         <MobileSpaceBar
           spaces={railSpaces}
           activeSpace={workbench.activeSpace}
-          canCreateSpace={workbench.canCreateSpace}
+          canCreateSpace={workbench.canCreateSpace && !recordingActive}
+          navigationLocked={recordingActive}
           onSelectSpace={selectWorkbenchSpace}
-          onCreateSpace={actions.promptCreateSpace}
+          onCreateSpace={recordingActive ? () => undefined : actions.promptCreateSpace}
           onOpenLibrary={libraryAvailable ? openLibrary : undefined}
           libraryActive={libraryOpen}
           onOpenHistory={openHistory}

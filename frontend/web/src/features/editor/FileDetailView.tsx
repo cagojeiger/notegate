@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from "react";
+import { AudioLines } from "lucide-react";
 
 import { ApiError } from "../../api/errors";
 import type { RestNode } from "../../api/types";
@@ -80,6 +81,11 @@ export function FileDetailView({ node }: { node: RestNode }) {
     <article className="min-h-0 w-full flex-1 overflow-y-auto" data-file-detail-scroll>
       <div className="mx-auto max-w-[44rem] px-6 py-10 sm:px-10 sm:py-14">
         <p className="text-sm text-muted">{node.path}</p>
+        {node.file_media_kind === "audio" ? (
+          <div className="mt-6 flex items-center gap-2 text-sm font-medium text-muted">
+            <AudioLines size={18} /> Audio recording
+          </div>
+        ) : null}
         <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">{node.name}</h1>
         {previewFailed || previewRequestFailed ? <p className="mt-8 text-sm text-muted">{previewFailureLabel} cannot be displayed</p> : null}
         <Card className="mt-8">

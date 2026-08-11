@@ -143,6 +143,15 @@ Text/File 한도는 서로 독립이므로 StatusBar에서 합산 비율을 만�
 - 완료 항목은 잠시 표시한 뒤 자동으로 제거한다.
 - History는 Changes, Audit, MCP, queue Jobs 이력을 담당한다. Jobs는 활성 작업이 있을 때만 자동 갱신한다.
 
+## RecordingDock
+
+활성 audio recording은 `UploadProgressDock` 바로 위의 compact row로 표시한다.
+
+- `Recording`, elapsed time, root target filename/path, 실제 microphone level, `Discard`, `Stop & save`를 보여준다.
+- desktop/tablet은 한 행을 유지하고 mobile에서는 action을 둘째 줄로 감싼다.
+- document viewport를 덮는 floating overlay를 만들지 않는다.
+- `Stop & save` 뒤에는 row를 제거하고 생성된 File을 기존 `UploadProgressDock`에서 표시한다.
+
 ## 반응형
 
 | 화면 | 규칙 |

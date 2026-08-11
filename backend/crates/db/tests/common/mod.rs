@@ -87,7 +87,7 @@ pub async fn attach_file(
         },
     )
     .await?;
-    repo.attach_object_upload(upload_id, space_id, account_id, None)
+    repo.attach_object_upload(upload_id, space_id, account_id, None, None)
         .await
 }
 

@@ -524,13 +524,25 @@ async fn object_upload_round_trips_through_s3_presigned_urls()
     let put = put_upload(&upload, payload).await?;
     assert!(put.status().is_success(), "PUT failed: {}", put.status());
 
-    let (status, completed) = complete_upload(&state, &caller, space_id, upload.id).await?;
+    let node_metadata = json!({
+        "type": "audio_recording",
+        "recording": { "profile_id": "notegate-meeting-llm-v1" }
+    });
+    let (status, completed) = json_request(
+        rest_app(state.clone(), caller.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/file-uploads/{}/complete", upload.id),
+        json!({ "node_metadata": node_metadata }),
+    )
+    .await?;
     assert_eq!(status, StatusCode::CREATED, "{completed}");
+    assert_eq!(completed["node"]["metadata"], node_metadata);
     let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
 
     let (status, completed_again) = complete_upload(&state, &caller, space_id, upload.id).await?;
     assert_eq!(status, StatusCode::CREATED, "{completed_again}");
     assert_eq!(completed_again["node"]["id"], completed["node"]["id"]);
+    assert_eq!(completed_again["node"]["metadata"], node_metadata);
 
     let object_key: String =
         sqlx::query_scalar("SELECT object_key FROM file_objects WHERE node_id = $1")

@@ -18,6 +18,7 @@ export function PrimarySidebar({
   onOpenNodeInNewGroup,
   onCreateFolder,
   onCreateText,
+  onRecordAudio,
   onFileSelected,
   onRenameSpace,
   onDeleteSpace,
@@ -46,6 +47,7 @@ export function PrimarySidebar({
   onOpenNodeInNewGroup: (node: NodeSummary) => void;
   onCreateFolder: () => void;
   onCreateText: () => void;
+  onRecordAudio: () => void;
   onFileSelected: (file: File | null) => void;
   onRenameSpace: () => void;
   onDeleteSpace: () => void;
@@ -69,7 +71,7 @@ export function PrimarySidebar({
 
   return (
     <aside ref={asideRef} onKeyDown={onSidebarKeyDown} className="flex h-full w-full min-h-0 flex-col border-r border-seam bg-panel">
-      <SpaceHeader activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} canManageActiveSpace={canManageActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onFileSelected={onFileSelected} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} />
+      <SpaceHeader activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} canManageActiveSpace={canManageActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onRecordAudio={onRecordAudio} onFileSelected={onFileSelected} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} />
       {activeSpace ? (
         <PrimarySidebarSections
           activeSpace={activeSpace}

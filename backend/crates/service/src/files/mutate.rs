@@ -260,12 +260,22 @@ impl FilesService {
         space_id: Uuid,
         upload_id: Uuid,
         detected_media_type: Option<&str>,
+        node_metadata: Option<&Value>,
     ) -> ServiceResult<crate::files::FileView> {
         self.authorize(space_id, caller_account_id, FileCommand::Write)
             .await?;
+        if let Some(metadata) = node_metadata {
+            validation::validate_metadata(metadata)?;
+        }
         let (node, file) = self
             .store
-            .attach_object_upload(upload_id, space_id, caller_account_id, detected_media_type)
+            .attach_object_upload(
+                upload_id,
+                space_id,
+                caller_account_id,
+                detected_media_type,
+                node_metadata,
+            )
             .await?;
         let node = self.file_node_view(space_id, node, &file).await?;
         Ok(crate::files::FileView { node, file })

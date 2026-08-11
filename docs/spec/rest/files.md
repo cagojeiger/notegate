@@ -30,10 +30,10 @@ POST /file-previews:batchResolve -> { results: BatchFilePreviewResult[] }
 
 Permission: `write`.
 
-1. `POST /file-uploads`에 `parent_node_id`, `name`, `byte_len`, `media_type`과 선택 metadata를 보낸다.
+1. `POST /file-uploads`에 `parent_node_id`, `name`, `byte_len`, `media_type`과 선택 encryption metadata를 보낸다.
 2. `transfer.mode=single`이면 `transfer.url`에 `transfer.headers`를 적용해 전체 bytes를 PUT한다.
 3. `transfer.mode=multipart`이면 `/parts`에 part number를 최대 16개씩 보내 URL을 발급받는다. 각 응답의 `content_length`만큼 원본을 잘라 최대 4개를 병렬 PUT하고 응답 `ETag`를 기록한다. 실패한 part만 새 URL로 재시도한다.
-4. `/complete`를 호출한다. Multipart는 모든 `{ part_number, etag }`를 `completed_parts`로 보낸다. S3 `HEAD`로 실물 크기를 검증하고 NoteGate quota 검사를 통과하면 File node가 생성된다. 암호화하지 않은 파일은 object 앞부분을 범위 조회해 실제 media type도 기록한다. 감지 실패는 upload 완료를 막지 않는다.
+4. `/complete`를 호출한다. Multipart는 모든 `{ part_number, etag }`를 `completed_parts`로 보내고, File Node 생성 시 함께 저장할 metadata가 있으면 `node_metadata` object를 보낸다. Metadata는 공통 Node metadata 제한으로 먼저 검증되고 File Node 연결과 같은 DB transaction에서 저장된다. S3 `HEAD`로 실물 크기를 검증하고 NoteGate quota 검사를 통과하면 File node가 생성된다. 암호화하지 않은 파일은 object 앞부분을 범위 조회해 실제 media type도 기록한다. 감지 실패는 upload 완료를 막지 않는다.
 
 Single PUT은 `If-None-Match: *`와 요청의 `Content-Length`를 서명하므로 같은 URL로 object를 덮어쓰거나 선언한 `byte_len`과 다른 크기를 업로드할 수 없다. 브라우저가 직접 설정할 수 없는 `Content-Length`는 응답 header 목록에서 제외하며 user agent가 body 길이로 자동 생성한다. Single과 multipart part presigned URL은 15분 동안 유효하다.
 
@@ -61,9 +61,9 @@ NOTEGATE_S3__SECRET_KEY
 
 Permission: `read`.
 
-`GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Node metadata는 공통 metadata API로 수정한다.
+`GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Upload 완료 시 선택 `node_metadata`로 초기값을 원자적으로 저장할 수 있고 이후에는 공통 metadata API로 수정한다. 완료 재시도는 처음 연결된 File Node와 metadata를 그대로 반환한다.
 
-`media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다. 감지가 끝난 File node에는 서버가 계산한 `preview_available`와 `file_preview_kind`도 포함된다. `preview_available`은 기존 image preview 호환 필드이므로 PDF에서는 `false`이고, PDF 가능 여부는 `file_preview_kind: "pdf"`로 표현한다. Inline preview 여부는 client 선언값이 아니라 감지 결과로 결정한다. 기존 파일처럼 아직 감지값이 없으면 첫 preview URL 요청에서 감지한다. 감지값 저장은 요청 응답을 막지 않는 process-local write-behind를 거치므로 같은 요청 직후의 metadata 조회에는 아직 반영되지 않을 수 있다.
+`media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다. 감지가 끝난 File node에는 서버가 계산한 `preview_available`, `file_preview_kind`, `file_media_kind`도 포함된다. `preview_available`은 기존 image preview 호환 필드이므로 PDF에서는 `false`이고, PDF 가능 여부는 `file_preview_kind: "pdf"`로 표현한다. `file_media_kind`는 표시용 분류(`image | pdf | audio | other`)이며 preview URL 계약과 분리된다. 브라우저 녹음의 MP4/WebM 컨테이너가 `video/*`로 감지되더라도 client 선언값이 `audio/*`이면 `audio`로 분류한다. Inline preview 여부는 client 선언값이 아니라 감지 결과로 결정한다. 기존 파일처럼 아직 감지값이 없으면 첫 preview URL 요청에서 감지한다. 감지값 저장은 요청 응답을 막지 않는 process-local write-behind를 거치므로 같은 요청 직후의 metadata 조회에는 아직 반영되지 않을 수 있다.
 
 ## Download
 

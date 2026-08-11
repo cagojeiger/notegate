@@ -95,7 +95,7 @@ async fn upload_reservation_and_file_deletion_follow_lock_policy() -> TestResult
 
     let file = fixture
         .files
-        .complete_object_upload(fixture.owner, fixture.space_id, upload_id, None)
+        .complete_object_upload(fixture.owner, fixture.space_id, upload_id, None, None)
         .await?;
     let file_id = file.node.node.id;
     assert_eq!(
@@ -114,7 +114,7 @@ async fn upload_reservation_and_file_deletion_follow_lock_policy() -> TestResult
 
     let repeated = fixture
         .files
-        .complete_object_upload(fixture.owner, fixture.space_id, upload_id, None)
+        .complete_object_upload(fixture.owner, fixture.space_id, upload_id, None, None)
         .await?;
     assert_eq!(repeated.node.node.id, file_id);
     assert_eq!(

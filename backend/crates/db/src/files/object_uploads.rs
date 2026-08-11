@@ -252,6 +252,7 @@ pub async fn attach(
     space_id: Uuid,
     requested_by: Uuid,
     detected_media_type: Option<&str>,
+    node_metadata: Option<&Value>,
     limits: Limits,
 ) -> Result<(Node, FileObject)> {
     let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
@@ -297,6 +298,9 @@ pub async fn attach(
     let parent_id = upload
         .parent_node_id
         .ok_or_else(|| Error::not_found("upload parent no longer exists"))?;
+    let node_metadata = node_metadata
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
     let locked = checks::lock_space_context(&mut tx, space_id, limits).await?;
     create::prepare_reserved_file_create(&mut tx, space_id, parent_id, &upload.name, locked.limits)
         .await?;
@@ -310,12 +314,13 @@ pub async fn attach(
 
     let node = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO nodes \
-         (space_id, parent_id, name, kind, search_enabled, created_by_account_id, updated_by_account_id) \
-         VALUES ($1, $2, $3, 'file', $4, $5, $5) RETURNING {NODE_COLUMNS}"
+         (space_id, parent_id, name, kind, metadata, search_enabled, created_by_account_id, updated_by_account_id) \
+         VALUES ($1, $2, $3, 'file', $4, $5, $6, $6) RETURNING {NODE_COLUMNS}"
     )))
     .bind(space_id)
     .bind(parent_id)
     .bind(&upload.name)
+    .bind(&node_metadata)
     .bind(locked.default_search_enabled)
     .bind(requested_by)
     .fetch_one(&mut *tx)

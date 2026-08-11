@@ -5,6 +5,7 @@ import { ApiError } from "../api/errors";
 import type { Me } from "../api/types";
 import { LoginGate } from "../auth/LoginGate";
 import { useSessionQuery } from "../auth/useAuthQueries";
+import { AudioRecordingProvider } from "../features/recording/AudioRecordingProvider";
 import { UploadProvider } from "../features/uploads/UploadProvider";
 import { AppShell } from "../layout/AppShell";
 import { FullScreenStatus } from "../layout/FullScreenStatus";
@@ -84,7 +85,9 @@ function AuthBoundary({
 
   return (
     <UploadProvider>
-      <AppShell me={authViewState.me} onSignOut={onSessionChanged} />
+      <AudioRecordingProvider>
+        <AppShell me={authViewState.me} onSignOut={onSessionChanged} />
+      </AudioRecordingProvider>
     </UploadProvider>
   );
 }

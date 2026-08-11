@@ -89,10 +89,16 @@ export async function completeFileUpload(
   client: ApiClient,
   spaceId: string,
   uploadId: string,
-  completedParts?: CompletedFileUploadPart[]
+  completedParts?: CompletedFileUploadPart[],
+  nodeMetadata?: Record<string, unknown>
 ): Promise<FileResponse> {
   const completePath = `/api/v1/spaces/${spaceId}/file-uploads/${uploadId}/complete`;
-  const body = completedParts === undefined ? undefined : { completed_parts: completedParts };
+  const body = completedParts === undefined && nodeMetadata === undefined
+    ? undefined
+    : {
+        ...(completedParts === undefined ? {} : { completed_parts: completedParts }),
+        ...(nodeMetadata === undefined ? {} : { node_metadata: nodeMetadata })
+      };
   const complete = () => body === undefined
     ? client.post<FileResponse>(completePath)
     : client.post<FileResponse>(completePath, body);

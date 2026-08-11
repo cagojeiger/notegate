@@ -11,6 +11,7 @@ import {
   canWriteNode,
   resolveNodeCreateTarget
 } from "../nodes/nodeWriteAccess";
+import { useAudioRecordingActions } from "../recording/AudioRecordingProvider";
 import { useUploadActions } from "../uploads/UploadProvider";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import type { AppDialog } from "./dialogs/dialogTypes";
@@ -56,6 +57,7 @@ export function useWorkbenchNodeCommandActions({
   const setExpanded = useUiStore((state) => state.setExpanded);
   const showToast = useUiStore((state) => state.showToast);
   const { startUpload } = useUploadActions();
+  const { startRecording } = useAudioRecordingActions();
 
   const createNodeMutation = useCreateNodeMutation(activeSpace, (node) => {
     addExpanded([node.parent_id ?? activeSpace!.root_node_id]);
@@ -140,6 +142,16 @@ export function useWorkbenchNodeCommandActions({
     promptUpload(activeSpace, parent.id, parent.path, file);
   }
 
+  function recordAudio() {
+    if (!canWriteActiveSpace || !activeSpace) return;
+    void startRecording({
+      parentNodeId: activeSpace.root_node_id,
+      spaceId: activeSpace.id,
+      spaceName: activeSpace.name,
+      destinationPath: "/"
+    });
+  }
+
   function promptUpload(space: Space, parentId: string, destinationPath: string, file: File) {
     setDialog(uploadFileDialog(parentId, file, (input) => {
       startUpload({
@@ -218,6 +230,7 @@ export function useWorkbenchNodeCommandActions({
     promptCreateNode,
     promptCreateInFolder,
     handleFileSelected,
+    recordAudio,
     uploadInFolder,
     collapseTree,
     promptRenameNode,

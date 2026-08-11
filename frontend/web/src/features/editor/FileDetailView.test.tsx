@@ -73,6 +73,20 @@ describe("FileDetailView", () => {
     expect(screen.getByText("application/pdf")).toBeInTheDocument();
   });
 
+  it("labels audio files as recordings", () => {
+    render(<FileDetailView node={fileNode({
+      name: "meeting.m4a",
+      path: "/meeting.m4a",
+      media_type: "audio/mp4",
+      detected_media_type: "video/mp4",
+      preview_available: false,
+      file_media_kind: "audio"
+    })} />);
+
+    expect(screen.getByText("Audio recording")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "meeting.m4a" })).toBeInTheDocument();
+  });
+
   it("renders a verified PDF from its preview URL", async () => {
     filePreviewQueryMocks.useFilePreviewUrl.mockReturnValue(previewQuery({
       data: {

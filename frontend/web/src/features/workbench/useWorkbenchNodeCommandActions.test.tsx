@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   downloadFile: vi.fn(),
   moveNode: vi.fn(),
   replaceMetadata: vi.fn(),
+  startRecording: vi.fn(),
   startUpload: vi.fn(),
   updateNode: vi.fn(),
   updateNodeSearchPolicy: vi.fn(),
@@ -30,6 +31,10 @@ vi.mock("../../api/files", () => ({
 
 vi.mock("../uploads/UploadProvider", () => ({
   useUploadActions: () => ({ startUpload: mocks.startUpload })
+}));
+
+vi.mock("../recording/AudioRecordingProvider", () => ({
+  useAudioRecordingActions: () => ({ startRecording: mocks.startRecording })
 }));
 
 vi.mock("./useWorkbenchQueries", () => {
@@ -63,6 +68,7 @@ describe("useWorkbenchNodeCommandActions", () => {
     mocks.deleteNode.mockReset();
     mocks.moveNode.mockReset();
     mocks.replaceMetadata.mockReset();
+    mocks.startRecording.mockReset().mockResolvedValue(undefined);
     mocks.startUpload.mockReset();
     mocks.updateNode.mockReset();
     mocks.updateNodeSearchPolicy.mockReset();
@@ -99,7 +105,27 @@ describe("useWorkbenchNodeCommandActions", () => {
     });
   });
 
-  it("explains why header create and upload actions are blocked", () => {
+  it("starts audio recording at the space root", () => {
+    const activeSpace = space("space-1");
+    const destinationFolder = node("meetings", activeSpace.id, "/Meetings", "folder");
+    const { result } = renderCommandActions({
+      activeSpace,
+      activeNode: destinationFolder,
+      canWriteActiveSpace: true,
+      setDialog: vi.fn()
+    });
+
+    act(() => result.current.recordAudio());
+
+    expect(mocks.startRecording).toHaveBeenCalledWith({
+      spaceId: activeSpace.id,
+      spaceName: activeSpace.name,
+      parentNodeId: activeSpace.root_node_id,
+      destinationPath: "/"
+    });
+  });
+
+  it("blocks selected-folder writes but records at the unlocked space root", () => {
     const activeSpace = space("space-1");
     const lockedFolder = {
       ...node("folder-1", activeSpace.id, "/Policies", "folder"),
@@ -121,11 +147,18 @@ describe("useWorkbenchNodeCommandActions", () => {
     act(() => {
       useUiStore.setState({ toast: null });
       result.current.handleFileSelected(file);
+      result.current.recordAudio();
     });
     expect(useUiStore.getState().toast).toBe(
       "Changes are blocked because the destination folder or an ancestor is write-locked"
     );
     expect(mocks.startUpload).not.toHaveBeenCalled();
+    expect(mocks.startRecording).toHaveBeenCalledWith({
+      destinationPath: "/",
+      parentNodeId: activeSpace.root_node_id,
+      spaceId: activeSpace.id,
+      spaceName: activeSpace.name
+    });
   });
 
   it("does not dispatch node mutations from any command path under an inherited lock", () => {

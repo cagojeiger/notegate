@@ -24,15 +24,25 @@ describe("ActivityRail", () => {
     expect(screen.getByRole("button", { name: "Daily" })).not.toHaveAttribute("aria-current");
     expect(view.container.querySelectorAll("[data-active-indicator]")).toHaveLength(1);
   });
+
+  it("disables destination changes while navigation is locked", () => {
+    renderRail(false, true);
+
+    expect(screen.getByRole("button", { name: "Open space library" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Daily" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "History" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled();
+  });
 });
 
-function renderRail(libraryActive: boolean) {
+function renderRail(libraryActive: boolean, navigationLocked = false) {
   return render(
     <ActivityRail
       spaces={[space]}
       activeSpace={space}
       canCreateSpace
       canManageSpaces
+      navigationLocked={navigationLocked}
       onSelectSpace={vi.fn()}
       onReorderSpaces={vi.fn()}
       onCreateSpace={vi.fn()}

@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use super::AccountRef;
 use crate::file_preview::{
-    FilePreviewKind, file_preview_kind, is_preview_size_allowed, is_previewable_image_type,
+    FileMediaKind, FilePreviewKind, file_media_kind, file_preview_kind, is_preview_size_allowed,
+    is_previewable_image_type,
 };
 
 /// Node output: tree metadata, derived `path`, and attribution refs.
@@ -47,6 +48,8 @@ pub struct NodeOut {
     pub preview_available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_preview_kind: Option<FilePreviewKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_media_kind: Option<FileMediaKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_filename: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,6 +122,10 @@ impl NodeOut {
                     file.detected_media_type.as_deref(),
                 )
             }),
+            file_media_kind: view
+                .file
+                .as_ref()
+                .map(|file| file_media_kind(&file.media_type, file.detected_media_type.as_deref())),
             original_filename: view
                 .file
                 .as_ref()

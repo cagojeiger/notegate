@@ -248,7 +248,7 @@ async fn complete_upload(
             })
             .collect()
     });
-    let view = complete_object_upload(state, caller.account_id(), upload, completed_parts)
+    let view = complete_object_upload(state, caller.account_id(), upload, completed_parts, None)
         .await
         .map_err(flow_error)?;
     Ok(Json(json!({
