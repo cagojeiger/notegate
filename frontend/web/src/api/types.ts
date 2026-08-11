@@ -282,6 +282,42 @@ export type McpInvocationListResponse = {
   page: Page;
 };
 
+export type BackgroundJobStatus = "queued" | "running" | "succeeded" | "dead";
+
+export type BackgroundJob = {
+  id: string;
+  kind: string;
+  status: BackgroundJobStatus;
+  context_kind: string | null;
+  context_id: string | null;
+  context_label: string | null;
+  attempt_count: number;
+  failure_count: number;
+  max_attempts: number;
+  last_error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type BackgroundJobAttempt = {
+  attempt_number: number;
+  started_at: string;
+  finished_at: string | null;
+  outcome: string | null;
+  error_code: string | null;
+};
+
+export type BackgroundJobListResponse = {
+  jobs: BackgroundJob[];
+  page: Page;
+};
+
+export type BackgroundJobDetailResponse = {
+  job: BackgroundJob;
+  attempts: BackgroundJobAttempt[];
+};
+
 export type FileChangeEvent = {
   id: number;
   created_at: string;

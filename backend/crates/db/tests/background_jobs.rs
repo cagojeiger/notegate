@@ -303,6 +303,168 @@ async fn background_jobs_migration_backfills_and_mirrors_legacy_usage_jobs()
 }
 
 #[tokio::test]
+async fn job_history_migration_backfills_active_and_scopes_legacy_usage_jobs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup_before(33).await? else {
+        return Ok(());
+    };
+    let (owner_account_id, backfilled_space_id, _) =
+        space_with_root(&db.pool, "jobs-history-backfill").await?;
+    sqlx::query(
+        "INSERT INTO background_jobs (job_kind, payload) \
+         VALUES ('space_usage_reconcile', jsonb_build_object('space_id', $1))",
+    )
+    .bind(backfilled_space_id)
+    .execute(&db.pool)
+    .await?;
+    let (_, terminal_space_id, _) = space_with_root(&db.pool, "jobs-history-terminal").await?;
+    sqlx::query(
+        "INSERT INTO background_jobs (job_kind, payload, status, completed_at) \
+         VALUES ('space_usage_reconcile', jsonb_build_object('space_id', $1), \
+                 'succeeded', now())",
+    )
+    .bind(terminal_space_id)
+    .execute(&db.pool)
+    .await?;
+    let missing_space_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO background_jobs (job_kind, payload) \
+         VALUES ('space_usage_reconcile', jsonb_build_object('space_id', $1))",
+    )
+    .bind(missing_space_id)
+    .execute(&db.pool)
+    .await?;
+
+    db.apply_migration(33).await?;
+
+    let backfilled: (
+        String,
+        Option<uuid::Uuid>,
+        Option<String>,
+        Option<uuid::Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id, \
+                context_kind, context_id, context_label \
+         FROM background_jobs WHERE payload ->> 'space_id' = $1",
+    )
+    .bind(backfilled_space_id.to_string())
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        backfilled,
+        (
+            "visible".to_owned(),
+            Some(owner_account_id),
+            Some("space".to_owned()),
+            Some(backfilled_space_id),
+            Some("ws-jobs-history-backfill".to_owned())
+        )
+    );
+
+    let legacy_hidden: Vec<(String, Option<uuid::Uuid>)> = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id \
+         FROM background_jobs \
+         WHERE payload ->> 'space_id' IN ($1, $2) \
+         ORDER BY payload ->> 'space_id'",
+    )
+    .bind(terminal_space_id.to_string())
+    .bind(missing_space_id.to_string())
+    .fetch_all(&db.pool)
+    .await?;
+    assert_eq!(
+        legacy_hidden,
+        vec![("hidden".to_owned(), None), ("hidden".to_owned(), None)]
+    );
+
+    let (mirrored_owner_account_id, mirrored_space_id, _) =
+        space_with_root(&db.pool, "jobs-history-mirror").await?;
+    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
+        .bind(mirrored_space_id)
+        .execute(&db.pool)
+        .await?;
+    let mirrored: (
+        String,
+        Option<uuid::Uuid>,
+        Option<String>,
+        Option<uuid::Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id, \
+                context_kind, context_id, context_label \
+         FROM background_jobs WHERE payload ->> 'space_id' = $1",
+    )
+    .bind(mirrored_space_id.to_string())
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        mirrored,
+        (
+            "visible".to_owned(),
+            Some(mirrored_owner_account_id),
+            Some("space".to_owned()),
+            Some(mirrored_space_id),
+            Some("ws-jobs-history-mirror".to_owned())
+        )
+    );
+
+    let (compat_owner_account_id, compat_space_id, _) =
+        space_with_root(&db.pool, "jobs-history-four-arg").await?;
+    let compat_job_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT enqueue_background_job( \
+             'space_usage_reconcile', jsonb_build_object('space_id', $1), \
+             NULL::timestamptz, 8 \
+         )",
+    )
+    .bind(compat_space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    let compatible: (
+        String,
+        Option<uuid::Uuid>,
+        Option<String>,
+        Option<uuid::Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id, \
+                context_kind, context_id, context_label \
+         FROM background_jobs WHERE job_id = $1",
+    )
+    .bind(compat_job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        compatible,
+        (
+            "visible".to_owned(),
+            Some(compat_owner_account_id),
+            Some("space".to_owned()),
+            Some(compat_space_id),
+            Some("ws-jobs-history-four-arg".to_owned())
+        )
+    );
+
+    let hidden_job_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT enqueue_background_job( \
+             'internal_maintenance', '{}'::jsonb, NULL::timestamptz, 8 \
+         )",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    let hidden: (String, Option<uuid::Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT history_visibility, history_owner_account_id, context_kind \
+         FROM background_jobs WHERE job_id = $1",
+    )
+    .bind(hidden_job_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(hidden, ("hidden".to_owned(), None, None));
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn concurrent_workers_claim_distinct_supported_jobs() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(db) = TestDb::setup().await? else {

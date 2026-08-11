@@ -73,6 +73,8 @@ pub struct PublicApiDoc;
         rest::me::get_usage,
         rest::me::list_audit_events,
         rest::me::list_mcp_invocations,
+        rest::me::list_background_jobs,
+        rest::me::get_background_job,
         rest::me::delete_me,
         rest::spaces::list,
         rest::spaces::create,
@@ -515,6 +517,8 @@ mod tests {
             "RevealResponse",
             "ConnectionListResponse",
             "AgentsListResponse",
+            "BackgroundJobListResponse",
+            "BackgroundJobDetailResponse",
             "ErrorResponse",
         ] {
             assert!(schemas.contains_key(schema), "missing schema: {schema}");
@@ -548,6 +552,14 @@ mod tests {
         assert_eq!(
             response_ref(&value, "/api/v1/agents", "get", "200"),
             "#/components/schemas/AgentsListResponse"
+        );
+        assert_eq!(
+            response_ref(&value, "/api/v1/me/jobs", "get", "200"),
+            "#/components/schemas/BackgroundJobListResponse"
+        );
+        assert_eq!(
+            response_ref(&value, "/api/v1/me/jobs/{job_id}", "get", "200"),
+            "#/components/schemas/BackgroundJobDetailResponse"
         );
     }
 
@@ -873,6 +885,8 @@ mod tests {
             "DELETE /api/v1/me",
             "GET /api/v1/me",
             "GET /api/v1/me/audit-events",
+            "GET /api/v1/me/jobs",
+            "GET /api/v1/me/jobs/{job_id}",
             "GET /api/v1/me/mcp-invocations",
             "GET /api/v1/me/usage",
             "GET /api/v1/spaces",

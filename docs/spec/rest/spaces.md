@@ -119,4 +119,4 @@ Owner user만 가능하다. Space는 soft delete 후 purge 대상이 된다.
 POST /api/v1/spaces/{space_id}/usage/reconcile
 ```
 
-Owner user만 가능하다. 요청은 해당 Space의 reconciliation job을 만들고 `202 Accepted`와 `{"status":"queued"}`를 반환한다. 같은 Space의 job이 이미 있으면 `409 usage_reconciliation_pending`, 최근 reconciliation 완료 후 1시간 cooldown이면 `409 usage_reconciliation_cooldown`을 반환한다. 실제 COUNT/SUM은 background worker가 순차적으로 실행한다.
+Owner user만 가능하다. 요청은 해당 Space의 reconciliation job을 만들고 `202 Accepted`와 `{"status":"queued","job_id":"..."}`를 반환한다. `job_id`는 `GET /api/v1/me/jobs/{job_id}`로 상태를 추적할 때 사용한다. 같은 Space의 job이 이미 있으면 `409 usage_reconciliation_pending`, 최근 reconciliation 완료 후 1시간 cooldown이면 `409 usage_reconciliation_cooldown`을 반환한다. 실제 COUNT/SUM은 background worker가 순차적으로 실행한다.

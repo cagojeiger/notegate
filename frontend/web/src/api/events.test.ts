@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createMockApiClient } from "../test/apiClient";
-import { drainFileChanges, listAuditEvents, listFileChangeEvents, listMcpInvocations } from "./events";
+import { drainFileChanges, getBackgroundJob, listAuditEvents, listBackgroundJobs, listFileChangeEvents, listMcpInvocations } from "./events";
 
 describe("events api", () => {
   it("lists audit events with pagination", async () => {
@@ -20,6 +20,17 @@ describe("events api", () => {
     await listMcpInvocations(client, "cursor-mcp-1");
 
     expect(client.get).toHaveBeenCalledWith("/api/v1/me/mcp-invocations?limit=50&cursor=cursor-mcp-1");
+  });
+
+  it("lists jobs with pagination and loads one job", async () => {
+    const client = createMockApiClient();
+    client.get.mockResolvedValue({ jobs: [] });
+
+    await listBackgroundJobs(client, "cursor-job-1");
+    await getBackgroundJob(client, "job-1");
+
+    expect(client.get).toHaveBeenNthCalledWith(1, "/api/v1/me/jobs?limit=50&cursor=cursor-job-1");
+    expect(client.get).toHaveBeenNthCalledWith(2, "/api/v1/me/jobs/job-1");
   });
 
   it("lists file change events with node filtering", async () => {

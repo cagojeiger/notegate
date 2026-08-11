@@ -92,18 +92,20 @@ async fn rest_usage_endpoints_enforce_the_public_contract() -> Result<(), Box<dy
     .await?;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
     assert_eq!(queued["status"], json!("queued"));
-    let job_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM background_jobs \
-             WHERE job_kind = 'space_usage_reconcile' \
-               AND payload ->> 'space_id' = $1::text \
-               AND status IN ('queued', 'running') \
-         )",
+    let queued_job_id = queued["job_id"].as_str().expect("queued job id");
+    let job_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT job_id FROM background_jobs \
+         WHERE job_kind = 'space_usage_reconcile' \
+           AND payload ->> 'space_id' = $1::text \
+           AND status IN ('queued', 'running')",
     )
     .bind(space_id)
-    .fetch_one(&db.pool)
+    .fetch_optional(&db.pool)
     .await?;
-    assert!(job_exists);
+    assert_eq!(
+        job_id.map(|id| id.to_string()).as_deref(),
+        Some(queued_job_id)
+    );
 
     let (status, duplicate) = empty_request(
         rest_app(state.clone(), owner.clone()),

@@ -67,7 +67,7 @@ async fn reconciliation_request_allows_only_one_concurrent_queue()
     assert_eq!(
         outcomes
             .iter()
-            .filter(|outcome| **outcome == UsageReconciliationOutcome::Queued)
+            .filter(|outcome| matches!(outcome, UsageReconciliationOutcome::Queued { .. }))
             .count(),
         1
     );

@@ -1,11 +1,15 @@
 //! Account lifecycle operations for the current caller.
 
-use notegate_db::{AccountRepo, AuditEventRepo, McpInvocationRepo};
+use notegate_db::{AccountRepo, AuditEventRepo, BackgroundJobRepo, McpInvocationRepo};
 use notegate_model::account::AccountKind;
-use notegate_model::{AuditEventPage, ListAuditEvents, ListMcpInvocations, McpInvocationPage};
+use notegate_model::{
+    AuditEventPage, BackgroundJobDetail, BackgroundJobPage, ListAuditEvents, ListBackgroundJobs,
+    ListMcpInvocations, McpInvocationPage,
+};
 use uuid::Uuid;
 
 use crate::audit_events::list_audit_event_page;
+use crate::background_jobs::{get_background_job, list_background_job_page};
 use crate::mcp_invocations::list_mcp_invocation_page;
 use crate::{ServiceError, ServiceResult};
 
@@ -14,6 +18,7 @@ pub struct AccountService {
     store: AccountRepo,
     audit_events: AuditEventRepo,
     mcp_invocations: McpInvocationRepo,
+    background_jobs: BackgroundJobRepo,
 }
 
 impl AccountService {
@@ -21,11 +26,13 @@ impl AccountService {
         store: AccountRepo,
         audit_events: AuditEventRepo,
         mcp_invocations: McpInvocationRepo,
+        background_jobs: BackgroundJobRepo,
     ) -> Self {
         Self {
             store,
             audit_events,
             mcp_invocations,
+            background_jobs,
         }
     }
 
@@ -82,6 +89,28 @@ impl AccountService {
     ) -> ServiceResult<McpInvocationPage> {
         require_user(caller_kind)?;
         list_mcp_invocation_page(&self.mcp_invocations, caller_account_id, request).await
+    }
+
+    /// List background jobs recorded in the current user's account-scoped history.
+    pub async fn list_background_jobs(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        request: ListBackgroundJobs,
+    ) -> ServiceResult<BackgroundJobPage> {
+        require_user(caller_kind)?;
+        list_background_job_page(&self.background_jobs, caller_account_id, request).await
+    }
+
+    /// Get one owned queue job with its attempt history.
+    pub async fn get_background_job(
+        &self,
+        caller_kind: AccountKind,
+        caller_account_id: Uuid,
+        job_id: Uuid,
+    ) -> ServiceResult<BackgroundJobDetail> {
+        require_user(caller_kind)?;
+        get_background_job(&self.background_jobs, caller_account_id, job_id).await
     }
 }
 

@@ -61,6 +61,52 @@ notegate-api background runtime
 - Queue schema와 migration은 기존 database schema 소유권에 따라 `notegate-db`가 관리한다.
 - API process는 HTTP server, queue consumer, queue reconciler를 함께 실행하고 하나의 `PgPool`을 공유한다.
 
+### 새 작업 추가 원칙
+
+새로운 작업은 기존 queue 상태 머신에 kind별 분기를 추가하지 않고 typed contract와 handler 등록으로 확장한다.
+
+1. 업무 payload와 `JobSpec`을 정의한다. `JobSpec`은 안정적인 `KIND`와 직렬화 가능한 payload type만 소유한다.
+2. `JobHandler<J>`를 구현한다. Handler는 실제 업무를 호출하고 `Complete`, `Defer`, 분류된 `JobFailure`만 반환한다. Queue row나 attempt 상태를 직접 변경하지 않는다.
+3. API의 background runtime에서 handler를 `JobRegistry::register`로 등록한다. 등록되지 않은 kind는 해당 worker가 선점하지 않는다.
+4. 원본 변경과 작업 등록이 하나의 원자적 동작이어야 하면 같은 transaction에서 `JobQueue::enqueue_in`을 호출한 뒤 commit한다.
+5. 사용자가 History에서 확인해야 하는 작업만 `NewJob::record_in_history`로 owner와 선택적 표시 context를 지정한다. 내부 유지보수 작업은 기본값인 `hidden`을 유지한다.
+6. Handler는 `at-least-once` 실행을 전제로 멱등해야 한다. 같은 payload가 재실행되거나 lease 만료 뒤 다른 worker가 선점해도 도메인 최종 상태가 달라지면 안 된다.
+
+```rust
+#[derive(Serialize, Deserialize)]
+struct DocumentExportPayload {
+    document_id: Uuid,
+}
+
+struct DocumentExportJob;
+
+impl JobSpec for DocumentExportJob {
+    const KIND: &'static str = "document_export";
+    type Payload = DocumentExportPayload;
+}
+
+let job = NewJob::<DocumentExportJob>::new(payload).record_in_history(
+    owner_account_id,
+    Some(
+        JobHistoryContext::new("document")
+            .id(document_id)
+            .label(document_title),
+    ),
+);
+JobQueue::enqueue_in(&mut tx, &job).await?;
+tx.commit().await?;
+```
+
+작업을 추가할 때의 변경 지점은 `JobSpec`, 업무 handler, registry 등록, 생산자 transaction과 해당 테스트다. 일반적인 새 kind를 위해 `queue.rs`, `worker.rs`, queue migration을 수정해야 한다면 책임 경계가 새고 있는지 먼저 점검한다. 사용자에게 공개하는 kind라면 History의 표시 이름도 추가하되 실행 정책과 UI 표시 정책은 결합하지 않는다.
+
+최소 검증 범위:
+
+- payload 직렬화와 잘못 저장된 payload의 permanent failure
+- handler의 완료, 지연, retryable/permanent failure 분류
+- 업무 transaction과 enqueue의 원자성
+- handler 멱등성과 재선점 안전성
+- History 공개 작업의 owner 격리와 context 표시
+
 ## 상태 머신
 
 ```text
@@ -90,6 +136,8 @@ background_jobs
   job_id
   job_kind
   payload
+  history_visibility / history_owner_account_id
+  context_kind / context_id / context_label
   status
   available_at
   attempt_count / failure_count / max_attempts
@@ -179,6 +227,10 @@ notegate_background_job_duration_seconds{kind}
 Metric label에는 job ID, Space ID, node ID, payload, error message를 넣지 않는다.
 
 Queue 상태와 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은 전역 값이다. 90일간 보관되는 `succeeded` 이력은 snapshot에서 세지 않는다. API replica마다 같은 전역 값이 노출되므로 Prometheus에서 replica를 합산하지 않고 `max`로 집계한다. In-flight, attempt, duration, transition metric은 process-local 값이다.
+
+History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `history_owner_account_id`, 선택적 `context_kind/context_id/context_label`을 기록한다. 이 공통 metadata가 있는 job은 종류와 관계없이 해당 account의 History에 나타난다. 기본값은 `hidden`이며 History에 표시할 필요가 없는 운영·유지보수 job은 제외된다. `context_*`는 Space에 한정되지 않는 표시 문맥이고, Worker의 claim·retry·lease 처리에는 이 metadata를 사용하지 않는다.
+
+90일 History 보존 계약은 이 metadata와 함께 등록된 작업부터 적용한다. History migration 이전의 terminal 작업은 소유자를 현재 Space에서 추정하지 않고 hidden으로 유지한다. Space의 삭제 보존 기간이 queue history보다 짧아 과거 전체에 대해 안전한 owner snapshot을 복구할 수 없기 때문이다. 배포 시점의 `queued`/`running` usage 작업 중 Space가 남아 있는 작업만 화면 연속성을 위해 backfill한다. 직전 release의 4-argument enqueue 함수와 legacy usage trigger에 대한 보정은 rolling deployment 동안의 `space_usage_reconcile` 전용 호환 경로이며, 새 kind의 일반적인 확장 지점이 아니다.
 
 ## 검증 경계
 

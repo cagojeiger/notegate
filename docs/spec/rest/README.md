@@ -7,7 +7,7 @@ V1 REST는 NoteGate 브라우저 UI 전용 resource API다. UI가 선택한 `spa
 | Category | Scope | Path | Doc |
 |---|---:|---|---|
 | Identity | global | `/api/v1/me`, `/api/v1/me/usage` | `identity.md` |
-| Events | global/space | `/api/v1/me/audit-events`, `/api/v1/me/mcp-invocations`, `/api/v1/spaces/{space_id}/file-change-events`, `/api/v1/spaces/{space_id}/file-change-sync` | `events.md` |
+| Events | global/space | `/api/v1/me/audit-events`, `/api/v1/me/mcp-invocations`, `/api/v1/me/jobs`, `/api/v1/spaces/{space_id}/file-change-events`, `/api/v1/spaces/{space_id}/file-change-sync` | `events.md` |
 | Spaces | global | `/api/v1/spaces`, `/api/v1/spaces:reorder`, `/api/v1/spaces/{space_id}/usage/reconcile` | `spaces.md` |
 | Agents | global | `/api/v1/agents` | `agents.md` |
 | Connections | space | `/api/v1/spaces/{space_id}/agents` | `connections.md` |

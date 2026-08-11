@@ -1,6 +1,8 @@
 import type { ApiClient } from "./client";
 import type {
   AuditEventListResponse,
+  BackgroundJobDetailResponse,
+  BackgroundJobListResponse,
   FileChangeEventListResponse,
   FileChangeSyncResponse,
   McpInvocationListResponse
@@ -19,6 +21,16 @@ export function listMcpInvocations(client: ApiClient, cursor?: string | null): P
   const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
   if (cursor) params.set("cursor", cursor);
   return client.get<McpInvocationListResponse>(`/api/v1/me/mcp-invocations?${params}`);
+}
+
+export function listBackgroundJobs(client: ApiClient, cursor?: string | null): Promise<BackgroundJobListResponse> {
+  const params = new URLSearchParams({ limit: String(DEFAULT_EVENT_LIMIT) });
+  if (cursor) params.set("cursor", cursor);
+  return client.get<BackgroundJobListResponse>(`/api/v1/me/jobs?${params}`);
+}
+
+export function getBackgroundJob(client: ApiClient, jobId: string): Promise<BackgroundJobDetailResponse> {
+  return client.get<BackgroundJobDetailResponse>(`/api/v1/me/jobs/${jobId}`);
 }
 
 export function listFileChangeEvents(

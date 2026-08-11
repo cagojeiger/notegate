@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use notegate_model::{AccountRef as ModelAccountRef, AuditEvent, McpInvocation};
+use notegate_model::{
+    AccountRef as ModelAccountRef, AuditEvent, BackgroundJob, BackgroundJobAttempt,
+    BackgroundJobDetail, McpInvocation,
+};
 use notegate_service::files::FileChangeEvent;
 use serde::Serialize;
 use serde_json::Value;
@@ -96,6 +99,86 @@ impl McpInvocationOut {
 pub(crate) struct McpInvocationListResponse {
     pub invocations: Vec<McpInvocationOut>,
     pub page: crate::page::Page,
+}
+
+/// Background job recorded in the current user's account-scoped history.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BackgroundJobOut {
+    pub id: Uuid,
+    pub kind: String,
+    pub status: String,
+    pub context_kind: Option<String>,
+    pub context_id: Option<Uuid>,
+    pub context_label: Option<String>,
+    pub attempt_count: i32,
+    pub failure_count: i32,
+    pub max_attempts: i32,
+    pub last_error_code: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+impl From<&BackgroundJob> for BackgroundJobOut {
+    fn from(job: &BackgroundJob) -> Self {
+        Self {
+            id: job.id,
+            kind: job.kind.clone(),
+            status: job.status.clone(),
+            context_kind: job.context_kind.clone(),
+            context_id: job.context_id,
+            context_label: job.context_label.clone(),
+            attempt_count: job.attempt_count,
+            failure_count: job.failure_count,
+            max_attempts: job.max_attempts,
+            last_error_code: job.last_error_code.clone(),
+            created_at: job.created_at,
+            updated_at: job.updated_at,
+            completed_at: job.completed_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BackgroundJobAttemptOut {
+    pub attempt_number: i32,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub outcome: Option<String>,
+    pub error_code: Option<String>,
+}
+
+impl From<&BackgroundJobAttempt> for BackgroundJobAttemptOut {
+    fn from(attempt: &BackgroundJobAttempt) -> Self {
+        Self {
+            attempt_number: attempt.attempt_number,
+            started_at: attempt.started_at,
+            finished_at: attempt.finished_at,
+            outcome: attempt.outcome.clone(),
+            error_code: attempt.error_code.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BackgroundJobListResponse {
+    pub jobs: Vec<BackgroundJobOut>,
+    pub page: crate::page::Page,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BackgroundJobDetailResponse {
+    pub job: BackgroundJobOut,
+    pub attempts: Vec<BackgroundJobAttemptOut>,
+}
+
+impl From<&BackgroundJobDetail> for BackgroundJobDetailResponse {
+    fn from(detail: &BackgroundJobDetail) -> Self {
+        Self {
+            job: (&detail.job).into(),
+            attempts: detail.attempts.iter().map(Into::into).collect(),
+        }
+    }
 }
 
 /// File change event history entry returned by `GET /api/v1/spaces/{space_id}/file-change-events`.
