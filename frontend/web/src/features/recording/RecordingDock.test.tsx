@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   stopRecording: vi.fn()
 }));
 
-vi.mock("./AudioRecordingProvider", () => ({
+vi.mock("./AudioRecordingContext", () => ({
   useAudioRecordingActions: () => ({
     discardRecording: mocks.discardRecording,
     stopRecording: mocks.stopRecording

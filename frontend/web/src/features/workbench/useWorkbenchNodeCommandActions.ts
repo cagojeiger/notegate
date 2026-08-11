@@ -11,7 +11,7 @@ import {
   canWriteNode,
   resolveNodeCreateTarget
 } from "../nodes/nodeWriteAccess";
-import { useAudioRecordingActions } from "../recording/AudioRecordingProvider";
+import { useAudioRecordingActions } from "../recording/AudioRecordingContext";
 import { useUploadActions } from "../uploads/UploadProvider";
 import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import type { AppDialog } from "./dialogs/dialogTypes";

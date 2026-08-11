@@ -6,7 +6,7 @@ import {
   useAudioRecordingActions,
   useAudioRecordingSignal,
   useAudioRecordingState
-} from "./AudioRecordingProvider";
+} from "./AudioRecordingContext";
 
 export function RecordingDock() {
   const state = useAudioRecordingState();

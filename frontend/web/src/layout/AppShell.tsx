@@ -7,8 +7,7 @@ import { MarkdownOutlineProvider } from "../features/editor/MarkdownOutlineConte
 import { useUsageQuery } from "../features/spaces/useUsageQueries";
 import { MAX_EDITOR_GROUPS } from "../shared/model/workbenchLayout";
 import { PrimarySidebar } from "../features/nodes/PrimarySidebar";
-import { RecordingDock } from "../features/recording/RecordingDock";
-import { useAudioRecordingState } from "../features/recording/AudioRecordingProvider";
+import { useAudioRecordingState } from "../features/recording/AudioRecordingContext";
 import { ActivityRail } from "../features/spaces/ActivityRail";
 import { MobileSpaceBar } from "../features/spaces/MobileSpaceBar";
 import { mergeVisibleSpaceOrder } from "../features/spaces/spaceReorder";
@@ -37,6 +36,7 @@ const SpaceLibrary = lazy(() => import("../features/spaces/SpaceLibrary").then((
 const EventHistoryModal = lazy(() => import("../features/events/EventHistoryModal").then((module) => ({ default: module.EventHistoryModal })));
 const SettingsModal = lazy(() => import("../features/settings/SettingsModal").then((module) => ({ default: module.SettingsModal })));
 const DialogHost = lazy(() => import("../features/workbench/dialogs/DialogHost").then((module) => ({ default: module.DialogHost })));
+const RecordingDock = lazy(() => import("../features/recording/RecordingDock").then((module) => ({ default: module.RecordingDock })));
 
 function WorkspaceStatusBar({
   activeSpace,
@@ -272,7 +272,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
         </main>
       </div>
       <div className="shrink-0">
-        <RecordingDock />
+        {recordingActive ? <Suspense fallback={null}><RecordingDock /></Suspense> : null}
         <UploadProgressDock />
         <MobileSpaceBar
           spaces={railSpaces}

@@ -33,7 +33,7 @@ vi.mock("../uploads/UploadProvider", () => ({
   useUploadActions: () => ({ startUpload: mocks.startUpload })
 }));
 
-vi.mock("../recording/AudioRecordingProvider", () => ({
+vi.mock("../recording/AudioRecordingContext", () => ({
   useAudioRecordingActions: () => ({ startRecording: mocks.startRecording })
 }));
 

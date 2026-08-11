@@ -26,7 +26,7 @@ vi.mock("../features/recording/RecordingDock", () => ({
   RecordingDock: () => null
 }));
 
-vi.mock("../features/recording/AudioRecordingProvider", () => ({
+vi.mock("../features/recording/AudioRecordingContext", () => ({
   useAudioRecordingState: () => mocks.recordingState
 }));
 
