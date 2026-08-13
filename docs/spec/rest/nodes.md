@@ -46,7 +46,7 @@ DELETE /nodes/{node_id}         -> 204 No Content
 
 `RestNode`는 UI용 resource shape이므로 metadata, attribution, text/file summary를 포함한다. Text/File content body는 포함하지 않는다.
 
-기존 collection API는 query에 `view`를 주지 않으면 `RestNode`를 반환한다.
+Collection API는 query에 `view`를 주지 않으면 `RestNode`를 반환한다.
 `view=summary`는 tree/Recent용 compact shape을 반환한다. `NodeSummary`는
 `id`, `parent_id`, `name`, `kind`, `path`, `has_children`, `effective_write_locked`, `byte_len`,
 `line_count`, `preview_available`, `file_preview_kind`, `updated_at`만 포함한다. `space_id`는 route
@@ -72,7 +72,7 @@ Rules:
 
 - 결과 순서는 요청한 `parent_ids` 순서와 같다.
 - 각 parent는 독립적으로 `ready`, `not_found`, `not_folder`가 된다.
-- parent마다 첫 page만 반환한다. `page.next_cursor`가 있으면 기존 단일 children API로 이어서 읽는다.
+- parent마다 첫 page만 반환한다. `page.next_cursor`가 있으면 단일 children API로 이어서 읽는다.
 - Space read 권한은 요청 전체에 한 번 확인한다.
 - 빈 목록, 중복 ID, 16개 초과 요청은 `400 invalid_input`이다.
 
@@ -109,7 +109,7 @@ Rules:
 
 `GET /file-change-events`는 Space의 파일/폴더/문서 변경 이력을 최신순으로 반환한다. 자세한 response shape와 metadata 규칙은 `events.md`를 따른다.
 
-`GET /file-change-sync`는 UI 동기화를 위한 오름차순 delta API다. 과거 이력 조회와 별도 계약이며 자세한 token 규칙은 `events.md`를 따른다.
+`GET /file-change-sync`는 UI 동기화를 위한 오름차순 delta API다. History 조회 계약과 분리되며 자세한 token 규칙은 `events.md`를 따른다.
 
 Rules:
 
@@ -123,7 +123,7 @@ Rules:
 ```ts
 type CreateNodeBody = {
   parent_id: string
-  kind: "folder" | "text" | "file"
+  kind: "folder" | "text"
   name: string
   content?: string
 }

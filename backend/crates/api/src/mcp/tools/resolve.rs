@@ -1,7 +1,7 @@
 //! Shared MCP tool plumbing: space-name resolution, target parsing, the
 //! request-scoped [`Caller`] lookup, and the service-error → [`ErrorData`] map.
 //!
-//! MCP/CLI callers select a space by its human-friendly **name** (the
+//! MCP callers select a space by its human-friendly **name** (the
 //! canonical name), or with a compact `target` string (`<space>:/<path>`).
 //! Resolution is stateless: every tool call resolves the target space name against the
 //! caller's accessible spaces (`docs/spec/mcp/README.md`). Paths are resolved
@@ -318,7 +318,7 @@ pub fn space_summary(view: &SpaceView) -> serde_json::Value {
 }
 
 /// A path-first node summary for file tools (`list`/`stat`/`find`/mutation
-/// results). Path is the canonical derived absolute path for MCP/CLI callers.
+/// results). Path is the canonical derived absolute path for MCP callers.
 pub fn node_summary(view: &notegate_service::files::NodeView) -> serde_json::Value {
     let mut value = json!({
         "path": view.path,

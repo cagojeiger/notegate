@@ -2,10 +2,6 @@
 //! kind builds its `op_type` + `metadata` (see `docs/spec/event-logging.md`
 //! for the allowlist), so the file-tree commands never inline strings or
 //! `json!` payloads — they only call a constructor here.
-//!
-//! To add a new event type: add a `..._payload` function that returns the
-//! `(op_type, metadata)` pair, a thin `pub(crate) async fn` wrapper that
-//! forwards it to `event`, and a unit test asserting the payload shape.
 
 use crate::file_change_event_repo::{NewFileChangeEvent, insert_file_change_event};
 use crate::files_repo::{MetadataMutationKind, TextMutationKind};

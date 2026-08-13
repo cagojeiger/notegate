@@ -155,7 +155,7 @@ Node/content-level limits
 
 `space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
 
-REST/browser object upload는 최대 10GiB를 지원한다. REST와 MCP 모두 100MiB 이하는 single PUT, 초과 파일은 64MiB part의 multipart upload를 사용한다. MCP와 제품 전체 File hard max는 100GiB이며 multipart part 수 상한은 10000이다. 현재 multipart 호환 검증 대상은 MinIO다. 운영 S3 provider는 incomplete multipart 자동 abort 정책을 제공해야 한다.
+REST/browser object upload는 최대 10GiB를 지원한다. REST와 MCP 모두 100MiB 이하는 single PUT, 초과 파일은 64MiB part의 multipart upload를 사용한다. MCP와 제품 전체 File hard max는 100GiB이며 multipart part 수 상한은 10000이다. Multipart 호환 검증 대상은 MinIO다. S3 provider는 incomplete multipart 자동 abort 정책을 제공해야 한다.
 
 Depth는 root 아래 segment 수로 계산한다.
 
@@ -244,7 +244,7 @@ api_keys_max_limit = 100
 
 ## Search memory model
 
-Search는 MCP/CLI와 Public V2 REST가 공유하며 Browser V1 REST에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다. 내부 구조는 DB candidate scan과 application matcher의 2단계다.
+Search는 MCP와 Public V2 REST가 공유하며 Browser V1 REST에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다. 내부 구조는 DB candidate scan과 application matcher의 2단계다.
 
 최악의 논리 scan 범위:
 

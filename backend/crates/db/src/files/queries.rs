@@ -860,7 +860,7 @@ pub mod node {
         Ok((nodes, has_more))
     }
 
-    /// Canonical nodes for the backward-compatible full REST collection view.
+    /// Canonical nodes for the full REST collection view.
     pub async fn paged_nodes(
         pool: &PgPool,
         space_id: Uuid,

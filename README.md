@@ -76,4 +76,4 @@ tool catalog.
 
 ## Project status
 
-NoteGate is open source under [AGPL-3.0-or-later](LICENSE) and is primarily maintained by one developer. The project is actively evolving; focused issues and real-world feedback are welcome.
+NoteGate is open source under [AGPL-3.0-or-later](LICENSE) and is primarily maintained by one developer.

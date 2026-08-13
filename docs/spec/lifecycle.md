@@ -134,7 +134,7 @@ text_objects
 - encrypted Text는 client-side encrypted payload를 저장하고 `line_count=0`을 사용한다.
 - 서버 관리 Text 암호화 설정을 변경하면 기존 plain Text 본문을 같은 transaction에서 즉시 암호화하거나 복호화한다.
 - 검색 포함 여부와 서버 관리 Text 암호화 설정은 Space owner User만 별도 API로 변경한다. Agent의 write 권한은 이 정책 관리를 포함하지 않는다.
-- REST read/write는 plain Text와 client-side encrypted payload를 모두 다룬다. REST patch는 plain Text만 대상으로 한다. MCP/CLI Text content operation과 `search op=grep`은 plain Text만 대상으로 하며 서버 관리 암호화는 서버에서 투명하게 복호화한다.
+- REST read/write는 plain Text와 client-side encrypted payload를 모두 다룬다. REST patch는 plain Text만 대상으로 한다. MCP Text content operation과 `search op=grep`은 plain Text만 대상으로 하며 서버 관리 암호화는 서버에서 투명하게 복호화한다.
 
 ### File
 

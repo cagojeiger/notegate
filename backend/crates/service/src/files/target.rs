@@ -1,4 +1,4 @@
-//! MCP/CLI compact target parsing: `<space>:/<absolute-path>`.
+//! MCP compact target parsing: `<space>:/<absolute-path>`.
 //!
 //! `target` is syntactic sugar for the structured `space` + `path` fields
 //! (`docs/spec/mcp/README.md`). Space names cannot contain `:`, so the target

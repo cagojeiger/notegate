@@ -111,7 +111,7 @@ type ReadInput = {
 | `changes_cursor_invalid` | 손상되거나 다른 형식의 cursor | 과거 탐색은 `call_tool`, 이후 변경은 `rebuild_snapshot` |
 | `changes_cursor_scope_mismatch` | 다른 Space cursor | 과거 탐색은 `call_tool`, 이후 변경은 `rebuild_snapshot` |
 
-`events[]`는 `event_id`, `created_at`, `node_id`, `actor_account_id`, `operation`, `metadata`, `item_kind`, `affected_parent_ids`와 `path_changed`, `subtree_changed`, `write_lock_changed` 영향 flag를 반환한다. `parent_scope_known=false`인 이전 event는 정확한 parent 범위를 알 수 없으므로 보수적으로 현재 상태를 다시 조회한다.
+`events[]`는 `event_id`, `created_at`, `node_id`, `actor_account_id`, `operation`, `metadata`, `item_kind`, `affected_parent_ids`와 `path_changed`, `subtree_changed`, `write_lock_changed` 영향 flag를 반환한다. `parent_scope_known=false`인 event는 정확한 parent 범위를 알 수 없으므로 보수적으로 현재 상태를 다시 조회한다.
 
 Node summary의 `write_locked`는 대상에 직접 설정된 잠금, `effective_write_locked`는 직접 또는 상속 잠금의 적용 여부다. `op=stat`은 현재 쓰기를 막는 직접 잠금 source를 `write_lock_sources[]`의 `node_id`, `name`, `path`로 함께 반환한다.
 
@@ -214,7 +214,7 @@ edit:   purpose, op, target, edits
 
 ## `manage`
 
-기존 Space 내부의 tree/location을 변경한다. Space lifecycle은 제공하지 않는다.
+Space 내부의 tree/location을 변경한다. Space lifecycle은 제공하지 않는다.
 
 ```ts
 type ManageInput = {
@@ -268,7 +268,7 @@ type FileTransferInput = {
 - `prepare_parts`: multipart part 번호를 최대 16개까지 받아 5분짜리 PUT URL을 발급한다. Caller는 part를 최대 4개까지 병렬 업로드하고 실패한 part만 새 URL로 다시 시도한다. 호출할 때마다 무활동 정리 시각을 갱신한다.
 - `complete_upload`: single object 또는 모든 multipart ETag를 검증하고 File node를 연결한다.
 - `abort_upload`: 완료되지 않은 upload를 비동기 정리 대상으로 전환한다.
-- `prepare_download`: 기존 File target의 5분짜리 GET URL을 반환한다.
+- `prepare_download`: File target의 5분짜리 GET URL을 반환한다.
 
 필수 필드:
 
@@ -326,7 +326,7 @@ Semantics:
 - 실행 전에 모든 command의 구조, 필수 필드, operation, target 형식과 요청만으로 판단 가능한 본문 제한 및 구조화 `write` 문법을 preflight한다. 하나라도 잘못되면 아무 command도 실행하지 않고 error `data`에 `ok=false`, `phase=preflight`, `executed=false`, `completed=0`, `failed_index=null`, 빈 `results`, command별 `errors[]`와 `next_action`을 반환한다. 최상위 `next_action.kind=apply_error_actions`는 각 `errors[].next_action`을 적용하라는 뜻이다.
 - command는 `tool`, `op`, operation 필드를 직접 담는 flat object다. 개별 command에 `purpose`를 반복하거나 `args`로 감싸지 않는다.
 - 최상위 `purpose` 하나를 사용하며 개별 command에는 `purpose`를 넣지 않는다.
-- 각 command는 기존 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
+- 각 command는 `read`/`search`/`write`/`manage`와 같은 validation, permission, service transaction을 사용한다.
 - 각 command의 필수 필드는 해당 tool의 필수 필드를 따른다.
 - 각 command는 해당 `tool` branch의 스키마를 사용한다. 런타임 preflight는 여러 오류를 한 번에 수집하기 위해 raw command를 받은 뒤 같은 직접 tool 입력으로 변환한다.
 - 독립적인 `read`/`search`는 최대 4개까지 병렬 실행한다. 앞선 mutation과 target 범위가 겹치지 않는 뒤쪽 `read`/`search`도 병렬화하며, exact path/subtree/Space 범위가 겹치면 순서를 보존한다.

@@ -230,7 +230,7 @@ mcp_invocations
   duration_ms bigint not null check >= 0
 ```
 
-유효한 호출의 `purpose`는 앞뒤 공백 없는 1..200자다. `purpose` 자체가 없거나 잘못된 실패도 기록해야 하므로 DB는 NULL을 허용하고, 잘못된 값은 `input`에 redaction marker로 남긴다. `space_name`은 `read op=changes`에만 허용되는 검증된 Space-name summary다. Target/path는 owner self-review를 위해 redacted `input`에 유지한다. Unknown tool은 `tool='unknown'`, 지원하지 않는 op는 `op=NULL`로 정규화한다. `response=NULL`은 response logging 도입 이전의 기존 행을 뜻한다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code, `invalid_params`/`tool_error`, 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 기존 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
+유효한 호출의 `purpose`는 앞뒤 공백 없는 1..200자다. `purpose` 자체가 없거나 잘못된 실패도 기록해야 하므로 DB는 NULL을 허용하고, 잘못된 값은 `input`에 redaction marker로 남긴다. `space_name`은 `read op=changes`에만 허용되는 검증된 Space-name summary다. Target/path는 owner self-review를 위해 redacted `input`에 유지한다. Unknown tool은 `tool='unknown'`, 지원하지 않는 op는 `op=NULL`로 정규화한다. `response`는 snapshot이 없을 수 있어 NULL을 허용한다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code, `invalid_params`/`tool_error`, 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
 
 Event history DB 제약:
 
@@ -328,7 +328,7 @@ background_job_attempts
 
 `background_jobs`는 지연 가능한 내부 작업의 원장이다. `queued`와 `running`은 `completed_at=NULL`, terminal 상태는 claim 정보가 없고 `completed_at`이 있어야 한다. 각 claim은 append-only attempt 한 개를 만들며 defer, lease 만료, timeout, panic, 취소, retryable/permanent failure를 구분한다. `attempt_count`는 실행 상한을 소비하는 전체 실행 이력이고 `failure_count`는 오류 관측값이다. Queue의 전달 보장은 at-least-once이고 terminal 행은 90일 뒤 bounded batch로 삭제한다. 상세 상태 전이는 `background-jobs.md`를 따른다.
 
-`space_usage_reconcile_jobs`와 `space_usage_reconcile_executions`는 단계적 배포 중 이전 process를 위한 호환 테이블이다. 새 API background runtime은 이 테이블을 작업 원장이나 실행 이력으로 읽지 않는다. 호환 기간의 legacy job insert는 trigger가 `background_jobs`로 복제한다.
+`space_usage_reconcile_jobs`와 `space_usage_reconcile_executions`는 active job 원장이나 실행 이력이 아니다. `space_usage_reconcile_jobs` insert는 trigger가 `background_jobs`로 복제하며 API background runtime은 `background_jobs`만 읽는다.
 
 ```text
 space_agent_connections

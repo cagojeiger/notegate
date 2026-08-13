@@ -96,7 +96,7 @@ acquire shared Space reconciliation gate
 
 ## Reconciliation worker
 
-정기 자동 재계산은 하지 않는다. API background runtime은 수동 요청으로 등록된 `space_usage_reconcile` job만 처리한다. 여러 API replica가 서로 다른 job을 병렬 처리할 수 있지만, 기존 Space별 reconciliation gate가 같은 Space의 재계산과 mutation을 직렬화한다.
+정기 자동 재계산은 하지 않는다. API background runtime은 수동 요청으로 등록된 `space_usage_reconcile` job만 처리한다. 여러 API replica가 서로 다른 job을 병렬 처리할 수 있지만, Space별 reconciliation gate가 같은 Space의 재계산과 mutation을 직렬화한다.
 
 ```text
 worker claim
@@ -136,7 +136,7 @@ POST /api/v1/spaces/{space_id}/usage/reconcile
 
 ## Full recalculation
 
-전체 재계산은 초기 backfill 또는 심각한 장애 복구를 위한 maintenance 작업이다. Startup과 사용자 요청에서는 자동 실행하지 않는다. Operator만 다음 명령으로 명시적으로 실행한다.
+전체 재계산은 운영자가 명시적으로 수행하는 maintenance/recovery 작업이다. Startup과 사용자 요청에서는 자동 실행하지 않는다.
 
 ```sh
 notegate-api --recalculate-usage

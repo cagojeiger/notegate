@@ -238,7 +238,7 @@ open a verified audio File
 - declared media type만 신뢰하지 않고 backend가 확인한 audio/container 조합에만 URL을 발급한다.
 - browser player는 `preload="metadata"`를 사용하며 전체 File을 application memory의 Blob으로 복사하지 않는다.
 - 재생, 일시정지, seek를 browser native control로 제공한다. URL 만료 뒤 media request가 실패하면 새 URL을 한 번 발급받아 복구한다.
-- client-side encrypted File과 확인되지 않은 media type은 inline 재생하지 않고 기존 Download를 유지한다.
+- client-side encrypted File과 확인되지 않은 media type은 inline 재생하지 않고 Download만 제공한다.
 
 ### Record audio
 
@@ -266,16 +266,16 @@ Create > Record audio
 - WebM/Opus File은 최초 보존본이지만 raw/lossless audio는 아니다. LLM별 downmix/resample은 후처리에서 파생본으로 만들고 보존본을 대체하지 않는다.
 - pause/resume은 File을 나누지 않는다. `MediaRecorder.pause()`는 현재 Blob을 유지한 채 data 수집을 멈추고 `resume()`은 같은 Blob에 이어서 수집한다.
 - timeline duration과 segment offset은 `performance.now()` 기반 monotonic milliseconds로 계산하고, session 시작/종료만 ISO 8601 wall-clock timestamp로 저장한다. recorded duration은 pause를 제외하며 wall duration은 pause를 포함한다.
-- metadata는 기존 depth 제한을 지키기 위해 summary를 top-level `recording_timeline` object로, interval 목록을 top-level `recording_segments` array로 둔다. 각 segment는 `wall_start_offset_ms`, `wall_end_offset_ms`, `media_start_offset_ms`, `media_end_offset_ms`를 가진다. pause 구간은 인접 segment 사이의 wall-time gap으로 계산한다.
+- metadata는 depth 제한을 지키기 위해 summary를 top-level `recording_timeline` object로, interval 목록을 top-level `recording_segments` array로 둔다. 각 segment는 `wall_start_offset_ms`, `wall_end_offset_ms`, `media_start_offset_ms`, `media_end_offset_ms`를 가진다. pause 구간은 인접 segment 사이의 wall-time gap으로 계산한다.
 - `recording_segments`는 16 KiB 상한을 위해 최대 64개를 저장한다. 이를 넘으면 최초 32개와 최근 32개를 보존하고 `segment_count`, `segments_included_count`, `segments_omitted_count`로 생략 여부를 명시한다.
 - paused 상태에서도 `Stop & save`와 `Discard`를 허용하고 Screen Wake Lock, microphone stream, same-origin recording lock은 유지한다.
 - 녹음 중에는 `RecordingDock`을 desktop/tablet의 bottom-right transfer stack에서 `UploadProgressDock` 위에 표시한다. panel은 접을 수 있지만 `Recording`과 elapsed time은 header에 남는다. mobile에서는 full-width bottom stack을 사용한다. 실제 microphone level은 최대 15 fps로 표시하며 녹음 상태의 유일한 신호로 사용하지 않는다.
 - 녹음 중에는 현재 Space의 Files 탐색, 문서 열기/스크롤, Outline, 검색, 복사를 유지하고 create/edit/move/delete와 Space/Settings 전환을 막는다.
-- `Stop & save`가 File을 upload queue에 넣으면 `RecordingDock`을 즉시 닫고 일반 작업 상태로 돌아간다. 기존 upload와 녹음 File은 같은 최대 2개 병렬 queue를 사용하므로 이전 녹음이 전송되는 동안 다음 녹음을 시작할 수 있다.
+- `Stop & save`가 File을 upload queue에 넣으면 `RecordingDock`을 즉시 닫고 일반 작업 상태로 돌아간다. 다른 upload와 녹음 File은 같은 최대 2개 병렬 queue를 사용하므로 이전 녹음이 전송되는 동안 다음 녹음을 시작할 수 있다.
 - 녹음 시작부터 NoteGate upload 종료까지 Screen Wake Lock을 요청한다. Wake Lock은 보조 기능이므로 OS가 거부하거나 해제해도 녹음 자체는 계속된다.
 - 문서가 다시 visible 상태가 되면 진행 중인 녹음/upload의 Wake Lock을 다시 요청한다.
 - 브라우저 background upload는 보장하지 않으므로 upload 완료 전에는 NoteGate를 foreground에 유지해야 한다. 서버가 upload 완료를 확인한 뒤의 후처리는 화면 상태와 무관하다.
-- 초기 구현은 녹음 chunk를 memory에 보관한다. tab 새로고침, 종료, browser/OS 강제 종료 시 저장 전 녹음은 복구하지 않는다.
+- 녹음 chunk는 memory에 보관한다. tab 새로고침, 종료, browser/OS 강제 종료 시 저장 전 녹음은 복구하지 않는다.
 - 표준 근거는 [MediaStream Recording](https://www.w3.org/TR/mediastream-recording/), [Web Locks](https://www.w3.org/TR/web-locks/), [Screen Wake Lock](https://www.w3.org/TR/screen-wake-lock/)이다. iOS/iPadOS Home Screen Web App의 Screen Wake Lock은 [Safari 18.4](https://webkit.org/blog/16574/webkit-features-in-safari-18-4/)부터 지원된다.
 
 ### Download file

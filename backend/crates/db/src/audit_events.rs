@@ -3,10 +3,6 @@
 //! for the allowlist), so the account/space/agent/connection repositories
 //! never inline strings or `json!` payloads — they only call a constructor
 //! here.
-//!
-//! To add a new event type: add a `..._payload` function that returns the
-//! `(op_type, metadata)` pair, a thin `pub(crate) async fn` wrapper that
-//! forwards it to `event`, and a unit test asserting the payload shape.
 
 use crate::audit_event_repo::{NewAuditEvent, insert_audit_event};
 use notegate_core::Result;

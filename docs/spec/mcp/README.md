@@ -34,7 +34,7 @@ run_sequence  ordered command sequence 실행
 
 서버는 MCP `2026-07-28`과 `tools.listChanged=true`를 지원한다. 일반 MCP POST는 세션 없는 JSON request/response를 유지하고, 갱신을 구독한 client의 `subscriptions/listen` 요청만 장기 SSE 응답으로 유지한다.
 
-구독이 성립하면 서버는 최초 `notifications/tools/list_changed`를 전송한다. Client는 이 알림을 받으면 현재 endpoint에 `tools/list`를 다시 호출해 설치 시점 또는 이전 연결에서 보관한 schema와 description을 교체해야 한다. 파드가 종료되면 서버는 활성 구독을 정상 종료하며, client는 새 파드에 연결해 구독을 다시 열어야 한다. `tools/list`의 `ttlMs`는 5분이고 `cacheScope=public`이다. 알림 구독을 지원하지 않는 구형 client는 연결을 다시 만들고 `tools/list`를 재호출해야 한다.
+구독이 성립하면 서버는 최초 `notifications/tools/list_changed`를 전송한다. Client는 이 알림을 받으면 현재 endpoint에 `tools/list`를 다시 호출해 cache한 schema와 description을 교체해야 한다. 파드가 종료되면 서버는 활성 구독을 정상 종료하며, client는 새 파드에 연결해 구독을 다시 열어야 한다. `tools/list`의 `ttlMs`는 5분이고 `cacheScope=public`이다. 알림 구독을 지원하지 않는 client는 연결을 다시 만들고 `tools/list`를 재호출해야 한다.
 
 MCP는 space create/delete/rename, agent 관리, API key 관리를 제공하지 않는다. 이 작업은 REST/dashboard user-only API에서 한다.
 
