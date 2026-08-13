@@ -16,7 +16,7 @@ NoteGate의 지연 가능한 내부 작업은 PostgreSQL 기반 범용 queue를 
 Queue가 보장하지 않는 것:
 
 - exactly-once 실행
-- 직접 SQL 또는 이전 binary가 저장한 JSON payload와 현재 payload type의 호환성
+- DB에 직접 저장된 JSON payload와 현재 payload type의 호환성
 - 도메인 결과의 stale 여부
 - 서로 다른 작업 사이의 실행 순서
 - 사용자별 또는 Space별 동시성 정책
@@ -53,59 +53,13 @@ notegate-api background runtime
   └─ handler를 통해 db/service 업무 호출
 ```
 
-- `notegate-jobs`는 Usage, Link, Space 같은 업무 개념과 payload schema를 알지 않는다.
+- `notegate-jobs`는 application 업무 개념과 payload schema를 알지 않는다.
 - API의 `background_jobs` 모듈은 handler를 조립하는 실행 경계이며 업무 규칙을 다시 구현하지 않는다.
 - Registry는 저장된 JSON을 `JobSpec::Payload`로 한 번 변환한다. 변환할 수 없는 payload는 handler를 호출하지 않고 permanent failure로 종료한다.
 - Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
 - 멱등성, stale 판정, 업무 결과 transaction은 handler가 호출하는 db/service 계층이 소유한다.
-- Queue schema와 migration은 기존 database schema 소유권에 따라 `notegate-db`가 관리한다.
+- Queue schema와 migration은 database schema 소유권에 따라 `notegate-db`가 관리한다.
 - API process는 HTTP server, queue consumer, queue reconciler를 함께 실행하고 하나의 `PgPool`을 공유한다.
-
-### 새 작업 추가 원칙
-
-새로운 작업은 기존 queue 상태 머신에 kind별 분기를 추가하지 않고 typed contract와 handler 등록으로 확장한다.
-
-1. 업무 payload와 `JobSpec`을 정의한다. `JobSpec`은 안정적인 `KIND`와 직렬화 가능한 payload type만 소유한다.
-2. `JobHandler<J>`를 구현한다. Handler는 실제 업무를 호출하고 `Complete`, `Defer`, 분류된 `JobFailure`만 반환한다. Queue row나 attempt 상태를 직접 변경하지 않는다.
-3. API의 background runtime에서 handler를 `JobRegistry::register`로 등록한다. 등록되지 않은 kind는 해당 worker가 선점하지 않는다.
-4. 원본 변경과 작업 등록이 하나의 원자적 동작이어야 하면 같은 transaction에서 `JobQueue::enqueue_in`을 호출한 뒤 commit한다.
-5. 사용자가 History에서 확인해야 하는 작업만 `NewJob::record_in_history`로 owner와 선택적 표시 context를 지정한다. 내부 유지보수 작업은 기본값인 `hidden`을 유지한다.
-6. Handler는 `at-least-once` 실행을 전제로 멱등해야 한다. 같은 payload가 재실행되거나 lease 만료 뒤 다른 worker가 선점해도 도메인 최종 상태가 달라지면 안 된다.
-
-```rust
-#[derive(Serialize, Deserialize)]
-struct DocumentExportPayload {
-    document_id: Uuid,
-}
-
-struct DocumentExportJob;
-
-impl JobSpec for DocumentExportJob {
-    const KIND: &'static str = "document_export";
-    type Payload = DocumentExportPayload;
-}
-
-let job = NewJob::<DocumentExportJob>::new(payload).record_in_history(
-    owner_account_id,
-    Some(
-        JobHistoryContext::new("document")
-            .id(document_id)
-            .label(document_title),
-    ),
-);
-JobQueue::enqueue_in(&mut tx, &job).await?;
-tx.commit().await?;
-```
-
-작업을 추가할 때의 변경 지점은 `JobSpec`, 업무 handler, registry 등록, 생산자 transaction과 해당 테스트다. 일반적인 새 kind를 위해 `queue.rs`, `worker.rs`, queue migration을 수정해야 한다면 책임 경계가 새고 있는지 먼저 점검한다. 사용자에게 공개하는 kind라면 History의 표시 이름도 추가하되 실행 정책과 UI 표시 정책은 결합하지 않는다.
-
-최소 검증 범위:
-
-- payload 직렬화와 잘못 저장된 payload의 permanent failure
-- handler의 완료, 지연, retryable/permanent failure 분류
-- 업무 transaction과 enqueue의 원자성
-- handler 멱등성과 재선점 안전성
-- History 공개 작업의 owner 격리와 context 표시
 
 ## 상태 머신
 
@@ -186,9 +140,9 @@ space_usage_reconcile  # Space 사용량 전체 재계산
 
 ## 도메인 책임
 
-Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다. 같은 작업이 반복되어도 결과가 같다. 기존 Space별 reconciliation gate를 사용하므로 같은 Space의 mutation과 정확한 재계산이 겹치지 않는다.
+Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다. 같은 작업이 반복되어도 결과가 같다. Space별 reconciliation gate를 사용하므로 같은 Space의 mutation과 정확한 재계산이 겹치지 않는다.
 
-## 실행과 확장
+## 실행과 스케일 아웃
 
 각 `notegate-api` process가 HTTP server와 queue runtime을 함께 실행한다. 원본 변경과 enqueue는 같은 PostgreSQL database transaction에 기록되고, 모든 replica의 consumer가 같은 원장에서 작업을 분산 선점한다.
 
@@ -213,7 +167,7 @@ SELECT background_job_backlog(NULL);
 
 ## 관측
 
-Background job metric은 기존 API listener의 `/metrics`에 함께 노출된다. `NOTEGATE_METRICS_ENABLED=true`일 때만 route와 주기적 queue snapshot 갱신이 활성화된다.
+Background job metric은 API listener의 `/metrics`에 함께 노출된다. `NOTEGATE_METRICS_ENABLED=true`일 때만 route와 주기적 queue snapshot 갱신이 활성화된다.
 
 ```text
 notegate_background_jobs{kind,state}
@@ -230,7 +184,7 @@ Queue 상태와 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은
 
 History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `history_owner_account_id`, 선택적 `context_kind/context_id/context_label`을 기록한다. 이 공통 metadata가 있는 job은 종류와 관계없이 해당 account의 History에 나타난다. 기본값은 `hidden`이며 History에 표시할 필요가 없는 운영·유지보수 job은 제외된다. `context_*`는 Space에 한정되지 않는 표시 문맥이고, Worker의 claim·retry·lease 처리에는 이 metadata를 사용하지 않는다.
 
-90일 History 보존 계약은 이 metadata와 함께 등록된 작업부터 적용한다. History migration 이전의 terminal 작업은 소유자를 현재 Space에서 추정하지 않고 hidden으로 유지한다. Space의 삭제 보존 기간이 queue history보다 짧아 과거 전체에 대해 안전한 owner snapshot을 복구할 수 없기 때문이다. 배포 시점의 `queued`/`running` usage 작업 중 Space가 남아 있는 작업만 화면 연속성을 위해 backfill한다. 직전 release의 4-argument enqueue 함수와 legacy usage trigger에 대한 보정은 rolling deployment 동안의 `space_usage_reconcile` 전용 호환 경로이며, 새 kind의 일반적인 확장 지점이 아니다.
+History는 enqueue 시 저장된 owner/context snapshot만 사용한다. 현재 Space 상태에서 소유자를 역추정하지 않으며 owner snapshot이 없는 행은 hidden으로 유지한다. Terminal 행은 90일 동안 보관한다. `space_usage_reconcile_jobs` insert는 trigger가 `background_jobs`로 복제하지만 일반적인 job 등록은 공통 enqueue API를 사용한다.
 
 ## 검증 경계
 

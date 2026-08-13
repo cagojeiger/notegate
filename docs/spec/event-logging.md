@@ -58,7 +58,7 @@ file_change_events insert 실패  => 원래 file-tree/content mutation도 실패
 
 `input`과 `response`는 실제 실행/응답 객체와 분리된 저장 전용 복사본이다. Tool/op별 allowlist는 purpose, target/path, 구조적 flag/count/hash처럼 분석에 필요한 값만 유지한다. Text `content`, patch/edit 문자열과 `diff`, grep 일치 줄, 검색어, 모든 cursor, 원본 파일명과 암호화 metadata, multipart ETag, presigned URL/header, PII와 자유 형식 오류 문구는 `{"_redacted":true,"category":"..."}` marker로 대체한다. 알려지지 않은 field의 이름과 값은 저장하지 않고 `_omitted_field_count`만 남긴다. 각 snapshot은 redaction 후 256 KiB를 넘으면 전체를 크기 marker로 대체한다.
 
-`response`는 protocol `ErrorData` 또는 MCP `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. `run_sequence`는 하나의 MCP 호출로 한 행을 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. 이 기능 도입 이전 행은 `response=NULL`이고 기존 input 형식을 유지한 채 90일 retention으로 만료된다. 새 MCP 조회 tool은 제공하지 않으며, user browser의 History > MCP에서 자기 소유 범위만 조회한다.
+`response`는 protocol `ErrorData` 또는 MCP `structured_content`에서 만들며 RMCP가 같은 JSON을 복제하는 wire `content[].text`와 `_meta`는 저장하지 않는다. `run_sequence`는 하나의 MCP 호출로 한 행을 만들고 commands/results에 재귀 redaction을 적용하며 내부 command별 행은 만들지 않는다. Response snapshot이 없는 행은 `response=NULL`이고 모든 행은 90일 retention을 따른다. MCP 조회 tool은 없으며 user browser의 History > MCP에서 자기 소유 범위만 조회한다.
 
 ## Audit event sources
 
@@ -76,7 +76,7 @@ system
 
 Audit event는 account, session, credential, agent, space, connection 관리 변경을 기록한다.
 
-초기 audit event type:
+Audit event type:
 
 ```text
 account.create
@@ -164,9 +164,9 @@ connection.upsert | connection.disconnect
 
 ## File change events
 
-File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Space 내부 mutation sequence는 `id`로 식별하고, 기존 REST self-review history는 `created_at desc, id desc` 표시 순서를 유지한다. Transport surface(REST/MCP/Browser), API key id, request id, IP, user agent 같은 request/security context는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
+File change event는 space 안의 파일/폴더/문서 변경 이력을 기록한다. Space 내부 mutation sequence는 `id`로 식별하고 REST self-review history는 `created_at desc, id desc` 순서로 표시한다. Transport surface(REST/MCP/Browser), API key id, request id, IP, user agent 같은 request/security context는 기록하지 않는다. 조회는 space scope이며, 특정 node만 보려면 `node_id` query로 필터링한다.
 
-초기 file change event type:
+File change event type:
 
 ```text
 folder.create
@@ -284,4 +284,4 @@ file_change_events: 3 months
 mcp_invocations: 90 days
 ```
 
-각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. `mcp_invocations`는 기존 purge worker가 90일을 초과한 행을 bounded batch로 삭제한다. `audit_events`와 `file_change_events`의 삭제 enforcement는 아직 purge 작업 범위에 포함되지 않는다.
+각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. `mcp_invocations`는 purge worker가 90일을 초과한 행을 bounded batch로 삭제한다. `audit_events`와 `file_change_events`에는 자동 retention enforcement가 없다.

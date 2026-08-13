@@ -31,7 +31,7 @@ NoteGate Markdown Text는 활성 Space 안의 node를 가리키는 링크에 대
 
 ## Resolve 동작
 
-Frontend는 기존 REST path endpoint로 node link를 resolve한다.
+Frontend는 REST path endpoint로 node link를 resolve한다.
 
 ```http
 GET /api/v1/spaces/{space_id}/paths/resolve?path=/folder/note.md

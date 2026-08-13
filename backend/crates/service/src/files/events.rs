@@ -83,8 +83,8 @@ impl FilesService {
         })
     }
 
-    /// List mutation events before an MCP changes cursor by `id DESC`. This
-    /// intentionally does not alter the existing REST display-time order.
+    /// List mutation events before an MCP changes cursor by `id DESC` without
+    /// changing the REST display-time order.
     pub async fn list_file_change_events_by_id(
         &self,
         caller_account_id: Uuid,

@@ -108,7 +108,7 @@ impl From<Permission> for PermissionOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-/// Tier-gated capabilities currently available in this space.
+/// Tier-gated capabilities for this Space.
 pub struct SpaceFeaturesOut {
     pub text_encryption: bool,
     pub write_lock: bool,

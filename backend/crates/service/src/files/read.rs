@@ -100,7 +100,7 @@ impl FilesService {
         })
     }
 
-    /// Canonical child nodes for MCP/CLI list output. REST tree collections use
+    /// Canonical child nodes for MCP list output. REST tree collections use
     /// `children`, whose compact summaries deliberately omit canonical metadata.
     pub async fn canonical_children(
         &self,

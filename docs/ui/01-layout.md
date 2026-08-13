@@ -39,7 +39,7 @@ AppRoot
 
 규칙:
 
-- 중앙 검색 영역은 아직 비워둔다.
+- 중앙 검색 영역은 비어 있다.
 - 현재 node path는 표시하지 않는다.
 - Inspector 버튼을 EditorGroup 안에 중복 배치하지 않는다.
 
@@ -151,8 +151,8 @@ Text/File 한도는 서로 독립이므로 StatusBar에서 합산 비율을 만�
 - expanded body에는 root target filename/path, segment 수와 누적 pause 시간, `Pause`/`Resume`, `Discard`, `Stop & save`를 보여준다.
 - desktop/tablet은 오른쪽 아래에서 `UploadProgressDock`과 같은 24 rem 폭을 사용하고, 두 panel이 함께 있으면 Recording을 위에 쌓는다.
 - collapse 상태에서도 `Recording`/`Paused`와 recorded duration은 계속 보여준다. document를 읽을 공간이 필요할 때 사용자가 panel을 접을 수 있다.
-- mobile에서는 floating overlay를 강제하지 않고 기존 bottom stack의 full-width panel로 표시한다.
-- `Stop & save` 뒤에는 panel을 제거하고 생성된 File을 기존 `UploadProgressDock`에서 표시한다.
+- mobile에서는 floating overlay를 강제하지 않고 bottom stack의 full-width panel로 표시한다.
+- `Stop & save` 뒤에는 panel을 제거하고 생성된 File을 `UploadProgressDock`에서 표시한다.
 
 ## 반응형
 

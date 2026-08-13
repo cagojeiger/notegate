@@ -44,8 +44,7 @@ pub(crate) async fn insert_file_change_event(
 }
 
 /// List file-change events for `space_id` (optionally scoped to `node_id`),
-/// newest first by display time. Matches the existing REST history contract and
-/// the `file_change_events_space_time_idx` / `file_change_events_node_time_idx` order.
+/// newest first by display time using the event time indexes.
 pub(crate) async fn list_file_change_events(
     pool: &PgPool,
     space_id: Uuid,

@@ -409,7 +409,6 @@ fn parse_patch_mode(raw: Option<&str>) -> Result<PatchMode, ApiError> {
         .ok_or_else(|| ApiError::invalid_field("mode must be 'unique', 'first', or 'all'"))
 }
 
-/// Build the response returned after a successful replace.
 fn text_response(view: &TextView, updated_by: AccountRef) -> TextResponse {
     TextResponse {
         node: NodeRef::from(&view.node),
@@ -425,7 +424,6 @@ fn text_response(view: &TextView, updated_by: AccountRef) -> TextResponse {
     }
 }
 
-/// Build the response after a successful patch (new metrics + previous hash).
 fn patch_response(result: &PatchResult, updated_by: AccountRef) -> PatchResponse {
     PatchResponse {
         node: NodeRef::from(&result.node),

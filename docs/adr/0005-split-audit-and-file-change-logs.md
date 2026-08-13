@@ -36,4 +36,4 @@ Event row는 append-only다. Product code는 일반 동작에서 event row를 up
 - File change event는 agent 작업 검토와 activity history에 집중할 수 있다.
 - Domain mutation code는 state change와 같은 DB transaction 안에서 event row를 insert해야 한다.
 - Event payload는 allowlist 기반이어야 한다. Payload 보안 원칙은 `docs/spec/security.md`를 따른다.
-- 두 domain을 모두 건드리는 mutation은 향후 각 stream에 event를 하나씩 남길 수 있다. 초기 설계는 명확한 audit 또는 file change history 필요가 없으면 mutation마다 primary stream 하나를 선호한다.
+- Mutation은 검토 목적에 맞는 primary stream을 사용한다. 두 domain 모두의 이력이 필요하면 각 stream에 event를 남긴다.

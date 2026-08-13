@@ -44,7 +44,6 @@ token_hash      = HMAC(API_KEY_SUBKEY, "api-key:v1:" || key_id || ":" || secret)
 - Token format version과 HMAC domain version은 별도 계약이다. Token은 `ngk_v2_`만 발급하고 해석하며 HMAC domain은 v1을 유지한다.
 - API key는 Agent account만 소유할 수 있으며 DB trigger가 User-owned key와 v2가 아닌 key의 신규 저장을 거부한다.
 - 인증 시 token에서 계산한 `token_prefix`와 DB 값을 정확히 비교한다.
-- 전환 migration은 형식과 소유자에 관계없이 기존 API key를 모두 revoke한다. 전환 후 Agent key를 새로 발급해야 한다.
 - LOOKUP root key 폐기가 필요하면 영향받는 live key를 revoke하고 재발급한다.
 
 ## Browser session storage

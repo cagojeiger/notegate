@@ -1,6 +1,6 @@
 # Search
 
-Search는 MCP/CLI와 Public V2 REST가 공유하는 path-first command다. Browser V1 REST는 search endpoint를 제공하지 않는다.
+Search는 MCP와 Public V2 REST가 공유하는 path-first command다. Browser V1 REST는 search endpoint를 제공하지 않는다.
 
 검색은 항상 folder scope의 subtree를 대상으로 한다. Scope를 생략하면 Space root `/`를 scope로 사용한다.
 
@@ -176,7 +176,7 @@ text_objects.storage_format = 'plain'
 - Client-side encrypted Text는 grep 대상이 아니다.
 - 서버 관리 방식으로 at-rest 암호화된 plain Text는 복호화 후 grep한다.
 - `grep`은 `nodes.metadata`를 검색하지 않는다.
-- Match된 Text의 실제 내용은 MCP/CLI에서 `read op=read`, Public V2 REST에서 `GET /api/v2/spaces/{space_id}/text/{node_id}`로 조회한다.
+- Match된 Text의 실제 내용은 MCP에서 `read op=read`, Public V2 REST에서 `GET /api/v2/spaces/{space_id}/text/{node_id}`로 조회한다.
 
 Match mode:
 
@@ -235,7 +235,7 @@ body cache hit:
   PostgreSQL body query와 서버 복호화 생략
 
 body cache miss:
-  기존 8 MiB request budget 안의 miss만 한 번의 bulk query로 조회
+  8 MiB request budget 안의 miss만 한 번의 bulk query로 조회
   live/plain/search_enabled/SHA/byte_len 재검증 후 복호화
   Arc<str>로 cache 저장
 ```
@@ -254,7 +254,7 @@ capacity 0 = disabled
 
 Cache에는 복호화된 본문만 저장하며 DB candidate, folder page, search result는 저장하지 않는다. 여러 replica 사이에 cache coherence나 공유 cache를 두지 않는다.
 
-동시에 들어온 요청의 miss key가 겹치면 process 안에서 key별 load flight를 공유한다. 대기한 요청은 cache를 다시 확인하고, 여전히 없는 miss만 기존 bulk query로 읽는다. 서로 겹치지 않는 key 집합은 독립적으로 진행한다.
+동시에 들어온 요청의 miss key가 겹치면 process 안에서 key별 load flight를 공유한다. 대기한 요청은 cache를 다시 확인하고, 여전히 없는 miss만 bulk query로 읽는다. 서로 겹치지 않는 key 집합은 독립적으로 진행한다.
 
 ## Worst-case scan and memory model
 

@@ -38,7 +38,7 @@ User caller만 가능하다. Caller의 `owner_user_id` scope에 속한 `audit_ev
 GET /api/v1/me/mcp-invocations?limit=50&cursor=...
 ```
 
-User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at desc, id desc` 순으로 반환한다. redacted `input`과 `response`, 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. `read op=changes`는 검증된 `space_name` summary도 반환한다. `me` 또는 입력 검증 실패는 `purpose`가 `null`일 수 있고, response logging 도입 이전 행은 `response=null`이다.
+User caller만 가능하다. Caller 소유 범위의 MCP 호출을 `created_at desc, id desc` 순으로 반환한다. redacted `input`과 `response`, 짧은 `purpose`, tool/op, 성공 여부, 안정적인 error code, 실행 시간을 제공한다. `read op=changes`는 검증된 `space_name` summary도 반환한다. `me` 또는 입력 검증 실패는 `purpose`가 `null`일 수 있고, response snapshot이 없는 행은 `response=null`이다.
 
 ```json
 {
@@ -174,7 +174,7 @@ Rules:
 - `has_more=true`이면 `next_after_id`로 다음 page를 이어서 읽는다.
 - 모든 page를 적용한 뒤 client token을 전진시킨다.
 - `affected_parent_ids`는 metadata를 해석하지 않아도 되는 typed cache invalidation 범위다.
-- `parent_scope_known=false`는 과거 event에 parent 정보가 없어 children-family fallback이 필요함을 뜻한다.
+- `parent_scope_known=false`는 parent 범위를 알 수 없어 children-family fallback이 필요함을 뜻한다.
 - `path_changed`는 create/copy/rename/move/delete로 path resolution 결과가 바뀌었음을 뜻한다.
 - `subtree_changed`는 folder rename/move 또는 recursive delete로 descendant cache도 바뀌었음을 뜻한다.
 - `write_lock_changed`는 node의 직접 write lock 설정이 바뀌었음을 뜻한다. 대상이 folder이면 하위 node의 상속 lock source가 바뀌므로 client는 node detail cache를 무효화한다.

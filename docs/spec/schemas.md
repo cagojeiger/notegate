@@ -1,6 +1,6 @@
 # Shared schemas
 
-이 문서는 node/text/file surface가 공유하는 응답 구조를 정의한다. REST는 UI 화면 렌더링을 위해 id-first의 넓은 resource shape를 반환하고, MCP는 CLI/agent 호출을 위해 path-first의 작은 tool shape를 반환한다.
+이 문서는 node/text/file surface가 공유하는 응답 구조를 정의한다. REST는 UI 화면 렌더링을 위해 id-first의 넓은 resource shape를 반환하고, MCP는 agent 호출을 위해 path-first의 작은 tool shape를 반환한다.
 
 ## Page
 
@@ -23,7 +23,7 @@ MCP `read`/`search`/`write`/`manage` tool과 `run_sequence.commands[]`가 사용
 type Target = string // "space:/absolute/path"
 ```
 
-MCP/CLI는 `target` 하나로 Space와 path를 함께 지정한다. Root는 `"space:/"`다.
+MCP는 `target` 하나로 Space와 path를 함께 지정한다. Root는 `"space:/"`다.
 
 ## NodeKind
 
