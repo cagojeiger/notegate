@@ -27,7 +27,11 @@ async fn node_metadata_is_read_only_over_rest() -> Result<(), Box<dyn std::error
     )
     .await?;
     assert_eq!(status, StatusCode::CREATED, "{node}");
-    let node_id: Uuid = serde_json::from_value(node["id"].clone())?;
+    let node_id: Uuid = serde_json::from_value(
+        node.get("id")
+            .cloned()
+            .ok_or_else(|| std::io::Error::other("created node response missing id"))?,
+    )?;
     let uri = format!("/v1/spaces/{space_id}/nodes/{node_id}/metadata");
 
     let (status, metadata) = get_json(rest_app(state.clone(), caller.clone()), uri.clone()).await?;
