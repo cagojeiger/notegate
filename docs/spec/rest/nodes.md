@@ -16,8 +16,6 @@ PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy
 PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/write-lock
 GET    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
-PUT    /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
-PATCH  /api/v1/spaces/{space_id}/nodes/{node_id}/metadata
 POST   /api/v1/spaces/{space_id}/nodes/{node_id}/move
 DELETE /api/v1/spaces/{space_id}/nodes/{node_id}?recursive=true
 ```
@@ -39,7 +37,7 @@ POST /nodes                     -> RestNode
 PATCH /nodes/{node_id}          -> RestNode
 PUT /nodes/{node_id}/search-policy -> RestNode
 PUT /nodes/{node_id}/write-lock    -> RestNode
-PUT/PATCH /nodes/{id}/metadata  -> RestNode
+GET /nodes/{id}/metadata        -> { metadata: object }
 POST /nodes/{node_id}/move      -> RestNode
 DELETE /nodes/{node_id}         -> 204 No Content
 ```
@@ -191,13 +189,14 @@ Rules:
 
 ## Node metadata
 
-모든 node는 `metadata` JSON object를 가진다.
+모든 node는 시스템이 관리하는 `metadata` JSON object를 가진다.
 
 ```json
 {
-  "title": "공급 계약 초안",
-  "tags": ["contract", "legal"],
-  "status": "draft"
+  "type": "audio_recording",
+  "recording": {
+    "profile_id": "notegate-meeting-llm-v1"
+  }
 }
 ```
 
@@ -207,11 +206,10 @@ Rules:
 - `metadata`는 content가 아니며 Text/File 본문 암호화 대상이 아니다.
 - 민감한 값은 `metadata`에 넣지 않는다.
 - `metadata`는 JSON object만 허용한다.
-- Markdown Text의 YAML frontmatter는 문서 content이며 Node `metadata`가 아니다. REST metadata API는 frontmatter를 읽거나 쓰지 않는다.
+- Browser, MCP와 Public V2 caller는 생성된 node의 `metadata`를 수정할 수 없다.
+- Markdown Text의 YAML frontmatter는 문서 content이며 Node `metadata`가 아니다. REST metadata 조회는 frontmatter를 해석하지 않는다.
 
-Update rules:
+Access rules:
 
 - `GET /metadata`는 `{ "metadata": {...} }`를 반환한다.
-- `PUT /metadata`는 `{ "metadata": {...} }`로 metadata 전체를 교체한다.
-- `PATCH /metadata`는 `{ "patch": {...} }`로 JSON Merge Patch 방식 부분 수정을 수행한다.
-- PATCH에서 `null` 값은 해당 key 삭제를 의미한다.
+- File upload 완료 시의 `node_metadata`는 File Node 생성과 같은 transaction에서 최초 metadata를 기록하는 Browser 전용 예외다. 생성 이후에는 읽기 전용이다.

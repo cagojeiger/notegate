@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   deleteNode: vi.fn(),
   downloadFile: vi.fn(),
   moveNode: vi.fn(),
-  replaceMetadata: vi.fn(),
   startRecording: vi.fn(),
   startUpload: vi.fn(),
   updateNode: vi.fn(),
@@ -42,7 +41,6 @@ vi.mock("./useWorkbenchQueries", () => {
     useCreateNodeMutation: () => ({ mutateAsync: mocks.createNode }),
     useDeleteNodeMutation: () => ({ mutateAsync: mocks.deleteNode }),
     useMoveNodeMutation: () => ({ mutate: mocks.moveNode, mutateAsync: mocks.moveNode }),
-    useReplaceMetadataMutation: () => ({ mutateAsync: mocks.replaceMetadata }),
     useUpdateNodeMutation: () => ({ mutateAsync: mocks.updateNode }),
     useUpdateNodeSearchPolicyMutation: () => ({
       mutate: mocks.updateNodeSearchPolicy,
@@ -67,7 +65,6 @@ describe("useWorkbenchNodeCommandActions", () => {
     mocks.createNode.mockReset();
     mocks.deleteNode.mockReset();
     mocks.moveNode.mockReset();
-    mocks.replaceMetadata.mockReset();
     mocks.startRecording.mockReset().mockResolvedValue(undefined);
     mocks.startUpload.mockReset();
     mocks.updateNode.mockReset();
@@ -198,7 +195,6 @@ describe("useWorkbenchNodeCommandActions", () => {
       result.current.moveNodeToFolder(lockedText, unlockedFolder);
       result.current.moveNodeToFolder(unlockedFolder, lockedFolder);
       result.current.confirmDeleteNode(lockedText);
-      result.current.promptReplaceMetadata();
       result.current.setNodeSearchEnabled(false);
       result.current.setTextEncryptionEnabled(true);
     });
@@ -234,7 +230,7 @@ describe("useWorkbenchNodeCommandActions", () => {
     });
   });
 
-  it("applies inspector commands to the inspected node instead of the open editor node", () => {
+  it("applies inspector policy commands to the inspected node instead of the open editor node", () => {
     const activeSpace = space("space-1");
     const openText = node("open", activeSpace.id, "/open.md");
     const inspectedFolder = node("folder-1", activeSpace.id, "/Policies", "folder");
@@ -248,15 +244,11 @@ describe("useWorkbenchNodeCommandActions", () => {
     });
 
     act(() => {
-      result.current.promptReplaceMetadata();
       result.current.setNodeSearchEnabled(false);
       result.current.setNodeWriteLocked(true);
     });
 
-    expect(setDialog).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "metadata",
-      node: inspectedFolder
-    }));
+    expect(setDialog).not.toHaveBeenCalled();
     expect(mocks.updateNodeSearchPolicy).toHaveBeenCalledWith({
       node: inspectedFolder,
       enabled: false

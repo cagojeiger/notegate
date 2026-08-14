@@ -67,7 +67,7 @@ Polling은 `document.visibilityState === "visible"`일 때만 돈다.
 - 변경/resync/error, 화면 복귀, focus/reconnect, active Space 전환은 interval을 30초로 reset한다.
 - 이후에는 마지막 적용 ID 이후의 event를 오름차순으로 모두 가져온다.
 - 여러 page는 전부 받은 뒤 token을 전진시키며 같은 parent invalidation은 한 번으로 병합한다.
-- token이 retention 범위를 벗어나면 node/children/text/metadata/file/path/preview cache만 한 번 재동기화한다.
+- token이 retention 범위를 벗어나면 node/children/text/file/path/preview cache만 한 번 재동기화한다.
 - opened node, Recent, expanded folder는 개별 polling을 하지 않는다.
 - opened node freshness는 folder/text/file 모두에 적용한다.
 - opened node가 404면 editor group을 비운다.

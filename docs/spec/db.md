@@ -370,7 +370,7 @@ nodes
 - Root는 `parent_id IS NULL`, `name='/'`, `kind='folder'`, `deleted_at IS NULL`인 node다.
 - Non-root node name은 1~128자 Unicode 문자열이다. 한글과 내부 공백은 허용한다. `/`, control char, 앞뒤 공백, `.`, `..`는 허용하지 않는다.
 - 같은 parent 안 live node name은 unique다.
-- `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다.
+- `metadata`는 JSON object여야 한다. content가 아니며 암호화 대상이 아니다. 시스템 관리 값이며 외부 caller에게 읽기 전용이다.
 - `search_enabled`는 해당 node만 검색 결과에 포함할지를 나타낸다. Folder 자식에게 상속되지 않는다.
 - `write_locked`는 직접 설정된 쓰기 잠금이다. descendant 상속 상태는 저장하지 않으며 parent chain에서 계산한다.
 - `deleted_at`, `deleted_by_account_id`, `purge_after`는 모두 NULL이거나 모두 non-NULL이다.

@@ -84,7 +84,7 @@ describe("eventDisplay", () => {
     expect(formatDurationBetween("2026-07-10T02:12:01Z", "2026-07-10T02:12:00Z")).toBeNull();
   });
 
-  it("formats create and edit metadata as readable details", () => {
+  it("formats create and content-change event details", () => {
     const event = {
       id: 1,
       created_at: "2026-07-13T00:00:00Z",

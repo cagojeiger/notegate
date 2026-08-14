@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient, type UseMutationOptions } from "@tanstack/react-query";
 
 import { useApiClient } from "../../api/ApiProvider";
-import { replaceMetadata } from "../../api/metadata";
 import { updateNodeCaches } from "../../api/nodeCache";
 import {
   createNode,
@@ -192,20 +191,6 @@ export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
       } else {
         invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
       }
-    }
-  });
-}
-
-export function useReplaceMetadataMutation(onReplaced: (node: RestNode) => void) {
-  const client = useApiClient();
-  const queryClient = useQueryClient();
-  return useMutation({
-    meta: { silentError: true },
-    mutationFn: ({ node, metadata }: { node: RestNode; metadata: Record<string, unknown> }) => replaceMetadata(client, node.space_id, node.id, metadata),
-    onSuccess: (node) => {
-      updateNodeCaches(queryClient, node, () => node);
-      invalidateRecentNodes(queryClient, node.space_id);
-      onReplaced(node);
     }
   });
 }

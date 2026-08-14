@@ -2,7 +2,6 @@ export {
   useCreateNodeMutation,
   useDeleteNodeMutation,
   useMoveNodeMutation,
-  useReplaceMetadataMutation,
   useRevealNode,
   useUpdateNodeMutation,
   useUpdateNodeSearchPolicyMutation,

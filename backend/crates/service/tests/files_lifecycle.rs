@@ -273,44 +273,9 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     );
     let projects_id = projects.node.id;
 
-    // --- metadata: replace, read, and merge-patch a node metadata object ---
-    let metadata = json!({
-        "title": "Project notes",
-        "tags": ["project", "draft"],
-        "nested": {"keep": true, "remove": true}
-    });
-    let metadata_updated = files
-        .replace_metadata(owner, ws, projects_id, metadata.clone())
-        .await?;
-    assert_eq!(metadata_updated.node.metadata, metadata);
-
+    // Node metadata is readable but managed by the system.
     let read_metadata = files.read_metadata(owner, ws, projects_id).await?;
-    assert_eq!(read_metadata["title"], "Project notes");
-
-    let metadata_patched = files
-        .patch_metadata(
-            owner,
-            ws,
-            projects_id,
-            json!({
-                "status": "active",
-                "nested": {"remove": null},
-                "tags": ["project"]
-            }),
-        )
-        .await?;
-    assert_eq!(metadata_patched.node.metadata["status"], "active");
-    assert_eq!(metadata_patched.node.metadata["tags"], json!(["project"]));
-    assert!(
-        metadata_patched.node.metadata["nested"]
-            .get("keep")
-            .is_some()
-    );
-    assert!(
-        metadata_patched.node.metadata["nested"]
-            .get("remove")
-            .is_none()
-    );
+    assert_eq!(read_metadata, json!({}));
 
     // --- touch: /projects/note.md ---
     let touched = files
@@ -451,7 +416,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(copied.counts.nodes, 3);
     assert_eq!(copied.counts.texts, 2);
     assert_eq!(copied.counts.files, 0);
-    assert_eq!(copied.node.node.metadata["title"], "Project notes");
+    assert_eq!(copied.node.node.metadata, read_metadata);
 
     let copied_secret = files
         .resolve_path(owner, ws, "/projects-copy/secret.md")

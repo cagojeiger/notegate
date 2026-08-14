@@ -61,7 +61,6 @@ export async function applyExternalFileChanges(
 
   const nodeIds = new Set<string>();
   const textIds = new Set<string>();
-  const metadataIds = new Set<string>();
   const parentIds = new Set<string>();
   let missingParent = false;
   let subtreeChanged = false;
@@ -88,7 +87,6 @@ export async function applyExternalFileChanges(
     if (!change.node_id) continue;
     nodeIds.add(change.node_id);
     if (change.op_type.startsWith("text.")) textIds.add(change.node_id);
-    if (change.op_type.startsWith("metadata.")) metadataIds.add(change.node_id);
   }
 
   if (!subtreeChanged) {
@@ -100,17 +98,10 @@ export async function applyExternalFileChanges(
     }
   }
   for (const nodeId of textIds) invalidateText(queryClient, spaceId, nodeId);
-  for (const nodeId of metadataIds) {
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.metadata(spaceId, nodeId),
-      exact: true
-    });
-  }
 
   if (subtreeDeleted) {
     await cancelAndRemoveQueries(queryClient, [
       queryKeys.texts(spaceId),
-      queryKeys.metadataFamily(spaceId),
       queryKeys.files(spaceId)
     ]);
   }
@@ -139,7 +130,6 @@ export async function invalidateFileSyncFallback(queryClient: QueryClient, space
   invalidateFolderSubtree(queryClient, spaceId);
   invalidateFileChangeEvents(queryClient, spaceId);
   void queryClient.invalidateQueries({ queryKey: queryKeys.texts(spaceId) });
-  void queryClient.invalidateQueries({ queryKey: queryKeys.metadataFamily(spaceId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.files(spaceId) });
   await cancelAndRemoveQueries(queryClient, [queryKeys.filePreviewUrls(spaceId)]);
 }
@@ -180,7 +170,6 @@ export function removeDeletedNodeQueries(
     queryKeys.node(node.space_id, node.id),
     queryKeys.text(node.space_id, node.id),
     queryKeys.file(node.space_id, node.id),
-    queryKeys.metadata(node.space_id, node.id),
     queryKeys.markdownImagePreview(node.space_id, node.path),
     previewQueryKey
   ]);
@@ -218,7 +207,6 @@ async function removeExternalDeletedNode(
     queryKeys.node(spaceId, change.node_id),
     queryKeys.text(spaceId, change.node_id),
     queryKeys.file(spaceId, change.node_id),
-    queryKeys.metadata(spaceId, change.node_id),
     previewKey
   ]);
 }

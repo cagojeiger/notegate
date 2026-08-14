@@ -69,7 +69,7 @@ pub(crate) async fn resolve_path(
     operation_id = "get_node",
     tag = "nodes",
     params(("space_id" = Uuid, Path), ("node_id" = Uuid, Path)),
-    responses((status = 200, description = "Get node metadata and effective write-lock state", body = NodeOut)),
+    responses((status = 200, description = "Get node details and effective write-lock state", body = NodeOut)),
     security(("api_key" = []))
 )]
 pub(crate) async fn get_one(

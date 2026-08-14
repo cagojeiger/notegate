@@ -391,7 +391,6 @@ describe("query invalidation", () => {
       queryKeys.node("space-1", "file-1"),
       queryKeys.text("space-1", "file-1"),
       queryKeys.file("space-1", "file-1"),
-      queryKeys.metadata("space-1", "file-1"),
       queryKeys.markdownImagePreview("space-1", "/file-1"),
       queryKeys.filePreviewUrl("space-1", "file-1", "image"),
       queryKeys.filePreviewUrl("space-1", "file-1", "pdf"),

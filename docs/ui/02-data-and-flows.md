@@ -10,7 +10,6 @@
 | nodes | Files, Recent, Editor, Inspector | `/api/v1/spaces/{space_id}/nodes...` |
 | text | EditorArea | `/api/v1/spaces/{space_id}/text/{node_id}` |
 | files | EditorArea | `/api/v1/spaces/{space_id}/files/{node_id}` |
-| metadata | Inspector | `/api/v1/spaces/{space_id}/nodes/{node_id}/metadata` |
 | agents | Settings Agents | `/api/v1/agents` |
 | agent API keys | Settings Agents | `/api/v1/agents/{id}/keys` |
 | connections | Settings Agents | `/api/v1/spaces/{space_id}/agents` |
@@ -437,8 +436,7 @@ Expand all / Collapse all
 - 검색 포함 여부는 `PUT /nodes/{node_id}/search-policy`로 변경한다.
 - Text 암호화는 `PUT /text/{node_id}/encryption`으로 변경한다.
 - Space의 기본값은 새 node 생성에만 적용하고 Inspector는 선택한 node의 현재 상태를 즉시 변경한다.
-- metadata는 encrypted content가 아니다.
-- metadata 수정은 명시 액션으로만 한다.
+- metadata는 encrypted content가 아니며 읽기 전용으로 표시한다.
 
 ## Settings
 
@@ -495,4 +493,4 @@ Agents:
 | Files | text | open, open in new group, rename, move, copy path, delete |
 | Files | file | open, open in new group, download, rename, move, copy path, delete |
 | EditorHeader | node | rename, move, delete, download if file |
-| Inspector | metadata | edit metadata |
+| Inspector | metadata | view system metadata |

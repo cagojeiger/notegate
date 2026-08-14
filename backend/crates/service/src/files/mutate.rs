@@ -1,5 +1,5 @@
 use notegate_core::limits;
-use notegate_db::{MetadataMutationKind, TextMutationKind};
+use notegate_db::TextMutationKind;
 use notegate_model::{AccountKind, Caller, NodeKind};
 use serde_json::Value;
 use uuid::Uuid;
@@ -570,64 +570,6 @@ impl FilesService {
         Ok(self.load_node(space_id, node_id).await?.metadata)
     }
 
-    /// Replace a node's metadata object. Requires write permission.
-    pub async fn replace_metadata(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        node_id: Uuid,
-        metadata: Value,
-    ) -> ServiceResult<NodeView> {
-        self.authorize(space_id, caller_account_id, FileCommand::Write)
-            .await?;
-        validation::validate_metadata(&metadata)?;
-
-        let updated = self
-            .store
-            .replace_node_metadata(
-                space_id,
-                node_id,
-                &metadata,
-                caller_account_id,
-                MetadataMutationKind::Replace,
-            )
-            .await?;
-        self.node_view(space_id, updated).await
-    }
-
-    /// Merge-patch a node's metadata object. Requires write permission.
-    pub async fn patch_metadata(
-        &self,
-        caller_account_id: Uuid,
-        space_id: Uuid,
-        node_id: Uuid,
-        patch: Value,
-    ) -> ServiceResult<NodeView> {
-        self.authorize(space_id, caller_account_id, FileCommand::Patch)
-            .await?;
-        if !patch.is_object() {
-            return Err(ServiceError::InvalidInput(
-                "metadata patch must be a JSON object".to_owned(),
-            ));
-        }
-
-        let mut metadata = self.load_node(space_id, node_id).await?.metadata;
-        apply_json_merge_patch(&mut metadata, patch);
-        validation::validate_metadata(&metadata)?;
-
-        let updated = self
-            .store
-            .replace_node_metadata(
-                space_id,
-                node_id,
-                &metadata,
-                caller_account_id,
-                MetadataMutationKind::Patch,
-            )
-            .await?;
-        self.node_view(space_id, updated).await
-    }
-
     /// Move or rename a node (`mv`). Requires write permission.
     pub async fn move_node(
         &self,
@@ -859,21 +801,6 @@ fn validate_file_encryption(
     Ok(())
 }
 
-fn apply_json_merge_patch(target: &mut Value, patch: Value) {
-    match (target, patch) {
-        (Value::Object(target), Value::Object(patch)) => {
-            for (key, value) in patch {
-                if value.is_null() {
-                    target.remove(&key);
-                } else {
-                    apply_json_merge_patch(target.entry(key).or_insert(Value::Null), value);
-                }
-            }
-        }
-        (target, patch) => *target = patch,
-    }
-}
-
 /// Compare an optional `expected_sha256` to the current hash; conflict on mismatch.
 fn check_expected_sha(expected: Option<&str>, current: &str) -> ServiceResult<()> {
     if let Some(expected) = expected
@@ -997,49 +924,6 @@ mod tests {
                         == "encryption_metadata must be a JSON object when encryption_mode=client"
             ));
         }
-    }
-
-    #[test]
-    fn json_merge_patch_merges_replaces_and_removes_fields() {
-        let mut target = json!({
-            "title": "old",
-            "nested": {
-                "keep": 1,
-                "remove": 2
-            },
-            "scalar": "old"
-        });
-
-        apply_json_merge_patch(
-            &mut target,
-            json!({
-                "nested": {
-                    "remove": null,
-                    "add": 3
-                },
-                "scalar": {
-                    "new": true
-                },
-                "missing": null
-            }),
-        );
-
-        assert_eq!(
-            target,
-            json!({
-                "title": "old",
-                "nested": {
-                    "keep": 1,
-                    "add": 3
-                },
-                "scalar": {
-                    "new": true
-                }
-            })
-        );
-
-        apply_json_merge_patch(&mut target, json!("replacement"));
-        assert_eq!(target, json!("replacement"));
     }
 
     #[test]

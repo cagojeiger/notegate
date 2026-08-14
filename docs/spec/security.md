@@ -9,7 +9,7 @@
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.
 - OAuth refresh token은 browser client에 노출하지 않고 서버에서 암호화 저장한다.
 - Text content는 서버가 읽는 plain content 또는 client-side encrypted payload로 저장한다. `system_max` Space는 plain content를 서버 관리 방식으로 추가 암호화할 수 있다.
-- Node metadata는 content가 아니며 암호화 대상이 아니다.
+- Node metadata는 content가 아니며 암호화 대상이 아니다. 시스템이 관리하고 외부 caller는 수정할 수 없다.
 - Markdown frontmatter는 Text content 안의 YAML block이다. encrypted Text 안에 있으면 content와 함께 client-side encrypted payload에 포함된다.
 
 ## Root key domains

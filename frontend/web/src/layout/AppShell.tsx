@@ -253,14 +253,12 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   activeNode={workbench.inspectedNode}
                   activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}
                   loadingNode={workbench.inspectorNodeLoading}
-                  canWriteActiveSpace={canWriteWorkbench}
                   canManageActiveSpace={canManageWorkbench}
                   textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}
                   writeLockAvailable={workbench.activeSpace?.features.write_lock ?? false}
                   searchPolicyPending={actions.nodeSearchPolicyPending}
                   writeLockPending={actions.nodeWriteLockPending}
                   textEncryptionPending={actions.textEncryptionPending}
-                  onReplaceMetadata={actions.promptReplaceMetadata}
                   onSearchEnabledChange={actions.setNodeSearchEnabled}
                   onWriteLockedChange={actions.setNodeWriteLocked}
                   onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}

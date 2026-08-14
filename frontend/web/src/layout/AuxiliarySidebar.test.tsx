@@ -31,14 +31,12 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
 function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
   return {
     activeNode: textNode,
-    canWriteActiveSpace: true,
     canManageActiveSpace: true,
     textEncryptionAvailable: true,
     writeLockAvailable: true,
     searchPolicyPending: false,
     writeLockPending: false,
     textEncryptionPending: false,
-    onReplaceMetadata: vi.fn(),
     onSearchEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
@@ -57,7 +55,6 @@ describe("AuxiliarySidebar", () => {
   it("uses the Details and Outline tabs as the single workbench header", () => {
     renderSidebar({
       activeNode: null,
-      canWriteActiveSpace: false,
       canManageActiveSpace: false,
       textEncryptionAvailable: false,
       writeLockAvailable: false
@@ -162,10 +159,10 @@ describe("AuxiliarySidebar", () => {
     expect(onTextEncryptionEnabledChange).toHaveBeenCalledWith(false);
   });
 
-  it("keeps metadata editing available while policy controls require manage access", () => {
+  it("keeps metadata read-only while policy controls require manage access", () => {
     renderSidebar({ canManageActiveSpace: false });
 
-    expect(screen.getByRole("button", { name: "Edit metadata" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Edit metadata" })).not.toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Stored text encryption" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Lock changes" })).toBeDisabled();
@@ -216,7 +213,6 @@ describe("AuxiliarySidebar", () => {
 
     expect(screen.getByRole("switch", { name: "Lock changes" })).toBeChecked();
     expect(screen.getByText("Locked here")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit metadata" })).toBeDisabled();
     expect(screen.queryByTitle("/Policies")).not.toBeInTheDocument();
 
     const sourceTrigger = screen.getByRole("button", { name: "1 inherited" });
@@ -245,7 +241,6 @@ describe("AuxiliarySidebar", () => {
 
     expect(screen.getByText("Inherited")).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Lock changes" })).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "Edit metadata" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: "Include in search" })).toBeDisabled();
     expect(screen.queryByTitle("/Policies")).not.toBeInTheDocument();
 

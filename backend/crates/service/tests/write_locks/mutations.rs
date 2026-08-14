@@ -1,11 +1,9 @@
+use crate::write_lock_support::{Fixture, TestResult, assert_write_locked};
 use notegate_model::AccountKind;
 use notegate_service::files::{
     CreateFolder, CreateText, DeleteNode, MoveNode, UpdateNode, UpdateNodeSearchPolicy,
     UpdateTextEncryption, WriteTarget, WriteText, WriteTextBody,
 };
-use serde_json::json;
-
-use crate::write_lock_support::{Fixture, TestResult, assert_write_locked};
 
 #[tokio::test]
 async fn ancestor_lock_blocks_child_creation_until_unlocked() -> TestResult {
@@ -111,17 +109,6 @@ async fn locked_node_blocks_each_distinct_mutation_guard() -> TestResult {
     assert_write_locked(
         fixture
             .files
-            .replace_metadata(
-                fixture.owner,
-                fixture.space_id,
-                text_id,
-                json!({ "classification": "restricted" }),
-            )
-            .await,
-    );
-    assert_write_locked(
-        fixture
-            .files
             .update_node_search_policy(
                 AccountKind::User,
                 fixture.owner,
@@ -176,16 +163,6 @@ async fn locked_descendant_protects_subtree_structure_without_freezing_parent() 
     fixture.set_lock(child_id, true).await?;
 
     fixture.text(folder_id, "sibling.md").await?;
-    fixture
-        .files
-        .replace_metadata(
-            fixture.owner,
-            fixture.space_id,
-            folder_id,
-            json!({ "classification": "archive" }),
-        )
-        .await?;
-
     assert_write_locked(
         fixture
             .files

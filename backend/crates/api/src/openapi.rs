@@ -97,8 +97,6 @@ pub struct PublicApiDoc;
         rest::nodes::children,
         rest::nodes::batch_children,
         rest::nodes::get_metadata,
-        rest::nodes::replace_metadata,
-        rest::nodes::patch_metadata,
         rest::nodes::move_node,
         rest::text::read,
         rest::text::replace,
@@ -324,7 +322,7 @@ mod tests {
         for forbidden in [
             "/api/v2/agents",
             "/api/v2/spaces/{space_id}/agents",
-            "/api/v2/spaces/{space_id}/metadata",
+            "/api/v2/spaces/{space_id}/nodes/{node_id}/metadata",
             "/api/v2/spaces/{space_id}/nodes/{node_id}/write-lock",
         ] {
             assert!(
@@ -911,7 +909,6 @@ mod tests {
             "PATCH /api/v1/spaces/{space_id}",
             "PATCH /api/v1/spaces/{space_id}/text/{node_id}",
             "PATCH /api/v1/spaces/{space_id}/nodes/{node_id}",
-            "PATCH /api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
             "POST /api/v1/agents",
             "POST /api/v1/agents/{agent_id}/keys",
             "POST /api/v1/agents/{agent_id}/keys/{key_id}",
@@ -926,7 +923,6 @@ mod tests {
             "POST /api/v1/spaces/{space_id}/nodes:batchListChildren",
             "POST /api/v1/spaces/{space_id}/usage/reconcile",
             "PUT /api/v1/spaces/{space_id}/agents/{agent_id}",
-            "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/metadata",
             "PUT /api/v1/spaces/{space_id}/text/{node_id}",
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/search-policy",
             "PUT /api/v1/spaces/{space_id}/nodes/{node_id}/write-lock",

@@ -10,7 +10,6 @@ use notegate_model::Node;
 use notegate_model::files::{
     StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTextBody,
 };
-use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -18,7 +17,6 @@ use super::super::error::{map_constraint_error, map_sqlx_error};
 use super::super::rows::{NODE_COLUMNS, NodeRow, TEXT_COLUMNS, TextRow};
 use super::{checks, lock_live_node, stored_text_parts};
 use crate::file_change_events;
-use crate::files_repo::MetadataMutationKind;
 
 pub async fn update_node(
     pool: &PgPool,
@@ -298,53 +296,4 @@ async fn rewrite_text_encryption(
     .await
     .map_err(map_sqlx_error)?;
     Ok(())
-}
-
-/// Replace `node_id`'s metadata object in place.
-pub async fn replace_node_metadata(
-    pool: &PgPool,
-    space_id: Uuid,
-    node_id: Uuid,
-    metadata: &Value,
-    updated_by: Uuid,
-    mutation_kind: MetadataMutationKind,
-) -> Result<Node> {
-    let mut tx = pool.begin().await.map_err(map_sqlx_error)?;
-
-    checks::lock_space(&mut tx, space_id).await?;
-    let current = lock_live_node(&mut tx, space_id, node_id).await?;
-    let node_kind = current.kind.clone();
-    if current.metadata == *metadata {
-        tx.commit().await.map_err(map_sqlx_error)?;
-        return current.into_node();
-    }
-    checks::require_node_write(&mut tx, space_id, node_id).await?;
-
-    let row = sqlx::query_as::<_, NodeRow>(sqlx::AssertSqlSafe(format!(
-        "UPDATE nodes \
-         SET metadata = $3, updated_by_account_id = $4, updated_at = now() \
-         WHERE space_id = $1 AND id = $2 AND deleted_at IS NULL RETURNING {NODE_COLUMNS}"
-    )))
-    .bind(space_id)
-    .bind(node_id)
-    .bind(metadata)
-    .bind(updated_by)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(map_constraint_error)?
-    .ok_or_else(|| Error::not_found("node not found"))?;
-
-    file_change_events::node_metadata_replaced(
-        &mut tx,
-        file_change_events::context(updated_by, space_id),
-        node_id,
-        mutation_kind,
-        &node_kind,
-        &row.name,
-        row.parent_id,
-    )
-    .await?;
-
-    tx.commit().await.map_err(map_sqlx_error)?;
-    row.into_node()
 }

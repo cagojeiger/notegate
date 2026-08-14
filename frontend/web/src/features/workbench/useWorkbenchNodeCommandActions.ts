@@ -8,19 +8,17 @@ import {
   canCreateInFolder,
   canMoveNodeToFolder,
   canMutateNode,
-  canWriteNode,
   resolveNodeCreateTarget
 } from "../nodes/nodeWriteAccess";
 import { useAudioRecordingActions } from "../recording/AudioRecordingContext";
 import { useUploadActions } from "../uploads/UploadProvider";
-import { createNodeDialog, deleteNodeDialog, metadataDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
+import { createNodeDialog, deleteNodeDialog, moveNodeDialog, renameNodeDialog, uploadFileDialog } from "./dialogs/appDialogs";
 import type { AppDialog } from "./dialogs/dialogTypes";
 import type { CanonicalNodeLoader } from "./useCanonicalNodeLoader";
 import {
   useCreateNodeMutation,
   useDeleteNodeMutation,
   useMoveNodeMutation,
-  useReplaceMetadataMutation,
   useUpdateNodeMutation,
   useUpdateNodeSearchPolicyMutation,
   useUpdateNodeWriteLockMutation,
@@ -70,7 +68,6 @@ export function useWorkbenchNodeCommandActions({
   const moveNodeMutation = useMoveNodeMutation(updateGroupsNode);
   const moveNodeDialogMutation = useMoveNodeMutation(updateGroupsNode, { silentError: true });
   const deleteNodeMutation = useDeleteNodeMutation((node) => clearGroupsWithNode(node.id));
-  const replaceMetadataMutation = useReplaceMetadataMutation(updateGroupsNode);
 
   function promptCreateNode(kind: "folder" | "text") {
     if (!canWriteActiveSpace || !activeSpace) return;
@@ -177,14 +174,6 @@ export function useWorkbenchNodeCommandActions({
     );
   }
 
-  function promptReplaceMetadata() {
-    if (!inspectedNode || !canWriteNode(inspectedNode, canWriteActiveSpace)) return;
-    const node = inspectedNode;
-    setDialog(metadataDialog(node, async (metadataNode, metadata) => {
-      await replaceMetadataMutation.mutateAsync({ node: metadataNode, metadata });
-    }));
-  }
-
   function setNodeSearchEnabled(searchEnabled: boolean) {
     if (
       !canManageActiveSpace
@@ -237,7 +226,6 @@ export function useWorkbenchNodeCommandActions({
     promptMoveNode,
     moveNodeToFolder,
     confirmDeleteNode,
-    promptReplaceMetadata,
     setNodeSearchEnabled,
     setNodeWriteLocked,
     setTextEncryptionEnabled,

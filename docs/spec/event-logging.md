@@ -178,9 +178,6 @@ text.append
 text.patch
 text.edit
 
-metadata.replace
-metadata.patch
-
 item.move
 item.update
 item.copy
@@ -215,7 +212,7 @@ line_count_before: integer
 line_count_after: integer
 ```
 
-Create/text/metadata/update event는 현재 `parent_node_id`를 기록한다. Move는
+Create/text/update event는 현재 `parent_node_id`를 기록한다. Move는
 `parent_node_id_before`와 `parent_node_id_after`, delete는
 `parent_node_id_before`를 기록한다. 이 값은 UI delta sync의 cache
 invalidation 범위이며 전체 path는 저장하지 않는다.
@@ -227,7 +224,7 @@ Agent 기준 검토는 `actor_account_id`에서 시작한다. API key 단위 추
 File change event target mapping:
 
 ```text
-folder.create | text.create | file.create | text.* | metadata.* | item.*
+folder.create | text.create | file.create | text.* | item.*
   space_id: space_id
   node_id: target node_id
 
