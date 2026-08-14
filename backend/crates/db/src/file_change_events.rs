@@ -4,7 +4,7 @@
 //! `json!` payloads — they only call a constructor here.
 
 use crate::file_change_event_repo::{NewFileChangeEvent, insert_file_change_event};
-use crate::files_repo::{MetadataMutationKind, TextMutationKind};
+use crate::files_repo::TextMutationKind;
 use notegate_core::Result;
 use notegate_model::files::CopyCounts;
 use serde_json::{Value, json};
@@ -171,36 +171,6 @@ pub(crate) async fn text_saved(
         line_count_before,
         line_count_after,
     );
-    event(tx, ctx, Some(node_id), op_type, metadata).await
-}
-
-fn node_metadata_replaced_payload(
-    kind: MetadataMutationKind,
-    item_kind: &str,
-    item_name: &str,
-    parent_node_id: Option<Uuid>,
-) -> (&'static str, Value) {
-    (
-        kind.op_type(),
-        json!({
-            "item_kind": item_kind,
-            "item_name": item_name,
-            "parent_node_id": parent_node_id,
-        }),
-    )
-}
-
-pub(crate) async fn node_metadata_replaced(
-    tx: &mut PgConnection,
-    ctx: FileChangeContext,
-    node_id: Uuid,
-    kind: MetadataMutationKind,
-    item_kind: &str,
-    item_name: &str,
-    parent_node_id: Option<Uuid>,
-) -> Result<()> {
-    let (op_type, metadata) =
-        node_metadata_replaced_payload(kind, item_kind, item_name, parent_node_id);
     event(tx, ctx, Some(node_id), op_type, metadata).await
 }
 
@@ -477,26 +447,6 @@ mod tests {
                 "byte_len_after": 11,
                 "line_count_before": 1,
                 "line_count_after": 2,
-            })
-        );
-    }
-
-    #[test]
-    fn node_metadata_replaced_uses_mutation_kind_op_type() {
-        let parent = Uuid::new_v4();
-        let (op_type, metadata) = node_metadata_replaced_payload(
-            MetadataMutationKind::Patch,
-            "text",
-            "draft.md",
-            Some(parent),
-        );
-        assert_eq!(op_type, "metadata.patch");
-        assert_eq!(
-            metadata,
-            json!({
-                "item_kind": "text",
-                "item_name": "draft.md",
-                "parent_node_id": parent,
             })
         );
     }

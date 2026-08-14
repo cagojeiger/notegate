@@ -56,21 +56,6 @@ impl TextMutationKind {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum MetadataMutationKind {
-    Replace,
-    Patch,
-}
-
-impl MetadataMutationKind {
-    pub(crate) fn op_type(self) -> &'static str {
-        match self {
-            MetadataMutationKind::Replace => "metadata.replace",
-            MetadataMutationKind::Patch => "metadata.patch",
-        }
-    }
-}
-
 impl FilesRepo {
     #[cfg(any(test, feature = "test-util"))]
     pub fn new(pool: PgPool) -> Self {
@@ -679,25 +664,6 @@ impl FilesRepo {
             command,
             updated_by,
             self.limits,
-        )
-        .await
-    }
-
-    pub async fn replace_node_metadata(
-        &self,
-        space_id: Uuid,
-        node_id: Uuid,
-        metadata: &Value,
-        updated_by: Uuid,
-        mutation_kind: MetadataMutationKind,
-    ) -> Result<Node> {
-        commands::update::replace_node_metadata(
-            &self.pool,
-            space_id,
-            node_id,
-            metadata,
-            updated_by,
-            mutation_kind,
         )
         .await
     }

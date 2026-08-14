@@ -11,7 +11,7 @@ mod common;
 
 use common::{TestDb, attach_file, space_with_root};
 use notegate_core::Error;
-use notegate_db::{FilesRepo, MetadataMutationKind, TextMutationKind};
+use notegate_db::{FilesRepo, TextMutationKind};
 use notegate_model::FileChangeEventCursor;
 use notegate_model::files::{
     CopyNode, CreateFolder, MoveNode, StoredContent, UpdateNode, WriteTextBody,
@@ -87,26 +87,6 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
         )
         .await?;
     assert_eq!(no_op_text.updated_at, written_text.updated_at);
-    let metadata = json!({ "source": "test" });
-    let metadata_node = repo
-        .replace_node_metadata(
-            space_id,
-            node.id,
-            &metadata,
-            account,
-            MetadataMutationKind::Replace,
-        )
-        .await?;
-    let no_op_metadata_node = repo
-        .replace_node_metadata(
-            space_id,
-            node.id,
-            &metadata,
-            account,
-            MetadataMutationKind::Replace,
-        )
-        .await?;
-    assert_eq!(no_op_metadata_node.updated_at, metadata_node.updated_at);
     let updated_node = repo
         .update_node(
             space_id,
@@ -181,7 +161,6 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
             "item.copy",
             "item.move",
             "item.update",
-            "metadata.replace",
             "text.write",
             "file.create",
             "text.create",
@@ -238,12 +217,12 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
             .iter()
             .all(|event| event.actor_account_id == Some(account))
     );
-    assert_eq!(events[5].metadata["byte_len_before"], json!(5));
-    assert_eq!(events[5].metadata["byte_len_after"], json!(11));
-    assert_eq!(events[5].metadata["parent_node_id"], json!(root_id));
-    assert_eq!(events[6].node_id, Some(file_node.id));
-    assert_eq!(events[6].metadata["byte_len_after"], json!(5));
-    assert!(events[6].metadata.get("line_count_after").is_none());
+    assert_eq!(events[4].metadata["byte_len_before"], json!(5));
+    assert_eq!(events[4].metadata["byte_len_after"], json!(11));
+    assert_eq!(events[4].metadata["parent_node_id"], json!(root_id));
+    assert_eq!(events[5].node_id, Some(file_node.id));
+    assert_eq!(events[5].metadata["byte_len_after"], json!(5));
+    assert!(events[5].metadata.get("line_count_after").is_none());
     assert_eq!(events[1].node_id, Some(copied_node.id));
     assert_eq!(events[1].metadata["item_kind"], json!("text"));
     assert_eq!(events[1].metadata["copied_from_node_id"], json!(node.id));
@@ -253,13 +232,13 @@ async fn file_tree_mutations_write_file_change_events() -> Result<(), Box<dyn st
     );
     assert_eq!(events[3].metadata["parent_node_id"], json!(root_id));
     assert_eq!(events[4].metadata["parent_node_id"], json!(root_id));
-    assert!(events[5].metadata.get("content_sha256_before").is_none());
-    assert!(events[5].metadata.get("content_sha256_after").is_none());
+    assert!(events[4].metadata.get("content_sha256_before").is_none());
+    assert!(events[4].metadata.get("content_sha256_after").is_none());
 
     let file_change_events = repo
         .list_file_change_events(space_id, Some(node.id), 20, None)
         .await?;
-    assert_eq!(file_change_events.len(), 6);
+    assert_eq!(file_change_events.len(), 5);
     assert!(
         file_change_events
             .iter()

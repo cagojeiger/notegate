@@ -35,7 +35,7 @@ Permission: `write`.
 1. `POST /file-uploads`에 `parent_node_id`, `name`, `byte_len`, `media_type`과 선택 encryption metadata를 보낸다.
 2. `transfer.mode=single`이면 `transfer.url`에 `transfer.headers`를 적용해 전체 bytes를 PUT한다.
 3. `transfer.mode=multipart`이면 `/parts`에 제한된 batch의 part number를 보내 URL을 발급받는다. 각 응답의 `content_length`만큼 원본을 잘라 제한된 동시성으로 PUT하고 응답 `ETag`를 기록한다. 실패한 part만 새 URL로 재시도한다. Batch와 동시성 상한은 [`performance-limits.md`](../performance-limits.md)의 Object upload 상한을 따른다.
-4. `/complete`를 호출한다. Multipart는 모든 `{ part_number, etag }`를 `completed_parts`로 보낸다. File Node 생성 시 함께 저장할 metadata는 `node_metadata` object로 보내며, 공통 Node metadata 제한을 통과한 뒤 File Node 연결과 같은 DB transaction에서 저장된다.
+4. `/complete`를 호출한다. Multipart는 모든 `{ part_number, etag }`를 `completed_parts`로 보낸다. Browser 녹음 기능이 File Node 생성 시 기록하는 metadata는 `node_metadata` object로 보내며, 공통 Node metadata 제한을 통과한 뒤 File Node 연결과 같은 DB transaction에서 한 번 저장된다.
 5. 서버는 S3 `HEAD`로 실물 크기와 quota를 검증한 뒤 File Node를 생성한다. 암호화하지 않은 파일은 object 앞부분을 범위 조회해 실제 media type도 기록한다. 감지 실패는 완료를 막지 않는다.
 
 ### 전송 무결성
@@ -61,7 +61,7 @@ File size, upload mode, multipart geometry, pending handle 수와 만료 시간�
 
 Permission: `read`.
 
-`GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Upload 완료 시 선택 `node_metadata`로 초기값을 원자적으로 저장할 수 있고 이후에는 공통 metadata API로 수정한다. 완료 재시도는 처음 연결된 File Node와 metadata를 그대로 반환한다.
+`GET /files/{node_id}`는 file node의 metadata와 file stats를 반환한다. Browser 녹음 upload 완료 시 선택 `node_metadata`로 초기값을 원자적으로 저장할 수 있으며 생성 이후에는 외부 API에서 수정할 수 없다. 완료 재시도는 처음 연결된 File Node와 metadata를 그대로 반환한다.
 
 `media_type`은 client 선언값이고 `detected_media_type`은 provider object에서 감지한 값이다.
 

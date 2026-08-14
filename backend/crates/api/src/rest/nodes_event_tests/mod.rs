@@ -104,28 +104,6 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
     .await?;
     assert_eq!(status, StatusCode::OK, "{no_op_write}");
 
-    let (status, metadata) = json_request(
-        rest_app(state.clone(), caller.clone()),
-        "PUT",
-        format!("/v1/spaces/{space_id}/nodes/{text_id}/metadata"),
-        json!({
-            "metadata": {"source": "rest-e2e"}
-        }),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::OK, "{metadata}");
-
-    let (status, no_op_metadata) = json_request(
-        rest_app(state.clone(), caller.clone()),
-        "PUT",
-        format!("/v1/spaces/{space_id}/nodes/{text_id}/metadata"),
-        json!({
-            "metadata": {"source": "rest-e2e"}
-        }),
-    )
-    .await?;
-    assert_eq!(status, StatusCode::OK, "{no_op_metadata}");
-
     let (status, updated) = json_request(
         rest_app(state.clone(), caller.clone()),
         "PATCH",
@@ -200,7 +178,6 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
             "item.delete",
             "item.move",
             "item.update",
-            "metadata.replace",
             "text.write",
             "file.create",
             "text.create",
@@ -266,7 +243,7 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
             .as_array()
             .expect("events array")
             .len(),
-        6
+        5
     );
     let text_event_ops: Vec<_> = text_events["events"]
         .as_array()
@@ -280,7 +257,6 @@ async fn rest_file_change_events_capture_and_list_real_mutations()
             "item.delete",
             "item.move",
             "item.update",
-            "metadata.replace",
             "text.write",
             "text.create",
         ]

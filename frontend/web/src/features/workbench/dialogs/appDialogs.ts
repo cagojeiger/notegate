@@ -1,4 +1,4 @@
-import type { NodeSummary, RestNode, Space } from "../../../api/types";
+import type { NodeSummary, Space } from "../../../api/types";
 import type { AppDialog } from "./dialogTypes";
 
 export function newSpaceDialog(onCreate: (name: string) => void): AppDialog {
@@ -78,8 +78,4 @@ export function deleteNodeDialog(node: NodeSummary, onDelete: (node: NodeSummary
     confirmLabel: "Delete",
     onConfirm: () => onDelete(node, recursive)
   };
-}
-
-export function metadataDialog(node: RestNode, onSave: (node: RestNode, metadata: Record<string, unknown>) => void): AppDialog {
-  return { kind: "metadata", node, onSave: (metadata) => onSave(node, metadata) };
 }

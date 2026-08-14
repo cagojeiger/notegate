@@ -219,29 +219,6 @@ describe("DialogHost", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("validates metadata JSON before saving", async () => {
-    const user = userEvent.setup();
-    const onSave = vi.fn();
-    const onClose = vi.fn();
-
-    render(<DialogHost dialog={{ kind: "metadata", node: textNode, onSave }} onClose={onClose} />);
-
-    const textarea = screen.getByRole("textbox");
-    const save = screen.getByRole("button", { name: "Save" });
-
-    await user.clear(textarea);
-    await user.type(textarea, "not json");
-    expect(save).toBeDisabled();
-    expect(screen.getAllByText(/not valid JSON/i).length).toBeGreaterThan(0);
-
-    await user.clear(textarea);
-    await user.click(textarea);
-    await user.paste(JSON.stringify({ title: "updated" }));
-    await user.click(save);
-
-    expect(onSave).toHaveBeenCalledWith({ title: "updated" });
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-  });
 });
 
 function folder(id: string, name: string): RestNode {

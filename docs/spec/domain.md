@@ -16,7 +16,7 @@ File       binary/object content. Text content operation과 grep 대상이 아�
 Connection Agent와 Space 사이의 연결. permission은 read 또는 write다.
 API key    Agent account로 인증되는 bearer credential.
 Browser session  Browser UI용 HttpOnly cookie session. AuthGate refresh token으로 server-side 갱신된다.
-Metadata   Node에 붙는 JSON object. content가 아니며 서버가 읽을 수 있다.
+Metadata   Node에 붙는 시스템 관리 JSON object. content가 아니며 외부 caller에게 읽기 전용이다.
 Markdown frontmatter  Markdown Text content 맨 앞의 YAML properties block. Node metadata와 별도다.
 ```
 
@@ -50,7 +50,7 @@ Permission:
 
 ```text
 read  = list/stat/read text/read file/read metadata/find/grep
-write = read + create folder/create text/upload file/update/append/patch/edit/copy/delete/move/write metadata
+write = read + create folder/create text/upload file/update/append/patch/edit/copy/delete/move
 ```
 
 ## Naming rules

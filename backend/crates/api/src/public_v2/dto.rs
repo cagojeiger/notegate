@@ -134,7 +134,7 @@ impl From<&SpaceView> for SpaceOut {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-/// Complete node metadata. Kind-specific fields are omitted when not applicable.
+/// Complete node details. Kind-specific fields are omitted when not applicable.
 pub struct NodeOut {
     pub id: Uuid,
     pub space_id: Uuid,

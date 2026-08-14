@@ -88,7 +88,9 @@ type ReadInput = {
 
 `direction`의 기본값은 `older`이며 `newer`는 checkpoint `cursor`가 필수다. `event_id`는 하나의 mutation event 식별자이며 Space 안에서는 큰 값이 더 최신이다. `created_at`은 표시 시각이고 정본 순서는 `event_id`다. Changes cursor는 Space에 묶인 opaque 값이므로 내부 event id를 만들거나 다른 Space에 재사용하지 않는다.
 
-`changes`는 operation filter 없이 Folder/Text/File의 create, content/metadata update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
+`changes`는 operation filter 없이 Folder/Text/File의 create, content update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
+
+MCP는 Node metadata 수정 command를 제공하지 않는다. `changes.events[].metadata`는 변경 event의 구조적 payload이고 `file_transfer.encryption_metadata`는 client-side encryption 계약이며, 둘 다 Node metadata 수정 기능이 아니다.
 
 호출 이력에는 `tools/call.params.arguments`에서 allowlist와 redaction을 적용한 snapshot만 저장한다. Changes target처럼 허용된 필드는 `input`에서 확인할 수 있고, 검증된 Space 이름은 목록용 `space_name` summary에 함께 남긴다.
 

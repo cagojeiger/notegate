@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const browserSession = process.env.NOTEGATE_WEB_E2E_BROWSER_SESSION;
 
-test("browser session dashboard supports space, text, metadata, and file basics", async ({ page, baseURL }) => {
+test("browser session dashboard supports space, text, read-only metadata, and file basics", async ({ page, baseURL }) => {
   test.skip(!browserSession, "set NOTEGATE_WEB_E2E_BROWSER_SESSION to run dashboard smoke e2e");
   const suffix = Date.now().toString(36);
   const spaceName = `web-e2e-${suffix}`;
@@ -42,12 +42,8 @@ test("browser session dashboard supports space, text, metadata, and file basics"
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Created by web smoke e2e.")).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit metadata" }).click();
-  await page.getByLabel("Metadata JSON").fill(JSON.stringify({ source: "web-e2e", suffix }));
-  await page.getByRole("dialog", { name: "Edit metadata" })
-    .getByRole("button", { name: "Save", exact: true })
-    .click();
-  await expect(page.getByText('"source": "web-e2e"')).toBeVisible();
+  await expect(page.getByText("No metadata.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit metadata" })).toHaveCount(0);
 
   const dir = join(tmpdir(), "notegate-web-e2e");
   mkdirSync(dir, { recursive: true });

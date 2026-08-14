@@ -5,7 +5,7 @@ import type { RestNode } from "../api/types";
 import { useMarkdownOutlineContext, type MarkdownInspectorView, type MarkdownOutlineSnapshot } from "../features/editor/MarkdownOutlineContext";
 import { useFolderChildrenStat } from "../features/editor/useEditorQueries";
 import { formatBytes } from "../shared/lib/formatBytes";
-import { Button, MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
+import { MetaRow, SectionHeader, SettingToggle, Tabs } from "../shared/ui";
 import { WriteLockStatus } from "./WriteLockStatus";
 
 const EMPTY = "—";
@@ -14,14 +14,12 @@ type AuxiliarySidebarProps = {
   activeNode: RestNode | null;
   activeGroupId?: number | null;
   loadingNode?: boolean;
-  canWriteActiveSpace: boolean;
   canManageActiveSpace: boolean;
   textEncryptionAvailable: boolean;
   writeLockAvailable: boolean;
   searchPolicyPending: boolean;
   writeLockPending: boolean;
   textEncryptionPending: boolean;
-  onReplaceMetadata: () => void;
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
@@ -32,14 +30,12 @@ export function AuxiliarySidebar({
   activeNode,
   activeGroupId = null,
   loadingNode = false,
-  canWriteActiveSpace,
   canManageActiveSpace,
   textEncryptionAvailable,
   writeLockAvailable,
   searchPolicyPending,
   writeLockPending,
   textEncryptionPending,
-  onReplaceMetadata,
   onSearchEnabledChange,
   onWriteLockedChange,
   onTextEncryptionEnabledChange,
@@ -126,15 +122,6 @@ export function AuxiliarySidebar({
             ) : (
               <p className="text-xs text-muted">No metadata.</p>
             )}
-            <Button
-              size="sm"
-              secondary
-              className="mt-3"
-              onClick={onReplaceMetadata}
-              disabled={!activeNode || !canWriteActiveSpace || changesLocked}
-            >
-              Edit metadata
-            </Button>
           </section>
           <section className="p-4">
             <SectionHeader

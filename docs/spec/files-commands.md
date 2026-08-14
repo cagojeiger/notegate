@@ -40,7 +40,7 @@ User caller는 자신이 소유한 space에서 read/write/manage 가능하다. A
 
 `nodes.write_locked=true`는 직접 설정된 node와 모든 live descendant에 쓰기 장벽을 만든다. 상속 상태를 별도 row로 저장하지 않고, mutation transaction 안에서 대상의 parent chain을 확인한다.
 
-- 잠긴 node 또는 잠긴 조상 아래에서는 create, Text write/append/patch/edit, metadata, 검색 정책, 저장 Text 암호화, rename, reorder, move, delete, File upload 등록을 거부한다.
+- 잠긴 node 또는 잠긴 조상 아래에서는 create, Text write/append/patch/edit, 검색 정책, 저장 Text 암호화, rename, reorder, move, delete, File upload 등록을 거부한다.
 - 이동은 source와 destination 모두 확인한다. 잠긴 descendant가 있는 folder는 rename, move, delete할 수 없다.
 - Copy는 source를 읽을 수 있지만 잠긴 destination에는 만들 수 없다. 복사본에는 직접 잠금을 복제하지 않는다.
 - Read, metadata 조회, find/grep/tree, File download는 허용한다. Preview MIME 감지값처럼 read path가 기록하는 파생 File metadata도 content/tree 변경이 아니므로 허용한다. 같은 parent/name으로의 move, 현재 값과 같은 update, 이미 attach된 File upload의 완료 재시도처럼 실제 변경이 없는 요청도 허용한다.
@@ -76,7 +76,7 @@ edit   line 기반 insert/replace/delete 적용
 
 ## File commands
 
-File은 binary/object content node다. MCP `file_transfer`는 presigned URL을 발급하고 실제 bytes는 로컬 caller와 S3 호환 저장소 사이에서 직접 전송한다. Node metadata는 REST metadata API에서 다룬다.
+File은 binary/object content node다. MCP `file_transfer`는 presigned URL을 발급하고 실제 bytes는 로컬 caller와 S3 호환 저장소 사이에서 직접 전송한다. Node metadata는 시스템이 관리하며 외부 caller에게 읽기 전용이다.
 
 - File은 `nodes.kind='file'`이다.
 - File은 Text content operation과 grep 대상이 아니다.

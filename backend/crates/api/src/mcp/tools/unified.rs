@@ -658,3 +658,41 @@ fn invalid_op(tool: &'static str, allowed: &[&str]) -> ErrorData {
         },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{FileTransferInput, ManageInput, WriteInput};
+
+    #[test]
+    fn mutation_tools_reject_node_metadata_fields() {
+        assert!(
+            serde_json::from_value::<WriteInput>(json!({
+                "purpose": "verify metadata boundary",
+                "op": "write",
+                "target": "daily:/note.md",
+                "metadata": {}
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ManageInput>(json!({
+                "purpose": "verify metadata boundary",
+                "op": "mkdir",
+                "target": "daily:/folder",
+                "metadata": {}
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<FileTransferInput>(json!({
+                "purpose": "verify metadata boundary",
+                "op": "complete_upload",
+                "upload_id": "upload-id",
+                "node_metadata": {}
+            }))
+            .is_err()
+        );
+    }
+}

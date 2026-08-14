@@ -66,7 +66,6 @@ Text 생성               +1             +new              0
 File 생성               +1              0               +new
 Text 내용 변경           0              +(new - old)      0
 같은 Space 안 이동       0               0                0
-Metadata 변경            0               0                0
 Text-only subtree 복사  +count          +text sum         0
 Subtree soft delete     -count          -text sum        -file sum
 Soft-deleted row purge   0               0                0
