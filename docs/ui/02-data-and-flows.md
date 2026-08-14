@@ -81,7 +81,7 @@ Browser session refresh는 server-side flow다. FE는 refresh token을 저장하
 규칙:
 
 - space 정렬은 `sort_order` 기준.
-- drag reorder는 `PATCH /spaces/{id}`로 저장한다.
+- drag reorder는 `POST /api/v1/spaces:reorder`로 일괄 저장한다.
 - account/settings는 SettingsModal에 둔다.
 
 ### Select
@@ -111,7 +111,7 @@ SpaceAddButton
 drag space
 -> show drop indicator
 -> compute sort_order
--> PATCH changed spaces
+-> POST /api/v1/spaces:reorder
 -> refresh spaces
 ```
 
@@ -423,13 +423,12 @@ Expand all / Collapse all
 
 표시:
 
-- kind, name, path, node id.
-- created/updated attribution.
-- byte/line metrics.
+- name, path, kind.
+- folder child count 또는 file size와 Text line count.
 - metadata JSON.
 - 현재 node의 검색 포함 여부.
 - Text의 현재 서버 관리 암호화 상태.
-- metadata privacy note.
+- 접힌 System details 안의 created/updated attribution과 internal id.
 
 규칙:
 
@@ -491,7 +490,7 @@ Agents:
 | Surface | Target | Actions |
 |---|---|---|
 | ActivityRail | space | select, rename, delete, copy id |
-| Files | empty/root | new folder, new text, upload file |
+| Files | empty/root | new folder, new document, upload file |
 | Files | folder | open/toggle, create child, upload, rename, move, copy path, delete |
 | Files | text | open, open in new group, rename, move, copy path, delete |
 | Files | file | open, open in new group, download, rename, move, copy path, delete |

@@ -22,7 +22,7 @@ export function deleteSpaceDialog(space: Space, onDelete: (spaceId: string) => v
   return {
     kind: "confirm",
     title: "Delete space",
-    message: `Delete space "${space.name}"? This permanently removes everything inside it.`,
+    message: `Delete space "${space.name}"? This removes it and everything inside it from NoteGate. It cannot be recovered in the app.`,
     danger: true,
     confirmLabel: "Delete",
     onConfirm: () => onDelete(space.id)
@@ -73,7 +73,7 @@ export function deleteNodeDialog(node: NodeSummary, onDelete: (node: NodeSummary
   return {
     kind: "confirm",
     title: "Delete",
-    message: `Delete "${node.name}"${recursive ? " and everything inside it" : ""}?`,
+    message: `Delete "${node.name}"${recursive ? " and everything inside it" : ""}? It cannot be recovered in the app.`,
     danger: true,
     confirmLabel: "Delete",
     onConfirm: () => onDelete(node, recursive)

@@ -1,131 +1,130 @@
-# Development guide
+# 개발 가이드
 
-## Repository layout
+## 저장소 구조
 
 ```text
 notegate/
 ├─ backend/crates/
-│  ├─ api/                     # Axum server, REST/MCP/auth/static web serving
-│  ├─ jobs/                    # PostgreSQL job queue and worker runtime
-│  ├─ service/                 # Business logic and command semantics
-│  ├─ db/                      # sqlx pool, repositories, and migrations
-│  ├─ model/                   # Shared domain types
-│  └─ core/                    # Config, limits, validation, and shared errors
+│  ├─ api/                     # Axum server, REST/MCP/auth, static web
+│  ├─ jobs/                    # PostgreSQL job queue와 worker runtime
+│  ├─ service/                 # business logic과 command semantics
+│  ├─ db/                      # sqlx pool, repository, migration
+│  ├─ model/                   # shared domain type
+│  └─ core/                    # config, limit, validation, shared error
 ├─ frontend/web/               # React dashboard
 ├─ deploy/
-│  ├─ docker/web.Dockerfile    # Frontend build and backend binary
-│  ├─ nginx/notegate.conf      # Reverse proxy for scaled web replicas
-│  └─ observability/           # Prometheus and provisioned Grafana dashboards
-└─ docker-compose.yml          # App, storage, proxy, and observability stack
+│  ├─ docker/web.Dockerfile
+│  ├─ nginx/notegate.conf
+│  └─ observability/
+└─ docker-compose.yml
 ```
 
-## Local development
+## 로컬 개발
 
-Development keeps the dashboard and API separate for fast feedback.
+Dashboard와 API를 분리해 실행한다.
 
 ```sh
-# Install frontend dependencies.
 pnpm install
-
-# Configure local settings.
 cp .env.example .env
-
-# Start PostgreSQL and MinIO.
 make dev-infra
 ```
 
-API process는 HTTP server와 background job runtime을 함께 실행한다. API와 dashboard를 별도 terminal에서 실행한다.
+API process는 HTTP server와 background job runtime을 함께 실행한다.
 
 ```sh
 cargo run --bin notegate-api
 pnpm web:dev
 ```
 
-Default local services:
-
-- Dashboard: `http://localhost:5173`
-- API and MCP: `http://localhost:9191`
-- PostgreSQL: `localhost:5433`
-- MinIO S3 API: `http://localhost:9000`
-- MinIO console: `http://localhost:9001`
-
-Health checks:
+| Service | URL |
+|---|---|
+| Dashboard | `http://localhost:5173` |
+| API/MCP | `http://localhost:9191` |
+| PostgreSQL | `localhost:5433` |
+| MinIO S3 API | `http://localhost:9000` |
+| MinIO console | `http://localhost:9001` |
 
 ```sh
 curl localhost:9191/health
 curl localhost:9191/ready
 ```
 
-## Production-like Docker stack
-
-The `web` image contains the built dashboard and Rust server. The server handles `/api`, `/auth`, `/mcp`, and `/mcp/v2`, and serves the browser app.
+## Docker Compose
 
 ```sh
 cp .env.example .env
 make up
 ```
 
-The stack exposes NoteGate through the proxy at `http://localhost:9191`. It also
-starts PostgreSQL, MinIO, Prometheus, Grafana, and an initialization job that creates
-the local bucket and its least-privilege application account.
-Compose는 `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`를 각 API replica에 전달한다.
+`web` image는 dashboard와 Rust server를 포함한다. Proxy는 NoteGate를 `http://localhost:9191`에 노출하고 Compose는 PostgreSQL, MinIO, Prometheus, Grafana와 로컬 bucket 초기화 job을 함께 실행한다. `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`는 각 API replica에 전달된다.
 
-Local observability endpoints:
+| Service | URL |
+|---|---|
+| NoteGate | `http://localhost:9191` |
+| Prometheus | `http://localhost:9090` |
+| Grafana | `http://localhost:3000` |
 
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
-- Grafana login: `admin` / `notegate-local` by default
-- Provisioned dashboards: **NoteGate / Service Overview**,
-  **NoteGate / Search Detail**, and **NoteGate / Internals Detail**
+Grafana의 기본 로컬 계정은 `admin` / `notegate-local`이다. Dashboard 구성, 검증과 Kubernetes packaging은 [`deploy/observability/README.md`](../deploy/observability/README.md)를 따른다.
 
-The Grafana root opens Service Overview as its local home dashboard.
-See [`deploy/observability/README.md`](../deploy/observability/README.md) for
-dashboard ownership, validation, and Kubernetes packaging requirements.
-The Service Overview is organized for an overview → RED → USE → process fleet scan.
-Search Detail continues with RED → pipeline → workload → cache diagnostics.
-Internals Detail exposes bounded MCP tool, database pool-acquisition, and
-server-managed text-decryption diagnostics.
-Each panel's information icon explains what the signal means, when a change is
-unusual, and which panel or runtime evidence to inspect next. Rate and throughput
-are treated as workload until they correlate with errors, latency, or saturation;
-fixed alert thresholds should follow a measured baseline or SLO.
-Dashboard links preserve the selected time range and shared instance filter, and
-the default 15-second refresh matches the Prometheus scrape interval.
-
-The application-level metrics default remains disabled. Docker Compose intentionally
-sets `NOTEGATE_METRICS_ENABLED` from `COMPOSE_NOTEGATE_METRICS_ENABLED`, which defaults
-to `true` for this local stack. Prometheus discovers both scaled `web` replicas through
-Docker DNS and scrapes HTTP and background-job metrics from each process-local
-`/metrics` endpoint. Change the local ports or Grafana credentials in `.env`.
-
-Verify the three endpoints after `make up`:
+Application metric은 기본적으로 비활성화되어 있다. Compose는 기본값이 `true`인 `COMPOSE_NOTEGATE_METRICS_ENABLED`를 `NOTEGATE_METRICS_ENABLED`로 전달하고, Prometheus는 각 `web` replica의 `/metrics`를 수집한다.
 
 ```sh
 make curl-metrics
 ```
 
-The MinIO root account is used only for local initialization. The NoteGate runtime account is limited to `GetObject`, `PutObject`, and `DeleteObject` under the configured bucket's `objects/*` prefix. It cannot create or list buckets.
+## Object storage
 
-## Authentication and MCP
+S3 설정은 API 시작에 필수다. Bucket은 운영자가 미리 생성하며 NoteGate는 설정된 기존 bucket만 사용한다.
 
-Authentication and MCP settings come from `.env`:
+필수 runtime 설정:
 
-- `NOTEGATE_AUTHGATE_URL`
-- `NOTEGATE_PUBLIC_URL`
-- `NOTEGATE_OAUTH_CLIENT_ID`
-- `NOTEGATE_MCP_OAUTH_CLIENT_ID`
-- `NOTEGATE_ENC_ROOT_KEY_ID` and `NOTEGATE_ENC_ROOT_SECRET`
-- `NOTEGATE_LOOKUP_ROOT_KEY_ID` and `NOTEGATE_LOOKUP_ROOT_SECRET`
+```text
+NOTEGATE_S3__ENDPOINT
+NOTEGATE_S3__REGION
+NOTEGATE_S3__BUCKET
+NOTEGATE_S3__ACCESS_KEY
+NOTEGATE_S3__SECRET_KEY
+```
 
-The OAuth redirect URL defaults to `${NOTEGATE_PUBLIC_URL}/auth/callback`. The MCP resource URL defaults to `${NOTEGATE_PUBLIC_URL}/mcp`.
+브라우저가 내부 endpoint에 접근할 수 없으면 `NOTEGATE_S3__PUBLIC_ENDPOINT`도 설정한다. `NOTEGATE_S3__FORCE_PATH_STYLE`은 기본 `true`이며 provider에 맞게 변경한다. Access key와 secret key는 secret manager에서 주입한다.
 
-The encryption and lookup root secrets must each be at least 32 bytes. On startup, the API ensures and verifies the configured active key epochs. Startup fails if the database already has a different active key for either domain; key rotation is not automatic.
+브라우저가 `PUBLIC_ENDPOINT`로 직접 PUT/GET할 수 있도록 provider CORS는 다음을 허용해야 한다.
 
-For a first MCP connection, open `${NOTEGATE_PUBLIC_URL}/auth/login`, complete Google sign-in, and reconnect the client to `${NOTEGATE_PUBLIC_URL}/mcp`.
+- Origin: NoteGate origin
+- Method: `PUT`, `GET`
+- Request header: `Content-Type`, `If-None-Match`
+- Exposed response header: `ETag`
 
-Agent API keys connect to `${NOTEGATE_PUBLIC_URL}/mcp/v2`. This endpoint accepts only `ngk_v2_` Agent keys and does not accept OAuth bearer tokens.
+Multipart 완료에는 각 part의 `ETag`가 필요하다. `ENDPOINT`는 서버 내부 주소이고 `PUBLIC_ENDPOINT`는 브라우저가 접근하고 서명에 사용하는 주소다.
 
-## Checks
+로컬 MinIO Compose는 버킷별 CORS 대신 `MINIO_API_CORS_ALLOW_ORIGIN`으로 서버 전역 origin을 설정한다. MinIO root account는 초기화에만 사용하고, NoteGate runtime account에는 설정된 bucket의 `objects/*` 아래에서 `GetObject`, `PutObject`, `DeleteObject`, `AbortMultipartUpload`만 허용한다.
+
+## 인증과 MCP
+
+`.env`에서 다음 값을 설정한다.
+
+```text
+NOTEGATE_AUTHGATE_URL
+NOTEGATE_PUBLIC_URL
+NOTEGATE_OAUTH_CLIENT_ID
+NOTEGATE_MCP_OAUTH_CLIENT_ID
+NOTEGATE_ENC_ROOT_KEY_ID
+NOTEGATE_ENC_ROOT_SECRET
+NOTEGATE_LOOKUP_ROOT_KEY_ID
+NOTEGATE_LOOKUP_ROOT_SECRET
+```
+
+- OAuth redirect: `${NOTEGATE_PUBLIC_URL}/auth/callback`
+- User MCP: `${NOTEGATE_PUBLIC_URL}/mcp`
+- Agent MCP: `${NOTEGATE_PUBLIC_URL}/mcp/v2`
+
+Encryption과 lookup root secret은 각각 32 bytes 이상이어야 한다. API는 시작할 때 active key epoch를 검증하며, 환경 변수와 DB registry가 다르면 시작하지 않는다.
+
+상세한 인증·키 계약은 [`docs/spec/security.md`](./spec/security.md), MCP 연결 계약은 [`docs/spec/mcp`](./spec/mcp/README.md)를 따른다.
+
+User MCP 연결은 `${NOTEGATE_PUBLIC_URL}/auth/login`에서 Google 로그인을 마친 뒤 `/mcp`로 연결한다. Agent MCP는 `ngk_v2_` Agent key만 허용하며 OAuth bearer token을 받지 않는다.
+
+## 검증
 
 ```sh
 make fmt
@@ -136,8 +135,7 @@ make frontend-check
 git diff --check
 ```
 
-`make frontend-check` runs the production dependency audit, theme contrast check,
-typecheck, lint, unit tests, and production build. Browser quality checks use:
+`make frontend-check`는 dependency audit, theme contrast, typecheck, lint, unit test와 production build를 실행한다.
 
 ```sh
 pnpm --filter web exec playwright install chromium
@@ -145,8 +143,4 @@ pnpm --filter web test:e2e
 pnpm --filter web test:lighthouse
 ```
 
-The Playwright suite runs WCAG 2.2 AA axe checks for the login and authenticated
-workspace across desktop, tablet, and mobile layouts. Lighthouse CI checks the
-production build with performance, accessibility, and best-practice budgets.
-Its LCP, CLS, and TBT results are lab regression signals; production INP and
-other Core Web Vitals still require field monitoring after deployment.
+Playwright는 login과 주요 authenticated workspace flow를 desktop, tablet과 mobile viewport에서 검증한다. Axe 기반 WCAG 2.2 AA 검사는 login, Space Library와 file preview 등 적용된 spec에서 실행한다. Lighthouse 결과는 lab regression 신호이며 production Core Web Vitals는 별도 field monitoring이 필요하다.

@@ -25,7 +25,7 @@ const FILE_CHANGE_ACTIONS: Record<string, string> = {
 
 const ITEM_KIND_LABELS: Record<string, string> = {
   folder: "Folder",
-  text: "Text",
+  text: "Document",
   file: "File"
 };
 
@@ -169,7 +169,7 @@ export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetai
     addIdDetail(details, "Source", metadata.copied_from_node_id);
     addIdDetail(details, "To parent", metadata.parent_node_id_after);
     addNumberDetail(details, "Copied items", metadata.copied_nodes);
-    addNumberDetail(details, "Copied texts", metadata.copied_texts);
+    addNumberDetail(details, "Copied documents", metadata.copied_texts);
     addNumberDetail(details, "Copied files", metadata.copied_files);
     addBooleanDetail(details, "Recursive", metadata.recursive);
   } else if (event.op_type === "item.delete") {
@@ -184,7 +184,10 @@ export function formatFileChangeDetails(event: FileChangeEvent): FileChangeDetai
     if (changes.length > 0) details.push({ label: "Changed", value: changes.join(", ") });
   }
 
-  if (event.node_id) details.push({ label: "Item", value: shortId(event.node_id) });
+  if (event.node_id) {
+    const kind = typeof metadata.item_kind === "string" ? metadata.item_kind : "item";
+    details.push({ label: ITEM_KIND_LABELS[kind] ?? "Item", value: shortId(event.node_id) });
+  }
   return details;
 }
 

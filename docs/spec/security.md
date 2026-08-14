@@ -3,7 +3,7 @@
 ## 기본 원칙
 
 - Secret, bearer token, OAuth code, PKCE verifier, API key plaintext, browser session token, OAuth refresh token은 log/error/audit payload에 기록하지 않는다.
-- MCP invocation history는 제품 개선과 실패 분석을 위해 서버에 도달한 `tools/call`의 redacted 입력·응답 snapshot을 JSONB로 저장한다. 저장 전 tool/op별 allowlist와 redaction policy를 적용하며 Text 본문/edit/diff와 grep 일치 줄, 검색어와 cursor, 원본 파일명과 암호화 metadata, presigned URL/header, ETag, PII, protocol `_meta`, 알 수 없는 field 값은 redaction marker 또는 omission count로 대체한다. MCP wire `content` 복사본은 저장하지 않고 redacted `structured_content`만 사용한다. Owner user의 browser self-review에만 노출하고 90일 후 bounded purge한다.
+- MCP invocation history는 allowlist와 redaction을 적용한 별도 snapshot만 저장하고 owner user의 browser self-review에만 노출한다. 수집 경계, 제외 항목과 보존 정책은 [`event-logging.md`](./event-logging.md#mcp-invocation-history)가 소유한다.
 - User PII는 평문 저장하지 않는다.
 - API key plaintext는 저장하지 않고 HMAC hash만 저장한다.
 - Browser session cookie token은 저장하지 않고 HMAC hash만 저장한다.
@@ -74,15 +74,27 @@ at_rest_encryption='none'   = plain content를 content_text에 저장
 at_rest_encryption='server' = plain content를 서버가 AEAD 암호화해 저장
 ```
 
-Client-side encrypted Text에서 서버는 원문, 비밀번호, 복호화 키를 받거나 저장하지 않는다. 서버는 encrypted payload를 opaque JSON object로 저장하고 반환한다. Encrypted payload metric은 서버의 canonical JSON serialization 기준으로 계산한다. Canonical JSON은 UTF-8, object key 정렬, 불필요한 whitespace 없음, 동일 JSON value의 동일 byte serialization을 의미한다.
+Client-side encrypted Text는 다음 경계를 따른다.
 
-서버 관리 암호화는 `storage_format='plain'`에만 적용한다. Ciphertext는 Space id, Node id, key id, version을 AEAD AAD로 묶는다. API read, write, patch와 `grep`은 서버에서 복호화한 plain content를 사용한다. Node metadata, `content_sha256`, `byte_len`, `line_count`는 암호화하지 않는다.
+- 서버는 원문, 비밀번호와 복호화 키를 받거나 저장하지 않는다.
+- Encrypted payload는 opaque JSON object로 저장하고 반환한다.
+- Payload metric은 UTF-8, 정렬된 object key와 불필요한 whitespace가 없는 canonical JSON bytes를 기준으로 계산한다.
 
-`grep`은 복호화된 plain body를 process-local memory에 제한적으로 캐시할 수 있다. Cache key는 Space/Node/content SHA를 묶고, 기본 capacity는 plaintext byte weight 128 MiB, TTL은 30분, TTI는 5분이다. Cache entry는 외부 저장소나 다른 replica로 전송하지 않으며 process 종료, capacity eviction, TTL/TTI 만료 시 참조에서 제거된다. Rust allocator가 해제된 memory page를 즉시 zeroize하거나 OS에 반환한다는 보장은 없다.
+서버 관리 암호화는 `storage_format='plain'`에만 적용한다.
 
-`text_objects.at_rest_encryption`은 서버 관리 암호화의 실제 저장 상태다. 설정을 변경하면 기존 plain Text 본문을 같은 transaction에서 즉시 암호화하거나 복호화한다. Space 기본값은 새 Text 생성 시 초기 저장 상태를 정하며 기존 Text를 바꾸지 않는다.
+- Ciphertext는 Space id, Node id, key id와 version을 AEAD AAD로 묶는다.
+- API read, write, patch와 `grep`은 서버에서 복호화한 plain content를 사용한다.
+- Node metadata, `content_sha256`, `byte_len`, `line_count`는 암호화하지 않는다.
 
-서버 관리 암호화 설정 변경은 Space owner User만 할 수 있다. Agent는 write 권한이 있어도 활성화하거나 비활성화할 수 없다. 암호화 활성화와 암호화 저장은 Space owner의 tier capability `text_encryption`이 필요하다. 현재 `system_max`만 허용한다. Tier가 낮아져도 기존 ciphertext는 읽기와 검색이 가능하지만 새 암호화 저장은 거부한다. 서버는 tier 변경을 이유로 ciphertext를 자동 복호화 저장하지 않는다.
+`grep`의 복호화 본문 cache는 process 밖으로 전송하지 않는다. Cache key, 상한과 만료는 [`search.md`](./search.md#decrypted-body-cache)가 소유한다. Entry 제거 뒤에도 Rust allocator가 memory page를 즉시 zeroize하거나 OS에 반환한다는 보장은 없다.
+
+`text_objects.at_rest_encryption`은 서버 관리 암호화의 실제 저장 상태다. 설정 변경은 기존 plain Text를 같은 transaction에서 암호화하거나 복호화한다. Space 기본값은 새 Text의 초기 상태만 정한다.
+
+- 서버 관리 암호화 설정은 Space owner User만 변경할 수 있다.
+- Agent는 write 권한이 있어도 설정을 바꿀 수 없다.
+- 새 암호화 저장에는 tier capability `text_encryption`이 필요하며 현재 `system_max`만 허용한다.
+- Tier가 낮아져도 기존 ciphertext는 읽고 검색할 수 있지만 새 암호화 저장은 거부한다.
+- Tier 변경만으로 ciphertext를 자동 복호화하지 않는다.
 
 ```text
 plain content_sha256 = SHA256(plaintext bytes)
@@ -98,13 +110,7 @@ REST는 client-side encrypted payload 저장/조회가 가능하다. MCP Text co
 
 ## Node write lock
 
-Node write lock은 content 암호화와 독립된 구조 변경 방지 정책이다. 직접 잠금은 `nodes.write_locked`에만 저장하고 descendant의 상속 상태는 materialize하지 않는다. 따라서 잠금 source와 실제 tree 관계가 항상 일치한다.
-
-직접 잠금 변경은 Browser channel의 Space owner User만 할 수 있다. Agent와 MCP/API channel의 User는 write permission이 있어도 변경할 수 없다. `write_lock` tier capability가 새 잠금 설정을 제어하며 현재는 `system_max`만 활성화한다. Tier 하향 뒤에는 기존 잠금을 해제할 수 있다.
-
-Node mutation은 현재 node의 ancestor chain을 확인한다. Folder rename/move/delete는 subtree에 직접 잠긴 descendant가 있는지도 확인한다. Read와 File download, owner의 Space 삭제는 별도 권한 경계이며 허용한다.
-
-File upload handle은 등록 transaction에서 destination의 write lock을 확인한다. 이후 잠금은 이미 등록된 handle의 완료를 취소하지 않으며, 완료 시 일반 write permission과 File 생성 invariant는 다시 확인한다.
+Node write lock은 content 암호화와 독립된 구조 변경 방지 정책이다. 직접 잠금 변경은 Browser channel의 Space owner User만 할 수 있고 Agent와 MCP/API channel에는 노출하지 않는다. `write_lock` tier capability는 새 잠금 설정만 제어하므로 tier 하향 뒤에도 기존 잠금을 해제할 수 있다. 상속, mutation, upload 예약과 Space 삭제 규칙은 [`files-commands.md`](./files-commands.md#write-lock)가 소유한다.
 
 
 ## File content encryption
@@ -120,7 +126,7 @@ client  = client-side encrypted bytes
 
 ## Object storage access
 
-NoteGate object storage credential은 설정된 bucket의 `objects/*`에 대한 `GetObject`, `PutObject`, `DeleteObject`만 허용한다. Bucket 생성, bucket 목록 조회, 익명 접근과 관리 작업은 허용하지 않는다. MinIO root credential은 로컬 초기화에만 사용하며 NoteGate runtime에 전달하지 않는다.
+NoteGate object storage credential은 설정된 bucket의 `objects/*`에 대한 `GetObject`, `PutObject`, `DeleteObject`, `AbortMultipartUpload`만 허용한다. Bucket 생성, bucket 목록 조회, 익명 접근과 관리 작업은 허용하지 않는다. MinIO root credential은 로컬 초기화에만 사용하며 NoteGate runtime에 전달하지 않는다.
 
 ## Deletion and anonymization
 

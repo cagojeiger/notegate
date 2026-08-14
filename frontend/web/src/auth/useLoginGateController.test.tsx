@@ -12,6 +12,18 @@ function dispatchLoginComplete(origin: string, source: MessageEventSource | null
 }
 
 describe("useLoginGateController", () => {
+  it("names the actual fallback link when a popup is blocked", () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    const { result, unmount } = renderHook(() => useLoginGateController({
+      onSessionAuthenticated: vi.fn().mockResolvedValue(false)
+    }));
+
+    act(() => result.current.startLogin());
+
+    expect(result.current.loginHint).toContain("Open Google sign-in in a new window");
+    unmount();
+  });
+
   it("accepts login completion only from the current origin", async () => {
     const onSessionAuthenticated = vi.fn().mockResolvedValue(true);
     const { result } = renderHook(() => useLoginGateController({

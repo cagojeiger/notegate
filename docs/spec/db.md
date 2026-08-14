@@ -1,6 +1,6 @@
 # Database schema
 
-이 문서는 NoteGate DB schema의 정본이다.
+이 문서는 migration이 정의한 현재 NoteGate DB schema를 설명한다. 실행 가능한 정본은 `backend/crates/db/migrations`다.
 
 ## Entity overview
 
@@ -195,7 +195,7 @@ audit_events
   metadata jsonb not null default '{}'
 ```
 
-`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경을 기록한다. Retention policy는 1 year이며, 현재 schema는 purge 구현을 위한 `created_at` index까지만 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`audit_events`는 account, browser session, credential, agent, space, connection 관리 변경을 기록한다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
 ```text
 file_change_events
@@ -208,9 +208,9 @@ file_change_events
   metadata jsonb not null default '{}'
 ```
 
-`file_change_events`는 space 안의 파일/폴더/문서 변경을 기록한다. Retention policy는 3 months이며, space 전체 조회와 node별 조회를 위해 별도 index를 둔다. Event payload 규칙은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
+`file_change_events`는 space 안의 파일/폴더/문서 변경을 기록하며 space 전체 조회와 node별 조회를 위한 index를 둔다. Payload와 retention 계약은 `docs/spec/event-logging.md`와 `docs/spec/security.md`를 따른다.
 
-`mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. Tool/op별 allowlist와 redaction policy를 적용하고 크기를 제한한 request/response snapshot을 JSONB로 저장한다.
+`mcp_invocations`는 domain event와 분리된 MCP 실행 이력이다. 저장 대상과 redaction, 크기 제한, retention 계약은 `docs/spec/event-logging.md`가 소유한다.
 
 ```text
 mcp_invocations
@@ -230,7 +230,7 @@ mcp_invocations
   duration_ms bigint not null check >= 0
 ```
 
-유효한 호출의 `purpose`는 앞뒤 공백 없는 1..200자다. `purpose` 자체가 없거나 잘못된 실패도 기록해야 하므로 DB는 NULL을 허용하고, 잘못된 값은 `input`에 redaction marker로 남긴다. `space_name`은 `read op=changes`에만 허용되는 검증된 Space-name summary다. Target/path는 owner self-review를 위해 redacted `input`에 유지한다. Unknown tool은 `tool='unknown'`, 지원하지 않는 op는 `op=NULL`로 정규화한다. `response`는 snapshot이 없을 수 있어 NULL을 허용한다. 성공 행은 `error_code=NULL`, 실패 행은 안정적인 application code, `invalid_params`/`tool_error`, 또는 JSON-RPC code를 가진다. 저장 실패는 원래 MCP 실행 결과를 바꾸지 않는다. User browser는 owner scope로 실행 이력을 조회한다. Retention policy는 90일이며 purge worker가 `created_at` index를 사용해 bounded batch로 삭제한다.
+DB는 기록 경계에서 발생한 실패도 저장할 수 있도록 `purpose`, `op`, `response`에 NULL을 허용한다. Column별 의미와 정규화 규칙은 `docs/spec/event-logging.md`를 따른다.
 
 Event history DB 제약:
 

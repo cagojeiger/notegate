@@ -184,7 +184,9 @@ Queue 상태와 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은
 
 History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `history_owner_account_id`, 선택적 `context_kind/context_id/context_label`을 기록한다. 이 공통 metadata가 있는 job은 종류와 관계없이 해당 account의 History에 나타난다. 기본값은 `hidden`이며 History에 표시할 필요가 없는 운영·유지보수 job은 제외된다. `context_*`는 Space에 한정되지 않는 표시 문맥이고, Worker의 claim·retry·lease 처리에는 이 metadata를 사용하지 않는다.
 
-History는 enqueue 시 저장된 owner/context snapshot만 사용한다. 현재 Space 상태에서 소유자를 역추정하지 않으며 owner snapshot이 없는 행은 hidden으로 유지한다. Terminal 행은 90일 동안 보관한다. `space_usage_reconcile_jobs` insert는 trigger가 `background_jobs`로 복제하지만 일반적인 job 등록은 공통 enqueue API를 사용한다.
+History는 enqueue 시 저장된 owner/context snapshot만 사용한다. 현재 Space 상태에서 소유자를 역추정하지 않으며 owner snapshot이 없는 행은 hidden으로 유지한다. Terminal 행은 90일 동안 보관한다.
+
+Mixed-version rolling deployment에서는 `space_usage_reconcile_jobs` trigger와 4-argument `enqueue_background_job` overload가 이전 replica의 Usage 요청을 공통 queue로 연결한다. 새 job kind는 이 compatibility path를 사용하지 않고 공통 enqueue API로만 등록한다.
 
 ## 검증 경계
 

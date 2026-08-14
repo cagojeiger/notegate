@@ -16,22 +16,11 @@ frontend/web/src
 
 ## State ownership
 
-이 표는 runtime owner만 정의한다. Browser persistence 여부와 수명은 `02-data-and-flows.md`의 상태 분류가 정본이다.
+- `/api/v1/me`, Space, Node, Text, File과 metadata 같은 server state는 React Query가 소유한다.
+- active Space, editor group과 탐색 기록, 열린 Node snapshot, layout, theme과 section 비율은 UI store가 소유한다.
+- expanded folder와 cursor는 query 또는 component state, Text draft는 draft/component state, hover·menu·drag는 component state가 소유한다.
 
-| State | Owner |
-|---|---|
-| `/api/v1/me` | React Query |
-| spaces/nodes/text/file/metadata | React Query |
-| active space id | UI store |
-| editor groups and pane navigation history | UI store |
-| opened node snapshot | UI store |
-| sidebar visibility/size | UI store |
-| Files/Recent ratio | UI store |
-| theme | UI store |
-| expanded folders | UI/component state |
-| cursors | query/component state |
-| text draft | draft/component state |
-| hover/menu/drag | component state |
+Browser 저장 여부, 수명과 reset 범위는 [`02-data-and-flows.md`](./02-data-and-flows.md#상태-분류)가 소유한다.
 
 ## Auth boundary
 

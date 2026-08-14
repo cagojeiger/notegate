@@ -1,18 +1,6 @@
-//! Pure validation for file-tree commands.
-//!
-//! These functions are the in-process gate for request-local name, path,
-//! metadata, and content limits in `docs/spec/{files-commands,performance-limits,db}.md`.
-//! They build on [`notegate_core::validation`] (name/path format, shared with the
-//! DB `CHECK` constraints) and [`notegate_core::limits`] (the numeric caps), and
-//! return a typed [`FilesValidationError`] so the service can map each failure to
-//! the correct HTTP status.
-//!
-//! Status mapping (see [`FilesValidationError::into_service_error`]):
-//! - Format-of-input failures (bad name, non-absolute/too-long/too-deep path,
-//!   per-content byte/line cap) are `400` (`InvalidInput`).
-//!
-//! Everything here is pure: no IO and no store access. Space-level node/content
-//! quota and file-tree structural bounds are enforced transactionally by the database.
+//! Pure request-local validation for file-tree commands.
+//! Format and numeric limits come from `notegate_core`; state-dependent quotas and
+//! tree bounds stay in database transactions.
 
 use notegate_core::limits;
 use notegate_core::validation::{self, ValidationError, validate_node_name};

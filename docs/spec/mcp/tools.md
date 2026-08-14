@@ -90,7 +90,7 @@ type ReadInput = {
 
 `changes`는 operation filter 없이 Folder/Text/File의 create, content/metadata update, move, copy, delete, write-lock 변경을 모두 반환한다. move/delete의 subtree 경계를 놓치지 않도록 target은 `<space>:/` Space root만 허용한다.
 
-호출 이력에는 `tools/call.params.arguments` 원본을 JSON으로 저장한다. 따라서 changes target도 `input`에서 확인할 수 있고, 목록용으로 검증된 Space 이름을 `space_name` summary에 함께 남긴다.
+호출 이력에는 `tools/call.params.arguments`에서 allowlist와 redaction을 적용한 snapshot만 저장한다. Changes target처럼 허용된 필드는 `input`에서 확인할 수 있고, 검증된 Space 이름은 목록용 `space_name` summary에 함께 남긴다.
 
 새 캐시는 **`changes(limit=1)`에서 `checkpoint_cursor` 저장 → 현재 Space snapshot 구성 → `direction=newer, cursor=<checkpoint_cursor>`로 조회** 순서로 시작한다. 마지막 조회가 snapshot을 읽는 동안 발생한 변경을 회수한다. 응답의 event를 `event_id ASC` 순서대로 모두 적용한 뒤에만 새 `checkpoint_cursor`를 저장한다. `page.has_more=true`이면 `page.next_cursor`로 계속 읽는다. `resync_required=true`이면 cursor 이후의 연속성을 보장할 수 없으므로 현재 Space tree를 다시 만들고 응답의 `checkpoint_cursor`에서 재개한다.
 
@@ -264,11 +264,11 @@ type FileTransferInput = {
 }
 ```
 
-- `begin_upload`: 새 File target과 byte length를 검증하고 upload handle을 만든다. 100MiB 이하는 single PUT URL을, 초과하면 `part_size`와 `part_count`를 반환한다.
-- `prepare_parts`: multipart part 번호를 최대 16개까지 받아 5분짜리 PUT URL을 발급한다. Caller는 part를 최대 4개까지 병렬 업로드하고 실패한 part만 새 URL로 다시 시도한다. 호출할 때마다 무활동 정리 시각을 갱신한다.
+- `begin_upload`: 새 File target과 byte length를 검증하고 upload handle을 만든다. Single upload에는 PUT URL을, multipart에는 `part_size`와 `part_count`를 반환한다.
+- `prepare_parts`: 제한된 수의 multipart part 번호를 받아 임시 PUT URL과 `max_concurrency`를 반환한다. Caller는 실패한 part만 새 URL로 다시 시도한다. 호출할 때마다 무활동 정리 시각을 갱신한다.
 - `complete_upload`: single object 또는 모든 multipart ETag를 검증하고 File node를 연결한다.
 - `abort_upload`: 완료되지 않은 upload를 비동기 정리 대상으로 전환한다.
-- `prepare_download`: File target의 5분짜리 GET URL을 반환한다.
+- `prepare_download`: File target의 임시 GET URL을 반환한다.
 
 필수 필드:
 
@@ -282,9 +282,9 @@ prepare_download: purpose, op, target
 
 File bytes는 MCP request/response에 포함하지 않는다. Single/multipart PUT의 성공 응답 ETag는 로컬 caller가 수집해 multipart complete에 전달한다. `file_transfer`는 외부 전송 사이에 caller 작업이 필요하므로 `run_sequence` 안에서 실행할 수 없다.
 
-모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하며, 이 input에는 현재 호출과 같은 `purpose`가 포함된다. `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 `max_concurrency=4` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
+모든 성공 응답은 `next_action`을 포함한다. `kind=call_tool`은 `tool`과 `input`을 다음 MCP 호출에 사용하며, 이 input에는 현재 호출과 같은 `purpose`가 포함된다. `kind=http_upload|http_upload_parts|http_download`는 지정된 `transfer_field` 또는 `transfers_field`의 URL과 header로 로컬 HTTP 전송을 수행한다. `kind=done`은 추가 단계가 없다는 뜻이다. Multipart PUT은 응답의 `max_concurrency` 이하로 병렬 전송하고 `collect_response_header=etag`에 따라 각 응답 ETag를 수집한다. 실패한 part는 `repeat`에 따라 새 URL을 준비해 다시 전송하고, 모든 part가 끝나면 `then`에 따라 `{part_number, etag}`를 `complete_upload.completed_parts`로 전달한다.
 
-완료되지 않은 upload는 `begin_upload`, `prepare_parts`, `complete_upload` 중 마지막 활동 이후 2시간이 지나면 비동기 정리 대상이 된다. `begin_upload`는 destination의 write lock을 검사하고 해당 handle의 write-lock 허가를 예약한다. 이후 destination이 잠겨도 기존 upload handle은 완료할 수 있지만 새 `begin_upload`는 거부한다. 완료 시 일반 write permission과 File 생성 invariant는 다시 확인한다. Presigned URL의 5분 만료와 upload 원장의 2시간 무활동 만료는 서로 다른 제한이다.
+완료되지 않은 upload의 비동기 정리와 presigned URL lifetime은 [`performance-limits.md`](../performance-limits.md)의 Object upload 상한을 따른다. Upload handle의 write-lock 예약과 완료 규칙은 [`files-commands.md`](../files-commands.md#write-lock)를 따른다.
 
 Write command가 잠금으로 거부되면 MCP error `data`는 `kind=write_locked`, `retryable=false`와 다음 code 중 하나를 포함한다.
 

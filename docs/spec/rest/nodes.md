@@ -164,8 +164,7 @@ type MoveNodeBody = {
 - `search_enabled`는 non-root folder/text/file에 적용한다. Folder의 값은 자식에게 상속되지 않는다.
 - Agent는 write 권한이 있어도 검색 정책을 변경할 수 없다.
 - `PUT /nodes/{node_id}/write-lock`은 node의 직접 쓰기 잠금을 변경한다. Browser channel의 Space owner User만 호출할 수 있으며 MCP/API key와 Agent에는 노출하지 않는다.
-- 직접 잠금은 해당 node와 모든 live descendant의 쓰기를 막는다. `RestNode.effective_write_locked`는 이 계산 결과이고, `RestNode.write_lock_sources`는 현재 node와 조상 중 직접 잠긴 node만 root부터 반환한다.
-- Root는 직접 잠글 수 없다. Tier capability `write_lock`이 활성화된 경우에만 새 잠금을 설정할 수 있지만, tier가 내려간 뒤의 잠금 해제는 허용한다.
+- `RestNode.effective_write_locked`와 `write_lock_sources`의 응답 의미는 `schemas.md`, mutation과 상속 규칙은 [`files-commands.md`](../files-commands.md#write-lock)를 따른다.
 - Text 암호화는 Text API의 `PUT /text/{node_id}/encryption`으로 변경한다.
 - Root node는 rename/move/delete할 수 없다.
 - `POST /nodes/{node_id}/move`는 같은 Space 안에서만 parent/name을 변경한다.

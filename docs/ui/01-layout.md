@@ -49,6 +49,7 @@ AppRoot
 ActivityRail
 ├─ SpaceRailList
 ├─ SpaceAddButton
+├─ HistoryButton
 └─ SettingsButton
 ```
 
@@ -57,7 +58,7 @@ ActivityRail
 - SpaceRailList는 스크롤 가능하다.
 - SpaceAddButton은 space 목록 바로 아래에 둔다.
 - 진행 중이거나 실패한 file transfer는 UploadProgressDock에서 표시한다.
-- SettingsButton은 하단에 고정한다.
+- HistoryButton과 SettingsButton은 하단에 고정한다.
 - space reorder는 desktop drag-and-drop으로 한다.
 
 ## PrimarySidebar

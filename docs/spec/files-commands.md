@@ -1,6 +1,6 @@
 # File tree commands
 
-이 문서는 Space 안 tree command의 공통 semantics다. MCP와 CLI는 `target` 중심 path-first 모델로 노출하고, REST는 id-first resource API로 노출한다.
+이 문서는 Space 안 file-tree command와 write lock의 공통 semantics를 소유한다. MCP는 `target` 중심 path-first 모델로 노출하고 REST는 id-first resource API로 노출한다.
 
 ## Path model
 
@@ -80,10 +80,9 @@ File은 binary/object content node다. MCP `file_transfer`는 presigned URL을 �
 
 - File은 `nodes.kind='file'`이다.
 - File은 Text content operation과 grep 대상이 아니다.
-- 100MiB 이하는 single PUT, 초과 파일은 64MiB part의 multipart upload를 사용한다.
-- 단일 file hard max는 100GiB이며 실제 허용량은 Space tier quota가 더 낮을 수 있다.
-- MCP 업로드와 다운로드 URL은 `file_transfer` 응답에 임시로 노출되며 5분 뒤 만료된다. REST/browser URL의 만료 정책은 REST File 스펙을 따른다.
-- Multipart part URL은 최대 16개씩 발급하고 재발급할 때 upload activity를 갱신한다.
+- File size, single/multipart threshold, part geometry와 presigned URL lifetime은 [`performance-limits.md`](./performance-limits.md)의 Object upload 상한을 따른다.
+- 실제 허용량은 Space tier quota와 잔여 용량에 따라 hard max보다 낮을 수 있다.
+- Multipart part URL을 재발급하면 upload activity를 갱신한다.
 - Multipart 호환 검증 대상은 MinIO다. S3 호환 provider는 create/upload-part/complete/abort 동작을 지원해야 한다.
 
 ## Copy semantics

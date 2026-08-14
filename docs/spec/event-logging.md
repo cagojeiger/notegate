@@ -240,6 +240,8 @@ recursive item.delete
   metadata.deleted_nodes: deleted node count
 ```
 
+새 event type을 추가할 때는 이 문서의 allowlist, DB module의 typed payload constructor와 repository wrapper, payload unit test를 같은 변경에서 갱신한다.
+
 ## Storage shape
 
 Schema는 별도 physical table을 사용한다. `audit_events`는 다음 조회 축을 column으로 둔다.
