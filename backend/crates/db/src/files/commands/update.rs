@@ -10,7 +10,6 @@ use notegate_model::Node;
 use notegate_model::files::{
     StoredContent, UpdateNode, UpdateNodeSearchPolicy, UpdateTextEncryption, WriteTextBody,
 };
-use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
