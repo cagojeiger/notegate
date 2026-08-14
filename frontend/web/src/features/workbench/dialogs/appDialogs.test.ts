@@ -2,7 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RestNode } from "../../../api/types";
 import { makeRestNode, makeSpace } from "../../../test/fixtures";
-import { createNodeDialog, deleteNodeDialog, renameNodeDialog, renameSpaceDialog, uploadFileDialog } from "./appDialogs";
+import {
+  createNodeDialog,
+  deleteNodeDialog,
+  deleteSpaceDialog,
+  renameNodeDialog,
+  renameSpaceDialog,
+  uploadFileDialog
+} from "./appDialogs";
 
 const space = makeSpace({
   name: "Personal",
@@ -38,6 +45,17 @@ describe("app dialog builders", () => {
     expect(onRenameNode).toHaveBeenCalledWith(textNode, "renamed.md");
   });
 
+  it("describes space deletion as unrecoverable in the app", () => {
+    const onDelete = vi.fn();
+    const dialog = deleteSpaceDialog(space, onDelete);
+
+    if (dialog.kind !== "confirm") throw new Error("expected confirm dialog");
+    expect(dialog.message).toContain("cannot be recovered in the app");
+    dialog.onConfirm();
+
+    expect(onDelete).toHaveBeenCalledWith(space.id);
+  });
+
   it("creates folders without content and texts with empty content", () => {
     const onCreate = vi.fn();
     const folderDialog = createNodeDialog("parent-1", "folder", onCreate);
@@ -70,6 +88,7 @@ describe("app dialog builders", () => {
 
     if (dialog.kind !== "confirm") throw new Error("expected confirm dialog");
     expect(dialog.message).toContain("everything inside it");
+    expect(dialog.message).toContain("cannot be recovered in the app");
     dialog.onConfirm();
 
     expect(onDelete).toHaveBeenCalledWith(folder, true);

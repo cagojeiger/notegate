@@ -155,7 +155,24 @@ Node/content-level limits
 
 `space_max_text_bytes`와 `space_max_file_bytes`는 독립 quota다. Soft-deleted node의 bytes는 live quota에 포함하지 않는다. S3 object bytes는 soft delete transaction에서 비동기 삭제 대상으로 전환한다.
 
-REST/browser object upload는 최대 10GiB를 지원한다. REST와 MCP 모두 100MiB 이하는 single PUT, 초과 파일은 64MiB part의 multipart upload를 사용한다. MCP와 제품 전체 File hard max는 100GiB이며 multipart part 수 상한은 10000이다. Multipart 호환 검증 대상은 MinIO다. S3 provider는 incomplete multipart 자동 abort 정책을 제공해야 한다.
+Object upload 상한:
+
+| 항목 | 값 |
+|---|---:|
+| REST/browser | 10 GiB |
+| 제품/MCP File hard max | 100 GiB |
+| Single PUT | 100 MiB 이하 |
+| Multipart part | 64 MiB |
+| Multipart part 수 | 10000 |
+| Part URL batch | 16 |
+| Part 전송 동시성 | 4 |
+| Browser 동시 File upload | 2 |
+| Account별 `uploading` + `expire_pending` | 16 |
+| REST/browser presigned URL | 15분 |
+| MCP/Public V2 presigned URL | 5분 |
+| API activity가 없는 upload 만료 | 2시간 |
+
+Multipart 호환 검증 대상은 MinIO다. S3 provider는 incomplete multipart 자동 abort 정책을 제공해야 한다.
 
 Depth는 root 아래 segment 수로 계산한다.
 
@@ -200,7 +217,7 @@ Node/content-level
   text lines exceeded:
     400 invalid_input "text exceeds the maximum of {max} lines; split the text into smaller notes"
   file bytes exceeded:
-    400 invalid_input "file exceeds the maximum of {max} bytes"
+    400 invalid_input "file exceeds the maximum size of {max} bytes"
   metadata bytes/depth/key/string exceeded:
     400 invalid_input with the exceeded metadata limit
 ```
@@ -242,36 +259,9 @@ api_keys_max_limit = 100
 
 목록 API는 여러 row를 반환하면 opaque cursor pagination을 제공한다. 내부 구현은 resource hard limit에 따라 DB keyset 또는 bounded in-memory pagination을 사용할 수 있다.
 
-## Search memory model
+## Search limits
 
-Search는 MCP와 Public V2 REST가 공유하며 Browser V1 REST에는 노출하지 않는다. Search는 folder scope의 subtree를 DFS pre-order로 순회한다. 내부 구조는 DB candidate scan과 application matcher의 2단계다.
-
-최악의 논리 scan 범위:
-
-```text
-node scan upper bound       = 25000 live nodes per space
-plain text scan upper bound = 1 GiB live Text content per system_max space
-                          = 128 MiB live Text content per tier0 space
-```
-
-최악의 경우 전체 subtree를 탐색해야 하지만 한 요청에서 전체를 읽지 않는다. `limit`은 반환할 result 수이고 scan budget은 검사할 candidate 양이다. Scan budget에 먼저 도달하면 result가 없어도 `has_more=true`와 `next_cursor`를 반환할 수 있다.
-
-```text
-DB candidate inspect <= 1000 node summaries per request
-node scan budget    <= 1000 node summaries per request
-grep scan budget    <= 8 MiB content bytes per request
-grep text read      <= 8 MiB total content bytes per request
-include glob list   <= 32 patterns × 256 chars
-exclude glob list   <= 32 patterns × 256 chars
-result limit        <= 100 node summaries
-response target     <= 256 KiB
-```
-
-DB candidate scan은 DFS order를 `sort_order, name, id`와 내부 `sort_path`로 안정화한다. Cursor는 마지막으로 소비한 candidate의 위치를 기억하고, 다음 page는 그 이후 candidate부터 검사한다. Regex matching은 DB regex가 아니라 application Rust regex로 수행한다.
-
-`grep`은 process-local decrypted body cache를 사용한다. Cache key는 `(space_id, node_id, content_sha256)`이고 capacity는 plaintext byte weight 기준 best-effort 128 MiB다. 한 요청의 8 MiB scan budget과 별도로 적용되며, replica가 여러 개면 각 process가 독립 capacity를 사용한다. 환경 변수 `NOTEGATE_SEARCH_BODY_CACHE__MAX_CAPACITY_BYTES`, `NOTEGATE_SEARCH_BODY_CACHE__TTL_SECS`, `NOTEGATE_SEARCH_BODY_CACHE__TTI_SECS`로 조정하고 capacity를 `0`으로 설정하면 비활성화한다.
-
-`grep`은 기본적으로 query를 포함하는 Text node 후보를 반환한다. 요청 옵션으로 matching line number를 반환할 수 있지만 본문과 snippet은 별도 read command로 조회한다.
+이 문서는 위 표의 숫자 제한만 소유한다. DFS 순회, cursor, scan 중단, `has_more`, Rust matcher와 복호화 본문 cache의 동작은 [`search.md`](./search.md)가 정본이다.
 
 ## Storage sizing guideline
 

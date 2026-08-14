@@ -44,7 +44,7 @@ describe("eventDisplay", () => {
       metadata: { item_kind: "text", item_name: "notes.md" }
     } satisfies FileChangeEvent;
 
-    expect(formatFileChangeTarget(event)).toBe("Text · notes.md");
+    expect(formatFileChangeTarget(event)).toBe("Document · notes.md");
     expect(formatFileChangeAction({ ...event, op_type: "text.edit" })).toBe("Edited");
     expect(formatFileChangeAction({ ...event, op_type: "item.update", metadata: { name_changed: true } })).toBe("Renamed");
     expect(formatFileChangeAction({
@@ -103,7 +103,7 @@ describe("eventDisplay", () => {
     expect(formatFileChangeDetails(event)).toEqual([
       { label: "Parent", value: "87654321…4321" },
       { label: "Size", value: "1.5 KB" },
-      { label: "Item", value: "12345678…9012" }
+      { label: "File", value: "12345678…9012" }
     ]);
     expect(formatFileChangeDetails({
       ...event,
@@ -174,7 +174,7 @@ describe("eventDisplay", () => {
       { label: "Source", value: "source-1" },
       { label: "To parent", value: "parent-2" },
       { label: "Copied items", value: "4" },
-      { label: "Copied texts", value: "2" },
+      { label: "Copied documents", value: "2" },
       { label: "Copied files", value: "1" },
       { label: "Recursive", value: "Yes" },
       { label: "Item", value: "node-1" }

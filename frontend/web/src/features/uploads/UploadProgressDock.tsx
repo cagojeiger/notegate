@@ -1,19 +1,36 @@
 import { Check, ChevronDown, RotateCcw, UploadCloud, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { formatBytes } from "../../shared/lib/formatBytes";
 import { IconButton } from "../../shared/ui";
 import { useUploadManager, type UploadTask } from "./UploadProvider";
 
+const UPLOAD_STATUS_COPY = {
+  queued: { visible: "Queued", announcement: "Queued" },
+  preparing: { visible: "Preparing", announcement: "Preparing upload" },
+  uploading: { visible: "Uploading", announcement: "Uploading" },
+  finalizing: { visible: "Finalizing", announcement: "Finalizing upload" },
+  failed: { visible: "Failed", announcement: "Upload failed" },
+  completed: { visible: "Complete", announcement: "Upload complete" }
+} satisfies Record<UploadTask["status"], { visible: string; announcement: string }>;
+
 export function UploadProgressDock() {
-  const { tasks, activeCount, queuedCount, failedCount, cancelUpload, retryUpload, dismissUpload } = useUploadManager();
+  const manager = useUploadManager();
+  const announcement = useUploadAnnouncement(manager.tasks);
+
+  return (
+    <>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement.message ? <span key={announcement.sequence}>{announcement.message}</span> : null}
+      </p>
+      {manager.tasks.length > 0 ? <UploadProgressPanel manager={manager} /> : null}
+    </>
+  );
+}
+
+function UploadProgressPanel({ manager }: { manager: ReturnType<typeof useUploadManager> }) {
+  const { tasks, activeCount, queuedCount, failedCount, cancelUpload, retryUpload, dismissUpload } = manager;
   const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    if (tasks.length === 0) setCollapsed(false);
-  }, [tasks.length]);
-
-  if (tasks.length === 0) return null;
 
   return (
     <section
@@ -100,12 +117,12 @@ function UploadProgressRow({
 }
 
 function UploadStatus({ task, progress }: { task: UploadTask; progress: number }) {
-  if (task.status === "queued") return <span className="text-xs text-muted">Queued</span>;
   if (task.status === "uploading") return <span className="text-xs tabular-nums text-muted">{progress}%</span>;
-  if (task.status === "preparing") return <span className="text-xs text-muted">Preparing</span>;
-  if (task.status === "finalizing") return <span className="text-xs text-muted">Finalizing</span>;
-  if (task.status === "failed") return <span className="text-xs text-danger">Failed</span>;
-  return <span className="text-xs text-muted">Complete</span>;
+  return (
+    <span className={`text-xs ${task.status === "failed" ? "text-danger" : "text-muted"}`}>
+      {UPLOAD_STATUS_COPY[task.status].visible}
+    </span>
+  );
 }
 
 function uploadSummary(taskCount: number, activeCount: number, queuedCount: number, failedCount: number): string {
@@ -116,6 +133,36 @@ function uploadSummary(taskCount: number, activeCount: number, queuedCount: numb
   ].filter((value): value is string => value !== null);
   if (pending.length > 0) return pending.join(" · ");
   return `${taskCount} complete`;
+}
+
+function useUploadAnnouncement(tasks: UploadTask[]): { message: string; sequence: number } {
+  const previousStatuses = useRef(new Map<string, UploadTask["status"]>());
+  const [announcement, setAnnouncement] = useState({ message: "", sequence: 0 });
+
+  useEffect(() => {
+    const nextStatuses = new Map(tasks.map((task) => [task.id, task.status]));
+    const changed = tasks.filter((task) => previousStatuses.current.get(task.id) !== task.status);
+    const removed = [...previousStatuses.current.keys()].some((id) => !nextStatuses.has(id));
+    previousStatuses.current = nextStatuses;
+    if (tasks.length === 0) {
+      setAnnouncement((current) => current.message
+        ? { message: "", sequence: current.sequence + 1 }
+        : current);
+      return;
+    }
+    if (changed.length > 0) {
+      const message = changed
+        .map((task) => `${task.name}: ${UPLOAD_STATUS_COPY[task.status].announcement}`)
+        .join(". ");
+      setAnnouncement((current) => ({ message, sequence: current.sequence + 1 }));
+    } else if (removed) {
+      setAnnouncement((current) => current.message
+        ? { message: "", sequence: current.sequence + 1 }
+        : current);
+    }
+  }, [tasks]);
+
+  return announcement;
 }
 
 function isCancelable(status: UploadTask["status"]): boolean {

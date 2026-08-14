@@ -1,6 +1,6 @@
 # API 구조
 
-NoteGate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. V1은 브라우저 UI 전용 resource API, V2는 외부 확장용 API key API, MCP는 agent/CLI용 path-first command API다.
+NoteGate API는 사람과 AI agent가 같은 Space tree를 다루도록 한다. V1은 브라우저 UI 전용 resource API, V2는 외부 확장용 API key API, MCP는 User·Agent client용 path-first command API다.
 
 ```text
 V1 REST  = 브라우저 UI가 사용하는 전체 resource API
@@ -9,6 +9,14 @@ MCP      = agent가 쓰기 쉬운 space name + path 기반 command/search API
 ```
 
 세 surface는 같은 service invariant를 사용한다. V2는 Agent MCP와 동등한 Space 내부 기능을 ID 기반 resource API로 제공한다.
+
+## 문서 원칙
+
+- 이 디렉터리는 현재 runtime 계약만 기록한다. 변경 이력과 계획은 ADR, issue와 Git history에 남긴다.
+- 실제 route, schema, 상수와 DB 제약의 정본은 코드와 migration이다. 계약을 바꾸면 구현과 관련 문서를 같은 변경에서 맞춘다.
+- `rest/*`, `public-api-v2.md`, `mcp/*`는 surface별 request/response와 오류만 소유한다.
+- 공통 domain, file-tree command, 보안, 생명주기와 전역 상한은 각각 `domain.md`, `files-commands.md`, `security.md`, `lifecycle.md`, `performance-limits.md`가 소유한다. Search 요청별 scan budget과 cache는 `search.md`가 소유한다. Surface 문서는 필요한 차이만 적고 공통 규칙은 연결한다.
+- 배포 환경 변수, object storage provider와 CORS 같은 운영 설정은 [`개발 가이드`](../development.md)가 소유한다. Surface 문서는 필요한 의존 관계만 연결한다.
 
 ## API 분류
 

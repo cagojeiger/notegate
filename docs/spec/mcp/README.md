@@ -1,6 +1,6 @@
 # MCP tools
 
-MCP는 agent/CLI용 target-first path API다. Tool은 파일 시스템 명령처럼 동작하되, Space lifecycle은 다루지 않는다. 여러 명령을 순서대로 실행할 때는 `run_sequence`를 사용한다.
+MCP는 User·Agent client용 target-first path API다. Tool은 파일 시스템 명령처럼 동작하되, Space lifecycle은 다루지 않는다. 여러 명령을 순서대로 실행할 때는 `run_sequence`를 사용한다.
 
 ```text
 target = space:/absolute/path
@@ -20,7 +20,12 @@ file_transfer  begin_upload/prepare_parts/complete_upload/abort_upload/prepare_d
 run_sequence  ordered command sequence 실행
 ```
 
-`me`는 입력이 없다. 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수이며, `run_sequence`는 sequence 전체에 하나만 지정한다. 서버는 인증된 `tools/call`마다 caller, tool/op, purpose, redacted 입력·응답 snapshot과 실행 결과/시간을 별도 invocation history에 기록한다. 본문, 검색어/cursor, credential, PII와 자유 형식 오류 문구는 redaction marker로 대체하고 알 수 없는 field는 omission으로 제외한다. 입력 schema나 purpose 검증에 실패한 호출도 안전한 summary로 기록하며, `run_sequence`는 내부 command별 행이 아니라 전체 sequence 한 행으로 남는다.
+- `me`는 입력이 없다.
+- 나머지 tool은 앞뒤 공백 없는 1..200자의 `purpose`가 필수다.
+- `run_sequence`는 sequence 전체에 하나의 `purpose`를 지정한다.
+- 인증된 호출의 실행 이력은 민감한 원문을 저장하지 않는 별도 snapshot으로 기록한다.
+
+수집 경계, redaction, `run_sequence` 집계와 보존 기간은 [`event-logging.md`](../event-logging.md#mcp-invocation-history)를 따른다.
 
 ## 버전 확인
 
@@ -34,7 +39,12 @@ run_sequence  ordered command sequence 실행
 
 서버는 MCP `2026-07-28`과 `tools.listChanged=true`를 지원한다. 일반 MCP POST는 세션 없는 JSON request/response를 유지하고, 갱신을 구독한 client의 `subscriptions/listen` 요청만 장기 SSE 응답으로 유지한다.
 
-구독이 성립하면 서버는 최초 `notifications/tools/list_changed`를 전송한다. Client는 이 알림을 받으면 현재 endpoint에 `tools/list`를 다시 호출해 cache한 schema와 description을 교체해야 한다. 파드가 종료되면 서버는 활성 구독을 정상 종료하며, client는 새 파드에 연결해 구독을 다시 열어야 한다. `tools/list`의 `ttlMs`는 5분이고 `cacheScope=public`이다. 알림 구독을 지원하지 않는 client는 연결을 다시 만들고 `tools/list`를 재호출해야 한다.
+구독이 성립하면 서버는 최초 `notifications/tools/list_changed`를 전송한다.
+
+- Client는 알림을 받으면 현재 endpoint의 `tools/list`를 다시 호출해 cache한 schema와 description을 교체한다.
+- 파드가 종료되면 활성 구독도 종료된다. Client는 새 파드에 연결해 구독을 다시 연다.
+- `tools/list`의 `ttlMs`는 5분이고 `cacheScope=public`이다.
+- 알림 구독을 지원하지 않는 client는 연결을 다시 만들고 `tools/list`를 재호출한다.
 
 MCP는 space create/delete/rename, agent 관리, API key 관리를 제공하지 않는다. 이 작업은 REST/dashboard user-only API에서 한다.
 

@@ -3,7 +3,7 @@ import { History, LayoutGrid, Plus, Settings } from "lucide-react";
 import type { Space } from "../../api/types";
 
 // Mobile presentation of the ActivityRail: a bottom space switcher bar.
-// Space list scrolls; ＋ hugs the list end; Settings is pinned far-right (docs/ui 01-layout).
+// Space list scrolls; ＋ hugs the list end; History and Settings stay at the far right.
 export function MobileSpaceBar({ spaces, activeSpace, canCreateSpace, navigationLocked = false, onSelectSpace, onCreateSpace, onOpenLibrary, libraryActive = false, onOpenHistory, onOpenSettings }: { spaces: Space[]; activeSpace: Space | null; canCreateSpace: boolean; navigationLocked?: boolean; onSelectSpace: (space: Space) => void; onCreateSpace: () => void; onOpenLibrary?: () => void; libraryActive?: boolean; onOpenHistory: () => void; onOpenSettings: () => void }) {
   return (
     <nav aria-label="Spaces" className="flex h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 items-center gap-2 border-t border-seam bg-surface px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 md:hidden">

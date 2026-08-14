@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,8 +14,86 @@ describe("UploadProgressDock", () => {
 
   it("stays hidden when there are no transfers", () => {
     mocks.useUploadManager.mockReturnValue(manager());
-    const { container } = render(<UploadProgressDock />);
-    expect(container).toBeEmptyDOMElement();
+    render(<UploadProgressDock />);
+    expect(screen.queryByRole("region", { name: "File uploads" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("announces status transitions without repeating progress updates", async () => {
+    let current = manager();
+    mocks.useUploadManager.mockImplementation(() => current);
+    const { rerender } = render(<UploadProgressDock />);
+    const liveRegion = screen.getByRole("status");
+
+    current = manager({ tasks: [task({ status: "queued" })], queuedCount: 1 });
+    rerender(<UploadProgressDock />);
+    await waitFor(() => expect(liveRegion).toHaveTextContent("archive.zip: Queued"));
+
+    current = manager({ tasks: [task({ status: "uploading", uploadedBytes: 2 })], activeCount: 1 });
+    rerender(<UploadProgressDock />);
+    await waitFor(() => expect(liveRegion).toHaveTextContent("archive.zip: Uploading"));
+
+    current = manager({ tasks: [task({ status: "uploading", uploadedBytes: 4 })], activeCount: 1 });
+    rerender(<UploadProgressDock />);
+    expect(liveRegion).toHaveTextContent("archive.zip: Uploading");
+    expect(liveRegion).not.toHaveTextContent("40%");
+
+    current = manager();
+    rerender(<UploadProgressDock />);
+    await waitFor(() => expect(liveRegion).toBeEmptyDOMElement());
+  });
+
+  it("clears a removed transfer before announcing the same file again", async () => {
+    const remainingTask = task({ id: "upload-2", name: "notes.zip" });
+    let current = manager({
+      tasks: [task({ status: "failed" }), remainingTask],
+      activeCount: 1,
+      failedCount: 1
+    });
+    mocks.useUploadManager.mockImplementation(() => current);
+    const { rerender } = render(<UploadProgressDock />);
+    const liveRegion = screen.getByRole("status");
+
+    await waitFor(() => expect(liveRegion).toHaveTextContent("archive.zip: Upload failed"));
+
+    current = manager({ tasks: [remainingTask], activeCount: 1 });
+    rerender(<UploadProgressDock />);
+    await waitFor(() => expect(liveRegion).toBeEmptyDOMElement());
+
+    current = manager({
+      tasks: [remainingTask, task({ id: "upload-3", status: "failed" })],
+      activeCount: 1,
+      failedCount: 1
+    });
+    rerender(<UploadProgressDock />);
+    await waitFor(() => expect(liveRegion).toHaveTextContent("archive.zip: Upload failed"));
+  });
+
+  it("re-announces identical text when a transfer is replaced in one render", async () => {
+    const remainingTask = task({ id: "upload-2", name: "notes.zip" });
+    let current = manager({ tasks: [remainingTask], activeCount: 1 });
+    mocks.useUploadManager.mockImplementation(() => current);
+    const { rerender } = render(<UploadProgressDock />);
+    const liveRegion = screen.getByRole("status");
+
+    current = manager({
+      tasks: [remainingTask, task({ status: "failed" })],
+      activeCount: 1,
+      failedCount: 1
+    });
+    rerender(<UploadProgressDock />);
+    await waitFor(() => expect(liveRegion).toHaveTextContent("archive.zip: Upload failed"));
+    const firstMessage = liveRegion.firstElementChild;
+
+    current = manager({
+      tasks: [remainingTask, task({ id: "upload-3", status: "failed" })],
+      activeCount: 1,
+      failedCount: 1
+    });
+    rerender(<UploadProgressDock />);
+
+    await waitFor(() => expect(liveRegion.firstElementChild).not.toBe(firstMessage));
+    expect(liveRegion).toHaveTextContent("archive.zip: Upload failed");
   });
 
   it("shows each transfer with its captured destination and progress", async () => {
@@ -36,6 +114,8 @@ describe("UploadProgressDock", () => {
     expect(screen.getByText("Daily/Reports")).toBeInTheDocument();
     expect(screen.getByText("Daily/Assets")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "archive.zip upload progress" })).toHaveAttribute("aria-valuenow", "40");
+    expect(screen.getByRole("status")).toHaveTextContent("archive.zip: Uploading");
+    expect(screen.getByRole("status")).not.toHaveTextContent("40%");
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel upload archive.zip" }));
     expect(cancelUpload).toHaveBeenCalledWith("upload-1");
@@ -55,6 +135,7 @@ describe("UploadProgressDock", () => {
 
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("network unavailable")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("archive.zip: Upload failed");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel upload archive.zip" })).not.toBeInTheDocument();
 

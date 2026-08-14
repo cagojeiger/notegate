@@ -172,7 +172,7 @@ Search는 include/exclude glob, pagination, process-wide admission limit을 사�
 | `DELETE` | `/api/v2/spaces/{space_id}/file-uploads/{upload_id}` | 미완료 upload 정리 예약 |
 | `GET` | `/api/v2/spaces/{space_id}/files/{node_id}/download` | download URL 발급 |
 
-File bytes는 NoteGate JSON을 통과하지 않고 S3 호환 presigned URL로 전송한다. URL 유효 시간은 5분이며 URL 자체를 bearer credential처럼 취급해 로그나 영구 저장소에 남기지 않는다. 시스템 파일 상한은 100 GiB이며 실제 허용량은 Space tier와 잔여 quota에 따라 더 작을 수 있다. 100 MiB 이하는 single PUT, 그보다 큰 파일은 multipart를 사용한다.
+File bytes는 NoteGate JSON을 통과하지 않고 S3 호환 presigned URL로 전송한다. URL 자체를 bearer credential처럼 취급해 로그나 영구 저장소에 남기지 않는다. File size, URL lifetime과 single/multipart 기준은 [`performance-limits.md`](./performance-limits.md)의 Object upload 상한을 따르며 실제 허용량은 Space tier와 잔여 quota에 따라 더 작을 수 있다.
 
 #### Single PUT
 
