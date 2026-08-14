@@ -803,6 +803,7 @@ mod tests {
             "/auth/login",
             "/auth/callback",
             "/auth/success",
+            "/auth/login-complete.js",
             "/auth/logout",
             "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-protected-resource",

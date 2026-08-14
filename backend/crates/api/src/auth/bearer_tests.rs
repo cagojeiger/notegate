@@ -1071,12 +1071,33 @@ async fn public_routes_do_not_require_bearer() -> Result<(), Box<dyn std::error:
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
 
-    for path in ["/auth/success"] {
+    for (path, content_type, cache_control) in [
+        ("/auth/success", "text/html; charset=utf-8", None),
+        (
+            "/auth/login-complete.js",
+            "text/javascript; charset=utf-8",
+            Some("private, no-store"),
+        ),
+    ] {
         let response = app
             .clone()
             .oneshot(Request::builder().uri(path).body(Body::empty())?)
             .await?;
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some(content_type)
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            cache_control
+        );
     }
 
     let logout_get = app

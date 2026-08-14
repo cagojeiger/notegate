@@ -1,5 +1,6 @@
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::Cookie;
@@ -232,39 +233,57 @@ pub async fn callback(
     }
 }
 
-pub async fn success(State(state): State<AppState>) -> Response {
-    let Some(html) = login_complete_html(&state.config.notegate_public_url) else {
-        tracing::error!(event = "oauth.success_page_failed");
-        return html_page(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed",
-            "internal error",
-        );
-    };
-    Html(html).into_response()
+pub async fn success() -> Response {
+    Html(login_complete_html()).into_response()
 }
 
-fn login_complete_html(public_url: &str) -> Option<String> {
-    let public_url = url::Url::parse(public_url).ok()?;
-    let target_origin = serde_json::to_string(&public_url.origin().ascii_serialization()).ok()?;
-    Some(
-        r#"<!doctype html>
+pub async fn success_script(State(state): State<AppState>) -> Response {
+    let Some(script) = login_complete_script(&state.config.notegate_public_url) else {
+        tracing::error!(event = "oauth.success_script_failed");
+        let mut response = StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        response
+            .headers_mut()
+            .insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
+        return response;
+    };
+    (
+        [
+            (
+                CONTENT_TYPE,
+                HeaderValue::from_static("text/javascript; charset=utf-8"),
+            ),
+            (CACHE_CONTROL, HeaderValue::from_static("private, no-store")),
+        ],
+        script,
+    )
+        .into_response()
+}
+
+fn login_complete_html() -> &'static str {
+    r#"<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Login complete</title>
+  <script src="/auth/login-complete.js" defer></script>
 </head>
 <body>
   <h1>Login complete</h1>
   <p>Login complete. You can close this tab and return to NoteGate.</p>
-  <script>
+</body>
+</html>"#
+}
+
+fn login_complete_script(public_url: &str) -> Option<String> {
+    let public_url = url::Url::parse(public_url).ok()?;
+    let target_origin = serde_json::to_string(&public_url.origin().ascii_serialization()).ok()?;
+    Some(
+        r#"(() => {
     if (window.opener) {
       window.opener.postMessage({ type: "notegate:login-complete" }, __NOTEGATE_TARGET_ORIGIN__);
       window.close();
     }
-  </script>
-</body>
-</html>"#
+})();"#
             .replace("__NOTEGATE_TARGET_ORIGIN__", &target_origin),
     )
 }
@@ -341,15 +360,24 @@ async fn revoke_authgate_refresh_token(state: &AppState, refresh_token: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{login_complete_html, sanitize_next};
+    use super::{login_complete_html, login_complete_script, sanitize_next};
 
     #[test]
-    fn login_complete_page_posts_only_to_configured_origin() {
-        let html = login_complete_html("https://notes.example.test/app").unwrap_or_default();
-        assert!(html.contains(
+    fn login_complete_page_uses_same_origin_external_script() {
+        let html = login_complete_html();
+        assert!(html.contains(r#"<script src="/auth/login-complete.js" defer></script>"#));
+        assert_eq!(html.matches("<script").count(), 1);
+        assert!(!html.contains("postMessage"));
+    }
+
+    #[test]
+    fn login_complete_script_posts_only_to_configured_origin_and_closes_popup() {
+        let script = login_complete_script("https://notes.example.test/app").unwrap_or_default();
+        assert!(script.contains(
             r#"postMessage({ type: "notegate:login-complete" }, "https://notes.example.test")"#
         ));
-        assert!(!html.contains(r#"postMessage({ type: "notegate:login-complete" }, "*")"#));
+        assert!(!script.contains(r#"postMessage({ type: "notegate:login-complete" }, "*")"#));
+        assert!(script.contains("window.close()"));
     }
 
     #[test]
