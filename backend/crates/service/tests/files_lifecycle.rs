@@ -416,7 +416,7 @@ async fn full_files_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(copied.counts.nodes, 3);
     assert_eq!(copied.counts.texts, 2);
     assert_eq!(copied.counts.files, 0);
-    assert_eq!(copied.node.node.metadata["title"], "Project notes");
+    assert_eq!(copied.node.node.metadata, read_metadata);
 
     let copied_secret = files
         .resolve_path(owner, ws, "/projects-copy/secret.md")
