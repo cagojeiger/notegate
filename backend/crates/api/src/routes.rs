@@ -53,9 +53,19 @@ pub fn app(state: AppState) -> Router {
                 MakeRequestUuid,
             ))
             .layer(from_fn_with_state(metrics_enabled, log_request))
+            .layer(from_fn(set_browser_permissions_policy))
             .layer(from_fn(add_json_charset))
             .layer(PropagateRequestIdLayer::new(x_request_id)),
     )
+}
+
+async fn set_browser_permissions_policy(request: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("geolocation=(), microphone=(self), camera=()"),
+    );
+    response
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -580,7 +590,8 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("index.html"), "<html>notegate</html>").unwrap();
 
-        let app = with_web_fallback(Router::new(), Some(dir.to_str().unwrap()));
+        let app = with_web_fallback(Router::new(), Some(dir.to_str().unwrap()))
+            .layer(from_fn(set_browser_permissions_policy));
         for path in ["/", "/index.html", "/dashboard"] {
             let response = app
                 .clone()
@@ -591,6 +602,13 @@ mod tests {
             assert_eq!(
                 response.headers().get(CACHE_CONTROL),
                 Some(&HeaderValue::from_static("no-cache, must-revalidate")),
+                "{path}"
+            );
+            assert_eq!(
+                response.headers().get("permissions-policy"),
+                Some(&HeaderValue::from_static(
+                    "geolocation=(), microphone=(self), camera=()"
+                )),
                 "{path}"
             );
             let body = axum::body::to_bytes(response.into_body(), usize::MAX)
