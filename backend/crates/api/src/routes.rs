@@ -27,7 +27,7 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use crate::auth::metadata::{
     authorization_server_metadata, protected_resource_metadata, protected_resource_metadata_url,
 };
-use crate::auth::oauth::{callback, login, logout, success};
+use crate::auth::oauth::{callback, login, logout, success, success_script};
 use crate::auth::{require_browser_session, require_public_api_key, set_private_no_store};
 use crate::error::ApiError;
 use crate::mcp::server::{agent_mcp_v2_handler, user_mcp_handler};
@@ -306,6 +306,7 @@ fn auth_routes() -> Router<AppState> {
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
         .route("/auth/success", get(success))
+        .route("/auth/login-complete.js", get(success_script))
         .route("/auth/logout", post(logout))
 }
 
