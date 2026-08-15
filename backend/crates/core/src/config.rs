@@ -94,6 +94,39 @@ impl Default for BackgroundJobsConfig {
     }
 }
 
+/// Components started by this binary instance.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProcessMode {
+    All,
+    Api,
+    Worker,
+}
+
+impl Default for ProcessMode {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl ProcessMode {
+    pub const fn runs_api(self) -> bool {
+        matches!(self, Self::All | Self::Api)
+    }
+
+    pub const fn runs_worker(self) -> bool {
+        matches!(self, Self::All | Self::Worker)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Api => "api",
+            Self::Worker => "worker",
+        }
+    }
+}
+
 /// One process-local token bucket.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -145,6 +178,9 @@ impl Default for HttpRateLimitsConfig {
 pub struct Config {
     /// Address the HTTP server binds to.
     pub bind_addr: SocketAddr,
+    /// Runtime role. `all` preserves the single-process deployment.
+    #[serde(default)]
+    pub process_mode: ProcessMode,
     /// Postgres connection string.
     pub database_url: String,
     /// Max connections in the sqlx pool.
@@ -628,14 +664,16 @@ fn validate_background_jobs(config: &Config, errors: &mut ValidationErrors) {
         errors.add("background_jobs.concurrency", ValidationError::new("range"));
         return;
     }
-    let required_connections = u32::try_from(config.background_jobs.concurrency)
-        .unwrap_or(u32::MAX)
-        .saturating_add(2);
-    if config.db_max_connections < required_connections {
-        errors.add(
-            "db_max_connections",
-            ValidationError::new("background_job_headroom"),
-        );
+    if config.process_mode.runs_worker() {
+        let required_connections = u32::try_from(config.background_jobs.concurrency)
+            .unwrap_or(u32::MAX)
+            .saturating_add(2);
+        if config.db_max_connections < required_connections {
+            errors.add(
+                "db_max_connections",
+                ValidationError::new("background_job_headroom"),
+            );
+        }
     }
 }
 
@@ -713,13 +751,14 @@ mod tests {
     use crate::tier::UserTier;
 
     use super::{
-        BackgroundJobsConfig, Config, HttpRateLimitConfig, HttpRateLimitsConfig,
+        BackgroundJobsConfig, Config, HttpRateLimitConfig, HttpRateLimitsConfig, ProcessMode,
         SearchBodyCacheConfig, load_from_sources,
     };
 
     fn valid_config() -> Config {
         Config {
             bind_addr: SocketAddr::from(([127, 0, 0, 1], 9191)),
+            process_mode: ProcessMode::All,
             database_url: "postgres://example".to_owned(),
             db_max_connections: 10,
             background_jobs: BackgroundJobsConfig::default(),
@@ -815,6 +854,7 @@ mod tests {
         )?;
 
         assert_eq!(config.web_dist_dir.as_deref(), Some("/app/web"));
+        assert_eq!(config.process_mode, ProcessMode::All);
         assert_eq!(config.default_user_tier, UserTier::Tier0);
         Ok(())
     }
@@ -840,6 +880,7 @@ mod tests {
                     "env-lookup-root-secret-32-bytes-long",
                 ),
                 ("NOTEGATE_DB_MAX_CONNECTIONS", "7"),
+                ("NOTEGATE_PROCESS_MODE", "worker"),
                 ("NOTEGATE_BACKGROUND_JOBS__CONCURRENCY", "5"),
                 ("NOTEGATE_METRICS_ENABLED", "true"),
                 ("NOTEGATE_DEFAULT_USER_TIER", "tier0"),
@@ -858,6 +899,7 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), super::DEFAULT_BIND_ADDR);
         assert_eq!(config.database_url, "postgres://env");
         assert_eq!(config.db_max_connections, 7);
+        assert_eq!(config.process_mode, ProcessMode::Worker);
         assert_eq!(config.background_jobs.concurrency, 5);
         assert!(config.metrics_enabled);
         assert_eq!(config.oauth_client_id, "notegate-web");
@@ -1107,6 +1149,26 @@ mod tests {
         config.search_body_cache.max_capacity_bytes = 0;
         config.search_body_cache.ttl = Duration::ZERO;
         config.search_body_cache.tti = Duration::ZERO;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn process_modes_select_components() {
+        assert!(ProcessMode::All.runs_api());
+        assert!(ProcessMode::All.runs_worker());
+        assert!(ProcessMode::Api.runs_api());
+        assert!(!ProcessMode::Api.runs_worker());
+        assert!(!ProcessMode::Worker.runs_api());
+        assert!(ProcessMode::Worker.runs_worker());
+    }
+
+    #[test]
+    fn api_mode_does_not_require_worker_pool_headroom() {
+        let mut config = valid_config();
+        config.process_mode = ProcessMode::Api;
+        config.db_max_connections = 5;
+        config.background_jobs.concurrency = 4;
+
         assert!(config.validate().is_ok());
     }
 

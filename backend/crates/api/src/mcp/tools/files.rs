@@ -808,6 +808,7 @@ mod tests {
     fn test_state(pool: notegate_db::PgPool) -> Result<AppState, Box<dyn std::error::Error>> {
         let config = Arc::new(Config {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9191),
+            process_mode: notegate_core::ProcessMode::All,
             database_url: "postgres://notegate:notegate@localhost/notegate".to_owned(),
             db_max_connections: 1,
             background_jobs: notegate_core::BackgroundJobsConfig::default(),

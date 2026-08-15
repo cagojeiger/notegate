@@ -34,7 +34,7 @@ backend/crates/jobs/                 package: notegate-jobs
   reconciler.rs                      lease recovery와 terminal history 정리
 
 backend/crates/api/src/background_jobs/
-  mod.rs                             API process의 runtime과 handler 등록
+  mod.rs                             worker runtime과 handler 등록
   handlers.rs                        Usage 업무 adapter
 
 backend/crates/db/                   schema, repository, transaction
@@ -59,7 +59,7 @@ notegate-api background runtime
 - Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
 - 멱등성, stale 판정, 업무 결과 transaction은 handler가 호출하는 db/service 계층이 소유한다.
 - Queue schema와 migration은 database schema 소유권에 따라 `notegate-db`가 관리한다.
-- API process는 HTTP server, queue consumer, queue reconciler를 함께 실행하고 하나의 `PgPool`을 공유한다.
+- `all` mode는 HTTP server와 queue runtime을 함께 실행한다. `api`와 `worker` mode는 같은 binary에서 실행 책임을 분리한다.
 
 ## 상태 머신
 
@@ -112,9 +112,11 @@ background_job_attempts
 ## 실행 규칙
 
 - Worker는 자신에게 등록된 `job_kind`만 선점한다. 처리할 수 없는 kind 때문에 polling loop가 계속 깨어나면 안 된다.
+- `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지한다.
+- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue runtime, purge, object storage cleanup과 control HTTP만 실행한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
 - `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`로 process별 동시 실행 수를 설정한다.
-- 공유 database pool은 concurrency보다 최소 2개 커야 한다. LISTEN 연결 하나와 HTTP, heartbeat, reconciliation, metric 조회가 공유할 최소 여유를 남긴다. 운영값은 HTTP 부하까지 포함해 이 최솟값보다 크게 잡는다.
+- Worker의 공유 database pool은 concurrency보다 최소 2개 커야 한다. LISTEN 연결 하나와 heartbeat, reconciliation, metric·control 조회가 공유할 최소 여유를 남긴다. `all` mode 운영값은 데이터 HTTP 부하까지 포함해 이 최솟값보다 크게 잡는다.
 - 기본 lease는 2분이며 worker는 lease의 3분의 1 간격으로 heartbeat한다.
 - Handler timeout은 kind별로 정한다.
 - 자동 재시도는 5초에서 시작해 최대 15분까지 증가하는 exponential backoff와 ±10% jitter를 사용한다.
@@ -128,9 +130,9 @@ background_job_attempts
 - Panic, timeout, graceful shutdown 중 취소는 retryable failure로 기록한다.
 - Worker가 비정상 종료되어 attempt를 닫지 못하면 lease recovery가 `lease_expired`로 마감하고 재시도하거나 `dead`로 전환한다.
 - Lease recovery와 retention 정리는 consumer loop와 독립적인 `QueueReconciler`가 수행한다.
-- 모든 API replica가 reconciler를 시작하지만 각 실행은 PostgreSQL advisory transaction lock을 먼저 얻는다. 같은 database에서는 한 시점에 하나의 recovery 또는 retention pass만 실행된다.
+- 모든 `all` 또는 `worker` mode replica가 reconciler를 시작하지만 각 실행은 PostgreSQL advisory transaction lock을 먼저 얻는다. 같은 database에서는 한 시점에 하나의 recovery 또는 retention pass만 실행된다.
 - Lease recovery는 60초 기준 ±10% jitter로 실행하고 시작 시점을 최대 5초 분산한다. Retention 정리는 1시간 기준 ±10% jitter로 실행하고 최초 실행도 한 주기 안에서 분산한다.
-- Consumer 또는 reconciler가 shutdown 신호 없이 종료되면 API process도 오류로 종료한다. HTTP만 정상인 채 queue 처리가 멈춘 상태를 허용하지 않는다.
+- Consumer 또는 reconciler가 shutdown 신호 없이 종료되면 해당 worker process도 오류로 종료한다. Control HTTP만 정상인 채 queue 처리가 멈춘 상태를 허용하지 않는다.
 
 현재 등록된 kind:
 
@@ -144,7 +146,7 @@ Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다
 
 ## 실행과 스케일 아웃
 
-각 `notegate-api` process가 HTTP server와 queue runtime을 함께 실행한다. 원본 변경과 enqueue는 같은 PostgreSQL database transaction에 기록되고, 모든 replica의 consumer가 같은 원장에서 작업을 분산 선점한다.
+원본 변경과 enqueue는 같은 PostgreSQL database transaction에 기록된다. `all` 또는 `worker` mode replica의 consumer가 같은 원장에서 작업을 분산 선점한다.
 
 ```text
 API transaction ── insert background_jobs ── COMMIT ── broadcast NOTIFY
@@ -152,7 +154,7 @@ API transaction ── insert background_jobs ── COMMIT ── broadcast NOT
                                                    0~50ms spread
                                                          │
                                                          ▼
-API replicas ── claim batch ── bounded handlers ── state transition
+Worker replicas ── claim batch ── bounded handlers ── state transition
      │
      └─ QueueReconciler ── advisory lock ── lease recovery / retention
 ```
@@ -167,7 +169,7 @@ SELECT background_job_backlog(NULL);
 
 ## 관측
 
-Background job metric은 API listener의 `/metrics`에 함께 노출된다. `NOTEGATE_METRICS_ENABLED=true`일 때만 route와 주기적 queue snapshot 갱신이 활성화된다.
+Background job metric은 worker listener의 `/metrics`에 노출된다. `all` mode에서는 같은 API listener를 사용한다. `NOTEGATE_METRICS_ENABLED=true`일 때만 route와 주기적 queue snapshot 갱신이 활성화된다.
 
 ```text
 notegate_background_jobs{kind,state}
@@ -180,7 +182,7 @@ notegate_background_job_duration_seconds{kind}
 
 Metric label에는 job ID, Space ID, node ID, payload, error message를 넣지 않는다.
 
-Queue 상태와 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은 전역 값이다. 90일간 보관되는 `succeeded` 이력은 snapshot에서 세지 않는다. API replica마다 같은 전역 값이 노출되므로 Prometheus에서 replica를 합산하지 않고 `max`로 집계한다. In-flight, attempt, duration, transition metric은 process-local 값이다.
+Queue 상태와 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은 전역 값이다. 90일간 보관되는 `succeeded` 이력은 snapshot에서 세지 않는다. Worker replica마다 같은 전역 값이 노출되므로 Prometheus에서 replica를 합산하지 않고 `max`로 집계한다. In-flight, attempt, duration, transition metric은 process-local 값이다.
 
 History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `history_owner_account_id`, 선택적 `context_kind/context_id/context_label`을 기록한다. 이 공통 metadata가 있는 job은 종류와 관계없이 해당 account의 History에 나타난다. 기본값은 `hidden`이며 History에 표시할 필요가 없는 운영·유지보수 job은 제외된다. `context_*`는 Space에 한정되지 않는 표시 문맥이고, Worker의 claim·retry·lease 처리에는 이 metadata를 사용하지 않는다.
 

@@ -35,18 +35,30 @@ use crate::observability::{self, HttpRequestMetrics, MetricsHandle};
 use crate::state::AppState;
 
 pub fn app(state: AppState) -> Router {
-    let x_request_id = HeaderName::from_static("x-request-id");
     let metrics = state.metrics.clone();
     let metrics_enabled = metrics.is_some();
 
-    with_web_fallback(
+    let router = with_web_fallback(
         Router::new()
             .merge(control_plane_routes(metrics))
             .merge(data_plane_routes(state.clone())),
         state.config.web_dist_dir.as_deref(),
     )
-    .with_state(state)
-    .layer(
+    .with_state(state);
+    apply_common_layers(router, metrics_enabled)
+}
+
+/// Health, readiness, and metrics only. Worker processes expose no data-plane routes.
+pub fn worker_app(state: AppState) -> Router {
+    let metrics = state.metrics.clone();
+    let metrics_enabled = metrics.is_some();
+    let router = control_plane_routes(metrics).with_state(state);
+    apply_common_layers(router, metrics_enabled)
+}
+
+fn apply_common_layers(router: Router, metrics_enabled: bool) -> Router {
+    let x_request_id = HeaderName::from_static("x-request-id");
+    router.layer(
         ServiceBuilder::new()
             .layer(SetRequestIdLayer::new(
                 x_request_id.clone(),
@@ -577,9 +589,35 @@ mod tests {
 
     use axum::http::header::CACHE_CONTROL;
     use axum::routing::{get, post};
+    use notegate_db::test_support::TestDb;
     use tower::ServiceExt as _;
 
     use super::*;
+
+    #[tokio::test]
+    async fn worker_app_exposes_only_control_plane_routes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let Some(db) = TestDb::setup().await? else {
+            return Ok(());
+        };
+        let app = worker_app(crate::rest::test_support::state(&db));
+
+        let health = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty())?)
+            .await?;
+        assert_eq!(health.status(), StatusCode::OK);
+
+        for path in ["/api/v1/me", "/auth/login", "/mcp", "/mcp/v2"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty())?)
+                .await?;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn web_fallback_serves_index_with_revalidation() {

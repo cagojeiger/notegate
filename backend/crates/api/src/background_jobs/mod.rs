@@ -1,15 +1,14 @@
 mod handlers;
 
 use handlers::UsageHandler;
-use notegate_db::{SpaceUsageReconcileJob, SpaceUsageRepo};
+use notegate_core::BackgroundJobsConfig;
+use notegate_db::{PgPool, SpaceUsageReconcileJob, SpaceUsageRepo};
 use notegate_jobs::{
     JobQueue, JobQueueResult, JobRegistry, QueueReconciler, QueueReconcilerConfig, Worker,
     WorkerConfig,
 };
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-
-use crate::state::AppState;
 
 pub(crate) struct BackgroundJobs {
     consumer: Option<JoinHandle<JobQueueResult<()>>>,
@@ -18,19 +17,20 @@ pub(crate) struct BackgroundJobs {
 }
 
 pub(crate) fn spawn(
-    state: &AppState,
+    pool: PgPool,
+    config: BackgroundJobsConfig,
+    metrics_enabled: bool,
     shutdown: CancellationToken,
 ) -> JobQueueResult<BackgroundJobs> {
-    let queue = JobQueue::new(state.db.clone());
-    let handlers = JobRegistry::new().register::<SpaceUsageReconcileJob>(UsageHandler::new(
-        SpaceUsageRepo::new(state.db.clone()),
-    ))?;
+    let queue = JobQueue::new(pool.clone());
+    let handlers = JobRegistry::new()
+        .register::<SpaceUsageReconcileJob>(UsageHandler::new(SpaceUsageRepo::new(pool)))?;
     let job_kinds = handlers.job_kinds();
     let worker = Worker::new(
         queue.clone(),
         handlers,
         WorkerConfig {
-            concurrency: state.config.background_jobs.concurrency,
+            concurrency: config.concurrency,
             ..WorkerConfig::default()
         },
         worker_id(),
@@ -41,7 +41,7 @@ pub(crate) fn spawn(
     let consumer = tokio::spawn(async move { worker.run(consumer_shutdown).await });
     let reconciler = tokio::spawn(async move { reconciler.run(reconciler_shutdown).await });
     let metrics = crate::observability::spawn_background_job_metrics(
-        state.config.metrics_enabled,
+        metrics_enabled,
         queue,
         job_kinds,
         shutdown,
@@ -49,7 +49,7 @@ pub(crate) fn spawn(
 
     tracing::info!(
         event = "background_jobs.started",
-        concurrency = state.config.background_jobs.concurrency
+        concurrency = config.concurrency
     );
     Ok(BackgroundJobs {
         consumer: Some(consumer),
