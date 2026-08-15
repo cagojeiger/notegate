@@ -195,11 +195,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reports_a_periodic_worker_task_failure() {
-        let mut runtime = runtime_with_task(
-            "purge worker",
-            tokio::spawn(async { panic!("worker failed") }),
-        );
+    async fn reports_a_cancelled_periodic_worker_task() {
+        let task = tokio::spawn(std::future::pending::<()>());
+        task.abort();
+        let mut runtime = runtime_with_task("purge worker", task);
 
         let error = runtime.wait_for_critical_exit().await;
 
@@ -225,9 +224,10 @@ mod tests {
         );
         let mut wait_for_exit = Box::pin(runtime.wait_for_critical_exit());
 
-        auxiliary_stopped_rx
-            .await
-            .expect("auxiliary task should report its exit");
+        assert!(
+            auxiliary_stopped_rx.await.is_ok(),
+            "auxiliary task should report its exit"
+        );
         assert!(
             tokio::time::timeout(Duration::from_millis(10), &mut wait_for_exit)
                 .await
