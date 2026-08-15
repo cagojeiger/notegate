@@ -39,8 +39,9 @@ Prefer `shared/ui` instead of repeating:
 
 ## Theme policy
 
-- Light theme uses paper and cool-neutral surfaces.
-- Dark theme uses ink and graphite surfaces instead of a blue IDE palette.
+- Light theme uses low-chroma warm gray chrome around a clean white editor.
+- Dark theme uses dim charcoal navigation around a slightly brighter editor.
+- Neutral surfaces own hover and selection; muted plum is reserved for focus, links, active borders, and primary actions.
 - Normal text targets WCAG 2.2 AA contrast of at least 4.5:1.
 - Meaningful controls and focus indicators target at least 3:1.
 - Brand assets identify NoteGate; Lucide icons represent actions and objects.

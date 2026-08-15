@@ -39,7 +39,7 @@
 ## 시각 언어
 
 - 방향: `Compact Workbench + Calm Reader`. 탐색·상태·도구 chrome은 개발 도구처럼 조밀하게, 문서 읽기 영역은 여유롭게 유지한다.
-- 색상: VS Code Workbench의 역할 구분을 따른다. Light는 `#f3f3f3` chrome과 `#ffffff` editor, Dark는 `#181818` chrome과 `#1f1f1f` editor를 기본 중성 축으로 사용한다. 경계·hover·선택 면은 인접한 중성 회색으로 표현하고, 파란색은 링크·포커스·활성 경계와 기본 동작에만 제한한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패를 뜻한다.
+- 색상: Linear의 낮은 chroma와 content-first surface 계층을 따른다. Light는 warm gray chrome보다 흰 editor를 한 단계 밝게, Dark는 dim charcoal navigation보다 editor를 한 단계 밝게 표현한다. 경계·hover·선택 면은 인접한 neutral로 표현하고, 저채도 plum은 링크·포커스·활성 경계와 기본 동작에만 제한한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패를 뜻한다.
 - Workbench 글꼴: title bar, Files/Recent, editor tab, Inspector와 status bar를 포함한 시스템 UI는 self-hosted `LINE Seed Sans KR`을 사용한다. 기본 크기는 13 px, line-height는 20 px다.
 - Files/Recent section label은 대문자 변환이나 별도 자간 없이 title case 13 px Medium으로 표시한다.
 - Reading 글꼴: Markdown과 일반 텍스트 본문은 기존 운영체제 UI stack을 유지한다. Markdown은 기존 16 px/1.7 line-height와 문서 간격을 그대로 유지하고, 코드·경로·식별자는 기존 monospace stack을 사용한다.
