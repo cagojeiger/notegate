@@ -28,6 +28,7 @@ mod observability;
 mod openapi;
 mod page;
 mod periodic_worker;
+mod process_runtime;
 mod public_v2;
 mod purge_worker;
 mod rest;
@@ -116,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
         http,
         pii_crypto,
     )
-    .with_metrics(metrics.clone())
+    .with_metrics(metrics)
     .with_shutdown_token(application_shutdown_token.clone());
     let router = if process_mode.runs_api() {
         routes::app(state.clone())
@@ -131,38 +132,8 @@ async fn main() -> anyhow::Result<()> {
         process_mode = process_mode.as_str(),
     );
 
-    let background_shutdown_token = application_shutdown_token;
-    let mut background_job_runtime = if process_mode.runs_worker() {
-        Some(background_jobs::spawn(
-            pool.clone(),
-            config.background_jobs,
-            config.metrics_enabled,
-            background_shutdown_token.clone(),
-        )?)
-    } else {
-        None
-    };
-    let metrics_upkeep_worker =
-        observability::spawn_upkeep(metrics, background_shutdown_token.clone());
-    let purge_worker = process_mode
-        .runs_worker()
-        .then(|| purge_worker::spawn(pool.clone(), background_shutdown_token.clone()));
-    let object_storage_cleanup_worker = process_mode.runs_worker().then(|| {
-        object_storage_cleanup_worker::spawn(
-            pool.clone(),
-            state.object_storage.clone(),
-            background_shutdown_token.clone(),
-        )
-    });
-    let metadata_write_shutdown_token = CancellationToken::new();
-    let metadata_write_worker = process_mode.runs_api().then(|| {
-        metadata_write_behind::spawn(
-            state.metadata_writes.clone(),
-            pool.clone(),
-            metadata_write_shutdown_token.clone(),
-            config.metrics_enabled,
-        )
-    });
+    let mut process_runtime =
+        process_runtime::ProcessRuntime::start(&state, application_shutdown_token)?;
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
@@ -176,60 +147,35 @@ async fn main() -> anyhow::Result<()> {
     enum StopReason {
         Http(io::Result<()>),
         Signal,
-        Background(anyhow::Error),
+        Runtime(anyhow::Error),
     }
 
     let stop_reason = tokio::select! {
         result = &mut server => StopReason::Http(result),
         () = signals.wait() => StopReason::Signal,
-        error = wait_for_background_exit(&mut background_job_runtime) => {
-            tracing::error!(event = "background_jobs.critical_task_exited", %error);
-            StopReason::Background(error)
+        error = process_runtime.wait_for_critical_exit() => {
+            tracing::error!(event = "process_runtime.critical_task_exited", %error);
+            StopReason::Runtime(error)
         },
     };
 
     info!(event = "server.shutting_down");
     http_shutdown_token.cancel();
-    background_shutdown_token.cancel();
+    process_runtime.begin_shutdown();
 
     let server_result = match stop_reason {
         StopReason::Http(result) => result.map_err(anyhow::Error::from),
         StopReason::Signal => server.await.map_err(anyhow::Error::from),
-        StopReason::Background(background_error) => {
+        StopReason::Runtime(runtime_error) => {
             if let Err(error) = server.await {
                 tracing::error!(event = "server.graceful_shutdown_failed", %error);
             }
-            Err(background_error)
+            Err(runtime_error)
         }
     };
 
-    // No request can add new observations after the HTTP server drains. Stop the
-    // writer afterwards so its final flush includes every completed request.
-    metadata_write_shutdown_token.cancel();
-    if let Some(metadata_write_worker) = metadata_write_worker
-        && let Err(error) = metadata_write_worker.await
-    {
-        tracing::error!(event = "metadata_write_behind.join_failed", %error);
-    }
-
-    if let Some(purge_worker) = purge_worker
-        && let Err(error) = purge_worker.await
-    {
-        tracing::error!(event = "purge_worker.join_failed", %error);
-    }
-    if let Some(object_storage_cleanup_worker) = object_storage_cleanup_worker
-        && let Err(error) = object_storage_cleanup_worker.await
-    {
-        tracing::error!(event = "object_storage_cleanup_worker.join_failed", %error);
-    }
-    if let Some(background_job_runtime) = background_job_runtime {
-        background_job_runtime.join().await;
-    }
-    if let Some(metrics_upkeep_worker) = metrics_upkeep_worker
-        && let Err(error) = metrics_upkeep_worker.await
-    {
-        tracing::error!(event = "metrics_upkeep_worker.join_failed", %error);
-    }
+    // HTTP has drained, so the metadata writer can flush its final observations.
+    process_runtime.join().await;
 
     // Background tasks record cancellation or finish their final flush before
     // returning. Close the pool only after every task has joined.
@@ -237,15 +183,6 @@ async fn main() -> anyhow::Result<()> {
     info!(event = "shutdown.complete");
 
     server_result
-}
-
-async fn wait_for_background_exit(
-    runtime: &mut Option<background_jobs::BackgroundJobs>,
-) -> anyhow::Error {
-    match runtime {
-        Some(runtime) => runtime.wait_for_critical_exit().await,
-        None => std::future::pending().await,
-    }
 }
 
 struct ShutdownSignals {

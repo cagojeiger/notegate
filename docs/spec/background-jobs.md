@@ -36,6 +36,8 @@ backend/crates/jobs/                 package: notegate-jobs
 backend/crates/api/src/background_jobs/
   mod.rs                             worker runtime과 handler 등록
   handlers.rs                        Usage 업무 adapter
+backend/crates/api/src/process_runtime.rs
+                                     process mode별 작업 기동, 감시, 종료
 
 backend/crates/db/                   schema, repository, transaction
 backend/crates/service/              authorization과 업무 흐름
@@ -133,7 +135,7 @@ background_job_attempts
 - Lease recovery와 retention 정리는 consumer loop와 독립적인 `QueueReconciler`가 수행한다.
 - 모든 `all` 또는 `worker` mode replica가 reconciler를 시작하지만 각 실행은 PostgreSQL advisory transaction lock을 먼저 얻는다. 같은 database에서는 한 시점에 하나의 recovery 또는 retention pass만 실행된다.
 - Lease recovery는 60초 기준 ±10% jitter로 실행하고 시작 시점을 최대 5초 분산한다. Retention 정리는 1시간 기준 ±10% jitter로 실행하고 최초 실행도 한 주기 안에서 분산한다.
-- Consumer 또는 reconciler가 shutdown 신호 없이 종료되면 해당 worker process도 오류로 종료한다. Control HTTP만 정상인 채 queue 처리가 멈춘 상태를 허용하지 않는다.
+- Queue consumer·reconciler, purge 또는 object cleanup이 shutdown 신호 없이 종료되면 해당 process도 오류로 종료한다. Best-effort metadata write-behind와 metrics upkeep은 실패를 기록하되 process를 종료하지 않는다.
 
 현재 등록된 kind:
 
