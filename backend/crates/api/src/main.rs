@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
 
     let config = Config::load()?;
+    let process_mode = config.process_mode;
     init_tracing(config.metrics_enabled);
     let metrics = observability::install(config.metrics_enabled)?;
 
@@ -67,7 +68,8 @@ async fn main() -> anyhow::Result<()> {
     usage_bootstrap::ensure(&pool).await?;
     info!(
         event = "db.ready",
-        max_connections = config.db_max_connections
+        max_connections = config.db_max_connections,
+        process_mode = process_mode.as_str(),
     );
 
     let pii_crypto = PiiCrypto::from_root_secrets(
@@ -116,33 +118,56 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_metrics(metrics.clone())
     .with_shutdown_token(application_shutdown_token.clone());
+    let router = if process_mode.runs_api() {
+        routes::app(state.clone())
+    } else {
+        routes::worker_app(state.clone())
+    };
 
     let listener = TcpListener::bind(bind_addr).await?;
-    info!(event = "server.listening", addr = %bind_addr);
+    info!(
+        event = "server.listening",
+        addr = %bind_addr,
+        process_mode = process_mode.as_str(),
+    );
 
     let background_shutdown_token = application_shutdown_token;
-    let mut background_job_runtime =
-        background_jobs::spawn(&state, background_shutdown_token.clone())?;
+    let mut background_job_runtime = if process_mode.runs_worker() {
+        Some(background_jobs::spawn(
+            pool.clone(),
+            config.background_jobs,
+            config.metrics_enabled,
+            background_shutdown_token.clone(),
+        )?)
+    } else {
+        None
+    };
     let metrics_upkeep_worker =
         observability::spawn_upkeep(metrics, background_shutdown_token.clone());
-    let purge_worker = purge_worker::spawn(pool.clone(), background_shutdown_token.clone());
-    let object_storage_cleanup_worker = object_storage_cleanup_worker::spawn(
-        pool.clone(),
-        state.object_storage.clone(),
-        background_shutdown_token.clone(),
-    );
+    let purge_worker = process_mode
+        .runs_worker()
+        .then(|| purge_worker::spawn(pool.clone(), background_shutdown_token.clone()));
+    let object_storage_cleanup_worker = process_mode.runs_worker().then(|| {
+        object_storage_cleanup_worker::spawn(
+            pool.clone(),
+            state.object_storage.clone(),
+            background_shutdown_token.clone(),
+        )
+    });
     let metadata_write_shutdown_token = CancellationToken::new();
-    let metadata_write_worker = metadata_write_behind::spawn(
-        state.metadata_writes.clone(),
-        pool.clone(),
-        metadata_write_shutdown_token.clone(),
-        config.metrics_enabled,
-    );
+    let metadata_write_worker = process_mode.runs_api().then(|| {
+        metadata_write_behind::spawn(
+            state.metadata_writes.clone(),
+            pool.clone(),
+            metadata_write_shutdown_token.clone(),
+            config.metrics_enabled,
+        )
+    });
 
     let http_shutdown_token = CancellationToken::new();
     let http_shutdown = http_shutdown_token.clone().cancelled_owned();
     let server = async move {
-        axum::serve(listener, routes::app(state))
+        axum::serve(listener, router)
             .with_graceful_shutdown(http_shutdown)
             .await
     };
@@ -157,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
     let stop_reason = tokio::select! {
         result = &mut server => StopReason::Http(result),
         () = signals.wait() => StopReason::Signal,
-        error = background_job_runtime.wait_for_critical_exit() => {
+        error = wait_for_background_exit(&mut background_job_runtime) => {
             tracing::error!(event = "background_jobs.critical_task_exited", %error);
             StopReason::Background(error)
         },
@@ -181,17 +206,25 @@ async fn main() -> anyhow::Result<()> {
     // No request can add new observations after the HTTP server drains. Stop the
     // writer afterwards so its final flush includes every completed request.
     metadata_write_shutdown_token.cancel();
-    if let Err(error) = metadata_write_worker.await {
+    if let Some(metadata_write_worker) = metadata_write_worker
+        && let Err(error) = metadata_write_worker.await
+    {
         tracing::error!(event = "metadata_write_behind.join_failed", %error);
     }
 
-    if let Err(error) = purge_worker.await {
+    if let Some(purge_worker) = purge_worker
+        && let Err(error) = purge_worker.await
+    {
         tracing::error!(event = "purge_worker.join_failed", %error);
     }
-    if let Err(error) = object_storage_cleanup_worker.await {
+    if let Some(object_storage_cleanup_worker) = object_storage_cleanup_worker
+        && let Err(error) = object_storage_cleanup_worker.await
+    {
         tracing::error!(event = "object_storage_cleanup_worker.join_failed", %error);
     }
-    background_job_runtime.join().await;
+    if let Some(background_job_runtime) = background_job_runtime {
+        background_job_runtime.join().await;
+    }
     if let Some(metrics_upkeep_worker) = metrics_upkeep_worker
         && let Err(error) = metrics_upkeep_worker.await
     {
@@ -204,6 +237,15 @@ async fn main() -> anyhow::Result<()> {
     info!(event = "shutdown.complete");
 
     server_result
+}
+
+async fn wait_for_background_exit(
+    runtime: &mut Option<background_jobs::BackgroundJobs>,
+) -> anyhow::Error {
+    match runtime {
+        Some(runtime) => runtime.wait_for_critical_exit().await,
+        None => std::future::pending().await,
+    }
 }
 
 struct ShutdownSignals {
