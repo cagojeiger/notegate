@@ -246,16 +246,14 @@ async fn expired_history_retention_starts_at_physical_delete()
     .await?;
     assert_eq!(retry, (1, Some("unavailable".to_owned()), true));
     assert!(cleanup.mark_expired(upload_id).await?);
-    assert_eq!(cleanup.purge_terminal_history(90, 10).await?, 0);
-
-    sqlx::query(
-        "UPDATE object_storage_objects \
-         SET deleted_at = now() - interval '91 days' WHERE id = $1",
+    let retention_started: bool = sqlx::query_scalar(
+        "SELECT deleted_at > now() - interval '1 minute' \
+         FROM object_storage_objects WHERE id = $1",
     )
     .bind(upload_id)
-    .execute(&db.pool)
+    .fetch_one(&db.pool)
     .await?;
-    assert_eq!(cleanup.purge_terminal_history(90, 10).await?, 1);
+    assert!(retention_started);
 
     db.cleanup().await;
     Ok(())

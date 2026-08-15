@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::periodic_worker;
 
-const PURGE_INTERVAL: Duration = Duration::from_secs(60);
+const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 pub fn spawn(pool: PgPool, shutdown: CancellationToken) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -39,6 +39,9 @@ async fn run_once(pool: &PgPool) {
                 accounts_anonymized = run.accounts_anonymized,
                 api_keys_deleted = run.api_keys_deleted,
                 browser_sessions_deleted = run.browser_sessions_deleted,
+                object_storage_history_deleted = run.object_storage_history_deleted,
+                audit_events_deleted = run.audit_events_deleted,
+                file_change_events_deleted = run.file_change_events_deleted,
                 mcp_invocations_deleted = run.mcp_invocations_deleted,
                 object_deletions_queued = run.object_deletions_queued,
             );

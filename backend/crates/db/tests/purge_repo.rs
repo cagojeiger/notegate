@@ -186,6 +186,151 @@ async fn purge_deletes_expired_mcp_invocations_in_bounded_batches()
     Ok(())
 }
 
+#[tokio::test]
+async fn purge_deletes_expired_event_history_in_bounded_batches()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let user = insert_user_account(&db.pool, "event-purger", "event-purger@example.test").await?;
+    let space_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO spaces (owner_user_id, name) VALUES ($1, 'event-purge-space') RETURNING id",
+    )
+    .bind(user)
+    .fetch_one(&db.pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO audit_events \
+         (created_at, owner_user_id, actor_account_id, source, op_type, resource_type, metadata) \
+         SELECT now() - interval '366 days', $1, $1, 'rest', 'test.expired', 'test', \
+                jsonb_build_object('sequence', value) \
+         FROM generate_series(1, 1001) AS value",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO audit_events \
+         (created_at, owner_user_id, actor_account_id, source, op_type, resource_type) \
+         VALUES (now() - interval '364 days', $1, $1, 'rest', 'test.recent', 'test')",
+    )
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO file_change_events \
+         (created_at, space_id, actor_account_id, op_type, metadata) \
+         SELECT now() - interval '91 days', $1, $2, 'test.expired', \
+                jsonb_build_object('sequence', value) \
+         FROM generate_series(1, 1001) AS value",
+    )
+    .bind(space_id)
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO file_change_events \
+         (created_at, space_id, actor_account_id, op_type) \
+         VALUES (now() - interval '89 days', $1, $2, 'test.recent')",
+    )
+    .bind(space_id)
+    .bind(user)
+    .execute(&db.pool)
+    .await?;
+
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.audit_events_deleted, 1_000);
+    assert_eq!(first.file_change_events_deleted, 1_000);
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(second.audit_events_deleted, 1);
+    assert_eq!(second.file_change_events_deleted, 1);
+
+    let remaining_audit_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type = 'test.recent'")
+            .fetch_one(&db.pool)
+            .await?;
+    let remaining_file_change_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM file_change_events WHERE op_type = 'test.recent'")
+            .fetch_one(&db.pool)
+            .await?;
+    let expired_audit_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE op_type = 'test.expired'")
+            .fetch_one(&db.pool)
+            .await?;
+    let expired_file_change_events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM file_change_events WHERE op_type = 'test.expired'",
+    )
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(remaining_audit_events, 1);
+    assert_eq!(remaining_file_change_events, 1);
+    assert_eq!(expired_audit_events, 0);
+    assert_eq!(expired_file_change_events, 0);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn purge_deletes_terminal_object_history_in_bounded_batches()
+-> Result<(), Box<dyn std::error::Error>> {
+    let _guard = PURGE_TEST_MUTEX.lock().await;
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let object_key_prefix = format!("objects/retention-{}/", Uuid::new_v4());
+
+    sqlx::query(
+        "INSERT INTO object_storage_objects \
+         (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
+         SELECT gen_random_uuid(), $1 || value::text, 'expired.bin', 1, \
+                'application/octet-stream', \
+                CASE WHEN value % 2 = 0 THEN 'expired' ELSE 'deleted' END, \
+                now() - interval '91 days', now() - interval '91 days' \
+         FROM generate_series(1, 1001) AS value",
+    )
+    .bind(&object_key_prefix)
+    .execute(&db.pool)
+    .await?;
+    let recent_object_key = format!("{object_key_prefix}recent");
+    sqlx::query(
+        "INSERT INTO object_storage_objects \
+         (id, object_key, name, declared_byte_len, media_type, state, last_activity_at, deleted_at) \
+         VALUES (gen_random_uuid(), $1, 'recent.bin', 1, 'application/octet-stream', \
+                 'deleted', now() - interval '89 days', now() - interval '89 days')",
+    )
+    .bind(&recent_object_key)
+    .execute(&db.pool)
+    .await?;
+
+    let first = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(first.object_storage_history_deleted, 1_000);
+    let second = PurgeRepo::new(db.pool.clone()).run_once().await?;
+    assert_eq!(second.object_storage_history_deleted, 1);
+
+    let old_remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM object_storage_objects \
+         WHERE object_key LIKE $1 AND object_key <> $2",
+    )
+    .bind(format!("{object_key_prefix}%"))
+    .bind(&recent_object_key)
+    .fetch_one(&db.pool)
+    .await?;
+    let recent_remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM object_storage_objects WHERE object_key = $1")
+            .bind(&recent_object_key)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(old_remaining, 0);
+    assert_eq!(recent_remaining, 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
 /// Seed one live key via the repo, returning its id.
 async fn seed_key(
     repo: &ApiKeyRepo,

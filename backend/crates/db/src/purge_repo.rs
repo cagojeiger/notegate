@@ -18,6 +18,9 @@ const NODE_PURGE_BATCH: i64 = 1_000;
 const ACCOUNT_PURGE_BATCH: i64 = 100;
 const API_KEY_PURGE_BATCH: i64 = 1_000;
 const BROWSER_SESSION_PURGE_BATCH: i64 = 1_000;
+const OBJECT_STORAGE_HISTORY_PURGE_BATCH: i64 = 1_000;
+const AUDIT_EVENT_PURGE_BATCH: i64 = 1_000;
+const FILE_CHANGE_EVENT_PURGE_BATCH: i64 = 1_000;
 const MCP_INVOCATION_PURGE_BATCH: i64 = 1_000;
 
 #[derive(Debug, Clone)]
@@ -52,6 +55,9 @@ impl PurgeRepo {
                 accounts_anonymized: 0,
                 api_keys_deleted: 0,
                 browser_sessions_deleted: 0,
+                object_storage_history_deleted: 0,
+                audit_events_deleted: 0,
+                file_change_events_deleted: 0,
                 mcp_invocations_deleted: 0,
                 object_deletions_queued: 0,
             });
@@ -236,6 +242,69 @@ impl PurgeRepo {
         .map_err(map_sqlx_error)?
         .get("deleted_count");
 
+        let object_storage_history_deleted: i64 = sqlx::query(
+            "WITH due AS ( \
+                 SELECT id FROM object_storage_objects \
+                 WHERE state IN ('expired','deleted') \
+                   AND COALESCE(deleted_at, last_activity_at) \
+                       <= now() - make_interval(days => $1::int) \
+                 ORDER BY COALESCE(deleted_at, last_activity_at), id \
+                 LIMIT $2 \
+                 FOR UPDATE SKIP LOCKED \
+             ), deleted AS ( \
+                 DELETE FROM object_storage_objects o USING due \
+                 WHERE o.id = due.id \
+                 RETURNING o.id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(i32::try_from(limits::OBJECT_STORAGE_HISTORY_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(OBJECT_STORAGE_HISTORY_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
+        let audit_events_deleted: i64 = sqlx::query(
+            "WITH due AS ( \
+                 SELECT id FROM audit_events \
+                 WHERE created_at <= now() - make_interval(days => $1::int) \
+                 ORDER BY created_at, id \
+                 LIMIT $2 \
+             ), deleted AS ( \
+                 DELETE FROM audit_events e USING due \
+                 WHERE e.id = due.id \
+                 RETURNING e.id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(i32::try_from(limits::AUDIT_EVENT_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(AUDIT_EVENT_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
+        let file_change_events_deleted: i64 = sqlx::query(
+            "WITH due AS ( \
+                 SELECT id FROM file_change_events \
+                 WHERE created_at <= now() - make_interval(days => $1::int) \
+                 ORDER BY created_at, id \
+                 LIMIT $2 \
+             ), deleted AS ( \
+                 DELETE FROM file_change_events e USING due \
+                 WHERE e.id = due.id \
+                 RETURNING e.id \
+             ) \
+             SELECT count(*) AS deleted_count FROM deleted",
+        )
+        .bind(i32::try_from(limits::FILE_CHANGE_EVENT_RETENTION_DAYS).unwrap_or(i32::MAX))
+        .bind(FILE_CHANGE_EVENT_PURGE_BATCH)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .get("deleted_count");
+
         let mcp_invocations_deleted: i64 = sqlx::query(
             "WITH due AS ( \
                  SELECT id FROM mcp_invocations \
@@ -264,6 +333,9 @@ impl PurgeRepo {
             accounts_anonymized: accounts_anonymized.max(0) as u64,
             api_keys_deleted: api_keys_deleted.max(0) as u64,
             browser_sessions_deleted: browser_sessions_deleted.max(0) as u64,
+            object_storage_history_deleted: object_storage_history_deleted.max(0) as u64,
+            audit_events_deleted: audit_events_deleted.max(0) as u64,
+            file_change_events_deleted: file_change_events_deleted.max(0) as u64,
             mcp_invocations_deleted: mcp_invocations_deleted.max(0) as u64,
             object_deletions_queued: queued_for_spaces + queued_for_nodes,
         })
@@ -278,6 +350,9 @@ pub struct PurgeRun {
     pub accounts_anonymized: u64,
     pub api_keys_deleted: u64,
     pub browser_sessions_deleted: u64,
+    pub object_storage_history_deleted: u64,
+    pub audit_events_deleted: u64,
+    pub file_change_events_deleted: u64,
     pub mcp_invocations_deleted: u64,
     pub object_deletions_queued: u64,
 }

@@ -432,7 +432,7 @@ object_storage_objects
   created_at/attached_at/delete_requested_at/deleted_at
 ```
 
-`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete transaction은 연결된 object를 즉시 `delete_pending`으로 전환한다. Hard purge의 같은 전환은 이전에 누락된 요청을 보정하는 안전장치다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 90일 뒤 bounded batch로 삭제한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
+`object_storage_objects`는 업로드 연결과 물리 삭제 재시도를 위한 운영 원장이다. Node/Space soft delete transaction은 연결된 object를 즉시 `delete_pending`으로 전환한다. Hard purge의 같은 전환은 이전에 누락된 요청을 보정하는 안전장치다. 원장은 Node/Space purge 뒤에도 남도록 참조 FK가 `ON DELETE SET NULL`이며, `expired`/`deleted` 이력은 cluster-singleton purge가 90일 뒤 bounded batch로 삭제한다. Retention 조회는 terminal state와 `COALESCE(deleted_at, last_activity_at)` 순서의 partial index를 사용한다. `expire_pending`과 `delete_pending`은 S3 삭제 실패를 재시도하는 중간 상태다.
 
 Content FK invariant:
 
