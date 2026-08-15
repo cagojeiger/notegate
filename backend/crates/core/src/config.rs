@@ -95,18 +95,13 @@ impl Default for BackgroundJobsConfig {
 }
 
 /// Components started by this binary instance.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ProcessMode {
+    #[default]
     All,
     Api,
     Worker,
-}
-
-impl Default for ProcessMode {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 impl ProcessMode {
