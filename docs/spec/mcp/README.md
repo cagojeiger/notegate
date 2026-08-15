@@ -30,8 +30,9 @@ run_sequence  ordered command sequence 실행
 ## 버전 확인
 
 - 이 checkout의 source release version은 repository root의 [`VERSION`](../../../VERSION)이 정본이다.
-- 실행 중인 서버 버전은 MCP `initialize` 응답의 `serverInfo.version` 또는 `me.server_version`으로 확인한다.
-- MCP protocol version은 `initialize.protocolVersion`이며 NoteGate release version과 별개다.
+- 최신 MCP client는 `server/discover`의 `supportedVersions`로 지원 protocol을 확인한다. 실행 중인 서버 버전은 응답 `_meta.io.modelcontextprotocol/serverInfo.version` 또는 `me.server_version`으로 확인한다.
+- MCP `2026-07-28` 요청은 `_meta.io.modelcontextprotocol/protocolVersion`을 포함하며, Streamable HTTP에서는 같은 값을 `MCP-Protocol-Version` header에도 보낸다. 이 값은 NoteGate release version과 별개다.
+- 구형 client의 `initialize.protocolVersion`과 `initialize.serverInfo.version`은 `2025-11-25` 이전 protocol을 위한 호환 경로다.
 
 문서/소스와 실행 중인 서버가 다른지 조사할 때는 `VERSION`, `me.server_version`, 현재 client에 노출된 tool 이름을 함께 기록한다. 서버 버전은 최신인데 tool 목록이 다르면 client/connector의 schema cache와 구독 상태를 확인한다.
 
