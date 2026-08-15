@@ -18,6 +18,14 @@ describe("parseDelimitedText", () => {
     });
   });
 
+  it("uses the requested TSV delimiter when fields contain commas and semicolons", () => {
+    expect(parseDelimitedText("tsv", 'name\tpayload\nAda\t"a,b;c"')).toEqual({
+      ok: true,
+      rows: [["name", "payload"], ["Ada", "a,b;c"]],
+      columnCount: 2
+    });
+  });
+
   it("normalizes CRLF while preserving bare carriage returns as data", () => {
     expect(parseDelimitedText("csv", "a,b\r\nc,d\re")).toEqual({
       ok: true,
