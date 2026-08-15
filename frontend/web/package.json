@@ -35,7 +35,7 @@
     "shiki": "^4.4.3",
     "smol-toml": "^1.8.0",
     "yaml": "^2.9.0",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -54,7 +54,7 @@
     "autoprefixer": "^10.5.4",
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "globals": "^17.10.0",
+    "globals": "^17.11.0",
     "jsdom": "^30.0.1",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
