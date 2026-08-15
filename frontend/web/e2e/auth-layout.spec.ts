@@ -29,7 +29,8 @@ for (const viewport of [
     await expect.poll(() => googleMark.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
     const authFontFamily = await authScreen.evaluate((element) => getComputedStyle(element).fontFamily);
     const googleButtonFontFamily = await googleButton.evaluate((element) => getComputedStyle(element).fontFamily);
-    expect(authFontFamily).toContain("LINE Seed Sans KR");
+    expect(authFontFamily).toContain("-apple-system");
+    expect(authFontFamily).not.toContain("LINE Seed Sans KR");
     expect(googleButtonFontFamily).toBe(authFontFamily);
     await expect.poll(() => authScreen.evaluate((element) => getComputedStyle(element).overflowX)).toBe("hidden");
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

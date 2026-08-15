@@ -144,7 +144,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
 
   return (
     <MarkdownOutlineProvider>
-    <div className="flex h-full flex-col overflow-hidden bg-bg text-text">
+    <div className="flex h-full flex-col overflow-hidden bg-bg font-ui text-text">
       <TitleBar
         activeSpace={workbench.activeSpace}
         locationLabel={libraryOpen ? "Spaces" : undefined}

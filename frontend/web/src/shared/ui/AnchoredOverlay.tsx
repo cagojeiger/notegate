@@ -158,7 +158,7 @@ export function AnchoredOverlay({
         role={role}
         aria-label={label}
         tabIndex={-1}
-        className="fixed z-50 outline-none"
+        className="fixed z-50 font-ui outline-none"
         style={position}
       >
         {children}

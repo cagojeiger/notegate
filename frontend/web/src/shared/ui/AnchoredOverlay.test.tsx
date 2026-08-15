@@ -63,6 +63,7 @@ describe("AnchoredOverlay", () => {
     await user.click(trigger);
 
     const action = screen.getByRole("button", { name: "First action" });
+    expect(screen.getByRole("dialog", { name: "Actions" })).toHaveClass("font-ui");
     expect(action).toHaveFocus();
 
     await user.keyboard("{Escape}");

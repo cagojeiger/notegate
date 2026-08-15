@@ -26,7 +26,7 @@ body {
   margin: 0;
   background: var(--ng-bg);
   color: var(--ng-text);
-  font-family: var(--font-ui);
+  font-family: var(--font-reading);
   font-synthesis-weight: none;
 }
 
@@ -118,7 +118,7 @@ button:not(:disabled):active {
   border-radius: 20px;
   background: var(--ng-google-bg);
   color: var(--ng-google-text);
-  font-family: var(--font-ui);
+  font-family: inherit;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
