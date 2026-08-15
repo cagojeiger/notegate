@@ -1,5 +1,8 @@
 # 디자인 원칙
 
+상태: Active
+마지막 검토: 2026-08-15
+
 ## 문서 경계
 
 - 이 문서는 제품의 시각·상호작용 원칙과 사용자에게 쓰는 언어를 정의한다.
@@ -35,10 +38,14 @@
 
 ## 시각 언어
 
-- 색상: `#17212b`와 `#f7f9fb`를 기본 중성 축으로 사용한다. 파란색은 링크, 선택, 포커스와 기본 동작에 사용한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패를 뜻한다.
-- 글꼴: 운영체제 기본 UI 글꼴을 chrome과 본문에 사용하고, 코드·경로·식별자에는 기본 monospace를 사용한다. 웹 폰트는 불러오지 않는다.
-- 간격: 4 px 리듬을 기준으로 control 간격은 8–12 px, component 간격은 16–24 px를 사용한다.
-- 형태: control은 8–10 px, panel은 12–16 px radius를 사용한다. 그림자는 modal과 떠 있는 surface에만 사용한다.
+- 방향: `Compact Workbench + Calm Reader`. 탐색·상태·도구 chrome은 개발 도구처럼 조밀하게, 문서 읽기 영역은 여유롭게 유지한다.
+- 색상: VS Code Workbench의 역할 구분을 따른다. Light는 `#f3f3f3` chrome과 `#ffffff` editor, Dark는 `#181818` chrome과 `#1f1f1f` editor를 기본 중성 축으로 사용한다. 경계·hover·선택 면은 인접한 중성 회색으로 표현하고, 파란색은 링크·포커스·활성 경계와 기본 동작에만 제한한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패를 뜻한다.
+- Workbench 글꼴: title bar, Files/Recent, editor tab, Inspector와 status bar를 포함한 시스템 UI는 self-hosted `LINE Seed Sans KR`을 사용한다. 기본 크기는 13 px, line-height는 20 px다.
+- Files/Recent section label은 대문자 변환이나 별도 자간 없이 title case 13 px Medium으로 표시한다.
+- Reading 글꼴: Markdown과 일반 텍스트 본문은 기존 운영체제 UI stack을 유지한다. Markdown은 기존 16 px/1.7 line-height와 문서 간격을 그대로 유지하고, 코드·경로·식별자는 기존 monospace stack을 사용한다.
+- 간격: 4 px 리듬을 기준으로 desktop chrome은 36 px header, 28 px control, 26 px row, 22 px status bar를 기본으로 한다. 모바일의 toolbar와 독립 control은 44 px를 유지하되, 전체 폭이 하나의 target인 Files/Recent 행은 36 px로 조밀하게 표시한다.
+- 선택 상태: hover, selected, inspected, active 상태가 행의 padding, 높이, 글자 굵기를 바꾸지 않아야 한다. Files/Recent 행은 장식용 side rail 없이 배경만 바꾸고, `aria-current`로 열린 항목을 표현한다.
+- 형태: Workbench의 붙어 있는 control과 row는 4 px, section surface는 6 px radius를 기본으로 한다. Inspector는 중첩 카드 대신 얇은 seam으로 나뉜 flat section을 사용한다. 큰 radius와 그림자는 modal과 떠 있는 surface에만 사용한다.
 - 아이콘: 기능 아이콘은 원칙적으로 16 px Lucide와 1.75 px stroke를 사용한다.
 - 움직임: 짧은 색상·투명도 전환만 사용하고 `prefers-reduced-motion`을 존중한다.
 
@@ -52,6 +59,7 @@
 - icon-only control은 문맥을 포함한 접근성 이름을 가진다.
 - 상태 변경과 비동기 결과는 적절한 live region으로 전달한다.
 - drag가 가능한 항목에는 keyboard와 touch로 사용할 수 있는 대체 동작을 제공한다.
+- desktop의 시각 밀도와 별개로 coarse pointer와 모바일에서는 interactive target을 44 px 이상 유지한다.
 
 구체적인 keyboard, tab, resize와 반응형 동작은 [`docs/ui`](docs/ui/README.md)에만 기록한다.
 
@@ -68,6 +76,16 @@
 
 - React, TypeScript, Tailwind utility와 기존 `--ng-*` CSS custom property 체계를 유지한다.
 - token의 정본은 [`frontend/web/src/design/theme.css`](frontend/web/src/design/theme.css)다.
-- 새 theme system, feature별 raw color, web font 또는 별도 icon dependency를 추가하지 않는다.
+- 기존 Workbench의 정보 구조와 배치(`Activity Rail → Files/Recent → Editor Groups → Details/Outline → Status Bar`)를 유지한다. 좌우 panel resize·폭 저장, 최대 3개 editor group과 mobile overlay 동작도 시각 갱신 때문에 바꾸지 않는다.
+- 새 theme system, feature별 raw color 또는 별도 icon dependency를 추가하지 않는다. 시스템 UI 글꼴은 앱과 함께 제공되는 `LINE Seed Sans KR` 한 종류로 제한하며 외부 font CDN에 의존하지 않는다.
+- Workbench density와 radius는 `theme.css`의 semantic token을 사용하고 Markdown의 typography/spacing을 이 scale에 결합하지 않는다.
+- 시각 변경은 1440×900 desktop과 390×844 mobile에서 light/dark 모두 확인한다.
 - 상세한 상태 소유권, 캐시, preview, recording과 검증 규칙은 [`docs/ui/02-data-and-flows.md`](docs/ui/02-data-and-flows.md)와 [`docs/ui/03-implementation.md`](docs/ui/03-implementation.md)를 따른다.
 - 운영 dashboard의 지표와 label 정책은 [`docs/spec/observability.md`](docs/spec/observability.md)가 소유한다.
+
+## 이번 갱신의 비범위
+
+- native 운영체제 menu chrome을 모방하지 않는다.
+- 승인 시안의 panel 배치나 정보 구성을 NoteGate에 이식하지 않는다. 시안은 typography, density, surface 표현의 기준으로만 사용한다.
+- 시각적 일치를 위해 기존 action, metadata 또는 status 정보를 제거하거나 새 기능을 만들지 않는다.
+- Markdown과 code syntax highlighting의 고유 색상 체계는 이번 Workbench palette 변경에 결합하지 않는다.

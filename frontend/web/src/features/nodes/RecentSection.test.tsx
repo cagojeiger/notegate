@@ -59,9 +59,10 @@ describe("RecentSection", () => {
       page([node("node-1")], true, "next")
     ], true));
 
-    renderRecent();
+    const view = renderRecent();
 
     await waitFor(() => expect(mocks.fetchNextPage).toHaveBeenCalledOnce());
+    expect(view.getByRole("button", { name: /load more/i })).toHaveClass("min-h-workbench-control", "md:min-h-6");
   });
 
   it("does not mount a load-more trigger after the last page", () => {
@@ -97,12 +98,14 @@ describe("RecentSection", () => {
 
     const view = renderRecent();
 
-    expect(view.container.querySelector("section")).toHaveClass("py-1.5", "font-ui");
-    expect(view.container.querySelector("[data-recent-list]")).toHaveClass("mt-0.5");
-    expect(view.container.querySelector("[data-recent-list] > div")).toHaveClass("space-y-0.5");
+    expect(view.container.querySelector("section")).toHaveClass("px-2", "py-1", "font-ui");
+    expect(view.container.querySelector("[data-recent-list]")).not.toHaveClass("mt-0.5");
+    expect(view.container.querySelector("[data-recent-list] > div")).not.toHaveClass("space-y-0.5");
     const recentToggle = view.getByRole("button", { name: "Recent" });
-    expect(recentToggle).toHaveClass("font-ui", "text-xs");
+    expect(recentToggle).toHaveClass("min-h-workbench-control", "md:min-h-6", "font-ui", "text-workbench", "font-medium");
+    expect(recentToggle).not.toHaveClass("uppercase", "tracking-wide", "font-semibold");
     expect(recentToggle.querySelectorAll("svg")).toHaveLength(1);
+    expect(view.container.querySelector("[data-recent-list] [data-node-disclosure-space]")).not.toBeInTheDocument();
   });
 });
 

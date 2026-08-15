@@ -20,7 +20,7 @@ describe("ActivityRail", () => {
 
     const libraryButton = screen.getByRole("button", { name: "Open space library" });
     expect(libraryButton).toHaveAttribute("aria-current", "page");
-    expect(libraryButton.parentElement).toHaveClass("h-12");
+    expect(libraryButton.parentElement).toHaveClass("h-workbench-header");
     expect(screen.getByRole("button", { name: "Daily" })).not.toHaveAttribute("aria-current");
     expect(view.container.querySelectorAll("[data-active-indicator]")).toHaveLength(1);
   });

@@ -20,12 +20,12 @@ export function SettingToggle({
   onChange
 }: SettingToggleProps) {
   return (
-    <div className="flex min-h-8 items-center justify-between gap-3">
+    <div className="flex min-h-workbench-control items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="grid size-6 shrink-0 place-items-center text-muted" aria-hidden="true">
+        <span className="grid size-5 shrink-0 place-items-center text-muted" aria-hidden="true">
           {icon}
         </span>
-        <span className="text-sm font-medium text-text">{label}</span>
+        <span className="font-ui text-workbench font-medium text-text">{label}</span>
         {badge ? <Badge>{badge}</Badge> : null}
       </div>
       <button

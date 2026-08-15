@@ -65,8 +65,9 @@ describe("MobileSpaceBar", () => {
     );
 
     const nav = screen.getByRole("navigation", { name: "Spaces" });
-    expect(nav).toHaveClass("h-[calc(3.5rem+env(safe-area-inset-bottom))]");
+    expect(nav).toHaveClass("h-[calc(var(--ng-workbench-control-size)+1rem+env(safe-area-inset-bottom))]");
     expect(nav).toHaveClass("pb-[calc(0.5rem+env(safe-area-inset-bottom))]");
+    expect(screen.getByRole("button", { name: "Daily" })).toHaveClass("size-workbench-control");
   });
 
   it("marks only the current mobile destination", () => {

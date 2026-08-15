@@ -47,9 +47,23 @@ for (const viewport of [
     }
     const tree = page.getByRole("tree", { name: "Files" });
     await expect(tree).toBeVisible();
+    const treeFontFamily = await tree.evaluate((element) => getComputedStyle(element).fontFamily);
+    const titleFontFamily = await page.locator("header").first().evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(treeFontFamily).toContain("LINE Seed Sans KR");
+    expect(treeFontFamily).toBe(titleFontFamily);
+    if (!viewport.opensOverlay) {
+      const inspectorFontFamily = await page.getByRole("complementary", { name: "Inspector" })
+        .evaluate((element) => getComputedStyle(element).fontFamily);
+      expect(inspectorFontFamily).toBe(titleFontFamily);
+    }
     await expect(page.getByRole("button", { name: "file-0000.bin" })).toBeVisible();
     await expect.poll(() => childRequestCount).toBe(1);
     await expect.poll(() => page.locator("[data-node-row]").count()).toBeLessThan(60);
+    const firstRowBox = await page.locator("[data-node-row]").nth(0).boundingBox();
+    const secondRowBox = await page.locator("[data-node-row]").nth(1).boundingBox();
+    expect(firstRowBox?.height).toBeGreaterThanOrEqual(viewport.opensOverlay ? 36 : 26);
+    if (viewport.opensOverlay) expect(firstRowBox?.height).toBeLessThan(44);
+    expect(secondRowBox?.y).toBeGreaterThanOrEqual((firstRowBox?.y ?? 0) + (firstRowBox?.height ?? 0));
 
     const filesSeparator = page.getByRole("separator", { name: "Resize Files section" });
     const sidebarSeparator = page.getByRole("separator", { name: "Resize Files sidebar" });
@@ -58,7 +72,17 @@ for (const viewport of [
     await filesSeparator.press("ArrowDown");
     await expect(filesSeparator).toHaveAttribute("aria-valuenow", "72");
     const filesSeparatorBox = await filesSeparator.boundingBox();
-    expect(filesSeparatorBox?.height).toBeGreaterThanOrEqual(24);
+    expect(filesSeparatorBox?.height).toBeGreaterThanOrEqual(viewport.opensOverlay ? 44 : 24);
+    if (viewport.opensOverlay) {
+      const filesToggleBox = await page.getByRole("button", { name: "Files" }).boundingBox();
+      const collapseAllBox = await page.getByRole("button", { name: "Collapse all folders" }).boundingBox();
+      const historyBox = await page.getByRole("button", { name: "History" }).boundingBox();
+      expect(filesToggleBox?.height).toBeGreaterThanOrEqual(44);
+      expect(collapseAllBox?.height).toBeGreaterThanOrEqual(44);
+      expect(collapseAllBox?.width).toBeGreaterThanOrEqual(44);
+      expect(historyBox?.height).toBeGreaterThanOrEqual(44);
+      expect(historyBox?.width).toBeGreaterThanOrEqual(44);
+    }
     if (!viewport.opensOverlay) {
       const sidebarBox = await sidebarSeparator.boundingBox();
       expect(sidebarBox?.width).toBeGreaterThanOrEqual(24);

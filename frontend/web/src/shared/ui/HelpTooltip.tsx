@@ -72,7 +72,7 @@ export function HelpTooltip({
     >
       <button
         type="button"
-        className="inline-grid size-6 shrink-0 place-items-center rounded text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45"
+        className="inline-grid size-workbench-control shrink-0 place-items-center rounded text-muted outline-none hover:bg-panel-strong hover:text-text focus-visible:ring-2 focus-visible:ring-primary/45 md:size-6"
         aria-label={label}
         aria-describedby={tooltipId}
         onClick={() => {
@@ -92,7 +92,7 @@ export function HelpTooltip({
         role="tooltip"
         hidden={!open}
         className={[
-          "absolute top-6 z-20 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-panel px-2.5 py-2 text-xs font-normal normal-case leading-5 text-text shadow-lg",
+          "absolute top-workbench-control z-20 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-panel px-2.5 py-2 text-xs font-normal normal-case leading-5 text-text shadow-lg md:top-6",
           align === "end" ? "right-0" : "left-0"
         ].join(" ")}
       >

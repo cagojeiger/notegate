@@ -11,10 +11,10 @@ import type { NodeContextHandler } from "./types";
 export function RecentSection({ activeSpace, openedNodeId, inspectedNodeId, density, open, onToggle, onToggleDensity, onOpenNode, onInspectNode, onNodeContextMenu }: { activeSpace: Space; openedNodeId: string | null; inspectedNodeId: string | null; density: "list" | "compact"; open: boolean; onToggle: () => void; onToggleDensity: () => void; onOpenNode: (node: NodeSummary) => void; onInspectNode: (node: NodeSummary) => void; onNodeContextMenu: NodeContextHandler }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   return (
-    <section className="flex min-h-0 min-w-0 flex-col px-3 py-1.5 font-ui">
+    <section className="flex min-h-0 min-w-0 flex-col px-2 py-1 font-ui">
       <SidebarSectionHeader label="Recent" open={open} onToggle={onToggle} action={{ label: "Toggle recent density", icon: <List size={13} />, onClick: onToggleDensity }} />
       {open ? (
-        <div ref={scrollRef} data-recent-list className="mt-0.5 min-h-0 flex-1 overflow-y-auto">
+        <div ref={scrollRef} data-recent-list className="min-h-0 flex-1 overflow-y-auto">
           <RecentList activeSpace={activeSpace} openedNodeId={openedNodeId} inspectedNodeId={inspectedNodeId} density={density} scrollRef={scrollRef} onOpenNode={onOpenNode} onInspectNode={onInspectNode} onNodeContextMenu={onNodeContextMenu} />
         </div>
       ) : null}
@@ -38,7 +38,7 @@ function RecentList({ activeSpace, openedNodeId, inspectedNodeId, density, scrol
   if (recentQuery.isError) return <EmptyState>Recent is unavailable for this server build.</EmptyState>;
   if (nodes.length === 0) return <div className="text-xs text-muted">No recent items yet.</div>;
   return (
-    <div className="space-y-0.5">
+    <div>
       {nodes.map((node) => (
         <NodeRow
           key={node.id}
@@ -47,6 +47,7 @@ function RecentList({ activeSpace, openedNodeId, inspectedNodeId, density, scrol
           inspected={inspectedNodeId === node.id}
           opened={openedNodeId === node.id}
           meta={density === "list" ? `${node.path} · ${node.updated_at.slice(0, 10)}` : undefined}
+          reserveDisclosureSpace={false}
           onOpenNode={onOpenNode}
           onInspectNode={onInspectNode}
           onNodeContextMenu={onNodeContextMenu}
@@ -85,7 +86,7 @@ function RecentLoadMore({ loaded, isFetching, scrollRef, fetchNextPage }: { load
     <div ref={ref} className="flex justify-center py-1">
       <button
         type="button"
-        className="rounded px-2 py-1 text-xs text-faint hover:bg-[var(--ng-hover)] hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        className="min-h-workbench-control rounded px-2 py-1 text-xs text-faint hover:bg-[var(--ng-hover)] hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:min-h-6"
         disabled={isFetching}
         onClick={fetchNextPage}
       >

@@ -440,6 +440,7 @@ describe("TextPreview", () => {
     const { container } = render(<TextPreview name="notes.txt" content={"Just plain text."} />);
 
     expect(screen.getByText("Just plain text.")).toBeInTheDocument();
+    expect(container.querySelector("pre")).toHaveClass("font-reading");
     expect(container.querySelector("pre.ng-code-fallback")).not.toBeInTheDocument();
   });
 

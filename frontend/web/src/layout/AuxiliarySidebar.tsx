@@ -61,8 +61,8 @@ export function AuxiliarySidebar({
   const metadataEntries = Object.entries(metadata);
 
   return (
-    <aside aria-label="Inspector" className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-panel">
-      <div className="flex h-12 shrink-0 items-end border-b border-seam px-3">
+    <aside aria-label="Inspector" className="flex h-full w-full min-h-0 flex-col border-l border-seam bg-surface font-ui text-workbench">
+      <div className="flex h-workbench-header shrink-0 items-end border-b border-seam px-2">
         <Tabs
           items={[
             { id: "details", label: "Details", controls: `${panelIdPrefix}-details` },
@@ -81,15 +81,15 @@ export function AuxiliarySidebar({
         aria-labelledby={`${panelIdPrefix}-details-tab`}
         tabIndex={0}
         hidden={selectedView !== "details"}
-        className="h-full overflow-y-auto p-3"
+        className="h-full overflow-y-auto"
         data-testid="node-inspector-scroll-region"
       >
-        <div className="divide-y divide-seam rounded-2xl border border-border bg-surface">
-          <section className="p-4">
+        <div className="divide-y divide-seam border-b border-seam bg-surface">
+          <section className="p-3">
             <SectionHeader title={activeNode ? nodeKindLabel(activeNode) : "Details"} />
             {activeNode ? (
               <>
-                <dl className="space-y-2">
+                <dl className="space-y-1.5">
                   <MetaRow label="Name" value={activeNode.name === "/" ? "Space root" : activeNode.name} />
                   <MetaRow label="Path" value={activeNode.path} />
                   <MetaRow label="Kind" value={nodeKindLabel(activeNode)} />
@@ -112,7 +112,7 @@ export function AuxiliarySidebar({
               <p className="text-xs text-muted">{loadingNode ? "Loading details…" : "Choose something from Files to inspect."}</p>
             )}
           </section>
-          <section className="p-4">
+          <section className="p-3">
             <SectionHeader
               title="Metadata"
               actions={<span className="text-xs tabular-nums text-muted">{metadataEntries.length}</span>}
@@ -123,13 +123,13 @@ export function AuxiliarySidebar({
               <p className="text-xs text-muted">No metadata.</p>
             )}
           </section>
-          <section className="p-4">
+          <section className="p-3">
             <SectionHeader
               title="Settings"
               help="Changes apply immediately. A direct lock protects this item and anything inside it; inherited locks must be removed at their source. Search and stored text encryption are independent settings. The space root cannot be locked."
             />
             {activeNode ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <SettingToggle
                   icon={<LockKeyhole size={16} />}
                   label="Lock changes"
@@ -182,7 +182,7 @@ export function AuxiliarySidebar({
               <p className="text-xs text-muted">Choose something from Files to manage its settings.</p>
             )}
           </section>
-          <details className="group p-4">
+          <details className="group p-3">
             <summary className="flex cursor-pointer list-none items-center justify-between outline-none focus-visible:ring-2 focus-visible:ring-primary/45 [&::-webkit-details-marker]:hidden">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted">System details</span>
               <ChevronRight
@@ -191,7 +191,7 @@ export function AuxiliarySidebar({
                 aria-hidden="true"
               />
             </summary>
-            <dl className="mt-3 space-y-2">
+            <dl className="mt-2 space-y-1.5">
               <MetaRow label="Created" value={activeNode ? `${activeNode.created_by.display_name || EMPTY} · ${activeNode.created_at.slice(0, 10)}` : EMPTY} />
               <MetaRow label="Updated" value={activeNode ? `${activeNode.updated_by.display_name || EMPTY} · ${activeNode.updated_at.slice(0, 10)}` : EMPTY} />
               <MetaRow label="Internal ID" value={activeNode?.id ?? EMPTY} />
@@ -226,9 +226,9 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
     <nav
       aria-label="Document outline"
       tabIndex={0}
-      className="max-h-full overflow-y-auto rounded-xl border border-seam bg-surface p-1.5 font-ui outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+      className="max-h-full overflow-y-auto rounded-workbench-surface border border-seam bg-surface p-1 font-ui outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
     >
-      <ul className="relative space-y-0.5 before:pointer-events-none before:absolute before:inset-y-1 before:left-1 before:w-px before:bg-seam">
+      <ul className="relative before:pointer-events-none before:absolute before:inset-y-1 before:left-1 before:w-px before:bg-seam">
         {outline.items.map((item) => {
           const active = item.id === outline.activeItemId;
           return (
@@ -242,8 +242,8 @@ function OutlinePanel({ outline, onNavigate }: { outline: MarkdownOutlineSnapsho
               <button
                 type="button"
                 aria-current={active ? "location" : undefined}
-                className={`flex min-h-8 w-full items-start rounded-lg py-1 pr-1.5 text-left text-sm leading-5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${active ? "bg-[var(--ng-active-surface)] font-semibold text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
-                style={{ paddingInlineStart: `${12 + (item.level - baseLevel) * 10}px` }}
+                className={`flex min-h-workbench-row w-full items-start rounded-workbench py-0.5 pr-1.5 text-left text-workbench transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 ${active ? "bg-[var(--ng-active-surface)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"}`}
+                style={{ paddingInlineStart: `${10 + (item.level - baseLevel) * 9}px` }}
                 onClick={() => {
                   outline.navigate(item.id);
                   onNavigate?.();

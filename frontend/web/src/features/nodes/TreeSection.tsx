@@ -48,7 +48,7 @@ export function TreeSection({
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
   return (
-    <section id="files-section" className="flex min-h-0 min-w-0 flex-col px-3 py-1.5 font-ui">
+    <section id="files-section" className="flex min-h-0 min-w-0 flex-col px-2 py-1 font-ui">
       <SidebarSectionHeader
         label="Files"
         open={open}
@@ -179,7 +179,7 @@ function VirtualizedTree(props: TreeProps & { onTreeNavigationChange: TreeKeyboa
         ref={scrollRef}
         role="tree"
         aria-label="Files"
-        className="mt-0.5 min-h-0 flex-1 overflow-y-auto"
+        className="min-h-0 flex-1 overflow-y-auto"
         onKeyDown={handleTreeKeyDown}
         onFocusCapture={handleTreeFocusCapture}
         onBlurCapture={handleTreeBlurCapture}
@@ -311,10 +311,10 @@ function VirtualTreeRow({
   canWriteActiveSpace: boolean;
 }) {
   if (row.type === "loading") {
-    return <div role="status" className="flex h-8 items-center py-1 text-xs text-muted" style={{ paddingLeft: `${8 + row.depth * 12}px` }}>Loading…</div>;
+    return <div role="status" className="flex h-tree-row items-center text-xs text-muted" style={{ paddingLeft: `${6 + row.depth * 11}px` }}>Loading…</div>;
   }
   if (row.type === "empty") {
-    return <div role="status" className="flex h-8 items-center px-2 py-2 text-xs text-muted">No items yet.</div>;
+    return <div role="status" className="flex h-tree-row items-center px-1.5 text-xs text-muted">No items yet.</div>;
   }
   if (row.type === "load-more") {
     return (
@@ -384,7 +384,7 @@ function LoadMoreRow({
   }, [fetchNextPage, isFetching, scrollRef]);
 
   return (
-    <div ref={ref} role="status" className="flex h-8 items-center py-1 text-xs text-faint" style={{ paddingLeft: `${8 + depth * 14}px` }}>
+    <div ref={ref} role="status" className="flex h-tree-row items-center text-xs text-faint" style={{ paddingLeft: `${6 + depth * 11}px` }}>
       {isFetching ? "Loading…" : `Scroll to load more (${loaded} loaded)`}
     </div>
   );

@@ -40,17 +40,17 @@ export function TitleBar({
   const splitLabel = atMaxGroups ? `Maximum ${MAX_EDITOR_GROUPS} editor groups` : `Split editor (${editorGroupCount}/${MAX_EDITOR_GROUPS})`;
 
   return (
-    <header className="grid h-12 shrink-0 grid-cols-[52px_minmax(0,1fr)_auto] items-center border-b border-seam bg-surface max-md:h-[calc(3rem+env(safe-area-inset-top))] max-md:grid-cols-[minmax(0,1fr)_auto] max-md:px-3 max-md:pt-[env(safe-area-inset-top)]">
+    <header className="grid h-workbench-header shrink-0 grid-cols-[44px_minmax(0,1fr)_auto] items-center border-b border-seam bg-surface font-ui text-workbench max-md:h-[calc(var(--ng-workbench-header-size)+env(safe-area-inset-top))] max-md:grid-cols-[minmax(0,1fr)_auto] max-md:px-2 max-md:pt-[env(safe-area-inset-top)]">
       <div className="grid h-full place-items-center max-md:hidden">
-        <BrandAppIcon size={28} decorative />
+        <BrandAppIcon size={24} decorative />
       </div>
-      <div className="flex min-w-0 items-center gap-2 px-3 max-md:px-0">
-        <BrandAppIcon size={28} className="md:hidden" decorative />
+      <div className="flex min-w-0 items-center gap-1.5 px-2.5 max-md:px-0">
+        <BrandAppIcon size={24} className="md:hidden" decorative />
         <span className="font-semibold tracking-tight">NoteGate</span>
-        {locationLabel || activeSpace ? <span className="truncate text-sm text-muted">/ {locationLabel ?? activeSpace?.name}</span> : null}
+        {locationLabel || activeSpace ? <span className="truncate text-workbench text-muted">/ {locationLabel ?? activeSpace?.name}</span> : null}
       </div>
-      <div className="flex items-center gap-2 pr-3 text-muted max-md:pr-0">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 pr-2 text-muted max-md:pr-0">
+        <div className="flex items-center gap-0.5">
           {showWorkbenchControls ? (
             <>
               <IconButton label="Toggle left sidebar" onClick={onTogglePrimarySidebar} pressed={primarySidebarOpen}><PanelLeft size={16} /></IconButton>

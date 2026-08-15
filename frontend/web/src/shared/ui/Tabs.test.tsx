@@ -69,12 +69,16 @@ describe("Tabs", () => {
     const { rerender } = render(<Tabs items={[...items]} value="outline" onChange={() => undefined} />);
 
     expect(screen.getByRole("tablist")).toHaveClass("mb-5");
-    expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass("px-3", "py-2", "text-sm");
+    expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass("px-2.5", "py-1.5", "text-workbench");
 
     rerender(<Tabs items={[...items]} value="outline" onChange={() => undefined} variant="header" />);
 
     expect(screen.getByRole("tablist")).toHaveClass("h-full", "items-end");
     expect(screen.getByRole("tablist")).not.toHaveClass("mb-5", "border-b");
-    expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass("h-9", "px-2.5", "text-xs");
+    expect(screen.getByRole("tab", { name: "Outline" })).toHaveClass(
+      "h-[calc(var(--ng-workbench-header-size)-4px)]",
+      "px-2",
+      "text-workbench"
+    );
   });
 });

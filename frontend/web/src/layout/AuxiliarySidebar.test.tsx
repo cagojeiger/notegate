@@ -63,7 +63,7 @@ describe("AuxiliarySidebar", () => {
     const inspector = screen.getByRole("complementary", { name: "Inspector" });
     const tablist = within(inspector).getByRole("tablist", { name: "Inspector sections" });
     expect(within(inspector).queryByText("Inspector", { exact: true })).not.toBeInTheDocument();
-    expect(tablist.parentElement).toHaveClass("h-12", "border-b", "border-seam");
+    expect(tablist.parentElement).toHaveClass("h-workbench-header", "border-b", "border-seam");
     expect(tablist).toHaveClass("h-full", "items-end");
     expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
   });
@@ -371,13 +371,16 @@ describe("AuxiliarySidebar", () => {
     expect(outlinePanel).toHaveClass("overflow-hidden", "p-3");
     const outlineNavigation = screen.getByRole("navigation", { name: "Document outline" });
     expect(outlineNavigation).toHaveAttribute("tabindex", "0");
-    expect(outlineNavigation).toHaveClass("max-h-full", "overflow-y-auto", "p-1.5", "font-ui");
+    expect(outlineNavigation).toHaveClass("max-h-full", "overflow-y-auto", "p-1", "font-ui");
     const currentHeading = within(outlineNavigation).getByRole("button", { name: "개요" });
     const otherHeading = within(outlineNavigation).getByRole("button", { name: "세부 사항" });
     expect(currentHeading).toHaveAttribute("aria-current", "location");
-    expect(currentHeading).toHaveClass("items-start", "py-1", "text-sm", "leading-5", "font-semibold");
-    expect(currentHeading).toHaveStyle({ paddingInlineStart: "12px" });
-    expect(otherHeading).toHaveStyle({ paddingInlineStart: "22px" });
+    expect(currentHeading).toHaveClass("items-start", "min-h-workbench-row", "py-0.5", "text-workbench");
+    expect(currentHeading).not.toHaveClass(
+      /^font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$/
+    );
+    expect(currentHeading).toHaveStyle({ paddingInlineStart: "10px" });
+    expect(otherHeading).toHaveStyle({ paddingInlineStart: "19px" });
     expect(currentHeading.querySelector("span")).toHaveClass("line-clamp-2", "break-words");
     expect(currentHeading.closest("li")?.querySelector('[aria-hidden="true"]')).toBeInTheDocument();
     expect(otherHeading).not.toHaveAttribute("aria-current");

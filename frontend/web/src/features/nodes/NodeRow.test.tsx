@@ -12,12 +12,12 @@ const pdf = makeNodeSummary({
 });
 
 describe("NodeRow", () => {
-  it("marks an opened file with the shared current indicator", () => {
+  it("marks an opened file without a decorative side rail", () => {
     const view = render(
       <NodeRow
         node={pdf}
         depth={0}
-        inspected
+        inspected={false}
         opened
         onOpenNode={vi.fn()}
         onInspectNode={vi.fn()}
@@ -26,7 +26,8 @@ describe("NodeRow", () => {
     );
 
     expect(screen.getByRole("button", { name: "report.pdf" })).toHaveAttribute("aria-current", "page");
-    expect(view.container.querySelector("[data-active-indicator]")).toBeInTheDocument();
+    expect(view.container.querySelector("[data-active-indicator]")).not.toBeInTheDocument();
+    expect(view.container.querySelector("[data-node-row]")).toHaveClass("bg-[var(--ng-active-surface)]");
   });
 
   it("keeps an idle file unselected", () => {
@@ -59,11 +60,11 @@ describe("NodeRow", () => {
       />
     );
 
-    expect(view.container.querySelector("[data-node-row]")).toHaveClass("font-ui", "py-1", "text-sm", "leading-5");
-    expect(view.container.querySelector("[data-node-row]")).toHaveStyle({ paddingLeft: "32px" });
+    expect(view.container.querySelector("[data-node-row]")).toHaveClass("min-h-tree-row", "font-ui", "text-workbench");
+    expect(view.container.querySelector("[data-node-row]")).toHaveStyle({ paddingLeft: "28px" });
   });
 
-  it("keeps Recent metadata secondary without changing the primary typeface", () => {
+  it("keeps Recent metadata secondary in the navigation typeface", () => {
     const view = render(
       <NodeRow
         node={pdf}
@@ -71,14 +72,17 @@ describe("NodeRow", () => {
         inspected={false}
         opened={false}
         meta="/report.pdf · 2026-08-05"
+        reserveDisclosureSpace={false}
         onOpenNode={vi.fn()}
         onInspectNode={vi.fn()}
         onNodeContextMenu={vi.fn()}
       />
     );
 
-    expect(view.container.querySelector("[data-node-row]")).toHaveClass("font-ui", "py-0.5", "text-sm");
-    expect(screen.getByText("/report.pdf · 2026-08-05")).toHaveClass("mt-0.5", "text-[11px]", "leading-4");
+    expect(view.container.querySelector("[data-node-row]")).toHaveClass("min-h-tree-row", "font-ui", "text-workbench");
+    expect(view.container.querySelector("[data-node-row]")).not.toHaveClass("py-0.5");
+    expect(view.container.querySelector("[data-node-disclosure-space]")).not.toBeInTheDocument();
+    expect(screen.getByText("/report.pdf · 2026-08-05")).toHaveClass("text-[10px]", "leading-[14px]");
   });
 
   it("highlights the inspected node without marking it as open", () => {
