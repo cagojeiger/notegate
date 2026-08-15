@@ -119,26 +119,6 @@ impl ObjectStorageRepo {
         .map_err(map_sqlx_error)?;
         Ok(result.rows_affected() == 1)
     }
-
-    pub async fn purge_terminal_history(&self, retention_days: i32, limit: i64) -> Result<u64> {
-        let result = sqlx::query(
-            "WITH due AS ( \
-                 SELECT id FROM object_storage_objects \
-                 WHERE state IN ('expired','deleted') \
-                   AND COALESCE(deleted_at, last_activity_at) \
-                       <= now() - make_interval(days => $1) \
-                 ORDER BY COALESCE(deleted_at, last_activity_at), id \
-                 LIMIT $2 \
-             ) \
-             DELETE FROM object_storage_objects f USING due WHERE f.id = due.id",
-        )
-        .bind(retention_days)
-        .bind(limit)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(result.rows_affected())
-    }
 }
 
 pub(crate) async fn queue_space_object_deletions(

@@ -287,15 +287,22 @@ tier0_logical_content_10000_users = 2.5 TiB
 ## Purge limits
 
 ```text
+purge_interval_minutes = 60
 deleted_space_retention_days = 30
 deleted_node_retention_days = 30
 account_deletion_retention_days = 15
 subtree_delete_max_nodes = 1000
 api_key_retention_days = 30
+object_storage_history_retention_days = 90
+audit_event_retention_days = 365
+file_change_event_retention_days = 90
 mcp_invocation_retention_days = 90
 purge_batch_spaces = 100
 purge_batch_nodes = 1000
 purge_batch_accounts = 100
 purge_batch_api_keys = 1000
+purge_batch_object_storage_history = 1000
+purge_batch_audit_events = 1000
+purge_batch_file_change_events = 1000
 purge_batch_mcp_invocations = 1000
 ```

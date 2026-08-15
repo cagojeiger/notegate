@@ -278,9 +278,9 @@ file_change_events
 Retention policy:
 
 ```text
-audit_events: 1 year
-file_change_events: 3 months
+audit_events: 365 days
+file_change_events: 90 days
 mcp_invocations: 90 days
 ```
 
-각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. `mcp_invocations`는 purge worker가 90일을 초과한 행을 bounded batch로 삭제한다. `audit_events`와 `file_change_events`에는 자동 retention enforcement가 없다.
+각 event table은 retention 조회/삭제를 위한 `created_at` index를 둔다. Purge worker는 `audit_events` 365일, `file_change_events`와 `mcp_invocations` 90일을 초과한 행을 테이블별 bounded batch로 삭제한다.

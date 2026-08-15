@@ -15,7 +15,6 @@ const STALE_UPLOAD_SECONDS: i64 = 2 * 60 * 60;
 // A claimed row remains unavailable longer than one bounded S3 delete call.
 const CLAIM_SECONDS: i64 = 30;
 const CLEANUP_BATCH: i64 = 100;
-const HISTORY_RETENTION_DAYS: i32 = 90;
 
 pub fn spawn(pool: PgPool, storage: ObjectStorage, shutdown: CancellationToken) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -58,23 +57,6 @@ pub(super) async fn run_once(
                 object_key = %candidate.object_key,
                 %error,
             );
-        }
-    }
-
-    if shutdown.is_cancelled() {
-        return;
-    }
-
-    match repo
-        .purge_terminal_history(HISTORY_RETENTION_DAYS, CLEANUP_BATCH)
-        .await
-    {
-        Ok(count) if count > 0 => {
-            tracing::info!(event = "object_storage_cleanup.history_purged", count)
-        }
-        Ok(_) => {}
-        Err(error) => {
-            tracing::error!(event = "object_storage_cleanup.history_purge_failed", %error)
         }
     }
 }
