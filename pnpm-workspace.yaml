@@ -1,2 +1,9 @@
 packages:
   - "frontend/*"
+
+auditConfig:
+  ignoreGhsas:
+    # `extract-zip` is only reachable through Lighthouse's development-only
+    # browser tooling. Upstream has no patched release; remove this exception
+    # when Lighthouse CI supports a release that no longer depends on it.
+    - GHSA-jmr9-qjv8-65gv
