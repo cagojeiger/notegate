@@ -32,6 +32,7 @@ make dev-infra
 기본 `NOTEGATE_PROCESS_MODE=all`은 HTTP server와 background job runtime을 함께 실행한다.
 운영에서는 같은 image를 `api`와 `worker` mode로 나눌 수 있다. Worker mode의 HTTP listener는
 `/health`, `/ready`, 활성화된 `/metrics`만 제공한다.
+Process mode는 실행할 component만 선택하며, 세 mode 모두 동일한 전체 runtime 설정을 읽고 검증한다.
 
 ```sh
 cargo run --bin notegate-api
