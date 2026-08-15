@@ -115,8 +115,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level moderate
+      - name: Audit dependencies
+        run: pnpm audit --audit-level moderate
 
       - name: Check theme contrast
         run: pnpm --filter web check:contrast
