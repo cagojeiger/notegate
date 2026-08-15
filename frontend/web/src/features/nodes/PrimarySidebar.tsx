@@ -70,7 +70,7 @@ export function PrimarySidebar({
   };
 
   return (
-    <aside ref={asideRef} onKeyDown={onSidebarKeyDown} className="flex h-full w-full min-h-0 flex-col border-r border-seam bg-panel">
+    <aside ref={asideRef} onKeyDown={onSidebarKeyDown} className="flex h-full w-full min-h-0 flex-col border-r border-seam bg-panel font-ui">
       <SpaceHeader activeSpace={activeSpace} canWriteActiveSpace={canWriteActiveSpace} canManageActiveSpace={canManageActiveSpace} onCreateFolder={onCreateFolder} onCreateText={onCreateText} onRecordAudio={onRecordAudio} onFileSelected={onFileSelected} onRenameSpace={onRenameSpace} onDeleteSpace={onDeleteSpace} />
       {activeSpace ? (
         <PrimarySidebarSections

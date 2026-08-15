@@ -63,8 +63,8 @@ export function ResizeSeparator({
       className={[
         "group absolute z-10 touch-none outline-none",
         vertical
-          ? "inset-y-0 left-1/2 w-6 -translate-x-1/2 cursor-col-resize"
-          : "inset-x-0 top-1/2 h-6 -translate-y-1/2 cursor-row-resize"
+          ? "inset-y-0 left-1/2 w-workbench-control -translate-x-1/2 cursor-col-resize md:w-6"
+          : "inset-x-0 top-1/2 h-workbench-control -translate-y-1/2 cursor-row-resize md:h-6"
       ].join(" ")}
     >
       <span

@@ -14,8 +14,8 @@ export function EditorGroupHeader({ title, icon, navigationActions, qualifiedPat
   }
 
   return (
-    <div data-editor-group-header onContextMenu={onContextMenu} className={`flex h-12 items-center justify-between border-b px-4 max-md:px-2 ${active ? "border-[var(--ng-active-border)] bg-[var(--ng-active-surface)]" : "border-seam"}`}>
-      <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold">
+    <div data-editor-group-header onContextMenu={onContextMenu} className={`flex h-workbench-header items-center justify-between border-b px-2.5 font-ui text-workbench max-md:px-2 ${active ? "border-[var(--ng-active-border)] bg-[var(--ng-active-surface)]" : "border-seam"}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 font-medium">
         {navigationActions ? <div className="flex shrink-0 items-center gap-1">{navigationActions}</div> : null}
         {icon ? <span className="shrink-0 max-md:hidden">{icon}</span> : null}
         <span className="min-w-0 truncate">{title}</span>

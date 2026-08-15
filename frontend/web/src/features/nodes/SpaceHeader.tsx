@@ -10,9 +10,9 @@ export function SpaceHeader({ activeSpace, canWriteActiveSpace, canManageActiveS
   const [manageOpen, setManageOpen] = useState(false);
   const canRefresh = !!activeSpace;
   return (
-    <div className="relative flex h-12 items-center justify-between border-b border-seam px-3">
+    <div className="relative flex h-workbench-header items-center justify-between border-b border-seam px-2 font-ui text-workbench">
       <div className="min-w-0">
-        <div className="truncate text-sm font-semibold">{activeSpace?.name ?? "No space"}</div>
+        <div className="truncate text-workbench font-semibold">{activeSpace?.name ?? "No space"}</div>
         {activeSpace ? <div className="text-[10px] uppercase tracking-wide text-faint">active space</div> : null}
       </div>
       <div className="flex items-center gap-1">
@@ -50,7 +50,7 @@ function CreateMenu({ onCreateFolder, onCreateText, onRecordAudio, onFileSelecte
   return (
     <>
       <MenuBackdrop onClose={onClose} />
-      <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
+      <Card className="absolute right-2 top-[calc(var(--ng-workbench-header-size)-1px)] z-20 w-44 p-1 text-workbench shadow-[var(--ng-focus-shadow)]" padding="none">
         <MenuButton onClick={() => run(onCreateFolder)}><FolderPlus size={14} /> New folder</MenuButton>
         <MenuButton onClick={() => run(onCreateText)}><FilePlus size={14} /> New document</MenuButton>
         <MenuButton onClick={() => run(onRecordAudio)}><Mic size={14} /> Record audio</MenuButton>
@@ -80,7 +80,7 @@ function SpaceMenu({ onRenameSpace, onDeleteSpace, onClose }: { onRenameSpace: (
   return (
     <>
       <MenuBackdrop onClose={onClose} />
-      <Card className="absolute right-3 top-11 z-20 w-44 p-1 text-sm shadow-[var(--ng-focus-shadow)]" padding="none">
+      <Card className="absolute right-2 top-[calc(var(--ng-workbench-header-size)-1px)] z-20 w-44 p-1 text-workbench shadow-[var(--ng-focus-shadow)]" padding="none">
         <MenuButton onClick={() => run(onRenameSpace)}><Pencil size={14} /> Rename space</MenuButton>
         <MenuButton danger onClick={() => run(onDeleteSpace)}><Trash2 size={14} /> Delete space</MenuButton>
       </Card>

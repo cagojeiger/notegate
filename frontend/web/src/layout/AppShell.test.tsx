@@ -241,6 +241,7 @@ describe("AppShell", () => {
 
     const view = render(<AppShell me={me("user")} onSignOut={vi.fn()} />);
 
+    expect(view.container.firstElementChild).toHaveClass("font-ui");
     expect(view.container.querySelector("main")).not.toHaveClass("border-y", "border-seam");
   });
 

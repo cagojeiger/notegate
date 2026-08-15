@@ -13,6 +13,7 @@ export function NodeRow({
   opened,
   expanded,
   meta,
+  reserveDisclosureSpace = true,
   dropTarget,
   onToggleFolder,
   onInspectNode,
@@ -29,6 +30,7 @@ export function NodeRow({
   opened: boolean;
   expanded?: boolean;
   meta?: string;
+  reserveDisclosureSpace?: boolean;
   dropTarget?: boolean;
   onToggleFolder?: (nodeId: string) => void;
   onInspectNode: (node: NodeSummary) => void;
@@ -86,21 +88,24 @@ export function NodeRow({
       onTouchMove={clearLongPress}
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
-      className={`group relative flex w-full items-center gap-1 rounded-[9px] pr-2 font-ui text-sm leading-5 transition active:bg-[var(--ng-selection)] active:text-text ${meta ? "py-0.5" : "py-1"} ${inspected ? "bg-[var(--ng-selection)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
-      style={{ paddingLeft: `${8 + depth * 12}px` }}
+      className={`group relative flex min-h-tree-row w-full items-center gap-1 rounded-workbench pr-1.5 font-ui text-workbench transition active:bg-[var(--ng-selection)] active:text-text ${inspected ? "bg-[var(--ng-selection)] text-text" : opened ? "bg-[var(--ng-active-surface)] text-text" : "text-muted hover:bg-[var(--ng-hover)] hover:text-text"} ${dropTarget ? "ring-1 ring-inset ring-primary bg-[var(--ng-selection)] text-text" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+      style={{ paddingLeft: `${6 + depth * 11}px` }}
       onContextMenu={(event) => { event.stopPropagation(); onNodeContextMenu(node, event); }}
     >
-      {opened ? <span data-active-indicator className="absolute bottom-1 left-0 top-1 w-[3px] rounded-r-full bg-primary" aria-hidden="true" /> : null}
-      {node.kind === "folder" ? <button aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center" onClick={handleToggleFolder}><ChevronRight size={13} className={expanded ? "rotate-90 transition" : "transition"} /></button> : <span className="size-6 shrink-0" />}
+      {reserveDisclosureSpace ? (
+        node.kind === "folder"
+          ? <button data-node-disclosure aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`} className="grid size-6 shrink-0 place-items-center max-md:size-tree-row" onClick={handleToggleFolder}><ChevronRight size={12} className={expanded ? "rotate-90 transition" : "transition"} /></button>
+          : <span data-node-disclosure-space className="size-6 shrink-0 max-md:size-tree-row" />
+      ) : null}
       <button
         data-node-open
         aria-current={opened ? "page" : undefined}
         aria-describedby={node.effective_write_locked ? lockDescriptionId : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-primary/50"
+        className="flex min-w-0 flex-1 self-stretch items-center gap-1.5 text-left outline-none focus-visible:rounded-workbench focus-visible:ring-2 focus-visible:ring-primary/50"
         onClick={handleOpen}
       >
         <span className="relative grid size-4 shrink-0 place-items-center">
-          <Icon size={15} data-node-kind-icon />
+          <Icon size={14} data-node-kind-icon />
           {node.effective_write_locked ? (
             <span
               data-node-lock-indicator
@@ -114,7 +119,7 @@ export function NodeRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate">{node.name}</span>
-          {meta ? <span className="mt-0.5 block truncate text-[11px] leading-4 text-faint">{meta}</span> : null}
+          {meta ? <span className="block truncate text-[10px] leading-[14px] text-faint">{meta}</span> : null}
         </span>
       </button>
       {node.effective_write_locked ? (

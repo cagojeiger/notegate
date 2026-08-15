@@ -26,6 +26,7 @@ for (const [themeName, theme] of Object.entries(themes)) {
     }
   }
   check(themeName, "--ng-primary-contrast", "--ng-primary", theme["--ng-primary-contrast"], theme["--ng-primary"], 4.5);
+  check(themeName, "--ng-text", "--ng-editor-selection", theme["--ng-text"], theme["--ng-editor-selection"], 4.5);
   check(themeName, "--ng-border-strong", "--ng-surface", theme["--ng-border-strong"], theme["--ng-surface"], 3);
   check(themeName, "--ng-google-text", "--ng-google-bg", theme["--ng-google-text"], theme["--ng-google-bg"], 4.5);
   check(themeName, "--ng-google-text", "--ng-google-hover", theme["--ng-google-text"], theme["--ng-google-hover"], 4.5);

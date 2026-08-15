@@ -57,6 +57,13 @@ test("marks the final outline row current after navigating to the document botto
 
   await page.getByRole("button", { name: markdownNode.name }).first().click();
   await expect(page.getByRole("heading", { name: "Opening" })).toBeVisible();
+  const readingTypography = await page.locator(".markdown").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight };
+  });
+  expect(readingTypography).toMatchObject({ fontSize: "16px", lineHeight: "27.2px" });
+  expect(readingTypography.fontFamily).toContain("-apple-system");
+  expect(readingTypography.fontFamily).not.toContain("LINE Seed Sans KR");
 
   await page.getByRole("tab", { name: "Outline" }).click();
   const outline = page.getByRole("navigation", { name: "Document outline" });

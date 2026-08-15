@@ -71,8 +71,15 @@ for (const viewport of [
     if (viewport.mobile) {
       const header = page.locator("[data-editor-group-header]");
       const copyPath = page.getByRole("button", { name: "Copy path" });
+      const tableView = page.getByRole("button", { name: "Table", exact: true });
+      const sourceView = page.getByRole("button", { name: "Source", exact: true });
       await expect.poll(() => header.evaluate((element) => Math.round(element.getBoundingClientRect().height))).toBe(48);
       await expect.poll(() => copyPath.evaluate((element) => Math.floor(element.getBoundingClientRect().width))).toBeGreaterThanOrEqual(24);
+      for (const control of [tableView, sourceView]) {
+        const box = await control.boundingBox();
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+      }
 
       const moreActions = page.getByRole("button", { name: "More actions" });
       await moreActions.click();

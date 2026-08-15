@@ -11,6 +11,8 @@ describe("HelpTooltip", () => {
 
     const trigger = screen.getByRole("button", { name: "About search" });
     const tooltip = screen.getByRole("tooltip", { hidden: true });
+    expect(trigger).toHaveClass("size-workbench-control", "md:size-6");
+    expect(tooltip).toHaveClass("top-workbench-control", "md:top-6");
     expect(tooltip).not.toBeVisible();
 
     await user.hover(trigger);

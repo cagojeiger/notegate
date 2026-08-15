@@ -23,7 +23,22 @@ export default {
       },
       fontFamily: {
         ui: "var(--font-ui)",
+        reading: "var(--font-reading)",
         mono: "var(--font-mono)"
+      },
+      fontSize: {
+        workbench: ["var(--ng-workbench-font-size)", { lineHeight: "var(--ng-workbench-line-height)" }]
+      },
+      spacing: {
+        "workbench-header": "var(--ng-workbench-header-size)",
+        "workbench-control": "var(--ng-workbench-control-size)",
+        "workbench-row": "var(--ng-workbench-row-size)",
+        "tree-row": "var(--ng-tree-row-size)",
+        "workbench-status": "var(--ng-workbench-status-size)"
+      },
+      borderRadius: {
+        workbench: "var(--ng-workbench-radius)",
+        "workbench-surface": "var(--ng-workbench-surface-radius)"
       }
     }
   },

@@ -23,6 +23,7 @@ describe("ResizeSeparator", () => {
 
     const separator = screen.getByRole("separator", { name: "Resize Files section" });
     expect(separator).toHaveAttribute("aria-valuenow", "67");
+    expect(separator).toHaveClass("h-workbench-control", "md:h-6");
     await separator.focus();
     await user.keyboard("{ArrowUp}{ArrowDown}{Home}{End}");
 
@@ -49,6 +50,7 @@ describe("ResizeSeparator", () => {
     );
 
     const separator = screen.getByRole("separator", { name: "Resize Files sidebar" });
+    expect(separator).toHaveClass("w-workbench-control", "md:w-6");
     await separator.focus();
     await user.keyboard("{ArrowLeft}{ArrowRight}");
 

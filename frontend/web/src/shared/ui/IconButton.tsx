@@ -23,7 +23,9 @@ export function IconButton({
   size = "md",
   children
 }: IconButtonProps) {
-  const sizeClass = size === "sm" ? "size-7 rounded-lg" : "size-8 rounded-[10px]";
+  const sizeClass = size === "sm"
+    ? "size-workbench-control rounded-workbench"
+    : "size-workbench-control rounded-workbench-surface";
   const active = pressed === true || expanded === true;
   return (
     <button

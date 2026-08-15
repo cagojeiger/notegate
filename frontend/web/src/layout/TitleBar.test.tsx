@@ -68,7 +68,7 @@ describe("TitleBar", () => {
   it("accounts for mobile top safe area", () => {
     renderTitleBar();
 
-    expect(document.querySelector("header")).toHaveClass("max-md:h-[calc(3rem+env(safe-area-inset-top))]");
+    expect(document.querySelector("header")).toHaveClass("max-md:h-[calc(var(--ng-workbench-header-size)+env(safe-area-inset-top))]");
     expect(document.querySelector("header")).toHaveClass("max-md:pt-[env(safe-area-inset-top)]");
   });
 
@@ -76,7 +76,7 @@ describe("TitleBar", () => {
     renderTitleBar();
 
     expect(document.querySelector("header")).toHaveClass(
-      "grid-cols-[52px_minmax(0,1fr)_auto]"
+      "grid-cols-[44px_minmax(0,1fr)_auto]"
     );
   });
 });

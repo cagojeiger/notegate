@@ -2,10 +2,12 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/rea
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
+import { useIsMobile } from "../../shared/hooks/useMediaQuery";
 import { findAdjacentNodeRowIndex, type TreeRow } from "./treeProjection";
 import type { TreeKeyboardNavigationRegistrar } from "./types";
 
-const TREE_ROW_SIZE = 32;
+const TREE_ROW_STRIDE = 28;
+const MOBILE_TREE_ROW_STRIDE = 38;
 const TREE_OVERSCAN = 8;
 
 export function useVirtualTreeNavigation({
@@ -19,6 +21,8 @@ export function useVirtualTreeNavigation({
   scrollRef: RefObject<HTMLDivElement | null>;
   onTreeNavigationChange: TreeKeyboardNavigationRegistrar;
 }) {
+  const isMobile = useIsMobile();
+  const rowStride = isMobile ? MOBILE_TREE_ROW_STRIDE : TREE_ROW_STRIDE;
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [pendingFocusNodeId, setPendingFocusNodeId] = useState<string | null>(null);
   const getItemKey = useCallback(
@@ -41,11 +45,14 @@ export function useVirtualTreeNavigation({
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => TREE_ROW_SIZE,
+    estimateSize: () => rowStride,
     getItemKey,
     overscan: TREE_OVERSCAN,
     rangeExtractor
   });
+  useLayoutEffect(() => {
+    rowVirtualizer.measure();
+  }, [rowStride, rowVirtualizer]);
   const virtualItems = rowVirtualizer.getVirtualItems();
   const requestNodeFocus = useCallback((nodeId: string, index: number) => {
     setPendingFocusNodeId(nodeId);

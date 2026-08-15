@@ -55,8 +55,8 @@ describe("TreeSection", () => {
     const view = renderTree(new Set());
 
     await waitFor(() => expect(view.getByRole("button", { name: file.name })).toBeTruthy());
-    expect(view.container.querySelector("#files-section")).toHaveClass("py-1.5");
-    expect(view.getByRole("tree", { name: "Files" })).toHaveClass("mt-0.5");
+    expect(view.container.querySelector("#files-section")).toHaveClass("px-2", "py-1", "font-ui");
+    expect(view.getByRole("tree", { name: "Files" })).not.toHaveClass("mt-0.5");
     expect(view.getByRole("button", { name: "Files" }).querySelectorAll("svg")).toHaveLength(1);
   });
 

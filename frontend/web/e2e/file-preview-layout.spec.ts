@@ -117,6 +117,9 @@ test("mobile Inspector details remain scrollable on a short viewport", async ({ 
 
   const scrollRegion = page.getByTestId("node-inspector-scroll-region");
   await expect(scrollRegion).toBeVisible();
+  const settingsHelpBox = await page.getByRole("button", { name: "About Settings" }).boundingBox();
+  expect(settingsHelpBox?.height).toBeGreaterThanOrEqual(44);
+  expect(settingsHelpBox?.width).toBeGreaterThanOrEqual(44);
   await expect.poll(
     async () => scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)
   ).toBe(true);

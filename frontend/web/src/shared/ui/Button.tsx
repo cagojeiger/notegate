@@ -19,7 +19,11 @@ export function Button({
   variant?: ButtonVariant;
   size?: ButtonSize;
 }) {
-  const sizeClass = size === "xs" ? "px-2 py-1 text-xs" : size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-2 text-sm";
+  const sizeClass = size === "xs"
+    ? "min-h-workbench-control px-2 text-xs md:min-h-6"
+    : size === "sm"
+      ? "min-h-workbench-control px-2 text-xs"
+      : "min-h-workbench-control px-2.5 text-workbench";
   const variantClass = {
     primary: "bg-primary text-primary-contrast shadow-[var(--ng-inset-shadow)] hover:bg-[var(--ng-primary-hover)]",
     secondary: "border border-border-strong bg-surface text-muted hover:bg-[var(--ng-hover)] hover:text-text",
@@ -31,7 +35,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-[10px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center gap-1.5 rounded-workbench-surface font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-primary/45 disabled:cursor-not-allowed disabled:opacity-50",
         sizeClass,
         variantClass,
         className
