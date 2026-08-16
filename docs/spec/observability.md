@@ -144,6 +144,9 @@ notegate_reconciliation_runs_total
 notegate_reconciliation_duration_seconds
   labels: kind, outcome
 
+notegate_reconciliation_last_completed_timestamp_seconds
+  labels: kind
+
 notegate_reconciliation_last_success_timestamp_seconds
   labels: kind
 ```
@@ -154,13 +157,14 @@ notegate_reconciliation_last_success_timestamp_seconds
   `lock_held`, `lock_error` 중 하나다.
 - 실행 시간은 advisory lock을 획득한 결과에만 기록한다.
 - ID, payload, 파일 이름, 문서 본문, 오류 문구는 metric label로 사용하지 않는다.
-- `active`는 process-local gauge다. Fleet 상태는 `sum by (kind)`으로 집계하며 advisory lock이 정상일 때 값은 `0` 또는 `1`이다.
-- `runs_total`은 `sum by (kind, outcome)`으로 집계한다.
-- `duration_seconds` histogram은 `kind`와 `outcome` 기준으로 bucket, count, sum을 합산한다.
-- `last_success_timestamp_seconds`는 `max by (kind)`으로 집계한다.
+- `active`는 process-local gauge이며 등록 시 kind별 `0` series를 만든다. Fleet 상태는 `sum by (kind)`으로 집계하며 advisory lock이 정상일 때 값은 `0` 또는 `1`이다.
+- `runs_total`은 process-local counter다. Fleet 실행 수는 `sum by (kind)`으로 replica별 `increase`를 합산한다. `max`는 실행 수를 누락하므로 사용하지 않는다.
+- `duration_seconds`는 process-local histogram이다. Fleet percentile은 먼저 `sum by (kind, le)`로 replica별 bucket 증가량을 합산한 뒤 `histogram_quantile`을 적용한다. Replica별 percentile의 평균이나 최댓값을 사용하지 않는다.
+- `last_completed_timestamp_seconds`는 lock을 획득한 실행이 성공, 실패, timeout, panic 또는 취소로 끝날 때 갱신한다. Fleet의 최신 완료 시각은 `max by (kind)`으로 집계한다.
+- `last_success_timestamp_seconds`는 성공한 실행에만 갱신하며 `max by (kind)`으로 집계한다.
 - `lock_held`는 다른 replica가 같은 kind를 실행 중임을 뜻하므로 다중 replica 환경에서 정상적으로 발생할 수 있다. 동일 kind의 `active` 합계가 `1`을 초과하면 단일 실행 불변식 위반이다.
 - `ContinueAfter`를 반환한 bounded pass도 `succeeded`다. 마지막 완전 수렴 여부는 업무별 backlog 또는 freshness metric으로 판단한다.
-- Last-success gauge는 process-local이다. Pod 교체를 포함하는 fleet 조회는 reconciliation interval보다 긴 범위의 `max_over_time`을 사용한다.
+- 완료 시각 gauge는 process-local이다. Pod 교체를 포함하는 fleet 조회는 reconciliation interval보다 긴 범위의 `max_over_time`을 사용한다.
 
 ## Search metrics
 

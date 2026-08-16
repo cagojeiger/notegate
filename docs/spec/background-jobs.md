@@ -195,6 +195,7 @@ notegate_background_job_duration_seconds{kind}
 notegate_reconciliation_active{kind}
 notegate_reconciliation_runs_total{kind,outcome}
 notegate_reconciliation_duration_seconds{kind,outcome}
+notegate_reconciliation_last_completed_timestamp_seconds{kind}
 notegate_reconciliation_last_success_timestamp_seconds{kind}
 ```
 
