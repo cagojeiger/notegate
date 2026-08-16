@@ -93,7 +93,7 @@ fn advisory_lock_key(kind: &str) -> i64 {
 mod tests {
     use std::time::Duration;
 
-    use crate::{ReconciliationContext, ReconciliationFuture};
+    use crate::{ReconciliationContext, ReconciliationDirective, ReconciliationFuture};
 
     use super::*;
 
@@ -106,7 +106,7 @@ mod tests {
             &'a self,
             _context: &'a ReconciliationContext,
         ) -> ReconciliationFuture<'a> {
-            Box::pin(async { Ok(()) })
+            Box::pin(async { Ok(ReconciliationDirective::Complete) })
         }
     }
 

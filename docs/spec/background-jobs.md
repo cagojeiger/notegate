@@ -142,7 +142,7 @@ background_job_attempts
 - Lease recovery와 retention 정리는 consumer loop와 독립적인 범용 reconciliation runtime이 수행한다.
 - 모든 `all` 또는 `worker` mode replica가 같은 reconciler를 등록한다. 각 kind는 PostgreSQL session advisory lock으로 같은 database에서 동시에 하나만 실행된다.
 - Advisory lock은 handler가 공유 pool을 기다리는 동안 pool slot을 점유하지 않도록 별도 session을 사용한다. 한 process에서 동시에 실행되는 reconciler kind 수만큼 database 연결이 공유 pool 밖에서 추가될 수 있다.
-- Lease recovery는 60초, retention 정리는 1시간의 고정 주기로 실행한다. 실패는 다음 고정 주기에서 현재 상태를 다시 읽어 수렴한다.
+- Lease recovery는 60초, retention 정리는 1시간의 고정 주기로 실행한다. 각 실행은 제한된 시간 동안 batch를 처리하고 backlog가 남으면 lock을 해제한 뒤 1초 후 다시 선점한다. 실패는 다음 고정 주기에서 현재 상태를 다시 읽어 수렴한다.
 - Reconciler 구현은 반복 실행해도 같은 현재 상태로 수렴해야 한다. Runtime은 동일 kind의 동시 실행을 막지만 exactly-once 실행은 보장하지 않는다.
 - Queue consumer 또는 reconciliation runtime이 shutdown 신호 없이 종료되면 해당 process도 오류로 종료한다. Best-effort metadata write-behind와 metrics upkeep은 실패를 기록하되 process를 종료하지 않는다.
 

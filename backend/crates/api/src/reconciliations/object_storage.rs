@@ -3,8 +3,8 @@ use std::time::Duration;
 use notegate_core::Result as CoreResult;
 use notegate_db::{CleanupCandidate, ObjectStorageRepo, PgPool};
 use notegate_reconciliation::{
-    Reconciler, ReconciliationContext, ReconciliationError, ReconciliationFailure,
-    ReconciliationFuture, ReconciliationSchedule,
+    Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationError,
+    ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
 };
 
 use crate::object_storage::ObjectStorage;
@@ -41,7 +41,8 @@ impl Reconciler for ObjectStorageCleanupReconciler {
         Box::pin(async move {
             run_once(&self.repo, &self.storage)
                 .await
-                .map_err(|error| Box::new(error) as ReconciliationFailure)
+                .map_err(|error| Box::new(error) as ReconciliationFailure)?;
+            Ok(ReconciliationDirective::Complete)
         })
     }
 }

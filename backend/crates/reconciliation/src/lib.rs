@@ -15,8 +15,17 @@ pub use registry::ReconciliationRegistry;
 pub use runtime::ReconciliationRuntime;
 
 pub type ReconciliationFailure = Box<dyn Error + Send + Sync>;
-pub type ReconciliationResult = Result<(), ReconciliationFailure>;
+pub type ReconciliationResult = Result<ReconciliationDirective, ReconciliationFailure>;
 pub type ReconciliationFuture<'a> = Pin<Box<dyn Future<Output = ReconciliationResult> + Send + 'a>>;
+
+/// Scheduling feedback from one successful reconciliation run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconciliationDirective {
+    /// Resume the reconciler's registered fixed schedule.
+    Complete,
+    /// Run this kind again after a shorter delay because bounded work remains.
+    ContinueAfter(Duration),
+}
 
 /// One idempotent convergence operation registered with the runtime.
 ///

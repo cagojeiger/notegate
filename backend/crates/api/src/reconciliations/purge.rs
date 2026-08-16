@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use notegate_db::{PgPool, PurgeRepo};
 use notegate_reconciliation::{
-    Reconciler, ReconciliationContext, ReconciliationError, ReconciliationFailure,
-    ReconciliationFuture, ReconciliationSchedule,
+    Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationError,
+    ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
 };
 
 const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -48,7 +48,7 @@ impl Reconciler for PurgeReconciler {
                 mcp_invocations_deleted = run.mcp_invocations_deleted,
                 object_deletions_queued = run.object_deletions_queued,
             );
-            Ok(())
+            Ok(ReconciliationDirective::Complete)
         })
     }
 }

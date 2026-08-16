@@ -5,11 +5,13 @@ NoteGate의 주기적인 전역 수렴 작업은 `notegate-reconciliation` runti
 ## 계약
 
 - `Reconciler::KIND`와 구현 타입은 compile time에 결합된다.
-- 각 kind는 고정 주기와 실행 timeout을 가진다.
+- 각 kind는 고정 주기와 실행 timeout을 가진다. 한 번의 제한된 실행으로 backlog를 비우지 못한 handler는 성공 결과와 함께 짧은 후속 실행 간격을 요청할 수 있다.
 - 모든 `all` 또는 `worker` process가 같은 kind를 등록한다.
 - PostgreSQL session advisory lock으로 같은 database에서 동일 kind가 동시에 하나만 실행된다.
+- Session advisory lock은 직접 PostgreSQL 연결 또는 PgBouncer session pooling에서만 사용할 수 있다. Transaction pooling은 lock 획득과 해제가 서로 다른 server session에서 실행될 수 있으므로 지원하지 않는다.
 - Advisory lock은 handler용 공유 pool과 분리된 session을 사용하므로 동시에 실행되는 kind 수만큼 추가 database 연결을 사용할 수 있다.
-- 실패, timeout 또는 panic은 다음 고정 주기의 실행을 막지 않는다.
+- 후속 실행 요청도 lock을 먼저 해제한 뒤 다시 선점한다. 다른 process의 동일 kind 실행을 막은 채 대기하지 않는다.
+- 실패, timeout 또는 panic은 다음 고정 주기의 실행을 막지 않으며 짧은 후속 실행을 자동 요청하지 않는다.
 - 구현은 현재 원본을 다시 읽고 같은 작업을 반복해도 같은 상태로 수렴해야 한다.
 - Runtime은 exactly-once 실행과 업무 transaction을 보장하지 않는다.
 
@@ -21,7 +23,9 @@ ReconciliationRegistry
   └─ object_storage.cleanup
          │
          ▼
-fixed lane ── advisory lock ── application adapter ── DB/service operation
+scheduled lane ── advisory lock ── application adapter ── DB/service operation
+       ▲                                                │
+       └──────── optional bounded continuation ─────────┘
 ```
 
 ## 코드 경계
@@ -52,4 +56,4 @@ notegate_reconciliation_duration_seconds{kind,outcome}
 notegate_reconciliation_last_success_timestamp_seconds{kind}
 ```
 
-로그와 metric label에는 node ID, Space ID, payload 또는 오류 본문을 넣지 않는다.
+Metric label에는 node ID, Space ID, payload 또는 오류 본문을 넣지 않는다. 구조화 로그는 진단에 필요한 제한된 오류 정보를 기록할 수 있지만 문서 본문이나 job payload는 기록하지 않는다.

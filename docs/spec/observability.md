@@ -122,6 +122,29 @@ Metric labels must be bounded and must not contain:
 New metrics must define their label domains in this document before implementation.
 Unbounded diagnostic values belong in structured logs or traces, not Prometheus labels.
 
+## Reconciliation 메트릭
+
+```text
+notegate_reconciliation_active
+  labels: kind
+
+notegate_reconciliation_runs_total
+  labels: kind, outcome
+
+notegate_reconciliation_duration_seconds
+  labels: kind, outcome
+
+notegate_reconciliation_last_success_timestamp_seconds
+  labels: kind
+```
+
+- `kind`는 `system.purge`, `object_storage.cleanup`,
+  `background_jobs.lease_recovery`, `background_jobs.history_retention` 중 하나다.
+- `outcome`은 `succeeded`, `failed`, `timed_out`, `panicked`, `cancelled`,
+  `lock_held`, `lock_error` 중 하나다.
+- 실행 시간은 advisory lock을 획득한 결과에만 기록한다.
+- ID, payload, 파일 이름, 문서 본문, 오류 문구는 metric label로 사용하지 않는다.
+
 ## Search metrics
 
 Search metrics are recorded only when `NOTEGATE_METRICS_ENABLED=true`. Disabled

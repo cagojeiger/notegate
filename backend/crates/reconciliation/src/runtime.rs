@@ -11,7 +11,10 @@ use tracing::Instrument as _;
 use uuid::Uuid;
 
 use crate::registry::RegisteredReconciler;
-use crate::{ErasedReconciler, ReconciliationContext, ReconciliationError, ReconciliationRegistry};
+use crate::{
+    ErasedReconciler, ReconciliationContext, ReconciliationDirective, ReconciliationError,
+    ReconciliationRegistry,
+};
 
 const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(10);
 const LOCK_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -70,7 +73,11 @@ where
             biased;
             () = shutdown.cancelled() => return,
             _ = ticker.tick() => {
-                if execute_once(&entry, &locks, &shutdown).await == RunOutcome::Cancelled {
+                let execution = execute_once(&entry, &locks, &shutdown).await;
+                if let Some(delay) = execution.continue_after {
+                    ticker.reset_after(delay);
+                }
+                if execution.outcome == RunOutcome::Cancelled {
                     return;
                 }
             }
@@ -87,6 +94,28 @@ enum RunOutcome {
     Cancelled,
     LockHeld,
     LockError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RunExecution {
+    outcome: RunOutcome,
+    continue_after: Option<Duration>,
+}
+
+impl RunExecution {
+    const fn finished(outcome: RunOutcome) -> Self {
+        Self {
+            outcome,
+            continue_after: None,
+        }
+    }
+
+    const fn succeeded(continue_after: Option<Duration>) -> Self {
+        Self {
+            outcome: RunOutcome::Succeeded,
+            continue_after,
+        }
+    }
 }
 
 impl RunOutcome {
@@ -107,14 +136,14 @@ async fn execute_once<L>(
     entry: &RegisteredReconciler,
     locks: &L,
     shutdown: &CancellationToken,
-) -> RunOutcome
+) -> RunExecution
 where
     L: LockProvider,
 {
     let run_id = Uuid::new_v4();
     let lock_attempt = tokio::select! {
         biased;
-        () = shutdown.cancelled() => return RunOutcome::Cancelled,
+        () = shutdown.cancelled() => return RunExecution::finished(RunOutcome::Cancelled),
         result = tokio::time::timeout(
             LOCK_ACQUIRE_TIMEOUT,
             locks.try_acquire(entry.lock_key),
@@ -130,7 +159,7 @@ where
                 %error,
             );
             record_run(entry.kind, RunOutcome::LockError, Duration::ZERO);
-            return RunOutcome::LockError;
+            return RunExecution::finished(RunOutcome::LockError);
         }
         Err(_elapsed) => {
             tracing::error!(
@@ -140,7 +169,7 @@ where
                 timeout_ms = LOCK_ACQUIRE_TIMEOUT.as_millis(),
             );
             record_run(entry.kind, RunOutcome::LockError, Duration::ZERO);
-            return RunOutcome::LockError;
+            return RunExecution::finished(RunOutcome::LockError);
         }
     }) else {
         tracing::debug!(
@@ -149,7 +178,7 @@ where
             reason = "lock_held",
         );
         record_run(entry.kind, RunOutcome::LockHeld, Duration::ZERO);
-        return RunOutcome::LockHeld;
+        return RunExecution::finished(RunOutcome::LockHeld);
     };
 
     let started = Instant::now();
@@ -165,7 +194,7 @@ where
     );
 
     let context = ReconciliationContext { run_id };
-    let outcome = run_reconciler(
+    let execution = run_reconciler(
         entry.reconciler.as_ref(),
         &context,
         entry.kind,
@@ -173,6 +202,7 @@ where
         shutdown,
     )
     .await;
+    let outcome = execution.outcome;
     let elapsed = started.elapsed();
     active.decrement(1.0);
 
@@ -199,6 +229,7 @@ where
             reconciliation_kind = entry.kind,
             %run_id,
             duration_ms = elapsed.as_millis(),
+            continue_after = ?execution.continue_after,
         ),
         RunOutcome::Failed => tracing::error!(
             event = "reconciliation.failed",
@@ -226,7 +257,7 @@ where
         ),
         RunOutcome::LockHeld | RunOutcome::LockError => {}
     }
-    outcome
+    execution
 }
 
 async fn run_reconciler(
@@ -235,11 +266,11 @@ async fn run_reconciler(
     kind: &'static str,
     timeout: Duration,
     shutdown: &CancellationToken,
-) -> RunOutcome {
+) -> RunExecution {
     let future = match std::panic::catch_unwind(AssertUnwindSafe(|| reconciler.reconcile(context)))
     {
         Ok(future) => future,
-        Err(_panic) => return RunOutcome::Panicked,
+        Err(_panic) => return RunExecution::finished(RunOutcome::Panicked),
     };
     let span = tracing::info_span!(
         "reconciliation.run",
@@ -251,10 +282,21 @@ async fn run_reconciler(
 
     tokio::select! {
         biased;
-        () = shutdown.cancelled() => RunOutcome::Cancelled,
-        () = &mut deadline => RunOutcome::TimedOut,
+        () = shutdown.cancelled() => RunExecution::finished(RunOutcome::Cancelled),
+        () = &mut deadline => RunExecution::finished(RunOutcome::TimedOut),
         result = &mut future => match result {
-            Ok(Ok(())) => RunOutcome::Succeeded,
+            Ok(Ok(ReconciliationDirective::Complete)) => RunExecution::succeeded(None),
+            Ok(Ok(ReconciliationDirective::ContinueAfter(delay))) if !delay.is_zero() => {
+                RunExecution::succeeded(Some(delay))
+            }
+            Ok(Ok(ReconciliationDirective::ContinueAfter(_delay))) => {
+                tracing::error!(
+                    event = "reconciliation.invalid_continuation_delay",
+                    reconciliation_kind = kind,
+                    run_id = %context.run_id(),
+                );
+                RunExecution::finished(RunOutcome::Failed)
+            }
             Ok(Err(error)) => {
                 tracing::error!(
                     event = "reconciliation.handler_failed",
@@ -262,9 +304,9 @@ async fn run_reconciler(
                     run_id = %context.run_id(),
                     %error,
                 );
-                RunOutcome::Failed
+                RunExecution::finished(RunOutcome::Failed)
             }
-            Err(_panic) => RunOutcome::Panicked,
+            Err(_panic) => RunExecution::finished(RunOutcome::Panicked),
         },
     }
 }
@@ -390,8 +432,8 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use crate::{
-        Reconciler, ReconciliationFailure, ReconciliationFuture, ReconciliationResult,
-        ReconciliationSchedule,
+        Reconciler, ReconciliationDirective, ReconciliationFailure, ReconciliationFuture,
+        ReconciliationResult, ReconciliationSchedule,
     };
 
     use super::*;
@@ -467,8 +509,46 @@ mod tests {
         ) -> ReconciliationFuture<'a> {
             Box::pin(async move {
                 self.calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(ReconciliationDirective::Complete)
             })
+        }
+    }
+
+    struct ContinueOnceReconciler {
+        calls: Arc<AtomicUsize>,
+        continued: Arc<tokio::sync::Notify>,
+    }
+
+    impl Reconciler for ContinueOnceReconciler {
+        const KIND: &'static str = "test.continue";
+
+        fn reconcile<'a>(
+            &'a self,
+            _context: &'a ReconciliationContext,
+        ) -> ReconciliationFuture<'a> {
+            Box::pin(async move {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(ReconciliationDirective::ContinueAfter(
+                        Duration::from_millis(10),
+                    ))
+                } else {
+                    self.continued.notify_one();
+                    Ok(ReconciliationDirective::Complete)
+                }
+            })
+        }
+    }
+
+    struct InvalidContinuationReconciler;
+
+    impl Reconciler for InvalidContinuationReconciler {
+        const KIND: &'static str = "test.invalid_continuation";
+
+        fn reconcile<'a>(
+            &'a self,
+            _context: &'a ReconciliationContext,
+        ) -> ReconciliationFuture<'a> {
+            Box::pin(async { Ok(ReconciliationDirective::ContinueAfter(Duration::ZERO)) })
         }
     }
 
@@ -609,15 +689,43 @@ mod tests {
             Duration::from_secs(1),
         );
 
-        let outcome = execute_once(
+        let execution = execute_once(
             &entry,
             &FakeLockProvider::default(),
             &CancellationToken::new(),
         )
         .await;
 
-        assert_eq!(outcome, RunOutcome::Succeeded);
+        assert_eq!(execution, RunExecution::succeeded(None));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn continuation_runs_before_the_registered_interval() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let continued = Arc::new(tokio::sync::Notify::new());
+        let entry = entry(
+            ContinueOnceReconciler {
+                calls: calls.clone(),
+                continued: continued.clone(),
+            },
+            Duration::from_secs(1),
+        );
+        let shutdown = CancellationToken::new();
+        let runtime = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move {
+                run(vec![entry], FakeLockProvider::default(), shutdown).await;
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(1), continued.notified())
+            .await
+            .expect("continuation should not wait for the one-minute interval");
+        shutdown.cancel();
+        runtime.await.unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -632,9 +740,9 @@ mod tests {
         );
         let guard = locks.try_acquire(entry.lock_key).await.unwrap().unwrap();
 
-        let outcome = execute_once(&entry, &locks, &CancellationToken::new()).await;
+        let execution = execute_once(&entry, &locks, &CancellationToken::new()).await;
 
-        assert_eq!(outcome, RunOutcome::LockHeld);
+        assert_eq!(execution, RunExecution::finished(RunOutcome::LockHeld));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         guard.release().await.unwrap();
     }
@@ -666,14 +774,17 @@ mod tests {
         );
         assert_eq!(
             execute_once(&successor, &locks, &CancellationToken::new()).await,
-            RunOutcome::LockHeld
+            RunExecution::finished(RunOutcome::LockHeld)
         );
 
         shutdown.cancel();
-        assert_eq!(running.await.unwrap(), RunOutcome::Cancelled);
+        assert_eq!(
+            running.await.unwrap(),
+            RunExecution::finished(RunOutcome::Cancelled)
+        );
         assert_eq!(
             execute_once(&successor, &locks, &CancellationToken::new()).await,
-            RunOutcome::Succeeded
+            RunExecution::succeeded(None)
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
@@ -713,8 +824,14 @@ mod tests {
         first_shutdown.cancel();
         second_shutdown.cancel();
 
-        assert_eq!(first.await.unwrap(), RunOutcome::Cancelled);
-        assert_eq!(second.await.unwrap(), RunOutcome::Cancelled);
+        assert_eq!(
+            first.await.unwrap(),
+            RunExecution::finished(RunOutcome::Cancelled)
+        );
+        assert_eq!(
+            second.await.unwrap(),
+            RunExecution::finished(RunOutcome::Cancelled)
+        );
     }
 
     #[tokio::test]
@@ -729,7 +846,7 @@ mod tests {
                 &shutdown
             )
             .await,
-            RunOutcome::Failed
+            RunExecution::finished(RunOutcome::Failed)
         );
         assert_eq!(
             execute_once(
@@ -738,7 +855,7 @@ mod tests {
                 &shutdown
             )
             .await,
-            RunOutcome::TimedOut
+            RunExecution::finished(RunOutcome::TimedOut)
         );
         assert_eq!(
             execute_once(
@@ -747,7 +864,7 @@ mod tests {
                 &shutdown
             )
             .await,
-            RunOutcome::Panicked
+            RunExecution::finished(RunOutcome::Panicked)
         );
         assert_eq!(
             execute_once(
@@ -756,7 +873,16 @@ mod tests {
                 &shutdown
             )
             .await,
-            RunOutcome::Panicked
+            RunExecution::finished(RunOutcome::Panicked)
+        );
+        assert_eq!(
+            execute_once(
+                &entry(InvalidContinuationReconciler, Duration::from_secs(1)),
+                &locks,
+                &shutdown
+            )
+            .await,
+            RunExecution::finished(RunOutcome::Failed)
         );
     }
 
@@ -772,15 +898,15 @@ mod tests {
             Duration::from_secs(1),
         );
 
-        let outcome = execute_once(&entry, &locks, &CancellationToken::new()).await;
+        let execution = execute_once(&entry, &locks, &CancellationToken::new()).await;
 
-        assert_eq!(outcome, RunOutcome::LockError);
+        assert_eq!(execution, RunExecution::finished(RunOutcome::LockError));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
     fn result_alias_accepts_success() {
-        let result: ReconciliationResult = Ok(());
+        let result: ReconciliationResult = Ok(ReconciliationDirective::Complete);
         assert!(result.is_ok());
     }
 }

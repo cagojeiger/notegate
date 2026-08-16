@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use notegate_db::test_support::TestDb;
 use notegate_reconciliation::{
-    Reconciler, ReconciliationContext, ReconciliationFuture, ReconciliationRegistry,
-    ReconciliationRuntime, ReconciliationSchedule,
+    Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationFuture,
+    ReconciliationRegistry, ReconciliationRuntime, ReconciliationSchedule,
 };
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -42,7 +42,7 @@ impl Reconciler for DatabaseReconciler {
         Box::pin(async move {
             sqlx::query("SELECT 1").execute(&self.pool).await?;
             self.completed.notify_one();
-            Ok(())
+            Ok(ReconciliationDirective::Complete)
         })
     }
 }
