@@ -20,6 +20,7 @@ pub(crate) use object_storage::run_once as run_object_storage_cleanup_once;
 pub(crate) fn spawn(
     pool: &PgPool,
     object_storage: ObjectStorage,
+    registered_job_kinds: &[String],
     shutdown: CancellationToken,
 ) -> Result<JoinHandle<()>, ReconciliationError> {
     let queue = JobQueue::new(pool.clone());
@@ -29,7 +30,7 @@ pub(crate) fn spawn(
             PurgeReconciler::schedule()?,
         )?
         .register(
-            LeaseRecoveryReconciler::new(queue.clone()),
+            LeaseRecoveryReconciler::new(queue.clone(), registered_job_kinds),
             LeaseRecoveryReconciler::schedule()?,
         )?
         .register(

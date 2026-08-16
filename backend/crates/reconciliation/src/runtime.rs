@@ -50,6 +50,7 @@ async fn run<L>(entries: Vec<RegisteredReconciler>, locks: L, shutdown: Cancella
 where
     L: LockProvider,
 {
+    initialize_metrics(&entries);
     let kinds = entries.len();
     tracing::info!(event = "reconciliation.started", kinds);
     join_all(
@@ -133,6 +134,10 @@ impl RunOutcome {
             Self::LockHeld => "lock_held",
             Self::LockError => "lock_error",
         }
+    }
+
+    fn completed(self) -> bool {
+        !matches!(self, Self::LockHeld | Self::LockError)
     }
 }
 
@@ -322,24 +327,39 @@ fn record_run(kind: &'static str, outcome: RunOutcome, duration: Duration) {
         "outcome" => outcome.as_str()
     )
     .increment(1);
-    if !matches!(outcome, RunOutcome::LockHeld | RunOutcome::LockError) {
+    if outcome.completed() {
         metrics::histogram!(
             "notegate_reconciliation_duration",
             "kind" => kind,
             "outcome" => outcome.as_str()
         )
         .record(duration.as_secs_f64());
-    }
-    if outcome == RunOutcome::Succeeded {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64();
         metrics::gauge!(
-            "notegate_reconciliation_last_success_timestamp_seconds",
+            "notegate_reconciliation_last_completed_timestamp_seconds",
             "kind" => kind
         )
         .set(timestamp);
+        if outcome == RunOutcome::Succeeded {
+            metrics::gauge!(
+                "notegate_reconciliation_last_success_timestamp_seconds",
+                "kind" => kind
+            )
+            .set(timestamp);
+        }
+    }
+}
+
+fn initialize_metrics(entries: &[RegisteredReconciler]) {
+    for entry in entries {
+        metrics::gauge!(
+            "notegate_reconciliation_active",
+            "kind" => entry.kind
+        )
+        .set(0.0);
     }
 }
 
@@ -356,6 +376,11 @@ fn describe_metrics() {
         "notegate_reconciliation_duration",
         metrics::Unit::Seconds,
         "Reconciliation handler duration"
+    );
+    metrics::describe_gauge!(
+        "notegate_reconciliation_last_completed_timestamp_seconds",
+        metrics::Unit::Seconds,
+        "Unix timestamp of the last reconciliation run that acquired the advisory lock"
     );
     metrics::describe_gauge!(
         "notegate_reconciliation_last_success_timestamp_seconds",
@@ -439,6 +464,7 @@ mod tests {
         Reconciler, ReconciliationDirective, ReconciliationFailure, ReconciliationFuture,
         ReconciliationResult, ReconciliationSchedule,
     };
+    use metrics_exporter_prometheus::PrometheusBuilder;
 
     use super::*;
 
@@ -681,6 +707,73 @@ mod tests {
     fn schedules_reject_zero_durations() {
         assert!(ReconciliationSchedule::new(Duration::ZERO, Duration::from_secs(1)).is_err());
         assert!(ReconciliationSchedule::new(Duration::from_secs(1), Duration::ZERO).is_err());
+    }
+
+    #[test]
+    fn completion_requires_an_acquired_lock() {
+        for outcome in [
+            RunOutcome::Succeeded,
+            RunOutcome::Failed,
+            RunOutcome::TimedOut,
+            RunOutcome::Panicked,
+            RunOutcome::Cancelled,
+        ] {
+            assert!(outcome.completed());
+        }
+        for outcome in [RunOutcome::LockHeld, RunOutcome::LockError] {
+            assert!(!outcome.completed());
+        }
+    }
+
+    #[test]
+    fn metrics_seed_registered_kinds_and_distinguish_completed_runs() {
+        let recorder = PrometheusBuilder::new()
+            .with_recommended_naming(true)
+            .build_recorder();
+        let handle = recorder.handle();
+        let entries = vec![entry(
+            SuccessReconciler {
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+            Duration::from_secs(1),
+        )];
+
+        metrics::with_local_recorder(&recorder, || {
+            initialize_metrics(&entries);
+            record_run(
+                "test.success",
+                RunOutcome::Succeeded,
+                Duration::from_millis(10),
+            );
+            record_run(
+                "test.failure",
+                RunOutcome::Failed,
+                Duration::from_millis(20),
+            );
+            record_run("test.lock_held", RunOutcome::LockHeld, Duration::ZERO);
+            record_run("test.lock_error", RunOutcome::LockError, Duration::ZERO);
+        });
+
+        let body = handle.render();
+        assert!(body.contains("notegate_reconciliation_active{kind=\"test.runtime\"} 0"));
+        assert!(body.contains(
+            "notegate_reconciliation_last_completed_timestamp_seconds{kind=\"test.success\"}"
+        ));
+        assert!(body.contains(
+            "notegate_reconciliation_last_completed_timestamp_seconds{kind=\"test.failure\"}"
+        ));
+        assert!(!body.contains(
+            "notegate_reconciliation_last_completed_timestamp_seconds{kind=\"test.lock_held\"}"
+        ));
+        assert!(!body.contains(
+            "notegate_reconciliation_last_completed_timestamp_seconds{kind=\"test.lock_error\"}"
+        ));
+        assert!(body.contains(
+            "notegate_reconciliation_last_success_timestamp_seconds{kind=\"test.success\"}"
+        ));
+        assert!(!body.contains(
+            "notegate_reconciliation_last_success_timestamp_seconds{kind=\"test.failure\"}"
+        ));
     }
 
     #[tokio::test]

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::time::Duration;
 
@@ -211,9 +212,16 @@ impl AttemptOutcome {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecoveryKindSummary {
+    pub retried: u64,
+    pub dead: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecoverySummary {
     pub retried: u64,
     pub dead: u64,
+    pub by_kind: BTreeMap<String, RecoveryKindSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,7 +232,13 @@ pub struct JobStateCount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobOldestReadyAt {
+    pub kind: String,
+    pub available_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobQueueSnapshot {
     pub states: Vec<JobStateCount>,
-    pub oldest_ready_at: Option<DateTime<Utc>>,
+    pub oldest_ready: Vec<JobOldestReadyAt>,
 }

@@ -38,9 +38,14 @@ impl ProcessRuntime {
             observability::spawn_upkeep(state.metrics.clone(), shutdown.clone()),
         );
         let reconciliation_runtime = if process_mode.runs_worker() {
+            let job_kinds = background_jobs
+                .as_ref()
+                .map(BackgroundJobs::job_kinds)
+                .unwrap_or_default();
             Some(reconciliations::spawn(
                 &state.db,
                 state.object_storage.clone(),
+                job_kinds,
                 shutdown.clone(),
             )?)
         } else {

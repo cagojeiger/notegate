@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::{
     AttemptOutcome, ClaimFence, ClaimedJob, EnqueuedJob, JobFailure, JobFailureClass,
-    JobQueueError, JobQueueResult, JobQueueSnapshot, JobSpec, JobStateCount, NewJob,
-    RecoverySummary,
+    JobOldestReadyAt, JobQueueError, JobQueueResult, JobQueueSnapshot, JobSpec, JobStateCount,
+    NewJob, RecoverySummary,
 };
 
 pub const BACKGROUND_JOB_NOTIFY_CHANNEL: &str = "notegate_background_jobs";
@@ -401,17 +401,24 @@ impl JobQueue {
             count: row.count,
         })
         .collect();
-        let oldest_ready_at = sqlx::query_scalar(
-            "SELECT min(available_at) FROM background_jobs \
+        let oldest_ready = sqlx::query_as::<_, OldestReadyRow>(
+            "SELECT job_kind, min(available_at) AS available_at FROM background_jobs \
              WHERE status = 'queued' AND available_at <= now() \
-               AND job_kind = ANY($1)",
+               AND job_kind = ANY($1) \
+             GROUP BY job_kind ORDER BY job_kind",
         )
         .bind(job_kinds)
-        .fetch_one(&self.pool)
-        .await?;
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| JobOldestReadyAt {
+            kind: row.job_kind,
+            available_at: row.available_at,
+        })
+        .collect();
         Ok(JobQueueSnapshot {
             states,
-            oldest_ready_at,
+            oldest_ready,
         })
     }
 
@@ -462,6 +469,7 @@ async fn recover_expired_in(
         .bind(claim.claim_token)
         .execute(&mut *connection)
         .await?;
+        let kind = summary.by_kind.entry(claim.job_kind.clone()).or_default();
         if attempts_exhausted(claim.attempt_count, claim.max_attempts) {
             sqlx::query(
                 "UPDATE background_jobs job \
@@ -477,6 +485,7 @@ async fn recover_expired_in(
             .execute(&mut *connection)
             .await?;
             summary.dead += 1;
+            kind.dead += 1;
         } else {
             sqlx::query(
                 "UPDATE background_jobs job \
@@ -493,6 +502,7 @@ async fn recover_expired_in(
             .execute(&mut *connection)
             .await?;
             summary.retried += 1;
+            kind.retried += 1;
         }
         tracing::warn!(
             event = "background_job.lease_expired",
@@ -656,6 +666,12 @@ struct StateCountRow {
     job_kind: String,
     state: String,
     count: i64,
+}
+
+#[derive(Debug, FromRow)]
+struct OldestReadyRow {
+    job_kind: String,
+    available_at: DateTime<Utc>,
 }
 
 #[cfg(test)]

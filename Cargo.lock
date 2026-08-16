@@ -2599,6 +2599,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "metrics",
+ "metrics-exporter-prometheus",
  "serde",
  "serde_json",
  "sqlx",
@@ -2626,6 +2627,7 @@ version = "0.1.66"
 dependencies = [
  "futures-util",
  "metrics",
+ "metrics-exporter-prometheus",
  "notegate-db",
  "sqlx",
  "thiserror 2.0.20",

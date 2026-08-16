@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use notegate_jobs::JobQueue;
+use notegate_jobs::{JobQueue, RecoverySummary};
 use notegate_reconciliation::{
     Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationError,
     ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
@@ -11,6 +12,7 @@ const LEASE_RECOVERY_INTERVAL: Duration = Duration::from_secs(60);
 const LEASE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 const LEASE_RECOVERY_BATCH_SIZE: usize = 256;
 const LEASE_RECOVERY_PASS_BUDGET: Duration = Duration::from_secs(5);
+const UNREGISTERED_JOB_KIND: &str = "unregistered";
 
 const HISTORY_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const HISTORY_RETENTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -20,11 +22,15 @@ const HISTORY_RETENTION_PASS_BUDGET: Duration = Duration::from_secs(5);
 
 pub(super) struct LeaseRecoveryReconciler {
     queue: JobQueue,
+    registered_job_kinds: HashSet<String>,
 }
 
 impl LeaseRecoveryReconciler {
-    pub(super) fn new(queue: JobQueue) -> Self {
-        Self { queue }
+    pub(super) fn new(queue: JobQueue, registered_job_kinds: &[String]) -> Self {
+        Self {
+            queue,
+            registered_job_kinds: registered_job_kinds.iter().cloned().collect(),
+        }
     }
 
     pub(super) fn schedule() -> Result<ReconciliationSchedule, ReconciliationError> {
@@ -46,16 +52,7 @@ impl Reconciler for LeaseRecoveryReconciler {
                     .recover_expired(LEASE_RECOVERY_BATCH_SIZE)
                     .await
                     .map_err(|error| Box::new(error) as ReconciliationFailure)?;
-                metrics::counter!(
-                    "notegate_background_job_transitions",
-                    "transition" => "lease_retry"
-                )
-                .increment(summary.retried);
-                metrics::counter!(
-                    "notegate_background_job_transitions",
-                    "transition" => "lease_dead"
-                )
-                .increment(summary.dead);
+                record_lease_transitions(&summary, &self.registered_job_kinds);
                 total_retried = total_retried.saturating_add(summary.retried);
                 total_dead = total_dead.saturating_add(summary.dead);
                 let processed = summary.retried.saturating_add(summary.dead);
@@ -81,6 +78,28 @@ impl Reconciler for LeaseRecoveryReconciler {
             }
             Ok(directive)
         })
+    }
+}
+
+fn record_lease_transitions(summary: &RecoverySummary, registered_job_kinds: &HashSet<String>) {
+    for (kind, transitions) in &summary.by_kind {
+        let metric_kind = if registered_job_kinds.contains(kind) {
+            kind.as_str()
+        } else {
+            UNREGISTERED_JOB_KIND
+        };
+        metrics::counter!(
+            "notegate_background_job_transitions",
+            "kind" => metric_kind.to_owned(),
+            "transition" => "lease_retry"
+        )
+        .increment(transitions.retried);
+        metrics::counter!(
+            "notegate_background_job_transitions",
+            "kind" => metric_kind.to_owned(),
+            "transition" => "lease_dead"
+        )
+        .increment(transitions.dead);
     }
 }
 
@@ -160,7 +179,65 @@ fn batch_action(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, HashSet};
+
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use notegate_jobs::RecoveryKindSummary;
+
     use super::*;
+
+    #[test]
+    fn lease_transition_metrics_are_scoped_by_job_kind() {
+        let recorder = PrometheusBuilder::new()
+            .with_recommended_naming(true)
+            .build_recorder();
+        let handle = recorder.handle();
+        let summary = RecoverySummary {
+            retried: 5,
+            dead: 5,
+            by_kind: BTreeMap::from([
+                (
+                    "graph-link".to_owned(),
+                    RecoveryKindSummary {
+                        retried: 2,
+                        dead: 0,
+                    },
+                ),
+                (
+                    "space-usage".to_owned(),
+                    RecoveryKindSummary {
+                        retried: 0,
+                        dead: 1,
+                    },
+                ),
+                (
+                    "legacy-job".to_owned(),
+                    RecoveryKindSummary {
+                        retried: 3,
+                        dead: 4,
+                    },
+                ),
+            ]),
+        };
+        let registered_job_kinds =
+            HashSet::from(["graph-link".to_owned(), "space-usage".to_owned()]);
+
+        metrics::with_local_recorder(&recorder, || {
+            record_lease_transitions(&summary, &registered_job_kinds)
+        });
+
+        let body = handle.render();
+        assert!(body.contains(
+            "notegate_background_job_transitions_total{kind=\"graph-link\",transition=\"lease_retry\"} 2"
+        ));
+        assert!(body.contains(
+            "notegate_background_job_transitions_total{kind=\"space-usage\",transition=\"lease_dead\"} 1"
+        ));
+        assert!(body.contains(
+            "notegate_background_job_transitions_total{kind=\"unregistered\",transition=\"lease_retry\"} 3"
+        ));
+        assert!(!body.contains("kind=\"legacy-job\""));
+    }
 
     #[test]
     fn retention_stops_when_the_batch_is_not_full() {

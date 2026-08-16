@@ -54,6 +54,7 @@ job_spec!(DelayedJob, "delayed");
 job_spec!(LeaseDeadJob, "lease-dead");
 job_spec!(ExpiredRunningJob, "expired-running");
 job_spec!(SnapshotJob, "snapshot");
+job_spec!(SnapshotOtherJob, "snapshot-other");
 job_spec!(RetentionJob, "retention");
 
 impl JobHandler<WorkerRuntimeJob> for BlockingHandler {
@@ -660,7 +661,11 @@ async fn expired_lease_is_recovered_and_fences_the_old_claim()
             .await?,
         FailureTransition::ClaimLost
     );
-    assert_eq!(queue.recover_expired(10).await?.retried, 1);
+    let recovery = queue.recover_expired(10).await?;
+    assert_eq!(recovery.retried, 1);
+    let lease = recovery.by_kind.get(LeaseJob::KIND).expect("kind");
+    assert_eq!(lease.retried, 1);
+    assert_eq!(lease.dead, 0);
     let current = queue
         .claim_many("current", &kinds, Duration::from_secs(30), 1)
         .await?
@@ -738,6 +743,9 @@ async fn expired_final_lease_moves_the_job_to_dead() -> Result<(), Box<dyn std::
     let summary = queue.recover_expired(10).await?;
     assert_eq!(summary.retried, 0);
     assert_eq!(summary.dead, 1);
+    let lease_dead = summary.by_kind.get(LeaseDeadJob::KIND).expect("kind");
+    assert_eq!(lease_dead.retried, 0);
+    assert_eq!(lease_dead.dead, 1);
     let row: (String, i32, Option<String>) = sqlx::query_as(
         "SELECT job.status, job.failure_count, attempt.outcome \
          FROM background_jobs job \
@@ -820,20 +828,41 @@ async fn operational_snapshot_does_not_scan_succeeded_history()
     let queue = JobQueue::new(db.pool.clone());
     queue.enqueue(&job::<SnapshotJob>()).await?;
     queue.enqueue(&job::<SnapshotJob>()).await?;
-    let kinds = kinds::<SnapshotJob>();
+    queue.enqueue(&job::<SnapshotOtherJob>()).await?;
+    let snapshot_kinds = vec![
+        SnapshotJob::KIND.to_owned(),
+        SnapshotOtherJob::KIND.to_owned(),
+    ];
     let claim = queue
-        .claim_many("worker", &kinds, Duration::from_secs(30), 1)
+        .claim_many(
+            "worker",
+            &kinds::<SnapshotJob>(),
+            Duration::from_secs(30),
+            1,
+        )
         .await?
         .into_iter()
         .next()
         .expect("claim");
     assert!(queue.succeed(&claim).await?);
 
-    let snapshot = queue.snapshot(&kinds).await?;
-    assert_eq!(snapshot.states.len(), 1);
-    let state = snapshot.states.first().expect("state");
-    assert_eq!(state.state, "ready");
-    assert_eq!(state.count, 1);
+    let snapshot = queue.snapshot(&snapshot_kinds).await?;
+    assert_eq!(snapshot.states.len(), 2);
+    assert!(snapshot.states.iter().all(|state| state.state == "ready"));
+    assert!(snapshot.states.iter().all(|state| state.count == 1));
+    assert_eq!(snapshot.oldest_ready.len(), 2);
+    assert!(
+        snapshot
+            .oldest_ready
+            .iter()
+            .any(|oldest| oldest.kind == SnapshotJob::KIND)
+    );
+    assert!(
+        snapshot
+            .oldest_ready
+            .iter()
+            .any(|oldest| oldest.kind == SnapshotOtherJob::KIND)
+    );
 
     db.cleanup().await;
     Ok(())

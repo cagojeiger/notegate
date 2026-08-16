@@ -34,7 +34,7 @@ are local-Docker configuration:
 | --- | --- |
 | Service Overview | Service health, HTTP RED, runtime USE, cache capacity, and process fleet health |
 | Search Detail | `find`/`grep` RED, pipeline-stage cost, scanned workload, and grep-body cache efficiency |
-| Internals Detail | MCP tool operations, database-pool acquisition, and server-managed text decryption |
+| Internals Detail | MCP tool operations, database-pool acquisition, server-managed text decryption, durable jobs, and reconciliation |
 
 All dashboards assume:
 

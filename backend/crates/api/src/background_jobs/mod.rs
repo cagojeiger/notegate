@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct BackgroundJobs {
     consumer: Option<JoinHandle<JobQueueResult<()>>>,
     metrics: Option<JoinHandle<()>>,
+    job_kinds: Vec<String>,
 }
 
 pub(crate) fn spawn(
@@ -36,7 +37,7 @@ pub(crate) fn spawn(
     let metrics = crate::observability::spawn_background_job_metrics(
         metrics_enabled,
         queue,
-        job_kinds,
+        job_kinds.clone(),
         shutdown,
     );
 
@@ -47,10 +48,15 @@ pub(crate) fn spawn(
     Ok(BackgroundJobs {
         consumer: Some(consumer),
         metrics,
+        job_kinds,
     })
 }
 
 impl BackgroundJobs {
+    pub(crate) fn job_kinds(&self) -> &[String] {
+        &self.job_kinds
+    }
+
     pub(crate) async fn wait_for_critical_exit(&mut self) -> anyhow::Error {
         let result = match self.consumer.as_mut() {
             Some(consumer) => consumer.await,
@@ -100,6 +106,7 @@ mod tests {
         let mut background_jobs = BackgroundJobs {
             consumer: Some(consumer),
             metrics: None,
+            job_kinds: Vec::new(),
         };
 
         let error = background_jobs.wait_for_critical_exit().await;

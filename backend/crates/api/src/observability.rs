@@ -26,6 +26,9 @@ const HTTP_DURATION_BUCKETS_SECONDS: &[f64] = &[
 const SEARCH_DURATION_BUCKETS_SECONDS: &[f64] = &[
     0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
 ];
+const BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS: &[f64] = &[
+    0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1_200.0, 3_600.0,
+];
 const UPKEEP_INTERVAL: Duration = Duration::from_secs(5);
 const BACKGROUND_JOB_METRICS_INTERVAL: Duration = Duration::from_secs(15);
 const BACKGROUND_JOB_STATES: &[&str] = &["ready", "delayed", "running", "lease_expired", "dead"];
@@ -72,6 +75,14 @@ pub(crate) fn install(enabled: bool) -> anyhow::Result<Option<MetricsHandle>> {
         .set_buckets_for_metric(
             Matcher::Full("notegate_metadata_write_flush_duration".to_owned()),
             HTTP_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_background_job_duration".to_owned()),
+            BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
+        )?
+        .set_buckets_for_metric(
+            Matcher::Full("notegate_reconciliation_duration".to_owned()),
+            BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
         )?
         .install_recorder()?;
 
@@ -209,7 +220,7 @@ fn describe_metrics() {
     metrics::describe_gauge!(
         "notegate_background_job_oldest_ready_age",
         Unit::Seconds,
-        "Age of the oldest ready background job"
+        "Age of the oldest ready background job by bounded kind"
     );
     metrics::describe_gauge!(
         "notegate_background_jobs_in_flight",
@@ -223,10 +234,18 @@ fn describe_metrics() {
         "notegate_background_job_transitions",
         "Background job maintenance transitions"
     );
+    metrics::describe_counter!(
+        "notegate_background_job_state_transition_errors",
+        "Background job state transition persistence errors"
+    );
+    metrics::describe_counter!(
+        "notegate_background_job_queue_errors",
+        "Background job queue access errors by bounded operation"
+    );
     metrics::describe_histogram!(
         "notegate_background_job_duration",
         Unit::Seconds,
-        "Background job handler duration"
+        "Background job attempt wall time including final state persistence"
     );
 }
 
@@ -432,6 +451,11 @@ async fn refresh_background_job_metrics(
             )
             .set(0.0);
         }
+        metrics::gauge!(
+            "notegate_background_job_oldest_ready_age",
+            "kind" => kind.clone(),
+        )
+        .set(0.0);
     }
     for count in snapshot.states {
         metrics::gauge!(
@@ -441,17 +465,19 @@ async fn refresh_background_job_metrics(
         )
         .set(count.count as f64);
     }
-    let age = snapshot
-        .oldest_ready_at
-        .map(|available_at| {
-            chrono::Utc::now()
-                .signed_duration_since(available_at)
-                .num_milliseconds()
-                .max(0) as f64
-                / 1_000.0
-        })
-        .unwrap_or(0.0);
-    metrics::gauge!("notegate_background_job_oldest_ready_age").set(age);
+    let now = chrono::Utc::now();
+    for oldest in snapshot.oldest_ready {
+        let age = now
+            .signed_duration_since(oldest.available_at)
+            .num_milliseconds()
+            .max(0) as f64
+            / 1_000.0;
+        metrics::gauge!(
+            "notegate_background_job_oldest_ready_age",
+            "kind" => oldest.kind,
+        )
+        .set(age);
+    }
     Ok(())
 }
 
@@ -654,6 +680,16 @@ mod tests {
                 HTTP_DURATION_BUCKETS_SECONDS,
             )
             .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_background_job_duration".to_owned()),
+                BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
+            .set_buckets_for_metric(
+                Matcher::Full("notegate_reconciliation_duration".to_owned()),
+                BACKGROUND_EXECUTION_DURATION_BUCKETS_SECONDS,
+            )
+            .unwrap()
             .build_recorder();
         (MetricsHandle(recorder.handle()), recorder)
     }
@@ -679,6 +715,11 @@ mod tests {
         let (handle, recorder) = test_metrics();
         metrics::with_local_recorder(&recorder, || {
             describe_metrics();
+            metrics::describe_histogram!(
+                "notegate_reconciliation_duration",
+                Unit::Seconds,
+                "Reconciliation handler duration"
+            );
             HttpRequestMetrics::start(&Method::GET, "/health")
                 .finish(StatusCode::OK, Duration::from_millis(10));
             record_resource_metrics(ResourceMetricsSnapshot {
@@ -738,6 +779,17 @@ mod tests {
             .record(0.015);
             record_metadata_flush(true, "success", Duration::from_millis(2));
             record_metadata_items(true, "api_key", "flushed", 3);
+            metrics::histogram!(
+                "notegate_background_job_duration",
+                "kind" => "space_usage_reconcile",
+            )
+            .record(0.5);
+            metrics::histogram!(
+                "notegate_reconciliation_duration",
+                "kind" => "system.purge",
+                "outcome" => "succeeded",
+            )
+            .record(1.0);
 
             let subscriber = tracing_subscriber::registry().with(InternalMetricsLayer);
             tracing::subscriber::with_default(subscriber, || {
@@ -811,6 +863,8 @@ mod tests {
         assert!(body.contains("notegate_text_decryption_duration_seconds_bucket"));
         assert!(body.contains("notegate_metadata_write_flushes_total{outcome=\"success\"} 1"));
         assert!(body.contains("notegate_metadata_write_flush_duration_seconds_bucket"));
+        assert!(body.contains("notegate_background_job_duration_seconds_bucket"));
+        assert!(body.contains("notegate_reconciliation_duration_seconds_bucket"));
         assert!(body.contains(
             "notegate_metadata_write_items_total{kind=\"api_key\",disposition=\"flushed\"} 3"
         ));
