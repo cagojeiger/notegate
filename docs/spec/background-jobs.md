@@ -116,7 +116,7 @@ background_job_attempts
   error_code / error_message
 ```
 
-작업은 성공하거나 재시도 한도를 소진해도 즉시 삭제하지 않는다. `succeeded`와 `dead` 작업 및 연결된 attempt는 90일 동안 보관한 뒤 짧은 transaction batch로 삭제한다. 한 retention pass는 최대 5초 동안 batch를 반복하고 남은 backlog는 다음 고정 주기에 처리한다.
+작업은 성공하거나 재시도 한도를 소진해도 즉시 삭제하지 않는다. `succeeded`와 `dead` 작업 및 연결된 attempt는 90일 동안 보관한 뒤 짧은 transaction batch로 삭제한다. 한 retention pass는 최대 5초 동안 batch를 반복하고 남은 backlog는 lock을 해제한 뒤 1초 후 이어서 처리한다.
 
 ## 실행 규칙
 
