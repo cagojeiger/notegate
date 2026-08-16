@@ -215,8 +215,6 @@ async fn migration_backfills_existing_space_usage() -> Result<(), Box<dyn std::e
     sqlx::raw_sql(
         "DROP TRIGGER spaces_create_usage ON spaces; \
          DROP FUNCTION create_space_usage(); \
-         DROP TABLE space_usage_reconcile_executions; \
-         DROP TABLE space_usage_reconcile_jobs; \
          DROP TABLE space_usage; \
          DROP INDEX agents_owner_user_idx;",
     )

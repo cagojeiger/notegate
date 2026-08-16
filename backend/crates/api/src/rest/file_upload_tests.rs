@@ -26,7 +26,6 @@ use notegate_model::{
 use notegate_service::files::{CreateFolder, UpdateNodeWriteLock};
 use secrecy::SecretString;
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
@@ -586,12 +585,12 @@ async fn upload_is_stale(db: &TestDb, upload_id: Uuid) -> Result<bool, Box<dyn s
 }
 
 async fn run_cleanup(db: &TestDb, state: &crate::state::AppState) {
-    crate::object_storage_cleanup_worker::run_once(
+    crate::reconciliations::run_object_storage_cleanup_once(
         &ObjectStorageRepo::new(db.pool.clone()),
         &state.object_storage,
-        &CancellationToken::new(),
     )
-    .await;
+    .await
+    .expect("object storage cleanup");
 }
 
 async fn object_state(db: &TestDb, upload_id: Uuid) -> Result<String, Box<dyn std::error::Error>> {

@@ -53,7 +53,7 @@ File size, upload mode, multipart geometry, pending handle 수와 만료 시간�
 - begin, part URL 재발급과 유효한 multipart 완료 요청은 activity 시각을 갱신한다.
 - begin은 live File bytes와 진행 중인 선언 bytes를 함께 quota에 반영한다.
 - Upload handle의 write-lock 예약과 완료 규칙은 [`files-commands.md`](../files-commands.md#write-lock)를 따른다.
-- 취소는 `DELETE /file-uploads/{upload_id}`로 요청한다. 응답은 물리 삭제 완료가 아니라 cleanup queue 등록을 뜻하며 provider 삭제는 cleanup worker가 재시도한다.
+- 취소는 `DELETE /file-uploads/{upload_id}`로 요청한다. 응답은 물리 삭제 완료가 아니라 cleanup 상태 등록을 뜻하며 provider 삭제는 object storage cleanup reconciliation이 재시도한다.
 
 실행 중 저장소가 실패하면 File operation은 `503 object_storage_unavailable`을 반환한다. Provider, CORS와 runtime 설정은 [개발 가이드](../../development.md#object-storage)를 따른다.
 

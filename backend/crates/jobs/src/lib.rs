@@ -4,7 +4,6 @@ mod error;
 mod handler;
 mod model;
 mod queue;
-mod reconciler;
 mod schedule;
 mod worker;
 
@@ -16,5 +15,4 @@ pub use model::{
     RecoverySummary,
 };
 pub use queue::{BACKGROUND_JOB_NOTIFY_CHANNEL, DeferTransition, FailureTransition, JobQueue};
-pub use reconciler::{QueueReconciler, QueueReconcilerConfig};
 pub use worker::{Worker, WorkerConfig};

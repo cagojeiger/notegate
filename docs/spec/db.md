@@ -17,8 +17,6 @@ spaces
 space_usage
 background_jobs
 background_job_attempts
-space_usage_reconcile_jobs
-space_usage_reconcile_executions
 space_agent_connections
 nodes
 text_objects
@@ -327,8 +325,6 @@ background_job_attempts
 ```
 
 `background_jobs`는 지연 가능한 내부 작업의 원장이다. `queued`와 `running`은 `completed_at=NULL`, terminal 상태는 claim 정보가 없고 `completed_at`이 있어야 한다. 각 claim은 append-only attempt 한 개를 만들며 defer, lease 만료, timeout, panic, 취소, retryable/permanent failure를 구분한다. `attempt_count`는 실행 상한을 소비하는 전체 실행 이력이고 `failure_count`는 오류 관측값이다. Queue의 전달 보장은 at-least-once이고 terminal 행은 90일 뒤 bounded batch로 삭제한다. 상세 상태 전이는 `background-jobs.md`를 따른다.
-
-`space_usage_reconcile_jobs`와 `space_usage_reconcile_executions`는 active job 원장이나 실행 이력이 아니다. `space_usage_reconcile_jobs` insert는 trigger가 `background_jobs`로 복제하며 API background runtime은 `background_jobs`만 읽는다.
 
 ```text
 space_agent_connections

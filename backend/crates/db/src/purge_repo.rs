@@ -1,18 +1,12 @@
 //! Hard purge for soft-deleted spaces and nodes.
 //!
-//! The purge run is protected by a Postgres advisory transaction lock. Multiple
-//! application processes may start this worker, but only one process can execute
-//! a purge transaction at a time for a given database.
+//! Cross-process scheduling is owned by the reconciliation runtime. This repo
+//! performs one bounded, atomic purge attempt.
 
 use crate::map_sqlx_error;
 use notegate_core::{Result, limits};
 use sqlx::{PgPool, Row as _};
 
-/// Stable advisory lock key for notegate purge runs.
-///
-/// This is an arbitrary signed 64-bit namespace value. It must stay stable so
-/// all notegate instances contend on the same database lock.
-const PURGE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5055_5247_4501;
 const SPACE_PURGE_BATCH: i64 = 100;
 const NODE_PURGE_BATCH: i64 = 1_000;
 const ACCOUNT_PURGE_BATCH: i64 = 100;
@@ -33,40 +27,14 @@ impl PurgeRepo {
         Self { pool }
     }
 
-    /// Run one bounded purge attempt.
-    ///
-    /// Returns immediately with `lock_acquired=false` if another notegate
-    /// process is already purging this database.
+    /// Run one bounded purge attempt in a single transaction.
     pub async fn run_once(&self) -> Result<PurgeRun> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-
-        let lock_acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock($1)")
-            .bind(PURGE_ADVISORY_LOCK_KEY)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        if !lock_acquired {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(PurgeRun {
-                lock_acquired: false,
-                spaces_deleted: 0,
-                nodes_deleted: 0,
-                accounts_anonymized: 0,
-                api_keys_deleted: 0,
-                browser_sessions_deleted: 0,
-                object_storage_history_deleted: 0,
-                audit_events_deleted: 0,
-                file_change_events_deleted: 0,
-                mcp_invocations_deleted: 0,
-                object_deletions_queued: 0,
-            });
-        }
 
         // Safety net for requests missed during soft delete: queue physical
         // object deletion before semantic rows disappear. The operational
         // ledger survives the following cascades and is processed outside this
-        // transaction by the object-storage cleanup worker.
+        // transaction by object-storage cleanup reconciliation.
         let queued_for_spaces = sqlx::query(
             "UPDATE object_storage_objects f SET \
                  state = 'delete_pending', \
@@ -327,7 +295,6 @@ impl PurgeRepo {
 
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(PurgeRun {
-            lock_acquired: true,
             spaces_deleted: spaces_deleted.max(0) as u64,
             nodes_deleted: nodes_deleted.max(0) as u64,
             accounts_anonymized: accounts_anonymized.max(0) as u64,
@@ -344,7 +311,6 @@ impl PurgeRepo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PurgeRun {
-    pub lock_acquired: bool,
     pub spaces_deleted: u64,
     pub nodes_deleted: u64,
     pub accounts_anonymized: u64,
