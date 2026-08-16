@@ -7,6 +7,7 @@ use futures_util::future::join_all;
 use sqlx::{Connection as _, PgConnection, PgPool};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument as _;
 use uuid::Uuid;
 
 use crate::registry::RegisteredReconciler;
@@ -240,7 +241,12 @@ async fn run_reconciler(
         Ok(future) => future,
         Err(_panic) => return RunOutcome::Panicked,
     };
-    let mut future = Box::pin(AssertUnwindSafe(future).catch_unwind());
+    let span = tracing::info_span!(
+        "reconciliation.run",
+        reconciliation_kind = kind,
+        run_id = %context.run_id(),
+    );
+    let mut future = Box::pin(AssertUnwindSafe(future).catch_unwind().instrument(span));
     let mut deadline = Box::pin(tokio::time::sleep(timeout));
 
     tokio::select! {

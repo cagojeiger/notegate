@@ -8,6 +8,7 @@ NoteGate의 주기적인 전역 수렴 작업은 `notegate-reconciliation` runti
 - 각 kind는 고정 주기와 실행 timeout을 가진다.
 - 모든 `all` 또는 `worker` process가 같은 kind를 등록한다.
 - PostgreSQL session advisory lock으로 같은 database에서 동일 kind가 동시에 하나만 실행된다.
+- Advisory lock은 handler용 공유 pool과 분리된 session을 사용하므로 동시에 실행되는 kind 수만큼 추가 database 연결을 사용할 수 있다.
 - 실패, timeout 또는 panic은 다음 고정 주기의 실행을 막지 않는다.
 - 구현은 현재 원본을 다시 읽고 같은 작업을 반복해도 같은 상태로 수렴해야 한다.
 - Runtime은 exactly-once 실행과 업무 transaction을 보장하지 않는다.
@@ -16,8 +17,8 @@ NoteGate의 주기적인 전역 수렴 작업은 `notegate-reconciliation` runti
 ReconciliationRegistry
   ├─ system.purge
   ├─ background_jobs.lease_recovery
-  ├─ background_jobs.history_retention
-  └─ object_storage.cleanup
+  ├─ background_jobs.history_retention
+  └─ object_storage.cleanup
          │
          ▼
 fixed lane ── advisory lock ── application adapter ── DB/service operation
