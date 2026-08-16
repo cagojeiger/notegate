@@ -1177,7 +1177,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Process-local attempt outcomes, queue-state persistence errors, and lease recovery transitions aggregated across replicas. Transition errors mean handler work finished but its final queue update failed and requires log correlation.",
+      "description": "Process-local attempt outcomes, queue access errors, queue-state persistence errors, and lease recovery transitions aggregated across replicas. Transition errors mean handler work finished but its final queue update failed and requires log correlation.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1233,6 +1233,14 @@
           "legendFormat": "{{kind}} · {{transition}}",
           "range": true,
           "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (operation) (rate(notegate_background_job_queue_errors_total{job=\"notegate\", instance=~\"$instance\"}[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "queue · {{operation}} error",
+          "range": true,
+          "refId": "D"
         }
       ],
       "title": "Job Outcomes and Maintenance",

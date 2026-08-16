@@ -91,6 +91,7 @@ impl Worker {
                 match self.queue.connect_listener().await {
                     Ok(connected) => listener = Some(connected),
                     Err(error) => {
+                        record_queue_error("listen");
                         tracing::error!(event = "background_jobs.listen_failed", %error);
                     }
                 }
@@ -121,6 +122,7 @@ impl Worker {
                 {
                     Ok(delay) => poll_delay(delay),
                     Err(error) => {
+                        record_queue_error("wake_query");
                         tracing::error!(event = "background_jobs.wake_query_failed", %error);
                         jitter.symmetric(LISTENER_RETRY, LISTENER_RETRY_JITTER_PERCENT)
                     }
@@ -151,6 +153,7 @@ impl Worker {
                                 }
                             }
                             Err(error) => {
+                                record_queue_error("listen");
                                 tracing::warn!(event = "background_jobs.listener_disconnected", %error);
                                 listener = None;
                             }
@@ -191,6 +194,7 @@ impl Worker {
         {
             Ok(claims) => claims,
             Err(error) => {
+                record_queue_error("claim");
                 tracing::error!(event = "background_jobs.claim_failed", %error);
                 return true;
             }
@@ -319,6 +323,7 @@ async fn monitor_lease(queue: &JobQueue, claim: &ClaimedJob, lease: Duration) {
             Ok(true) => {}
             Ok(false) => return,
             Err(error) => {
+                record_queue_error("heartbeat");
                 tracing::error!(
                     event = "background_jobs.heartbeat_failed",
                     job_kind = claim.kind,
@@ -447,6 +452,14 @@ fn record_state_transition_error(claim: &ClaimedJob, operation: &'static str) {
     metrics::counter!(
         "notegate_background_job_state_transition_errors",
         "kind" => claim.kind.clone(),
+        "operation" => operation,
+    )
+    .increment(1);
+}
+
+fn record_queue_error(operation: &'static str) {
+    metrics::counter!(
+        "notegate_background_job_queue_errors",
         "operation" => operation,
     )
     .increment(1);
@@ -617,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_metrics_keep_job_kind_and_bounded_outcomes() {
+    fn worker_metrics_keep_bounded_labels() {
         let recorder = PrometheusBuilder::new()
             .with_recommended_naming(true)
             .build_recorder();
@@ -627,6 +640,9 @@ mod tests {
         metrics::with_local_recorder(&recorder, || {
             record_attempt(&claim, "deferred");
             record_state_transition_error(&claim, "succeed");
+            for operation in ["listen", "wake_query", "claim", "heartbeat"] {
+                record_queue_error(operation);
+            }
         });
 
         let body = handle.render();
@@ -636,6 +652,11 @@ mod tests {
         assert!(body.contains(
             "notegate_background_job_state_transition_errors_total{kind=\"metrics-job\",operation=\"succeed\"} 1"
         ));
+        for operation in ["listen", "wake_query", "claim", "heartbeat"] {
+            assert!(body.contains(&format!(
+                "notegate_background_job_queue_errors_total{{operation=\"{operation}\"}} 1"
+            )));
+        }
     }
 
     fn claim(kind: &str) -> ClaimedJob {

@@ -238,6 +238,10 @@ fn describe_metrics() {
         "notegate_background_job_state_transition_errors",
         "Background job state transition persistence errors"
     );
+    metrics::describe_counter!(
+        "notegate_background_job_queue_errors",
+        "Background job queue access errors by bounded operation"
+    );
     metrics::describe_histogram!(
         "notegate_background_job_duration",
         Unit::Seconds,

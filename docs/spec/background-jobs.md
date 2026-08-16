@@ -190,6 +190,7 @@ notegate_background_jobs_in_flight{kind}
 notegate_background_job_attempts_total{kind,outcome}
 notegate_background_job_transitions_total{kind,transition}
 notegate_background_job_state_transition_errors_total{kind,operation}
+notegate_background_job_queue_errors_total{operation}
 notegate_background_job_duration_seconds{kind}
 notegate_reconciliation_active{kind}
 notegate_reconciliation_runs_total{kind,outcome}
@@ -199,7 +200,7 @@ notegate_reconciliation_last_success_timestamp_seconds{kind}
 
 Metric label에는 job ID, Space ID, node ID, payload, error message를 넣지 않는다.
 
-Queue 상태와 kind별 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은 전역 값이다. 90일간 보관되는 `succeeded` 이력은 snapshot에서 세지 않는다. Worker replica마다 같은 전역 값이 노출되므로 Prometheus에서 replica를 합산하지 않고 `max`로 집계한다. In-flight, attempt, duration, transition, state-transition error metric은 process-local 값이다. Duration은 handler 실행부터 최종 queue state 저장까지의 attempt wall time이다.
+Queue 상태와 kind별 oldest-ready age는 PostgreSQL의 운영 대상 작업을 읽은 전역 값이다. 90일간 보관되는 `succeeded` 이력은 snapshot에서 세지 않는다. Worker replica마다 같은 전역 값이 노출되므로 Prometheus에서 replica를 합산하지 않고 `max`로 집계한다. In-flight, attempt, duration, transition, state-transition error, queue error metric은 process-local 값이다. Queue error의 `operation`은 `listen`, `wake_query`, `claim`, `heartbeat` 중 하나다. Duration은 handler 실행부터 최종 queue state 저장까지의 attempt wall time이다.
 
 History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `history_owner_account_id`, 선택적 `context_kind/context_id/context_label`을 기록한다. 이 공통 metadata가 있는 job은 종류와 관계없이 해당 account의 History에 나타난다. 기본값은 `hidden`이며 History에 표시할 필요가 없는 운영·유지보수 job은 제외된다. `context_*`는 Space에 한정되지 않는 표시 문맥이고, Worker의 claim·retry·lease 처리에는 이 metadata를 사용하지 않는다.
 

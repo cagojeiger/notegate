@@ -82,6 +82,9 @@ notegate_background_job_transitions_total
 notegate_background_job_state_transition_errors_total
   labels: kind, operation
 
+notegate_background_job_queue_errors_total
+  labels: operation
+
 notegate_background_job_duration_seconds
   labels: kind
 ```
@@ -91,8 +94,9 @@ notegate_background_job_duration_seconds
 - `outcome`은 `succeeded`, `retrying`, `deferred`, `dead`, `claim_lost` 중 하나다.
 - `transition`은 현재 `lease_retry`, `lease_dead` 중 하나다.
 - `operation`은 `succeed`, `fail`, `defer` 중 하나다.
+- Queue error의 `operation`은 `listen`, `wake_query`, `claim`, `heartbeat` 중 하나다.
 - Queue gauge와 oldest-ready age는 15초마다 PostgreSQL 운영 원장을 읽어 갱신한다. 조회에 실패하면 오류를 기록하고 마지막 정상 값을 유지한다. API replica마다 같은 전역 값이 노출되므로 fleet 조회에는 `max` 집계를 사용하며 `sum`으로 합산하지 않는다.
-- In-flight, attempt, transition, state-transition error, duration metric은 해당 API process에서 발생한 값이다.
+- In-flight, attempt, transition, state-transition error, queue error, duration metric은 해당 API process에서 발생한 값이다.
 - Duration은 handler 실행과 최종 queue state 저장을 포함한 attempt wall time이다. Fleet percentile은 histogram bucket을 `kind`별로 합산한 뒤 계산한다.
 - Queue의 실행 및 retention 계약은 `background-jobs.md`를 따른다.
 
