@@ -68,6 +68,7 @@ notegate_background_jobs
   labels: kind, state
 
 notegate_background_job_oldest_ready_age_seconds
+  labels: kind
 
 notegate_background_jobs_in_flight
   labels: kind
@@ -76,18 +77,23 @@ notegate_background_job_attempts_total
   labels: kind, outcome
 
 notegate_background_job_transitions_total
-  labels: transition
+  labels: kind, transition
+
+notegate_background_job_state_transition_errors_total
+  labels: kind, operation
 
 notegate_background_job_duration_seconds
   labels: kind
 ```
 
-- `kind`는 API background runtime에 등록된 bounded job kind다.
+- `kind`는 API background runtime에 등록된 bounded job kind다. Lease 복구 중 발견한 미등록 kind는 `unregistered`로 합친다.
 - `state`는 `ready`, `delayed`, `running`, `lease_expired`, `dead` 중 하나다. 90일간 보관되는 `succeeded` 이력은 scrape 비용이 누적되지 않도록 gauge에서 제외한다.
-- `outcome`은 `succeeded`, `retrying`, `dead`, `claim_lost` 중 하나다.
+- `outcome`은 `succeeded`, `retrying`, `deferred`, `dead`, `claim_lost` 중 하나다.
 - `transition`은 현재 `lease_retry`, `lease_dead` 중 하나다.
+- `operation`은 `succeed`, `fail`, `defer` 중 하나다.
 - Queue gauge와 oldest-ready age는 15초마다 PostgreSQL 운영 원장을 읽어 갱신한다. 조회에 실패하면 오류를 기록하고 마지막 정상 값을 유지한다. API replica마다 같은 전역 값이 노출되므로 fleet 조회에는 `max` 집계를 사용하며 `sum`으로 합산하지 않는다.
-- In-flight, attempt, transition, duration metric은 해당 API process에서 발생한 값이다.
+- In-flight, attempt, transition, state-transition error, duration metric은 해당 API process에서 발생한 값이다.
+- Duration은 handler 실행과 최종 queue state 저장을 포함한 attempt wall time이다. Fleet percentile은 histogram bucket을 `kind`별로 합산한 뒤 계산한다.
 - Queue의 실행 및 retention 계약은 `background-jobs.md`를 따른다.
 
 ## Metadata write-behind metrics
@@ -148,6 +154,9 @@ notegate_reconciliation_last_success_timestamp_seconds
 - `runs_total`은 `sum by (kind, outcome)`으로 집계한다.
 - `duration_seconds` histogram은 `kind`와 `outcome` 기준으로 bucket, count, sum을 합산한다.
 - `last_success_timestamp_seconds`는 `max by (kind)`으로 집계한다.
+- `lock_held`는 다른 replica가 같은 kind를 실행 중임을 뜻하므로 다중 replica 환경에서 정상적으로 발생할 수 있다. 동일 kind의 `active` 합계가 `1`을 초과하면 단일 실행 불변식 위반이다.
+- `ContinueAfter`를 반환한 bounded pass도 `succeeded`다. 마지막 완전 수렴 여부는 업무별 backlog 또는 freshness metric으로 판단한다.
+- Last-success gauge는 process-local이다. Pod 교체를 포함하는 fleet 조회는 reconciliation interval보다 긴 범위의 `max_over_time`을 사용한다.
 
 ## Search metrics
 

@@ -56,4 +56,8 @@ notegate_reconciliation_duration_seconds{kind,outcome}
 notegate_reconciliation_last_success_timestamp_seconds{kind}
 ```
 
+Duration은 명시적인 histogram bucket으로 노출하며 fleet percentile은 `kind`, `outcome`, `le` 기준으로 합산한 뒤 계산한다. `lock_held`는 다른 replica가 동일 kind를 실행 중이라는 정상적인 조정 결과일 수 있으며, 같은 kind의 `active` 합계가 `1`을 초과하면 단일 실행 불변식 위반이다.
+
+`ContinueAfter`를 반환한 bounded pass도 성공한 실행이다. 따라서 last-success는 마지막 완전 수렴 시각이 아니라 마지막 성공 pass 시각이다. Last-success gauge는 process-local이므로 Pod 교체를 포함하는 fleet 조회는 등록 주기보다 긴 범위의 `max_over_time`을 사용한다.
+
 Metric label에는 node ID, Space ID, payload 또는 오류 본문을 넣지 않는다. 구조화 로그는 진단에 필요한 제한된 오류 정보를 기록할 수 있지만 문서 본문이나 job payload는 기록하지 않는다.

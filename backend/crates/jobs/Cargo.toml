@@ -18,5 +18,8 @@ tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+metrics-exporter-prometheus.workspace = true
+
 [lints]
 workspace = true

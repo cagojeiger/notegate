@@ -11,8 +11,8 @@ pub use error::{JobQueueError, JobQueueResult};
 pub use handler::{JobHandler, JobRegistry};
 pub use model::{
     AttemptOutcome, ClaimFence, ClaimedJob, EnqueuedJob, JobDisposition, JobFailure,
-    JobFailureClass, JobHistoryContext, JobQueueSnapshot, JobSpec, JobStateCount, NewJob,
-    RecoverySummary,
+    JobFailureClass, JobHistoryContext, JobOldestReadyAt, JobQueueSnapshot, JobSpec, JobStateCount,
+    NewJob, RecoveryKindSummary, RecoverySummary,
 };
 pub use queue::{BACKGROUND_JOB_NOTIFY_CHANNEL, DeferTransition, FailureTransition, JobQueue};
 pub use worker::{Worker, WorkerConfig};

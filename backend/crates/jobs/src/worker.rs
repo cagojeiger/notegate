@@ -341,12 +341,15 @@ async fn finish_claim(
         HandlerOutcome::Succeeded => match queue.succeed(claim).await {
             Ok(true) => record_attempt(claim, "succeeded"),
             Ok(false) => record_attempt(claim, "claim_lost"),
-            Err(error) => tracing::error!(
-                event = "background_jobs.complete_failed",
-                job_kind = claim.kind,
-                job_id = %claim.job_id,
-                %error,
-            ),
+            Err(error) => {
+                record_state_transition_error(claim, "succeed");
+                tracing::error!(
+                    event = "background_jobs.complete_failed",
+                    job_kind = claim.kind,
+                    job_id = %claim.job_id,
+                    %error,
+                );
+            }
         },
         HandlerOutcome::Failed { failure, outcome } => {
             let retry_delay = failure_retry_delay(claim, &failure, config);
@@ -354,13 +357,16 @@ async fn finish_claim(
                 Ok(FailureTransition::Retrying) => record_attempt(claim, "retrying"),
                 Ok(FailureTransition::Dead) => record_attempt(claim, "dead"),
                 Ok(FailureTransition::ClaimLost) => record_attempt(claim, "claim_lost"),
-                Err(error) => tracing::error!(
-                    event = "background_jobs.failure_transition_failed",
-                    job_kind = claim.kind,
-                    job_id = %claim.job_id,
-                    failure_code = failure.code,
-                    %error,
-                ),
+                Err(error) => {
+                    record_state_transition_error(claim, "fail");
+                    tracing::error!(
+                        event = "background_jobs.failure_transition_failed",
+                        job_kind = claim.kind,
+                        job_id = %claim.job_id,
+                        failure_code = failure.code,
+                        %error,
+                    );
+                }
             }
         }
         HandlerOutcome::Deferred {
@@ -372,13 +378,16 @@ async fn finish_claim(
                 Ok(DeferTransition::Deferred) => record_attempt(claim, "deferred"),
                 Ok(DeferTransition::Dead) => record_attempt(claim, "dead"),
                 Ok(DeferTransition::ClaimLost) => record_attempt(claim, "claim_lost"),
-                Err(error) => tracing::error!(
-                    event = "background_jobs.defer_transition_failed",
-                    job_kind = claim.kind,
-                    job_id = %claim.job_id,
-                    defer_reason = reason,
-                    %error,
-                ),
+                Err(error) => {
+                    record_state_transition_error(claim, "defer");
+                    tracing::error!(
+                        event = "background_jobs.defer_transition_failed",
+                        job_kind = claim.kind,
+                        job_id = %claim.job_id,
+                        defer_reason = reason,
+                        %error,
+                    );
+                }
             }
         }
         HandlerOutcome::ClaimLost => record_attempt(claim, "claim_lost"),
@@ -434,6 +443,15 @@ fn record_attempt(claim: &ClaimedJob, outcome: &'static str) {
     .increment(1);
 }
 
+fn record_state_transition_error(claim: &ClaimedJob, operation: &'static str) {
+    metrics::counter!(
+        "notegate_background_job_state_transition_errors",
+        "kind" => claim.kind.clone(),
+        "operation" => operation,
+    )
+    .increment(1);
+}
+
 fn validate_config(config: &WorkerConfig) -> JobQueueResult<()> {
     if config.concurrency == 0 || config.concurrency > 64 {
         return Err(JobQueueError::InvalidConfiguration(
@@ -476,6 +494,7 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context, Poll};
 
+    use metrics_exporter_prometheus::PrometheusBuilder;
     use serde::{Deserialize, Serialize};
     use sqlx::postgres::PgPoolOptions;
 
@@ -595,6 +614,28 @@ mod tests {
             .connect_lazy("postgres://notegate:notegate@127.0.0.1:1/notegate")
             .expect("lazy pool");
         JobQueue::new(pool)
+    }
+
+    #[test]
+    fn worker_metrics_keep_job_kind_and_bounded_outcomes() {
+        let recorder = PrometheusBuilder::new()
+            .with_recommended_naming(true)
+            .build_recorder();
+        let handle = recorder.handle();
+        let claim = claim("metrics-job");
+
+        metrics::with_local_recorder(&recorder, || {
+            record_attempt(&claim, "deferred");
+            record_state_transition_error(&claim, "succeed");
+        });
+
+        let body = handle.render();
+        assert!(body.contains(
+            "notegate_background_job_attempts_total{kind=\"metrics-job\",outcome=\"deferred\"} 1"
+        ));
+        assert!(body.contains(
+            "notegate_background_job_state_transition_errors_total{kind=\"metrics-job\",operation=\"succeed\"} 1"
+        ));
     }
 
     fn claim(kind: &str) -> ClaimedJob {
