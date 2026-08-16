@@ -9,6 +9,7 @@ use notegate_reconciliation::{
 const LEASE_RECOVERY_INTERVAL: Duration = Duration::from_secs(60);
 const LEASE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 const LEASE_RECOVERY_BATCH_SIZE: usize = 256;
+const LEASE_RECOVERY_PASS_BUDGET: Duration = Duration::from_secs(5);
 
 const HISTORY_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const HISTORY_RETENTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -35,26 +36,43 @@ impl Reconciler for LeaseRecoveryReconciler {
 
     fn reconcile<'a>(&'a self, _context: &'a ReconciliationContext) -> ReconciliationFuture<'a> {
         Box::pin(async move {
-            let summary = self
-                .queue
-                .recover_expired(LEASE_RECOVERY_BATCH_SIZE)
-                .await
-                .map_err(|error| Box::new(error) as ReconciliationFailure)?;
-            metrics::counter!(
-                "notegate_background_job_transitions",
-                "transition" => "lease_retry"
-            )
-            .increment(summary.retried);
-            metrics::counter!(
-                "notegate_background_job_transitions",
-                "transition" => "lease_dead"
-            )
-            .increment(summary.dead);
-            if summary.retried > 0 || summary.dead > 0 {
+            let started = Instant::now();
+            let mut total_retried = 0_u64;
+            let mut total_dead = 0_u64;
+            loop {
+                let summary = self
+                    .queue
+                    .recover_expired(LEASE_RECOVERY_BATCH_SIZE)
+                    .await
+                    .map_err(|error| Box::new(error) as ReconciliationFailure)?;
+                metrics::counter!(
+                    "notegate_background_job_transitions",
+                    "transition" => "lease_retry"
+                )
+                .increment(summary.retried);
+                metrics::counter!(
+                    "notegate_background_job_transitions",
+                    "transition" => "lease_dead"
+                )
+                .increment(summary.dead);
+                total_retried = total_retried.saturating_add(summary.retried);
+                total_dead = total_dead.saturating_add(summary.dead);
+                let processed = summary.retried.saturating_add(summary.dead);
+                if !continue_batch_pass(
+                    processed,
+                    LEASE_RECOVERY_BATCH_SIZE,
+                    started.elapsed(),
+                    LEASE_RECOVERY_PASS_BUDGET,
+                ) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            if total_retried > 0 || total_dead > 0 {
                 tracing::info!(
                     event = "background_jobs.leases_recovered",
-                    retried = summary.retried,
-                    dead = summary.dead,
+                    retried = total_retried,
+                    dead = total_dead,
                 );
             }
             Ok(())
@@ -90,7 +108,12 @@ impl Reconciler for JobHistoryRetentionReconciler {
                     .await
                     .map_err(|error| Box::new(error) as ReconciliationFailure)?;
                 total_deleted = total_deleted.saturating_add(deleted);
-                if !continue_retention_pass(deleted, started.elapsed()) {
+                if !continue_batch_pass(
+                    deleted,
+                    HISTORY_RETENTION_BATCH_SIZE,
+                    started.elapsed(),
+                    HISTORY_RETENTION_PASS_BUDGET,
+                ) {
                     break;
                 }
                 tokio::task::yield_now().await;
@@ -106,8 +129,13 @@ impl Reconciler for JobHistoryRetentionReconciler {
     }
 }
 
-fn continue_retention_pass(deleted: u64, elapsed: Duration) -> bool {
-    deleted == HISTORY_RETENTION_BATCH_SIZE as u64 && elapsed < HISTORY_RETENTION_PASS_BUDGET
+fn continue_batch_pass(
+    processed: u64,
+    batch_size: usize,
+    elapsed: Duration,
+    budget: Duration,
+) -> bool {
+    processed == batch_size as u64 && elapsed < budget
 }
 
 #[cfg(test)]
@@ -116,25 +144,41 @@ mod tests {
 
     #[test]
     fn retention_stops_when_the_batch_is_not_full() {
-        assert!(!continue_retention_pass(
+        assert!(!continue_batch_pass(
             HISTORY_RETENTION_BATCH_SIZE as u64 - 1,
+            HISTORY_RETENTION_BATCH_SIZE,
             Duration::ZERO,
+            HISTORY_RETENTION_PASS_BUDGET,
         ));
     }
 
     #[test]
     fn retention_continues_full_batches_within_the_budget() {
-        assert!(continue_retention_pass(
+        assert!(continue_batch_pass(
             HISTORY_RETENTION_BATCH_SIZE as u64,
+            HISTORY_RETENTION_BATCH_SIZE,
             Duration::ZERO,
+            HISTORY_RETENTION_PASS_BUDGET,
         ));
     }
 
     #[test]
     fn retention_stops_after_the_pass_budget() {
-        assert!(!continue_retention_pass(
+        assert!(!continue_batch_pass(
             HISTORY_RETENTION_BATCH_SIZE as u64,
+            HISTORY_RETENTION_BATCH_SIZE,
             HISTORY_RETENTION_PASS_BUDGET,
+            HISTORY_RETENTION_PASS_BUDGET,
+        ));
+    }
+
+    #[test]
+    fn recovery_continues_full_batches_within_the_budget() {
+        assert!(continue_batch_pass(
+            LEASE_RECOVERY_BATCH_SIZE as u64,
+            LEASE_RECOVERY_BATCH_SIZE,
+            Duration::ZERO,
+            LEASE_RECOVERY_PASS_BUDGET,
         ));
     }
 }
