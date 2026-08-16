@@ -16,10 +16,8 @@ use notegate_db::{
     browser_session_repo::InsertBrowserSession,
 };
 use notegate_model::CreateApiKey;
-use sqlx::Row as _;
 use uuid::Uuid;
 
-const PURGE_ADVISORY_LOCK_KEY: i64 = 0x4e47_5055_5247_4501;
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
@@ -74,7 +72,6 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     .await?;
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert!(run.lock_acquired);
     assert_eq!(run.spaces_deleted, 1);
     assert_eq!(run.nodes_deleted, 1);
 
@@ -97,45 +94,6 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
             .await?;
     assert!(text_exists.is_none());
 
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn purge_skips_when_advisory_lock_is_held() -> Result<(), Box<dyn std::error::Error>> {
-    let _guard = PURGE_TEST_MUTEX.lock().await;
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let user = insert_user_account(&db.pool, "locked", "locked@example.test").await?;
-    let due_space: Uuid = sqlx::query_scalar(
-        "INSERT INTO spaces (owner_user_id, name, deleted_at, deleted_by_user_id, purge_after) \
-         VALUES ($1, 'locked-space', now() - interval '40 days', $1, now() - interval '1 day') \
-         RETURNING id",
-    )
-    .bind(user)
-    .fetch_one(&db.pool)
-    .await?;
-
-    let mut tx = db.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(PURGE_ADVISORY_LOCK_KEY)
-        .execute(&mut *tx)
-        .await?;
-
-    let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert!(!run.lock_acquired);
-    assert_eq!(run.spaces_deleted, 0);
-    assert_eq!(run.nodes_deleted, 0);
-
-    let still_exists = sqlx::query("SELECT id FROM spaces WHERE id = $1")
-        .bind(due_space)
-        .fetch_one(&db.pool)
-        .await?
-        .get::<Uuid, _>("id");
-    assert_eq!(still_exists, due_space);
-
-    tx.commit().await?;
     db.cleanup().await;
     Ok(())
 }
@@ -428,7 +386,6 @@ async fn purge_deletes_long_dead_api_keys_only() -> Result<(), Box<dyn std::erro
     .await?;
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert!(run.lock_acquired);
     assert_eq!(run.api_keys_deleted, 2, "only the two long-dead keys purge");
 
     let remaining: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM api_keys WHERE account_id = $1")
@@ -487,7 +444,6 @@ async fn purge_deletes_long_dead_browser_sessions_only() -> Result<(), Box<dyn s
     .await?;
 
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
-    assert!(run.lock_acquired);
     assert_eq!(
         run.browser_sessions_deleted, 2,
         "only the two long-dead sessions purge"

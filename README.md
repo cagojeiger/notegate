@@ -71,6 +71,7 @@ tool catalog.
 - [Agent and permission model](docs/adr/0002-user-managed-agents-and-space-connections.md)
 - [MCP tools](docs/spec/mcp/README.md)
 - [Background jobs](docs/spec/background-jobs.md)
+- [Reconciliation](docs/spec/reconciliation.md)
 - [UI design principles](DESIGN.md)
 - [UI behavior and implementation](docs/ui/README.md)
 - [Security model](docs/spec/security.md)

@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::background_jobs::{self, BackgroundJobs};
 use crate::state::AppState;
-use crate::{metadata_write_behind, object_storage_cleanup_worker, observability, purge_worker};
+use crate::{metadata_write_behind, observability, reconciliations};
 
 pub(crate) struct ProcessRuntime {
     shutdown: CancellationToken,
@@ -37,22 +37,16 @@ impl ProcessRuntime {
             "metrics upkeep worker",
             observability::spawn_upkeep(state.metrics.clone(), shutdown.clone()),
         );
-        critical_tasks.push(
-            "purge worker",
-            process_mode
-                .runs_worker()
-                .then(|| purge_worker::spawn(state.db.clone(), shutdown.clone())),
-        );
-        critical_tasks.push(
-            "object storage cleanup worker",
-            process_mode.runs_worker().then(|| {
-                object_storage_cleanup_worker::spawn(
-                    state.db.clone(),
-                    state.object_storage.clone(),
-                    shutdown.clone(),
-                )
-            }),
-        );
+        let reconciliation_runtime = if process_mode.runs_worker() {
+            Some(reconciliations::spawn(
+                &state.db,
+                state.object_storage.clone(),
+                shutdown.clone(),
+            )?)
+        } else {
+            None
+        };
+        critical_tasks.push("reconciliation runtime", reconciliation_runtime);
         auxiliary_tasks.push(
             "metadata write-behind",
             process_mode.runs_api().then(|| {
@@ -186,23 +180,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reports_an_unexpected_periodic_worker_exit() {
-        let mut runtime = runtime_with_task("purge worker", tokio::spawn(async {}));
+    async fn reports_an_unexpected_reconciliation_runtime_exit() {
+        let mut runtime = runtime_with_task("reconciliation runtime", tokio::spawn(async {}));
 
         let error = runtime.wait_for_critical_exit().await;
 
-        assert_eq!(error.to_string(), "purge worker stopped unexpectedly");
+        assert_eq!(
+            error.to_string(),
+            "reconciliation runtime stopped unexpectedly"
+        );
     }
 
     #[tokio::test]
-    async fn reports_a_cancelled_periodic_worker_task() {
+    async fn reports_a_cancelled_reconciliation_runtime_task() {
         let task = tokio::spawn(std::future::pending::<()>());
         task.abort();
-        let mut runtime = runtime_with_task("purge worker", task);
+        let mut runtime = runtime_with_task("reconciliation runtime", task);
 
         let error = runtime.wait_for_critical_exit().await;
 
-        assert!(error.to_string().starts_with("purge worker task failed:"));
+        assert!(
+            error
+                .to_string()
+                .starts_with("reconciliation runtime task failed:")
+        );
     }
 
     #[tokio::test]

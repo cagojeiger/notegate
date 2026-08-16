@@ -31,11 +31,17 @@ backend/crates/jobs/                 package: notegate-jobs
   handler.rs                         typed handler contract와 runtime registry
   queue.rs                           enqueue, claim, heartbeat, state transition
   worker.rs                          concurrency, lease, retry, timeout runtime
-  reconciler.rs                      lease recovery와 terminal history 정리
+
+backend/crates/reconciliation/       package: notegate-reconciliation
+  registry.rs                        typed reconciler 등록과 kind 검증
+  runtime.rs                         고정 주기, 전역 선점, timeout과 관측
 
 backend/crates/api/src/background_jobs/
-  mod.rs                             worker runtime과 handler 등록
+  mod.rs                             queue consumer와 handler 등록
   handlers.rs                        Usage 업무 adapter
+backend/crates/api/src/reconciliations/
+  background_jobs.rs                 lease recovery와 history retention adapter
+  purge.rs                           system purge adapter
 backend/crates/api/src/process_runtime.rs
                                      process mode별 작업 기동, 감시, 종료
 
@@ -51,11 +57,12 @@ API 또는 domain transaction
 
 notegate-api background runtime
   ├─ notegate-jobs::Worker로 작업 실행
-  ├─ notegate-jobs::QueueReconciler로 queue 복구와 정리
+  ├─ notegate-reconciliation으로 queue 복구와 정리
   └─ handler를 통해 db/service 업무 호출
 ```
 
 - `notegate-jobs`는 application 업무 개념과 payload schema를 알지 않는다.
+- 전역 실행과 고정 주기 계약은 [Reconciliation](reconciliation.md)을 따른다.
 - API의 `background_jobs` 모듈은 handler를 조립하는 실행 경계이며 업무 규칙을 다시 구현하지 않는다.
 - Registry는 저장된 JSON을 `JobSpec::Payload`로 한 번 변환한다. 변환할 수 없는 payload는 handler를 호출하지 않고 permanent failure로 종료한다.
 - Handler는 typed payload를 받아 완료, 지연 또는 분류된 실패를 queue runtime에 반환한다.
@@ -109,17 +116,17 @@ background_job_attempts
   error_code / error_message
 ```
 
-작업은 성공하거나 재시도 한도를 소진해도 즉시 삭제하지 않는다. `succeeded`와 `dead` 작업 및 연결된 attempt는 90일 동안 보관한 뒤 짧은 transaction batch로 삭제한다. 한 maintenance pass는 최대 5초 동안 batch를 반복하고 backlog가 남으면 약 1초 뒤 이어서 처리한다.
+작업은 성공하거나 재시도 한도를 소진해도 즉시 삭제하지 않는다. `succeeded`와 `dead` 작업 및 연결된 attempt는 90일 동안 보관한 뒤 짧은 transaction batch로 삭제한다. 한 retention pass는 최대 5초 동안 batch를 반복하고 남은 backlog는 lock을 해제한 뒤 1초 후 이어서 처리한다.
 
 ## 실행 규칙
 
 - Worker는 자신에게 등록된 `job_kind`만 선점한다. 처리할 수 없는 kind 때문에 polling loop가 계속 깨어나면 안 된다.
 - `NOTEGATE_PROCESS_MODE`는 `all`, `api`, `worker` 중 하나다. 기본값 `all`은 기존 단일 process 배포를 유지한다.
-- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue runtime, purge, object storage cleanup과 control HTTP만 실행한다.
+- `api` mode는 데이터·control HTTP와 metadata write-behind만 실행한다. `worker` mode는 queue runtime, reconciliation runtime과 control HTTP만 실행한다.
 - Process mode는 실행 책임만 분리한다. 모든 mode는 같은 binary와 전체 `Config` 계약을 사용한다.
 - 기본 동시 실행 수는 process당 4이고 최대 64다.
 - `NOTEGATE_BACKGROUND_JOBS__CONCURRENCY`로 process별 동시 실행 수를 설정한다.
-- Worker의 공유 database pool은 concurrency보다 최소 2개 커야 한다. LISTEN 연결 하나와 heartbeat, reconciliation, metric·control 조회가 공유할 최소 여유를 남긴다. `all` mode 운영값은 데이터 HTTP 부하까지 포함해 이 최솟값보다 크게 잡는다.
+- Worker의 공유 database pool은 concurrency보다 최소 2개 커야 한다. LISTEN 연결 하나와 heartbeat, metric·control 조회가 공유할 최소 여유를 남긴다. `all` mode 운영값은 데이터 HTTP 부하까지 포함해 이 최솟값보다 크게 잡는다.
 - 기본 lease는 2분이며 worker는 lease의 3분의 1 간격으로 heartbeat한다.
 - Handler timeout은 kind별로 정한다.
 - 자동 재시도는 5초에서 시작해 최대 15분까지 증가하는 exponential backoff와 ±10% jitter를 사용한다.
@@ -132,10 +139,12 @@ background_job_attempts
 - LISTEN 재연결은 10초 기준 ±20% jitter를 적용한다.
 - Panic, timeout, graceful shutdown 중 취소는 retryable failure로 기록한다.
 - Worker가 비정상 종료되어 attempt를 닫지 못하면 lease recovery가 `lease_expired`로 마감하고 재시도하거나 `dead`로 전환한다.
-- Lease recovery와 retention 정리는 consumer loop와 독립적인 `QueueReconciler`가 수행한다.
-- 모든 `all` 또는 `worker` mode replica가 reconciler를 시작하지만 각 실행은 PostgreSQL advisory transaction lock을 먼저 얻는다. 같은 database에서는 한 시점에 하나의 recovery 또는 retention pass만 실행된다.
-- Lease recovery는 60초 기준 ±10% jitter로 실행하고 시작 시점을 최대 5초 분산한다. Retention 정리는 1시간 기준 ±10% jitter로 실행하고 최초 실행도 한 주기 안에서 분산한다.
-- Queue consumer·reconciler, purge 또는 object cleanup이 shutdown 신호 없이 종료되면 해당 process도 오류로 종료한다. Best-effort metadata write-behind와 metrics upkeep은 실패를 기록하되 process를 종료하지 않는다.
+- Lease recovery와 retention 정리는 consumer loop와 독립적인 범용 reconciliation runtime이 수행한다.
+- 모든 `all` 또는 `worker` mode replica가 같은 reconciler를 등록한다. 각 kind는 PostgreSQL session advisory lock으로 같은 database에서 동시에 하나만 실행된다.
+- Advisory lock은 handler가 공유 pool을 기다리는 동안 pool slot을 점유하지 않도록 별도 session을 사용한다. 한 process에서 동시에 실행되는 reconciler kind 수만큼 database 연결이 공유 pool 밖에서 추가될 수 있다.
+- Lease recovery는 60초, retention 정리는 1시간의 고정 주기로 실행한다. 각 실행은 제한된 시간 동안 batch를 처리하고 backlog가 남으면 lock을 해제한 뒤 1초 후 다시 선점한다. 실패는 다음 고정 주기에서 현재 상태를 다시 읽어 수렴한다.
+- Reconciler 구현은 반복 실행해도 같은 현재 상태로 수렴해야 한다. Runtime은 동일 kind의 동시 실행을 막지만 exactly-once 실행은 보장하지 않는다.
+- Queue consumer 또는 reconciliation runtime이 shutdown 신호 없이 종료되면 해당 process도 오류로 종료한다. Best-effort metadata write-behind와 metrics upkeep은 실패를 기록하되 process를 종료하지 않는다.
 
 현재 등록된 kind:
 
@@ -159,7 +168,7 @@ API transaction ── insert background_jobs ── COMMIT ── broadcast NOT
                                                          ▼
 Worker replicas ── claim batch ── bounded handlers ── state transition
      │
-     └─ QueueReconciler ── advisory lock ── lease recovery / retention
+     └─ ReconciliationRuntime ── advisory lock ── lease recovery / retention
 ```
 
 KEDA PostgreSQL scaler는 read-only 계정으로 다음 단일 값을 조회할 수 있다.
@@ -181,6 +190,10 @@ notegate_background_jobs_in_flight{kind}
 notegate_background_job_attempts_total{kind,outcome}
 notegate_background_job_transitions_total{transition}
 notegate_background_job_duration_seconds{kind}
+notegate_reconciliation_active{kind}
+notegate_reconciliation_runs_total{kind,outcome}
+notegate_reconciliation_duration_seconds{kind,outcome}
+notegate_reconciliation_last_success_timestamp_seconds{kind}
 ```
 
 Metric label에는 job ID, Space ID, node ID, payload, error message를 넣지 않는다.
@@ -191,12 +204,11 @@ History에 보여줄 job은 enqueue envelope에 `history_visibility=visible`, `h
 
 History는 enqueue 시 저장된 owner/context snapshot만 사용한다. 현재 Space 상태에서 소유자를 역추정하지 않으며 owner snapshot이 없는 행은 hidden으로 유지한다. Terminal 행은 90일 동안 보관한다.
 
-Mixed-version rolling deployment에서는 `space_usage_reconcile_jobs` trigger와 4-argument `enqueue_background_job` overload가 이전 replica의 Usage 요청을 공통 queue로 연결한다. 새 job kind는 이 compatibility path를 사용하지 않고 공통 enqueue API로만 등록한다.
-
 ## 검증 경계
 
 - `notegate-jobs` unit test는 handler 등록, 잘못 저장된 payload, configuration, retry delay, panic, timeout, shutdown 결과를 검증한다.
-- PostgreSQL integration test는 transaction enqueue, 동시 claim, attempt 기록, heartbeat, 다중 reconciler lease recovery, fencing, terminal 전이와 retention을 검증한다.
+- PostgreSQL integration test는 transaction enqueue, 동시 claim, attempt 기록, heartbeat, fencing, terminal 전이와 retention을 검증한다.
+- Reconciliation runtime test는 동일 kind의 다중 process 선점, 서로 다른 kind의 병렬 실행, timeout, panic, cancellation과 lock 해제를 검증한다.
 - Usage test는 반복 실행해도 같은 정확한 counter가 생성되는 업무 멱등성을 검증한다.
 - Browser E2E는 queue consumer가 포함된 API process와 dashboard를 실행해 사용자 흐름을 검증한다.
 - Queue test는 handler 업무 정확성을 대신하지 않고, handler test도 queue의 전달 보장을 다시 구현하지 않는다.

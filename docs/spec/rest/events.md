@@ -100,7 +100,7 @@ User caller만 가능하다. 공통 queue envelope에서 `history_visibility=vis
 - `queued`와 `running`이 활성 상태이며 UI는 활성 작업이 있을 때만 목록을 polling한다.
 - Job은 `created_at`을 queued 시각, `completed_at`을 terminal 완료 시각으로 표시한다. 개별 attempt는 `started_at`과 `finished_at`으로 실제 실행 구간을 표시한다.
 - `claimed_by`, `worker_id`, claim token, payload, 자유 형식 error message는 응답하지 않는다.
-- purge, object cleanup, metadata write-behind, metrics upkeep, queue reconciler처럼 queue 밖에서 실행되는 운영 task는 이 이력에 포함하지 않는다.
+- purge, object cleanup, queue maintenance reconciliation, metadata write-behind, metrics upkeep처럼 공통 queue 밖에서 실행되는 운영 task는 이 이력에 포함하지 않는다.
 
 ## List space file change events
 

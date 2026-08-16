@@ -14,6 +14,7 @@ notegate-core.workspace = true
 notegate-db.workspace = true
 notegate-jobs.workspace = true
 notegate-model.workspace = true
+notegate-reconciliation.workspace = true
 notegate-service.workspace = true
 
 tokio.workspace = true

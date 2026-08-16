@@ -1,63 +1,89 @@
-//! Retryable cleanup for unattached and soft-deleted S3-compatible objects.
-
 use std::time::Duration;
 
+use notegate_core::Result as CoreResult;
 use notegate_db::{CleanupCandidate, ObjectStorageRepo, PgPool};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
+use notegate_reconciliation::{
+    Reconciler, ReconciliationContext, ReconciliationDirective, ReconciliationError,
+    ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
+};
 
 use crate::object_storage::ObjectStorage;
-use crate::periodic_worker;
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+const CLEANUP_RUN_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const CLEANUP_CONTINUATION_DELAY: Duration = Duration::from_secs(1);
 const DELETE_TIMEOUT: Duration = Duration::from_secs(10);
 const STALE_UPLOAD_SECONDS: i64 = 2 * 60 * 60;
-// A claimed row remains unavailable longer than one bounded S3 delete call.
 const CLAIM_SECONDS: i64 = 30;
-const CLEANUP_BATCH: i64 = 100;
+const CLEANUP_BATCH: usize = 100;
 
-pub fn spawn(pool: PgPool, storage: ObjectStorage, shutdown: CancellationToken) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        tracing::info!(event = "object_storage_cleanup_worker.started");
-        let drain_shutdown = shutdown.clone();
-        periodic_worker::run(CLEANUP_INTERVAL, shutdown, || {
-            let repo = ObjectStorageRepo::new(pool.clone());
-            let storage = storage.clone();
-            let shutdown = drain_shutdown.clone();
-            async move { run_once(&repo, &storage, &shutdown).await }
-        })
-        .await;
-        tracing::info!(event = "object_storage_cleanup_worker.stopped");
-    })
+pub(super) struct ObjectStorageCleanupReconciler {
+    repo: ObjectStorageRepo,
+    storage: ObjectStorage,
 }
 
-pub(super) async fn run_once(
+impl ObjectStorageCleanupReconciler {
+    pub(super) fn new(pool: PgPool, storage: ObjectStorage) -> Self {
+        Self {
+            repo: ObjectStorageRepo::new(pool),
+            storage,
+        }
+    }
+
+    pub(super) fn schedule() -> std::result::Result<ReconciliationSchedule, ReconciliationError> {
+        ReconciliationSchedule::new(CLEANUP_INTERVAL, CLEANUP_RUN_TIMEOUT)
+    }
+}
+
+impl Reconciler for ObjectStorageCleanupReconciler {
+    const KIND: &'static str = "object_storage.cleanup";
+
+    fn reconcile<'a>(&'a self, _context: &'a ReconciliationContext) -> ReconciliationFuture<'a> {
+        Box::pin(async move {
+            let processed = run_once(&self.repo, &self.storage)
+                .await
+                .map_err(|error| Box::new(error) as ReconciliationFailure)?;
+            Ok(cleanup_directive(processed))
+        })
+    }
+}
+
+pub(crate) async fn run_once(
     repo: &ObjectStorageRepo,
     storage: &ObjectStorage,
-    shutdown: &CancellationToken,
-) {
+) -> CoreResult<usize> {
+    let mut first_error = None;
+    let mut processed = 0;
     for _ in 0..CLEANUP_BATCH {
-        if shutdown.is_cancelled() {
-            break;
-        }
-        let candidate = match repo
+        let Some(candidate) = repo
             .claim_cleanup(STALE_UPLOAD_SECONDS, CLAIM_SECONDS)
-            .await
-        {
-            Ok(Some(candidate)) => candidate,
-            Ok(None) => break,
-            Err(error) => {
-                tracing::error!(event = "object_storage_cleanup.claim_failed", %error);
-                return;
-            }
+            .await?
+        else {
+            break;
         };
+        processed += 1;
         if let Err(error) = process_candidate(repo, storage, &candidate).await {
             tracing::error!(
                 event = "object_storage_cleanup.record_failed",
                 object_key = %candidate.object_key,
                 %error,
             );
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
         }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    Ok(processed)
+}
+
+fn cleanup_directive(processed: usize) -> ReconciliationDirective {
+    if processed == CLEANUP_BATCH {
+        ReconciliationDirective::ContinueAfter(CLEANUP_CONTINUATION_DELAY)
+    } else {
+        ReconciliationDirective::Complete
     }
 }
 
@@ -65,7 +91,7 @@ async fn process_candidate(
     repo: &ObjectStorageRepo,
     storage: &ObjectStorage,
     candidate: &CleanupCandidate,
-) -> notegate_core::Result<()> {
+) -> CoreResult<()> {
     let terminal_state = match candidate.state.as_str() {
         "uploading" => {
             if !repo.begin_expiry(candidate.id).await? {
@@ -86,8 +112,6 @@ async fn process_candidate(
                 .abort_multipart_upload(&candidate.object_key, upload_id)
                 .await?;
         }
-        // A multipart complete may have succeeded before attachment failed.
-        // Delete is idempotent and covers both that case and ordinary objects.
         storage.delete(&candidate.object_key).await
     };
     let delete_error_code = match tokio::time::timeout(DELETE_TIMEOUT, cleanup).await {
@@ -140,7 +164,7 @@ fn cleanup_retry_seconds(retry_count: i32) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::cleanup_retry_seconds;
+    use super::*;
 
     #[test]
     fn cleanup_retry_uses_bounded_exponential_backoff() {
@@ -150,5 +174,17 @@ mod tests {
         assert_eq!(cleanup_retry_seconds(2), 120);
         assert_eq!(cleanup_retry_seconds(7), 3_600);
         assert_eq!(cleanup_retry_seconds(i32::MAX), 3_600);
+    }
+
+    #[test]
+    fn a_full_cleanup_batch_requests_a_short_continuation() {
+        assert_eq!(
+            cleanup_directive(CLEANUP_BATCH - 1),
+            ReconciliationDirective::Complete
+        );
+        assert_eq!(
+            cleanup_directive(CLEANUP_BATCH),
+            ReconciliationDirective::ContinueAfter(CLEANUP_CONTINUATION_DELAY)
+        );
     }
 }

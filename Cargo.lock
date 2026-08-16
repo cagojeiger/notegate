@@ -2532,6 +2532,7 @@ dependencies = [
  "notegate-db",
  "notegate-jobs",
  "notegate-model",
+ "notegate-reconciliation",
  "notegate-service",
  "openidconnect",
  "reqwest 0.13.4",
@@ -2616,6 +2617,21 @@ dependencies = [
  "notegate-core",
  "serde",
  "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "notegate-reconciliation"
+version = "0.1.65"
+dependencies = [
+ "futures-util",
+ "metrics",
+ "notegate-db",
+ "sqlx",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "uuid",
 ]
 

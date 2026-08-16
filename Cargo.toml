@@ -6,6 +6,7 @@ members = [
     "backend/crates/db",
     "backend/crates/jobs",
     "backend/crates/model",
+    "backend/crates/reconciliation",
     "backend/crates/service",
 ]
 
@@ -22,6 +23,7 @@ notegate-core = { path = "backend/crates/core" }
 notegate-db = { path = "backend/crates/db" }
 notegate-jobs = { path = "backend/crates/jobs" }
 notegate-model = { path = "backend/crates/model" }
+notegate-reconciliation = { path = "backend/crates/reconciliation" }
 notegate-service = { path = "backend/crates/service" }
 
 # Async runtime

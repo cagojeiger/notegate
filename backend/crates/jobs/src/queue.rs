@@ -336,26 +336,6 @@ impl JobQueue {
         Ok(summary)
     }
 
-    pub(crate) async fn try_recover_expired(
-        &self,
-        limit: usize,
-    ) -> JobQueueResult<Option<RecoverySummary>> {
-        if limit == 0 {
-            return Ok(Some(RecoverySummary::default()));
-        }
-        let limit = i64::try_from(limit).map_err(|_error| {
-            JobQueueError::InvalidConfiguration("recovery limit is too large".to_owned())
-        })?;
-        let mut tx = self.pool.begin().await?;
-        if !try_reconciler_lock(&mut tx).await? {
-            tx.commit().await?;
-            return Ok(None);
-        }
-        let summary = recover_expired_in(&mut tx, limit).await?;
-        tx.commit().await?;
-        Ok(Some(summary))
-    }
-
     pub async fn purge_completed(&self, retention: Duration, limit: usize) -> JobQueueResult<u64> {
         if limit == 0 {
             return Ok(0);
@@ -365,27 +345,6 @@ impl JobQueue {
         })?;
         let mut connection = self.pool.acquire().await?;
         purge_completed_in(&mut connection, retention, limit).await
-    }
-
-    pub(crate) async fn try_purge_completed(
-        &self,
-        retention: Duration,
-        limit: usize,
-    ) -> JobQueueResult<Option<u64>> {
-        if limit == 0 {
-            return Ok(Some(0));
-        }
-        let limit = i64::try_from(limit).map_err(|_error| {
-            JobQueueError::InvalidConfiguration("purge limit is too large".to_owned())
-        })?;
-        let mut tx = self.pool.begin().await?;
-        if !try_reconciler_lock(&mut tx).await? {
-            tx.commit().await?;
-            return Ok(None);
-        }
-        let deleted = purge_completed_in(&mut tx, retention, limit).await?;
-        tx.commit().await?;
-        Ok(Some(deleted))
     }
 
     pub async fn next_wake_delay(
@@ -475,14 +434,6 @@ impl JobQueue {
         .await?;
         Ok(owned.unwrap_or(false))
     }
-}
-
-async fn try_reconciler_lock(connection: &mut PgConnection) -> JobQueueResult<bool> {
-    Ok(
-        sqlx::query_scalar("SELECT try_lock_background_job_reconciler()")
-            .fetch_one(connection)
-            .await?,
-    )
 }
 
 async fn recover_expired_in(

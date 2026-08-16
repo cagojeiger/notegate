@@ -17,8 +17,7 @@ use std::time::Duration;
 use common::{TestDb, space_with_root};
 use notegate_jobs::{
     AttemptOutcome, ClaimedJob, DeferTransition, FailureTransition, JobDisposition, JobFailure,
-    JobHandler, JobQueue, JobRegistry, JobSpec, NewJob, QueueReconciler, QueueReconcilerConfig,
-    Worker, WorkerConfig,
+    JobHandler, JobQueue, JobRegistry, JobSpec, NewJob, Worker, WorkerConfig,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -51,7 +50,6 @@ job_spec!(DeferJob, "defer");
 job_spec!(RetryJob, "retry");
 job_spec!(PermanentJob, "permanent");
 job_spec!(LeaseJob, "lease");
-job_spec!(ReconcilerRaceJob, "reconciler-race");
 job_spec!(DelayedJob, "delayed");
 job_spec!(LeaseDeadJob, "lease-dead");
 job_spec!(ExpiredRunningJob, "expired-running");
@@ -253,58 +251,53 @@ async fn enqueue_participates_in_the_callers_transaction() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
-async fn background_jobs_migration_backfills_and_mirrors_legacy_usage_jobs()
+async fn legacy_background_runtime_migration_preserves_queued_work()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup_before(32).await? else {
         return Ok(());
     };
-    let (_, backfilled_space_id, _) = space_with_root(&db.pool, "jobs-backfill").await?;
+    let (_, space_id, _) = space_with_root(&db.pool, "legacy-runtime-removal").await?;
     sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id, retry_count) VALUES ($1, 3)")
-        .bind(backfilled_space_id)
+        .bind(space_id)
         .execute(&db.pool)
         .await?;
 
     db.apply_migration(32).await?;
+    db.apply_migration(33).await?;
+    db.apply_migration(34).await?;
+    db.apply_migration(35).await?;
 
-    let backfilled: (String, String, i32, i32, i32) = sqlx::query_as(
-        "SELECT job_kind, payload ->> 'space_id', attempt_count, failure_count, max_attempts \
+    let queued: (String, String, i32) = sqlx::query_as(
+        "SELECT job_kind, status, attempt_count \
          FROM background_jobs WHERE payload ->> 'space_id' = $1",
     )
-    .bind(backfilled_space_id.to_string())
+    .bind(space_id.to_string())
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(
-        backfilled,
-        (
-            "space_usage_reconcile".to_owned(),
-            backfilled_space_id.to_string(),
-            3,
-            3,
-            8,
-        )
+        queued,
+        ("space_usage_reconcile".to_owned(), "queued".to_owned(), 3)
     );
-
-    let (_, mirrored_space_id, _) = space_with_root(&db.pool, "jobs-mirror").await?;
-    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
-        .bind(mirrored_space_id)
-        .execute(&db.pool)
-        .await?;
-    let mirrored: (String, i32, i32) = sqlx::query_as(
-        "SELECT status, attempt_count, failure_count \
-         FROM background_jobs WHERE payload ->> 'space_id' = $1",
+    let removed: (bool, bool, bool, bool, bool) = sqlx::query_as(
+        "SELECT \
+             to_regclass('space_usage_reconcile_jobs') IS NULL, \
+             to_regclass('space_usage_reconcile_executions') IS NULL, \
+             to_regprocedure('mirror_legacy_space_usage_job()') IS NULL, \
+             to_regprocedure('try_lock_background_job_reconciler()') IS NULL, \
+             to_regprocedure( \
+                 'enqueue_background_job(text,jsonb,timestamp with time zone,integer)' \
+             ) IS NULL",
     )
-    .bind(mirrored_space_id.to_string())
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(mirrored, ("queued".to_owned(), 0, 0));
+    assert_eq!(removed, (true, true, true, true, true));
 
     db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
-async fn job_history_migration_backfills_active_and_scopes_legacy_usage_jobs()
--> Result<(), Box<dyn std::error::Error>> {
+async fn job_history_migration_backfills_active_jobs() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup_before(33).await? else {
         return Ok(());
     };
@@ -376,89 +369,6 @@ async fn job_history_migration_backfills_active_and_scopes_legacy_usage_jobs()
         legacy_hidden,
         vec![("hidden".to_owned(), None), ("hidden".to_owned(), None)]
     );
-
-    let (mirrored_owner_account_id, mirrored_space_id, _) =
-        space_with_root(&db.pool, "jobs-history-mirror").await?;
-    sqlx::query("INSERT INTO space_usage_reconcile_jobs (space_id) VALUES ($1)")
-        .bind(mirrored_space_id)
-        .execute(&db.pool)
-        .await?;
-    let mirrored: (
-        String,
-        Option<uuid::Uuid>,
-        Option<String>,
-        Option<uuid::Uuid>,
-        Option<String>,
-    ) = sqlx::query_as(
-        "SELECT history_visibility, history_owner_account_id, \
-                context_kind, context_id, context_label \
-         FROM background_jobs WHERE payload ->> 'space_id' = $1",
-    )
-    .bind(mirrored_space_id.to_string())
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(
-        mirrored,
-        (
-            "visible".to_owned(),
-            Some(mirrored_owner_account_id),
-            Some("space".to_owned()),
-            Some(mirrored_space_id),
-            Some("ws-jobs-history-mirror".to_owned())
-        )
-    );
-
-    let (compat_owner_account_id, compat_space_id, _) =
-        space_with_root(&db.pool, "jobs-history-four-arg").await?;
-    let compat_job_id: uuid::Uuid = sqlx::query_scalar(
-        "SELECT enqueue_background_job( \
-             'space_usage_reconcile', jsonb_build_object('space_id', $1), \
-             NULL::timestamptz, 8 \
-         )",
-    )
-    .bind(compat_space_id)
-    .fetch_one(&db.pool)
-    .await?;
-    let compatible: (
-        String,
-        Option<uuid::Uuid>,
-        Option<String>,
-        Option<uuid::Uuid>,
-        Option<String>,
-    ) = sqlx::query_as(
-        "SELECT history_visibility, history_owner_account_id, \
-                context_kind, context_id, context_label \
-         FROM background_jobs WHERE job_id = $1",
-    )
-    .bind(compat_job_id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(
-        compatible,
-        (
-            "visible".to_owned(),
-            Some(compat_owner_account_id),
-            Some("space".to_owned()),
-            Some(compat_space_id),
-            Some("ws-jobs-history-four-arg".to_owned())
-        )
-    );
-
-    let hidden_job_id: uuid::Uuid = sqlx::query_scalar(
-        "SELECT enqueue_background_job( \
-             'internal_maintenance', '{}'::jsonb, NULL::timestamptz, 8 \
-         )",
-    )
-    .fetch_one(&db.pool)
-    .await?;
-    let hidden: (String, Option<uuid::Uuid>, Option<String>) = sqlx::query_as(
-        "SELECT history_visibility, history_owner_account_id, context_kind \
-         FROM background_jobs WHERE job_id = $1",
-    )
-    .bind(hidden_job_id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(hidden, ("hidden".to_owned(), None, None));
 
     db.cleanup().await;
     Ok(())
@@ -780,153 +690,6 @@ async fn expired_lease_is_recovered_and_fences_the_old_claim()
 }
 
 #[tokio::test]
-async fn reconciler_advisory_lock_has_one_database_owner() -> Result<(), Box<dyn std::error::Error>>
-{
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let mut first = db.pool.begin().await?;
-    let mut second = db.pool.begin().await?;
-
-    assert!(
-        sqlx::query_scalar::<_, bool>("SELECT try_lock_background_job_reconciler()")
-            .fetch_one(&mut *first)
-            .await?
-    );
-    assert!(
-        !sqlx::query_scalar::<_, bool>("SELECT try_lock_background_job_reconciler()")
-            .fetch_one(&mut *second)
-            .await?
-    );
-
-    first.commit().await?;
-    assert!(
-        sqlx::query_scalar::<_, bool>("SELECT try_lock_background_job_reconciler()")
-            .fetch_one(&mut *second)
-            .await?
-    );
-    second.commit().await?;
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn concurrent_reconcilers_do_not_duplicate_lease_recovery()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let queue = JobQueue::new(db.pool.clone());
-    let enqueued = queue.enqueue(&job::<ReconcilerRaceJob>()).await?;
-    let kinds = kinds::<ReconcilerRaceJob>();
-    let claim = queue
-        .claim_many("stale-worker", &kinds, Duration::from_secs(30), 1)
-        .await?
-        .into_iter()
-        .next()
-        .expect("claim");
-    sqlx::query(
-        "UPDATE background_jobs SET lease_until = now() - interval '1 second' \
-         WHERE job_id = $1",
-    )
-    .bind(claim.job_id)
-    .execute(&db.pool)
-    .await?;
-
-    let config = QueueReconcilerConfig {
-        recovery_interval: Duration::from_millis(20),
-        retention: Duration::from_secs(90 * 24 * 60 * 60),
-        maintenance_interval: Duration::from_secs(60),
-    };
-    let left = QueueReconciler::new(queue.clone(), config.clone())?;
-    let right = QueueReconciler::new(queue, config)?;
-    let shutdown = CancellationToken::new();
-    let left_shutdown = shutdown.clone();
-    let right_shutdown = shutdown.clone();
-    let left_task = tokio::spawn(async move { left.run(left_shutdown).await });
-    let right_task = tokio::spawn(async move { right.run(right_shutdown).await });
-
-    wait_for_status(&db.pool, enqueued.job_id, "queued").await?;
-    shutdown.cancel();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        tokio::try_join!(left_task, right_task)
-    })
-    .await
-    .map_err(|_| std::io::Error::other("reconcilers did not stop"))??;
-
-    let row: (String, i32, i64) = sqlx::query_as(
-        "SELECT job.status, job.attempt_count, count(attempt.job_id) \
-         FROM background_jobs job \
-         LEFT JOIN background_job_attempts attempt \
-           ON attempt.job_id = job.job_id AND attempt.outcome = 'lease_expired' \
-         WHERE job.job_id = $1 \
-         GROUP BY job.job_id",
-    )
-    .bind(enqueued.job_id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert_eq!(row, ("queued".to_owned(), 1, 1));
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn reconciler_drains_terminal_history_larger_than_one_batch()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    sqlx::query(
-        "INSERT INTO background_jobs ( \
-             job_kind, payload, status, attempt_count, max_attempts, completed_at \
-         ) \
-         SELECT 'purge-backlog', '{}'::jsonb, 'succeeded', 1, 1, \
-                now() - interval '2 days' \
-         FROM generate_series(1, 1001)",
-    )
-    .execute(&db.pool)
-    .await?;
-
-    let queue = JobQueue::new(db.pool.clone());
-    let reconciler = QueueReconciler::new(
-        queue,
-        QueueReconcilerConfig {
-            recovery_interval: Duration::from_secs(60),
-            retention: Duration::from_secs(24 * 60 * 60),
-            maintenance_interval: Duration::from_millis(20),
-        },
-    )?;
-    let shutdown = CancellationToken::new();
-    let run_shutdown = shutdown.clone();
-    let reconciler_task = tokio::spawn(async move { reconciler.run(run_shutdown).await });
-
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let remaining: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM background_jobs WHERE job_kind = 'purge-backlog'",
-            )
-            .fetch_one(&db.pool)
-            .await?;
-            if remaining == 0 {
-                return Ok::<(), sqlx::Error>(());
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .map_err(|_| std::io::Error::other("reconciler did not drain terminal history"))??;
-    shutdown.cancel();
-    tokio::time::timeout(Duration::from_secs(5), reconciler_task)
-        .await
-        .map_err(|_| std::io::Error::other("reconciler did not stop"))??;
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
 async fn delayed_job_is_not_claimed_early() -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -1031,7 +794,8 @@ async fn consumer_wake_delay_uses_database_time_for_delayed_jobs()
     };
     sqlx::query_scalar::<_, uuid::Uuid>(
         "SELECT enqueue_background_job( \
-             'db-clock-delayed', '{}'::jsonb, now() + interval '10 minutes', 8 \
+             'db-clock-delayed', '{}'::jsonb, now() + interval '10 minutes', 8, \
+             'hidden', NULL::uuid, NULL::text, NULL::uuid, NULL::text \
          )",
     )
     .fetch_one(&db.pool)
