@@ -5,7 +5,7 @@ NoteGate의 주기적인 전역 수렴 작업은 `notegate-reconciliation` runti
 ## 계약
 
 - `Reconciler::KIND`와 구현 타입은 compile time에 결합된다.
-- 각 kind는 고정 주기와 실행 timeout을 가진다. 한 번의 제한된 실행으로 backlog를 비우지 못한 handler는 성공 결과와 함께 짧은 후속 실행 간격을 요청할 수 있다.
+- 각 kind는 고정 주기와 실행 timeout을 가진다. 한 번의 제한된 실행으로 backlog를 비우지 못한 handler는 성공 결과와 함께 짧은 후속 실행 간격을 요청할 수 있다. Runtime은 요청값을 고정 주기 이하로 제한하므로 후속 실행이 원래 schedule을 늦추지 않는다.
 - 모든 `all` 또는 `worker` process가 같은 kind를 등록한다.
 - PostgreSQL session advisory lock으로 같은 database에서 동일 kind가 동시에 하나만 실행된다.
 - Session advisory lock은 직접 PostgreSQL 연결 또는 PgBouncer session pooling에서만 사용할 수 있다. Transaction pooling은 lock 획득과 해제가 서로 다른 server session에서 실행될 수 있으므로 지원하지 않는다.
@@ -43,7 +43,7 @@ backend/crates/api/src/reconciliations/
   object_storage.rs    S3-compatible object cleanup adapter
 ```
 
-Object storage cleanup은 전역 singleton reconciliation으로 실행하지만, provider 호출 전의 행 단위 claim과 `retry_after` lease를 유지한다. 이 안전장치는 롤링 배포 중 구버전 worker와의 경합, provider 호출 후 DB 갱신 전 종료, 재시도 backoff를 처리한다.
+Object storage cleanup은 전역 singleton reconciliation으로 실행하지만, provider 호출 전의 행 단위 claim과 `retry_after` lease를 유지한다. 이 안전장치는 롤링 배포 중 구버전 worker와의 경합, provider 호출 후 DB 갱신 전 종료, 재시도 backoff를 처리한다. 한 번에 100개를 모두 처리하면 lock을 해제하고 1초 후 다시 선점해 남은 backlog를 이어서 처리한다.
 
 행 단위 claim으로 replica가 작업을 나눠 처리하는 queue consumer는 이 runtime 대상이 아니다. Process별 상태를 관리하는 metrics upkeep과 metadata write-behind도 전역 singleton으로 만들지 않는다.
 

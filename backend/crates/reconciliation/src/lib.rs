@@ -23,7 +23,10 @@ pub type ReconciliationFuture<'a> = Pin<Box<dyn Future<Output = ReconciliationRe
 pub enum ReconciliationDirective {
     /// Resume the reconciler's registered fixed schedule.
     Complete,
-    /// Run this kind again after a shorter delay because bounded work remains.
+    /// Request another run after bounded work remains.
+    ///
+    /// The runtime caps this delay at the registered fixed interval, so a
+    /// continuation cannot postpone the normal schedule.
     ContinueAfter(Duration),
 }
 

@@ -74,7 +74,7 @@ where
             () = shutdown.cancelled() => return,
             _ = ticker.tick() => {
                 let execution = execute_once(&entry, &locks, &shutdown).await;
-                if let Some(delay) = execution.continue_after {
+                if let Some(delay) = execution.next_delay(entry.schedule.interval()) {
                     ticker.reset_after(delay);
                 }
                 if execution.outcome == RunOutcome::Cancelled {
@@ -115,6 +115,10 @@ impl RunExecution {
             outcome: RunOutcome::Succeeded,
             continue_after,
         }
+    }
+
+    fn next_delay(self, interval: Duration) -> Option<Duration> {
+        self.continue_after.map(|delay| delay.min(interval))
     }
 }
 
@@ -908,5 +912,19 @@ mod tests {
     fn result_alias_accepts_success() {
         let result: ReconciliationResult = Ok(ReconciliationDirective::Complete);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn continuation_never_postpones_the_registered_interval() {
+        let interval = Duration::from_secs(60);
+
+        assert_eq!(
+            RunExecution::succeeded(Some(Duration::from_secs(1))).next_delay(interval),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            RunExecution::succeeded(Some(Duration::from_secs(120))).next_delay(interval),
+            Some(interval)
+        );
     }
 }

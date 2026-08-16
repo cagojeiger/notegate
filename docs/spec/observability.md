@@ -144,6 +144,10 @@ notegate_reconciliation_last_success_timestamp_seconds
   `lock_held`, `lock_error` 중 하나다.
 - 실행 시간은 advisory lock을 획득한 결과에만 기록한다.
 - ID, payload, 파일 이름, 문서 본문, 오류 문구는 metric label로 사용하지 않는다.
+- `active`는 process-local gauge다. Fleet 상태는 `sum by (kind)`으로 집계하며 advisory lock이 정상일 때 값은 `0` 또는 `1`이다.
+- `runs_total`은 `sum by (kind, outcome)`으로 집계한다.
+- `duration_seconds` histogram은 `kind`와 `outcome` 기준으로 bucket, count, sum을 합산한다.
+- `last_success_timestamp_seconds`는 `max by (kind)`으로 집계한다.
 
 ## Search metrics
 

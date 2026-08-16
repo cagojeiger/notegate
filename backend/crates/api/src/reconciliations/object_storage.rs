@@ -11,6 +11,7 @@ use crate::object_storage::ObjectStorage;
 
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 const CLEANUP_RUN_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const CLEANUP_CONTINUATION_DELAY: Duration = Duration::from_secs(1);
 const DELETE_TIMEOUT: Duration = Duration::from_secs(10);
 const STALE_UPLOAD_SECONDS: i64 = 2 * 60 * 60;
 const CLAIM_SECONDS: i64 = 30;
@@ -39,16 +40,20 @@ impl Reconciler for ObjectStorageCleanupReconciler {
 
     fn reconcile<'a>(&'a self, _context: &'a ReconciliationContext) -> ReconciliationFuture<'a> {
         Box::pin(async move {
-            run_once(&self.repo, &self.storage)
+            let processed = run_once(&self.repo, &self.storage)
                 .await
                 .map_err(|error| Box::new(error) as ReconciliationFailure)?;
-            Ok(ReconciliationDirective::Complete)
+            Ok(cleanup_directive(processed))
         })
     }
 }
 
-pub(crate) async fn run_once(repo: &ObjectStorageRepo, storage: &ObjectStorage) -> CoreResult<()> {
+pub(crate) async fn run_once(
+    repo: &ObjectStorageRepo,
+    storage: &ObjectStorage,
+) -> CoreResult<usize> {
     let mut first_error = None;
+    let mut processed = 0;
     for _ in 0..CLEANUP_BATCH {
         let Some(candidate) = repo
             .claim_cleanup(STALE_UPLOAD_SECONDS, CLAIM_SECONDS)
@@ -56,6 +61,7 @@ pub(crate) async fn run_once(repo: &ObjectStorageRepo, storage: &ObjectStorage) 
         else {
             break;
         };
+        processed += 1;
         if let Err(error) = process_candidate(repo, storage, &candidate).await {
             tracing::error!(
                 event = "object_storage_cleanup.record_failed",
@@ -70,7 +76,15 @@ pub(crate) async fn run_once(repo: &ObjectStorageRepo, storage: &ObjectStorage) 
     if let Some(error) = first_error {
         return Err(error);
     }
-    Ok(())
+    Ok(processed)
+}
+
+fn cleanup_directive(processed: usize) -> ReconciliationDirective {
+    if processed == CLEANUP_BATCH {
+        ReconciliationDirective::ContinueAfter(CLEANUP_CONTINUATION_DELAY)
+    } else {
+        ReconciliationDirective::Complete
+    }
 }
 
 async fn process_candidate(
@@ -150,7 +164,7 @@ fn cleanup_retry_seconds(retry_count: i32) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::cleanup_retry_seconds;
+    use super::*;
 
     #[test]
     fn cleanup_retry_uses_bounded_exponential_backoff() {
@@ -160,5 +174,17 @@ mod tests {
         assert_eq!(cleanup_retry_seconds(2), 120);
         assert_eq!(cleanup_retry_seconds(7), 3_600);
         assert_eq!(cleanup_retry_seconds(i32::MAX), 3_600);
+    }
+
+    #[test]
+    fn a_full_cleanup_batch_requests_a_short_continuation() {
+        assert_eq!(
+            cleanup_directive(CLEANUP_BATCH - 1),
+            ReconciliationDirective::Complete
+        );
+        assert_eq!(
+            cleanup_directive(CLEANUP_BATCH),
+            ReconciliationDirective::ContinueAfter(CLEANUP_CONTINUATION_DELAY)
+        );
     }
 }
