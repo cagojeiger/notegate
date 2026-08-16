@@ -46,7 +46,7 @@ impl Reconciler for ObjectStorageCleanupReconciler {
     }
 }
 
-pub(super) async fn run_once(repo: &ObjectStorageRepo, storage: &ObjectStorage) -> CoreResult<()> {
+pub(crate) async fn run_once(repo: &ObjectStorageRepo, storage: &ObjectStorage) -> CoreResult<()> {
     let mut first_error = None;
     for _ in 0..CLEANUP_BATCH {
         let Some(candidate) = repo

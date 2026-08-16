@@ -16,7 +16,6 @@ use notegate_db::{
     browser_session_repo::InsertBrowserSession,
 };
 use notegate_model::CreateApiKey;
-use sqlx::Row as _;
 use uuid::Uuid;
 
 static PURGE_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
