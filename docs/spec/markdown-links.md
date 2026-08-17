@@ -91,6 +91,8 @@ Target이 없거나 삭제되면 target node id는 `null`이지만 path는 유�
 - Source projection row는 마지막 성공 시각, 작업 필요 여부, 현재 queue claim과 최종 실패를 보관한다.
 - Space state row는 change checkpoint, quiet deadline과 bounded full-scan cursor를 보관한다.
 
+Projection 상태는 현재 상태만 보관하며, projection에 사용한 원문 snapshot 이력은 별도로 저장하지 않는다.
+
 ### 변경 수집
 
 문서 변경 transaction은 해당 Space의 실행 시각을 마지막 변경 5분 뒤로 갱신한다. 변경이 이어지면 quiet window도 연장되며 최대 대기 시간은 두지 않는다. Collector는 1분마다 실행 시각이 지난 Space와 진행 중인 bounded 작업만 조회한다. 모든 Space를 순회하지 않는다.
