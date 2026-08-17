@@ -13,8 +13,8 @@ use std::time::Duration;
 use common::{TestDb, space_with_root};
 use notegate_db::{
     FilesRepo, LinkGraphChangeCollection, LinkGraphProjectNodesJob, LinkGraphProjection,
-    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphStoredReference, LinkGraphWorkRepo,
-    SpaceRepo, TextMutationKind,
+    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference,
+    LinkGraphWorkRepo, SpaceRepo, TextMutationKind,
 };
 use notegate_jobs::{ClaimedJob, JobQueue, JobSpec};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
@@ -130,10 +130,12 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
                 space_id,
                 source.id,
                 projection_claim(&db.pool, &work, space_id, source.id).await?,
-                &old_text.content_sha256,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &old_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await?,
         LinkGraphProjection::Stale
@@ -151,10 +153,12 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
                 space_id,
                 source.id,
                 projection_claim(&db.pool, &work, space_id, source.id).await?,
-                &current_text.content_sha256,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &current_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await?,
         LinkGraphProjection::Applied { reference_count: 1 }
@@ -239,10 +243,12 @@ async fn projection_waiting_for_space_does_not_lock_its_target()
                 space_id,
                 source_id,
                 claim,
-                &source_hash,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &source_hash,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await
     });
@@ -336,10 +342,12 @@ async fn deleted_space_projection_leaves_space_cleanup_to_the_collector()
                 space_id,
                 source.id,
                 claim,
-                &source_text.content_sha256,
-                &source_path,
-                1,
-                &[],
+                LinkGraphSourceSnapshot {
+                    content_sha256: &source_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &[],
+                },
             ),
         )
         .await??,
@@ -1177,10 +1185,12 @@ async fn a_new_request_version_survives_completion_of_an_older_job()
                 space_id,
                 source.id,
                 old_claim,
-                &source_text.content_sha256,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &source_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await?,
         LinkGraphProjection::Stale
@@ -1249,10 +1259,12 @@ async fn deleting_a_space_wakes_collection_and_removes_derived_graph_data()
                 space_id,
                 source.id,
                 projection_claim(&db.pool, &work, space_id, source.id).await?,
-                &source_text.content_sha256,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &source_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await?,
         LinkGraphProjection::Applied { reference_count: 1 }
@@ -1292,7 +1304,7 @@ async fn deleting_a_space_wakes_collection_and_removes_derived_graph_data()
 }
 
 #[tokio::test]
-async fn full_reindex_dispatches_every_ready_target_to_the_queue()
+async fn full_reindex_dispatches_ready_targets_in_bounded_passes()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -1326,14 +1338,14 @@ async fn full_reindex_dispatches_every_ready_target_to_the_queue()
 
     assert!(work.request_space(space_id).await?);
 
-    let (job_count, queued_nodes): (i64, i64) = sqlx::query_as(
+    let (initial_job_count, initial_queued_nodes): (i64, i64) = sqlx::query_as(
         "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'node_ids')), 0) \
          FROM background_jobs WHERE job_kind = $1",
     )
     .bind(LinkGraphProjectNodesJob::KIND)
     .fetch_one(&db.pool)
     .await?;
-    let (target_count, ready_count): (i64, i64) = sqlx::query_as(
+    let (target_count, initial_ready_count): (i64, i64) = sqlx::query_as(
         "SELECT count(*), count(*) FILTER ( \
              WHERE active_job_id IS NULL AND failed_at IS NULL \
          ) \
@@ -1342,9 +1354,31 @@ async fn full_reindex_dispatches_every_ready_target_to_the_queue()
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
+    assert_eq!(initial_job_count, 10);
+    assert_eq!(initial_queued_nodes, 500);
+    assert_eq!(target_count, node_count);
+    assert_eq!(initial_ready_count, node_count - 500);
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected { .. }
+    ));
+    let (job_count, queued_nodes): (i64, i64) = sqlx::query_as(
+        "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'node_ids')), 0) \
+         FROM background_jobs WHERE job_kind = $1",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .fetch_one(&db.pool)
+    .await?;
+    let ready_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM node_link_projection_targets \
+         WHERE space_id = $1 AND active_job_id IS NULL AND failed_at IS NULL",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
     assert_eq!(job_count, 21);
     assert_eq!(queued_nodes, node_count);
-    assert_eq!(target_count, node_count);
     assert_eq!(ready_count, 0);
 
     db.cleanup().await;
@@ -1421,10 +1455,12 @@ async fn expired_claim_cannot_publish_after_the_job_is_reclaimed()
                     fence: expired_job.fence(),
                     request_version,
                 },
-                &source_text.content_sha256,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &source_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await?,
         LinkGraphProjection::Stale
@@ -1444,10 +1480,12 @@ async fn expired_claim_cannot_publish_after_the_job_is_reclaimed()
                     fence: replacement_job.fence(),
                     request_version,
                 },
-                &source_text.content_sha256,
-                &source_path,
-                1,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &source_text.content_sha256,
+                    path: &source_path,
+                    parser_version: 1,
+                    references: &references,
+                },
             )
             .await?,
         LinkGraphProjection::Applied { reference_count: 1 }

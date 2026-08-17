@@ -51,7 +51,7 @@ pub use files_repo::{FilesRepo, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
 pub use link_graph_repo::{
     LinkGraphIncomingReference, LinkGraphOutgoingReference, LinkGraphProjection,
-    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphStoredReference,
+    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference,
 };
 pub use link_graph_work_repo::{
     LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphChangeCollection, LinkGraphProjectNodesJob,

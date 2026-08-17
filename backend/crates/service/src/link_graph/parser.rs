@@ -250,11 +250,21 @@ mod tests {
             "[file](./asset.png) ![image](./asset.png) ![again](./asset.png)",
         );
 
-        assert_eq!(references.len(), 2);
-        assert_eq!(references[0].kind, LinkReferenceKind::Link);
-        assert_eq!(references[0].occurrence_count, 1);
-        assert_eq!(references[1].kind, LinkReferenceKind::Image);
-        assert_eq!(references[1].occurrence_count, 2);
+        assert_eq!(
+            references,
+            vec![
+                ParsedLinkReference {
+                    target_path: "/docs/asset.png".to_owned(),
+                    kind: LinkReferenceKind::Link,
+                    occurrence_count: 1,
+                },
+                ParsedLinkReference {
+                    target_path: "/docs/asset.png".to_owned(),
+                    kind: LinkReferenceKind::Image,
+                    occurrence_count: 2,
+                },
+            ]
+        );
     }
 
     #[test]

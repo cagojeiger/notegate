@@ -18,6 +18,14 @@ pub struct LinkGraphStoredReference {
     pub occurrence_count: i32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LinkGraphSourceSnapshot<'a> {
+    pub content_sha256: &'a str,
+    pub path: &'a str,
+    pub parser_version: i32,
+    pub references: &'a [LinkGraphStoredReference],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkGraphOutgoingReference {
     pub target_node_id: Option<Uuid>,
@@ -173,11 +181,14 @@ impl LinkGraphRepo {
         space_id: Uuid,
         source_node_id: Uuid,
         claim: LinkGraphProjectionClaim,
-        expected_content_sha256: &str,
-        expected_source_path: &str,
-        parser_version: i32,
-        references: &[LinkGraphStoredReference],
+        source: LinkGraphSourceSnapshot<'_>,
     ) -> Result<LinkGraphProjection> {
+        let LinkGraphSourceSnapshot {
+            content_sha256: expected_content_sha256,
+            path: expected_source_path,
+            parser_version,
+            references,
+        } = source;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
         if !owns_projection_claim_in(&mut tx, claim).await? {
             tx.commit().await.map_err(map_sqlx_error)?;

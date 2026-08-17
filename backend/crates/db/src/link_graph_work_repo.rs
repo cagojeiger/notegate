@@ -14,6 +14,8 @@ pub(crate) const LINK_GRAPH_PROCESSOR_KIND: &str = "link_graph";
 const LINK_GRAPH_CHANGE_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_CHANGE_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: i64 = 32;
+const LINK_GRAPH_DISPATCH_BATCH_SIZE: usize = 500;
+const LINK_GRAPH_DISPATCH_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_SETTLEMENT_BATCH_SIZE: i64 = 500;
 const LINK_GRAPH_PROJECT_MAX_ATTEMPTS: i32 = 8;
 
@@ -83,10 +85,20 @@ impl LinkGraphWorkRepo {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(false);
         }
+        lock_processor_state_in(&mut tx, space_id).await?;
         let scope = TargetScope::Space(space_id);
-        settle_terminal_targets_in(&mut tx, scope, i64::MAX).await?;
+        let settled =
+            settle_terminal_targets_in(&mut tx, scope, LINK_GRAPH_SETTLEMENT_BATCH_SIZE).await?;
         stage_full_space_in(&mut tx, space_id).await?;
-        dispatch_targets_in(&mut tx, scope).await?;
+        let latest_event_id = latest_event_id(&mut tx, space_id).await?;
+        let dispatched = dispatch_targets_in(&mut tx, scope).await?;
+        update_processor_state(
+            &mut tx,
+            space_id,
+            latest_event_id,
+            settled.has_more || dispatched.has_more,
+        )
+        .await?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(true)
     }
@@ -161,7 +173,7 @@ impl LinkGraphWorkRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         dispatched_targets += dispatched.targets;
         jobs += dispatched.jobs;
-        has_more |= settled.has_more;
+        has_more |= settled.has_more || dispatched.has_more;
 
         if spaces == 0 && settled.failed == 0 && dispatched_targets == 0 {
             return Ok(LinkGraphChangeCollection::Idle);
@@ -212,13 +224,14 @@ impl LinkGraphWorkRepo {
         if requires_full_scan {
             let targets = stage_full_space_in(&mut tx, space_id).await?;
             let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-            update_processor_state(&mut tx, space_id, latest_event_id, false).await?;
             let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
+            update_processor_state(&mut tx, space_id, latest_event_id, dispatched.has_more).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(CollectedSpace {
                 targets,
                 dispatched_targets: dispatched.targets,
                 jobs: dispatched.jobs,
+                has_more: dispatched.has_more,
                 ..CollectedSpace::default()
             }));
         }
@@ -228,13 +241,14 @@ impl LinkGraphWorkRepo {
         if !checkpoint_valid {
             let targets = stage_full_space_in(&mut tx, space_id).await?;
             let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-            update_processor_state(&mut tx, space_id, latest_event_id, false).await?;
             let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
+            update_processor_state(&mut tx, space_id, latest_event_id, dispatched.has_more).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(CollectedSpace {
                 targets,
                 dispatched_targets: dispatched.targets,
                 jobs: dispatched.jobs,
+                has_more: dispatched.has_more,
                 ..CollectedSpace::default()
             }));
         }
@@ -244,12 +258,19 @@ impl LinkGraphWorkRepo {
             rows.pop();
         }
         if rows.is_empty() {
-            update_processor_state(&mut tx, space_id, last_processed_event_id, false).await?;
             let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
+            update_processor_state(
+                &mut tx,
+                space_id,
+                last_processed_event_id,
+                dispatched.has_more,
+            )
+            .await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(CollectedSpace {
                 dispatched_targets: dispatched.targets,
                 jobs: dispatched.jobs,
+                has_more: dispatched.has_more,
                 ..CollectedSpace::default()
             }));
         }
@@ -261,21 +282,22 @@ impl LinkGraphWorkRepo {
         if plan.rebuild {
             let targets = stage_full_space_in(&mut tx, space_id).await?;
             let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-            update_processor_state(&mut tx, space_id, latest_event_id, false).await?;
             let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
+            update_processor_state(&mut tx, space_id, latest_event_id, dispatched.has_more).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(CollectedSpace {
                 events: rows.len(),
                 targets,
                 dispatched_targets: dispatched.targets,
                 jobs: dispatched.jobs,
-                has_more: false,
+                has_more: dispatched.has_more,
             }));
         }
 
         let targets = stage_incremental_plan(&mut tx, space_id, plan).await?;
-        update_processor_state(&mut tx, space_id, last_event_id, has_more).await?;
         let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
+        let has_more = has_more || dispatched.has_more;
+        update_processor_state(&mut tx, space_id, last_event_id, has_more).await?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(Some(CollectedSpace {
             events: rows.len(),
@@ -300,6 +322,7 @@ struct CollectedSpace {
 struct DispatchSummary {
     targets: usize,
     jobs: usize,
+    has_more: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -420,7 +443,7 @@ async fn load_event_window(
     .fetch_all(&mut *connection)
     .await
     .map_err(map_sqlx_error)?;
-    let checkpoint_valid = rows.first().map_or(true, |row| row.checkpoint_valid);
+    let checkpoint_valid = rows.first().is_none_or(|row| row.checkpoint_valid);
     let events = rows
         .into_iter()
         .filter_map(|row| {
@@ -596,20 +619,23 @@ async fn dispatch_targets_in(
     scope: TargetScope<'_>,
 ) -> Result<DispatchSummary> {
     let (space_id, node_ids) = scope_parameters(scope);
-    let rows = sqlx::query_as::<_, DispatchCandidateRow>(
+    let mut rows = sqlx::query_as::<_, DispatchCandidateRow>(
         "SELECT target.space_id, target.node_id \
          FROM node_link_projection_targets target \
          WHERE ($1::uuid IS NULL OR target.space_id = $1) \
            AND ($2::uuid[] IS NULL OR target.node_id = ANY($2)) \
            AND target.active_job_id IS NULL AND target.failed_at IS NULL \
          ORDER BY target.space_id, target.node_id \
-         FOR UPDATE OF target SKIP LOCKED",
+         LIMIT $3 FOR UPDATE OF target SKIP LOCKED",
     )
     .bind(space_id)
     .bind(node_ids)
+    .bind(LINK_GRAPH_DISPATCH_FETCH_LIMIT)
     .fetch_all(&mut *connection)
     .await
     .map_err(map_sqlx_error)?;
+    let has_more = rows.len() > LINK_GRAPH_DISPATCH_BATCH_SIZE;
+    rows.truncate(LINK_GRAPH_DISPATCH_BATCH_SIZE);
 
     let mut by_space = BTreeMap::<Uuid, Vec<Uuid>>::new();
     for row in rows {
@@ -647,7 +673,11 @@ async fn dispatch_targets_in(
             jobs += 1;
         }
     }
-    Ok(DispatchSummary { targets, jobs })
+    Ok(DispatchSummary {
+        targets,
+        jobs,
+        has_more,
+    })
 }
 
 fn scope_parameters(scope: TargetScope<'_>) -> (Option<Uuid>, Option<Vec<Uuid>>) {
@@ -673,6 +703,28 @@ async fn latest_event_id(connection: &mut PgConnection, space_id: Uuid) -> Resul
         .fetch_one(&mut *connection)
         .await
         .map_err(map_sqlx_error)
+}
+
+async fn lock_processor_state_in(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO space_change_processor_states (space_id, processor_kind) \
+         VALUES ($1, $2) ON CONFLICT (space_id, processor_kind) DO NOTHING",
+    )
+    .bind(space_id)
+    .bind(LINK_GRAPH_PROCESSOR_KIND)
+    .execute(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    sqlx::query(
+        "SELECT 1 FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = $2 FOR UPDATE",
+    )
+    .bind(space_id)
+    .bind(LINK_GRAPH_PROCESSOR_KIND)
+    .execute(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
 }
 
 async fn update_processor_state(

@@ -3,7 +3,7 @@ mod parser;
 use notegate_core::{Error, Result, limits};
 use notegate_db::{
     FilesRepo, LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphProjection, LinkGraphProjectionClaim,
-    LinkGraphRepo, LinkGraphStoredReference, LinkGraphWorkRepo,
+    LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference, LinkGraphWorkRepo,
 };
 use notegate_jobs::ClaimFence;
 use notegate_model::{
@@ -286,10 +286,12 @@ impl LinkGraphService {
                 space_id,
                 node.id,
                 claim,
-                &text.content_sha256,
-                &source_path,
-                LINK_GRAPH_PARSER_VERSION,
-                &references,
+                LinkGraphSourceSnapshot {
+                    content_sha256: &text.content_sha256,
+                    path: &source_path,
+                    parser_version: LINK_GRAPH_PARSER_VERSION,
+                    references: &references,
+                },
             )
             .await
     }
