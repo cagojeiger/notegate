@@ -370,7 +370,7 @@ pub mod node {
     use notegate_core::{Error, Result};
     use notegate_model::files::NodeListSort;
     use notegate_model::{Node, NodeKind, NodeSummary};
-    use sqlx::PgPool;
+    use sqlx::{Executor, PgPool, Postgres};
     use std::collections::{HashMap, HashSet};
     use uuid::Uuid;
 
@@ -547,13 +547,16 @@ pub mod node {
         Ok(sources)
     }
 
-    /// Shared path-derivation CTE used by `node_path` and search result assembly.
+    /// Shared path-derivation CTE used by pool and transaction callers.
     /// Returns the absolute path of a live node, or `None` if it is missing/deleted.
-    pub async fn derive_path(
-        pool: &PgPool,
+    pub async fn derive_path<'e, E>(
+        executor: E,
         space_id: Uuid,
         node_id: Uuid,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         let path: Option<String> = sqlx::query_scalar(
             "WITH RECURSIVE chain AS ( \
             SELECT id, parent_id, name, 0 AS depth \
@@ -574,7 +577,7 @@ pub mod node {
         )
         .bind(space_id)
         .bind(node_id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
         .map_err(map_sqlx_error)?
         .flatten();
@@ -964,8 +967,7 @@ pub mod search {
     use notegate_model::search::{SearchNodeCandidate, SearchTextCandidate};
     use notegate_model::{TextAtRestEncryption, TextObject};
     use serde_json::Value;
-    use sqlx::FromRow;
-    use sqlx::PgPool;
+    use sqlx::{Executor, FromRow, PgPool, Postgres};
     use std::collections::HashMap;
     use std::time::Instant;
     use uuid::Uuid;
@@ -1176,6 +1178,17 @@ pub mod search {
         space_id: Uuid,
         paths: &[String],
     ) -> Result<Vec<(usize, String, notegate_model::Node)>> {
+        resolve_nodes_by_paths_with(pool, space_id, paths).await
+    }
+
+    pub(crate) async fn resolve_nodes_by_paths_with<'e, E>(
+        executor: E,
+        space_id: Uuid,
+        paths: &[String],
+    ) -> Result<Vec<(usize, String, notegate_model::Node)>>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
         if paths.is_empty() {
             return Ok(Vec::new());
         }
@@ -1216,7 +1229,7 @@ pub mod search {
         )))
         .bind(space_id)
         .bind(paths.to_vec())
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .map_err(map_sqlx_error)?;
 

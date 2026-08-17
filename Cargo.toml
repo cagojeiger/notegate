@@ -75,6 +75,8 @@ futures-util = "0.3"
 moka = { version = "0.12", features = ["future"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
+percent-encoding = "2"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 # Auth / OAuth / MCP
 aliri = { version = "0.6.4", default-features = false, features = ["rsa"] }

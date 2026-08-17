@@ -149,16 +149,19 @@ background_job_attempts
 현재 등록된 kind:
 
 ```text
-space_usage_reconcile  # Space 사용량 전체 재계산
+space_usage_reconcile      # Space 사용량 전체 재계산
+link_graph_project_nodes   # Text source의 링크 관계 projection
 ```
 
 ## 도메인 책임
 
 Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다. 같은 작업이 반복되어도 결과가 같다. Space별 reconciliation gate를 사용하므로 같은 Space의 mutation과 정확한 재계산이 겹치지 않는다.
 
+Link graph handler는 한 작업에서 최대 50개 source를 projection한다. Queue claim fence가 유효한 domain transaction만 관계를 교체할 수 있으며, source별 최신 요청 version이 이전 작업의 늦은 결과를 차단한다.
+
 ## 실행과 스케일 아웃
 
-원본 변경과 enqueue는 같은 PostgreSQL database transaction에 기록된다. `all` 또는 `worker` mode replica의 consumer가 같은 원장에서 작업을 분산 선점한다.
+즉시 작업을 만드는 도메인은 원본 변경과 enqueue를 같은 PostgreSQL database transaction에 기록한다. Link graph처럼 변경을 합치는 도메인은 원본 checkpoint와 durable target을 먼저 같은 transaction에 기록하고, 준비된 target을 별도 transaction에서 queue로 옮긴다. `all` 또는 `worker` mode replica의 consumer가 같은 queue에서 작업을 분산 선점한다.
 
 ```text
 API transaction ── insert background_jobs ── COMMIT ── broadcast NOTIFY

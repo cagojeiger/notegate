@@ -15,6 +15,7 @@ test-util = ["notegate-db/test-util"]
 notegate-core.workspace = true
 notegate-model.workspace = true
 notegate-db.workspace = true
+notegate-jobs.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
@@ -32,6 +33,8 @@ regex.workspace = true
 moka.workspace = true
 tokio.workspace = true
 metrics.workspace = true
+percent-encoding.workspace = true
+pulldown-cmark.workspace = true
 
 [dev-dependencies]
 notegate-db = { workspace = true, features = ["test-util"] }

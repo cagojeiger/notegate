@@ -236,3 +236,7 @@ pub const BACKGROUND_JOBS_MAX_LIMIT: i64 = 100;
 pub const FILE_CHANGE_EVENTS_DEFAULT_LIMIT: i64 = 50;
 /// Maximum `GET /spaces/{id}/file-change-events` page size.
 pub const FILE_CHANGE_EVENTS_MAX_LIMIT: i64 = 100;
+/// Default page size for incoming and outgoing Markdown references.
+pub const LINK_REFERENCES_DEFAULT_LIMIT: i64 = 50;
+/// Maximum page size for incoming and outgoing Markdown references.
+pub const LINK_REFERENCES_MAX_LIMIT: i64 = 100;

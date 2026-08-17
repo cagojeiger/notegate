@@ -14,6 +14,7 @@ pub mod cursor;
 pub mod error;
 pub mod files;
 pub mod identity;
+pub mod link_graph;
 pub mod mcp_invocations;
 mod pagination;
 pub mod search;

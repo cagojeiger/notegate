@@ -178,6 +178,7 @@ pub(super) fn rest_app(state: crate::state::AppState, caller: Caller) -> Router 
         .merge(crate::rest::text::routes())
         .merge(crate::rest::file_uploads::routes())
         .merge(crate::rest::files::routes())
+        .merge(crate::rest::link_graph::routes())
         .merge(crate::rest::connections::routes())
         .merge(crate::rest::agents::routes())
         .layer(Extension(caller))

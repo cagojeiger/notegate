@@ -3,6 +3,7 @@ pub mod connections;
 pub mod dto;
 pub mod file_uploads;
 pub mod files;
+pub mod link_graph;
 pub mod me;
 pub mod nodes;
 pub mod spaces;
@@ -10,6 +11,8 @@ pub mod text;
 
 #[cfg(test)]
 mod file_upload_tests;
+#[cfg(test)]
+mod link_graph_tests;
 #[cfg(test)]
 mod me_tests;
 #[cfg(test)]

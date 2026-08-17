@@ -23,6 +23,8 @@ mod file_change_events;
 pub mod files;
 pub mod files_repo;
 pub mod key_epoch_repo;
+pub mod link_graph_repo;
+pub mod link_graph_work_repo;
 pub mod mcp_invocation_repo;
 pub mod metadata_write_repo;
 pub mod object_storage_repo;
@@ -47,6 +49,14 @@ pub use connection_repo::ConnectionRepo;
 pub use file_change_event_repo::FileChangeSyncRows;
 pub use files_repo::{FilesRepo, TextMutationKind};
 pub use key_epoch_repo::CryptoKeyEpochRepo;
+pub use link_graph_repo::{
+    LinkGraphIncomingReference, LinkGraphOutgoingReference, LinkGraphProjection,
+    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphStoredReference,
+};
+pub use link_graph_work_repo::{
+    LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphChangeCollection, LinkGraphProjectNodesJob,
+    LinkGraphProjectNodesPayload, LinkGraphProjectionTarget, LinkGraphWorkRepo,
+};
 pub use mcp_invocation_repo::{McpInvocationRepo, NewMcpInvocation};
 pub use metadata_write_repo::{MediaTypeObservation, MetadataWriteRepo};
 pub use object_storage_repo::{CleanupCandidate, ObjectStorageRepo};
