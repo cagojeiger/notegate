@@ -164,13 +164,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_standard_internal_links_and_images() {
+    fn parses_standard_internal_links_and_images() -> Result<(), ParseInternalReferencesError> {
         let references = parse_internal_references(
             "/docs/current.md",
             "[one](../README.md) [again](../README.md#top) ![asset](./a%20b.png) \
              [web](https://example.com) [anchor](#local)",
-        )
-        .unwrap();
+        )?;
 
         assert_eq!(
             references,
@@ -187,6 +186,7 @@ mod tests {
                 },
             ]
         );
+        Ok(())
     }
 
     #[test]
@@ -221,15 +221,15 @@ mod tests {
     }
 
     #[test]
-    fn follows_commonmark_links_but_ignores_code_and_raw_html() {
+    fn follows_commonmark_links_but_ignores_code_and_raw_html()
+    -> Result<(), ParseInternalReferencesError> {
         let references = parse_internal_references(
             "/docs/current.md",
             "[reference][target]\n\n[target]: ./target.md\n\n\
              `<a href=\"./code.md\">code</a>`\n\n\
              <a href=\"./raw.md\">raw</a>\n\n\
              ```md\n[code](./fenced.md)\n```",
-        )
-        .unwrap();
+        )?;
 
         assert_eq!(
             references,
@@ -239,15 +239,15 @@ mod tests {
                 occurrence_count: 1,
             }]
         );
+        Ok(())
     }
 
     #[test]
-    fn ignores_obsidian_wikilinks() {
+    fn ignores_obsidian_wikilinks() -> Result<(), ParseInternalReferencesError> {
         let references = parse_internal_references(
             "/docs/current.md",
             "[[target.md]] ![[image.png]] [standard](./target.md)",
-        )
-        .unwrap();
+        )?;
 
         assert_eq!(
             references,
@@ -257,15 +257,15 @@ mod tests {
                 occurrence_count: 1,
             }]
         );
+        Ok(())
     }
 
     #[test]
-    fn keeps_link_and_image_occurrences_separate() {
+    fn keeps_link_and_image_occurrences_separate() -> Result<(), ParseInternalReferencesError> {
         let references = parse_internal_references(
             "/docs/current.md",
             "[file](./asset.png) ![image](./asset.png) ![again](./asset.png)",
-        )
-        .unwrap();
+        )?;
 
         assert_eq!(
             references,
@@ -282,6 +282,7 @@ mod tests {
                 },
             ]
         );
+        Ok(())
     }
 
     #[test]
@@ -316,7 +317,8 @@ mod tests {
     }
 
     #[test]
-    fn repeated_references_count_once_toward_the_limit() {
+    fn repeated_references_count_once_toward_the_limit() -> Result<(), ParseInternalReferencesError>
+    {
         let content = std::iter::repeat_n(
             "[target](./target.md)",
             notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX + 1,
@@ -325,15 +327,13 @@ mod tests {
         .join(" ");
 
         assert_eq!(
-            parse_internal_references("/source.md", &content).unwrap(),
+            parse_internal_references("/source.md", &content)?,
             vec![ParsedLinkReference {
                 target_path: "/target.md".to_owned(),
                 kind: LinkReferenceKind::Link,
-                occurrence_count: i32::try_from(
-                    notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX + 1
-                )
-                .unwrap(),
+                occurrence_count: 1_001,
             }]
         );
+        Ok(())
     }
 }
