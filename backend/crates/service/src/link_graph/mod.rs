@@ -17,7 +17,6 @@ use crate::pagination::paginate_keyset;
 
 use parser::{ParseInternalReferencesError, parse_internal_references};
 
-pub const LINK_GRAPH_PARSER_VERSION: i32 = 1;
 const LINK_REFERENCE_LIMIT_FAILURE_CODE: &str = "link_reference_limit_exceeded";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -308,7 +307,6 @@ impl LinkGraphService {
                 LinkGraphSourceSnapshot {
                     content_sha256: &text.content_sha256,
                     path: &source_path,
-                    parser_version: LINK_GRAPH_PARSER_VERSION,
                     references: &references,
                 },
             )

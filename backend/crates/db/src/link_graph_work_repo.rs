@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::map_sqlx_error;
 
 pub const LINK_GRAPH_PROJECT_BATCH_MAX: usize = 50;
-pub(crate) const LINK_GRAPH_PROCESSOR_KIND: &str = "link_graph";
 const LINK_GRAPH_CHANGE_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_CHANGE_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: i64 = 32;
@@ -87,12 +86,19 @@ impl LinkGraphWorkRepo {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(false);
         }
-        lock_processor_state_in(&mut tx, space_id).await?;
-        reset_full_scan_state(&mut tx, space_id).await?;
+        lock_space_state_in(&mut tx, space_id).await?;
+        let full_scan_event_id = start_full_scan_state(&mut tx, space_id).await?;
         let scope = TargetScope::Space(space_id);
         let settled =
             settle_terminal_targets_in(&mut tx, scope, LINK_GRAPH_SETTLEMENT_BATCH_SIZE).await?;
-        run_full_scan_pass(&mut tx, space_id, None, None, settled.has_more).await?;
+        run_full_scan_pass(
+            &mut tx,
+            space_id,
+            full_scan_event_id,
+            None,
+            settled.has_more,
+        )
+        .await?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(true)
     }
@@ -112,11 +118,11 @@ impl LinkGraphWorkRepo {
     ) -> Result<Vec<LinkGraphProjectionTarget>> {
         validate_node_batch(node_ids)?;
         sqlx::query_as::<_, ProjectionTargetRow>(
-            "SELECT node_id, active_request_version AS request_version \
-             FROM node_link_projection_targets \
+            "SELECT source_node_id AS node_id, active_request_version AS request_version \
+             FROM node_link_projections \
              WHERE active_job_id = $1 AND active_request_version IS NOT NULL \
-               AND space_id = $2 AND node_id = ANY($3) \
-             ORDER BY node_id",
+               AND space_id = $2 AND source_node_id = ANY($3) \
+             ORDER BY source_node_id",
         )
         .bind(job_id)
         .bind(space_id)
@@ -129,12 +135,17 @@ impl LinkGraphWorkRepo {
 
     pub async fn collect_changes(&self) -> Result<LinkGraphChangeCollection> {
         let space_ids: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT space_id FROM space_change_processor_states \
-             WHERE processor_kind = $1 AND processing_state = 'pending' \
-               AND (continue_immediately OR available_at <= now()) \
-             ORDER BY continue_immediately DESC, available_at, space_id LIMIT $2",
+            "SELECT space_id FROM link_graph_space_states \
+             WHERE available_at IS NOT NULL AND ( \
+                 incremental_event_id IS NOT NULL \
+                 OR full_scan_event_id IS NOT NULL \
+                 OR available_at <= now() \
+             ) \
+             ORDER BY (incremental_event_id IS NOT NULL \
+                       OR full_scan_event_id IS NOT NULL) DESC, \
+                      available_at, space_id \
+             LIMIT $1",
         )
-        .bind(LINK_GRAPH_PROCESSOR_KIND)
         .bind(LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE)
         .fetch_all(&self.pool)
         .await
@@ -185,17 +196,18 @@ impl LinkGraphWorkRepo {
 
     async fn collect_space_changes(&self, space_id: Uuid) -> Result<Option<CollectedSpace>> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let state = sqlx::query_as::<_, ProcessorStateRow>(
+        let state = sqlx::query_as::<_, LinkGraphSpaceStateRow>(
             "SELECT last_processed_event_id, pending_since_event_id, incremental_event_id, \
-                    requires_full_scan, full_scan_event_id, full_scan_after_node_id \
-             FROM space_change_processor_states \
-             WHERE space_id = $1 AND processor_kind = $2 \
-               AND processing_state = 'pending' \
-               AND (continue_immediately OR available_at <= now()) \
+                    full_scan_event_id, full_scan_after_node_id \
+             FROM link_graph_space_states \
+             WHERE space_id = $1 AND available_at IS NOT NULL AND ( \
+                 incremental_event_id IS NOT NULL \
+                 OR full_scan_event_id IS NOT NULL \
+                 OR available_at <= now() \
+             ) \
              FOR UPDATE",
         )
         .bind(space_id)
-        .bind(LINK_GRAPH_PROCESSOR_KIND)
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
@@ -217,11 +229,11 @@ impl LinkGraphWorkRepo {
             return Ok(Some(CollectedSpace::default()));
         }
 
-        if state.requires_full_scan {
+        if let Some(full_scan_event_id) = state.full_scan_event_id {
             let collected = run_full_scan_pass(
                 &mut tx,
                 space_id,
-                state.full_scan_event_id,
+                full_scan_event_id,
                 state.full_scan_after_node_id,
                 false,
             )
@@ -244,7 +256,7 @@ impl LinkGraphWorkRepo {
         .await?;
         if !checkpoint_valid {
             let collected =
-                run_full_scan_pass(&mut tx, space_id, Some(event_window_id), None, false).await?;
+                run_full_scan_pass(&mut tx, space_id, event_window_id, None, false).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(collected));
         }
@@ -257,12 +269,11 @@ impl LinkGraphWorkRepo {
             let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
             let events_after_window = latest_event_id(&mut tx, space_id).await? > event_window_id;
             let pending = dispatched.has_more || events_after_window;
-            update_processor_state(
+            update_space_state(
                 &mut tx,
                 space_id,
                 state.last_processed_event_id,
                 pending,
-                dispatched.has_more,
                 dispatched.has_more.then_some(event_window_id),
             )
             .await?;
@@ -281,7 +292,7 @@ impl LinkGraphWorkRepo {
         let plan = classify_changes(&rows);
         if plan.rebuild {
             let mut collected =
-                run_full_scan_pass(&mut tx, space_id, Some(event_window_id), None, false).await?;
+                run_full_scan_pass(&mut tx, space_id, event_window_id, None, false).await?;
             collected.events = rows.len();
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(Some(collected));
@@ -291,15 +302,14 @@ impl LinkGraphWorkRepo {
         let targets = stage_node_ids_in(&mut tx, space_id, &node_ids, false).await?;
         let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
         let events_after_window = latest_event_id(&mut tx, space_id).await? > event_window_id;
-        let continue_immediately = has_more || dispatched.has_more;
-        let pending = continue_immediately || events_after_window;
-        update_processor_state(
+        let has_immediate_work = has_more || dispatched.has_more;
+        let pending = has_immediate_work || events_after_window;
+        update_space_state(
             &mut tx,
             space_id,
             last_event_id,
             pending,
-            continue_immediately,
-            continue_immediately.then_some(event_window_id),
+            has_immediate_work.then_some(event_window_id),
         )
         .await?;
         tx.commit().await.map_err(map_sqlx_error)?;
@@ -308,7 +318,7 @@ impl LinkGraphWorkRepo {
             targets,
             dispatched_targets: dispatched.targets,
             jobs: dispatched.jobs,
-            has_more: continue_immediately,
+            has_more: has_immediate_work,
         }))
     }
 }
@@ -336,11 +346,10 @@ struct SettlementSummary {
 }
 
 #[derive(Debug, FromRow)]
-struct ProcessorStateRow {
+struct LinkGraphSpaceStateRow {
     last_processed_event_id: i64,
     pending_since_event_id: Option<i64>,
     incremental_event_id: Option<i64>,
-    requires_full_scan: bool,
     full_scan_event_id: Option<i64>,
     full_scan_after_node_id: Option<Uuid>,
 }
@@ -503,21 +512,24 @@ async fn stage_node_ids_in(
                  SELECT 1 FROM nodes node \
                  WHERE node.id = input.node_id AND node.space_id = $1 \
              ) OR EXISTS ( \
-                 SELECT 1 FROM node_link_projection_targets target \
-                 WHERE target.space_id = $1 AND target.node_id = input.node_id \
+                 SELECT 1 FROM node_link_projections projection \
+                 WHERE projection.space_id = $1 \
+                   AND projection.source_node_id = input.node_id \
              ) \
          ) \
-         INSERT INTO node_link_projection_targets (space_id, node_id, request_version) \
-         SELECT $1, candidates.node_id, \
-                nextval('node_link_projection_request_version_seq') \
+         INSERT INTO node_link_projections ( \
+             space_id, source_node_id, needs_projection, request_version \
+         ) \
+         SELECT $1, candidates.node_id, true, 1 \
          FROM candidates \
-         ON CONFLICT (space_id, node_id) DO UPDATE \
-         SET request_version = EXCLUDED.request_version, \
+         ON CONFLICT (space_id, source_node_id) DO UPDATE \
+         SET needs_projection = true, \
+             request_version = node_link_projections.request_version + 1, \
              active_job_id = CASE WHEN $3 THEN NULL \
-                 ELSE node_link_projection_targets.active_job_id END, \
+                 ELSE node_link_projections.active_job_id END, \
              active_request_version = CASE WHEN $3 THEN NULL \
-                 ELSE node_link_projection_targets.active_request_version END, \
-             failure_code = NULL, failed_at = NULL, updated_at = now()",
+                 ELSE node_link_projections.active_request_version END, \
+             failure_code = NULL, failed_at = NULL",
     )
     .bind(space_id)
     .bind(node_ids)
@@ -542,43 +554,23 @@ async fn stage_full_space_batch_in(
                 AND node.deleted_at IS NULL \
               ORDER BY node.id LIMIT $2) \
              UNION \
-             (SELECT state.source_node_id AS node_id \
-              FROM node_link_source_states state \
-              WHERE state.space_id = $1 \
-              ORDER BY state.source_node_id LIMIT $2) \
-             UNION \
-             (SELECT DISTINCT reference.source_node_id AS node_id \
-              FROM node_link_refs reference \
-              WHERE reference.space_id = $1 \
-              ORDER BY reference.source_node_id LIMIT $2) \
-             UNION \
-             (SELECT target.node_id \
-              FROM node_link_projection_targets target \
-              WHERE target.space_id = $1 \
-              ORDER BY target.node_id LIMIT $2) \
+             (SELECT projection.source_node_id AS node_id \
+              FROM node_link_projections projection \
+              WHERE projection.space_id = $1 \
+              ORDER BY projection.source_node_id LIMIT $2) \
          ) \
          SELECT node_id FROM candidates ORDER BY node_id LIMIT $2";
     const CONTINUATION_PAGE_SQL: &str = "WITH candidates AS ( \
              (SELECT node.id AS node_id \
               FROM nodes node \
-              WHERE node.space_id = $1 AND node.kind = 'text' \
+             WHERE node.space_id = $1 AND node.kind = 'text' \
                 AND node.deleted_at IS NULL AND node.id > $2 \
               ORDER BY node.id LIMIT $3) \
              UNION \
-             (SELECT state.source_node_id AS node_id \
-              FROM node_link_source_states state \
-              WHERE state.space_id = $1 AND state.source_node_id > $2 \
-              ORDER BY state.source_node_id LIMIT $3) \
-             UNION \
-             (SELECT DISTINCT reference.source_node_id AS node_id \
-              FROM node_link_refs reference \
-              WHERE reference.space_id = $1 AND reference.source_node_id > $2 \
-              ORDER BY reference.source_node_id LIMIT $3) \
-             UNION \
-             (SELECT target.node_id \
-              FROM node_link_projection_targets target \
-              WHERE target.space_id = $1 AND target.node_id > $2 \
-              ORDER BY target.node_id LIMIT $3) \
+             (SELECT projection.source_node_id AS node_id \
+              FROM node_link_projections projection \
+              WHERE projection.space_id = $1 AND projection.source_node_id > $2 \
+              ORDER BY projection.source_node_id LIMIT $3) \
          ) \
          SELECT node_id FROM candidates ORDER BY node_id LIMIT $3";
 
@@ -609,14 +601,10 @@ async fn stage_full_space_batch_in(
 async fn run_full_scan_pass(
     connection: &mut PgConnection,
     space_id: Uuid,
-    full_scan_event_id: Option<i64>,
+    full_scan_event_id: i64,
     after_node_id: Option<Uuid>,
     pending_after_scan: bool,
 ) -> Result<CollectedSpace> {
-    let full_scan_event_id = match full_scan_event_id {
-        Some(event_id) => event_id,
-        None => latest_event_id(connection, space_id).await?,
-    };
     let batch = stage_full_space_batch_in(connection, space_id, after_node_id).await?;
     let dispatched = dispatch_targets_in(connection, TargetScope::Space(space_id)).await?;
 
@@ -625,21 +613,20 @@ async fn run_full_scan_pass(
     } else {
         latest_event_id(connection, space_id).await? > full_scan_event_id
     };
-    let continue_immediately = batch.has_more || dispatched.has_more || pending_after_scan;
-    let pending = continue_immediately || events_after_scan;
+    let has_immediate_work = batch.has_more || dispatched.has_more || pending_after_scan;
+    let pending = has_immediate_work || events_after_scan;
     if batch.has_more {
         let last_node_id = batch.last_node_id.ok_or_else(|| {
             notegate_core::Error::internal("full link scan has no continuation node")
         })?;
         update_full_scan_progress(connection, space_id, full_scan_event_id, last_node_id).await?;
     } else {
-        update_processor_state(
+        update_space_state(
             connection,
             space_id,
             full_scan_event_id,
             pending,
-            continue_immediately,
-            None,
+            has_immediate_work.then_some(full_scan_event_id),
         )
         .await?;
     }
@@ -648,7 +635,7 @@ async fn run_full_scan_pass(
         targets: batch.targets,
         dispatched_targets: dispatched.targets,
         jobs: dispatched.jobs,
-        has_more: continue_immediately,
+        has_more: has_immediate_work,
         ..CollectedSpace::default()
     })
 }
@@ -661,19 +648,21 @@ async fn settle_terminal_targets_in(
     let (space_id, node_ids) = scope_parameters(scope);
     let (processed, failed): (i64, i64) = sqlx::query_as(
         "WITH candidates AS ( \
-             SELECT target.space_id, target.node_id, target.request_version, \
-                    target.active_request_version, job.status, \
+             SELECT projection.space_id, projection.source_node_id, \
+                    projection.request_version, projection.active_request_version, job.status, \
                     job.last_error_code, job.completed_at \
-             FROM node_link_projection_targets target \
-             JOIN background_jobs job ON job.job_id = target.active_job_id \
-             WHERE ($1::uuid IS NULL OR target.space_id = $1) \
-               AND ($2::uuid[] IS NULL OR target.node_id = ANY($2)) \
+             FROM node_link_projections projection \
+             JOIN background_jobs job ON job.job_id = projection.active_job_id \
+             WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
+               AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
                AND job.status IN ('succeeded', 'dead') \
-             ORDER BY target.space_id, target.node_id \
-             LIMIT $3 FOR UPDATE OF target SKIP LOCKED \
+             ORDER BY projection.space_id, projection.source_node_id \
+             LIMIT $3 FOR UPDATE OF projection SKIP LOCKED \
          ), updated AS ( \
-             UPDATE node_link_projection_targets target \
+             UPDATE node_link_projections projection \
              SET active_job_id = NULL, active_request_version = NULL, \
+                 needs_projection = \
+                     candidate.active_request_version IS DISTINCT FROM candidate.request_version, \
                  failure_code = CASE \
                      WHEN candidate.active_request_version IS DISTINCT FROM candidate.request_version \
                          THEN NULL \
@@ -685,12 +674,11 @@ async fn settle_terminal_targets_in(
                      WHEN candidate.active_request_version IS DISTINCT FROM candidate.request_version \
                          THEN NULL \
                      ELSE COALESCE(candidate.completed_at, now()) \
-                 END, \
-                 updated_at = now() \
+                 END \
              FROM candidates candidate \
-             WHERE target.space_id = candidate.space_id \
-               AND target.node_id = candidate.node_id \
-             RETURNING target.failure_code IS NOT NULL AS failed \
+             WHERE projection.space_id = candidate.space_id \
+               AND projection.source_node_id = candidate.source_node_id \
+             RETURNING projection.failure_code IS NOT NULL AS failed \
          ) \
          SELECT count(*), count(*) FILTER (WHERE failed) FROM updated",
     )
@@ -714,13 +702,14 @@ async fn dispatch_targets_in(
 ) -> Result<DispatchSummary> {
     let (space_id, node_ids) = scope_parameters(scope);
     let mut rows = sqlx::query_as::<_, DispatchCandidateRow>(
-        "SELECT target.space_id, target.node_id \
-         FROM node_link_projection_targets target \
-         WHERE ($1::uuid IS NULL OR target.space_id = $1) \
-           AND ($2::uuid[] IS NULL OR target.node_id = ANY($2)) \
-           AND target.active_job_id IS NULL AND target.failed_at IS NULL \
-         ORDER BY target.space_id, target.node_id \
-         LIMIT $3 FOR UPDATE OF target SKIP LOCKED",
+        "SELECT projection.space_id, projection.source_node_id AS node_id \
+         FROM node_link_projections projection \
+         WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
+           AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
+           AND projection.needs_projection \
+           AND projection.active_job_id IS NULL AND projection.failed_at IS NULL \
+         ORDER BY projection.space_id, projection.source_node_id \
+         LIMIT $3 FOR UPDATE OF projection SKIP LOCKED",
     )
     .bind(space_id)
     .bind(node_ids)
@@ -752,10 +741,9 @@ async fn dispatch_targets_in(
             .await
             .map_err(job_error)?;
             sqlx::query(
-                "UPDATE node_link_projection_targets \
-                 SET active_job_id = $3, active_request_version = request_version, \
-                     updated_at = now() \
-                 WHERE space_id = $1 AND node_id = ANY($2)",
+                "UPDATE node_link_projections \
+                 SET active_job_id = $3, active_request_version = request_version \
+                 WHERE space_id = $1 AND source_node_id = ANY($2)",
             )
             .bind(space_id)
             .bind(batch)
@@ -799,44 +787,39 @@ async fn latest_event_id(connection: &mut PgConnection, space_id: Uuid) -> Resul
         .map_err(map_sqlx_error)
 }
 
-async fn lock_processor_state_in(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
+async fn lock_space_state_in(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
     sqlx::query(
-        "INSERT INTO space_change_processor_states (space_id, processor_kind) \
-         VALUES ($1, $2) ON CONFLICT (space_id, processor_kind) DO NOTHING",
+        "INSERT INTO link_graph_space_states (space_id) \
+         VALUES ($1) ON CONFLICT (space_id) DO NOTHING",
     )
     .bind(space_id)
-    .bind(LINK_GRAPH_PROCESSOR_KIND)
     .execute(&mut *connection)
     .await
     .map_err(map_sqlx_error)?;
-    sqlx::query(
-        "SELECT 1 FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = $2 FOR UPDATE",
-    )
-    .bind(space_id)
-    .bind(LINK_GRAPH_PROCESSOR_KIND)
-    .execute(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
+    sqlx::query("SELECT 1 FROM link_graph_space_states WHERE space_id = $1 FOR UPDATE")
+        .bind(space_id)
+        .execute(&mut *connection)
+        .await
+        .map_err(map_sqlx_error)?;
     Ok(())
 }
 
-async fn reset_full_scan_state(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
+async fn start_full_scan_state(connection: &mut PgConnection, space_id: Uuid) -> Result<i64> {
+    let full_scan_event_id = latest_event_id(connection, space_id).await?;
     sqlx::query(
-        "UPDATE space_change_processor_states \
-         SET processing_state = 'pending', available_at = now(), \
-             pending_since_event_id = NULL, continue_immediately = true, \
-             incremental_event_id = NULL, requires_full_scan = true, \
-             full_scan_event_id = NULL, \
-             full_scan_after_node_id = NULL, updated_at = now() \
-         WHERE space_id = $1 AND processor_kind = $2",
+        "UPDATE link_graph_space_states \
+         SET last_processed_event_id = LEAST(last_processed_event_id, $2), \
+             available_at = now(), pending_since_event_id = NULL, \
+             incremental_event_id = NULL, full_scan_event_id = $2, \
+             full_scan_after_node_id = NULL \
+         WHERE space_id = $1",
     )
     .bind(space_id)
-    .bind(LINK_GRAPH_PROCESSOR_KIND)
+    .bind(full_scan_event_id)
     .execute(&mut *connection)
     .await
     .map_err(map_sqlx_error)?;
-    Ok(())
+    Ok(full_scan_event_id)
 }
 
 async fn update_full_scan_progress(
@@ -846,17 +829,13 @@ async fn update_full_scan_progress(
     after_node_id: Uuid,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE space_change_processor_states \
-         SET processing_state = 'pending', \
-             available_at = COALESCE(available_at, now()), \
-             continue_immediately = true, incremental_event_id = NULL, \
-             requires_full_scan = true, \
-             full_scan_event_id = $3, \
-             full_scan_after_node_id = $4, updated_at = now() \
-         WHERE space_id = $1 AND processor_kind = $2",
+        "UPDATE link_graph_space_states \
+         SET last_processed_event_id = LEAST(last_processed_event_id, $2), \
+             available_at = COALESCE(available_at, now()), incremental_event_id = NULL, \
+             full_scan_event_id = $2, full_scan_after_node_id = $3 \
+         WHERE space_id = $1",
     )
     .bind(space_id)
-    .bind(LINK_GRAPH_PROCESSOR_KIND)
     .bind(full_scan_event_id)
     .bind(after_node_id)
     .execute(&mut *connection)
@@ -865,35 +844,32 @@ async fn update_full_scan_progress(
     Ok(())
 }
 
-async fn update_processor_state(
+async fn update_space_state(
     connection: &mut PgConnection,
     space_id: Uuid,
     last_processed_event_id: i64,
     pending: bool,
-    continue_immediately: bool,
     incremental_event_id: Option<i64>,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE space_change_processor_states \
-         SET last_processed_event_id = $3, \
-             processing_state = CASE WHEN $4 THEN 'pending' ELSE 'idle' END, \
-             available_at = CASE WHEN $4 THEN COALESCE(available_at, now()) ELSE NULL END, \
+        "UPDATE link_graph_space_states \
+         SET last_processed_event_id = $2, \
+             available_at = CASE \
+                 WHEN NOT $3 THEN NULL \
+                 ELSE COALESCE(available_at, now()) \
+             END, \
              pending_since_event_id = CASE \
-                 WHEN $4 AND pending_since_event_id > COALESCE($6, $3) \
+                 WHEN $3 AND pending_since_event_id > COALESCE($4, $2) \
                      THEN pending_since_event_id \
                  ELSE NULL \
              END, \
-             continue_immediately = $5, \
-             incremental_event_id = $6, requires_full_scan = false, \
-             full_scan_event_id = NULL, \
-             full_scan_after_node_id = NULL, updated_at = now() \
-         WHERE space_id = $1 AND processor_kind = $2",
+             incremental_event_id = $4, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL \
+         WHERE space_id = $1",
     )
     .bind(space_id)
-    .bind(LINK_GRAPH_PROCESSOR_KIND)
     .bind(last_processed_event_id)
     .bind(pending)
-    .bind(continue_immediately)
     .bind(incremental_event_id)
     .execute(&mut *connection)
     .await
@@ -907,25 +883,16 @@ pub(crate) async fn cleanup_space_in(connection: &mut PgConnection, space_id: Uu
         .execute(&mut *connection)
         .await
         .map_err(map_sqlx_error)?;
-    sqlx::query("DELETE FROM node_link_source_states WHERE space_id = $1")
+    sqlx::query("DELETE FROM node_link_projections WHERE space_id = $1")
         .bind(space_id)
         .execute(&mut *connection)
         .await
         .map_err(map_sqlx_error)?;
-    sqlx::query("DELETE FROM node_link_projection_targets WHERE space_id = $1")
+    sqlx::query("DELETE FROM link_graph_space_states WHERE space_id = $1")
         .bind(space_id)
         .execute(&mut *connection)
         .await
         .map_err(map_sqlx_error)?;
-    sqlx::query(
-        "DELETE FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = $2",
-    )
-    .bind(space_id)
-    .bind(LINK_GRAPH_PROCESSOR_KIND)
-    .execute(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
     Ok(())
 }
 

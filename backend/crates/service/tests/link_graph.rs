@@ -391,8 +391,8 @@ async fn oversized_source_fails_without_blocking_other_sources_in_the_same_job()
         1
     );
     let failure_code: Option<String> = sqlx::query_scalar(
-        "SELECT failure_code FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT failure_code FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(oversized.node.node.id)
@@ -556,8 +556,8 @@ async fn manual_sync_immediately_supersedes_an_active_job() -> Result<(), Box<dy
     let (active_job_id, request_version, active_request_version): (Uuid, i64, i64) =
         sqlx::query_as(
             "SELECT active_job_id, request_version, active_request_version \
-             FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2",
+             FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2",
         )
         .bind(space_id)
         .bind(source_id)
@@ -572,8 +572,8 @@ async fn manual_sync_immediately_supersedes_an_active_job() -> Result<(), Box<dy
     assert_eq!(result, LinkGraphProjectionBatch::default());
 
     let preserved_job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source_id)

@@ -19,167 +19,127 @@ CREATE INDEX node_link_refs_incoming_idx
     ON node_link_refs (space_id, target_node_id, source_node_id, reference_kind)
     WHERE target_node_id IS NOT NULL;
 
-CREATE TABLE node_link_source_states (
-    space_id UUID NOT NULL,
-    source_node_id UUID NOT NULL,
-    source_content_sha256 TEXT NOT NULL,
-    source_path TEXT NOT NULL,
-    parser_version INTEGER NOT NULL CHECK (parser_version > 0),
-    projected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (space_id, source_node_id),
-    FOREIGN KEY (source_node_id, space_id)
-        REFERENCES nodes(id, space_id)
-        ON DELETE CASCADE,
-    CHECK (source_path LIKE '/%' AND octet_length(source_path) <= 903)
-);
-
 CREATE INDEX nodes_live_text_link_scan_idx
     ON nodes (space_id, id)
     WHERE kind = 'text' AND deleted_at IS NULL;
 
-CREATE SEQUENCE node_link_projection_request_version_seq AS BIGINT;
-
-CREATE TABLE node_link_projection_targets (
+CREATE TABLE node_link_projections (
     space_id UUID NOT NULL,
-    node_id UUID NOT NULL,
-    request_version BIGINT NOT NULL
-        DEFAULT nextval('node_link_projection_request_version_seq')
-        CHECK (request_version > 0),
+    source_node_id UUID NOT NULL,
+    projected_at TIMESTAMPTZ,
+    needs_projection BOOLEAN NOT NULL DEFAULT false,
+    request_version BIGINT NOT NULL DEFAULT 1 CHECK (request_version > 0),
     active_job_id UUID REFERENCES background_jobs(job_id) ON DELETE SET NULL,
     active_request_version BIGINT,
     failure_code TEXT,
     failed_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (space_id, node_id),
+    PRIMARY KEY (space_id, source_node_id),
     CHECK (active_request_version IS NULL OR active_request_version <= request_version),
     CHECK ((failure_code IS NULL) = (failed_at IS NULL)),
+    CHECK (NOT needs_projection OR failure_code IS NULL),
     CHECK (failure_code IS NULL OR octet_length(failure_code) BETWEEN 1 AND 128)
 );
 
-ALTER SEQUENCE node_link_projection_request_version_seq
-    OWNED BY node_link_projection_targets.request_version;
+CREATE INDEX node_link_projections_ready_idx
+    ON node_link_projections (space_id, source_node_id)
+    WHERE needs_projection AND active_job_id IS NULL AND failed_at IS NULL;
 
-CREATE INDEX node_link_projection_targets_ready_idx
-    ON node_link_projection_targets (space_id, node_id)
-    WHERE active_job_id IS NULL AND failed_at IS NULL;
-
-CREATE INDEX node_link_projection_targets_job_idx
-    ON node_link_projection_targets (active_job_id)
+CREATE INDEX node_link_projections_job_idx
+    ON node_link_projections (active_job_id)
     WHERE active_job_id IS NOT NULL;
 
-CREATE TABLE space_change_processor_states (
-    space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
-    processor_kind TEXT NOT NULL,
+CREATE TABLE link_graph_space_states (
+    space_id UUID PRIMARY KEY REFERENCES spaces(id) ON DELETE CASCADE,
     last_processed_event_id BIGINT NOT NULL DEFAULT 0
         CHECK (last_processed_event_id >= 0),
-    processing_state TEXT NOT NULL DEFAULT 'pending'
-        CHECK (processing_state IN ('idle', 'pending')),
-    available_at TIMESTAMPTZ DEFAULT now(),
+    available_at TIMESTAMPTZ,
     pending_since_event_id BIGINT CHECK (pending_since_event_id > 0),
-    continue_immediately BOOLEAN NOT NULL DEFAULT false,
     incremental_event_id BIGINT CHECK (incremental_event_id >= 0),
-    requires_full_scan BOOLEAN NOT NULL DEFAULT true,
     full_scan_event_id BIGINT CHECK (full_scan_event_id >= 0),
     full_scan_after_node_id UUID,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (space_id, processor_kind),
-    CHECK (octet_length(processor_kind) BETWEEN 1 AND 127),
-    CHECK (
-        (processing_state = 'idle' AND available_at IS NULL)
-        OR (processing_state = 'pending' AND available_at IS NOT NULL)
-    ),
-    CHECK (processing_state = 'pending' OR pending_since_event_id IS NULL),
-    CHECK (processing_state = 'pending' OR NOT continue_immediately),
-    CHECK (processing_state = 'pending' OR incremental_event_id IS NULL),
     CHECK (incremental_event_id IS NULL OR incremental_event_id >= last_processed_event_id),
-    CHECK (NOT requires_full_scan OR incremental_event_id IS NULL),
-    CHECK (NOT requires_full_scan OR processing_state = 'pending'),
+    CHECK (full_scan_event_id IS NULL OR full_scan_event_id >= last_processed_event_id),
+    CHECK (NOT (incremental_event_id IS NOT NULL AND full_scan_event_id IS NOT NULL)),
+    CHECK (full_scan_event_id IS NOT NULL OR full_scan_after_node_id IS NULL),
     CHECK (
-        requires_full_scan
-        OR (full_scan_event_id IS NULL AND full_scan_after_node_id IS NULL)
-    ),
-    CHECK ((full_scan_event_id IS NULL) = (full_scan_after_node_id IS NULL))
+        available_at IS NOT NULL
+        OR (
+            pending_since_event_id IS NULL
+            AND incremental_event_id IS NULL
+            AND full_scan_event_id IS NULL
+        )
+    )
 );
 
-CREATE INDEX space_change_processor_pending_idx
-    ON space_change_processor_states (
-        processor_kind,
-        continue_immediately DESC,
+CREATE INDEX link_graph_space_states_due_idx
+    ON link_graph_space_states (
+        ((incremental_event_id IS NOT NULL OR full_scan_event_id IS NOT NULL)) DESC,
         available_at,
         space_id
     )
-    WHERE processing_state = 'pending';
+    WHERE available_at IS NOT NULL;
 
-INSERT INTO space_change_processor_states (
+INSERT INTO link_graph_space_states (
     space_id,
-    processor_kind,
-    processing_state,
     available_at,
-    continue_immediately,
-    requires_full_scan
+    full_scan_event_id
 )
-SELECT id, 'link_graph', 'pending', now(), true, true
-FROM spaces
-WHERE deleted_at IS NULL;
+SELECT space.id, now(), COALESCE(max(event.id), 0)
+FROM spaces space
+LEFT JOIN file_change_events event ON event.space_id = space.id
+WHERE space.deleted_at IS NULL
+GROUP BY space.id;
 
-CREATE OR REPLACE FUNCTION mark_space_change_processors_pending()
+CREATE OR REPLACE FUNCTION mark_link_graph_space_pending()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    INSERT INTO space_change_processor_states (space_id, processor_kind)
-    VALUES (NEW.space_id, 'link_graph')
-    ON CONFLICT (space_id, processor_kind) DO NOTHING;
-
-    -- The unconditional update serializes a concurrent collector with this
-    -- event transaction, so an idle transition cannot lose the wakeup.
-    UPDATE space_change_processor_states
-    SET processing_state = 'pending',
-        pending_since_event_id = COALESCE(pending_since_event_id, NEW.id),
-        available_at = CASE
-            WHEN processor_kind = 'link_graph' THEN GREATEST(
-                COALESCE(available_at, '-infinity'::timestamptz),
-                clock_timestamp() + interval '5 minutes'
-            )
-            ELSE clock_timestamp()
-        END,
-        updated_at = clock_timestamp()
-    WHERE space_id = NEW.space_id;
+    INSERT INTO link_graph_space_states (
+        space_id,
+        available_at,
+        pending_since_event_id
+    ) VALUES (
+        NEW.space_id,
+        clock_timestamp() + interval '5 minutes',
+        NEW.id
+    )
+    ON CONFLICT (space_id) DO UPDATE
+    SET available_at = GREATEST(
+            COALESCE(link_graph_space_states.available_at, '-infinity'::timestamptz),
+            clock_timestamp() + interval '5 minutes'
+        ),
+        pending_since_event_id = COALESCE(
+            link_graph_space_states.pending_since_event_id,
+            EXCLUDED.pending_since_event_id
+        );
 
     RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER file_change_events_mark_processors_pending
+CREATE TRIGGER file_change_events_mark_link_graph_pending
 AFTER INSERT ON file_change_events
 FOR EACH ROW
-EXECUTE FUNCTION mark_space_change_processors_pending();
+EXECUTE FUNCTION mark_link_graph_space_pending();
 
-CREATE OR REPLACE FUNCTION mark_deleted_space_processors_pending()
+CREATE OR REPLACE FUNCTION mark_deleted_space_link_graph_pending()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
     IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN
-        INSERT INTO space_change_processor_states (
-            space_id,
-            processor_kind
-        ) VALUES (NEW.id, 'link_graph')
-        ON CONFLICT (space_id, processor_kind) DO NOTHING;
-
-        UPDATE space_change_processor_states
-        SET processing_state = 'pending',
-            available_at = now(),
-            continue_immediately = true,
-            updated_at = now()
-        WHERE space_id = NEW.id;
+        INSERT INTO link_graph_space_states (space_id, available_at)
+        VALUES (NEW.id, now())
+        ON CONFLICT (space_id) DO UPDATE
+        SET available_at = now();
     END IF;
 
     RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER spaces_mark_processors_pending_on_delete
+CREATE TRIGGER spaces_mark_link_graph_pending_on_delete
 AFTER UPDATE OF deleted_at ON spaces
 FOR EACH ROW
-EXECUTE FUNCTION mark_deleted_space_processors_pending();
+EXECUTE FUNCTION mark_deleted_space_link_graph_pending();

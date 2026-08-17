@@ -71,7 +71,7 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     .execute(&db.pool)
     .await?;
     sqlx::query(
-        "INSERT INTO node_link_projection_targets (space_id, node_id) \
+        "INSERT INTO node_link_projections (space_id, source_node_id) \
          VALUES ($1, gen_random_uuid()), ($2, $3)",
     )
     .bind(due_space)
@@ -83,7 +83,7 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
     let run = PurgeRepo::new(db.pool.clone()).run_once().await?;
     assert_eq!(run.spaces_deleted, 1);
     assert_eq!(run.nodes_deleted, 1);
-    assert_eq!(run.link_graph_targets_deleted, 2);
+    assert_eq!(run.link_graph_projections_deleted, 2);
 
     let space_exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM spaces WHERE id = $1")
         .bind(due_space)
@@ -104,15 +104,15 @@ async fn purge_deletes_due_spaces_and_nodes() -> Result<(), Box<dyn std::error::
             .await?;
     assert!(text_exists.is_none());
 
-    let orphaned_link_targets: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM node_link_projection_targets \
-         WHERE space_id = $1 OR node_id = $2",
+    let orphaned_link_projections: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM node_link_projections \
+         WHERE space_id = $1 OR source_node_id = $2",
     )
     .bind(due_space)
     .bind(due_node)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(orphaned_link_targets, 0);
+    assert_eq!(orphaned_link_projections, 0);
 
     db.cleanup().await;
     Ok(())

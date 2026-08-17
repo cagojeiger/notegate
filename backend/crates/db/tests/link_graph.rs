@@ -60,8 +60,8 @@ async fn claim_projection_job(
     let job = jobs.pop().expect("projection job");
     let request_version: i64 = sqlx::query_scalar(
         "SELECT active_request_version \
-         FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2 AND active_job_id = $3",
+         FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2 AND active_job_id = $3",
     )
     .bind(space_id)
     .bind(node_id)
@@ -72,7 +72,7 @@ async fn claim_projection_job(
 }
 
 async fn clear_projection_work(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
-    sqlx::query("DELETE FROM node_link_projection_targets")
+    sqlx::query("DELETE FROM node_link_projections")
         .execute(pool)
         .await?;
     sqlx::query("DELETE FROM background_jobs")
@@ -86,8 +86,8 @@ async fn collect_due(
     work: &LinkGraphWorkRepo,
 ) -> Result<LinkGraphChangeCollection, Box<dyn std::error::Error>> {
     sqlx::query(
-        "UPDATE space_change_processor_states SET available_at = now() \
-         WHERE processor_kind = 'link_graph' AND processing_state = 'pending'",
+        "UPDATE link_graph_space_states SET available_at = now() \
+         WHERE available_at IS NOT NULL",
     )
     .execute(pool)
     .await?;
@@ -180,24 +180,21 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
                 LinkGraphSourceSnapshot {
                     content_sha256: &old_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
             .await?,
         LinkGraphProjection::Stale
     );
-    let pending_target: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2 \
-         )",
+    let needs_projection: bool = sqlx::query_scalar(
+        "SELECT needs_projection FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
     .fetch_one(&db.pool)
     .await?;
-    assert!(!pending_target);
+    assert!(!needs_projection);
     assert_eq!(
         work.collect_changes().await?,
         LinkGraphChangeCollection::Idle
@@ -221,17 +218,15 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
             .await?,
         LinkGraphProjection::Stale
     );
-    let failed_target_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2 \
-         )",
+    let failure_code: Option<String> = sqlx::query_scalar(
+        "SELECT failure_code FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
     .fetch_one(&db.pool)
     .await?;
-    assert!(!failed_target_exists);
+    assert_eq!(failure_code, None);
 
     assert_eq!(
         graph
@@ -242,7 +237,6 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
                 LinkGraphSourceSnapshot {
                     content_sha256: &current_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
@@ -252,6 +246,10 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
     assert_eq!(
         graph.outgoing(space_id, source.id, 10, None).await?[0].target_node_id,
         Some(target.id)
+    );
+    assert_eq!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Idle
     );
 
     files
@@ -337,7 +335,6 @@ async fn projection_waiting_for_source_does_not_lock_its_target()
                 LinkGraphSourceSnapshot {
                     content_sha256: &source_hash,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
@@ -369,8 +366,8 @@ async fn projection_waiting_for_source_does_not_lock_its_target()
 
     let mut target_probe = db.pool.begin().await?;
     sqlx::query(
-        "SELECT 1 FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2 FOR UPDATE NOWAIT",
+        "SELECT 1 FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2 FOR UPDATE NOWAIT",
     )
     .bind(space_id)
     .bind(source_id)
@@ -445,7 +442,6 @@ async fn mutually_linked_sources_project_without_deadlocking()
         LinkGraphSourceSnapshot {
             content_sha256: &first_text.content_sha256,
             path: &first_path,
-            parser_version: 1,
             references: &first_references,
         },
     );
@@ -456,7 +452,6 @@ async fn mutually_linked_sources_project_without_deadlocking()
         LinkGraphSourceSnapshot {
             content_sha256: &second_text.content_sha256,
             path: &second_path,
-            parser_version: 1,
             references: &second_references,
         },
     );
@@ -496,8 +491,8 @@ async fn change_collection_does_not_wait_for_a_source_writer()
         )
         .await?;
     sqlx::query(
-        "UPDATE space_change_processor_states SET available_at = now() \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "UPDATE link_graph_space_states SET available_at = now() \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .execute(&db.pool)
@@ -557,8 +552,8 @@ async fn deleted_space_projection_leaves_space_cleanup_to_the_collector()
         .await?;
     let mut collector = db.pool.begin().await?;
     sqlx::query(
-        "SELECT 1 FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph' FOR UPDATE",
+        "SELECT 1 FROM link_graph_space_states \
+         WHERE space_id = $1 FOR UPDATE",
     )
     .bind(space_id)
     .execute(&mut *collector)
@@ -574,7 +569,6 @@ async fn deleted_space_projection_leaves_space_cleanup_to_the_collector()
                 LinkGraphSourceSnapshot {
                     content_sha256: &source_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &[],
                 },
             ),
@@ -615,8 +609,8 @@ async fn change_events_wait_for_and_extend_the_quiet_period()
         .await?;
 
     let first_available_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
-        "SELECT available_at FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT available_at FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -644,8 +638,8 @@ async fn change_events_wait_for_and_extend_the_quiet_period()
         )
         .await?;
     let second_available_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
-        "SELECT available_at FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT available_at FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -719,8 +713,8 @@ async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary(
         }
     ));
     let stored_window_id: Option<i64> = sqlx::query_scalar(
-        "SELECT incremental_event_id FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT incremental_event_id FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -743,22 +737,16 @@ async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary(
             ..
         }
     ));
-    let (checkpoint, continue_immediately, incremental_event_id, waits_for_quiet): (
-        i64,
-        bool,
-        Option<i64>,
-        bool,
-    ) = sqlx::query_as(
-        "SELECT last_processed_event_id, continue_immediately, incremental_event_id, \
-                available_at > now() \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let (checkpoint, incremental_event_id, waits_for_quiet): (i64, Option<i64>, bool) =
+        sqlx::query_as(
+            "SELECT last_processed_event_id, incremental_event_id, available_at > now() \
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
+        )
+        .bind(space_id)
+        .fetch_one(&db.pool)
+        .await?;
     assert_eq!(checkpoint, event_window_id);
-    assert!(!continue_immediately);
     assert_eq!(incremental_event_id, None);
     assert!(waits_for_quiet);
     assert_eq!(
@@ -775,8 +763,8 @@ async fn incremental_rebuild_does_not_pull_new_events_across_its_quiet_boundary(
         }
     ));
     let final_checkpoint: i64 = sqlx::query_scalar(
-        "SELECT last_processed_event_id FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT last_processed_event_id FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -962,7 +950,7 @@ async fn delete_change_stages_a_full_scan_in_bounded_passes()
         }
     ));
     let target_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM node_link_projection_targets WHERE space_id = $1")
+        sqlx::query_scalar("SELECT count(*) FROM node_link_projections WHERE space_id = $1")
             .bind(space_id)
             .fetch_one(&db.pool)
             .await?;
@@ -1048,16 +1036,16 @@ async fn first_collection_full_scans_when_initial_events_were_pruned()
         .bind(space_id)
         .execute(&db.pool)
         .await?;
-    let (state, requires_full_scan): (String, bool) = sqlx::query_as(
-        "SELECT processing_state, requires_full_scan \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    let (pending, full_scan_event_id): (bool, Option<i64>) = sqlx::query_as(
+        "SELECT available_at IS NOT NULL, full_scan_event_id \
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(state, "pending");
-    assert!(requires_full_scan);
+    assert!(pending);
+    assert_eq!(full_scan_event_id, None);
 
     assert!(matches!(
         collect_due(&db.pool, &work).await?,
@@ -1073,8 +1061,8 @@ async fn first_collection_full_scans_when_initial_events_were_pruned()
     ));
     let staged: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
-             SELECT 1 FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2 \
+             SELECT 1 FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2 \
          )",
     )
     .bind(space_id)
@@ -1097,9 +1085,11 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
     let files = FilesRepo::new(db.pool.clone());
     let work = LinkGraphWorkRepo::new(db.pool.clone());
     sqlx::query(
-        "INSERT INTO space_change_processor_states ( \
-             space_id, processor_kind, processing_state, available_at, requires_full_scan \
-         ) VALUES ($1, 'link_graph', 'idle', NULL, false)",
+        "INSERT INTO link_graph_space_states (space_id) VALUES ($1) \
+         ON CONFLICT (space_id) DO UPDATE \
+         SET available_at = NULL, pending_since_event_id = NULL, \
+             incremental_event_id = NULL, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL",
     )
     .bind(space_id)
     .execute(&db.pool)
@@ -1114,8 +1104,8 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
         )
         .await?;
     let pending_since_event_id: Option<i64> = sqlx::query_scalar(
-        "SELECT pending_since_event_id FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT pending_since_event_id FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -1141,8 +1131,8 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
     ));
     let staged: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
-             SELECT 1 FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2 \
+             SELECT 1 FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2 \
          )",
     )
     .bind(space_id)
@@ -1165,8 +1155,8 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
     collect_due(&db.pool, &work).await?;
     clear_projection_work(&db.pool).await?;
     let checkpoint: i64 = sqlx::query_scalar(
-        "SELECT last_processed_event_id FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT last_processed_event_id FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -1184,8 +1174,8 @@ async fn a_pruned_first_pending_event_falls_back_to_a_full_scan()
         )
         .await?;
     let pending_event_id: i64 = sqlx::query_scalar(
-        "SELECT pending_since_event_id FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT pending_since_event_id FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -1265,64 +1255,6 @@ async fn a_full_scan_absorbs_the_remaining_event_backlog() -> Result<(), Box<dyn
 }
 
 #[tokio::test]
-async fn change_events_mark_each_registered_processor_independently()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (account, space_id, root_id) =
-        space_with_root(&db.pool, "link-processor-isolation").await?;
-    let files = FilesRepo::new(db.pool.clone());
-    let work = LinkGraphWorkRepo::new(db.pool.clone());
-    sqlx::query(
-        "INSERT INTO space_change_processor_states (space_id, processor_kind) VALUES ($1, $2)",
-    )
-    .bind(space_id)
-    .bind("ai_analysis")
-    .execute(&db.pool)
-    .await?;
-
-    files
-        .insert_text(
-            space_id,
-            root_id,
-            "source.md",
-            &text("source", '4'),
-            account,
-        )
-        .await?;
-
-    let pending_before: Vec<String> = sqlx::query_scalar(
-        "SELECT processor_kind FROM space_change_processor_states \
-         WHERE space_id = $1 AND processing_state = 'pending' ORDER BY processor_kind",
-    )
-    .bind(space_id)
-    .fetch_all(&db.pool)
-    .await?;
-    assert_eq!(pending_before, vec!["ai_analysis", "link_graph"]);
-
-    collect_due(&db.pool, &work).await?;
-
-    let states: Vec<(String, String)> = sqlx::query_as(
-        "SELECT processor_kind, processing_state FROM space_change_processor_states \
-         WHERE space_id = $1 ORDER BY processor_kind",
-    )
-    .bind(space_id)
-    .fetch_all(&db.pool)
-    .await?;
-    assert_eq!(
-        states,
-        vec![
-            ("ai_analysis".to_owned(), "pending".to_owned()),
-            ("link_graph".to_owned(), "idle".to_owned()),
-        ]
-    );
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
 async fn event_committed_after_an_idle_transition_restores_pending_state()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -1330,11 +1262,8 @@ async fn event_committed_after_an_idle_transition_restores_pending_state()
     };
     let (_account, space_id, _root_id) = space_with_root(&db.pool, "link-wakeup").await?;
     sqlx::query(
-        "INSERT INTO space_change_processor_states ( \
-             space_id, processor_kind, processing_state, available_at, requires_full_scan \
-         ) VALUES ($1, 'link_graph', 'pending', now(), false) \
-         ON CONFLICT (space_id, processor_kind) DO UPDATE \
-         SET processing_state = 'pending', available_at = now(), requires_full_scan = false",
+        "INSERT INTO link_graph_space_states (space_id, available_at) VALUES ($1, now()) \
+         ON CONFLICT (space_id) DO UPDATE SET available_at = now()",
     )
     .bind(space_id)
     .execute(&db.pool)
@@ -1342,8 +1271,8 @@ async fn event_committed_after_an_idle_transition_restores_pending_state()
 
     let mut collector = db.pool.begin().await?;
     sqlx::query(
-        "SELECT 1 FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph' FOR UPDATE",
+        "SELECT 1 FROM link_graph_space_states \
+         WHERE space_id = $1 FOR UPDATE",
     )
     .bind(space_id)
     .execute(&mut *collector)
@@ -1360,12 +1289,11 @@ async fn event_committed_after_an_idle_transition_restores_pending_state()
     });
 
     sqlx::query(
-        "UPDATE space_change_processor_states \
-         SET processing_state = 'idle', available_at = NULL, \
-             pending_since_event_id = NULL, requires_full_scan = false, \
-             full_scan_event_id = NULL, \
+        "UPDATE link_graph_space_states \
+         SET available_at = NULL, pending_since_event_id = NULL, \
+             incremental_event_id = NULL, full_scan_event_id = NULL, \
              full_scan_after_node_id = NULL \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .execute(&mut *collector)
@@ -1373,14 +1301,14 @@ async fn event_committed_after_an_idle_transition_restores_pending_state()
     collector.commit().await?;
     writer.await??;
 
-    let state: String = sqlx::query_scalar(
-        "SELECT processing_state FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    let pending: bool = sqlx::query_scalar(
+        "SELECT available_at IS NOT NULL FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(state, "pending");
+    assert!(pending);
 
     db.cleanup().await;
     Ok(())
@@ -1407,8 +1335,8 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     collect_due(&db.pool, &work).await?;
 
     let first_job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1448,8 +1376,8 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
         Option<chrono::DateTime<chrono::Utc>>,
     ) = sqlx::query_as(
         "SELECT active_job_id, active_request_version, failure_code, failed_at \
-             FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2",
+             FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1481,8 +1409,8 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     ) = sqlx::query_as(
         "SELECT request_version, active_job_id, active_request_version, \
                     failure_code, failed_at \
-             FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2",
+             FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1502,8 +1430,8 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
     collect_due(&db.pool, &work).await?;
     assert!(work.request_space(space_id).await?);
     let full_reindex_job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1539,8 +1467,8 @@ async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dy
         )
         .await?;
     sqlx::query(
-        "INSERT INTO node_link_projection_targets ( \
-             space_id, node_id, failure_code, failed_at \
+        "INSERT INTO node_link_projections ( \
+             space_id, source_node_id, failure_code, failed_at \
          ) VALUES ($1, $2, 'previous_failure', now())",
     )
     .bind(space_id)
@@ -1558,12 +1486,11 @@ async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dy
     );
 
     sqlx::query(
-        "UPDATE space_change_processor_states \
-         SET processing_state = 'idle', available_at = NULL, \
-             pending_since_event_id = NULL, requires_full_scan = false, \
-             full_scan_event_id = NULL, \
+        "UPDATE link_graph_space_states \
+         SET available_at = NULL, pending_since_event_id = NULL, \
+             incremental_event_id = NULL, full_scan_event_id = NULL, \
              full_scan_after_node_id = NULL \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .execute(&db.pool)
@@ -1597,8 +1524,8 @@ async fn manual_sync_supersedes_an_unsettled_dead_projection_job()
         .await?;
     collect_due(&db.pool, &work).await?;
     let first_job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1615,8 +1542,8 @@ async fn manual_sync_supersedes_an_unsettled_dead_projection_job()
         Option<String>,
     ) = sqlx::query_as(
         "SELECT request_version, active_job_id, active_request_version, failure_code \
-         FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+         FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1625,6 +1552,76 @@ async fn manual_sync_supersedes_an_unsettled_dead_projection_job()
     assert_ne!(active_job_id, first_job_id);
     assert_eq!(active_request_version, request_version);
     assert_eq!(failure_code, None);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn terminal_settlement_preserves_a_newer_pending_request()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) =
+        space_with_root(&db.pool, "link-terminal-superseded").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("source", 't'),
+            account,
+        )
+        .await?;
+    collect_due(&db.pool, &work).await?;
+    let (first_version, first_job_id): (i64, Uuid) = sqlx::query_as(
+        "SELECT request_version, active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+
+    let newer_version: i64 = sqlx::query_scalar(
+        "UPDATE node_link_projections \
+         SET needs_projection = true, request_version = request_version + 1 \
+         WHERE space_id = $1 AND source_node_id = $2 \
+         RETURNING request_version",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(newer_version > first_version);
+    mark_job_dead(&db.pool, first_job_id).await?;
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            spaces: 0,
+            failed_targets: 0,
+            dispatched_targets: 1,
+            jobs: 1,
+            has_more: false,
+            ..
+        }
+    ));
+    let (preserved_version, next_job_id, needs_projection): (i64, Uuid, bool) = sqlx::query_as(
+        "SELECT request_version, active_job_id, needs_projection \
+             FROM node_link_projections \
+             WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(preserved_version, newer_version);
+    assert_ne!(next_job_id, first_job_id);
+    assert!(needs_projection);
 
     db.cleanup().await;
     Ok(())
@@ -1652,8 +1649,8 @@ async fn duplicate_node_requests_coalesce_before_job_dispatch()
     work.request_nodes(space_id, &[source.id, source.id])
         .await?;
     let target_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT count(*) FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1681,9 +1678,11 @@ async fn collected_events_for_already_purged_nodes_are_ignored()
     let (_account, space_id, _root_id) = space_with_root(&db.pool, "link-purged-event").await?;
     let work = LinkGraphWorkRepo::new(db.pool.clone());
     sqlx::query(
-        "INSERT INTO space_change_processor_states ( \
-             space_id, processor_kind, processing_state, available_at, requires_full_scan \
-         ) VALUES ($1, 'link_graph', 'idle', NULL, false)",
+        "INSERT INTO link_graph_space_states (space_id) VALUES ($1) \
+         ON CONFLICT (space_id) DO UPDATE \
+         SET available_at = NULL, pending_since_event_id = NULL, \
+             incremental_event_id = NULL, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL",
     )
     .bind(space_id)
     .execute(&db.pool)
@@ -1711,71 +1710,11 @@ async fn collected_events_for_already_purged_nodes_are_ignored()
         }
     ));
     let targets: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM node_link_projection_targets WHERE space_id = $1")
+        sqlx::query_scalar("SELECT count(*) FROM node_link_projections WHERE space_id = $1")
             .bind(space_id)
             .fetch_one(&db.pool)
             .await?;
     assert_eq!(targets, 0);
-
-    db.cleanup().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn full_reindex_repairs_relation_sources_without_projection_state()
--> Result<(), Box<dyn std::error::Error>> {
-    let Some(db) = TestDb::setup().await? else {
-        return Ok(());
-    };
-    let (account, space_id, root_id) = space_with_root(&db.pool, "link-repair-source").await?;
-    let files = FilesRepo::new(db.pool.clone());
-    let work = LinkGraphWorkRepo::new(db.pool.clone());
-    let (source, _) = files
-        .insert_text(
-            space_id,
-            root_id,
-            "source.md",
-            &text("source", 'b'),
-            account,
-        )
-        .await?;
-    let (target, _) = files
-        .insert_text(
-            space_id,
-            root_id,
-            "target.md",
-            &text("target", 'c'),
-            account,
-        )
-        .await?;
-    clear_projection_work(&db.pool).await?;
-    sqlx::query(
-        "INSERT INTO node_link_refs ( \
-             space_id, source_node_id, target_node_id, target_path, \
-             reference_kind, occurrence_count \
-         ) VALUES ($1, $2, $3, '/target.md', 'link', 1)",
-    )
-    .bind(space_id)
-    .bind(source.id)
-    .bind(target.id)
-    .execute(&db.pool)
-    .await?;
-    files
-        .soft_delete_node(space_id, source.id, account, false)
-        .await?;
-
-    assert!(work.request_space(space_id).await?);
-    let staged: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM node_link_projection_targets \
-             WHERE space_id = $1 AND node_id = $2 \
-         )",
-    )
-    .bind(space_id)
-    .bind(source.id)
-    .fetch_one(&db.pool)
-    .await?;
-    assert!(staged);
 
     db.cleanup().await;
     Ok(())
@@ -1801,8 +1740,8 @@ async fn full_reindex_reactivates_work_for_a_hard_deleted_node()
         .await?;
     work.request_nodes(space_id, &[source.id]).await?;
     let first_job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1817,8 +1756,8 @@ async fn full_reindex_reactivates_work_for_a_hard_deleted_node()
 
     assert!(work.request_space(space_id).await?);
     let next_job_id: Uuid = sqlx::query_scalar(
-        "SELECT active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1866,8 +1805,8 @@ async fn a_new_request_version_survives_completion_of_an_older_job()
 
     work.request_nodes(space_id, &[source.id]).await?;
     let (newer_version, newer_job_id): (i64, Uuid) = sqlx::query_as(
-        "SELECT request_version, active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT request_version, active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1889,7 +1828,6 @@ async fn a_new_request_version_survives_completion_of_an_older_job()
                 LinkGraphSourceSnapshot {
                     content_sha256: &source_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
@@ -1897,8 +1835,8 @@ async fn a_new_request_version_survives_completion_of_an_older_job()
         LinkGraphProjection::Stale
     );
     let (preserved_version, active_job_id): (i64, Option<Uuid>) = sqlx::query_as(
-        "SELECT request_version, active_job_id FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+        "SELECT request_version, active_job_id FROM node_link_projections \
+         WHERE space_id = $1 AND source_node_id = $2",
     )
     .bind(space_id)
     .bind(source.id)
@@ -1963,7 +1901,6 @@ async fn deleting_a_space_wakes_collection_and_removes_derived_graph_data()
                 LinkGraphSourceSnapshot {
                     content_sha256: &source_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
@@ -1991,14 +1928,13 @@ async fn deleting_a_space_wakes_collection_and_removes_derived_graph_data()
             .bind(space_id)
             .fetch_one(&db.pool)
             .await?;
-    let processor_rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM space_change_processor_states WHERE space_id = $1",
-    )
-    .bind(space_id)
-    .fetch_one(&db.pool)
-    .await?;
+    let state_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM link_graph_space_states WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
     assert_eq!(graph_rows, 0);
-    assert_eq!(processor_rows, 0);
+    assert_eq!(state_rows, 0);
 
     db.cleanup().await;
     Ok(())
@@ -2026,9 +1962,9 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     .await?;
     let (target_count, initial_ready_count): (i64, i64) = sqlx::query_as(
         "SELECT count(*), count(*) FILTER ( \
-             WHERE active_job_id IS NULL AND failed_at IS NULL \
+             WHERE needs_projection AND active_job_id IS NULL AND failed_at IS NULL \
          ) \
-         FROM node_link_projection_targets WHERE space_id = $1",
+         FROM node_link_projections WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2040,16 +1976,15 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
 
     let (scan_boundary, scan_cursor): (i64, Uuid) = sqlx::query_as(
         "SELECT full_scan_event_id, full_scan_after_node_id \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph' \
-           AND requires_full_scan",
+         FROM link_graph_space_states \
+         WHERE space_id = $1 AND full_scan_event_id IS NOT NULL",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
     let changed_node_id: Uuid = sqlx::query_scalar(
-        "SELECT node_id FROM node_link_projection_targets \
-         WHERE space_id = $1 ORDER BY node_id LIMIT 1",
+        "SELECT source_node_id FROM node_link_projections \
+         WHERE space_id = $1 ORDER BY source_node_id LIMIT 1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2077,7 +2012,7 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     ));
     let (mid_target_count, mid_job_count): (i64, i64) = sqlx::query_as(
         "SELECT \
-             (SELECT count(*) FROM node_link_projection_targets WHERE space_id = $1), \
+             (SELECT count(*) FROM node_link_projections WHERE space_id = $1), \
              (SELECT count(*) FROM background_jobs WHERE job_kind = $2)",
     )
     .bind(space_id)
@@ -2099,25 +2034,23 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
             ..
         }
     ));
-    let (requires_full_scan, pending, checkpoint, continue_immediately, debounce_pending): (
-        bool,
-        bool,
+    let (full_scan_event_id, incremental_event_id, checkpoint, debounce_pending): (
+        Option<i64>,
+        Option<i64>,
         i64,
         bool,
-        bool,
     ) = sqlx::query_as(
-        "SELECT requires_full_scan, processing_state = 'pending', last_processed_event_id, \
-                continue_immediately, available_at > now() \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT full_scan_event_id, incremental_event_id, last_processed_event_id, \
+                available_at > now() \
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert!(!requires_full_scan);
-    assert!(pending);
+    assert_eq!(full_scan_event_id, None);
+    assert_eq!(incremental_event_id, None);
     assert_eq!(checkpoint, scan_boundary);
-    assert!(!continue_immediately);
     assert!(debounce_pending);
 
     assert!(matches!(
@@ -2140,8 +2073,9 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     .fetch_one(&db.pool)
     .await?;
     let ready_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM node_link_projection_targets \
-         WHERE space_id = $1 AND active_job_id IS NULL AND failed_at IS NULL",
+        "SELECT count(*) FROM node_link_projections \
+         WHERE space_id = $1 AND needs_projection \
+           AND active_job_id IS NULL AND failed_at IS NULL",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2149,20 +2083,19 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     assert_eq!(job_count, 21);
     assert_eq!(queued_nodes, node_count);
     assert_eq!(ready_count, 0);
-    let final_state: (String, bool, Option<i64>, Option<Uuid>, i64) = sqlx::query_as(
-        "SELECT processing_state, requires_full_scan, full_scan_event_id, \
-                full_scan_after_node_id, last_processed_event_id \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    let final_state: (bool, Option<i64>, Option<Uuid>, i64) = sqlx::query_as(
+        "SELECT available_at IS NULL, full_scan_event_id, full_scan_after_node_id, \
+                last_processed_event_id \
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(final_state.0, "idle");
-    assert!(!final_state.1);
+    assert!(final_state.0);
+    assert_eq!(final_state.1, None);
     assert_eq!(final_state.2, None);
-    assert_eq!(final_state.3, None);
-    assert!(final_state.4 > scan_boundary);
+    assert!(final_state.3 > scan_boundary);
     assert!(changed_node_id <= scan_cursor);
 
     db.cleanup().await;
@@ -2182,8 +2115,8 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     assert!(work.request_space(space_id).await?);
     let (first_boundary, first_cursor): (i64, Uuid) = sqlx::query_as(
         "SELECT full_scan_event_id, full_scan_after_node_id \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2194,8 +2127,8 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
         LinkGraphChangeCollection::Collected { has_more: true, .. }
     ));
     let middle_cursor: Uuid = sqlx::query_scalar(
-        "SELECT full_scan_after_node_id FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+        "SELECT full_scan_after_node_id FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2203,8 +2136,8 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     assert!(middle_cursor > first_cursor);
 
     let changed_node_id: Uuid = sqlx::query_scalar(
-        "SELECT node_id FROM node_link_projection_targets \
-         WHERE space_id = $1 ORDER BY node_id LIMIT 1",
+        "SELECT source_node_id FROM node_link_projections \
+         WHERE space_id = $1 ORDER BY source_node_id LIMIT 1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2221,8 +2154,8 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
     assert!(work.request_space(space_id).await?);
     let (restarted_boundary, restarted_cursor): (i64, Uuid) = sqlx::query_as(
         "SELECT full_scan_event_id, full_scan_after_node_id \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
@@ -2241,20 +2174,19 @@ async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
             ..
         }
     ));
-    let final_state: (String, bool, i64, Option<i64>, Option<Uuid>) = sqlx::query_as(
-        "SELECT processing_state, requires_full_scan, last_processed_event_id, \
+    let final_state: (bool, i64, Option<i64>, Option<Uuid>) = sqlx::query_as(
+        "SELECT available_at IS NULL, last_processed_event_id, \
                 full_scan_event_id, full_scan_after_node_id \
-         FROM space_change_processor_states \
-         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+         FROM link_graph_space_states \
+         WHERE space_id = $1",
     )
     .bind(space_id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(final_state.0, "idle");
-    assert!(!final_state.1);
-    assert_eq!(final_state.2, restarted_boundary);
+    assert!(final_state.0);
+    assert_eq!(final_state.1, restarted_boundary);
+    assert_eq!(final_state.2, None);
     assert_eq!(final_state.3, None);
-    assert_eq!(final_state.4, None);
 
     db.cleanup().await;
     Ok(())
@@ -2333,7 +2265,6 @@ async fn expired_claim_cannot_publish_after_the_job_is_reclaimed()
                 LinkGraphSourceSnapshot {
                     content_sha256: &source_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
@@ -2358,7 +2289,6 @@ async fn expired_claim_cannot_publish_after_the_job_is_reclaimed()
                 LinkGraphSourceSnapshot {
                     content_sha256: &source_text.content_sha256,
                     path: &source_path,
-                    parser_version: 1,
                     references: &references,
                 },
             )
