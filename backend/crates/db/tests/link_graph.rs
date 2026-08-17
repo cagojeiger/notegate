@@ -221,15 +221,17 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
             .await?,
         LinkGraphProjection::Stale
     );
-    let failure_code: Option<String> = sqlx::query_scalar(
-        "SELECT failure_code FROM node_link_projection_targets \
-         WHERE space_id = $1 AND node_id = $2",
+    let failed_target_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM node_link_projection_targets \
+             WHERE space_id = $1 AND node_id = $2 \
+         )",
     )
     .bind(space_id)
     .bind(source.id)
     .fetch_one(&db.pool)
     .await?;
-    assert_eq!(failure_code, None);
+    assert!(!failed_target_exists);
 
     assert_eq!(
         graph
