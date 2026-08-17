@@ -33,6 +33,10 @@ CREATE TABLE node_link_source_states (
     CHECK (source_path LIKE '/%' AND octet_length(source_path) <= 903)
 );
 
+CREATE INDEX nodes_live_text_link_scan_idx
+    ON nodes (space_id, id)
+    WHERE kind = 'text' AND deleted_at IS NULL;
+
 CREATE SEQUENCE node_link_projection_request_version_seq AS BIGINT;
 
 CREATE TABLE node_link_projection_targets (

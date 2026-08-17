@@ -82,6 +82,41 @@ async fn clear_projection_work(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+async fn insert_text_nodes(
+    pool: &sqlx::PgPool,
+    account_id: Uuid,
+    space_id: Uuid,
+    root_id: Uuid,
+    name_prefix: &str,
+    count: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    sqlx::query(
+        "WITH created AS ( \
+             INSERT INTO nodes ( \
+                 space_id, parent_id, name, kind, \
+                 created_by_account_id, updated_by_account_id \
+             ) \
+             SELECT $1, $2, format('%s-%s.md', $4, item), 'text', $3, $3 \
+             FROM generate_series(1, $5) AS generated(item) \
+             RETURNING id \
+         ) \
+         INSERT INTO text_objects ( \
+             node_id, space_id, storage_format, content_text, content_sha256, \
+             byte_len, line_count, created_by_account_id, updated_by_account_id \
+         ) \
+         SELECT id, $1, 'plain', '', repeat('a', 64), 0, 0, $3, $3 \
+         FROM created",
+    )
+    .bind(space_id)
+    .bind(root_id)
+    .bind(account_id)
+    .bind(name_prefix)
+    .bind(count)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn stale_source_snapshot_cannot_replace_a_newer_projection()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -1312,29 +1347,7 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     let (account, space_id, root_id) = space_with_root(&db.pool, "link-full-dispatch").await?;
     let work = LinkGraphWorkRepo::new(db.pool.clone());
     let node_count = 1_001_i64;
-    sqlx::query(
-        "WITH created AS ( \
-             INSERT INTO nodes ( \
-                 space_id, parent_id, name, kind, \
-                 created_by_account_id, updated_by_account_id \
-             ) \
-             SELECT $1, $2, format('doc-%s.md', item), 'text', $3, $3 \
-             FROM generate_series(1, $4) AS generated(item) \
-             RETURNING id \
-         ) \
-         INSERT INTO text_objects ( \
-             node_id, space_id, storage_format, content_text, content_sha256, \
-             byte_len, line_count, created_by_account_id, updated_by_account_id \
-         ) \
-         SELECT id, $1, 'plain', '', repeat('a', 64), 0, 0, $3, $3 \
-         FROM created",
-    )
-    .bind(space_id)
-    .bind(root_id)
-    .bind(account)
-    .bind(node_count)
-    .execute(&db.pool)
-    .await?;
+    insert_text_nodes(&db.pool, account, space_id, root_id, "doc", node_count).await?;
 
     assert!(work.request_space(space_id).await?);
 
@@ -1476,6 +1489,97 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     assert_eq!(final_state.3, None);
     assert!(final_state.4 > scan_boundary);
     assert!(changed_node_id <= scan_cursor);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn manual_reindex_restarts_an_active_full_scan_from_a_new_event_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-full-restart").await?;
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    insert_text_nodes(&db.pool, account, space_id, root_id, "restart", 1_001).await?;
+
+    assert!(work.request_space(space_id).await?);
+    let (first_boundary, first_cursor): (i64, Uuid) = sqlx::query_as(
+        "SELECT full_scan_event_id, full_scan_after_node_id \
+         FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected { has_more: true, .. }
+    ));
+    let middle_cursor: Uuid = sqlx::query_scalar(
+        "SELECT full_scan_after_node_id FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(middle_cursor > first_cursor);
+
+    let changed_node_id: Uuid = sqlx::query_scalar(
+        "SELECT node_id FROM node_link_projection_targets \
+         WHERE space_id = $1 ORDER BY node_id LIMIT 1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
+         VALUES ($1, $2, 'text.write', '{}'::jsonb)",
+    )
+    .bind(space_id)
+    .bind(changed_node_id)
+    .execute(&db.pool)
+    .await?;
+
+    assert!(work.request_space(space_id).await?);
+    let (restarted_boundary, restarted_cursor): (i64, Uuid) = sqlx::query_as(
+        "SELECT full_scan_event_id, full_scan_after_node_id \
+         FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(restarted_boundary > first_boundary);
+    assert_eq!(restarted_cursor, first_cursor);
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected { has_more: true, .. }
+    ));
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            has_more: false,
+            ..
+        }
+    ));
+    let final_state: (String, bool, i64, Option<i64>, Option<Uuid>) = sqlx::query_as(
+        "SELECT processing_state, requires_full_scan, last_processed_event_id, \
+                full_scan_event_id, full_scan_after_node_id \
+         FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(final_state.0, "idle");
+    assert!(!final_state.1);
+    assert_eq!(final_state.2, restarted_boundary);
+    assert_eq!(final_state.3, None);
+    assert_eq!(final_state.4, None);
 
     db.cleanup().await;
     Ok(())

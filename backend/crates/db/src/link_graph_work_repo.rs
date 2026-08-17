@@ -522,31 +522,56 @@ async fn stage_full_space_batch_in(
     space_id: Uuid,
     after_node_id: Option<Uuid>,
 ) -> Result<FullScanBatch> {
-    let mut node_ids: Vec<Uuid> = sqlx::query_scalar(
-        "WITH candidates AS ( \
-             SELECT node.id AS node_id \
-             FROM nodes node \
-             WHERE node.space_id = $1 AND node.kind = 'text' \
-               AND node.deleted_at IS NULL \
+    const INITIAL_PAGE_SQL: &str = "WITH candidates AS ( \
+             (SELECT node.id AS node_id \
+              FROM nodes node \
+              WHERE node.space_id = $1 AND node.kind = 'text' \
+                AND node.deleted_at IS NULL \
+              ORDER BY node.id LIMIT $2) \
              UNION \
-             SELECT state.source_node_id AS node_id \
-             FROM node_link_source_states state \
-             WHERE state.space_id = $1 \
+             (SELECT state.source_node_id AS node_id \
+              FROM node_link_source_states state \
+              WHERE state.space_id = $1 \
+              ORDER BY state.source_node_id LIMIT $2) \
              UNION \
-             SELECT reference.source_node_id AS node_id \
-             FROM node_link_refs reference \
-             WHERE reference.space_id = $1 \
+             (SELECT DISTINCT reference.source_node_id AS node_id \
+              FROM node_link_refs reference \
+              WHERE reference.space_id = $1 \
+              ORDER BY reference.source_node_id LIMIT $2) \
          ) \
-         SELECT node_id FROM candidates \
-         WHERE ($2::uuid IS NULL OR node_id > $2) \
-         ORDER BY node_id LIMIT $3",
-    )
-    .bind(space_id)
-    .bind(after_node_id)
-    .bind(LINK_GRAPH_FULL_SCAN_FETCH_LIMIT)
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(map_sqlx_error)?;
+         SELECT node_id FROM candidates ORDER BY node_id LIMIT $2";
+    const CONTINUATION_PAGE_SQL: &str = "WITH candidates AS ( \
+             (SELECT node.id AS node_id \
+              FROM nodes node \
+              WHERE node.space_id = $1 AND node.kind = 'text' \
+                AND node.deleted_at IS NULL AND node.id > $2 \
+              ORDER BY node.id LIMIT $3) \
+             UNION \
+             (SELECT state.source_node_id AS node_id \
+              FROM node_link_source_states state \
+              WHERE state.space_id = $1 AND state.source_node_id > $2 \
+              ORDER BY state.source_node_id LIMIT $3) \
+             UNION \
+             (SELECT DISTINCT reference.source_node_id AS node_id \
+              FROM node_link_refs reference \
+              WHERE reference.space_id = $1 AND reference.source_node_id > $2 \
+              ORDER BY reference.source_node_id LIMIT $3) \
+         ) \
+         SELECT node_id FROM candidates ORDER BY node_id LIMIT $3";
+
+    let mut query = sqlx::query_scalar::<_, Uuid>(match after_node_id {
+        Some(_after_node_id) => CONTINUATION_PAGE_SQL,
+        None => INITIAL_PAGE_SQL,
+    })
+    .bind(space_id);
+    if let Some(after_node_id) = after_node_id {
+        query = query.bind(after_node_id);
+    }
+    let mut node_ids = query
+        .bind(LINK_GRAPH_FULL_SCAN_FETCH_LIMIT)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(map_sqlx_error)?;
     let has_more = node_ids.len() > LINK_GRAPH_FULL_SCAN_BATCH_SIZE;
     node_ids.truncate(LINK_GRAPH_FULL_SCAN_BATCH_SIZE);
     let last_node_id = node_ids.last().copied();
