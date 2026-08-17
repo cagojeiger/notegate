@@ -85,7 +85,7 @@ Target이 없거나 삭제되면 target node id는 `null`이지만 path는 유�
 
 문서 변경 트랜잭션은 해당 Space에 등록된 비동기 processor를 pending 상태로 전환한다. Link processor는 pending Space만 골라 Space별 checkpoint 이후의 `file_change_events`를 읽고, 중복 source id를 durable projection target으로 합친다. 새 processor의 첫 실행과 checkpoint event가 retention에서 사라진 경우에는 전체 Space를 스캔해 기준 상태를 만든다. 전체 스캔은 후보 등록을 pass당 최대 500개로 제한하고 durable node cursor에서 이어간다. 스캔 시작 시 event 경계를 저장하므로 실행 중 발생한 변경은 완료 후 증분 처리된다. Target 등록과 checkpoint 갱신은 같은 transaction에서 완료되며, background job은 target을 실행할 뿐 source of truth가 아니다. 준비된 target은 transaction당 최대 500개를 옮기고, Space별 최대 50개 단위의 작업으로 queue에 등록한다. Link collector가 backlog를 발견하면 lock을 해제한 뒤 1초 후 다음 bounded pass를 실행한다. Queue worker의 concurrency가 실제 병렬 실행량을 제한한다. Background queue가 잡 하나의 제한된 자동 재시도를 전담하고, 최종 실패한 target은 실패 상태로 남긴다. 새 변경·수동 동기화·전체 재색인은 해당 target의 실패 상태를 초기화하고 다시 활성화한다. 모든 Space를 주기적으로 순회하지 않는다.
 
-생성, 이름 변경, 이동, 복사는 path resolve 결과에 영향을 줄 수 있으므로 해당 Space의 live Text와 기존 source projection을 target으로 등록한다. 삭제는 soft-deleted subtree id를 target으로 등록해 outgoing 관계를 제거하고 incoming 관계를 broken 상태로 바꾼다. 실행 중 source가 다시 변경되면 이전 job은 최신 target을 완료 처리하지 않고 해제하며, 준비된 최신 version을 새 작업으로 등록한다. Lease가 만료된 attempt는 동일 job id라도 claim token이 다르므로 관계를 갱신할 수 없다.
+생성, 이름 변경, 이동, 복사, 삭제는 path resolve 결과에 영향을 줄 수 있으므로 해당 Space의 live Text와 기존 source projection을 bounded full scan으로 target에 등록한다. 삭제된 source의 outgoing 관계는 제거되고, live source를 다시 projection하면서 삭제된 target의 incoming 관계는 broken 상태로 바뀐다. 실행 중 source가 다시 변경되면 이전 job은 최신 target을 완료 처리하지 않고 해제하며, 준비된 최신 version을 새 작업으로 등록한다. Lease가 만료된 attempt는 동일 job id라도 claim token이 다르므로 관계를 갱신할 수 없다.
 
 수동 요청도 같은 background job 경로를 사용한다.
 

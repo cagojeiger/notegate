@@ -270,7 +270,8 @@ impl LinkGraphWorkRepo {
             return Ok(Some(collected));
         }
 
-        let targets = stage_incremental_plan(&mut tx, space_id, plan).await?;
+        let node_ids = plan.node_ids.into_iter().collect::<Vec<_>>();
+        let targets = stage_node_ids_in(&mut tx, space_id, &node_ids).await?;
         let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
         let has_more = has_more || dispatched.has_more;
         update_processor_state(&mut tx, space_id, last_event_id, has_more).await?;
@@ -374,7 +375,6 @@ struct LinkChangeEventRow {
 struct LinkChangePlan {
     rebuild: bool,
     node_ids: BTreeSet<Uuid>,
-    deleted_roots: BTreeSet<Uuid>,
 }
 
 fn classify_changes(events: &[LinkChangeEventRow]) -> LinkChangePlan {
@@ -387,15 +387,9 @@ fn classify_changes(events: &[LinkChangeEventRow]) -> LinkChangePlan {
                 }
                 None => plan.rebuild = true,
             },
-            "item.delete" => match event.node_id {
-                Some(node_id) => {
-                    plan.deleted_roots.insert(node_id);
-                }
-                None => plan.rebuild = true,
-            },
             "item.update" if name_changed(&event.metadata) == Some(false) => {}
             "folder.create" | "text.create" | "file.create" | "item.move" | "item.update"
-            | "item.copy" => plan.rebuild = true,
+            | "item.copy" | "item.delete" => plan.rebuild = true,
             _ => plan.rebuild = true,
         }
     }
@@ -447,39 +441,6 @@ async fn load_event_window(
         })
         .collect();
     Ok((checkpoint_valid, events))
-}
-
-async fn stage_incremental_plan(
-    connection: &mut PgConnection,
-    space_id: Uuid,
-    plan: LinkChangePlan,
-) -> Result<usize> {
-    debug_assert!(!plan.rebuild);
-
-    let mut node_ids = plan.node_ids;
-    if !plan.deleted_roots.is_empty() {
-        let deleted_roots = plan.deleted_roots.into_iter().collect::<Vec<_>>();
-        let deleted_ids: Vec<Uuid> = sqlx::query_scalar(
-            "WITH RECURSIVE subtree AS ( \
-                 SELECT id FROM nodes \
-                 WHERE space_id = $1 AND id = ANY($2) AND deleted_at IS NOT NULL \
-                 UNION \
-                 SELECT child.id FROM nodes child \
-                 JOIN subtree parent ON child.parent_id = parent.id \
-                 WHERE child.space_id = $1 AND child.deleted_at IS NOT NULL \
-             ) \
-             SELECT id FROM subtree ORDER BY id",
-        )
-        .bind(space_id)
-        .bind(deleted_roots)
-        .fetch_all(&mut *connection)
-        .await
-        .map_err(map_sqlx_error)?;
-        node_ids.extend(deleted_ids);
-    }
-
-    let node_ids = node_ids.into_iter().collect::<Vec<_>>();
-    stage_node_ids_in(connection, space_id, &node_ids).await
 }
 
 async fn stage_node_ids_in(
@@ -910,7 +871,6 @@ mod tests {
 
         assert!(!plan.rebuild);
         assert_eq!(plan.node_ids, BTreeSet::from([node_id]));
-        assert!(plan.deleted_roots.is_empty());
     }
 
     #[test]
@@ -923,7 +883,6 @@ mod tests {
 
         assert!(!plan.rebuild);
         assert!(plan.node_ids.is_empty());
-        assert!(plan.deleted_roots.is_empty());
     }
 
     #[test]
@@ -948,11 +907,14 @@ mod tests {
     }
 
     #[test]
-    fn deletion_keeps_the_root_for_retained_subtree_expansion() {
-        let root = Uuid::new_v4();
-        let plan = classify_changes(&[event("item.delete", Some(root), json!({}))]);
+    fn deletion_uses_the_bounded_full_scan_path() {
+        let plan = classify_changes(&[event(
+            "item.delete",
+            Some(Uuid::new_v4()),
+            json!({"deleted_nodes": 1}),
+        )]);
 
-        assert!(!plan.rebuild);
-        assert_eq!(plan.deleted_roots, BTreeSet::from([root]));
+        assert!(plan.rebuild);
+        assert!(plan.node_ids.is_empty());
     }
 }

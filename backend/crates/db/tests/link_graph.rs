@@ -7,7 +7,6 @@
 )]
 mod common;
 
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 use common::{TestDb, space_with_root};
@@ -408,7 +407,7 @@ async fn deleted_space_projection_leaves_space_cleanup_to_the_collector()
 }
 
 #[tokio::test]
-async fn change_collector_coalesces_and_expands_deleted_subtrees()
+async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -516,9 +515,9 @@ async fn change_collector_coalesces_and_expands_deleted_subtrees()
         LinkGraphChangeCollection::Collected {
             spaces: 1,
             events: 1,
-            staged_targets: 2,
+            staged_targets: 1,
             failed_targets: 0,
-            dispatched_targets: 2,
+            dispatched_targets: 1,
             jobs: 1,
             has_more: false,
         }
@@ -529,13 +528,64 @@ async fn change_collector_coalesces_and_expands_deleted_subtrees()
     )
     .fetch_one(&db.pool)
     .await?;
-    let deleted_ids = payload["node_ids"]
+    let projected_ids = payload["node_ids"]
         .as_array()
         .expect("node ids")
         .iter()
         .map(|value| Uuid::parse_str(value.as_str().expect("node id")).expect("uuid"))
-        .collect::<BTreeSet<_>>();
-    assert_eq!(deleted_ids, BTreeSet::from([folder.id, child.id]));
+        .collect::<Vec<_>>();
+    assert_eq!(projected_ids, vec![source.id]);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn delete_change_stages_a_full_scan_in_bounded_passes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-delete-bounded").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+
+    let folder = files
+        .insert_folder(
+            space_id,
+            &CreateFolder {
+                parent_node_id: root_id,
+                name: "deleted".to_owned(),
+            },
+            account,
+        )
+        .await?;
+    work.collect_changes().await?;
+    clear_projection_work(&db.pool).await?;
+
+    insert_text_nodes(&db.pool, account, space_id, root_id, "live", 501).await?;
+    files
+        .soft_delete_node(space_id, folder.id, account, false)
+        .await?;
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            spaces: 1,
+            events: 1,
+            staged_targets: 500,
+            failed_targets: 0,
+            dispatched_targets: 500,
+            jobs: 10,
+            has_more: true,
+        }
+    ));
+    let target_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM node_link_projection_targets WHERE space_id = $1")
+            .bind(space_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(target_count, 500);
 
     db.cleanup().await;
     Ok(())
