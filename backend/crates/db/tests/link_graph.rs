@@ -1304,7 +1304,7 @@ async fn deleting_a_space_wakes_collection_and_removes_derived_graph_data()
 }
 
 #[tokio::test]
-async fn full_reindex_dispatches_ready_targets_in_bounded_passes()
+async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_changes()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -1356,12 +1356,93 @@ async fn full_reindex_dispatches_ready_targets_in_bounded_passes()
     .await?;
     assert_eq!(initial_job_count, 10);
     assert_eq!(initial_queued_nodes, 500);
-    assert_eq!(target_count, node_count);
-    assert_eq!(initial_ready_count, node_count - 500);
+    assert_eq!(target_count, 500);
+    assert_eq!(initial_ready_count, 0);
+
+    let (scan_boundary, scan_cursor): (i64, Uuid) = sqlx::query_as(
+        "SELECT full_scan_event_id, full_scan_after_node_id \
+         FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph' \
+           AND requires_full_scan",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    let changed_node_id: Uuid = sqlx::query_scalar(
+        "SELECT node_id FROM node_link_projection_targets \
+         WHERE space_id = $1 ORDER BY node_id LIMIT 1",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO file_change_events (space_id, node_id, op_type, metadata) \
+         VALUES ($1, $2, 'text.write', '{}'::jsonb)",
+    )
+    .bind(space_id)
+    .bind(changed_node_id)
+    .execute(&db.pool)
+    .await?;
 
     assert!(matches!(
         work.collect_changes().await?,
-        LinkGraphChangeCollection::Collected { .. }
+        LinkGraphChangeCollection::Collected {
+            spaces: 1,
+            events: 0,
+            staged_targets: 500,
+            dispatched_targets: 500,
+            jobs: 10,
+            has_more: true,
+            ..
+        }
+    ));
+    let (mid_target_count, mid_job_count): (i64, i64) = sqlx::query_as(
+        "SELECT \
+             (SELECT count(*) FROM node_link_projection_targets WHERE space_id = $1), \
+             (SELECT count(*) FROM background_jobs WHERE job_kind = $2)",
+    )
+    .bind(space_id)
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(mid_target_count, 1_000);
+    assert_eq!(mid_job_count, 20);
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            spaces: 1,
+            events: 0,
+            staged_targets: 1,
+            dispatched_targets: 1,
+            jobs: 1,
+            has_more: true,
+            ..
+        }
+    ));
+    let (requires_full_scan, pending, checkpoint): (bool, bool, i64) = sqlx::query_as(
+        "SELECT requires_full_scan, processing_state = 'pending', last_processed_event_id \
+         FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert!(!requires_full_scan);
+    assert!(pending);
+    assert_eq!(checkpoint, scan_boundary);
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            spaces: 1,
+            events: 1,
+            staged_targets: 1,
+            dispatched_targets: 0,
+            jobs: 0,
+            has_more: false,
+            ..
+        }
     ));
     let (job_count, queued_nodes): (i64, i64) = sqlx::query_as(
         "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'node_ids')), 0) \
@@ -1380,6 +1461,21 @@ async fn full_reindex_dispatches_ready_targets_in_bounded_passes()
     assert_eq!(job_count, 21);
     assert_eq!(queued_nodes, node_count);
     assert_eq!(ready_count, 0);
+    let final_state: (String, bool, Option<i64>, Option<Uuid>, i64) = sqlx::query_as(
+        "SELECT processing_state, requires_full_scan, full_scan_event_id, \
+                full_scan_after_node_id, last_processed_event_id \
+         FROM space_change_processor_states \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(final_state.0, "idle");
+    assert!(!final_state.1);
+    assert_eq!(final_state.2, None);
+    assert_eq!(final_state.3, None);
+    assert!(final_state.4 > scan_boundary);
+    assert!(changed_node_id <= scan_cursor);
 
     db.cleanup().await;
     Ok(())

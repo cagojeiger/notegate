@@ -14,6 +14,8 @@ pub(crate) const LINK_GRAPH_PROCESSOR_KIND: &str = "link_graph";
 const LINK_GRAPH_CHANGE_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_CHANGE_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: i64 = 32;
+const LINK_GRAPH_FULL_SCAN_BATCH_SIZE: usize = 500;
+const LINK_GRAPH_FULL_SCAN_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_DISPATCH_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_DISPATCH_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_SETTLEMENT_BATCH_SIZE: i64 = 500;
@@ -86,19 +88,11 @@ impl LinkGraphWorkRepo {
             return Ok(false);
         }
         lock_processor_state_in(&mut tx, space_id).await?;
+        reset_full_scan_state(&mut tx, space_id).await?;
         let scope = TargetScope::Space(space_id);
         let settled =
             settle_terminal_targets_in(&mut tx, scope, LINK_GRAPH_SETTLEMENT_BATCH_SIZE).await?;
-        stage_full_space_in(&mut tx, space_id).await?;
-        let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-        let dispatched = dispatch_targets_in(&mut tx, scope).await?;
-        update_processor_state(
-            &mut tx,
-            space_id,
-            latest_event_id,
-            settled.has_more || dispatched.has_more,
-        )
-        .await?;
+        run_full_scan_pass(&mut tx, space_id, None, None, settled.has_more).await?;
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(true)
     }
@@ -191,8 +185,9 @@ impl LinkGraphWorkRepo {
 
     async fn collect_space_changes(&self, space_id: Uuid) -> Result<Option<CollectedSpace>> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        let state: Option<(i64, bool)> = sqlx::query_as(
-            "SELECT last_processed_event_id, requires_full_scan \
+        let state = sqlx::query_as::<_, ProcessorStateRow>(
+            "SELECT last_processed_event_id, requires_full_scan, \
+                    full_scan_event_id, full_scan_after_node_id \
              FROM space_change_processor_states \
              WHERE space_id = $1 AND processor_kind = $2 \
                AND processing_state = 'pending' AND available_at <= now() \
@@ -203,7 +198,7 @@ impl LinkGraphWorkRepo {
         .fetch_optional(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
-        let Some((last_processed_event_id, requires_full_scan)) = state else {
+        let Some(state) = state else {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(None);
         };
@@ -221,36 +216,25 @@ impl LinkGraphWorkRepo {
             return Ok(Some(CollectedSpace::default()));
         }
 
-        if requires_full_scan {
-            let targets = stage_full_space_in(&mut tx, space_id).await?;
-            let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-            let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
-            update_processor_state(&mut tx, space_id, latest_event_id, dispatched.has_more).await?;
+        if state.requires_full_scan {
+            let collected = run_full_scan_pass(
+                &mut tx,
+                space_id,
+                state.full_scan_event_id,
+                state.full_scan_after_node_id,
+                false,
+            )
+            .await?;
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(Some(CollectedSpace {
-                targets,
-                dispatched_targets: dispatched.targets,
-                jobs: dispatched.jobs,
-                has_more: dispatched.has_more,
-                ..CollectedSpace::default()
-            }));
+            return Ok(Some(collected));
         }
 
         let (checkpoint_valid, mut rows) =
-            load_event_window(&mut tx, space_id, last_processed_event_id).await?;
+            load_event_window(&mut tx, space_id, state.last_processed_event_id).await?;
         if !checkpoint_valid {
-            let targets = stage_full_space_in(&mut tx, space_id).await?;
-            let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-            let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
-            update_processor_state(&mut tx, space_id, latest_event_id, dispatched.has_more).await?;
+            let collected = run_full_scan_pass(&mut tx, space_id, None, None, false).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(Some(CollectedSpace {
-                targets,
-                dispatched_targets: dispatched.targets,
-                jobs: dispatched.jobs,
-                has_more: dispatched.has_more,
-                ..CollectedSpace::default()
-            }));
+            return Ok(Some(collected));
         }
 
         let has_more = rows.len() > LINK_GRAPH_CHANGE_BATCH_SIZE;
@@ -262,7 +246,7 @@ impl LinkGraphWorkRepo {
             update_processor_state(
                 &mut tx,
                 space_id,
-                last_processed_event_id,
+                state.last_processed_event_id,
                 dispatched.has_more,
             )
             .await?;
@@ -277,21 +261,13 @@ impl LinkGraphWorkRepo {
 
         let last_event_id = rows
             .last()
-            .map_or(last_processed_event_id, |event| event.id);
+            .map_or(state.last_processed_event_id, |event| event.id);
         let plan = classify_changes(&rows);
         if plan.rebuild {
-            let targets = stage_full_space_in(&mut tx, space_id).await?;
-            let latest_event_id = latest_event_id(&mut tx, space_id).await?;
-            let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
-            update_processor_state(&mut tx, space_id, latest_event_id, dispatched.has_more).await?;
+            let mut collected = run_full_scan_pass(&mut tx, space_id, None, None, false).await?;
+            collected.events = rows.len();
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(Some(CollectedSpace {
-                events: rows.len(),
-                targets,
-                dispatched_targets: dispatched.targets,
-                jobs: dispatched.jobs,
-                has_more: dispatched.has_more,
-            }));
+            return Ok(Some(collected));
         }
 
         let targets = stage_incremental_plan(&mut tx, space_id, plan).await?;
@@ -328,6 +304,21 @@ struct DispatchSummary {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct SettlementSummary {
     failed: usize,
+    has_more: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct ProcessorStateRow {
+    last_processed_event_id: i64,
+    requires_full_scan: bool,
+    full_scan_event_id: Option<i64>,
+    full_scan_after_node_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FullScanBatch {
+    targets: usize,
+    last_node_id: Option<Uuid>,
     has_more: bool,
 }
 
@@ -526,8 +517,12 @@ async fn stage_node_ids_in(
         .map_err(|_error| notegate_core::Error::internal("link target count overflow"))
 }
 
-async fn stage_full_space_in(connection: &mut PgConnection, space_id: Uuid) -> Result<usize> {
-    let affected = sqlx::query(
+async fn stage_full_space_batch_in(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+    after_node_id: Option<Uuid>,
+) -> Result<FullScanBatch> {
+    let mut node_ids: Vec<Uuid> = sqlx::query_scalar(
         "WITH candidates AS ( \
              SELECT node.id AS node_id \
              FROM nodes node \
@@ -542,21 +537,63 @@ async fn stage_full_space_in(connection: &mut PgConnection, space_id: Uuid) -> R
              FROM node_link_refs reference \
              WHERE reference.space_id = $1 \
          ) \
-         INSERT INTO node_link_projection_targets (space_id, node_id, request_version) \
-         SELECT $1, node_id, \
-                nextval('node_link_projection_request_version_seq') \
-         FROM candidates \
-         ON CONFLICT (space_id, node_id) DO UPDATE \
-         SET request_version = EXCLUDED.request_version, \
-             failure_code = NULL, failed_at = NULL, updated_at = now()",
+         SELECT node_id FROM candidates \
+         WHERE ($2::uuid IS NULL OR node_id > $2) \
+         ORDER BY node_id LIMIT $3",
     )
     .bind(space_id)
-    .execute(&mut *connection)
+    .bind(after_node_id)
+    .bind(LINK_GRAPH_FULL_SCAN_FETCH_LIMIT)
+    .fetch_all(&mut *connection)
     .await
-    .map_err(map_sqlx_error)?
-    .rows_affected();
-    usize::try_from(affected)
-        .map_err(|_error| notegate_core::Error::internal("link target count overflow"))
+    .map_err(map_sqlx_error)?;
+    let has_more = node_ids.len() > LINK_GRAPH_FULL_SCAN_BATCH_SIZE;
+    node_ids.truncate(LINK_GRAPH_FULL_SCAN_BATCH_SIZE);
+    let last_node_id = node_ids.last().copied();
+    let targets = stage_node_ids_in(connection, space_id, &node_ids).await?;
+    Ok(FullScanBatch {
+        targets,
+        last_node_id,
+        has_more,
+    })
+}
+
+async fn run_full_scan_pass(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+    full_scan_event_id: Option<i64>,
+    after_node_id: Option<Uuid>,
+    pending_after_scan: bool,
+) -> Result<CollectedSpace> {
+    let full_scan_event_id = match full_scan_event_id {
+        Some(event_id) => event_id,
+        None => latest_event_id(connection, space_id).await?,
+    };
+    let batch = stage_full_space_batch_in(connection, space_id, after_node_id).await?;
+    let dispatched = dispatch_targets_in(connection, TargetScope::Space(space_id)).await?;
+
+    let events_after_scan = if batch.has_more {
+        false
+    } else {
+        latest_event_id(connection, space_id).await? > full_scan_event_id
+    };
+    let has_more = batch.has_more || dispatched.has_more || pending_after_scan || events_after_scan;
+    if batch.has_more {
+        let last_node_id = batch.last_node_id.ok_or_else(|| {
+            notegate_core::Error::internal("full link scan has no continuation node")
+        })?;
+        update_full_scan_progress(connection, space_id, full_scan_event_id, last_node_id).await?;
+    } else {
+        update_processor_state(connection, space_id, full_scan_event_id, has_more).await?;
+    }
+
+    Ok(CollectedSpace {
+        targets: batch.targets,
+        dispatched_targets: dispatched.targets,
+        jobs: dispatched.jobs,
+        has_more,
+        ..CollectedSpace::default()
+    })
 }
 
 async fn settle_terminal_targets_in(
@@ -727,6 +764,45 @@ async fn lock_processor_state_in(connection: &mut PgConnection, space_id: Uuid) 
     Ok(())
 }
 
+async fn reset_full_scan_state(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
+    sqlx::query(
+        "UPDATE space_change_processor_states \
+         SET processing_state = 'pending', available_at = now(), \
+             requires_full_scan = true, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL, updated_at = now() \
+         WHERE space_id = $1 AND processor_kind = $2",
+    )
+    .bind(space_id)
+    .bind(LINK_GRAPH_PROCESSOR_KIND)
+    .execute(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
+async fn update_full_scan_progress(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+    full_scan_event_id: i64,
+    after_node_id: Uuid,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE space_change_processor_states \
+         SET processing_state = 'pending', available_at = now(), \
+             requires_full_scan = true, full_scan_event_id = $3, \
+             full_scan_after_node_id = $4, updated_at = now() \
+         WHERE space_id = $1 AND processor_kind = $2",
+    )
+    .bind(space_id)
+    .bind(LINK_GRAPH_PROCESSOR_KIND)
+    .bind(full_scan_event_id)
+    .bind(after_node_id)
+    .execute(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(())
+}
+
 async fn update_processor_state(
     connection: &mut PgConnection,
     space_id: Uuid,
@@ -738,7 +814,8 @@ async fn update_processor_state(
          SET last_processed_event_id = $3, \
              processing_state = CASE WHEN $4 THEN 'pending' ELSE 'idle' END, \
              available_at = CASE WHEN $4 THEN now() ELSE NULL END, \
-             requires_full_scan = false, updated_at = now() \
+             requires_full_scan = false, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL, updated_at = now() \
          WHERE space_id = $1 AND processor_kind = $2",
     )
     .bind(space_id)

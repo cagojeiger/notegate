@@ -161,7 +161,7 @@ Link graph handler는 한 작업에서 최대 50개 source를 projection한다. 
 
 ## 실행과 스케일 아웃
 
-즉시 작업을 만드는 도메인은 원본 변경과 enqueue를 같은 PostgreSQL database transaction에 기록한다. Link graph처럼 변경을 합치는 도메인은 원본 checkpoint와 durable target을 같은 transaction에 기록하고, 준비된 target은 transaction당 최대 500개씩 queue로 옮긴다. 남은 target은 짧은 후속 reconciliation pass가 계속 옮긴다. `all` 또는 `worker` mode replica의 consumer가 같은 queue에서 작업을 분산 선점한다.
+즉시 작업을 만드는 도메인은 원본 변경과 enqueue를 같은 PostgreSQL database transaction에 기록한다. Link graph처럼 변경을 합치는 도메인은 원본 checkpoint와 durable target을 같은 transaction에 기록한다. 전체 재색인은 후보 탐색과 target 등록을 pass당 최대 500개로 제한하고 durable cursor에서 이어서 실행한다. 준비된 target도 transaction당 최대 500개씩 queue로 옮긴다. 남은 작업은 짧은 후속 reconciliation pass가 계속 처리한다. `all` 또는 `worker` mode replica의 consumer가 같은 queue에서 작업을 분산 선점한다.
 
 ```text
 API transaction ── insert background_jobs ── COMMIT ── broadcast NOTIFY

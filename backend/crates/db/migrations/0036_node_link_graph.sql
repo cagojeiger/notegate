@@ -75,6 +75,8 @@ CREATE TABLE space_change_processor_states (
         CHECK (processing_state IN ('idle', 'pending')),
     available_at TIMESTAMPTZ DEFAULT now(),
     requires_full_scan BOOLEAN NOT NULL DEFAULT true,
+    full_scan_event_id BIGINT CHECK (full_scan_event_id >= 0),
+    full_scan_after_node_id UUID,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (space_id, processor_kind),
     CHECK (octet_length(processor_kind) BETWEEN 1 AND 127),
@@ -82,7 +84,12 @@ CREATE TABLE space_change_processor_states (
         (processing_state = 'idle' AND available_at IS NULL)
         OR (processing_state = 'pending' AND available_at IS NOT NULL)
     ),
-    CHECK (NOT requires_full_scan OR processing_state = 'pending')
+    CHECK (NOT requires_full_scan OR processing_state = 'pending'),
+    CHECK (
+        requires_full_scan
+        OR (full_scan_event_id IS NULL AND full_scan_after_node_id IS NULL)
+    ),
+    CHECK ((full_scan_event_id IS NULL) = (full_scan_after_node_id IS NULL))
 );
 
 CREATE INDEX space_change_processor_pending_idx
