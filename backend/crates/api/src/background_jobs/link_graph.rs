@@ -49,6 +49,7 @@ impl JobHandler<LinkGraphProjectNodesJob> for LinkGraphProjectNodesHandler {
                 space_id = %payload.space_id,
                 requested = payload.node_ids.len(),
                 projected = result.projected,
+                failed = result.failed,
                 removed = result.removed,
                 skipped = result.skipped,
                 stale = result.stale,

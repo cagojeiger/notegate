@@ -304,6 +304,110 @@ async fn client_encrypted_source_does_not_block_plain_sources_in_the_same_job()
 }
 
 #[tokio::test]
+async fn oversized_source_fails_without_blocking_other_sources_in_the_same_job()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-reference-limit",
+        "link-reference-limit@example.test",
+    )
+    .await?;
+    let (space_id, root_id) = setup_space(
+        &SpaceRepo::new(db.pool.clone()),
+        owner,
+        "link-reference-limit",
+    )
+    .await;
+    let files_repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(files_repo.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let graph = LinkGraphService::new(
+        LinkGraphRepo::new(db.pool.clone()),
+        files_repo,
+        work.clone(),
+    );
+    files
+        .create_text(
+            owner,
+            space_id,
+            CreateText {
+                parent_node_id: root_id,
+                name: "target.md".to_owned(),
+            },
+        )
+        .await?;
+    let valid = files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "valid.md".to_owned(),
+                },
+                body: WriteTextBody::Plain("[target](./target.md)".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let oversized_content = (0..=notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX)
+        .map(|index| format!("[{index}](./target-{index}.md)"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let oversized = files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "oversized.md".to_owned(),
+                },
+                body: WriteTextBody::Plain(oversized_content),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let node_ids = [valid.node.node.id, oversized.node.node.id];
+
+    let result = project_requested_nodes(&db.pool, &work, &graph, space_id, &node_ids).await?;
+
+    assert_eq!(result.projected, 1);
+    assert_eq!(result.failed, 1);
+    assert_eq!(
+        graph
+            .outgoing(
+                owner,
+                space_id,
+                valid.node.node.id,
+                ListLinkReferences::default(),
+            )
+            .await?
+            .items
+            .len(),
+        1
+    );
+    let failure_code: Option<String> = sqlx::query_scalar(
+        "SELECT failure_code FROM node_link_projection_targets \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(space_id)
+    .bind(oversized.node.node.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(
+        failure_code.as_deref(),
+        Some("link_reference_limit_exceeded")
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn client_encryption_removes_a_previous_plain_text_projection()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {

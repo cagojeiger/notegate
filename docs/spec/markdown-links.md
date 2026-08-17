@@ -81,6 +81,8 @@ Backend는 Text의 표준 Markdown link와 image destination을 파싱해 같은
 - `link` 또는 `image` 종류
 - 같은 source 안의 occurrence count
 
+한 Text에서 projection하는 고유 `(kind, target path)` 관계는 최대 1,000개다. 같은 관계의 반복은 occurrence count에 합쳐지며 상한에 한 번만 포함된다. 상한을 넘긴 source는 기존의 마지막 성공 projection을 유지하고 `link_reference_limit_exceeded` 실패 상태로 종료된다. 같은 queue job에 포함된 다른 source는 계속 처리된다.
+
 Target이 없거나 삭제되면 target node id는 `null`이지만 path는 유지한다. 따라서 깨진 링크를 조회할 수 있고, 같은 path에 node가 다시 생성된 뒤 source를 projection하면 새 node id로 연결된다. Text 본문은 관계 테이블에 복제하지 않는다. Server at-rest encryption을 사용하는 plain Text는 application service에서 복호화한 뒤 파싱한다. Client-encrypted Text는 server가 본문을 읽을 수 없으므로 관계를 만들지 않으며, 기존 projection이 있으면 제거한다.
 
 문서 변경 트랜잭션은 해당 Space에 등록된 비동기 processor를 pending 상태로 전환한다. Link processor는 pending Space만 골라 Space별 checkpoint 이후의 `file_change_events`를 읽고, 중복 source id를 durable projection target으로 합친다. 새 processor의 첫 실행과 checkpoint event가 retention에서 사라진 경우에는 전체 Space를 스캔해 기준 상태를 만든다. 전체 스캔은 후보 등록을 pass당 최대 500개로 제한하고 durable node cursor에서 이어간다. 스캔 시작 시 event 경계를 저장하므로 실행 중 발생한 변경은 완료 후 증분 처리된다. Target 등록과 checkpoint 갱신은 같은 transaction에서 완료되며, background job은 target을 실행할 뿐 source of truth가 아니다. 준비된 target은 transaction당 최대 500개를 옮기고, Space별 최대 50개 단위의 작업으로 queue에 등록한다. Link collector가 backlog를 발견하면 lock을 해제한 뒤 1초 후 다음 bounded pass를 실행한다. Queue worker의 concurrency가 실제 병렬 실행량을 제한한다. Background queue가 잡 하나의 제한된 자동 재시도를 전담하고, 최종 실패한 target은 실패 상태로 남긴다. 새 변경·수동 동기화·전체 재색인은 해당 target의 실패 상태를 초기화하고 다시 활성화한다. 모든 Space를 주기적으로 순회하지 않는다.
@@ -102,4 +104,4 @@ GET /api/v1/spaces/{space_id}/nodes/{node_id}/links/outgoing
 GET /api/v1/spaces/{space_id}/nodes/{node_id}/links/incoming
 ```
 
-Projection은 eventual consistency 모델이다. 본문 저장 성공과 링크 관계 갱신 완료 사이에는 지연이 있을 수 있다. Node link 상태 응답은 현재 동기화 상태, 마지막 성공 시각, 최종 실패 코드를 제공한다. 관계 교체, 해당 시각 갱신, 처리한 target 완료는 하나의 database transaction으로 완료한다.
+Projection은 eventual consistency 모델이다. 본문 저장 성공과 링크 관계 갱신 완료 사이에는 지연이 있을 수 있다. Node link 상태 응답은 현재 동기화 상태, 마지막 성공 시각, 최종 실패 코드를 제공한다. Processor가 아직 Space 변경을 분류하지 않았으면 해당 Space의 live Text는 보수적으로 `pending`이다. 관계 교체, 해당 시각 갱신, 처리한 target 완료는 하나의 database transaction으로 완료한다.

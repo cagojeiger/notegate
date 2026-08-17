@@ -240,3 +240,5 @@ pub const FILE_CHANGE_EVENTS_MAX_LIMIT: i64 = 100;
 pub const LINK_REFERENCES_DEFAULT_LIMIT: i64 = 50;
 /// Maximum page size for incoming and outgoing Markdown references.
 pub const LINK_REFERENCES_MAX_LIMIT: i64 = 100;
+/// Maximum unique internal references projected from one Text.
+pub const LINK_REFERENCES_PER_TEXT_MAX: usize = 1_000;

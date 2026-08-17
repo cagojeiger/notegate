@@ -9,6 +9,7 @@ use sqlx::{FromRow, PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::files::queries::{node::derive_path, search::resolve_nodes_by_paths_with};
+use crate::link_graph_work_repo::LINK_GRAPH_PROCESSOR_KIND;
 use crate::map_sqlx_error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +45,7 @@ pub struct LinkGraphIncomingReference {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkGraphProjection {
     Applied { reference_count: usize },
+    Failed,
     Removed,
     Skipped,
     Stale,
@@ -53,6 +55,13 @@ pub enum LinkGraphProjection {
 pub struct LinkGraphProjectionClaim {
     pub fence: ClaimFence,
     pub request_version: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LinkSourceSnapshotState {
+    Current,
+    Changed,
+    Missing,
 }
 
 #[derive(Debug, Clone)]
@@ -68,20 +77,30 @@ impl LinkGraphRepo {
     pub async fn state(&self, space_id: Uuid, source_node_id: Uuid) -> Result<NodeLinkGraphState> {
         let row = sqlx::query_as::<_, NodeLinkGraphStateRow>(
             "SELECT source.projected_at, target.node_id IS NOT NULL AS target_exists, \
+                    COALESCE(node.kind = 'text' AND node.deleted_at IS NULL, false) \
+                        AS source_is_text, \
+                    COALESCE(processor.processing_state = 'pending', false) \
+                        AS processor_pending, \
                     target.request_version, target.active_job_id, \
                     target.active_request_version, target.failure_code, target.failed_at, \
                     job.status AS active_job_status, job.last_error_code AS active_job_error_code, \
                     job.completed_at AS active_job_completed_at \
              FROM (SELECT $1::uuid AS space_id, $2::uuid AS node_id) requested \
+             LEFT JOIN nodes node \
+               ON node.space_id = requested.space_id AND node.id = requested.node_id \
              LEFT JOIN node_link_source_states source \
                ON source.space_id = requested.space_id \
               AND source.source_node_id = requested.node_id \
              LEFT JOIN node_link_projection_targets target \
                ON target.space_id = requested.space_id AND target.node_id = requested.node_id \
+             LEFT JOIN space_change_processor_states processor \
+               ON processor.space_id = requested.space_id \
+              AND processor.processor_kind = $3 \
              LEFT JOIN background_jobs job ON job.job_id = target.active_job_id",
         )
         .bind(space_id)
         .bind(source_node_id)
+        .bind(LINK_GRAPH_PROCESSOR_KIND)
         .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -190,54 +209,18 @@ impl LinkGraphRepo {
             references,
         } = source;
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        if !owns_projection_claim_in(&mut tx, claim).await? {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Stale);
-        }
-        let Some(space_live) = lock_space_state(&mut tx, space_id).await? else {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Removed);
-        };
-        if !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Stale);
-        }
-        if !space_live {
-            complete_projection_target_in(&mut tx, space_id, source_node_id, claim).await?;
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Removed);
-        }
-
-        let current: Option<(String, String)> = sqlx::query_as(
-            "SELECT text.content_sha256, text.storage_format \
-             FROM nodes node \
-             JOIN text_objects text ON text.node_id = node.id AND text.space_id = node.space_id \
-             WHERE node.space_id = $1 AND node.id = $2 \
-               AND node.kind = 'text' AND node.deleted_at IS NULL \
-             FOR UPDATE OF node, text",
+        if let Some(projection) = prepare_plain_projection_in(
+            &mut tx,
+            space_id,
+            source_node_id,
+            claim,
+            expected_content_sha256,
+            expected_source_path,
         )
-        .bind(space_id)
-        .bind(source_node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-
-        let Some((content_sha256, storage_format)) = current else {
-            cleanup_deleted_node_in(&mut tx, space_id, source_node_id).await?;
-            complete_projection_target_in(&mut tx, space_id, source_node_id, claim).await?;
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Removed);
-        };
-        let source_path = derive_path(&mut *tx, space_id, source_node_id)
-            .await?
-            .ok_or_else(|| Error::internal("live link source has no path"))?;
-        if storage_format != "plain"
-            || content_sha256 != expected_content_sha256
-            || source_path != expected_source_path
+        .await?
         {
-            release_projection_target_in(&mut tx, space_id, source_node_id, claim).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Stale);
+            return Ok(projection);
         }
 
         let target_paths = references
@@ -315,6 +298,58 @@ impl LinkGraphRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         Ok(LinkGraphProjection::Applied {
             reference_count: references.len(),
+        })
+    }
+
+    pub async fn fail_projection_target(
+        &self,
+        space_id: Uuid,
+        source_node_id: Uuid,
+        claim: LinkGraphProjectionClaim,
+        failure_code: &str,
+        expected_content_sha256: &str,
+        expected_source_path: &str,
+    ) -> Result<LinkGraphProjection> {
+        if failure_code.is_empty() || failure_code.len() > 128 {
+            return Err(Error::validation("invalid link projection failure code"));
+        }
+
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        if let Some(projection) = prepare_plain_projection_in(
+            &mut tx,
+            space_id,
+            source_node_id,
+            claim,
+            expected_content_sha256,
+            expected_source_path,
+        )
+        .await?
+        {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(projection);
+        }
+        let affected = sqlx::query(
+            "UPDATE node_link_projection_targets \
+             SET active_job_id = NULL, active_request_version = NULL, \
+                 failure_code = $5, failed_at = now(), updated_at = now() \
+             WHERE space_id = $1 AND node_id = $2 \
+               AND active_job_id = $3 AND active_request_version = $4 \
+               AND request_version = $4",
+        )
+        .bind(space_id)
+        .bind(source_node_id)
+        .bind(claim.fence.job_id)
+        .bind(claim.request_version)
+        .bind(failure_code)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?
+        .rows_affected();
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(if affected == 1 {
+            LinkGraphProjection::Failed
+        } else {
+            LinkGraphProjection::Stale
         })
     }
 
@@ -465,6 +500,8 @@ struct IncomingReferenceRow {
 struct NodeLinkGraphStateRow {
     projected_at: Option<DateTime<Utc>>,
     target_exists: bool,
+    source_is_text: bool,
+    processor_pending: bool,
     request_version: Option<i64>,
     active_job_id: Option<Uuid>,
     active_request_version: Option<i64>,
@@ -490,20 +527,27 @@ impl From<NodeLinkGraphStateRow> for NodeLinkGraphState {
             Some("succeeded") if active_job_is_terminal => Some("projection_incomplete".to_owned()),
             _ => None,
         };
-        let failure_code = row.failure_code.or(terminal_failure_code);
-        let failed_at = row.failed_at.or(if active_job_is_terminal {
+        let stored_failure_code = row.failure_code.or(terminal_failure_code);
+        let stored_failed_at = row.failed_at.or(if active_job_is_terminal {
             row.active_job_completed_at
         } else {
             None
         });
-        let status = if failure_code.is_some() {
-            NodeLinkGraphStatus::Failed
-        } else if active_job_is_current {
+        let status = if active_job_is_current && !active_job_is_terminal {
             NodeLinkGraphStatus::Syncing
+        } else if row.source_is_text && row.processor_pending {
+            NodeLinkGraphStatus::Pending
+        } else if stored_failure_code.is_some() {
+            NodeLinkGraphStatus::Failed
         } else if row.target_exists {
             NodeLinkGraphStatus::Pending
         } else {
             NodeLinkGraphStatus::Idle
+        };
+        let (failure_code, failed_at) = if status == NodeLinkGraphStatus::Failed {
+            (stored_failure_code, stored_failed_at)
+        } else {
+            (None, None)
         };
         Self {
             status,
@@ -529,6 +573,86 @@ impl TryFrom<IncomingReferenceRow> for LinkGraphIncomingReference {
 fn parse_reference_kind(value: &str) -> Result<LinkReferenceKind> {
     LinkReferenceKind::parse(value)
         .ok_or_else(|| Error::internal(format!("unknown link reference kind: {value}")))
+}
+
+async fn prepare_plain_projection_in(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+    source_node_id: Uuid,
+    claim: LinkGraphProjectionClaim,
+    expected_content_sha256: &str,
+    expected_source_path: &str,
+) -> Result<Option<LinkGraphProjection>> {
+    if !owns_projection_claim_in(connection, claim).await? {
+        return Ok(Some(LinkGraphProjection::Stale));
+    }
+    let Some(space_live) = lock_space_state(connection, space_id).await? else {
+        return Ok(Some(LinkGraphProjection::Removed));
+    };
+    if !lock_projection_target_in(connection, space_id, source_node_id, claim).await? {
+        return Ok(Some(LinkGraphProjection::Stale));
+    }
+    if !space_live {
+        complete_projection_target_in(connection, space_id, source_node_id, claim).await?;
+        return Ok(Some(LinkGraphProjection::Removed));
+    }
+
+    match link_source_snapshot_state_in(
+        connection,
+        space_id,
+        source_node_id,
+        expected_content_sha256,
+        expected_source_path,
+    )
+    .await?
+    {
+        LinkSourceSnapshotState::Current => Ok(None),
+        LinkSourceSnapshotState::Changed => {
+            release_projection_target_in(connection, space_id, source_node_id, claim).await?;
+            Ok(Some(LinkGraphProjection::Stale))
+        }
+        LinkSourceSnapshotState::Missing => {
+            cleanup_deleted_node_in(connection, space_id, source_node_id).await?;
+            complete_projection_target_in(connection, space_id, source_node_id, claim).await?;
+            Ok(Some(LinkGraphProjection::Removed))
+        }
+    }
+}
+
+async fn link_source_snapshot_state_in(
+    connection: &mut PgConnection,
+    space_id: Uuid,
+    source_node_id: Uuid,
+    expected_content_sha256: &str,
+    expected_source_path: &str,
+) -> Result<LinkSourceSnapshotState> {
+    let current: Option<(String, String)> = sqlx::query_as(
+        "SELECT text.content_sha256, text.storage_format \
+         FROM nodes node \
+         JOIN text_objects text ON text.node_id = node.id AND text.space_id = node.space_id \
+         WHERE node.space_id = $1 AND node.id = $2 \
+           AND node.kind = 'text' AND node.deleted_at IS NULL \
+         FOR UPDATE OF node, text",
+    )
+    .bind(space_id)
+    .bind(source_node_id)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    let Some((content_sha256, storage_format)) = current else {
+        return Ok(LinkSourceSnapshotState::Missing);
+    };
+    if storage_format != "plain" || content_sha256 != expected_content_sha256 {
+        return Ok(LinkSourceSnapshotState::Changed);
+    }
+    let source_path = derive_path(&mut *connection, space_id, source_node_id)
+        .await?
+        .ok_or_else(|| Error::internal("live link source has no path"))?;
+    Ok(if source_path == expected_source_path {
+        LinkSourceSnapshotState::Current
+    } else {
+        LinkSourceSnapshotState::Changed
+    })
 }
 
 async fn lock_space_state(connection: &mut PgConnection, space_id: Uuid) -> Result<Option<bool>> {

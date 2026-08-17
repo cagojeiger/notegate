@@ -180,6 +180,28 @@ async fn stale_source_snapshot_cannot_replace_a_newer_projection()
             .await?
             .is_empty()
     );
+    assert_eq!(
+        graph
+            .fail_projection_target(
+                space_id,
+                source.id,
+                projection_claim(&db.pool, &work, space_id, source.id).await?,
+                "link_reference_limit_exceeded",
+                &old_text.content_sha256,
+                &source_path,
+            )
+            .await?,
+        LinkGraphProjection::Stale
+    );
+    let failure_code: Option<String> = sqlx::query_scalar(
+        "SELECT failure_code FROM node_link_projection_targets \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(failure_code, None);
 
     assert_eq!(
         graph
@@ -854,7 +876,9 @@ async fn event_committed_after_an_idle_transition_restores_pending_state()
 
     sqlx::query(
         "UPDATE space_change_processor_states \
-         SET processing_state = 'idle', available_at = NULL \
+         SET processing_state = 'idle', available_at = NULL, \
+             requires_full_scan = false, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL \
          WHERE space_id = $1 AND processor_kind = 'link_graph'",
     )
     .bind(space_id)
@@ -1005,6 +1029,60 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
         .await?;
     assert_eq!(full_reindex_state.status, NodeLinkGraphStatus::Syncing);
     assert_eq!(full_reindex_state.failure_code, None);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) = space_with_root(&db.pool, "link-pending-state").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let graph = LinkGraphRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("source", 'p'),
+            account,
+        )
+        .await?;
+    sqlx::query(
+        "INSERT INTO node_link_projection_targets ( \
+             space_id, node_id, failure_code, failed_at \
+         ) VALUES ($1, $2, 'previous_failure', now())",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .execute(&db.pool)
+    .await?;
+
+    let pending = graph.state(space_id, source.id).await?;
+    assert_eq!(pending.status, NodeLinkGraphStatus::Pending);
+    assert_eq!(pending.failure_code, None);
+    assert_eq!(pending.failed_at, None);
+    assert_eq!(
+        graph.state(space_id, root_id).await?.status,
+        NodeLinkGraphStatus::Idle
+    );
+
+    sqlx::query(
+        "UPDATE space_change_processor_states \
+         SET processing_state = 'idle', available_at = NULL \
+         WHERE space_id = $1 AND processor_kind = 'link_graph'",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+    let failed = graph.state(space_id, source.id).await?;
+    assert_eq!(failed.status, NodeLinkGraphStatus::Failed);
+    assert_eq!(failed.failure_code.as_deref(), Some("previous_failure"));
+    assert!(failed.failed_at.is_some());
 
     db.cleanup().await;
     Ok(())

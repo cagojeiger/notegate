@@ -15,13 +15,15 @@ use uuid::Uuid;
 use crate::error::{ServiceError, ServiceResult};
 use crate::pagination::paginate_keyset;
 
-use parser::parse_internal_references;
+use parser::{ParseInternalReferencesError, parse_internal_references};
 
 pub const LINK_GRAPH_PARSER_VERSION: i32 = 1;
+const LINK_REFERENCE_LIMIT_FAILURE_CODE: &str = "link_reference_limit_exceeded";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LinkGraphProjectionBatch {
     pub projected: usize,
+    pub failed: usize,
     pub removed: usize,
     pub skipped: usize,
     pub stale: usize,
@@ -245,9 +247,11 @@ impl LinkGraphService {
                 .await?;
             return match projection {
                 LinkGraphProjection::Removed | LinkGraphProjection::Stale => Ok(projection),
-                LinkGraphProjection::Applied { .. } | LinkGraphProjection::Skipped => Err(
-                    Error::internal("non-text node produced an invalid link projection result"),
-                ),
+                LinkGraphProjection::Applied { .. }
+                | LinkGraphProjection::Failed
+                | LinkGraphProjection::Skipped => Err(Error::internal(
+                    "non-text node produced an invalid link projection result",
+                )),
             };
         };
         if text.storage_format == TextStorageFormat::Encrypted {
@@ -259,9 +263,9 @@ impl LinkGraphService {
                 LinkGraphProjection::Skipped
                 | LinkGraphProjection::Removed
                 | LinkGraphProjection::Stale => Ok(projection),
-                LinkGraphProjection::Applied { .. } => Err(Error::internal(
-                    "encrypted text produced an invalid link projection result",
-                )),
+                LinkGraphProjection::Applied { .. } | LinkGraphProjection::Failed => Err(
+                    Error::internal("encrypted text produced an invalid link projection result"),
+                ),
             };
         }
         let source_path = self
@@ -273,14 +277,29 @@ impl LinkGraphService {
             .content
             .as_deref()
             .ok_or_else(|| Error::internal("link source has no readable text content"))?;
-        let references = parse_internal_references(&source_path, content)
-            .into_iter()
-            .map(|reference| LinkGraphStoredReference {
-                target_path: reference.target_path,
-                kind: reference.kind,
-                occurrence_count: reference.occurrence_count,
-            })
-            .collect::<Vec<_>>();
+        let references = match parse_internal_references(&source_path, content) {
+            Ok(references) => references,
+            Err(ParseInternalReferencesError::TooManyReferences { .. }) => {
+                return self
+                    .store
+                    .fail_projection_target(
+                        space_id,
+                        node.id,
+                        claim,
+                        LINK_REFERENCE_LIMIT_FAILURE_CODE,
+                        &text.content_sha256,
+                        &source_path,
+                    )
+                    .await;
+            }
+        }
+        .into_iter()
+        .map(|reference| LinkGraphStoredReference {
+            target_path: reference.target_path,
+            kind: reference.kind,
+            occurrence_count: reference.occurrence_count,
+        })
+        .collect::<Vec<_>>();
         self.store
             .replace_source(
                 space_id,
@@ -334,6 +353,7 @@ impl LinkGraphService {
 fn record_projection(result: &mut LinkGraphProjectionBatch, projection: LinkGraphProjection) {
     match projection {
         LinkGraphProjection::Applied { .. } => result.projected += 1,
+        LinkGraphProjection::Failed => result.failed += 1,
         LinkGraphProjection::Removed => result.removed += 1,
         LinkGraphProjection::Skipped => result.skipped += 1,
         LinkGraphProjection::Stale => result.stale += 1,

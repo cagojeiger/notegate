@@ -98,7 +98,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{graph_state}");
-    assert_eq!(graph_state["status"], json!("idle"));
+    assert_eq!(graph_state["status"], json!("pending"));
     assert!(graph_state["projected_at"].is_string());
     assert!(graph_state["failure_code"].is_null());
     assert!(graph_state["failed_at"].is_null());

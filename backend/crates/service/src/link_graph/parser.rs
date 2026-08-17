@@ -11,10 +11,16 @@ pub(super) struct ParsedLinkReference {
     pub occurrence_count: i32,
 }
 
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq, Eq)]
+pub(super) enum ParseInternalReferencesError {
+    #[error("text contains more than {max} unique internal references")]
+    TooManyReferences { max: usize },
+}
+
 pub(super) fn parse_internal_references(
     source_path: &str,
     content: &str,
-) -> Vec<ParsedLinkReference> {
+) -> Result<Vec<ParsedLinkReference>, ParseInternalReferencesError> {
     let mut references = BTreeMap::<(String, LinkReferenceKind), i32>::new();
     for event in Parser::new(content) {
         let (destination, kind) = match event {
@@ -25,13 +31,20 @@ pub(super) fn parse_internal_references(
         let Some(target_path) = internal_target_path(source_path, destination.as_ref()) else {
             continue;
         };
-        references
-            .entry((target_path, kind))
-            .and_modify(|count| *count += 1)
-            .or_insert(1);
+        let key = (target_path, kind);
+        if let Some(count) = references.get_mut(&key) {
+            *count += 1;
+            continue;
+        }
+        if references.len() >= notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX {
+            return Err(ParseInternalReferencesError::TooManyReferences {
+                max: notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX,
+            });
+        }
+        references.insert(key, 1);
     }
 
-    references
+    Ok(references
         .into_iter()
         .map(
             |((target_path, kind), occurrence_count)| ParsedLinkReference {
@@ -40,7 +53,7 @@ pub(super) fn parse_internal_references(
                 occurrence_count,
             },
         )
-        .collect()
+        .collect())
 }
 
 fn internal_target_path(source_path: &str, destination: &str) -> Option<String> {
@@ -156,7 +169,8 @@ mod tests {
             "/docs/current.md",
             "[one](../README.md) [again](../README.md#top) ![asset](./a%20b.png) \
              [web](https://example.com) [anchor](#local)",
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             references,
@@ -214,7 +228,8 @@ mod tests {
              `<a href=\"./code.md\">code</a>`\n\n\
              <a href=\"./raw.md\">raw</a>\n\n\
              ```md\n[code](./fenced.md)\n```",
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             references,
@@ -231,7 +246,8 @@ mod tests {
         let references = parse_internal_references(
             "/docs/current.md",
             "[[target.md]] ![[image.png]] [standard](./target.md)",
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             references,
@@ -248,7 +264,8 @@ mod tests {
         let references = parse_internal_references(
             "/docs/current.md",
             "[file](./asset.png) ![image](./asset.png) ![again](./asset.png)",
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             references,
@@ -280,6 +297,43 @@ mod tests {
         assert_eq!(
             internal_target_path("/docs/current.md", "./hidden%00name.md"),
             None
+        );
+    }
+
+    #[test]
+    fn rejects_more_than_the_unique_reference_limit() {
+        let content = (0..=notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX)
+            .map(|index| format!("[{index}](./target-{index}.md)"))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert_eq!(
+            parse_internal_references("/source.md", &content),
+            Err(ParseInternalReferencesError::TooManyReferences {
+                max: notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX,
+            })
+        );
+    }
+
+    #[test]
+    fn repeated_references_count_once_toward_the_limit() {
+        let content = std::iter::repeat_n(
+            "[target](./target.md)",
+            notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX + 1,
+        )
+        .collect::<Vec<_>>()
+        .join(" ");
+
+        assert_eq!(
+            parse_internal_references("/source.md", &content).unwrap(),
+            vec![ParsedLinkReference {
+                target_path: "/target.md".to_owned(),
+                kind: LinkReferenceKind::Link,
+                occurrence_count: i32::try_from(
+                    notegate_core::limits::LINK_REFERENCES_PER_TEXT_MAX + 1
+                )
+                .unwrap(),
+            }]
         );
     }
 }
