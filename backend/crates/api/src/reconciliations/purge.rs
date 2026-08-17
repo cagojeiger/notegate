@@ -46,6 +46,7 @@ impl Reconciler for PurgeReconciler {
                 audit_events_deleted = run.audit_events_deleted,
                 file_change_events_deleted = run.file_change_events_deleted,
                 mcp_invocations_deleted = run.mcp_invocations_deleted,
+                link_graph_targets_deleted = run.link_graph_targets_deleted,
                 object_deletions_queued = run.object_deletions_queued,
             );
             Ok(ReconciliationDirective::Complete)

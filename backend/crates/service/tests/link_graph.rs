@@ -504,8 +504,8 @@ async fn client_encryption_removes_a_previous_plain_text_projection()
 }
 
 #[tokio::test]
-async fn stale_projection_dispatches_the_latest_request_version()
--> Result<(), Box<dyn std::error::Error>> {
+async fn manual_sync_immediately_supersedes_an_active_job() -> Result<(), Box<dyn std::error::Error>>
+{
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -553,11 +553,6 @@ async fn stale_projection_dispatches_the_latest_request_version()
     let first_job = claimed.pop().expect("first projection job");
 
     work.request_nodes(space_id, &[source_id]).await?;
-    let result = graph
-        .project_job(first_job.fence(), space_id, &[source_id])
-        .await?;
-    assert_eq!(result.stale, 1);
-
     let (active_job_id, request_version, active_request_version): (Uuid, i64, i64) =
         sqlx::query_as(
             "SELECT active_job_id, request_version, active_request_version \
@@ -570,6 +565,21 @@ async fn stale_projection_dispatches_the_latest_request_version()
         .await?;
     assert_ne!(active_job_id, first_job.job_id);
     assert_eq!(active_request_version, request_version);
+
+    let result = graph
+        .project_job(first_job.fence(), space_id, &[source_id])
+        .await?;
+    assert_eq!(result, LinkGraphProjectionBatch::default());
+
+    let preserved_job_id: Uuid = sqlx::query_scalar(
+        "SELECT active_job_id FROM node_link_projection_targets \
+         WHERE space_id = $1 AND node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source_id)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(preserved_job_id, active_job_id);
 
     db.cleanup().await;
     Ok(())

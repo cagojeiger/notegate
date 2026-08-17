@@ -157,7 +157,7 @@ link_graph_project_nodes   # Text source의 링크 관계 projection
 
 Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다. 같은 작업이 반복되어도 결과가 같다. Space별 reconciliation gate를 사용하므로 같은 Space의 mutation과 정확한 재계산이 겹치지 않는다.
 
-Link graph handler는 한 작업에서 최대 50개 source를 projection한다. Queue claim fence가 유효한 domain transaction만 관계를 교체할 수 있으며, source별 최신 요청 version이 이전 작업의 늦은 결과를 차단한다.
+Link graph handler는 한 작업에서 최대 50개 source를 projection한다. Queue claim fence가 유효한 domain transaction만 source 단위 관계를 교체할 수 있으며, source별 최신 요청 version이 이전 작업의 늦은 결과를 차단한다. 자동 변경은 마지막 event 뒤 5분 동안 합치고, 수동 동기화와 전체 재색인은 즉시 같은 queue 경로를 사용한다.
 
 ## 실행과 스케일 아웃
 

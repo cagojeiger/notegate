@@ -1,5 +1,5 @@
 CREATE TABLE node_link_refs (
-    space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    space_id UUID NOT NULL,
     source_node_id UUID NOT NULL,
     target_node_id UUID,
     target_path TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE INDEX node_link_refs_incoming_idx
     WHERE target_node_id IS NOT NULL;
 
 CREATE TABLE node_link_source_states (
-    space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    space_id UUID NOT NULL,
     source_node_id UUID NOT NULL,
     source_content_sha256 TEXT NOT NULL,
     source_path TEXT NOT NULL,
@@ -40,7 +40,7 @@ CREATE INDEX nodes_live_text_link_scan_idx
 CREATE SEQUENCE node_link_projection_request_version_seq AS BIGINT;
 
 CREATE TABLE node_link_projection_targets (
-    space_id UUID NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    space_id UUID NOT NULL,
     node_id UUID NOT NULL,
     request_version BIGINT NOT NULL
         DEFAULT nextval('node_link_projection_request_version_seq')
@@ -51,9 +51,6 @@ CREATE TABLE node_link_projection_targets (
     failed_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (space_id, node_id),
-    FOREIGN KEY (node_id, space_id)
-        REFERENCES nodes(id, space_id)
-        ON DELETE CASCADE,
     CHECK (active_request_version IS NULL OR active_request_version <= request_version),
     CHECK ((failure_code IS NULL) = (failed_at IS NULL)),
     CHECK (failure_code IS NULL OR octet_length(failure_code) BETWEEN 1 AND 128)
@@ -78,6 +75,9 @@ CREATE TABLE space_change_processor_states (
     processing_state TEXT NOT NULL DEFAULT 'pending'
         CHECK (processing_state IN ('idle', 'pending')),
     available_at TIMESTAMPTZ DEFAULT now(),
+    pending_since_event_id BIGINT CHECK (pending_since_event_id > 0),
+    continue_immediately BOOLEAN NOT NULL DEFAULT false,
+    incremental_event_id BIGINT CHECK (incremental_event_id >= 0),
     requires_full_scan BOOLEAN NOT NULL DEFAULT true,
     full_scan_event_id BIGINT CHECK (full_scan_event_id >= 0),
     full_scan_after_node_id UUID,
@@ -88,6 +88,11 @@ CREATE TABLE space_change_processor_states (
         (processing_state = 'idle' AND available_at IS NULL)
         OR (processing_state = 'pending' AND available_at IS NOT NULL)
     ),
+    CHECK (processing_state = 'pending' OR pending_since_event_id IS NULL),
+    CHECK (processing_state = 'pending' OR NOT continue_immediately),
+    CHECK (processing_state = 'pending' OR incremental_event_id IS NULL),
+    CHECK (incremental_event_id IS NULL OR incremental_event_id >= last_processed_event_id),
+    CHECK (NOT requires_full_scan OR incremental_event_id IS NULL),
     CHECK (NOT requires_full_scan OR processing_state = 'pending'),
     CHECK (
         requires_full_scan
@@ -97,7 +102,12 @@ CREATE TABLE space_change_processor_states (
 );
 
 CREATE INDEX space_change_processor_pending_idx
-    ON space_change_processor_states (processor_kind, available_at, space_id)
+    ON space_change_processor_states (
+        processor_kind,
+        continue_immediately DESC,
+        available_at,
+        space_id
+    )
     WHERE processing_state = 'pending';
 
 INSERT INTO space_change_processor_states (
@@ -105,9 +115,10 @@ INSERT INTO space_change_processor_states (
     processor_kind,
     processing_state,
     available_at,
+    continue_immediately,
     requires_full_scan
 )
-SELECT id, 'link_graph', 'pending', now(), true
+SELECT id, 'link_graph', 'pending', now(), true, true
 FROM spaces
 WHERE deleted_at IS NULL;
 
@@ -124,8 +135,15 @@ BEGIN
     -- event transaction, so an idle transition cannot lose the wakeup.
     UPDATE space_change_processor_states
     SET processing_state = 'pending',
-        available_at = now(),
-        updated_at = now()
+        pending_since_event_id = COALESCE(pending_since_event_id, NEW.id),
+        available_at = CASE
+            WHEN processor_kind = 'link_graph' THEN GREATEST(
+                COALESCE(available_at, '-infinity'::timestamptz),
+                clock_timestamp() + interval '5 minutes'
+            )
+            ELSE clock_timestamp()
+        END,
+        updated_at = clock_timestamp()
     WHERE space_id = NEW.space_id;
 
     RETURN NEW;
@@ -152,6 +170,7 @@ BEGIN
         UPDATE space_change_processor_states
         SET processing_state = 'pending',
             available_at = now(),
+            continue_immediately = true,
             updated_at = now()
         WHERE space_id = NEW.id;
     END IF;

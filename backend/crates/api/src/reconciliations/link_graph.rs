@@ -6,7 +6,7 @@ use notegate_reconciliation::{
     ReconciliationFailure, ReconciliationFuture, ReconciliationSchedule,
 };
 
-const CHANGE_COLLECTION_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const CHANGE_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
 const CHANGE_COLLECTION_TIMEOUT: Duration = Duration::from_secs(60);
 const BACKLOG_CONTINUATION_DELAY: Duration = Duration::from_secs(1);
 
