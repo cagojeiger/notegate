@@ -803,7 +803,7 @@ async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
         collect_due(&db.pool, &work).await?,
         LinkGraphChangeCollection::Collected {
             spaces: 1,
-            events: 0,
+            events: 1,
             staged_targets: 1,
             failed_targets: 0,
             dispatched_targets: 1,
@@ -996,7 +996,7 @@ async fn change_collector_processes_pending_spaces_without_scanning_idle_spaces(
         collect_due(&db.pool, &work).await?,
         LinkGraphChangeCollection::Collected {
             spaces: 2,
-            events: 0,
+            events: 2,
             staged_targets: 2,
             failed_targets: 0,
             dispatched_targets: 2,
