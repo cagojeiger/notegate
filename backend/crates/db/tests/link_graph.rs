@@ -495,7 +495,7 @@ async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
             account,
         )
         .await?;
-    let (child, _) = files
+    let (_child, _) = files
         .insert_text(
             space_id,
             folder.id,
