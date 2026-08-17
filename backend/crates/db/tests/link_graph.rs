@@ -1073,7 +1073,9 @@ async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dy
 
     sqlx::query(
         "UPDATE space_change_processor_states \
-         SET processing_state = 'idle', available_at = NULL \
+         SET processing_state = 'idle', available_at = NULL, \
+             requires_full_scan = false, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL \
          WHERE space_id = $1 AND processor_kind = 'link_graph'",
     )
     .bind(space_id)
