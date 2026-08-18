@@ -254,6 +254,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   activeGroupId={workbench.editorGroups[workbench.activeGroupIndex]?.id ?? null}
                   loadingNode={workbench.inspectorNodeLoading}
                   canManageActiveSpace={canManageWorkbench}
+                  canSyncLinks={me.account.kind === "user" && canWriteWorkbench}
                   textEncryptionAvailable={workbench.activeSpace?.features.text_encryption ?? false}
                   writeLockAvailable={workbench.activeSpace?.features.write_lock ?? false}
                   searchPolicyPending={actions.nodeSearchPolicyPending}
@@ -262,6 +263,7 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   onSearchEnabledChange={actions.setNodeSearchEnabled}
                   onWriteLockedChange={actions.setNodeWriteLocked}
                   onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}
+                  onOpenLinkedNode={(nodeId) => { void actions.openNodeById(nodeId); }}
                   onOutlineNavigate={closeMobilePanels}
                 />
               </AuxiliarySidebarFrame>

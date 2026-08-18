@@ -1,4 +1,4 @@
-import { Bot, FolderOpen, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
+import { Bot, FolderOpen, Link2, LockKeyhole, Pin, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../../api/errors";
@@ -8,6 +8,7 @@ import type { CurrentUserUsage, SpaceUsage } from "../../api/usage";
 import { formatBytes } from "../../shared/lib/formatBytes";
 import { WORKBENCH_LAYOUT } from "../../shared/model/workbenchLayout";
 import { Button, Card, MetaRow, Modal, SectionHeader, SettingToggle } from "../../shared/ui";
+import { useReindexSpaceLinksMutation } from "../links/useLinkQueries";
 import { SortableSpaceGrid } from "./SortableSpaceGrid";
 import { useReorderSpacesMutation, useUpdateSpaceMutation } from "./useSpaceQueries";
 import { useCheckSpaceUsageMutation, useUsageQuery } from "./useUsageQueries";
@@ -196,6 +197,7 @@ function SpaceInspector({
   usageCheck,
   showHeader = true
 }: SpaceInspectorProps) {
+  const reindexLinks = useReindexSpaceLinksMutation();
   const isChecking = !!space && Boolean(usage?.reconciliation_pending || usageCheck.isRequesting);
   const isCooldown = usageCheck.error instanceof ApiError && usageCheck.error.kind === "usage_reconciliation_cooldown";
   const checkStatus = usageState === "ready" && usage
@@ -230,6 +232,8 @@ function SpaceInspector({
         </Button>
       )
       : undefined;
+  const reindexForCurrentSpace = Boolean(space && reindexLinks.variables === space.id);
+  const reindexPending = reindexForCurrentSpace && reindexLinks.isPending;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-panel md:border-l md:border-seam">
@@ -303,6 +307,30 @@ function SpaceInspector({
                 onChange={(checked) => onUpdate({ default_text_encryption_enabled: checked })}
               />
             </div>
+          </section>
+          <section className="p-4">
+            <SectionHeader
+              title="Link index"
+              help="Rebuilds Markdown link relationships for this Space in the background."
+              actions={space ? (
+                <Button
+                  secondary
+                  size="sm"
+                  disabled={space.permission !== "write" || reindexPending}
+                  onClick={() => reindexLinks.mutate(space.id)}
+                  aria-label={`Reindex links in ${space.name}`}
+                >
+                  <Link2 size={14} />
+                  {reindexPending ? "Requesting…" : "Reindex"}
+                </Button>
+              ) : undefined}
+            />
+            {reindexForCurrentSpace && reindexLinks.isSuccess ? (
+              <p className="text-xs text-muted" role="status">Link reindex requested.</p>
+            ) : null}
+            {reindexForCurrentSpace && reindexLinks.isError ? (
+              <p className="text-xs text-danger" role="alert">Could not request link reindex.</p>
+            ) : null}
           </section>
           <section className="p-4">
             <SectionHeader title="Usage" actions={usageAction} />

@@ -244,6 +244,9 @@ describe("query invalidation", () => {
       exact: true
     });
     expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.links("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),
       exact: true
     });

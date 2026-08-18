@@ -15,6 +15,12 @@ vi.mock("../features/editor/useEditorQueries", () => ({
   useFolderChildrenStat: mocks.useFolderChildrenStat
 }));
 
+vi.mock("../features/links/NodeLinksPanel", () => ({
+  NodeLinksPanel: ({ node, onOpenNode }: { node: { id: string }; onOpenNode: (nodeId: string) => void }) => (
+    <button type="button" onClick={() => onOpenNode("linked-node")}>Links for {node.id}</button>
+  )
+}));
+
 type SidebarProps = ComponentProps<typeof AuxiliarySidebar>;
 
 function renderSidebar(overrides: Partial<SidebarProps> = {}) {
@@ -32,6 +38,7 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
   return {
     activeNode: textNode,
     canManageActiveSpace: true,
+    canSyncLinks: true,
     textEncryptionAvailable: true,
     writeLockAvailable: true,
     searchPolicyPending: false,
@@ -40,6 +47,7 @@ function sidebarProps(overrides: Partial<SidebarProps> = {}): SidebarProps {
     onSearchEnabledChange: vi.fn(),
     onWriteLockedChange: vi.fn(),
     onTextEncryptionEnabledChange: vi.fn(),
+    onOpenLinkedNode: vi.fn(),
     ...overrides
   };
 }
@@ -52,7 +60,7 @@ describe("AuxiliarySidebar", () => {
     });
   });
 
-  it("uses the Details and Outline tabs as the single workbench header", () => {
+  it("uses the Details, Outline, and Links tabs as the single workbench header", () => {
     renderSidebar({
       activeNode: null,
       canManageActiveSpace: false,
@@ -66,6 +74,19 @@ describe("AuxiliarySidebar", () => {
     expect(tablist.parentElement).toHaveClass("h-workbench-header", "border-b", "border-seam");
     expect(tablist).toHaveClass("h-full", "items-end");
     expect(within(tablist).getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+    expect(within(tablist).getByRole("tab", { name: "Links" })).toBeDisabled();
+  });
+
+  it("opens indexed relationships from the Links tab", async () => {
+    const user = userEvent.setup();
+    const onOpenLinkedNode = vi.fn();
+    renderSidebar({ onOpenLinkedNode });
+
+    await user.click(screen.getByRole("tab", { name: "Links" }));
+    expect(screen.getByRole("tabpanel", { name: "Links" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: `Links for ${textNode.id}` }));
+
+    expect(onOpenLinkedNode).toHaveBeenCalledWith("linked-node");
   });
 
   it("changes search, write lock, and stored-text encryption independently", async () => {

@@ -17,6 +17,7 @@ import {
   invalidateFileChangeEvents,
   invalidateNodeLists,
   invalidateRecentNodes,
+  invalidateSpaceLinks,
   invalidateText,
   invalidateWriteLockState,
   removeDeletedNodeQueries,
@@ -46,6 +47,7 @@ export function useCreateNodeMutation(activeSpace: Space | null, onCreated: (nod
     onSuccess: (node) => {
       queryClient.setQueryData(queryKeys.node(node.space_id, node.id), node);
       invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
+      invalidateSpaceLinks(queryClient, node.space_id);
       onCreated(node);
     }
   });
@@ -65,6 +67,7 @@ export function useUpdateNodeMutation(onUpdated: (node: RestNode) => void) {
         invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
         removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
+      invalidateSpaceLinks(queryClient, node.space_id);
       onUpdated(node);
     }
   });
@@ -172,6 +175,7 @@ export function useMoveNodeMutation(
         invalidateNodeLists(queryClient, node.space_id, [previousNode.parent_id, node.parent_id]);
         removeMarkdownImagePreviewQuery(queryClient, node.space_id, previousNode.path);
       }
+      invalidateSpaceLinks(queryClient, node.space_id);
       onMoved(node);
     }
   });
@@ -191,6 +195,7 @@ export function useDeleteNodeMutation(onDeleted: (node: NodeSummary) => void) {
       } else {
         invalidateNodeLists(queryClient, node.space_id, [node.parent_id]);
       }
+      invalidateSpaceLinks(queryClient, node.space_id);
     }
   });
 }

@@ -202,6 +202,39 @@ describe("useWorkbenchNodeNavigationActions", () => {
     expect(useUiStore.getState().expandedFolderIds.has(folder.id)).toBe(true);
   });
 
+  it("opens an indexed link by node id through normal editor history", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    openSourceGroup(activeSpace, sourceNode);
+    mocks.revealNode.mockResolvedValue({ ancestors: [], target: targetNode });
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openNodeById(targetNode.id);
+    });
+
+    const group = useUiStore.getState().editorGroups[0];
+    expect(mocks.revealNode).toHaveBeenCalledWith(activeSpace.id, targetNode.id);
+    expect(group.node?.id).toBe(targetNode.id);
+    expect(group.back.map((entry) => entry.nodeId)).toEqual([sourceNode.id]);
+  });
+
+  it("keeps the current editor when an indexed link target was deleted", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    openSourceGroup(activeSpace, sourceNode);
+    mocks.revealNode.mockRejectedValue(new ApiError("not found", 404));
+    const { result } = renderNavigationActions(activeSpace);
+
+    await act(async () => {
+      await result.current.openNodeById("deleted-node");
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
+    expect(useUiStore.getState().toast).toBe("Link target not found");
+  });
+
   it("opens a revealed node in a new editor group without a node request", async () => {
     const activeSpace = space("space-1");
     const current = node("current", activeSpace.id, "/current.md");

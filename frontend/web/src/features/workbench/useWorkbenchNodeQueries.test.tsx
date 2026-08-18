@@ -243,6 +243,8 @@ describe("workbench node mutations", () => {
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "pdf"), { url: "child-pdf" });
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-1", "other-1", "image"), { url: "other" });
     queryClient.setQueryData(queryKeys.filePreviewUrl("space-2", "file-2", "pdf"), { url: "separate" });
+    queryClient.setQueryData(queryKeys.nodeLinkStatus("space-1", "child-1"), { status: "idle" });
+    queryClient.setQueryData(queryKeys.nodeLinkStatus("space-2", "file-2"), { status: "idle" });
     vi.mocked(deleteNode).mockResolvedValue(undefined);
 
     const result = renderMutationHook(queryClient, () => useDeleteNodeMutation(vi.fn()));
@@ -255,6 +257,8 @@ describe("workbench node mutations", () => {
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "child-1", "pdf"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-1", "other-1", "image"))).toBeUndefined();
     expect(queryClient.getQueryData(queryKeys.filePreviewUrl("space-2", "file-2", "pdf"))).toEqual({ url: "separate" });
+    expect(queryClient.getQueryData(queryKeys.nodeLinkStatus("space-1", "child-1"))).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.nodeLinkStatus("space-2", "file-2"))).toEqual({ status: "idle" });
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),
       exact: true
@@ -265,7 +269,10 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.nodes("space-1")
     });
-    expect(resetQueries).toHaveBeenCalledTimes(2);
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.links("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledTimes(3);
     expect(invalidateQueries).toHaveBeenCalledOnce();
   });
 
@@ -291,7 +298,10 @@ describe("workbench node mutations", () => {
     expect(resetQueries).toHaveBeenNthCalledWith(3, {
       queryKey: queryKeys.children("space-1", "folder-2")
     });
-    expect(resetQueries).toHaveBeenCalledTimes(3);
+    expect(resetQueries).toHaveBeenNthCalledWith(4, {
+      queryKey: queryKeys.links("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledTimes(4);
   });
 
   it("invalidates descendant cache families when moving a folder", async () => {
@@ -317,7 +327,10 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
       queryKey: queryKeys.nodes("space-1")
     });
-    expect(resetQueries).toHaveBeenCalledTimes(2);
+    expect(resetQueries).toHaveBeenNthCalledWith(3, {
+      queryKey: queryKeys.links("space-1")
+    });
+    expect(resetQueries).toHaveBeenCalledTimes(3);
     expect(invalidateQueries).toHaveBeenCalledOnce();
   });
 });

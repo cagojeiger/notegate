@@ -195,6 +195,9 @@ describe("editor queries", () => {
       queryKey: queryKeys.recent(node.space_id),
       exact: true
     });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.links(node.space_id)
+    });
     expect(useUiStore.getState().saveState).toBe("saved");
     expect(useUiStore.getState().toast).toBe("Saved");
     expect(onSaved).toHaveBeenCalledTimes(1);
