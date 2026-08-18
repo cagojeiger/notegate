@@ -20,6 +20,10 @@ vi.mock("../uploads/UploadProvider", () => ({
   useUploadManager: () => ({ tasks: mocks.tasks })
 }));
 
+vi.mock("./finalizeRecordedAudio", () => ({
+  finalizeRecordedAudio: async (blob: Blob) => blob
+}));
+
 describe("AudioRecordingProvider", () => {
   beforeEach(() => {
     MockMediaRecorder.instances = [];
@@ -180,7 +184,7 @@ describe("AudioRecordingProvider", () => {
 
     await act(async () => { await result.current.actions.startRecording(destination); });
     act(() => result.current.actions.stopRecording());
-    expect(result.current.state.status).toBe("idle");
+    await waitFor(() => expect(result.current.state.status).toBe("idle"));
 
     mocks.tasks = [{ id: "upload-recording", status: "uploading" }];
     await act(async () => { await result.current.actions.startRecording(destination); });

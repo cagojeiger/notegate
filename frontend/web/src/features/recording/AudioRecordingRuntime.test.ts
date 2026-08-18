@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecordingDestination } from "./AudioRecordingContext";
 import { AudioRecordingRuntime } from "./AudioRecordingRuntime";
 
+const finalizationMocks = vi.hoisted(() => ({
+  finalizeRecordedAudio: vi.fn<(blob: Blob) => Promise<Blob>>()
+}));
+
+vi.mock("./finalizeRecordedAudio", () => finalizationMocks);
+
 const destination: RecordingDestination = {
   spaceId: "space-1",
   spaceName: "Meetings",
@@ -14,6 +20,7 @@ describe("AudioRecordingRuntime", () => {
   beforeEach(() => {
     MockMediaRecorder.instances = [];
     MockMediaRecorder.deferStateEvents = false;
+    finalizationMocks.finalizeRecordedAudio.mockReset().mockImplementation(async (blob) => blob);
     Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
     Object.defineProperty(navigator, "locks", {
       configurable: true,
@@ -96,6 +103,50 @@ describe("AudioRecordingRuntime", () => {
     expect(MockMediaRecorder.instances).toHaveLength(0);
   });
 
+  it("finalizes a WebM recording before upload", async () => {
+    const monotonicNow = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    setMediaStream(mockStream(mockTrack()));
+    const runtime = new AudioRecordingRuntime();
+    const callbacks = mockCallbacks();
+    const finalizedBlob = new Blob(["finalized audio"], { type: "audio/webm;codecs=opus" });
+    finalizationMocks.finalizeRecordedAudio.mockResolvedValue(finalizedBlob);
+
+    await runtime.start(destination, callbacks);
+    monotonicNow.mockReturnValue(6_000);
+    runtime.stop();
+
+    await vi.waitFor(() => expect(callbacks.onCaptured).toHaveBeenCalledOnce());
+    expect(finalizationMocks.finalizeRecordedAudio).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "audio/webm;codecs=opus" })
+    );
+    const capture = callbacks.onCaptured.mock.calls[0]?.[0];
+    expect(capture?.file).toEqual(expect.objectContaining({
+      name: expect.stringMatching(/-record\.webm$/),
+      size: finalizedBlob.size,
+      type: "audio/webm;codecs=opus"
+    }));
+  });
+
+  it("preserves the original recording when playback optimization fails", async () => {
+    const monotonicNow = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    setMediaStream(mockStream(mockTrack()));
+    const runtime = new AudioRecordingRuntime();
+    const callbacks = mockCallbacks();
+    finalizationMocks.finalizeRecordedAudio.mockRejectedValue(new Error("invalid WebM"));
+
+    await runtime.start(destination, callbacks);
+    monotonicNow.mockReturnValue(3_000);
+    runtime.stop();
+
+    await vi.waitFor(() => expect(callbacks.onCaptured).toHaveBeenCalledOnce());
+    expect(callbacks.onToast).toHaveBeenCalledWith(
+      "Could not optimize audio playback; uploading the original recording"
+    );
+    expect(callbacks.onCaptured.mock.calls[0]?.[0].file.size).toBe(
+      new Blob(["recorded audio"]).size
+    );
+  });
+
   it("pauses and resumes one recorder while preserving recorded-time segments", async () => {
     const startedAt = Date.UTC(2026, 7, 11, 1, 2, 3);
     vi.spyOn(Date, "now").mockReturnValue(startedAt);
@@ -139,6 +190,7 @@ describe("AudioRecordingRuntime", () => {
     monotonicNow.mockReturnValue(13_000);
     runtime.stop();
 
+    await vi.waitFor(() => expect(callbacks.onCaptured).toHaveBeenCalledOnce());
     expect(callbacks.onCaptured).toHaveBeenCalledOnce();
     expect(callbacks.onCaptured).toHaveBeenCalledWith(expect.objectContaining({
       nodeMetadata: expect.objectContaining({
@@ -185,6 +237,7 @@ describe("AudioRecordingRuntime", () => {
     monotonicNow.mockReturnValue(8_000);
     runtime.stop();
 
+    await vi.waitFor(() => expect(callbacks.onCaptured).toHaveBeenCalledOnce());
     expect(callbacks.onCaptured).toHaveBeenCalledWith(expect.objectContaining({
       nodeMetadata: expect.objectContaining({
         recording_timeline: expect.objectContaining({
