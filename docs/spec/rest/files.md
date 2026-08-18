@@ -130,18 +130,20 @@ Permission: `read`.
 
 `GET /files/{node_id}/docx-preview-url`은 10 MiB 이하이고 `encryption_mode=none`인 검증된 DOCX package에 임시 presigned GET URL을 반환한다. Upload 완료 시 의심되는 DOCX는 전체 package를 한 번 검증해 server-owned `detected_media_type`으로 저장한다. 기능 도입 전에 ZIP으로 감지됐거나 감지값이 없는 기존 DOCX 후보는 첫 preview 요청에서 같은 검증을 수행해 감지값을 교정한다. Object key는 완료 후 불변이므로 검증된 DOCX 감지값은 image/PDF와 같이 재사용하며 preview마다 object를 다시 읽지 않는다. Client 선언 `media_type`과 `.docx` 원본 파일명은 DOCX 후보를 고르는 힌트일 뿐 최종 허용 판정이 아니며, 응답과 presigned URL의 `Content-Type`은 실제 package 검증 결과인 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`다. 응답은 `Cache-Control: private, no-store`, object URL은 `Content-Disposition: inline`과 `Cache-Control: private, no-store, max-age=0`을 서명한다.
 
-검증은 ZIP container와 `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`을 확인하고 `/word/document.xml`의 exact DOCX main content-type override와 root `officeDocument` relationship을 요구한다. HTML, 일반 ZIP, 다른 OOXML 형식, 손상되거나 구조만 흉내 낸 ZIP, client-encrypted File은 `404`다. Markdown image batch endpoint에서도 DOCX는 `unsupported`로 유지한다.
+검증은 ZIP container와 `[Content_Types].xml`, `_rels/.rels`, `word/document.xml`을 확인하고 `/word/document.xml`의 exact DOCX main content-type override와 root `officeDocument` relationship을 요구한다. 구조 검증을 먼저 완료한 뒤 허용된 모든 non-directory entry를 실제 EOF까지 읽어 CRC와 확장량을 검증한다. HTML, 일반 ZIP, 다른 OOXML 형식, 손상되거나 구조만 흉내 낸 ZIP, client-encrypted File은 `404`다. Markdown image batch endpoint에서도 DOCX는 `unsupported`로 유지한다.
 
 압축 package는 frontend parsing 전에 다음 resource/security 상한을 통과해야 한다.
 
 - compressed object 10 MiB 이하
 - entry 2,048개 이하
-- entry별 선언 uncompressed size 32 MiB 이하, 전체 64 MiB 이하
-- `[Content_Types].xml`과 `_rels/.rels`는 각각 64 KiB 이하만 bounded decompress
-- canonical path와 Stored/Deflate entry만 허용하고 encrypted entry와 symlink는 거부
+- entry별 실제 uncompressed bytes 32 MiB 이하, 전체 실제 expanded bytes 64 MiB 이하
+- `[Content_Types].xml`과 `_rels/.rels`는 각각 64 KiB 이하만 메모리에 보관하고, 나머지 허용 entry는 discard sink로 bounded decompress
+- canonical path와 Stored/Deflate entry만 허용하고 overlapping range, encrypted entry, symlink, CRC/read/decompress 오류는 거부
 - `word/vbaProject.bin`, `word/activeX/`, `word/embeddings/` active content part는 거부
 
-이 상한은 압축 폭탄의 확장량을 제한하지만 DOCX parser 자체의 모든 취약성을 제거하지는 않는다. Frontend renderer는 오류 시 fail closed하며, 일반 external hyperlink는 package 단계에서 허용하되 unsafe href를 제거하고 `altChunk` rendering은 사용하지 않는다.
+DOCX package 검증은 API process별 최대 2개만 blocking worker에서 동시에 실행한다. 용량이 찬 경우 검증 결과를 unsupported로 저장하지 않고 일시적 unavailable로 처리하여 이후 다시 시도할 수 있게 한다.
+
+이 상한은 압축 폭탄의 확장량과 서버 검증 비용을 제한하지만 Word와 동일한 렌더링 충실도를 보장하거나 DOCX parser 자체의 모든 취약성을 제거하지는 않는다. Frontend renderer는 오류 시 fail closed하며, 일반 external hyperlink는 package 단계에서 허용하되 unsafe href를 제거하고 `altChunk` rendering은 사용하지 않는다.
 
 ## Audio preview
 

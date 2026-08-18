@@ -426,6 +426,7 @@ async fn prepare_preview(
     let (media_type, detected_media_type) = if should_detect_media_type {
         let media_type = detect_object_media_type(
             &state.object_storage,
+            &state.docx_validation_admission,
             &file.object_key,
             file.byte_len,
             file.encryption_mode,

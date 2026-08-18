@@ -57,6 +57,7 @@ pub enum FileMediaKind {
 
 pub async fn detect_object_media_type(
     storage: &ObjectStorage,
+    docx_admission: &crate::admission::DocxValidationAdmission,
     object_key: &str,
     byte_len: i64,
     encryption_mode: FileEncryptionMode,
@@ -83,17 +84,34 @@ pub async fn detect_object_media_type(
             original_filename,
             inferred_media_type,
         ) {
+        let permit = enter_docx_validation(docx_admission)?;
         let max_bytes = usize::try_from(byte_len).map_err(|_| ObjectStorageError::Unavailable)?;
         let bytes = if max_bytes <= prefix.len() {
             prefix
         } else {
             storage.read_prefix(object_key, max_bytes).await?
         };
-        detect_media_type_from_bytes(&bytes)
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            detect_media_type_from_bytes(&bytes)
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(event = "docx.validation_join_failed", ?error);
+            ObjectStorageError::Unavailable
+        })?
     } else {
         inferred_media_type
     };
     Ok(Some(media_type.to_owned()))
+}
+
+fn enter_docx_validation(
+    admission: &crate::admission::DocxValidationAdmission,
+) -> Result<tokio::sync::OwnedSemaphorePermit, ObjectStorageError> {
+    admission
+        .enter()
+        .map_err(|_| ObjectStorageError::Unavailable)
 }
 
 fn is_docx_candidate(
@@ -143,100 +161,245 @@ fn detect_media_type_from_bytes(bytes: &[u8]) -> &'static str {
 }
 
 fn is_docx_package(bytes: &[u8]) -> bool {
-    let Ok(mut archive) = ZipArchive::new(Cursor::new(bytes)) else {
-        return false;
-    };
+    match validate_docx_package(bytes) {
+        Ok(()) => true,
+        Err(reason) => {
+            tracing::debug!(event = "docx.validation_rejected", ?reason);
+            false
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocxRejection {
+    InvalidArchive,
+    NonzeroArchiveOffset,
+    EmptyArchive,
+    TooManyEntries,
+    OverlappingEntries,
+    InvalidEntryMetadata,
+    EncryptedEntry,
+    SymlinkEntry,
+    UnsupportedCompression,
+    CompressedEntryTooLarge,
+    NoncanonicalPath,
+    DuplicatePath,
+    ForbiddenEntry,
+    DeclaredEntryTooLarge,
+    DeclaredArchiveTooLarge,
+    MissingRequiredPart,
+    RequiredXmlTooLarge,
+    EntryOpen,
+    EntryRead,
+    ActualEntryTooLarge,
+    ActualArchiveTooLarge,
+    DeclaredSizeMismatch,
+    InvalidXmlEncoding,
+    InvalidContentTypes,
+    InvalidRelationships,
+}
+
+#[derive(Default)]
+struct RequiredParts {
+    has_content_types: bool,
+    has_package_relationships: bool,
+    has_main_document: bool,
+}
+
+#[derive(Clone, Copy)]
+enum RetainedXml {
+    ContentTypes,
+    PackageRelationships,
+}
+
+fn validate_docx_package(bytes: &[u8]) -> Result<(), DocxRejection> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|_| DocxRejection::InvalidArchive)?;
     if archive.offset() != 0 || archive.is_empty() || archive.len() > DOCX_MAX_ENTRIES {
-        return false;
+        return Err(if archive.offset() != 0 {
+            DocxRejection::NonzeroArchiveOffset
+        } else if archive.is_empty() {
+            DocxRejection::EmptyArchive
+        } else {
+            DocxRejection::TooManyEntries
+        });
+    }
+    if archive
+        .has_overlapping_files()
+        .map_err(|_| DocxRejection::InvalidArchive)?
+    {
+        return Err(DocxRejection::OverlappingEntries);
     }
 
-    let mut total_expanded_bytes = 0_u64;
+    let mut total_declared_bytes = 0_u64;
     let mut normalized_paths = HashSet::with_capacity(archive.len());
-    let mut has_content_types = false;
-    let mut has_package_relationships = false;
-    let mut has_main_document = false;
+    let mut required_parts = RequiredParts::default();
 
     for index in 0..archive.len() {
-        let Ok(entry) = archive.by_index_raw(index) else {
-            return false;
-        };
+        let entry = archive
+            .by_index_raw(index)
+            .map_err(|_| DocxRejection::InvalidEntryMetadata)?;
         let name = entry.name();
         let normalized_path = name.strip_suffix('/').unwrap_or(name).to_ascii_lowercase();
-        if !is_supported_docx_entry(
+        validate_supported_docx_entry(
             entry.encrypted(),
             entry.is_symlink(),
             entry.compression(),
             entry.compressed_size(),
-        ) || entry.enclosed_name().as_deref() != Some(Path::new(name))
-            || !is_canonical_zip_path(name)
-            || !normalized_paths.insert(normalized_path)
-        {
-            return false;
+        )?;
+        if entry.is_dir() && (entry.size() != 0 || entry.compressed_size() != 0) {
+            return Err(DocxRejection::InvalidEntryMetadata);
         }
-        let Some(next_total) = bounded_expanded_total(total_expanded_bytes, entry.size()) else {
-            return false;
-        };
-        total_expanded_bytes = next_total;
+        if entry.enclosed_name().as_deref() != Some(Path::new(name)) || !is_canonical_zip_path(name)
+        {
+            return Err(DocxRejection::NoncanonicalPath);
+        }
+        if !normalized_paths.insert(normalized_path) {
+            return Err(DocxRejection::DuplicatePath);
+        }
+        total_declared_bytes = bounded_expanded_total(total_declared_bytes, entry.size()).ok_or(
+            if entry.size() > DOCX_MAX_ENTRY_BYTES {
+                DocxRejection::DeclaredEntryTooLarge
+            } else {
+                DocxRejection::DeclaredArchiveTooLarge
+            },
+        )?;
 
         let lowercase_name = name.to_ascii_lowercase();
         if lowercase_name == "word/vbaproject.bin"
             || lowercase_name.starts_with("word/activex/")
             || lowercase_name.starts_with("word/embeddings/")
         {
-            return false;
+            return Err(DocxRejection::ForbiddenEntry);
         }
 
         match name {
             "[Content_Types].xml" => {
                 if entry.size() > DOCX_CONTENT_TYPES_MAX_BYTES {
-                    return false;
+                    return Err(DocxRejection::RequiredXmlTooLarge);
                 }
-                has_content_types = true;
+                required_parts.has_content_types = true;
             }
-            "_rels/.rels" => has_package_relationships = true,
-            "word/document.xml" => has_main_document = true,
+            "_rels/.rels" => {
+                if entry.size() > DOCX_ROOT_RELATIONSHIPS_MAX_BYTES {
+                    return Err(DocxRejection::RequiredXmlTooLarge);
+                }
+                required_parts.has_package_relationships = true;
+            }
+            "word/document.xml" => required_parts.has_main_document = true,
             _ => {}
         }
     }
 
-    if !has_content_types || !has_package_relationships || !has_main_document {
-        return false;
-    }
-
-    let Ok(mut content_types) = archive.by_name("[Content_Types].xml") else {
-        return false;
-    };
-    let mut xml = String::new();
-    let Ok(read_bytes) = content_types
-        .by_ref()
-        .take(DOCX_CONTENT_TYPES_MAX_BYTES + 1)
-        .read_to_string(&mut xml)
-    else {
-        return false;
-    };
-    if read_bytes as u64 > DOCX_CONTENT_TYPES_MAX_BYTES
-        || !has_docx_main_document_override(xml.trim_start_matches('\u{feff}'))
+    if !required_parts.has_content_types
+        || !required_parts.has_package_relationships
+        || !required_parts.has_main_document
     {
-        return false;
+        return Err(DocxRejection::MissingRequiredPart);
     }
-    drop(content_types);
 
-    let Ok(mut relationships) = archive.by_name("_rels/.rels") else {
-        return false;
-    };
-    if relationships.size() > DOCX_ROOT_RELATIONSHIPS_MAX_BYTES {
-        return false;
+    let mut total_actual_bytes = 0_u64;
+    let mut content_types = None;
+    let mut package_relationships = None;
+    let mut has_declared_size_mismatch = false;
+    let mut buffer = [0_u8; 8 * 1024];
+    let buffer_len = u64::try_from(buffer.len()).map_err(|_| DocxRejection::ActualEntryTooLarge)?;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|_| DocxRejection::EntryOpen)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let declared_size = entry.size();
+        let retained_xml = match entry.name() {
+            "[Content_Types].xml" => Some(RetainedXml::ContentTypes),
+            "_rels/.rels" => Some(RetainedXml::PackageRelationships),
+            _ => None,
+        };
+        let mut retained_bytes = retained_xml.map(|_| Vec::new());
+        let mut entry_actual_bytes = 0_u64;
+        loop {
+            let mut remaining = DOCX_MAX_ENTRY_BYTES
+                .saturating_sub(entry_actual_bytes)
+                .min(DOCX_MAX_EXPANDED_BYTES.saturating_sub(total_actual_bytes));
+            if let Some(retained_xml) = retained_xml {
+                let xml_limit = match retained_xml {
+                    RetainedXml::ContentTypes => DOCX_CONTENT_TYPES_MAX_BYTES,
+                    RetainedXml::PackageRelationships => DOCX_ROOT_RELATIONSHIPS_MAX_BYTES,
+                };
+                remaining = remaining.min(xml_limit.saturating_sub(entry_actual_bytes));
+            }
+            let read_limit = usize::try_from(remaining.saturating_add(1).min(buffer_len))
+                .map_err(|_| DocxRejection::ActualEntryTooLarge)?;
+            let read_buffer = buffer
+                .get_mut(..read_limit)
+                .ok_or(DocxRejection::ActualEntryTooLarge)?;
+            let read_bytes = entry
+                .read(read_buffer)
+                .map_err(|_| DocxRejection::EntryRead)?;
+            if read_bytes == 0 {
+                break;
+            }
+            let read_bytes_usize = read_bytes;
+            let read_bytes =
+                u64::try_from(read_bytes).map_err(|_| DocxRejection::ActualEntryTooLarge)?;
+            entry_actual_bytes = entry_actual_bytes
+                .checked_add(read_bytes)
+                .filter(|size| *size <= DOCX_MAX_ENTRY_BYTES)
+                .ok_or(DocxRejection::ActualEntryTooLarge)?;
+            total_actual_bytes = total_actual_bytes
+                .checked_add(read_bytes)
+                .filter(|size| *size <= DOCX_MAX_EXPANDED_BYTES)
+                .ok_or(DocxRejection::ActualArchiveTooLarge)?;
+
+            if let Some(retained_bytes) = &mut retained_bytes {
+                let xml_limit = match retained_xml {
+                    Some(RetainedXml::ContentTypes) => DOCX_CONTENT_TYPES_MAX_BYTES,
+                    Some(RetainedXml::PackageRelationships) => DOCX_ROOT_RELATIONSHIPS_MAX_BYTES,
+                    None => 0,
+                };
+                if entry_actual_bytes > xml_limit {
+                    return Err(DocxRejection::RequiredXmlTooLarge);
+                }
+                let read_chunk = buffer
+                    .get(..read_bytes_usize)
+                    .ok_or(DocxRejection::ActualEntryTooLarge)?;
+                retained_bytes.extend_from_slice(read_chunk);
+            }
+        }
+        if entry_actual_bytes != declared_size {
+            has_declared_size_mismatch = true;
+        }
+        match (retained_xml, retained_bytes) {
+            (Some(RetainedXml::ContentTypes), Some(bytes)) => content_types = Some(bytes),
+            (Some(RetainedXml::PackageRelationships), Some(bytes)) => {
+                package_relationships = Some(bytes);
+            }
+            _ => {}
+        }
     }
-    let mut xml = String::new();
-    let Ok(read_bytes) = relationships
-        .by_ref()
-        .take(DOCX_ROOT_RELATIONSHIPS_MAX_BYTES + 1)
-        .read_to_string(&mut xml)
-    else {
-        return false;
+    if has_declared_size_mismatch {
+        return Err(DocxRejection::DeclaredSizeMismatch);
+    }
+
+    let Some(content_types) = content_types else {
+        return Err(DocxRejection::MissingRequiredPart);
     };
-    read_bytes as u64 <= DOCX_ROOT_RELATIONSHIPS_MAX_BYTES
-        && has_main_document_relationship(xml.trim_start_matches('\u{feff}'))
+    let Some(package_relationships) = package_relationships else {
+        return Err(DocxRejection::MissingRequiredPart);
+    };
+    let content_types =
+        std::str::from_utf8(&content_types).map_err(|_| DocxRejection::InvalidXmlEncoding)?;
+    if !has_docx_main_document_override(content_types.trim_start_matches('\u{feff}')) {
+        return Err(DocxRejection::InvalidContentTypes);
+    }
+    let package_relationships = std::str::from_utf8(&package_relationships)
+        .map_err(|_| DocxRejection::InvalidXmlEncoding)?;
+    if !has_main_document_relationship(package_relationships.trim_start_matches('\u{feff}')) {
+        return Err(DocxRejection::InvalidRelationships);
+    }
+    Ok(())
 }
 
 fn bounded_expanded_total(current_total: u64, entry_size: u64) -> Option<u64> {
@@ -248,19 +411,28 @@ fn bounded_expanded_total(current_total: u64, entry_size: u64) -> Option<u64> {
         .filter(|total| *total <= DOCX_MAX_EXPANDED_BYTES)
 }
 
-fn is_supported_docx_entry(
+fn validate_supported_docx_entry(
     encrypted: bool,
     symlink: bool,
     compression: CompressionMethod,
     compressed_size: u64,
-) -> bool {
-    !encrypted
-        && !symlink
-        && matches!(
-            compression,
-            CompressionMethod::Stored | CompressionMethod::Deflated
-        )
-        && compressed_size <= PREVIEW_MAX_BYTES as u64
+) -> Result<(), DocxRejection> {
+    if encrypted {
+        return Err(DocxRejection::EncryptedEntry);
+    }
+    if symlink {
+        return Err(DocxRejection::SymlinkEntry);
+    }
+    if !matches!(
+        compression,
+        CompressionMethod::Stored | CompressionMethod::Deflated
+    ) {
+        return Err(DocxRejection::UnsupportedCompression);
+    }
+    if compressed_size > PREVIEW_MAX_BYTES as u64 {
+        return Err(DocxRejection::CompressedEntryTooLarge);
+    }
+    Ok(())
 }
 
 fn has_docx_main_document_override(xml: &str) -> bool {
@@ -419,16 +591,20 @@ mod tests {
 
     use notegate_model::FileEncryptionMode;
     use zip::write::SimpleFileOptions;
-    use zip::{CompressionMethod, ZipWriter};
+    use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
     use super::{
         DOCX_CONTENT_TYPES_MAX_BYTES, DOCX_MAIN_DOCUMENT_MEDIA_TYPE, DOCX_MAX_ENTRIES,
-        DOCX_MAX_ENTRY_BYTES, DOCX_MAX_EXPANDED_BYTES, DOCX_MEDIA_TYPE, FileMediaKind,
-        FilePreviewKind, PREVIEW_MAX_BYTES, ZIP_MEDIA_TYPE, audio_preview_media_type,
-        bounded_expanded_total, detect_media_type_from_bytes, file_media_kind, file_preview_kind,
-        is_docx_candidate, is_docx_package, is_preview_size_allowed, is_previewable_docx_type,
-        is_previewable_image_type, is_previewable_pdf_type, is_supported_docx_entry,
+        DOCX_MAX_ENTRY_BYTES, DOCX_MAX_EXPANDED_BYTES, DOCX_MEDIA_TYPE, DocxRejection,
+        FileMediaKind, FilePreviewKind, PREVIEW_MAX_BYTES, ZIP_MEDIA_TYPE,
+        audio_preview_media_type, bounded_expanded_total, detect_media_type_from_bytes,
+        enter_docx_validation, file_media_kind, file_preview_kind, is_docx_candidate,
+        is_docx_package, is_preview_size_allowed, is_previewable_docx_type,
+        is_previewable_image_type, is_previewable_pdf_type, validate_docx_package,
+        validate_supported_docx_entry,
     };
+    use crate::admission::DocxValidationAdmission;
+    use crate::object_storage::ObjectStorageError;
 
     const PACKAGE_RELATIONSHIPS: &[u8] = br#"<?xml version="1.0"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -481,14 +657,120 @@ mod tests {
         required_entries: &[(&str, &[u8])],
         extra_entries: &[(&str, &[u8])],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        archive_bytes_with_compression(required_entries, extra_entries, CompressionMethod::Deflated)
+    }
+
+    fn archive_bytes_with_compression(
+        required_entries: &[(&str, &[u8])],
+        extra_entries: &[(&str, &[u8])],
+        compression: CompressionMethod,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let cursor = Cursor::new(Vec::new());
         let mut writer = ZipWriter::new(cursor);
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let options = SimpleFileOptions::default().compression_method(compression);
         for (name, bytes) in required_entries.iter().chain(extra_entries) {
             writer.start_file(*name, options)?;
             writer.write_all(bytes)?;
         }
         Ok(writer.finish()?.into_inner())
+    }
+
+    fn docx_bytes_with_compression(
+        extra_entries: &[(&str, &[u8])],
+        compression: CompressionMethod,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let content_types = content_types(DOCX_MAIN_DOCUMENT_MEDIA_TYPE);
+        archive_bytes_with_compression(
+            &[
+                ("[Content_Types].xml", content_types.as_bytes()),
+                ("_rels/.rels", PACKAGE_RELATIONSHIPS),
+                ("word/document.xml", MAIN_DOCUMENT),
+            ],
+            extra_entries,
+            compression,
+        )
+    }
+
+    fn central_header_offset(bytes: &[u8], target_name: &str) -> Option<usize> {
+        for (offset, signature) in bytes.windows(4).enumerate() {
+            if signature != b"PK\x01\x02" {
+                continue;
+            }
+            let name_length = bytes
+                .get(offset.checked_add(28)?..offset.checked_add(30)?)?
+                .try_into()
+                .ok()
+                .map(u16::from_le_bytes)?;
+            let name_start = offset.checked_add(46)?;
+            let name_end = name_start.checked_add(usize::from(name_length))?;
+            if bytes.get(name_start..name_end) == Some(target_name.as_bytes()) {
+                return Some(offset);
+            }
+        }
+        None
+    }
+
+    fn patch_declared_size(bytes: &mut [u8], target_name: &str, size: u32) -> TestResult {
+        let offset = central_header_offset(bytes, target_name)
+            .ok_or_else(|| std::io::Error::other("central entry not found"))?;
+        let size_start = offset
+            .checked_add(24)
+            .ok_or_else(|| std::io::Error::other("central entry offset overflow"))?;
+        let size_end = size_start
+            .checked_add(4)
+            .ok_or_else(|| std::io::Error::other("central entry size overflow"))?;
+        bytes
+            .get_mut(size_start..size_end)
+            .ok_or_else(|| std::io::Error::other("central entry size is truncated"))?
+            .copy_from_slice(&size.to_le_bytes());
+        Ok(())
+    }
+
+    fn central_local_header_offset(bytes: &[u8], target_name: &str) -> Option<u32> {
+        let offset = central_header_offset(bytes, target_name)?;
+        let offset_start = offset.checked_add(42)?;
+        let offset_end = offset_start.checked_add(4)?;
+        bytes
+            .get(offset_start..offset_end)?
+            .try_into()
+            .ok()
+            .map(u32::from_le_bytes)
+    }
+
+    fn patch_local_header_offset(
+        bytes: &mut [u8],
+        target_name: &str,
+        local_header_offset: u32,
+    ) -> TestResult {
+        let offset = central_header_offset(bytes, target_name)
+            .ok_or_else(|| std::io::Error::other("central entry not found"))?;
+        let offset_start = offset
+            .checked_add(42)
+            .ok_or_else(|| std::io::Error::other("central entry offset overflow"))?;
+        let offset_end = offset_start
+            .checked_add(4)
+            .ok_or_else(|| std::io::Error::other("central entry size overflow"))?;
+        bytes
+            .get_mut(offset_start..offset_end)
+            .ok_or_else(|| std::io::Error::other("central entry offset is truncated"))?
+            .copy_from_slice(&local_header_offset.to_le_bytes());
+        Ok(())
+    }
+
+    fn corrupt_entry_data(bytes: &mut [u8], target_name: &str) -> TestResult {
+        let data_start = {
+            let mut archive = ZipArchive::new(Cursor::new(&*bytes))?;
+            let entry = archive.by_name(target_name)?;
+            entry
+                .data_start()
+                .ok_or_else(|| std::io::Error::other("entry data offset unavailable"))?
+        };
+        let data_start = usize::try_from(data_start)?;
+        let byte = bytes
+            .get_mut(data_start)
+            .ok_or_else(|| std::io::Error::other("entry data is truncated"))?;
+        *byte ^= 1;
+        Ok(())
     }
 
     fn docx_with_empty_entries(count: usize) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -687,25 +969,37 @@ mod tests {
     }
 
     #[test]
-    fn docx_detection_rejects_encrypted_and_unsupported_compression_entries() {
-        assert!(is_supported_docx_entry(
-            false,
-            false,
-            CompressionMethod::Deflated,
-            PREVIEW_MAX_BYTES as u64
-        ));
-        assert!(!is_supported_docx_entry(
-            true,
-            false,
-            CompressionMethod::Deflated,
-            1
-        ));
-        assert!(!is_supported_docx_entry(
-            false,
-            false,
-            CompressionMethod::BZIP2,
-            1
-        ));
+    fn docx_entry_validation_rejects_prohibited_features_and_size() {
+        assert!(
+            validate_supported_docx_entry(
+                false,
+                false,
+                CompressionMethod::Deflated,
+                PREVIEW_MAX_BYTES as u64
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_supported_docx_entry(true, false, CompressionMethod::Deflated, 1),
+            Err(DocxRejection::EncryptedEntry)
+        );
+        assert_eq!(
+            validate_supported_docx_entry(false, true, CompressionMethod::Deflated, 1),
+            Err(DocxRejection::SymlinkEntry)
+        );
+        assert_eq!(
+            validate_supported_docx_entry(false, false, CompressionMethod::BZIP2, 1),
+            Err(DocxRejection::UnsupportedCompression)
+        );
+        assert_eq!(
+            validate_supported_docx_entry(
+                false,
+                false,
+                CompressionMethod::Deflated,
+                PREVIEW_MAX_BYTES as u64 + 1,
+            ),
+            Err(DocxRejection::CompressedEntryTooLarge)
+        );
     }
 
     #[test]
@@ -720,6 +1014,143 @@ mod tests {
             assert_eq!(detect_media_type_from_bytes(&bytes), ZIP_MEDIA_TYPE);
         }
         Ok(())
+    }
+
+    #[test]
+    fn docx_validation_rejects_overlapping_entry_payloads_before_reading() -> TestResult {
+        let shared_payload = b"same payload";
+        let mut bytes = docx_bytes_with_compression(
+            &[
+                ("word/media/first.bin", shared_payload),
+                ("word/media/second.bin", shared_payload),
+            ],
+            CompressionMethod::Stored,
+        )?;
+        let first_offset = central_local_header_offset(&bytes, "word/media/first.bin")
+            .ok_or_else(|| std::io::Error::other("first local header not found"))?;
+        patch_local_header_offset(&mut bytes, "word/media/second.bin", first_offset)?;
+
+        assert_eq!(
+            validate_docx_package(&bytes),
+            Err(DocxRejection::OverlappingEntries)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_reads_unretained_entries_through_crc_eof() -> TestResult {
+        let mut bytes = docx_bytes_with_compression(
+            &[("word/media/image.bin", b"crc protected payload")],
+            CompressionMethod::Stored,
+        )?;
+        corrupt_entry_data(&mut bytes, "word/media/image.bin")?;
+
+        assert_eq!(validate_docx_package(&bytes), Err(DocxRejection::EntryRead));
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_rejects_underdeclared_entry_after_actual_limit() -> TestResult {
+        let payload = vec![0_u8; (DOCX_MAX_ENTRY_BYTES + 1) as usize];
+        let mut bytes = docx_bytes(&[("word/media/large.bin", &payload)])?;
+        patch_declared_size(&mut bytes, "word/media/large.bin", 1)?;
+
+        assert_eq!(
+            validate_docx_package(&bytes),
+            Err(DocxRejection::ActualEntryTooLarge)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_rejects_underdeclared_aggregate_after_actual_limit() -> TestResult {
+        let payload = vec![0_u8; (DOCX_MAX_EXPANDED_BYTES / 3 + 1) as usize];
+        let names = [
+            "word/media/first.bin",
+            "word/media/second.bin",
+            "word/media/third.bin",
+        ];
+        let mut bytes = docx_bytes(&[
+            (names[0], &payload),
+            (names[1], &payload),
+            (names[2], &payload),
+        ])?;
+        for name in names {
+            patch_declared_size(&mut bytes, name, 1)?;
+        }
+
+        assert_eq!(
+            validate_docx_package(&bytes),
+            Err(DocxRejection::ActualArchiveTooLarge)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_rejects_declared_actual_size_mismatch() -> TestResult {
+        let mut bytes = docx_bytes(&[("word/media/data.bin", b"actual bytes")])?;
+        patch_declared_size(&mut bytes, "word/media/data.bin", 1)?;
+
+        assert_eq!(
+            validate_docx_package(&bytes),
+            Err(DocxRejection::DeclaredSizeMismatch)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_preflights_forbidden_entries_before_decompression() -> TestResult {
+        let mut bytes = docx_bytes_with_compression(
+            &[("word/vbaProject.bin", b"macro payload")],
+            CompressionMethod::Stored,
+        )?;
+        corrupt_entry_data(&mut bytes, "word/vbaProject.bin")?;
+
+        assert_eq!(
+            validate_docx_package(&bytes),
+            Err(DocxRejection::ForbiddenEntry)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_rejects_directory_entries_with_payloads() -> TestResult {
+        let bytes = docx_bytes_with_compression(
+            &[("word/media/", b"hidden payload")],
+            CompressionMethod::Stored,
+        )?;
+
+        assert_eq!(
+            validate_docx_package(&bytes),
+            Err(DocxRejection::InvalidEntryMetadata)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_accepts_entry_at_actual_expansion_limit() -> TestResult {
+        let payload = vec![0_u8; DOCX_MAX_ENTRY_BYTES as usize];
+        let bytes = docx_bytes(&[("word/media/large.bin", &payload)])?;
+
+        assert_eq!(validate_docx_package(&bytes), Ok(()));
+        Ok(())
+    }
+
+    #[test]
+    fn docx_validation_capacity_maps_to_storage_unavailable() {
+        let admission = DocxValidationAdmission::new(2);
+        let first = enter_docx_validation(&admission).ok();
+        let second = enter_docx_validation(&admission).ok();
+        assert!(first.is_some());
+        assert!(second.is_some());
+        assert!(matches!(
+            enter_docx_validation(&admission),
+            Err(ObjectStorageError::Unavailable)
+        ));
+
+        drop(first);
+        assert!(enter_docx_validation(&admission).is_ok());
+        drop(second);
     }
 
     #[test]

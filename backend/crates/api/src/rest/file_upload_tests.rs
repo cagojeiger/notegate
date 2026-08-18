@@ -403,7 +403,7 @@ async fn verified_docx_bytes_use_the_dedicated_preview_url()
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
-    let state = state_with_s3(&db, s3);
+    let state = state_with_s3(&db, s3.clone());
     let (caller, space_id, root_id) = caller_and_space(&state).await?;
     let bytes = docx_bytes()?;
     let upload = begin_upload_with_media_type(
@@ -431,7 +431,8 @@ async fn verified_docx_bytes_use_the_dedicated_preview_url()
     assert_eq!(completed["node"]["encryption_mode"], "none");
     let node_id: Uuid = serde_json::from_value(completed["node"]["id"].clone())?;
 
-    let docx_preview_response = rest_app(state.clone(), caller.clone())
+    let cached_preview_state = state_with_s3(&db, unavailable_internal_storage(s3));
+    let docx_preview_response = rest_app(cached_preview_state, caller.clone())
         .oneshot(
             Request::builder()
                 .uri(format!(
@@ -478,6 +479,29 @@ async fn verified_docx_bytes_use_the_dedicated_preview_url()
     .bind(node_id)
     .execute(&db.pool)
     .await?;
+    let first_validation = state
+        .docx_validation_admission
+        .enter()
+        .expect("first DOCX validation permit");
+    let second_validation = state
+        .docx_validation_admission
+        .enter()
+        .expect("second DOCX validation permit");
+    let (status, body) = empty_request(
+        rest_app(state.clone(), caller.clone()),
+        "GET",
+        format!("/v1/spaces/{space_id}/files/{node_id}/docx-preview-url"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    let detected: Option<String> =
+        sqlx::query_scalar("SELECT detected_media_type FROM file_objects WHERE node_id = $1")
+            .bind(node_id)
+            .fetch_one(&db.pool)
+            .await?;
+    assert_eq!(detected.as_deref(), Some("application/zip"));
+    drop((first_validation, second_validation));
+
     let (status, body) = empty_request(
         rest_app(state.clone(), caller.clone()),
         "GET",

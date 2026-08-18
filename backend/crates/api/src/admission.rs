@@ -1,4 +1,4 @@
-//! Process-local admission control for CPU-sensitive search operations.
+//! Process-local admission control for CPU-sensitive operations.
 
 use std::sync::Arc;
 
@@ -17,6 +17,35 @@ pub(crate) struct SearchAdmission {
     find: Arc<Semaphore>,
     grep_requests: Arc<Semaphore>,
     grep_executions: Arc<Semaphore>,
+}
+
+#[derive(Clone)]
+pub(crate) struct DocxValidationAdmission {
+    executions: Arc<Semaphore>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DocxValidationCapacity;
+
+impl Default for DocxValidationAdmission {
+    fn default() -> Self {
+        Self::new(limits::DOCX_VALIDATION_MAX_EXECUTING)
+    }
+}
+
+impl DocxValidationAdmission {
+    pub(crate) fn new(executions: usize) -> Self {
+        Self {
+            executions: Arc::new(Semaphore::new(executions)),
+        }
+    }
+
+    pub(crate) fn enter(&self) -> Result<OwnedSemaphorePermit, DocxValidationCapacity> {
+        self.executions
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| DocxValidationCapacity)
+    }
 }
 
 impl Default for SearchAdmission {
@@ -116,6 +145,19 @@ mod tests {
             .expect("waiting grep starts after capacity is released")
             .expect("waiting task joins")
             .expect("waiting grep is admitted");
+        drop(second);
+    }
+
+    #[test]
+    fn docx_validation_fails_fast_at_capacity_and_recovers_after_release() {
+        let admission = DocxValidationAdmission::new(2);
+        let first = admission.enter().expect("first validation admitted");
+        let second = admission.enter().expect("second validation admitted");
+
+        assert!(admission.enter().is_err());
+
+        drop(first);
+        assert!(admission.enter().is_ok());
         drop(second);
     }
 }
