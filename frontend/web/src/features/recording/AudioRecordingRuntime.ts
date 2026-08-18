@@ -11,6 +11,7 @@ import {
   type RecordingSegmentTiming,
   recordingSupport
 } from "./audioRecording";
+import { finalizeRecordedAudio } from "./finalizeRecordedAudio";
 
 export type CapturedRecording = {
   destination: RecordingDestination;
@@ -101,7 +102,7 @@ export class AudioRecordingRuntime {
       recorder.addEventListener("pause", () => this.handlePause(recorder));
       recorder.addEventListener("resume", () => this.handleResume(recorder));
       recorder.addEventListener("stop", () => {
-        this.finishCapture(recorder, audioTrack, mimeType);
+        void this.finishCapture(recorder, audioTrack, mimeType);
       }, { once: true });
 
       const awake = await callbacks.acquireWakeLock();
@@ -188,7 +189,7 @@ export class AudioRecordingRuntime {
     this.resumeSignal();
   }
 
-  private finishCapture(
+  private async finishCapture(
     recorder: MediaRecorder,
     audioTrack: MediaStreamTrack | undefined,
     fallbackMimeType: string
@@ -204,7 +205,8 @@ export class AudioRecordingRuntime {
     const startedAt = this.startedAt ?? Date.now();
     const recordedMimeType = recorder.mimeType || this.chunks[0]?.type || fallbackMimeType;
     const captureSettings = audioTrack?.getSettings() ?? {};
-    const file = new File(
+    const recordedDurationMs = this.recordedDurationMs;
+    const recordedFile = new File(
       this.chunks,
       this.filename ?? recordingFilename(new Date(startedAt), recordedMimeType),
       { type: recordedMimeType }
@@ -216,18 +218,40 @@ export class AudioRecordingRuntime {
       {
         startedAt,
         wallDurationMs: this.wallDurationMs(),
-        recordedDurationMs: this.recordedDurationMs,
+        recordedDurationMs,
         segments: this.segments
       }
     );
-    this.cleanupCapture();
-    this.setState("idle");
 
-    if (!callbacks || shouldDiscard || !destination) return;
-    if (file.size === 0) {
+    if (!callbacks || shouldDiscard || !destination) {
+      this.cleanupCapture();
+      this.setState("idle");
+      return;
+    }
+    if (recordedFile.size === 0) {
+      this.cleanupCapture();
+      this.setState("idle");
       callbacks.onToast("No audio was captured");
       return;
     }
+
+    this.stopCaptureResources();
+    let file = recordedFile;
+    try {
+      const finalizedBlob = await finalizeRecordedAudio(recordedFile);
+      if (finalizedBlob !== recordedFile) {
+        file = new File([finalizedBlob], recordedFile.name, {
+          type: recordedFile.type,
+          lastModified: recordedFile.lastModified
+        });
+      }
+    } catch {
+      callbacks.onToast("Could not optimize audio playback; uploading the original recording");
+    }
+    if (this.disposed) return;
+
+    this.cleanupCapture();
+    this.setState("idle");
     callbacks.onCaptured({ destination, file, nodeMetadata });
   }
 
@@ -352,15 +376,7 @@ export class AudioRecordingRuntime {
   }
 
   private cleanupCapture() {
-    this.pauseSignal();
-    this.analyser = null;
-    this.frequencyData = null;
-    const audioContext = this.audioContext;
-    this.audioContext = null;
-    if (audioContext) void audioContext.close().catch(() => undefined);
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
-    this.recorder = null;
-    this.stream = null;
+    this.stopCaptureResources();
     this.chunks = [];
     this.destination = null;
     this.startedAt = null;
@@ -375,6 +391,18 @@ export class AudioRecordingRuntime {
     const release = this.releaseRecordingLock;
     this.releaseRecordingLock = null;
     release?.();
+  }
+
+  private stopCaptureResources() {
+    this.pauseSignal();
+    this.analyser = null;
+    this.frequencyData = null;
+    const audioContext = this.audioContext;
+    this.audioContext = null;
+    if (audioContext) void audioContext.close().catch(() => undefined);
+    for (const track of this.stream?.getTracks() ?? []) track.stop();
+    this.recorder = null;
+    this.stream = null;
   }
 }
 
