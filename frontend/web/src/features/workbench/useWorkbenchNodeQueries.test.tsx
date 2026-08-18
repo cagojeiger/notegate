@@ -79,6 +79,7 @@ describe("workbench node mutations", () => {
     };
     vi.mocked(updateTextEncryption).mockResolvedValue(updated);
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const onUpdated = vi.fn();
     const result = renderMutationHook(queryClient, () => useUpdateTextEncryptionMutation(onUpdated));
 
@@ -99,6 +100,13 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.text(current.space_id, current.id),
       exact: true
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkStatuses(current.space_id)
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkLists(current.space_id),
+      refetchType: "none"
     });
     expect(onUpdated).toHaveBeenCalledWith(updated);
   });
@@ -270,10 +278,14 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.nodes("space-1")
     });
     expect(resetQueries).toHaveBeenCalledWith({
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkLists("space-1"),
+      refetchType: "none"
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {
@@ -299,7 +311,7 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.children("space-1", "folder-2")
     });
     expect(resetQueries).toHaveBeenNthCalledWith(4, {
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
     });
     expect(resetQueries).toHaveBeenCalledTimes(4);
   });
@@ -328,10 +340,14 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.nodes("space-1")
     });
     expect(resetQueries).toHaveBeenNthCalledWith(3, {
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.linkLists("space-1"),
+      refetchType: "none"
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 });
 

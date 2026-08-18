@@ -13,11 +13,13 @@ import { useRevealNode } from "./useWorkbenchQueries";
 
 type NavigationActionsProps = {
   activeSpace: Space | null;
+  inspectedNode: RestNode | null;
   loadCanonicalNode: CanonicalNodeLoader;
 };
 
 export function useWorkbenchNodeNavigationActions({
   activeSpace,
+  inspectedNode,
   loadCanonicalNode
 }: NavigationActionsProps) {
   const client = useApiClient();
@@ -31,8 +33,10 @@ export function useWorkbenchNodeNavigationActions({
   const closeMobile = useUiStore((state) => state.closeMobile);
   const showToast = useUiStore((state) => state.showToast);
   const revealNodeInSpace = useRevealNode();
+  const inspectedNodeIdRef = useRef(inspectedNode?.id ?? null);
   const navigatingGroupsRef = useRef(new Set<number>());
   const [navigatingGroupIds, setNavigatingGroupIds] = useState<ReadonlySet<number>>(new Set());
+  inspectedNodeIdRef.current = inspectedNode?.id ?? null;
 
   async function openNode(summary: NodeSummary) {
     await openNodeFromSummary(summary, openInActiveGroup);
@@ -42,20 +46,29 @@ export function useWorkbenchNodeNavigationActions({
     await openNodeFromSummary(summary, openInNewGroup);
   }
 
-  async function openNodeById(nodeId: string) {
-    if (!activeSpace) return;
+  async function openNodeById(nodeId: string, sourceNodeId: string) {
+    if (!activeSpace || inspectedNodeIdRef.current !== sourceNodeId) return;
     const spaceId = activeSpace.id;
+    const initialState = useUiStore.getState();
+    const initialGroup = initialState.editorGroups[initialState.activeGroupIndex];
+    if (!initialGroup) return;
+    const groupId = initialGroup.id;
+    const groupNodeId = initialGroup.node?.id ?? null;
     let resolved: { node: RestNode; reveal: NodeRevealResponse | null };
     try {
       resolved = await loadNavigationNode(spaceId, nodeId);
     } catch (error) {
+      if (!isCurrentIndexedLinkSource(spaceId, groupId, groupNodeId, sourceNodeId)) return;
       showToast(error instanceof ApiError && error.status === 404 ? "Link target not found" : "Could not open link target");
       return;
     }
-    if (useUiStore.getState().activeSpaceId !== spaceId || resolved.node.space_id !== spaceId) return;
+    if (
+      resolved.node.space_id !== spaceId
+      || !isCurrentIndexedLinkSource(spaceId, groupId, groupNodeId, sourceNodeId)
+    ) return;
 
     if (resolved.reveal) applyReveal(resolved.reveal);
-    openInActiveGroup(resolved.node);
+    openInGroup(groupId, resolved.node);
     closeMobile();
     if (!resolved.reveal) showToast("Opened item, but could not reveal it in Files");
   }
@@ -146,6 +159,20 @@ export function useWorkbenchNodeNavigationActions({
     const state = useUiStore.getState();
     return state.activeSpaceId === spaceId
       && state.editorGroups.some((group) => group.id === groupId && group.node?.id === sourceNode.id);
+  }
+
+  function isCurrentIndexedLinkSource(
+    spaceId: string,
+    groupId: number,
+    groupNodeId: string | null,
+    sourceNodeId: string
+  ): boolean {
+    const state = useUiStore.getState();
+    const activeGroup = state.editorGroups[state.activeGroupIndex];
+    return state.activeSpaceId === spaceId
+      && inspectedNodeIdRef.current === sourceNodeId
+      && activeGroup?.id === groupId
+      && (activeGroup.node?.id ?? null) === groupNodeId;
   }
 
   function isCurrentNavigationTarget(

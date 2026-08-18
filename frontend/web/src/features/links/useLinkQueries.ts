@@ -10,6 +10,7 @@ import {
   type NodeLinkProjectionStatus
 } from "../../api/links";
 import { queryKeys } from "../../api/queryKeys";
+import { invalidateSpaceLinks } from "../../api/queryInvalidation";
 import type { RestNode } from "../../api/types";
 
 const PENDING_STATUS_POLL_MS = 15_000;
@@ -63,6 +64,7 @@ export function useSyncNodeLinksMutation() {
         queryKeys.nodeLinkStatus(node.space_id, node.id),
         (current) => ({
           status: "pending",
+          space_pending: current?.space_pending ?? false,
           projected_at: current?.projected_at ?? null,
           failure_code: null,
           failed_at: null
@@ -85,13 +87,13 @@ export function useReindexSpaceLinksMutation() {
     meta: { silentError: true },
     mutationFn: (spaceId: string) => requestSpaceLinkReindex(client, spaceId),
     onSuccess: (_response, spaceId) => {
-      void queryClient.resetQueries({ queryKey: queryKeys.links(spaceId) });
+      invalidateSpaceLinks(queryClient, spaceId);
     }
   });
 }
 
-function projectionPollInterval(status: NodeLinkProjectionStatus | undefined): number | false {
-  if (status?.status === "pending") return PENDING_STATUS_POLL_MS;
+export function projectionPollInterval(status: NodeLinkProjectionStatus | undefined): number | false {
   if (status?.status === "syncing") return SYNCING_STATUS_POLL_MS;
+  if (status?.status === "pending" || status?.space_pending) return PENDING_STATUS_POLL_MS;
   return false;
 }

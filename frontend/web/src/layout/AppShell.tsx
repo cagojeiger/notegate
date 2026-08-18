@@ -263,7 +263,9 @@ export function AppShell({ me, onSignOut }: AppShellProps) {
                   onSearchEnabledChange={actions.setNodeSearchEnabled}
                   onWriteLockedChange={actions.setNodeWriteLocked}
                   onTextEncryptionEnabledChange={actions.setTextEncryptionEnabled}
-                  onOpenLinkedNode={(nodeId) => { void actions.openNodeById(nodeId); }}
+                  onOpenLinkedNode={(nodeId, sourceNodeId) => {
+                    void actions.openNodeById(nodeId, sourceNodeId);
+                  }}
                   onOutlineNavigate={closeMobilePanels}
                 />
               </AuxiliarySidebarFrame>

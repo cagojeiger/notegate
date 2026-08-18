@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { queryKeys } from "../../api/queryKeys";
 import { makeRestNode } from "../../test/fixtures";
 import { createTestQueryClient } from "../../test/queryClient";
 import { NodeLinksPanel } from "./NodeLinksPanel";
@@ -30,6 +31,7 @@ describe("NodeLinksPanel", () => {
     mocks.useNodeLinkStatusQuery.mockReturnValue({
       data: {
         status: "idle",
+        space_pending: false,
         projected_at: "2026-08-18T00:00:00Z",
         failure_code: null,
         failed_at: null
@@ -66,8 +68,8 @@ describe("NodeLinksPanel", () => {
     await user.click(screen.getByRole("button", { name: "Open /docs/target.md" }));
     await user.click(screen.getByRole("button", { name: "Open /docs/source.md" }));
 
-    expect(onOpenNode).toHaveBeenNthCalledWith(1, "target-1");
-    expect(onOpenNode).toHaveBeenNthCalledWith(2, "source-1");
+    expect(onOpenNode).toHaveBeenNthCalledWith(1, "target-1", "node-1");
+    expect(onOpenNode).toHaveBeenNthCalledWith(2, "source-1", "node-1");
     expect(screen.queryByRole("button", { name: "Open /missing.md" })).not.toBeInTheDocument();
   });
 
@@ -85,27 +87,91 @@ describe("NodeLinksPanel", () => {
   });
 
   it("shows only backlinks for non-text nodes", () => {
-    renderPanel({ node: makeRestNode({ kind: "folder", name: "Docs", path: "/Docs" }) });
+    const folder = makeRestNode({ kind: "folder", name: "Docs", path: "/Docs" });
+    renderPanel({ node: folder });
 
     expect(screen.queryByText("Index status")).not.toBeInTheDocument();
     expect(screen.queryByText("Outgoing")).not.toBeInTheDocument();
     expect(screen.getByText("Backlinks")).toBeInTheDocument();
+    expect(mocks.useNodeLinkStatusQuery).toHaveBeenCalledWith(folder, true);
+  });
+
+  it("refreshes the selected node links after Space projection work settles", () => {
+    const node = makeRestNode();
+    mocks.useNodeLinkStatusQuery.mockReturnValue({
+      data: {
+        status: "idle",
+        space_pending: true,
+        projected_at: null,
+        failure_code: null,
+        failed_at: null
+      },
+      isError: false,
+      isLoading: false
+    });
+    const queryClient = createTestQueryClient();
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+    const view = renderPanel({ node, queryClient });
+
+    mocks.useNodeLinkStatusQuery.mockReturnValue({
+      data: {
+        status: "idle",
+        space_pending: false,
+        projected_at: "2026-08-18T00:00:00Z",
+        failure_code: null,
+        failed_at: null
+      },
+      isError: false,
+      isLoading: false
+    });
+    view.rerenderPanel();
+
+    expect(resetQueries).toHaveBeenNthCalledWith(1, {
+      queryKey: queryKeys.nodeLinkList(node.space_id, node.id, "outgoing"),
+      exact: true
+    });
+    expect(resetQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.nodeLinkList(node.space_id, node.id, "incoming"),
+      exact: true
+    });
+  });
+
+  it("refreshes invalidated links when projection finishes before pending is observed", () => {
+    const node = makeRestNode();
+    const queryClient = createTestQueryClient();
+    const incomingKey = queryKeys.nodeLinkList(node.space_id, node.id, "incoming");
+    queryClient.setQueryData(incomingKey, { pages: [], pageParams: [] });
+    void queryClient.invalidateQueries({ queryKey: incomingKey, refetchType: "none" });
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
+
+    renderPanel({ node, queryClient });
+
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: incomingKey,
+      exact: true
+    });
   });
 });
 
 function renderPanel({
   node = makeRestNode(),
-  onOpenNode = vi.fn()
+  onOpenNode = vi.fn(),
+  queryClient = createTestQueryClient()
 }: {
   node?: ReturnType<typeof makeRestNode>;
-  onOpenNode?: (nodeId: string) => void;
+  onOpenNode?: (nodeId: string, sourceNodeId: string) => void;
+  queryClient?: ReturnType<typeof createTestQueryClient>;
 } = {}) {
-  const queryClient = createTestQueryClient();
-  return render(
+  const renderPanelElement = () => (
     <QueryClientProvider client={queryClient}>
       <NodeLinksPanel node={node} canSync onOpenNode={onOpenNode} />
     </QueryClientProvider>
   );
+  const view = render(renderPanelElement());
+  return {
+    ...view,
+    rerenderPanel: () => view.rerender(renderPanelElement())
+  };
 }
 
 function linkQuery(

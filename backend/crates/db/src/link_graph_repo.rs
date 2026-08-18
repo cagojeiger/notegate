@@ -76,18 +76,17 @@ impl LinkGraphRepo {
         let row = sqlx::query_as::<_, NodeLinkGraphStateRow>(
             "SELECT projection.projected_at, \
                     COALESCE(projection.needs_projection, false) AS needs_projection, \
-                    COALESCE(node.kind = 'text' AND node.deleted_at IS NULL, false) \
-                        AS source_is_text, \
-                    COALESCE(space_state.available_at IS NOT NULL, false) \
-                        AS space_pending, \
+                    (COALESCE(space_state.available_at IS NOT NULL, false) OR EXISTS ( \
+                        SELECT 1 FROM node_link_projections pending_projection \
+                        WHERE pending_projection.space_id = requested.space_id \
+                          AND pending_projection.needs_projection \
+                    )) AS space_pending, \
                     projection.request_version, projection.active_job_id, \
                     projection.active_request_version, projection.failure_code, \
                     projection.failed_at, \
                     job.status AS active_job_status, job.last_error_code AS active_job_error_code, \
                     job.completed_at AS active_job_completed_at \
              FROM (SELECT $1::uuid AS space_id, $2::uuid AS node_id) requested \
-             LEFT JOIN nodes node \
-               ON node.space_id = requested.space_id AND node.id = requested.node_id \
              LEFT JOIN node_link_projections projection \
                ON projection.space_id = requested.space_id \
               AND projection.source_node_id = requested.node_id \
@@ -500,7 +499,6 @@ struct IncomingReferenceRow {
 struct NodeLinkGraphStateRow {
     projected_at: Option<DateTime<Utc>>,
     needs_projection: bool,
-    source_is_text: bool,
     space_pending: bool,
     request_version: Option<i64>,
     active_job_id: Option<Uuid>,
@@ -535,8 +533,6 @@ impl From<NodeLinkGraphStateRow> for NodeLinkGraphState {
         });
         let status = if active_job_is_current && !active_job_is_terminal {
             NodeLinkGraphStatus::Syncing
-        } else if row.source_is_text && row.space_pending {
-            NodeLinkGraphStatus::Pending
         } else if stored_failure_code.is_some() {
             NodeLinkGraphStatus::Failed
         } else if row.needs_projection {
@@ -551,6 +547,7 @@ impl From<NodeLinkGraphStateRow> for NodeLinkGraphState {
         };
         Self {
             status,
+            space_pending: row.space_pending,
             projected_at: row.projected_at,
             failure_code,
             failed_at,

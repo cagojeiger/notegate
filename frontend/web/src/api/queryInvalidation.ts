@@ -53,7 +53,11 @@ export function invalidateNodeDetails(queryClient: QueryClient, spaceId: string)
 }
 
 export function invalidateSpaceLinks(queryClient: QueryClient, spaceId: string) {
-  void queryClient.resetQueries({ queryKey: queryKeys.links(spaceId) });
+  void queryClient.resetQueries({ queryKey: queryKeys.linkStatuses(spaceId) });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.linkLists(spaceId),
+    refetchType: "none"
+  });
 }
 
 export async function applyExternalFileChanges(
@@ -171,9 +175,9 @@ export function removeDeletedNodeQueries(
   const previewQueryKey = recursive && node.kind === "folder"
     ? queryKeys.filePreviewUrls(node.space_id)
     : queryKeys.filePreviewNode(node.space_id, node.id);
-  const linksQueryKey = recursive && node.kind === "folder"
-    ? queryKeys.links(node.space_id)
-    : queryKeys.nodeLinks(node.space_id, node.id);
+  const linksQueryKeys = recursive && node.kind === "folder"
+    ? [queryKeys.linkStatuses(node.space_id), queryKeys.linkLists(node.space_id)]
+    : [queryKeys.nodeLinkStatus(node.space_id, node.id), queryKeys.nodeLinkLists(node.space_id, node.id)];
 
   return cancelAndRemoveQueries(queryClient, [
     queryKeys.node(node.space_id, node.id),
@@ -181,7 +185,7 @@ export function removeDeletedNodeQueries(
     queryKeys.file(node.space_id, node.id),
     queryKeys.markdownImagePreview(node.space_id, node.path),
     previewQueryKey,
-    linksQueryKey
+    ...linksQueryKeys
   ]);
 }
 
@@ -213,15 +217,15 @@ async function removeExternalDeletedNode(
   const previewKey = change.subtree_changed
     ? queryKeys.filePreviewUrls(spaceId)
     : queryKeys.filePreviewNode(spaceId, change.node_id);
-  const linksKey = change.subtree_changed
-    ? queryKeys.links(spaceId)
-    : queryKeys.nodeLinks(spaceId, change.node_id);
+  const linkKeys = change.subtree_changed
+    ? [queryKeys.linkStatuses(spaceId), queryKeys.linkLists(spaceId)]
+    : [queryKeys.nodeLinkStatus(spaceId, change.node_id), queryKeys.nodeLinkLists(spaceId, change.node_id)];
   await cancelAndRemoveQueries(queryClient, [
     queryKeys.node(spaceId, change.node_id),
     queryKeys.text(spaceId, change.node_id),
     queryKeys.file(spaceId, change.node_id),
     previewKey,
-    linksKey
+    ...linkKeys
   ]);
 }
 

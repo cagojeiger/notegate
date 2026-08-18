@@ -16,8 +16,8 @@ vi.mock("../features/editor/useEditorQueries", () => ({
 }));
 
 vi.mock("../features/links/NodeLinksPanel", () => ({
-  NodeLinksPanel: ({ node, onOpenNode }: { node: { id: string }; onOpenNode: (nodeId: string) => void }) => (
-    <button type="button" onClick={() => onOpenNode("linked-node")}>Links for {node.id}</button>
+  NodeLinksPanel: ({ node, onOpenNode }: { node: { id: string }; onOpenNode: (nodeId: string, sourceNodeId: string) => void }) => (
+    <button type="button" onClick={() => onOpenNode("linked-node", node.id)}>Links for {node.id}</button>
   )
 }));
 
@@ -86,7 +86,7 @@ describe("AuxiliarySidebar", () => {
     expect(screen.getByRole("tabpanel", { name: "Links" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: `Links for ${textNode.id}` }));
 
-    expect(onOpenLinkedNode).toHaveBeenCalledWith("linked-node");
+    expect(onOpenLinkedNode).toHaveBeenCalledWith("linked-node", textNode.id);
   });
 
   it("changes search, write lock, and stored-text encryption independently", async () => {

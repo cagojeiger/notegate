@@ -15,40 +15,47 @@ import {
 type NodeLinksPanelProps = {
   node: RestNode;
   canSync: boolean;
-  onOpenNode: (nodeId: string) => void;
+  onOpenNode: (nodeId: string, sourceNodeId: string) => void;
 };
 
 export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProps) {
   const queryClient = useQueryClient();
-  const statusQuery = useNodeLinkStatusQuery(node, node.kind === "text");
+  const statusQuery = useNodeLinkStatusQuery(node, true);
   const outgoingQuery = useNodeLinksQuery(node, "outgoing", node.kind === "text");
   const incomingQuery = useNodeLinksQuery(node, "incoming", true);
   const syncMutation = useSyncNodeLinksMutation();
-  const previousStatus = useRef<{ nodeId: string; status?: NodeLinkProjectionStatus["status"] }>({
+  const previousStatus = useRef<{ nodeId: string; updating: boolean }>({
+    updating: false,
     nodeId: node.id
   });
   const status = statusQuery.data?.status;
   const busy = status === "pending" || status === "syncing" || syncMutation.isPending;
+  const updating = isRelationUpdateActive(statusQuery.data);
+  const openLinkedNode = (targetNodeId: string) => onOpenNode(targetNodeId, node.id);
 
   useEffect(() => {
     const previous = previousStatus.current;
+    const outgoingKey = queryKeys.nodeLinkList(node.space_id, node.id, "outgoing");
+    const incomingKey = queryKeys.nodeLinkList(node.space_id, node.id, "incoming");
+    const invalidated = queryClient.getQueryState(outgoingKey)?.isInvalidated === true
+      || queryClient.getQueryState(incomingKey)?.isInvalidated === true;
     if (
       previous.nodeId === node.id
-      && isActiveStatus(previous.status)
-      && status !== undefined
-      && !isActiveStatus(status)
+      && statusQuery.data !== undefined
+      && !updating
+      && (previous.updating || invalidated)
     ) {
       void queryClient.resetQueries({
-        queryKey: queryKeys.nodeLinkList(node.space_id, node.id, "outgoing"),
+        queryKey: outgoingKey,
         exact: true
       });
       void queryClient.resetQueries({
-        queryKey: queryKeys.nodeLinkList(node.space_id, node.id, "incoming"),
+        queryKey: incomingKey,
         exact: true
       });
     }
-    previousStatus.current = { nodeId: node.id, status };
-  }, [node.id, node.space_id, queryClient, status]);
+    previousStatus.current = { nodeId: node.id, updating };
+  }, [node.id, node.space_id, queryClient, statusQuery.data, updating]);
 
   const outgoing = outgoingQuery.data?.pages.flatMap((page) => page.links) ?? [];
   const incoming = incomingQuery.data?.pages.flatMap((page) => page.links) ?? [];
@@ -90,7 +97,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
           hasMore={outgoingQuery.hasNextPage}
           onRetry={() => { void outgoingQuery.refetch(); }}
           onLoadMore={() => { void outgoingQuery.fetchNextPage(); }}
-          onOpenNode={onOpenNode}
+          onOpenNode={openLinkedNode}
         />
       ) : null}
 
@@ -104,7 +111,7 @@ export function NodeLinksPanel({ node, canSync, onOpenNode }: NodeLinksPanelProp
         hasMore={incomingQuery.hasNextPage}
         onRetry={() => { void incomingQuery.refetch(); }}
         onLoadMore={() => { void incomingQuery.fetchNextPage(); }}
-        onOpenNode={onOpenNode}
+        onOpenNode={openLinkedNode}
       />
     </div>
   );
@@ -122,17 +129,15 @@ function ProjectionStatus({
   if (loading) return <p className="text-xs text-muted">Loading link status…</p>;
   if (error || !status) return <p className="text-xs text-danger">Could not load link status.</p>;
 
-  const label = {
-    idle: status.projected_at ? `Indexed ${status.projected_at.slice(0, 10)}` : "Not indexed yet",
-    pending: "Waiting to update",
-    syncing: "Updating links…",
-    failed: status.failure_code === "link_reference_limit_exceeded"
-      ? "Too many unique links to index"
-      : "Link update failed"
-  }[status.status];
+  const label = projectionStatusLabel(status);
+  const tone = status.status === "failed"
+    ? "text-danger"
+    : isRelationUpdateActive(status)
+      ? "text-warning"
+      : "text-muted";
   return (
     <p
-      className={`text-xs ${status.status === "failed" ? "text-danger" : status.status === "idle" ? "text-muted" : "text-warning"}`}
+      className={`text-xs ${tone}`}
       aria-live="polite"
     >
       {label}
@@ -237,4 +242,19 @@ function LinkRow({ link, onOpenNode }: { link: NodeLink; onOpenNode: (nodeId: st
 
 function isActiveStatus(status: NodeLinkProjectionStatus["status"] | undefined): boolean {
   return status === "pending" || status === "syncing";
+}
+
+function isRelationUpdateActive(status: NodeLinkProjectionStatus | undefined): boolean {
+  return status?.space_pending === true || isActiveStatus(status?.status);
+}
+
+function projectionStatusLabel(status: NodeLinkProjectionStatus): string {
+  if (status.status === "failed") {
+    return status.failure_code === "link_reference_limit_exceeded"
+      ? "Too many unique links to index"
+      : "Link update failed";
+  }
+  if (status.status === "syncing") return "Updating links…";
+  if (status.status === "pending" || status.space_pending) return "Waiting to update";
+  return status.projected_at ? `Indexed ${status.projected_at.slice(0, 10)}` : "Not indexed yet";
 }

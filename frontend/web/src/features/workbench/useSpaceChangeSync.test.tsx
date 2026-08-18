@@ -168,7 +168,11 @@ describe("useSpaceChangeSync", () => {
         queryKey: queryKeys.childrenFamily("space-1")
       });
       expect(reset).toHaveBeenCalledWith({
-        queryKey: queryKeys.links("space-1")
+        queryKey: queryKeys.linkStatuses("space-1")
+      });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: queryKeys.linkLists("space-1"),
+        refetchType: "none"
       });
       expect(invalidate).toHaveBeenCalledWith({
         queryKey: queryKeys.nodes("space-1")

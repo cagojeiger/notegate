@@ -138,6 +138,7 @@ describe("editor queries", () => {
       }
     });
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const onSaved = vi.fn();
     const onConflict = vi.fn();
     const draft = "changed\nagain\n";
@@ -196,7 +197,11 @@ describe("editor queries", () => {
       exact: true
     });
     expect(resetQueries).toHaveBeenCalledWith({
-      queryKey: queryKeys.links(node.space_id)
+      queryKey: queryKeys.linkStatuses(node.space_id)
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkLists(node.space_id),
+      refetchType: "none"
     });
     expect(useUiStore.getState().saveState).toBe("saved");
     expect(useUiStore.getState().toast).toBe("Saved");

@@ -26,9 +26,10 @@ export const queryKeys = {
   recent: (spaceId: string) => ["spaces", spaceId, "recent"] as const,
   nodes: (spaceId: string) => ["spaces", spaceId, "nodes"] as const,
   node: (spaceId: string, nodeId: string) => ["spaces", spaceId, "nodes", nodeId] as const,
-  links: (spaceId: string) => ["spaces", spaceId, "links"] as const,
-  nodeLinks: (spaceId: string, nodeId: string) => ["spaces", spaceId, "links", nodeId] as const,
-  nodeLinkStatus: (spaceId: string, nodeId: string) => ["spaces", spaceId, "links", nodeId, "status"] as const,
+  linkStatuses: (spaceId: string) => ["spaces", spaceId, "link-status"] as const,
+  nodeLinkStatus: (spaceId: string, nodeId: string) => ["spaces", spaceId, "link-status", nodeId] as const,
+  linkLists: (spaceId: string) => ["spaces", spaceId, "links"] as const,
+  nodeLinkLists: (spaceId: string, nodeId: string) => ["spaces", spaceId, "links", nodeId] as const,
   nodeLinkList: (spaceId: string, nodeId: string, direction: "outgoing" | "incoming") => (
     ["spaces", spaceId, "links", nodeId, direction] as const
   ),

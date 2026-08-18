@@ -71,6 +71,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     .await?;
     assert_eq!(status, StatusCode::OK, "{graph_state}");
     assert_eq!(graph_state["status"], json!("syncing"));
+    assert_eq!(graph_state["space_pending"], json!(true));
 
     let sources = serde_json::from_value::<LinkGraphProjectNodesPayload>(payload)?.sources;
     let mut jobs = JobQueue::new(db.pool.clone())
@@ -93,7 +94,8 @@ async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
     )
     .await?;
     assert_eq!(status, StatusCode::OK, "{graph_state}");
-    assert_eq!(graph_state["status"], json!("pending"));
+    assert_eq!(graph_state["status"], json!("idle"));
+    assert_eq!(graph_state["space_pending"], json!(true));
     assert!(graph_state["projected_at"].is_string());
     assert!(graph_state["failure_code"].is_null());
     assert!(graph_state["failed_at"].is_null());
