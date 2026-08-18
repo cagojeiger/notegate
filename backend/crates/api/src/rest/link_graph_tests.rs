@@ -16,7 +16,7 @@ use serde_json::json;
 use super::test_support::{caller_and_space, empty_request, get_json, rest_app, state};
 
 #[tokio::test]
-async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
+async fn rest_link_graph_routes_enforce_visibility_and_accept_manual_sync()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
@@ -48,15 +48,15 @@ async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
         )
         .await?;
 
-    let (status, queued) = empty_request(
+    let (status, accepted) = empty_request(
         rest_app(state.clone(), owner.clone()),
         "POST",
         format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
     )
     .await?;
-    assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
-    assert_eq!(queued["status"], json!("queued"));
-    assert!(queued.get("job_id").is_none());
+    assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
+    assert_eq!(accepted["status"], json!("accepted"));
+    assert!(accepted.get("job_id").is_none());
     let (stored_job_id, payload): (uuid::Uuid, serde_json::Value) = sqlx::query_as(
         "SELECT job_id, payload FROM background_jobs \
          WHERE job_kind = 'link_graph_project_nodes' \
@@ -106,6 +106,26 @@ async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
     assert_eq!(outgoing["links"][0]["path"], json!("/missing.md"));
     assert!(outgoing["links"][0]["node_id"].is_null());
 
+    let (status, accepted) = empty_request(
+        rest_app(state.clone(), owner.clone()),
+        "POST",
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED, "{accepted}");
+    assert_eq!(accepted["status"], json!("accepted"));
+
+    let mut api_owner = owner.clone();
+    api_owner.channel = Channel::Api;
+    for path in [
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    ] {
+        let (status, forbidden) =
+            empty_request(rest_app(state.clone(), api_owner.clone()), "POST", path).await?;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+    }
+
     let (stranger_account, stranger_user) = state
         .accounts
         .upsert_user_by_sub(&ResolveAttrs {
@@ -119,6 +139,14 @@ async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
         identity: CallerIdentity::User(stranger_user),
         channel: Channel::Browser,
     };
+    for path in [
+        format!("/v1/spaces/{space_id}/nodes/{node_id}/links/sync"),
+        format!("/v1/spaces/{space_id}/link-index/reindex"),
+    ] {
+        let (status, hidden) =
+            empty_request(rest_app(state.clone(), stranger.clone()), "POST", path).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{hidden}");
+    }
     let (status, hidden) = get_json(
         rest_app(state, stranger),
         format!("/v1/spaces/{space_id}/nodes/{node_id}/links"),

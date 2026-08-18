@@ -957,7 +957,7 @@ async fn update_space_state(
     Ok(())
 }
 
-pub(crate) async fn cleanup_space_in(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
+async fn cleanup_space_in(connection: &mut PgConnection, space_id: Uuid) -> Result<()> {
     sqlx::query("DELETE FROM node_link_refs WHERE space_id = $1")
         .bind(space_id)
         .execute(&mut *connection)

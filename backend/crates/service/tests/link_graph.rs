@@ -18,7 +18,10 @@ use notegate_service::files::{
     CreateFolder, CreateText, FilesService, UpdateTextEncryption, WriteTarget, WriteText,
     WriteTextBody,
 };
-use notegate_service::link_graph::{LinkGraphProjectionBatch, LinkGraphService};
+use notegate_service::{
+    ServiceError,
+    link_graph::{LinkGraphProjectionBatch, LinkGraphService},
+};
 use uuid::Uuid;
 
 async fn project_requested_nodes(
@@ -42,6 +45,13 @@ async fn project_requested_nodes(
     Ok(graph
         .project_job(job.fence(), space_id, &payload.sources)
         .await?)
+}
+
+fn single_item_page(cursor: Option<String>) -> ListLinkReferences {
+    ListLinkReferences {
+        limit: Some(1),
+        cursor,
+    }
 }
 
 #[tokio::test]
@@ -92,7 +102,18 @@ async fn projection_replaces_outgoing_and_derives_incoming_links()
             },
         )
         .await?;
+    let second_source = files
+        .create_text(
+            owner,
+            space_id,
+            CreateText {
+                parent_node_id: docs.node.id,
+                name: "second-source.md".to_owned(),
+            },
+        )
+        .await?;
     let source_id = source.node.node.id;
+    let second_source_id = second_source.node.node.id;
     let target_id = target.node.node.id;
     files
         .write_text(
@@ -108,10 +129,29 @@ async fn projection_replaces_outgoing_and_derives_incoming_links()
             },
         )
         .await?;
+    files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Existing {
+                    node_id: second_source_id,
+                },
+                body: WriteTextBody::Plain("[target](../target.md)".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
 
-    let projected =
-        project_requested_nodes(&db.pool, &work, &graph, space_id, &[source_id]).await?;
-    assert_eq!(projected.projected, 1);
+    let projected = project_requested_nodes(
+        &db.pool,
+        &work,
+        &graph,
+        space_id,
+        &[source_id, second_source_id],
+    )
+    .await?;
+    assert_eq!(projected.projected, 2);
     assert_eq!(projected.stale, 0);
 
     let outgoing = graph
@@ -132,13 +172,91 @@ async fn projection_replaces_outgoing_and_derives_incoming_links()
         .expect("broken reference");
     assert_eq!(broken.node_id, None);
 
+    let first_outgoing = graph
+        .outgoing(owner, space_id, source_id, single_item_page(None))
+        .await?;
+    let outgoing_cursor = first_outgoing.next_cursor.clone().expect("outgoing cursor");
+    let second_outgoing = graph
+        .outgoing(
+            owner,
+            space_id,
+            source_id,
+            single_item_page(Some(outgoing_cursor.clone())),
+        )
+        .await?;
+    assert!(first_outgoing.has_more);
+    assert!(!second_outgoing.has_more);
+    assert_eq!(second_outgoing.next_cursor, None);
+    let mut paged_paths = first_outgoing
+        .items
+        .into_iter()
+        .chain(second_outgoing.items)
+        .map(|reference| reference.path)
+        .collect::<Vec<_>>();
+    paged_paths.sort();
+    assert_eq!(paged_paths, ["/missing.md", "/target.md"]);
+    assert_eq!(
+        graph
+            .outgoing(
+                owner,
+                space_id,
+                target_id,
+                single_item_page(Some(outgoing_cursor)),
+            )
+            .await
+            .expect_err("cursor must remain bound to its source"),
+        ServiceError::InvalidInput("cursor does not match outgoing links query".to_owned())
+    );
+
     let incoming = graph
         .incoming(owner, space_id, target_id, ListLinkReferences::default())
         .await?;
-    assert_eq!(incoming.items.len(), 1);
-    assert_eq!(incoming.items[0].node_id, Some(source_id));
-    assert_eq!(incoming.items[0].path, "/docs/source.md");
-    assert_eq!(incoming.items[0].occurrence_count, 2);
+    assert_eq!(incoming.items.len(), 2);
+    let source_reference = incoming
+        .items
+        .iter()
+        .find(|reference| reference.node_id == Some(source_id))
+        .expect("source backlink");
+    assert_eq!(source_reference.path, "/docs/source.md");
+    assert_eq!(source_reference.occurrence_count, 2);
+
+    let first_incoming = graph
+        .incoming(owner, space_id, target_id, single_item_page(None))
+        .await?;
+    let incoming_cursor = first_incoming.next_cursor.clone().expect("incoming cursor");
+    let second_incoming = graph
+        .incoming(
+            owner,
+            space_id,
+            target_id,
+            single_item_page(Some(incoming_cursor.clone())),
+        )
+        .await?;
+    assert!(first_incoming.has_more);
+    assert!(!second_incoming.has_more);
+    assert_eq!(second_incoming.next_cursor, None);
+    let mut paged_source_ids = first_incoming
+        .items
+        .into_iter()
+        .chain(second_incoming.items)
+        .map(|reference| reference.node_id)
+        .collect::<Vec<_>>();
+    paged_source_ids.sort();
+    let mut expected_source_ids = vec![Some(source_id), Some(second_source_id)];
+    expected_source_ids.sort();
+    assert_eq!(paged_source_ids, expected_source_ids);
+    assert_eq!(
+        graph
+            .incoming(
+                owner,
+                space_id,
+                source_id,
+                single_item_page(Some(incoming_cursor)),
+            )
+            .await
+            .expect_err("cursor must remain bound to its target"),
+        ServiceError::InvalidInput("cursor does not match incoming links query".to_owned())
+    );
     assert!(
         graph
             .node_state(owner, space_id, source_id)

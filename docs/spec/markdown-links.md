@@ -109,19 +109,6 @@ Job payload는 dispatch 당시 source 본문의 hash를 보관한다. Worker는 
 
 생성, 이름 변경, 이동, 복사, 삭제는 path resolve 결과에 영향을 줄 수 있으므로 해당 Space의 live Text와 기존 source projection을 bounded full scan으로 target에 등록한다. 삭제된 source의 outgoing 관계는 제거되고, live source를 다시 projection하면서 삭제된 target의 incoming 관계는 broken 상태로 바뀐다. Dispatch 뒤 source 본문이 바뀌면 이전 job은 관계를 공개하지 않고, 해당 변경 event가 quiet window 뒤 최신 source를 다시 등록한다. 수동으로 같은 source를 다시 요청해 request version이 바뀐 경우에는 최신 version을 즉시 새 작업으로 등록한다. Lease가 만료된 attempt는 동일 job id라도 claim token이 다르므로 관계를 갱신할 수 없다.
 
-수동 요청은 같은 background job 경로를 사용하지만 quiet window를 기다리지 않는다.
-
-```http
-POST /api/v1/spaces/{space_id}/nodes/{node_id}/links/sync
-POST /api/v1/spaces/{space_id}/link-index/reindex
-```
-
-조회는 browser session과 기존 Space permission을 그대로 적용한다.
-
-```http
-GET /api/v1/spaces/{space_id}/nodes/{node_id}/links
-GET /api/v1/spaces/{space_id}/nodes/{node_id}/links/outgoing
-GET /api/v1/spaces/{space_id}/nodes/{node_id}/links/incoming
-```
+수동 요청은 같은 background job 경로를 사용하지만 quiet window를 기다리지 않는다. 조회와 수동 동기화 endpoint, 권한 및 응답 형식은 [`rest/links.md`](rest/links.md)에 정의한다.
 
 Projection은 eventual consistency 모델이다. 본문 저장 성공과 링크 관계 갱신 완료 사이에는 지연이 있을 수 있다. Node link 상태 응답은 현재 동기화 상태, 마지막 성공 시각과 최종 실패 코드를 제공한다. Collector가 아직 Space 변경을 분류하지 않았으면 해당 Space의 live Text는 보수적으로 `pending`이다. Worker는 source snapshot과 queue claim을 다시 검증하고 source의 관계 교체와 성공 상태 갱신을 하나의 database transaction으로 공개한다. 이 transaction은 source와 resolve된 target node만 잠그며 Space 전체나 subtree의 쓰기를 잠그지 않는다. 따라서 projection과 이름 변경 또는 이동이 겹치면 이전 path 관계가 잠시 보일 수 있지만, 같은 mutation transaction의 change event가 quiet window 뒤 해당 Space를 다시 projection해 수렴시킨다.
