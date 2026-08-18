@@ -14,7 +14,7 @@ const failures = [];
 for (const [themeName, theme] of Object.entries(themes)) {
   const surfaces = ["--ng-bg", "--ng-surface", "--ng-editor", "--ng-panel"];
   for (const surface of surfaces) {
-    for (const text of ["--ng-text", "--ng-muted", "--ng-faint", "--ng-primary", "--ng-success", "--ng-warning", "--ng-danger"]) {
+    for (const text of ["--ng-text", "--ng-muted", "--ng-faint", "--ng-primary", "--ng-link", "--ng-success", "--ng-warning", "--ng-danger", "--ng-info"]) {
       check(themeName, text, surface, theme[text], theme[surface], 4.5);
     }
     check(themeName, "--ng-focus-ring", surface, theme["--ng-focus-ring"], theme[surface], 3);
@@ -27,7 +27,9 @@ for (const [themeName, theme] of Object.entries(themes)) {
   }
   check(themeName, "--ng-primary-contrast", "--ng-primary", theme["--ng-primary-contrast"], theme["--ng-primary"], 4.5);
   check(themeName, "--ng-text", "--ng-editor-selection", theme["--ng-text"], theme["--ng-editor-selection"], 4.5);
-  check(themeName, "--ng-border-strong", "--ng-surface", theme["--ng-border-strong"], theme["--ng-surface"], 3);
+  for (const surface of ["--ng-surface", "--ng-panel-strong"]) {
+    check(themeName, "--ng-border-strong", surface, theme["--ng-border-strong"], theme[surface], 3);
+  }
   check(themeName, "--ng-google-text", "--ng-google-bg", theme["--ng-google-text"], theme["--ng-google-bg"], 4.5);
   check(themeName, "--ng-google-text", "--ng-google-hover", theme["--ng-google-text"], theme["--ng-google-hover"], 4.5);
   check(themeName, "--ng-google-border", "--ng-google-bg", theme["--ng-google-border"], theme["--ng-google-bg"], 3);

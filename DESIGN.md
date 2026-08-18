@@ -1,7 +1,7 @@
 # 디자인 원칙
 
 상태: Active
-마지막 검토: 2026-08-15
+마지막 검토: 2026-08-18
 
 ## 문서 경계
 
@@ -39,7 +39,7 @@
 ## 시각 언어
 
 - 방향: `Compact Workbench + Calm Reader`. 탐색·상태·도구 chrome은 개발 도구처럼 조밀하게, 문서 읽기 영역은 여유롭게 유지한다.
-- 색상: Linear의 낮은 chroma와 content-first surface 계층을 따른다. Light는 warm gray chrome보다 흰 editor를 한 단계 밝게, Dark는 dim charcoal navigation보다 editor를 한 단계 밝게 표현한다. 경계·hover·선택 면은 인접한 neutral로 표현하고, 저채도 plum은 링크·포커스·활성 경계와 기본 동작에만 제한한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패를 뜻한다.
+- 색상: `Logo Slate + Muted Violet`을 따른다. Logo Slate는 브랜드와 텍스트의 뼈대, Paper Neutral은 화면 대부분, Muted Violet은 링크·포커스·선택·기본 동작만 담당한다. Light는 cool paper chrome보다 흰 editor를 한 단계 밝게, Dark는 ink slate navigation보다 surface와 editor를 한 단계 밝게 표현한다. hover는 neutral, selected surface는 옅은 violet로 구분하고 violet 면적은 화면의 약 5% 안쪽으로 제한한다. 초록색은 정상, 주황색은 주의, 빨간색은 실패, 파란색은 정보 상태에만 쓴다.
 - Workbench 글꼴: title bar, Files/Recent, editor tab, Inspector와 status bar를 포함한 시스템 UI는 self-hosted `LINE Seed Sans KR`을 사용한다. 기본 크기는 13 px, line-height는 20 px다.
 - Files/Recent section label은 대문자 변환이나 별도 자간 없이 title case 13 px Medium으로 표시한다.
 - Reading 글꼴: Markdown과 일반 텍스트 본문은 기존 운영체제 UI stack을 유지한다. Markdown은 기존 16 px/1.7 line-height와 문서 간격을 그대로 유지하고, 코드·경로·식별자는 기존 monospace stack을 사용한다.
@@ -76,6 +76,7 @@
 
 - React, TypeScript, Tailwind utility와 기존 `--ng-*` CSS custom property 체계를 유지한다.
 - token의 정본은 [`frontend/web/src/design/theme.css`](frontend/web/src/design/theme.css)다.
+- 브랜드 기준색은 Ink Slate `#202833`, Light paper `#F6F8FA`, Light accent `#6761A8`, Dark background `#11161D`, Dark accent `#AAA5E3`이다. 일반·보조 텍스트와 의미 있는 경계는 이 기준색보다 WCAG 2.2 AA 충족을 우선해 조정할 수 있다.
 - 기존 Workbench의 정보 구조와 배치(`Activity Rail → Files/Recent → Editor Groups → Details/Outline → Status Bar`)를 유지한다. 좌우 panel resize·폭 저장, 최대 3개 editor group과 mobile overlay 동작도 시각 갱신 때문에 바꾸지 않는다.
 - 새 theme system, feature별 raw color 또는 별도 icon dependency를 추가하지 않는다. 시스템 UI 글꼴은 앱과 함께 제공되는 `LINE Seed Sans KR` 한 종류로 제한하며 외부 font CDN에 의존하지 않는다.
 - Workbench density와 radius는 `theme.css`의 semantic token을 사용하고 Markdown의 typography/spacing을 이 scale에 결합하지 않는다.

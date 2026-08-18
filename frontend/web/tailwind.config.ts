@@ -17,9 +17,11 @@ export default {
         muted: "var(--ng-muted)",
         faint: "var(--ng-faint)",
         primary: "var(--ng-primary)",
+        link: "var(--ng-link)",
         danger: "var(--ng-danger)",
         success: "var(--ng-success)",
-        warning: "var(--ng-warning)"
+        warning: "var(--ng-warning)",
+        info: "var(--ng-info)"
       },
       fontFamily: {
         ui: "var(--font-ui)",
