@@ -52,6 +52,10 @@ export function invalidateNodeDetails(queryClient: QueryClient, spaceId: string)
   void queryClient.invalidateQueries({ queryKey: queryKeys.nodes(spaceId) });
 }
 
+export function invalidateSpaceLinks(queryClient: QueryClient, spaceId: string) {
+  void queryClient.resetQueries({ queryKey: queryKeys.links(spaceId) });
+}
+
 export async function applyExternalFileChanges(
   queryClient: QueryClient,
   spaceId: string,
@@ -69,6 +73,7 @@ export async function applyExternalFileChanges(
   let descendantWriteLockChanged = false;
 
   invalidateFileChangeEvents(queryClient, spaceId);
+  invalidateSpaceLinks(queryClient, spaceId);
 
   for (const change of changes) {
     subtreeChanged ||= change.subtree_changed;
@@ -129,6 +134,7 @@ export async function applyExternalFileChanges(
 export async function invalidateFileSyncFallback(queryClient: QueryClient, spaceId: string) {
   invalidateFolderSubtree(queryClient, spaceId);
   invalidateFileChangeEvents(queryClient, spaceId);
+  invalidateSpaceLinks(queryClient, spaceId);
   void queryClient.invalidateQueries({ queryKey: queryKeys.texts(spaceId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.files(spaceId) });
   await cancelAndRemoveQueries(queryClient, [queryKeys.filePreviewUrls(spaceId)]);
@@ -165,13 +171,17 @@ export function removeDeletedNodeQueries(
   const previewQueryKey = recursive && node.kind === "folder"
     ? queryKeys.filePreviewUrls(node.space_id)
     : queryKeys.filePreviewNode(node.space_id, node.id);
+  const linksQueryKey = recursive && node.kind === "folder"
+    ? queryKeys.links(node.space_id)
+    : queryKeys.nodeLinks(node.space_id, node.id);
 
   return cancelAndRemoveQueries(queryClient, [
     queryKeys.node(node.space_id, node.id),
     queryKeys.text(node.space_id, node.id),
     queryKeys.file(node.space_id, node.id),
     queryKeys.markdownImagePreview(node.space_id, node.path),
-    previewQueryKey
+    previewQueryKey,
+    linksQueryKey
   ]);
 }
 
@@ -203,11 +213,15 @@ async function removeExternalDeletedNode(
   const previewKey = change.subtree_changed
     ? queryKeys.filePreviewUrls(spaceId)
     : queryKeys.filePreviewNode(spaceId, change.node_id);
+  const linksKey = change.subtree_changed
+    ? queryKeys.links(spaceId)
+    : queryKeys.nodeLinks(spaceId, change.node_id);
   await cancelAndRemoveQueries(queryClient, [
     queryKeys.node(spaceId, change.node_id),
     queryKeys.text(spaceId, change.node_id),
     queryKeys.file(spaceId, change.node_id),
-    previewKey
+    previewKey,
+    linksKey
   ]);
 }
 

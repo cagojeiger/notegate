@@ -13,11 +13,13 @@ const mocks = vi.hoisted(() => ({
   checkUsage: vi.fn(),
   resetUsageCheck: vi.fn(),
   retryUsage: vi.fn(),
+  reindexLinks: vi.fn(),
   reorder: vi.fn(),
   useCheckSpaceUsageMutation: vi.fn(),
   useUsageQuery: vi.fn(),
   useReorderSpacesMutation: vi.fn(),
-  useUpdateSpaceMutation: vi.fn()
+  useUpdateSpaceMutation: vi.fn(),
+  useReindexSpaceLinksMutation: vi.fn()
 }));
 
 vi.mock("./useUsageQueries", () => ({
@@ -28,6 +30,10 @@ vi.mock("./useUsageQueries", () => ({
 vi.mock("./useSpaceQueries", () => ({
   useReorderSpacesMutation: mocks.useReorderSpacesMutation,
   useUpdateSpaceMutation: mocks.useUpdateSpaceMutation
+}));
+
+vi.mock("../links/useLinkQueries", () => ({
+  useReindexSpaceLinksMutation: mocks.useReindexSpaceLinksMutation
 }));
 
 const spaces: Space[] = [
@@ -92,6 +98,7 @@ describe("SpaceLibrary", () => {
     mocks.checkUsage.mockReset();
     mocks.resetUsageCheck.mockReset();
     mocks.retryUsage.mockReset();
+    mocks.reindexLinks.mockReset();
     mocks.useUpdateSpaceMutation.mockImplementation((options?: { silentError?: boolean }) => ({
       mutate: options?.silentError ? mocks.inspectorMutate : mocks.cardMutate,
       isPending: false,
@@ -128,6 +135,13 @@ describe("SpaceLibrary", () => {
           }
         ]
       }
+    });
+    mocks.useReindexSpaceLinksMutation.mockReturnValue({
+      isError: false,
+      isPending: false,
+      isSuccess: false,
+      mutate: mocks.reindexLinks,
+      variables: undefined
     });
   });
 
@@ -198,6 +212,9 @@ describe("SpaceLibrary", () => {
     expect(screen.getByRole("button", { name: "About New item defaults" })).toHaveAccessibleDescription(
       "These settings apply only to new items created in this space. Search applies to every new item, while encryption applies only to new documents. Existing items are unchanged."
     );
+    expect(screen.getByRole("button", { name: "About Link index" })).toHaveAccessibleDescription(
+      "Rebuilds Markdown link relationships for this Space in the background."
+    );
   });
 
   it("opens the inspector as a mobile sheet only on mobile", async () => {
@@ -253,6 +270,15 @@ describe("SpaceLibrary", () => {
 
     expect(mocks.resetUsageCheck).toHaveBeenCalledTimes(1);
     expect(mocks.checkUsage).toHaveBeenCalledWith("daily");
+  });
+
+  it("requests a link reindex for the selected Space", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+
+    await user.click(screen.getByRole("button", { name: "Reindex links in Daily" }));
+
+    expect(mocks.reindexLinks).toHaveBeenCalledWith("daily");
   });
 
   it("retries usage loading from the inspector", async () => {

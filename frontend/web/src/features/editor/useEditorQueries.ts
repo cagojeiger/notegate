@@ -4,7 +4,7 @@ import { useApiClient } from "../../api/ApiProvider";
 import { ApiError } from "../../api/errors";
 import { updateNodeCaches } from "../../api/nodeCache";
 import { getNode } from "../../api/nodes";
-import { invalidateRecentNodes } from "../../api/queryInvalidation";
+import { invalidateRecentNodes, invalidateSpaceLinks } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 import { readText, replaceText } from "../../api/text";
 import type { ReadTextResponse, RestNode } from "../../api/types";
@@ -94,6 +94,7 @@ export function useSaveTextDocument(node: RestNode, draft: string, sha: string |
       showToast("Saved");
       onSaved();
       invalidateRecentNodes(queryClient, node.space_id);
+      invalidateSpaceLinks(queryClient, node.space_id);
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
