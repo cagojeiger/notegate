@@ -148,6 +148,42 @@ describe("DocxPreview", () => {
       expect.arrayContaining(["blob:docx-image", "blob:docx-bullet"])
     );
   });
+
+  it("does not replace the current preview when an aborted render finishes late", async () => {
+    let resolveStaleRender: ((nodes: Node[]) => void) | undefined;
+    const staleRender = new Promise<Node[]>((resolve) => {
+      resolveStaleRender = resolve;
+    });
+    docxMocks.renderDocument
+      .mockImplementationOnce(() => staleRender)
+      .mockImplementationOnce(async (_document, options: Partial<Options>) => renderedNodes(options));
+
+    const view = render(
+      <DocxPreview url="https://storage.example/stale.docx" name="stale.docx" onError={vi.fn()} />
+    );
+    await waitFor(() => expect(docxMocks.renderDocument).toHaveBeenCalledTimes(1));
+    const staleSignal = vi.mocked(fetch).mock.calls[0][1]?.signal;
+
+    view.rerender(
+      <DocxPreview url="https://storage.example/current.docx" name="current.docx" onError={vi.fn()} />
+    );
+    await waitFor(() => expect(docxMocks.renderDocument).toHaveBeenCalledTimes(2));
+
+    const frame = screen.getByTitle("current.docx DOCX pages") as HTMLIFrameElement;
+    await waitFor(() => expect(frame.contentDocument?.body).toHaveTextContent("Website"));
+    expect(staleSignal?.aborted).toBe(true);
+
+    const staleWrapper = document.createElement("main");
+    staleWrapper.textContent = "Stale document";
+    const staleImage = document.createElement("img");
+    staleImage.src = "blob:stale-docx-image";
+    staleWrapper.appendChild(staleImage);
+    resolveStaleRender?.([staleWrapper]);
+
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:stale-docx-image"));
+    expect(frame.contentDocument?.body).toHaveTextContent("Website");
+    expect(frame.contentDocument?.body).not.toHaveTextContent("Stale document");
+  });
 });
 
 function renderedNodes(options: Partial<Options>) {

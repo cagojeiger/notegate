@@ -81,8 +81,11 @@ export function DocxPreview({
         setStatus("ready");
       })
       .catch(() => {
+        if (!active || controller.signal.aborted) {
+          revokeObjectUrls(resourceUrls);
+          return;
+        }
         cleanupRenderedPreview(previewDocument, resourceUrls);
-        if (!active || controller.signal.aborted) return;
         setStatus("error");
         onErrorRef.current();
       });
