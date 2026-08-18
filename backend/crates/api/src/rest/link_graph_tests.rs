@@ -7,7 +7,7 @@
 )]
 
 use axum::http::StatusCode;
-use notegate_db::{LinkGraphProjectNodesJob, test_support::TestDb};
+use notegate_db::{LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload, test_support::TestDb};
 use notegate_jobs::{JobQueue, JobSpec};
 use notegate_model::{Caller, CallerIdentity, Channel, ResolveAttrs};
 use notegate_service::files::{CreateText, WriteTarget, WriteText, WriteTextBody};
@@ -72,12 +72,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
     assert_eq!(status, StatusCode::OK, "{graph_state}");
     assert_eq!(graph_state["status"], json!("syncing"));
 
-    let node_ids = payload["node_ids"]
-        .as_array()
-        .expect("node ids")
-        .iter()
-        .map(|value| uuid::Uuid::parse_str(value.as_str().expect("node id")))
-        .collect::<Result<Vec<_>, _>>()?;
+    let sources = serde_json::from_value::<LinkGraphProjectNodesPayload>(payload)?.sources;
     let mut jobs = JobQueue::new(db.pool.clone())
         .claim_many(
             "link-graph-rest-test",
@@ -90,7 +85,7 @@ async fn rest_link_graph_routes_enforce_visibility_and_queue_manual_sync()
     assert_eq!(claimed.job_id, stored_job_id);
     state
         .link_graph
-        .project_job(claimed.fence(), space_id, &node_ids)
+        .project_job(claimed.fence(), space_id, &sources)
         .await?;
     let (status, graph_state) = get_json(
         rest_app(state.clone(), owner.clone()),

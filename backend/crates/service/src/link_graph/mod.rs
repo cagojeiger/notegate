@@ -1,9 +1,14 @@
 mod parser;
 
+use std::collections::HashMap;
+use std::time::Duration;
+
+use futures_util::stream::{self, StreamExt as _};
 use notegate_core::{Error, Result, limits};
 use notegate_db::{
-    FilesRepo, LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphProjection, LinkGraphProjectionClaim,
-    LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference, LinkGraphWorkRepo,
+    FilesRepo, LINK_GRAPH_PROJECT_BATCH_MAX, LinkGraphProjectSource, LinkGraphProjection,
+    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference,
+    LinkGraphWorkRepo,
 };
 use notegate_jobs::ClaimFence;
 use notegate_model::{
@@ -18,6 +23,8 @@ use crate::pagination::paginate_keyset;
 use parser::{ParseInternalReferencesError, parse_internal_references};
 
 const LINK_REFERENCE_LIMIT_FAILURE_CODE: &str = "link_reference_limit_exceeded";
+const LINK_GRAPH_SOURCE_CONCURRENCY: usize = 10;
+const LINK_GRAPH_SOURCE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LinkGraphProjectionBatch {
@@ -197,26 +204,70 @@ impl LinkGraphService {
         &self,
         fence: ClaimFence,
         space_id: Uuid,
-        node_ids: &[Uuid],
+        sources: &[LinkGraphProjectSource],
     ) -> Result<LinkGraphProjectionBatch> {
-        if node_ids.is_empty() || node_ids.len() > LINK_GRAPH_PROJECT_BATCH_MAX {
+        if sources.is_empty() || sources.len() > LINK_GRAPH_PROJECT_BATCH_MAX {
             return Err(Error::validation(format!(
                 "link projection batch must contain between 1 and {LINK_GRAPH_PROJECT_BATCH_MAX} node ids"
             )));
         }
+        let source_snapshots = sources
+            .iter()
+            .map(|source| (source.node_id, source.expected_content_sha256.clone()))
+            .collect::<HashMap<_, _>>();
+        if source_snapshots.len() != sources.len() {
+            return Err(Error::validation(
+                "link projection batch contains duplicate node ids",
+            ));
+        }
+        let node_ids = sources
+            .iter()
+            .map(|source| source.node_id)
+            .collect::<Vec<_>>();
 
         let targets = self
             .work
-            .claimed_targets(fence.job_id, space_id, node_ids)
+            .claimed_targets(fence.job_id, space_id, &node_ids)
             .await?;
         let mut result = LinkGraphProjectionBatch::default();
         let mut first_error = None;
-        for target in targets {
-            let claim = LinkGraphProjectionClaim {
-                fence,
-                request_version: target.request_version,
-            };
-            match self.project_target(space_id, target.node_id, claim).await {
+        let outcomes = stream::iter(targets)
+            .map(|target| {
+                let expected_content_sha256 = source_snapshots.get(&target.node_id).cloned();
+                async move {
+                    let expected_content_sha256 = expected_content_sha256.ok_or_else(|| {
+                        Error::internal(format!(
+                            "claimed link source {} is missing from the job payload",
+                            target.node_id
+                        ))
+                    })?;
+                    let claim = LinkGraphProjectionClaim {
+                        fence,
+                        request_version: target.request_version,
+                    };
+                    tokio::time::timeout(
+                        LINK_GRAPH_SOURCE_TIMEOUT,
+                        self.project_target(
+                            space_id,
+                            target.node_id,
+                            claim,
+                            expected_content_sha256.as_deref(),
+                        ),
+                    )
+                    .await
+                    .map_err(|_elapsed| {
+                        Error::internal(format!(
+                            "link source projection timed out: {}",
+                            target.node_id
+                        ))
+                    })?
+                }
+            })
+            .buffer_unordered(LINK_GRAPH_SOURCE_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        for outcome in outcomes {
+            match outcome {
                 Ok(projection) => record_projection(&mut result, projection),
                 Err(error) => {
                     if first_error.is_none() {
@@ -225,7 +276,7 @@ impl LinkGraphService {
                 }
             }
         }
-        let dispatch_result = self.work.dispatch_ready_nodes(space_id, node_ids).await;
+        let dispatch_result = self.work.dispatch_ready_nodes(space_id, &node_ids).await;
         match (first_error, dispatch_result) {
             (Some(error), _) => Err(error),
             (None, Err(error)) => Err(error),
@@ -238,8 +289,16 @@ impl LinkGraphService {
         space_id: Uuid,
         node_id: Uuid,
         claim: LinkGraphProjectionClaim,
+        expected_content_sha256: Option<&str>,
     ) -> Result<LinkGraphProjection> {
-        let Some(text) = self.files.find_text_object(space_id, node_id).await? else {
+        let text = self.files.find_text_object(space_id, node_id).await?;
+        if text.as_ref().map(|text| text.content_sha256.as_str()) != expected_content_sha256 {
+            return self
+                .store
+                .settle_stale_target(space_id, node_id, claim)
+                .await;
+        }
+        let Some(text) = text else {
             let projection = self
                 .store
                 .reconcile_non_text_node(space_id, node_id, claim)

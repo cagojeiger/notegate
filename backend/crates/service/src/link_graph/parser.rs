@@ -118,11 +118,23 @@ fn decode_path_segments(path: &str) -> Option<String> {
                 return None;
             }
             let decoded = percent_decode_str(segment).decode_utf8().ok()?;
-            (!decoded.contains('/') && !decoded.chars().any(is_ascii_control))
+            (!decoded.contains('/') && !decoded.chars().any(is_forbidden_path_character))
                 .then(|| decoded.into_owned())
         })
         .collect::<Option<Vec<_>>>()
         .map(|segments| segments.join("/"))
+}
+
+fn is_forbidden_path_character(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{061c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2066}'..='\u{206f}'
+        )
 }
 
 fn has_valid_percent_encoding(value: &str) -> bool {
@@ -139,10 +151,6 @@ fn has_valid_percent_encoding(value: &str) -> bool {
         }
     }
     true
-}
-
-fn is_ascii_control(character: char) -> bool {
-    matches!(character as u32, 0x00..=0x1f | 0x7f)
 }
 
 fn normalize_absolute_path(path: &str) -> Option<String> {
@@ -297,6 +305,18 @@ mod tests {
         );
         assert_eq!(
             internal_target_path("/docs/current.md", "./hidden%00name.md"),
+            None
+        );
+        assert_eq!(
+            internal_target_path("/docs/current.md", "./hidden%C2%85name.md"),
+            None
+        );
+        assert_eq!(
+            internal_target_path("/docs/current.md", "./hidden%E2%80%AEname.md"),
+            None
+        );
+        assert_eq!(
+            internal_target_path("/docs/current.md", "./hidden\u{2066}name.md"),
             None
         );
     }

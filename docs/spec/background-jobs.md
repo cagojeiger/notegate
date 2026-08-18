@@ -157,11 +157,11 @@ link_graph_project_nodes   # Text source의 링크 관계 projection
 
 Usage handler는 현재 원본을 다시 집계해 `space_usage`를 덮어쓴다. 같은 작업이 반복되어도 결과가 같다. Space별 reconciliation gate를 사용하므로 같은 Space의 mutation과 정확한 재계산이 겹치지 않는다.
 
-Link graph handler는 한 작업에서 최대 50개 source를 projection한다. Queue claim fence가 유효한 domain transaction만 source 단위 관계를 교체할 수 있으며, source별 최신 요청 version이 이전 작업의 늦은 결과를 차단한다. 자동 변경은 마지막 event 뒤 5분 동안 합치고, 수동 동기화와 전체 재색인은 즉시 같은 queue 경로를 사용한다.
+Link graph handler는 한 작업에서 최대 50개 source를 projection한다. Queue claim fence가 유효한 domain transaction만 source 단위 관계를 교체할 수 있으며, source별 최신 요청 version과 dispatch 당시 content hash가 이전 작업의 늦은 결과를 차단한다. 자동 변경은 마지막 event 뒤 5분 동안 합치고, 수동 동기화와 전체 재색인은 즉시 같은 queue 경로를 사용한다. 활성 link projection job은 전체 1,000개로 제한하며, 초과 source는 durable projection row에 병합해 다음 collector 주기에 빈 슬롯만큼 queue로 옮긴다.
 
 ## 실행과 스케일 아웃
 
-즉시 작업을 만드는 도메인은 원본 변경과 enqueue를 같은 PostgreSQL database transaction에 기록한다. Link graph처럼 변경을 합치는 도메인은 원본 checkpoint와 durable target을 같은 transaction에 기록한다. 전체 재색인은 후보 탐색과 target 등록을 pass당 최대 500개로 제한하고 durable cursor에서 이어서 실행한다. 준비된 target도 transaction당 최대 500개씩 queue로 옮긴다. 남은 작업은 짧은 후속 reconciliation pass가 계속 처리한다. `all` 또는 `worker` mode replica의 consumer가 같은 queue에서 작업을 분산 선점한다.
+즉시 작업을 만드는 도메인은 원본 변경과 enqueue를 같은 PostgreSQL database transaction에 기록한다. Link graph처럼 변경을 합치는 도메인은 원본 checkpoint와 durable target을 같은 transaction에 기록한다. 전체 재색인은 후보 탐색과 target 등록을 pass당 최대 500개로 제한하고 durable cursor에서 이어서 실행한다. 준비된 target도 transaction당 최대 500개씩 queue로 옮긴다. Scan backlog는 짧은 후속 reconciliation pass가 처리하고, queue 상한 때문에 남은 target은 collector의 고정 주기에서 다시 확인한다. `all` 또는 `worker` mode replica의 consumer가 같은 queue에서 작업을 분산 선점한다.
 
 ```text
 API transaction ── insert background_jobs ── COMMIT ── broadcast NOTIFY

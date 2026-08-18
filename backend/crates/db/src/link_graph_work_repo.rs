@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::map_sqlx_error;
 
 pub const LINK_GRAPH_PROJECT_BATCH_MAX: usize = 50;
+pub const LINK_GRAPH_ACTIVE_JOB_MAX: i64 = 1_000;
 const LINK_GRAPH_CHANGE_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_CHANGE_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_CHANGE_SPACE_BATCH_SIZE: usize = 32;
@@ -20,13 +21,20 @@ const LINK_GRAPH_DISPATCH_BATCH_SIZE: usize = 500;
 const LINK_GRAPH_DISPATCH_FETCH_LIMIT: i64 = 501;
 const LINK_GRAPH_SETTLEMENT_BATCH_SIZE: i64 = 500;
 const LINK_GRAPH_PROJECT_MAX_ATTEMPTS: i32 = 8;
+const LINK_GRAPH_DISPATCH_LOCK_SEED: i64 = 0x4e47_4c49_4e4b_0001;
 
 pub struct LinkGraphProjectNodesJob;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LinkGraphProjectNodesPayload {
     pub space_id: Uuid,
-    pub node_ids: Vec<Uuid>,
+    pub sources: Vec<LinkGraphProjectSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LinkGraphProjectSource {
+    pub node_id: Uuid,
+    pub expected_content_sha256: Option<String>,
 }
 
 impl JobSpec for LinkGraphProjectNodesJob {
@@ -148,6 +156,7 @@ impl LinkGraphWorkRepo {
         let mut targets = 0;
         let mut dispatched_targets = 0;
         let mut jobs = 0;
+        let mut backpressured = false;
         for space_id in space_ids {
             let Some(collected) = self.collect_space_changes(space_id).await? else {
                 continue;
@@ -158,6 +167,7 @@ impl LinkGraphWorkRepo {
             dispatched_targets += collected.dispatched_targets;
             jobs += collected.jobs;
             has_more |= collected.has_more;
+            backpressured |= collected.backpressured;
         }
 
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
@@ -168,9 +178,10 @@ impl LinkGraphWorkRepo {
         tx.commit().await.map_err(map_sqlx_error)?;
         dispatched_targets += dispatched.targets;
         jobs += dispatched.jobs;
-        has_more |= settled.has_more || dispatched.has_more;
+        has_more |= settled.has_more || (dispatched.has_more && !dispatched.backpressured);
+        backpressured |= dispatched.backpressured;
 
-        if spaces == 0 && settled.failed == 0 && dispatched_targets == 0 {
+        if spaces == 0 && settled.failed == 0 && dispatched_targets == 0 && !backpressured {
             return Ok(LinkGraphChangeCollection::Idle);
         }
         Ok(LinkGraphChangeCollection::Collected {
@@ -269,7 +280,8 @@ impl LinkGraphWorkRepo {
             return Ok(Some(CollectedSpace {
                 dispatched_targets: dispatched.targets,
                 jobs: dispatched.jobs,
-                has_more: dispatched.has_more,
+                has_more: dispatched.has_more && !dispatched.backpressured,
+                backpressured: dispatched.backpressured,
                 ..CollectedSpace::default()
             }));
         }
@@ -290,14 +302,14 @@ impl LinkGraphWorkRepo {
         let targets = stage_node_ids_in(&mut tx, space_id, &node_ids, false).await?;
         let dispatched = dispatch_targets_in(&mut tx, TargetScope::Space(space_id)).await?;
         let events_after_window = latest_event_id(&mut tx, space_id).await? > event_window_id;
-        let has_immediate_work = has_more || dispatched.has_more;
-        let pending = has_immediate_work || events_after_window;
+        let has_immediate_work = has_more || (dispatched.has_more && !dispatched.backpressured);
+        let pending = has_more || dispatched.has_more || events_after_window;
         update_space_state(
             &mut tx,
             space_id,
             last_event_id,
             pending,
-            has_immediate_work.then_some(event_window_id),
+            (has_more || dispatched.has_more).then_some(event_window_id),
         )
         .await?;
         tx.commit().await.map_err(map_sqlx_error)?;
@@ -307,6 +319,7 @@ impl LinkGraphWorkRepo {
             dispatched_targets: dispatched.targets,
             jobs: dispatched.jobs,
             has_more: has_immediate_work,
+            backpressured: dispatched.backpressured,
         }))
     }
 }
@@ -318,6 +331,7 @@ struct CollectedSpace {
     dispatched_targets: usize,
     jobs: usize,
     has_more: bool,
+    backpressured: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -325,6 +339,7 @@ struct DispatchSummary {
     targets: usize,
     jobs: usize,
     has_more: bool,
+    backpressured: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -378,6 +393,7 @@ impl From<ProjectionTargetRow> for LinkGraphProjectionTarget {
 struct DispatchCandidateRow {
     space_id: Uuid,
     node_id: Uuid,
+    expected_content_sha256: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -600,8 +616,8 @@ async fn run_full_scan_pass(
     } else {
         latest_event_id(connection, space_id).await? > full_scan_event_id
     };
-    let has_immediate_work = batch.has_more || dispatched.has_more;
-    let pending = has_immediate_work || events_after_scan;
+    let has_immediate_work = batch.has_more || (dispatched.has_more && !dispatched.backpressured);
+    let pending = batch.has_more || dispatched.has_more || events_after_scan;
     if batch.has_more {
         let last_node_id = batch.last_node_id.ok_or_else(|| {
             notegate_core::Error::internal("full link scan has no continuation node")
@@ -613,7 +629,7 @@ async fn run_full_scan_pass(
             space_id,
             full_scan_event_id,
             pending,
-            has_immediate_work.then_some(full_scan_event_id),
+            dispatched.has_more.then_some(full_scan_event_id),
         )
         .await?;
     }
@@ -623,6 +639,7 @@ async fn run_full_scan_pass(
         dispatched_targets: dispatched.targets,
         jobs: dispatched.jobs,
         has_more: has_immediate_work,
+        backpressured: dispatched.backpressured,
         ..CollectedSpace::default()
     })
 }
@@ -688,9 +705,41 @@ async fn dispatch_targets_in(
     scope: TargetScope<'_>,
 ) -> Result<DispatchSummary> {
     let (space_id, node_ids) = scope_parameters(scope);
+    let capacity_locked: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(), $1))",
+    )
+    .bind(LINK_GRAPH_DISPATCH_LOCK_SEED)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    if !capacity_locked {
+        return pending_dispatch_summary(connection, space_id, node_ids.as_deref()).await;
+    }
+
+    let active_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM background_jobs \
+         WHERE job_kind = $1 AND status IN ('queued', 'running')",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    let job_capacity =
+        usize::try_from(LINK_GRAPH_ACTIVE_JOB_MAX.saturating_sub(active_jobs).max(0))
+            .map_err(|_error| notegate_core::Error::internal("link graph job capacity overflow"))?;
+    if job_capacity == 0 {
+        return pending_dispatch_summary(connection, space_id, node_ids.as_deref()).await;
+    }
+
     let mut rows = sqlx::query_as::<_, DispatchCandidateRow>(
-        "SELECT projection.space_id, projection.source_node_id AS node_id \
+        "SELECT projection.space_id, projection.source_node_id AS node_id, \
+                text.content_sha256 AS expected_content_sha256 \
          FROM node_link_projections projection \
+         LEFT JOIN nodes node ON node.space_id = projection.space_id \
+           AND node.id = projection.source_node_id AND node.kind = 'text' \
+           AND node.deleted_at IS NULL \
+         LEFT JOIN text_objects text ON text.space_id = node.space_id \
+           AND text.node_id = node.id \
          WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
            AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
            AND projection.needs_projection \
@@ -704,21 +753,31 @@ async fn dispatch_targets_in(
     .fetch_all(&mut *connection)
     .await
     .map_err(map_sqlx_error)?;
-    let has_more = rows.len() > LINK_GRAPH_DISPATCH_BATCH_SIZE;
+    let fetched_more = rows.len() > LINK_GRAPH_DISPATCH_BATCH_SIZE;
     rows.truncate(LINK_GRAPH_DISPATCH_BATCH_SIZE);
+    let candidate_count = rows.len();
 
-    let mut by_space = BTreeMap::<Uuid, Vec<Uuid>>::new();
+    let mut by_space = BTreeMap::<Uuid, Vec<LinkGraphProjectSource>>::new();
     for row in rows {
-        by_space.entry(row.space_id).or_default().push(row.node_id);
+        by_space
+            .entry(row.space_id)
+            .or_default()
+            .push(LinkGraphProjectSource {
+                node_id: row.node_id,
+                expected_content_sha256: row.expected_content_sha256,
+            });
     }
 
     let mut targets = 0;
     let mut jobs = 0;
-    for (space_id, node_ids) in by_space {
-        for batch in node_ids.chunks(LINK_GRAPH_PROJECT_BATCH_MAX) {
+    'spaces: for (space_id, sources) in by_space {
+        for batch in sources.chunks(LINK_GRAPH_PROJECT_BATCH_MAX) {
+            if jobs == job_capacity {
+                break 'spaces;
+            }
             let payload = LinkGraphProjectNodesPayload {
                 space_id,
-                node_ids: batch.to_vec(),
+                sources: batch.to_vec(),
             };
             let enqueued = JobQueue::enqueue_in(
                 connection,
@@ -733,7 +792,12 @@ async fn dispatch_targets_in(
                  WHERE space_id = $1 AND source_node_id = ANY($2)",
             )
             .bind(space_id)
-            .bind(batch)
+            .bind(
+                batch
+                    .iter()
+                    .map(|source| source.node_id)
+                    .collect::<Vec<_>>(),
+            )
             .bind(enqueued.job_id)
             .execute(&mut *connection)
             .await
@@ -742,10 +806,39 @@ async fn dispatch_targets_in(
             jobs += 1;
         }
     }
+    let capacity_exhausted = jobs == job_capacity && (targets < candidate_count || fetched_more);
     Ok(DispatchSummary {
         targets,
         jobs,
+        has_more: targets < candidate_count || fetched_more,
+        backpressured: capacity_exhausted,
+    })
+}
+
+async fn pending_dispatch_summary(
+    connection: &mut PgConnection,
+    space_id: Option<Uuid>,
+    node_ids: Option<&[Uuid]>,
+) -> Result<DispatchSummary> {
+    let node_ids = node_ids.map(<[Uuid]>::to_vec);
+    let has_more: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM node_link_projections projection \
+             WHERE ($1::uuid IS NULL OR projection.space_id = $1) \
+               AND ($2::uuid[] IS NULL OR projection.source_node_id = ANY($2)) \
+               AND projection.needs_projection \
+               AND projection.active_job_id IS NULL AND projection.failed_at IS NULL \
+         )",
+    )
+    .bind(space_id)
+    .bind(node_ids)
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(map_sqlx_error)?;
+    Ok(DispatchSummary {
         has_more,
+        backpressured: has_more,
+        ..DispatchSummary::default()
     })
 }
 

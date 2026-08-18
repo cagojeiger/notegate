@@ -287,6 +287,24 @@ impl LinkGraphRepo {
         Ok(LinkGraphProjection::Applied)
     }
 
+    pub async fn settle_stale_target(
+        &self,
+        space_id: Uuid,
+        source_node_id: Uuid,
+        claim: LinkGraphProjectionClaim,
+    ) -> Result<LinkGraphProjection> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+        if !owns_projection_claim_in(&mut tx, claim).await?
+            || !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await?
+        {
+            tx.commit().await.map_err(map_sqlx_error)?;
+            return Ok(LinkGraphProjection::Stale);
+        }
+        settle_stale_projection_in(&mut tx, space_id, source_node_id, claim).await?;
+        tx.commit().await.map_err(map_sqlx_error)?;
+        Ok(LinkGraphProjection::Stale)
+    }
+
     pub async fn fail_projection_target(
         &self,
         space_id: Uuid,

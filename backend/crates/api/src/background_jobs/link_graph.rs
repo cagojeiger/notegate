@@ -21,7 +21,7 @@ impl LinkGraphProjectNodesHandler {
 
 impl JobHandler<LinkGraphProjectNodesJob> for LinkGraphProjectNodesHandler {
     fn timeout(&self) -> Duration {
-        Duration::from_secs(60)
+        Duration::from_secs(70)
     }
 
     fn handle<'a>(
@@ -30,8 +30,7 @@ impl JobHandler<LinkGraphProjectNodesJob> for LinkGraphProjectNodesHandler {
         payload: LinkGraphProjectNodesPayload,
     ) -> Pin<Box<dyn Future<Output = Result<JobDisposition, JobFailure>> + Send + 'a>> {
         Box::pin(async move {
-            if payload.node_ids.is_empty() || payload.node_ids.len() > LINK_GRAPH_PROJECT_BATCH_MAX
-            {
+            if payload.sources.is_empty() || payload.sources.len() > LINK_GRAPH_PROJECT_BATCH_MAX {
                 return Err(JobFailure::permanent(
                     "invalid_link_graph_batch",
                     format!(
@@ -41,13 +40,13 @@ impl JobHandler<LinkGraphProjectNodesJob> for LinkGraphProjectNodesHandler {
             }
             let result = self
                 .graph
-                .project_job(job.fence(), payload.space_id, &payload.node_ids)
+                .project_job(job.fence(), payload.space_id, &payload.sources)
                 .await
                 .map_err(retryable_domain_error)?;
             tracing::debug!(
                 event = "link_graph.nodes_projected",
                 space_id = %payload.space_id,
-                requested = payload.node_ids.len(),
+                requested = payload.sources.len(),
                 projected = result.projected,
                 failed = result.failed,
                 removed = result.removed,

@@ -9,12 +9,14 @@ mod common;
 
 use common::{TestDb, insert_user_account, setup_space};
 use notegate_db::{
-    FilesRepo, LinkGraphProjectNodesJob, LinkGraphRepo, LinkGraphWorkRepo, SpaceRepo,
+    FilesRepo, LinkGraphProjectNodesJob, LinkGraphProjectNodesPayload, LinkGraphRepo,
+    LinkGraphWorkRepo, SpaceRepo,
 };
 use notegate_jobs::{JobQueue, JobSpec};
-use notegate_model::{ListLinkReferences, files::DeleteNode};
+use notegate_model::{AccountKind, ListLinkReferences, files::DeleteNode};
 use notegate_service::files::{
-    CreateFolder, CreateText, FilesService, WriteTarget, WriteText, WriteTextBody,
+    CreateFolder, CreateText, FilesService, UpdateTextEncryption, WriteTarget, WriteText,
+    WriteTextBody,
 };
 use notegate_service::link_graph::{LinkGraphProjectionBatch, LinkGraphService};
 use uuid::Uuid;
@@ -36,7 +38,10 @@ async fn project_requested_nodes(
         )
         .await?;
     let job = jobs.pop().expect("projection job");
-    Ok(graph.project_job(job.fence(), space_id, node_ids).await?)
+    let payload = serde_json::from_value::<LinkGraphProjectNodesPayload>(job.payload.clone())?;
+    Ok(graph
+        .project_job(job.fence(), space_id, &payload.sources)
+        .await?)
 }
 
 #[tokio::test]
@@ -304,6 +309,93 @@ async fn client_encrypted_source_does_not_block_plain_sources_in_the_same_job()
 }
 
 #[tokio::test]
+async fn server_encrypted_source_is_decrypted_for_projection()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-server-encrypted",
+        "link-server-encrypted@example.test",
+    )
+    .await?;
+    let (space_id, root_id) = setup_space(
+        &SpaceRepo::new(db.pool.clone()),
+        owner,
+        "link-server-encrypted",
+    )
+    .await;
+    let files_repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(files_repo.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let graph = LinkGraphService::new(
+        LinkGraphRepo::new(db.pool.clone()),
+        files_repo,
+        work.clone(),
+    );
+    let target = files
+        .create_text(
+            owner,
+            space_id,
+            CreateText {
+                parent_node_id: root_id,
+                name: "target.md".to_owned(),
+            },
+        )
+        .await?;
+    let source = files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "source.md".to_owned(),
+                },
+                body: WriteTextBody::Plain("[target](./target.md)".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    sqlx::query("UPDATE users SET tier = 'system_max' WHERE id = $1")
+        .bind(owner)
+        .execute(&db.pool)
+        .await?;
+    files
+        .update_text_encryption(
+            AccountKind::User,
+            owner,
+            space_id,
+            UpdateTextEncryption {
+                node_id: source.node.node.id,
+                enabled: true,
+            },
+        )
+        .await?;
+
+    let result =
+        project_requested_nodes(&db.pool, &work, &graph, space_id, &[source.node.node.id]).await?;
+    assert_eq!(result.projected, 1);
+    assert_eq!(
+        graph
+            .outgoing(
+                owner,
+                space_id,
+                source.node.node.id,
+                ListLinkReferences::default(),
+            )
+            .await?
+            .items[0]
+            .node_id,
+        Some(target.node.node.id)
+    );
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn oversized_source_fails_without_blocking_other_sources_in_the_same_job()
 -> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
@@ -551,6 +643,8 @@ async fn manual_sync_immediately_supersedes_an_active_job() -> Result<(), Box<dy
         )
         .await?;
     let first_job = claimed.pop().expect("first projection job");
+    let first_payload =
+        serde_json::from_value::<LinkGraphProjectNodesPayload>(first_job.payload.clone())?;
 
     work.request_nodes(space_id, &[source_id]).await?;
     let (active_job_id, request_version, active_request_version): (Uuid, i64, i64) =
@@ -567,7 +661,7 @@ async fn manual_sync_immediately_supersedes_an_active_job() -> Result<(), Box<dy
     assert_eq!(active_request_version, request_version);
 
     let result = graph
-        .project_job(first_job.fence(), space_id, &[source_id])
+        .project_job(first_job.fence(), space_id, &first_payload.sources)
         .await?;
     assert_eq!(result, LinkGraphProjectionBatch::default());
 
@@ -580,6 +674,215 @@ async fn manual_sync_immediately_supersedes_an_active_job() -> Result<(), Box<dy
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(preserved_job_id, active_job_id);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn queued_projection_does_not_publish_content_saved_after_dispatch()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-dispatch-snapshot",
+        "link-dispatch-snapshot@example.test",
+    )
+    .await?;
+    let (space_id, root_id) = setup_space(
+        &SpaceRepo::new(db.pool.clone()),
+        owner,
+        "link-dispatch-snapshot",
+    )
+    .await;
+    let files_repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(files_repo.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let graph = LinkGraphService::new(
+        LinkGraphRepo::new(db.pool.clone()),
+        files_repo,
+        work.clone(),
+    );
+    let target = files
+        .create_text(
+            owner,
+            space_id,
+            CreateText {
+                parent_node_id: root_id,
+                name: "target.md".to_owned(),
+            },
+        )
+        .await?;
+    let source = files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "source.md".to_owned(),
+                },
+                body: WriteTextBody::Plain("no links".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let source_id = source.node.node.id;
+    work.request_nodes(space_id, &[source_id]).await?;
+    let mut jobs = JobQueue::new(db.pool.clone())
+        .claim_many(
+            "link-dispatch-snapshot",
+            &[LinkGraphProjectNodesJob::KIND.to_owned()],
+            std::time::Duration::from_secs(300),
+            1,
+        )
+        .await?;
+    let job = jobs.pop().expect("projection job");
+    let payload = serde_json::from_value::<LinkGraphProjectNodesPayload>(job.payload.clone())?;
+
+    files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Existing { node_id: source_id },
+                body: WriteTextBody::Plain("[target](./target.md)".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+
+    let result = graph
+        .project_job(job.fence(), space_id, &payload.sources)
+        .await?;
+    assert_eq!(result.stale, 1);
+    assert!(
+        graph
+            .outgoing(owner, space_id, source_id, ListLinkReferences::default())
+            .await?
+            .items
+            .is_empty()
+    );
+    assert_ne!(target.node.node.id, source_id);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn blocked_source_does_not_prevent_a_peer_in_the_same_job_from_projecting()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let owner = insert_user_account(
+        &db.pool,
+        "link-source-isolation",
+        "link-source-isolation@example.test",
+    )
+    .await?;
+    let (space_id, root_id) = setup_space(
+        &SpaceRepo::new(db.pool.clone()),
+        owner,
+        "link-source-isolation",
+    )
+    .await;
+    let files_repo = FilesRepo::new(db.pool.clone());
+    let files = FilesService::new(files_repo.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let graph = LinkGraphService::new(
+        LinkGraphRepo::new(db.pool.clone()),
+        files_repo,
+        work.clone(),
+    );
+    files
+        .create_text(
+            owner,
+            space_id,
+            CreateText {
+                parent_node_id: root_id,
+                name: "target.md".to_owned(),
+            },
+        )
+        .await?;
+    let first = files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "first.md".to_owned(),
+                },
+                body: WriteTextBody::Plain("[target](./target.md)".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let second = files
+        .write_text(
+            owner,
+            space_id,
+            WriteText {
+                target: WriteTarget::Create {
+                    parent_node_id: root_id,
+                    name: "second.md".to_owned(),
+                },
+                body: WriteTextBody::Plain("[target](./target.md)".to_owned()),
+                expected_sha256: None,
+            },
+        )
+        .await?;
+    let mut source_ids = [first.node.node.id, second.node.node.id];
+    source_ids.sort_unstable();
+    work.request_nodes(space_id, &source_ids).await?;
+    let queue = JobQueue::new(db.pool.clone());
+    let mut jobs = queue
+        .claim_many(
+            "link-source-isolation",
+            &[LinkGraphProjectNodesJob::KIND.to_owned()],
+            std::time::Duration::from_secs(300),
+            1,
+        )
+        .await?;
+    let job = jobs.pop().expect("projection job");
+    let payload = serde_json::from_value::<LinkGraphProjectNodesPayload>(job.payload.clone())?;
+
+    let mut blocker = db.pool.begin().await?;
+    sqlx::query("SELECT 1 FROM text_objects WHERE space_id = $1 AND node_id = $2 FOR UPDATE")
+        .bind(space_id)
+        .bind(source_ids[0])
+        .execute(&mut *blocker)
+        .await?;
+    let projected_graph = graph.clone();
+    let projection = tokio::spawn(async move {
+        projected_graph
+            .project_job(job.fence(), space_id, &payload.sources)
+            .await
+    });
+    let peer_projected = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let projected: bool = sqlx::query_scalar(
+                "SELECT projected_at IS NOT NULL FROM node_link_projections \
+                 WHERE space_id = $1 AND source_node_id = $2",
+            )
+            .bind(space_id)
+            .bind(source_ids[1])
+            .fetch_one(&db.pool)
+            .await?;
+            if projected {
+                return Ok::<(), sqlx::Error>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .is_ok();
+    blocker.rollback().await?;
+    projection.await??;
+    assert!(peer_projected);
 
     db.cleanup().await;
     Ok(())

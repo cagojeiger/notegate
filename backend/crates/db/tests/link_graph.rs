@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use common::{TestDb, space_with_root};
 use notegate_db::{
-    FilesRepo, LinkGraphChangeCollection, LinkGraphProjectNodesJob, LinkGraphProjection,
-    LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot, LinkGraphStoredReference,
-    LinkGraphWorkRepo, SpaceRepo, TextMutationKind,
+    FilesRepo, LINK_GRAPH_ACTIVE_JOB_MAX, LinkGraphChangeCollection, LinkGraphProjectNodesJob,
+    LinkGraphProjection, LinkGraphProjectionClaim, LinkGraphRepo, LinkGraphSourceSnapshot,
+    LinkGraphStoredReference, LinkGraphWorkRepo, SpaceRepo, TextMutationKind,
 };
 use notegate_jobs::{ClaimedJob, JobQueue, JobSpec};
 use notegate_model::files::{CreateFolder, StoredContent, WriteTextBody};
@@ -843,7 +843,7 @@ async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(payload["space_id"], space_id.to_string());
-    assert_eq!(payload["node_ids"][0], source.id.to_string());
+    assert_eq!(payload["sources"][0]["node_id"], source.id.to_string());
 
     let folder = files
         .insert_folder(
@@ -888,11 +888,11 @@ async fn change_collector_coalesces_content_changes_and_rebuilds_after_delete()
     )
     .fetch_one(&db.pool)
     .await?;
-    let projected_ids = payload["node_ids"]
+    let projected_ids = payload["sources"]
         .as_array()
-        .expect("node ids")
+        .expect("sources")
         .iter()
-        .map(|value| Uuid::parse_str(value.as_str().expect("node id")).expect("uuid"))
+        .map(|value| Uuid::parse_str(value["node_id"].as_str().expect("node id")).expect("uuid"))
         .collect::<Vec<_>>();
     assert_eq!(projected_ids, vec![source.id]);
 
@@ -1700,7 +1700,119 @@ async fn duplicate_node_requests_coalesce_before_job_dispatch()
     .fetch_one(&db.pool)
     .await?;
     assert_eq!(target_count, 1);
-    assert_eq!(payload["node_ids"].as_array().expect("node ids").len(), 1);
+    assert_eq!(payload["sources"].as_array().expect("sources").len(), 1);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn active_job_cap_keeps_projection_work_durable_until_capacity_returns()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (first_account, first_space_id, first_root_id) =
+        space_with_root(&db.pool, "link-job-cap-first").await?;
+    let (second_account, second_space_id, second_root_id) =
+        space_with_root(&db.pool, "link-job-cap-second").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let work = LinkGraphWorkRepo::new(db.pool.clone());
+    let (first_source, _) = files
+        .insert_text(
+            first_space_id,
+            first_root_id,
+            "source.md",
+            &text("source", 'a'),
+            first_account,
+        )
+        .await?;
+    let (second_source, _) = files
+        .insert_text(
+            second_space_id,
+            second_root_id,
+            "source.md",
+            &text("source", 'b'),
+            second_account,
+        )
+        .await?;
+    sqlx::query(
+        "INSERT INTO background_jobs (job_kind, payload) \
+         SELECT $1, '{}'::jsonb FROM generate_series(1::bigint, $2)",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .bind(LINK_GRAPH_ACTIVE_JOB_MAX - 1)
+    .execute(&db.pool)
+    .await?;
+
+    let first_nodes = [first_source.id];
+    let second_nodes = [second_source.id];
+    let (first_request, second_request) = tokio::join!(
+        work.request_nodes(first_space_id, &first_nodes),
+        work.request_nodes(second_space_id, &second_nodes),
+    );
+    first_request?;
+    second_request?;
+
+    let (active_jobs, claimed_targets, pending_targets): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+             (SELECT count(*) FROM background_jobs \
+              WHERE job_kind = $1 AND status IN ('queued', 'running')), \
+             count(*) FILTER (WHERE active_job_id IS NOT NULL), \
+             count(*) FILTER (WHERE needs_projection AND active_job_id IS NULL) \
+         FROM node_link_projections",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(active_jobs, LINK_GRAPH_ACTIVE_JOB_MAX);
+    assert_eq!(claimed_targets, 1);
+    assert_eq!(pending_targets, 1);
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            dispatched_targets: 0,
+            jobs: 0,
+            has_more: false,
+            ..
+        }
+    ));
+
+    sqlx::query(
+        "UPDATE background_jobs \
+         SET status = 'succeeded', completed_at = now(), updated_at = now() \
+         WHERE job_id = ( \
+             SELECT job_id FROM background_jobs \
+             WHERE job_kind = $1 AND status = 'queued' AND payload = '{}'::jsonb \
+             ORDER BY job_id LIMIT 1 \
+         )",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .execute(&db.pool)
+    .await?;
+
+    assert!(matches!(
+        work.collect_changes().await?,
+        LinkGraphChangeCollection::Collected {
+            dispatched_targets: 1,
+            jobs: 1,
+            ..
+        }
+    ));
+    let (active_jobs, claimed_targets, pending_targets): (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+             (SELECT count(*) FROM background_jobs \
+              WHERE job_kind = $1 AND status IN ('queued', 'running')), \
+             count(*) FILTER (WHERE active_job_id IS NOT NULL), \
+             count(*) FILTER (WHERE needs_projection AND active_job_id IS NULL) \
+         FROM node_link_projections",
+    )
+    .bind(LinkGraphProjectNodesJob::KIND)
+    .fetch_one(&db.pool)
+    .await?;
+    assert_eq!(active_jobs, LINK_GRAPH_ACTIVE_JOB_MAX);
+    assert_eq!(claimed_targets, 2);
+    assert_eq!(pending_targets, 0);
 
     db.cleanup().await;
     Ok(())
@@ -1991,7 +2103,7 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
     assert!(work.request_space(space_id).await?);
 
     let (initial_job_count, initial_queued_nodes): (i64, i64) = sqlx::query_as(
-        "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'node_ids')), 0) \
+        "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'sources')), 0) \
          FROM background_jobs WHERE job_kind = $1",
     )
     .bind(LinkGraphProjectNodesJob::KIND)
@@ -2103,7 +2215,7 @@ async fn full_reindex_stages_and_dispatches_in_bounded_passes_without_losing_cha
         }
     ));
     let (job_count, queued_nodes): (i64, i64) = sqlx::query_as(
-        "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'node_ids')), 0) \
+        "SELECT count(*), COALESCE(sum(jsonb_array_length(payload -> 'sources')), 0) \
          FROM background_jobs WHERE job_kind = $1",
     )
     .bind(LinkGraphProjectNodesJob::KIND)
