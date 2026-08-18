@@ -153,6 +153,7 @@ export function useUpdateTextEncryptionMutation(onUpdated: (node: RestNode) => v
       updateNodeCaches(queryClient, node, () => node);
       invalidateRecentNodes(queryClient, node.space_id);
       invalidateText(queryClient, node.space_id, node.id);
+      invalidateSpaceLinks(queryClient, node.space_id);
       onUpdated(node);
     }
   });

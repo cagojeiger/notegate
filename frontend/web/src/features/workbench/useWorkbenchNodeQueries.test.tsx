@@ -79,6 +79,7 @@ describe("workbench node mutations", () => {
     };
     vi.mocked(updateTextEncryption).mockResolvedValue(updated);
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const resetQueries = vi.spyOn(queryClient, "resetQueries");
     const onUpdated = vi.fn();
     const result = renderMutationHook(queryClient, () => useUpdateTextEncryptionMutation(onUpdated));
 
@@ -99,6 +100,13 @@ describe("workbench node mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.text(current.space_id, current.id),
       exact: true
+    });
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkStatuses(current.space_id)
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkLists(current.space_id),
+      refetchType: "none"
     });
     expect(onUpdated).toHaveBeenCalledWith(updated);
   });
