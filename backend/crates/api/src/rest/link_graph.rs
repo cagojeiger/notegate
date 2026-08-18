@@ -45,6 +45,7 @@ pub(crate) struct LinkReferencesQuery {
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct NodeLinksResponse {
     status: &'static str,
+    space_pending: bool,
     projected_at: Option<DateTime<Utc>>,
     failure_code: Option<String>,
     failed_at: Option<DateTime<Utc>>,
@@ -113,6 +114,7 @@ pub(crate) async fn get_node_links(
         .await?;
     Ok(Json(NodeLinksResponse {
         status: graph_state.status.as_str(),
+        space_pending: graph_state.space_pending,
         projected_at: graph_state.projected_at,
         failure_code: graph_state.failure_code,
         failed_at: graph_state.failed_at,

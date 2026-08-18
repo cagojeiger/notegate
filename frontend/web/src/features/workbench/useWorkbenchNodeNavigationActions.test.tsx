@@ -211,7 +211,7 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const { result } = renderNavigationActions(activeSpace);
 
     await act(async () => {
-      await result.current.openNodeById(targetNode.id);
+      await result.current.openNodeById(targetNode.id, sourceNode.id);
     });
 
     const group = useUiStore.getState().editorGroups[0];
@@ -228,11 +228,51 @@ describe("useWorkbenchNodeNavigationActions", () => {
     const { result } = renderNavigationActions(activeSpace);
 
     await act(async () => {
-      await result.current.openNodeById("deleted-node");
+      await result.current.openNodeById("deleted-node", sourceNode.id);
     });
 
     expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
     expect(useUiStore.getState().toast).toBe("Link target not found");
+  });
+
+  it("does not open an indexed link after the originating editor group changes", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const replacementNode = node("replacement", activeSpace.id, "/replacement.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    openSourceGroup(activeSpace, sourceNode);
+    const reveal = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    mocks.revealNode.mockReturnValue(reveal.promise);
+    const { result } = renderNavigationActions(activeSpace);
+
+    const opening = result.current.openNodeById(targetNode.id, sourceNode.id);
+    act(() => useUiStore.getState().openInActiveGroup(replacementNode));
+    await act(async () => {
+      reveal.resolve({ ancestors: [], target: targetNode });
+      await opening;
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(replacementNode.id);
+  });
+
+  it("does not open an indexed link after the Inspector selection changes", async () => {
+    const activeSpace = space("space-1");
+    const sourceNode = node("source", activeSpace.id, "/source.md");
+    const inspectedElsewhere = node("other", activeSpace.id, "/other.md");
+    const targetNode = node("target", activeSpace.id, "/target.md");
+    openSourceGroup(activeSpace, sourceNode);
+    const reveal = deferred<{ ancestors: RestNode[]; target: RestNode }>();
+    mocks.revealNode.mockReturnValue(reveal.promise);
+    const { result, rerender } = renderNavigationActions(activeSpace);
+
+    const opening = result.current.openNodeById(targetNode.id, sourceNode.id);
+    rerender({ inspectedNode: inspectedElsewhere });
+    await act(async () => {
+      reveal.resolve({ ancestors: [], target: targetNode });
+      await opening;
+    });
+
+    expect(useUiStore.getState().editorGroups[0].node?.id).toBe(sourceNode.id);
   });
 
   it("opens a revealed node in a new editor group without a node request", async () => {
@@ -392,26 +432,37 @@ function renderNavigationActions(
   loadCanonicalNode: CanonicalNodeLoader = vi.fn()
 ) {
   const queryClient = createTestQueryClient();
+  const inspectedNode = currentActiveNode();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   const rendered = renderHook(
-    () => useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode }),
-    { wrapper }
+    ({ inspectedNode }: { inspectedNode: RestNode | null }) => useWorkbenchNodeNavigationActions({
+      activeSpace,
+      inspectedNode,
+      loadCanonicalNode
+    }),
+    { wrapper, initialProps: { inspectedNode } }
   );
   return { ...rendered, queryClient };
 }
 
 function renderNavigationActionsWithCanonicalLoader(activeSpace: Space) {
   const queryClient = createTestQueryClient();
+  const inspectedNode = currentActiveNode();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  const rendered = renderHook(() => {
+  const rendered = renderHook(({ inspectedNode }: { inspectedNode: RestNode | null }) => {
     const loadCanonicalNode = useCanonicalNodeLoader();
-    return useWorkbenchNodeNavigationActions({ activeSpace, loadCanonicalNode });
-  }, { wrapper });
+    return useWorkbenchNodeNavigationActions({ activeSpace, inspectedNode, loadCanonicalNode });
+  }, { wrapper, initialProps: { inspectedNode } });
   return { ...rendered, queryClient };
+}
+
+function currentActiveNode(): RestNode | null {
+  const state = useUiStore.getState();
+  return state.editorGroups[state.activeGroupIndex]?.node ?? null;
 }
 
 function openSourceGroup(activeSpace: Space, sourceNode: RestNode): number {

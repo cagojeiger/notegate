@@ -9,7 +9,7 @@ import {
   transferFile,
   type FileUploadInput
 } from "../../api/files";
-import { invalidateNodeLists } from "../../api/queryInvalidation";
+import { invalidateNodeLists, invalidateSpaceLinks } from "../../api/queryInvalidation";
 import { queryKeys } from "../../api/queryKeys";
 
 export type UploadTaskStatus = "queued" | "preparing" | "uploading" | "finalizing" | "failed" | "completed";
@@ -119,6 +119,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         updateTask(taskId, (task) => ({ ...task, status: "completed", uploadedBytes: task.file.size }));
         queryClient.setQueryData(queryKeys.node(input.spaceId, response.node.id), response.node);
         invalidateNodeLists(queryClient, input.spaceId, [input.parentNodeId]);
+        invalidateSpaceLinks(queryClient, input.spaceId);
         const timer = window.setTimeout(() => removeTask(taskId), COMPLETED_TASK_TTL_MS);
         cleanupTimers.current.set(taskId, timer);
       })

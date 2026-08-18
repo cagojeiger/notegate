@@ -8,6 +8,7 @@ import {
   invalidateFolderSubtree,
   invalidateNodeLists,
   invalidateRecentNodes,
+  invalidateSpaceLinks,
   invalidateSpaceResources,
   invalidateSpacesList,
   invalidateWriteLockState,
@@ -193,6 +194,21 @@ describe("query invalidation", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["spaces", "space-1"] });
   });
 
+  it("refreshes link status without discarding cached link pages", () => {
+    const queryClient = createTestQueryClient();
+    const statusKey = queryKeys.nodeLinkStatus("space-1", "node-1");
+    const listKey = queryKeys.nodeLinkList("space-1", "node-1", "incoming");
+    const cachedPages = { pages: [{ links: [{ node_id: "source-1" }] }], pageParams: [null] };
+    queryClient.setQueryData(statusKey, { status: "idle" });
+    queryClient.setQueryData(listKey, cachedPages);
+
+    invalidateSpaceLinks(queryClient, "space-1");
+
+    expect(queryClient.getQueryData(statusKey)).toBeUndefined();
+    expect(queryClient.getQueryData(listKey)).toEqual(cachedPages);
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true);
+  });
+
   it("invalidates descendant-bearing cache families after a folder path change", () => {
     const queryClient = createTestQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
@@ -244,7 +260,11 @@ describe("query invalidation", () => {
       exact: true
     });
     expect(resetQueries).toHaveBeenCalledWith({
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkLists("space-1"),
+      refetchType: "none"
     });
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: queryKeys.recent("space-1"),

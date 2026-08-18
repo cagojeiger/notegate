@@ -25,7 +25,7 @@ type AuxiliarySidebarProps = {
   onSearchEnabledChange: (enabled: boolean) => void;
   onWriteLockedChange: (enabled: boolean) => void;
   onTextEncryptionEnabledChange: (enabled: boolean) => void;
-  onOpenLinkedNode: (nodeId: string) => void;
+  onOpenLinkedNode: (nodeId: string, sourceNodeId: string) => void;
   onOutlineNavigate?: () => void;
 };
 

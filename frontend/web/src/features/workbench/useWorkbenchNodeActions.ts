@@ -19,6 +19,7 @@ export function useWorkbenchNodeActions(props: NodeActionsProps) {
   const loadCanonicalNode = useCanonicalNodeLoader();
   const navigationActions = useWorkbenchNodeNavigationActions({
     activeSpace: props.activeSpace,
+    inspectedNode: props.inspectedNode,
     loadCanonicalNode
   });
   const commandActions = useWorkbenchNodeCommandActions({

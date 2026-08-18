@@ -37,6 +37,7 @@ pub struct LinkReference {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NodeLinkGraphState {
     pub status: NodeLinkGraphStatus,
+    pub space_pending: bool,
     pub projected_at: Option<DateTime<Utc>>,
     pub failure_code: Option<String>,
     pub failed_at: Option<DateTime<Utc>>,

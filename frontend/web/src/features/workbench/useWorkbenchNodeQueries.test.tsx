@@ -270,10 +270,14 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.nodes("space-1")
     });
     expect(resetQueries).toHaveBeenCalledWith({
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: queryKeys.linkLists("space-1"),
+      refetchType: "none"
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it("invalidates only the old and new parent when moving a node", async () => {
@@ -299,7 +303,7 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.children("space-1", "folder-2")
     });
     expect(resetQueries).toHaveBeenNthCalledWith(4, {
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
     });
     expect(resetQueries).toHaveBeenCalledTimes(4);
   });
@@ -328,10 +332,14 @@ describe("workbench node mutations", () => {
       queryKey: queryKeys.nodes("space-1")
     });
     expect(resetQueries).toHaveBeenNthCalledWith(3, {
-      queryKey: queryKeys.links("space-1")
+      queryKey: queryKeys.linkStatuses("space-1")
+    });
+    expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+      queryKey: queryKeys.linkLists("space-1"),
+      refetchType: "none"
     });
     expect(resetQueries).toHaveBeenCalledTimes(3);
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 });
 

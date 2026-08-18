@@ -3,6 +3,7 @@ import type { Page } from "./types";
 
 export type NodeLinkProjectionStatus = {
   status: "idle" | "pending" | "syncing" | "failed";
+  space_pending: boolean;
   projected_at: string | null;
   failure_code: string | null;
   failed_at: string | null;

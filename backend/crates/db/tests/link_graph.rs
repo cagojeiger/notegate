@@ -1486,8 +1486,8 @@ async fn dead_projection_job_is_recorded_and_manual_sync_reactivates_the_node()
 }
 
 #[tokio::test]
-async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn pending_space_changes_do_not_mask_an_older_text_failure()
+-> Result<(), Box<dyn std::error::Error>> {
     let Some(db) = TestDb::setup().await? else {
         return Ok(());
     };
@@ -1513,14 +1513,20 @@ async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dy
     .execute(&db.pool)
     .await?;
 
-    let pending = graph.state(space_id, source.id).await?;
-    assert_eq!(pending.status, NodeLinkGraphStatus::Pending);
-    assert_eq!(pending.failure_code, None);
-    assert_eq!(pending.failed_at, None);
+    let failed_while_space_pending = graph.state(space_id, source.id).await?;
     assert_eq!(
-        graph.state(space_id, root_id).await?.status,
-        NodeLinkGraphStatus::Idle
+        failed_while_space_pending.status,
+        NodeLinkGraphStatus::Failed
     );
+    assert_eq!(
+        failed_while_space_pending.failure_code.as_deref(),
+        Some("previous_failure")
+    );
+    assert!(failed_while_space_pending.failed_at.is_some());
+    assert!(failed_while_space_pending.space_pending);
+    let root_while_space_pending = graph.state(space_id, root_id).await?;
+    assert_eq!(root_while_space_pending.status, NodeLinkGraphStatus::Idle);
+    assert!(root_while_space_pending.space_pending);
 
     sqlx::query(
         "UPDATE link_graph_space_states \
@@ -1536,6 +1542,68 @@ async fn pending_space_changes_mask_an_older_text_failure() -> Result<(), Box<dy
     assert_eq!(failed.status, NodeLinkGraphStatus::Failed);
     assert_eq!(failed.failure_code.as_deref(), Some("previous_failure"));
     assert!(failed.failed_at.is_some());
+    assert!(!failed.space_pending);
+    let idle_root = graph.state(space_id, root_id).await?;
+    assert_eq!(idle_root.status, NodeLinkGraphStatus::Idle);
+    assert!(!idle_root.space_pending);
+
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn unfinished_projection_keeps_space_relation_state_pending()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = TestDb::setup().await? else {
+        return Ok(());
+    };
+    let (account, space_id, root_id) =
+        space_with_root(&db.pool, "link-projection-pending-state").await?;
+    let files = FilesRepo::new(db.pool.clone());
+    let graph = LinkGraphRepo::new(db.pool.clone());
+    let (source, _) = files
+        .insert_text(
+            space_id,
+            root_id,
+            "source.md",
+            &text("source", 'p'),
+            account,
+        )
+        .await?;
+    sqlx::query(
+        "INSERT INTO node_link_projections (space_id, source_node_id, needs_projection) \
+         VALUES ($1, $2, true)",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .execute(&db.pool)
+    .await?;
+    sqlx::query(
+        "UPDATE link_graph_space_states \
+         SET available_at = NULL, pending_since_event_id = NULL, \
+             incremental_event_id = NULL, full_scan_event_id = NULL, \
+             full_scan_after_node_id = NULL \
+         WHERE space_id = $1",
+    )
+    .bind(space_id)
+    .execute(&db.pool)
+    .await?;
+
+    let pending = graph.state(space_id, root_id).await?;
+    assert_eq!(pending.status, NodeLinkGraphStatus::Idle);
+    assert!(pending.space_pending);
+
+    sqlx::query(
+        "UPDATE node_link_projections SET needs_projection = false \
+         WHERE space_id = $1 AND source_node_id = $2",
+    )
+    .bind(space_id)
+    .bind(source.id)
+    .execute(&db.pool)
+    .await?;
+    let idle = graph.state(space_id, root_id).await?;
+    assert_eq!(idle.status, NodeLinkGraphStatus::Idle);
+    assert!(!idle.space_pending);
 
     db.cleanup().await;
     Ok(())

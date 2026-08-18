@@ -52,6 +52,7 @@ describe("UploadProvider", () => {
     });
     const { result, queryClient } = renderUploadManager();
     const resetQueries = vi.spyOn(queryClient, "resetQueries");
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     act(() => { result.current.startUpload(input()); });
     await waitFor(() => expect(result.current.tasks[0]?.status).toBe("uploading"));
@@ -78,7 +79,14 @@ describe("UploadProvider", () => {
     expect(resetQueries).toHaveBeenCalledWith({
       queryKey: ["spaces", "space-1", "children", "parent-1"]
     });
-    expect(resetQueries).toHaveBeenCalledTimes(2);
+    expect(resetQueries).toHaveBeenCalledWith({
+      queryKey: ["spaces", "space-1", "link-status"]
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["spaces", "space-1", "links"],
+      refetchType: "none"
+    });
+    expect(resetQueries).toHaveBeenCalledTimes(3);
   });
 
   it("attaches optional node metadata when completing an upload", async () => {
