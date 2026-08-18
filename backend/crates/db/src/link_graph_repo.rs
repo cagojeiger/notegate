@@ -231,7 +231,7 @@ impl LinkGraphRepo {
         resolved_target_ids.dedup();
         let locked_target_ids =
             lock_live_reference_targets_in(&mut tx, space_id, &resolved_target_ids).await?;
-        if !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
+        if !lock_owned_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Stale);
         }
@@ -294,9 +294,7 @@ impl LinkGraphRepo {
         claim: LinkGraphProjectionClaim,
     ) -> Result<LinkGraphProjection> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        if !owns_projection_claim_in(&mut tx, claim).await?
-            || !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await?
-        {
+        if !lock_owned_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Stale);
         }
@@ -332,7 +330,7 @@ impl LinkGraphRepo {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(projection);
         }
-        if !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
+        if !lock_owned_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Stale);
         }
@@ -368,31 +366,28 @@ impl LinkGraphRepo {
         claim: LinkGraphProjectionClaim,
     ) -> Result<LinkGraphProjection> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        if !owns_projection_claim_in(&mut tx, claim).await? {
+        let space_live = space_state(&mut tx, space_id).await? == Some(true);
+        let state: Option<(String, bool)> = if space_live {
+            sqlx::query_as(
+                "SELECT kind, deleted_at IS NOT NULL \
+                 FROM nodes WHERE space_id = $1 AND id = $2 FOR NO KEY UPDATE",
+            )
+            .bind(space_id)
+            .bind(node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?
+        } else {
+            None
+        };
+        if !lock_owned_projection_target_in(&mut tx, space_id, node_id, claim).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Stale);
         }
-        if space_state(&mut tx, space_id).await? != Some(true) {
-            if !lock_projection_target_in(&mut tx, space_id, node_id, claim).await? {
-                tx.commit().await.map_err(map_sqlx_error)?;
-                return Ok(LinkGraphProjection::Stale);
-            }
+        if !space_live {
             remove_projection_in(&mut tx, space_id, node_id, claim).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Removed);
-        }
-        let state: Option<(String, bool)> = sqlx::query_as(
-            "SELECT kind, deleted_at IS NOT NULL \
-             FROM nodes WHERE space_id = $1 AND id = $2 FOR NO KEY UPDATE",
-        )
-        .bind(space_id)
-        .bind(node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if !lock_projection_target_in(&mut tx, space_id, node_id, claim).await? {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Stale);
         }
 
         match state {
@@ -421,35 +416,32 @@ impl LinkGraphRepo {
         expected_content_sha256: &str,
     ) -> Result<LinkGraphProjection> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
-        if !owns_projection_claim_in(&mut tx, claim).await? {
+        let space_live = space_state(&mut tx, space_id).await? == Some(true);
+        let current: Option<(String, String)> = if space_live {
+            sqlx::query_as(
+                "SELECT text.content_sha256, text.storage_format \
+                 FROM nodes node \
+                 JOIN text_objects text ON text.node_id = node.id AND text.space_id = node.space_id \
+                 WHERE node.space_id = $1 AND node.id = $2 \
+                   AND node.kind = 'text' AND node.deleted_at IS NULL \
+                 FOR NO KEY UPDATE OF node, text",
+            )
+            .bind(space_id)
+            .bind(source_node_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?
+        } else {
+            None
+        };
+        if !lock_owned_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Stale);
         }
-        if space_state(&mut tx, space_id).await? != Some(true) {
-            if !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
-                tx.commit().await.map_err(map_sqlx_error)?;
-                return Ok(LinkGraphProjection::Stale);
-            }
+        if !space_live {
             remove_projection_in(&mut tx, space_id, source_node_id, claim).await?;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(LinkGraphProjection::Removed);
-        }
-        let current: Option<(String, String)> = sqlx::query_as(
-            "SELECT text.content_sha256, text.storage_format \
-             FROM nodes node \
-             JOIN text_objects text ON text.node_id = node.id AND text.space_id = node.space_id \
-             WHERE node.space_id = $1 AND node.id = $2 \
-               AND node.kind = 'text' AND node.deleted_at IS NULL \
-             FOR NO KEY UPDATE OF node, text",
-        )
-        .bind(space_id)
-        .bind(source_node_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_error)?;
-        if !lock_projection_target_in(&mut tx, space_id, source_node_id, claim).await? {
-            tx.commit().await.map_err(map_sqlx_error)?;
-            return Ok(LinkGraphProjection::Stale);
         }
 
         match current {
@@ -591,11 +583,8 @@ async fn prepare_plain_projection_in(
     expected_content_sha256: &str,
     expected_source_path: &str,
 ) -> Result<Option<LinkGraphProjection>> {
-    if !owns_projection_claim_in(connection, claim).await? {
-        return Ok(Some(LinkGraphProjection::Stale));
-    }
     if space_state(connection, space_id).await? != Some(true) {
-        if !lock_projection_target_in(connection, space_id, source_node_id, claim).await? {
+        if !lock_owned_projection_target_in(connection, space_id, source_node_id, claim).await? {
             return Ok(Some(LinkGraphProjection::Stale));
         }
         remove_projection_in(connection, space_id, source_node_id, claim).await?;
@@ -613,7 +602,7 @@ async fn prepare_plain_projection_in(
     if source_state == LinkSourceSnapshotState::Current {
         return Ok(None);
     }
-    if !lock_projection_target_in(connection, space_id, source_node_id, claim).await? {
+    if !lock_owned_projection_target_in(connection, space_id, source_node_id, claim).await? {
         return Ok(Some(LinkGraphProjection::Stale));
     }
     match source_state {
@@ -703,12 +692,13 @@ async fn owns_projection_claim_in(
         .map_err(|error| Error::internal(format!("link graph job claim check failed: {error}")))
 }
 
-async fn lock_projection_target_in(
+async fn lock_owned_projection_target_in(
     connection: &mut PgConnection,
     space_id: Uuid,
     node_id: Uuid,
     claim: LinkGraphProjectionClaim,
 ) -> Result<bool> {
+    // Keep the shared job row last so a blocked source cannot stall its peers.
     let request_version: Option<i64> = sqlx::query_scalar(
         "SELECT request_version FROM node_link_projections \
          WHERE space_id = $1 AND source_node_id = $2 AND active_job_id = $3 \
@@ -722,23 +712,27 @@ async fn lock_projection_target_in(
     .fetch_optional(&mut *connection)
     .await
     .map_err(map_sqlx_error)?;
-    match request_version {
-        Some(request_version) if request_version == claim.request_version => Ok(true),
-        Some(_request_version) => {
-            sqlx::query(
-                "UPDATE node_link_projections \
+    let Some(request_version) = request_version else {
+        return Ok(false);
+    };
+    if !owns_projection_claim_in(connection, claim).await? {
+        return Ok(false);
+    }
+    if request_version == claim.request_version {
+        Ok(true)
+    } else {
+        sqlx::query(
+            "UPDATE node_link_projections \
                  SET active_job_id = NULL, active_request_version = NULL \
                  WHERE space_id = $1 AND source_node_id = $2 AND active_job_id = $3",
-            )
-            .bind(space_id)
-            .bind(node_id)
-            .bind(claim.fence.job_id)
-            .execute(&mut *connection)
-            .await
-            .map_err(map_sqlx_error)?;
-            Ok(false)
-        }
-        None => Ok(false),
+        )
+        .bind(space_id)
+        .bind(node_id)
+        .bind(claim.fence.job_id)
+        .execute(&mut *connection)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(false)
     }
 }
 
